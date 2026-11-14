@@ -10,7 +10,7 @@ import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { takeMainAtTests } from './echelons-main.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
-import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
+import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, skippedData, type Route } from './echelons-store.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
@@ -404,8 +404,8 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
   }).returning();
   /* A part of the same work may touch what its whole may, as the head approved it there. */
   const whole = await routeOf(tx, parent);
-  await createRoute(tx, child!, { paths: whole.paths, ...(whole.state.resultKind === 'document' ? { resultKind: 'document' } : {}) }, plan);
-  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id } });
+  const skipped = await createRoute(tx, child!, { paths: whole.paths, ...(whole.state.resultKind === 'document' ? { resultKind: 'document' } : {}) }, plan);
+  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id, ...skippedData(skipped) } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
   return { child: child!, wake };
@@ -533,11 +533,12 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     .insert(tasks)
     .values(newTaskValues(actor, input, setup, { urgent, turnId, number: last + 1 }))
     .returning();
-  await createRoute(tx, row!, input, plan);
+  const skipped = await createRoute(tx, row!, input, plan);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
     assignee: assignee.id,
     after: row!.after,
     ...independentData(declaration),
+    ...skippedData(skipped),
   } });
   await bindAfter(tx, row!, after, input.afterPlans, actor);
   if (declaration?.kind === 'part') {
@@ -642,7 +643,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...skippedData(next.skipped) },
   }, async tx => {
     if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);

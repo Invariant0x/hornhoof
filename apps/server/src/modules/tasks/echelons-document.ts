@@ -11,14 +11,14 @@ import { changeRoute, type Route } from './echelons-store.js';
 import { requireTaskHead } from './echelons-update.js';
 import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
-/* Work of a department that keeps no repository goes through its stages as a document: the words of the hand-in and the
-   files on its task. Nothing here reads a commit, and Tests and Cleanup, which need one, are not among its stages. */
+/* A document goes through its stages as the words of the hand-in and the files on its task: the work of a department that
+   keeps no repository, or a task made as a document where one does. Nothing here reads a commit, and Tests and Cleanup, which need one, are not among its stages. */
 
 type Reader = Pick<Ctx, 'db' | 'bus'>;
 
 /* The document as it is handed in: a later hand-in with other words or other files is another candidate. */
 export async function documentHandIn(ctx: Reader, agentId: string, task: Task, route: Route, r: Submission) {
-  if (r.review) throw refuse(400, 'task_invalid', `#${task.number} is handed in as a document, as its department keeps no repository: name no commit. Attach the files to the task and say in the summary what you hand in.`);
+  if (r.review) throw refuse(400, 'task_invalid', `#${task.number} is handed in as a document: name no commit. Attach the files to the task and say in the summary what you hand in.`);
   const input = route.state.stage === 'development' ? null : await currentDocument(ctx.db, task, route);
   const producer = await producerIdentity(ctx.db, task, agentId);
   if (input) await checkingIdentity(ctx, task, route, input);

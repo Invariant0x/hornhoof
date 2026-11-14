@@ -8,6 +8,7 @@ import { ApiError } from '../../errors.js';
 import type { StageRoute } from '../templates/load.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { throughEchelons } from './turnkey.js';
+import { NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
 export type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
@@ -79,18 +80,37 @@ export async function createCoordinationRoute(tx: Tx, task: Task): Promise<void>
   } });
 }
 
-export async function createRoute(tx: Tx, task: Task, input: RouteInput, plan: StageRoute): Promise<void> {
-  const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
-  if (resultKind === 'coordination') return createCoordinationRoute(tx, task);
-  if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, input);
-  if (resultKind === 'document') {
-    await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: [], state: stagedState(task, input, input.cleanup ?? false, documentStages(plan), 'document') });
-    return;
+/* The checks of a new route nobody in its department can do, skipped: the head accepts the result in their place. A
+   checker named for the task keeps its check. */
+async function withoutUncheckable(tx: Tx, task: Task, state: Route['state']): Promise<{ state: Route['state']; skipped: EchelonStep['stage'][] }> {
+  const skipped: EchelonStep['stage'][] = [];
+  const stages: EchelonStep[] = [];
+  for (const step of state.stages) {
+    const ability = state.abilities[step.stage];
+    const skip = step.status === 'pending' && !step.ownerAgentId && ability && await uncheckable(tx, task, step.stage, ability, state.security);
+    if (skip) skipped.push(step.stage);
+    stages.push(skip ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER } : step);
   }
-  /* The head's Cleanup for a whole turn reaches only the departments whose route has it. */
-  const cleanup = input.cleanup ?? (plan.stages.some(step => step.stage === 'cleanup') && await turnCleanupDefault(tx, task));
-  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: stagedState(task, input, cleanup, plan, 'code') });
+  return { state: { ...state, stages }, skipped };
 }
+
+/* Lays the route of a new task out and says which of its checks were skipped, as nobody in its department can do them. */
+export async function createRoute(tx: Tx, task: Task, input: RouteInput, plan: StageRoute): Promise<EchelonStep['stage'][]> {
+  const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
+  if (resultKind === 'coordination') return createCoordinationRoute(tx, task).then(() => []);
+  if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, input).then(() => []);
+  /* The head's Cleanup for a whole turn reaches only the departments whose route has it. */
+  const cleanup = resultKind === 'document' ? input.cleanup ?? false : input.cleanup ?? (plan.stages.some(step => step.stage === 'cleanup') && await turnCleanupDefault(tx, task));
+  const staged = resultKind === 'document' ? stagedState(task, input, cleanup, documentStages(plan), 'document') : stagedState(task, input, cleanup, plan, 'code');
+  const { state, skipped } = await withoutUncheckable(tx, task, staged);
+  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: resultKind === 'document' ? [] : input.paths ?? [], state });
+  return skipped;
+}
+
+/* What the log keeps of the checks a route skipped, with why, so the head and the people see why the result came
+   straight to the head. */
+export const skippedData = (skipped: EchelonStep['stage'][]) =>
+  skipped.length ? { skipped: skipped.map(stage => ({ stage, reason: NO_DEPARTMENT_CHECKER, why: `Nobody in this department carries the skill of ${stage}, so the head accepts the result.` })) } : {};
 
 export async function routeOf(db: Db | Tx, task: Pick<Task, 'id' | 'companyId'>): Promise<Route> {
   const [route] = await db.select().from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));

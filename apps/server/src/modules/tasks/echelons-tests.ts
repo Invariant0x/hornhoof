@@ -205,7 +205,7 @@ function matchesTestsReport(proof: z.infer<typeof Verified>, eventAgent: string 
 
 /* What Tests proved of the candidate; nothing where the route of its department has no Tests. */
 export async function testedEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {
-  return route.state.stages.some(step => step.stage === 'tests') ? verifiedCandidateEvidence(db, task, route, candidate, verifiedRevision) : [];
+  return route.state.stages.some(step => step.stage === 'tests' && step.status !== 'skipped') ? verifiedCandidateEvidence(db, task, route, candidate, verifiedRevision) : [];
 }
 
 export async function verifiedCandidateEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {

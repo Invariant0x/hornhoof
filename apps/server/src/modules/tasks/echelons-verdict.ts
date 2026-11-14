@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { currentHanded } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
-import { changeRoute, routeOf, type Route } from './echelons-store.js';
+import { changeRoute, routeOf, type Route, skippedData } from './echelons-store.js';
 import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { loadTask, move, refuse, waitsForPerson, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { bindReviewEvidence, type ReviewVerdict } from './review-verdict.js';
@@ -81,6 +81,6 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
     return { task: row, wakes: [] };
   }
   const next = await forwardHandoff(ctx, task, { ...route, state }, candidate);
-  const row = await move(ctx, task, next.set, { ...n, returned: true }, async tx => { await held(tx); await changeRoute(tx, route, next.state); }, next.wakes);
+  const row = await move(ctx, task, next.set, { ...n, data: { ...n.data, ...skippedData(next.skipped) }, returned: true }, async tx => { await held(tx); await changeRoute(tx, route, next.state); }, next.wakes);
   return { task: row, wakes: next.wakes };
 }

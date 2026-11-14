@@ -1,7 +1,7 @@
 import type { EchelonStage, EchelonStep, HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import type { Route } from './echelons-store.js';
-import { checkerFor, departmentHead } from './echelons-assign.js';
+import { checkerFor, departmentHead, NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { refuse, type Task, type Wake } from './engine.js';
 
@@ -25,7 +25,7 @@ function handoffTask(stage: EchelonStage, owner: CheckerIdentity | null): Partia
 }
 
 /* Past its last stage the result is ready, and the head of the department accepts it. */
-async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
+async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Omit<Handoff, 'skipped'>> {
   const headId = await departmentHead(ctx.db, task);
   const state: Route['state'] = { ...route.state, phase: 'ready', candidateId: candidate.id, assignment: null,
     stages: route.state.stages.map(step => step.stage === route.state.stage ? { ...step, status: 'complete', candidateId: candidate.id } : step),
@@ -33,18 +33,29 @@ async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, cand
   return { state, set: { status: 'open', assigneeAgentId: headId, silent: 0 }, wakes: [{ agentId: headId, taskId: task.id, why: 'reviewed' }] };
 }
 
-type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[] };
+/* skipped: the checks passed over on the way, as nobody in the department can do them. */
+type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[]; skipped: EchelonStage[] };
 
 export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
-  const next = route.state.stages.slice(at + 1).find(step => step.status !== 'skipped');
-  if (!next && route.state.stage === 'tests') throw refuse(409, 'task_invalid', 'Tests must verify the final candidate before integration.');
-  if (!next) return readyHandoff(ctx, task, route, candidate);
-  const ability = route.state.abilities[next.stage];
-  if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
-  const owner = await checkerFor(ctx, task, candidate.producedBy, ability, next.ownerAgentId);
-  const state: Route['state'] = { ...route.state, stage: next.stage, phase: owner ? 'active' : 'waiting', candidateId: candidate.id, assignment: owner,
-    stages: advancedSteps(route, next, owner, candidate.id),
-  };
-  return { state, set: handoffTask(next.stage, owner), wakes: [await handoffWake(ctx, task, next.stage, owner)] };
+  const ahead = route.state.stages.slice(at + 1).filter(step => step.status !== 'skipped');
+  if (!ahead.length && route.state.stage === 'tests') throw refuse(409, 'task_invalid', 'Tests must verify the final candidate before integration.');
+  const skipped: EchelonStage[] = [];
+  let stages = route.state.stages;
+  for (const next of ahead) {
+    const ability = route.state.abilities[next.stage];
+    if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
+    const owner = await checkerFor(ctx, task, candidate.producedBy, ability, next.ownerAgentId);
+    if (!owner && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
+      stages = stages.map(step => step.stage === next.stage ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER, ownerAgentId: null } : step);
+      skipped.push(next.stage);
+      continue;
+    }
+    const current: Route = { ...route, state: { ...route.state, stages } };
+    const state: Route['state'] = { ...route.state, stage: next.stage, phase: owner ? 'active' : 'waiting', candidateId: candidate.id, assignment: owner,
+      stages: advancedSteps(current, next, owner, candidate.id),
+    };
+    return { state, set: handoffTask(next.stage, owner), wakes: [await handoffWake(ctx, task, next.stage, owner)], skipped };
+  }
+  return { ...(await readyHandoff(ctx, task, { ...route, state: { ...route.state, stages } }, candidate)), skipped };
 }
