@@ -3,6 +3,8 @@ import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 import { chooseTerminal } from './api';
 
 /* Render real native scrollbars in headless Chromium so .xterm-viewport has a visible scrollbar track and thumb. */
+/* The page colours its scrollbars with scrollbar-color, which Chromium lets win over ::-webkit-scrollbar. A probe that sets
+   the width of the terminal's scrollbar, as a platform would, first takes that colour off its viewport. */
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
 type SizeReport = { cols: number; rows: number; via: 'open' | 'resize' };
@@ -199,7 +201,7 @@ test.describe('agent terminal full-width column visibility and node resize parit
     /* 4. Dynamic scrollbar widening after open (e.g. browser zoom or OS scrollbar switch to 24px):
        terminal refits immediately, notifies the node via resize, and never lets the scrollbar overlap column cols. */
     await page.addStyleTag({
-      content: '.t-term .xterm-viewport::-webkit-scrollbar { width: 24px; } .t-term .xterm-viewport::-webkit-scrollbar-thumb { background: #5a6572; }',
+      content: '.t-term .xterm-viewport { scrollbar-color: auto; } .t-term .xterm-viewport::-webkit-scrollbar { width: 24px; } .t-term .xterm-viewport::-webkit-scrollbar-thumb { background: #5a6572; }',
     });
     const widened = await verifyLastColumnVisible(page, reported);
     expect(widened.metrics.scrollbarWidth).toBeGreaterThanOrEqual(23);
@@ -213,7 +215,7 @@ test.describe('agent terminal full-width column visibility and node resize parit
     await page.addInitScript(() => {
       const style = document.createElement('style');
       style.id = 'scrollbar-probe';
-      style.textContent = '.t-term .xterm-viewport::-webkit-scrollbar { width: 6px; }';
+      style.textContent = '.t-term .xterm-viewport { scrollbar-color: auto; } .t-term .xterm-viewport::-webkit-scrollbar { width: 6px; }';
       document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
     });
     const { agentWindow, reported, errors } = await openMeasuredTerminal(page, 375, 812, 'light');
@@ -221,7 +223,7 @@ test.describe('agent terminal full-width column visibility and node resize parit
     /* Expand scrollbar to 22px active track without changing outer window size first. */
     await page.evaluate(() => {
       document.getElementById('scrollbar-probe')!.textContent =
-        '.t-term .xterm-viewport::-webkit-scrollbar { width: 22px; } .t-term .xterm-viewport::-webkit-scrollbar-thumb { background: #5a6572; }';
+        '.t-term .xterm-viewport { scrollbar-color: auto; } .t-term .xterm-viewport::-webkit-scrollbar { width: 22px; } .t-term .xterm-viewport::-webkit-scrollbar-thumb { background: #5a6572; }';
     });
 
     const narrow = await verifyLastColumnVisible(page, reported);

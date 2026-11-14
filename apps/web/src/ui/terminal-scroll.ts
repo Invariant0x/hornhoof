@@ -37,13 +37,18 @@ export function scrollTerminal(term: Terminal, amount: number): void {
   restoreLiveTerminal(term);
 }
 
-/* New output always goes to the real active buffer, never to the history someone was reading. */
+/* New output always goes to the real active buffer, never to the history someone was reading. A live alternate screen
+   comes back at its bottom: xterm 5.5 lets it keep lines above it when the terminal shrank before its first use, and
+   output written there while someone read history leaves its view behind, since xterm counts that reader as scrolled up
+   in every buffer. The normal buffer is that history itself once the program left its alternate screen, so its reader
+   stays where they read. */
 export function restoreLiveTerminal(term: Terminal): void {
   const buffers = buffersOf(term);
   const live = borrowed.get(buffers);
   if (!live) return;
   Reflect.deleteProperty(buffers, 'active');
   buffers._activeBuffer = live;
+  if (live === buffers.alt) live.ydisp = live.ybase;
   borrowed.delete(buffers);
   report(buffers, live, buffers.normal);
   term.refresh(0, term.rows - 1);

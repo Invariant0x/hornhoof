@@ -173,7 +173,7 @@ test('walks the three tabs with the arrow keys', async ({ page }) => {
 });
 
 for (const [name, reports, text] of [
-  ['no turn has run', { [PATH]: { status: 404, body: { error: { code: 'not_found', message: 'No turn has run yet.', reason: 'turn_unknown' } } } }, 'No turn has run yet, so there is nothing to report.'],
+  ['no turn has run', { [PATH]: { status: 404, body: { error: { code: 'not_found', message: 'No turn has run yet.', reason: 'turn_unknown' } } } }, 'This department has not run a turn yet, so there is nothing to report.'],
   ['the department had no tasks', { [PATH]: { status: 200, body: { report: { ...REPORT, department: null } } } }, 'This department had no tasks in turn 9.'],
 ] as const) {
   test(`says so when ${name}`, async ({ page }, info) => {

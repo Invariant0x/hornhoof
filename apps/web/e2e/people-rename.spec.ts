@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 
@@ -100,9 +100,11 @@ for (const lang of ['en', 'ru'] as const) {
     const web = baseURL!;
     const server = await startServer(web);
     const errors: string[] = [];
+    const contexts: BrowserContext[] = [];
     /* The People screen, signed in as one of them, every call going to the real server. */
     const signedIn = async (browser: Browser, who: keyof Boot['sessions']): Promise<Page> => {
       const context = await browser.newContext({ baseURL: web, viewport: { width: 1440, height: 960 } });
+      contexts.push(context);
       await context.addCookies([{ name: 'hh_session', value: server.sessions[who], url: web }]);
       await context.addInitScript(lang => localStorage.setItem('hh-lang', lang), lang);
       const page = await context.newPage();
@@ -173,6 +175,9 @@ for (const lang of ['en', 'ru'] as const) {
 
       expect(errors).toEqual([]);
     } finally {
+      /* A page left open asks the stopped server for updates every five minutes, and that failure lands on whichever
+         test then runs in this worker. */
+      for (const context of contexts) await context.close();
       await server.stop();
     }
   });

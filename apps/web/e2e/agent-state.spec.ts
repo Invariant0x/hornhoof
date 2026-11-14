@@ -81,7 +81,7 @@ for (const lang of ['en', 'ru'] as const) {
           const line = card.getByText(state[lang], { exact: true });
           await expect(line).toBeVisible();
           await expect(line).toHaveClass(state.red ? /alarm/ : state.calm ? /calm/ : /work/);
-          if (state.red) await expect(line).toHaveCSS('background-color', theme === 'light' ? 'rgb(211, 47, 47)' : 'rgb(255, 107, 107)');
+          if (state.red) await expect(line).toHaveCSS('background-color', theme === 'light' ? 'rgb(198, 40, 40)' : 'rgb(255, 107, 107)');
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
           await page.screenshot({ path: info.outputPath(`agent-${width}-${lang}-${theme}-${state.name}.png`) });
         }
