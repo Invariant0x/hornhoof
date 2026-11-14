@@ -83,6 +83,17 @@ describe('local terminal scrollback', () => {
     expect(shown).toContain('ALT-OLD\nALT-NEW');
   });
 
+  it('keeps the reader in place when the program leaves its alternate screen and writes on while history is read', async () => {
+    const term = await fixture(true);
+    scrollTerminal(term, -10);
+    const reading = term.buffer.active.viewportY;
+    writeTerminalData(term, '\x1b[?1049lBACK-1\r\n');
+    await write(term, '');
+    writeTerminalData(term, 'BACK-2\r\n');
+    await write(term, '');
+    expect(term.buffer.active.viewportY).toBe(reading);
+  });
+
   it('returns to the live alternate screen when the wheel reaches the bottom', async () => {
     const term = await fixture(true);
     scrollTerminal(term, -10);
