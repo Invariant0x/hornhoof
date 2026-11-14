@@ -21,7 +21,7 @@ it('opens the running orchestrator task instead of a newer assigned task', async
     'GET /api/tasks/t12': [200, { task: current }],
     'GET /api/tasks/t99': [200, { task: next }],
     'GET /api/requests': [200, decisions([])],
-    'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'working-on-t12', queued: 0 } }],
+    'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'working-on-t12', queued: 0 } }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
   });
   const user = userEvent.setup();
@@ -39,7 +39,7 @@ it('opens a product employee task without a map employee', async () => {
     'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents: [{ ...RUNNING_AGENTS[0]!, canOpen: true }] }] }],
     'GET /api/requests': [200, decisions([])],
     'GET /api/agents/b1': [200, { ...CARD, product: { id: 'product', name: 'Checkout' }, currentTask }],
-    'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'working-on-t12', queued: 0 } }],
+    'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'working-on-t12', queued: 0 } }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
   });
   const user = userEvent.setup();
@@ -56,7 +56,7 @@ it.each<LiveMessage>([{ type: 'task', id: 't12', spot: { departmentId: 'd2' } },
   let current: typeof currentTask | null = currentTask;
   mockApi({
     'GET /api/agents/b1': () => [200, { ...CARD, currentTask: current }],
-    'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+    'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
   });
   const stream = fakeStream();

@@ -16,11 +16,11 @@ function company(agents = RUNNING_AGENTS) {
     'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, running: { agents, parts: [] } }] }],
     'GET /api/subscriptions': [200, { subscriptions: [] }],
     'GET /api/agents/b1': [200, BRUNO],
-    'GET /api/agents/b1/events?after=0': [200, IDLE],
+    'GET /api/agents/b1/events?last=300': [200, IDLE],
     'GET /api/agents/b2': [200, VERA],
-    'GET /api/agents/b2/events?after=0': [200, IDLE],
+    'GET /api/agents/b2/events?last=300': [200, IDLE],
     'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
-    'GET /api/agents/orchestrator/events?after=0': [200, IDLE],
+    'GET /api/agents/orchestrator/events?last=300': [200, IDLE],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
   });
 }

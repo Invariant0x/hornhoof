@@ -15,7 +15,7 @@ const SECRET = 'Private journal of an inaccessible agent';
 const EVENTS_REPLY: [number, unknown] = [200, { events: [{ seq: 1, kind: 'text', data: { text: SECRET }, jobId: null, person: null, at: '2026-10-30T09:00:00.000Z' }], state: STATE }];
 const allowed: Parameters<typeof mockApi>[0] = {
   'GET /api/agents/b1': [200, CARD],
-  'GET /api/agents/b1/events?after=0': EVENTS_REPLY,
+  'GET /api/agents/b1/events?last=300': EVENTS_REPLY,
   'GET /api/nodes/commands': [200, { commands: [] }],
   'GET /api/computer': [200, { available: false, until: null, asked: null }],
 };
@@ -45,7 +45,7 @@ describe('restricted access screens', () => {
 
   it.each([403, 404])('shows an access-denied window without the agent name or payload after %s', async status => {
     const denied: [number, unknown] = [status, { error: { code: status === 403 ? 'forbidden' : 'not_found', message: 'Hidden resource details.' } }];
-    mockApi({ 'GET /api/agents/b1': denied, 'GET /api/agents/b1/events?after=0': denied });
+    mockApi({ 'GET /api/agents/b1': denied, 'GET /api/agents/b1/events?last=300': denied });
     render(<Windows />);
     expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
@@ -73,7 +73,7 @@ describe('restricted access screens', () => {
       await waitFor(() => expect(calls.filter(c => c.path === '/api/agents/b1').length).toBeGreaterThan(i + 1));
     }
     expect(screen.getByText(SECRET)).toBeInTheDocument();
-    expect(calls.filter(c => c.path === '/api/agents/b1/events?after=0')).toHaveLength(1);
+    expect(calls.filter(c => c.path === '/api/agents/b1/events?last=300')).toHaveLength(1);
   });
 
   it('drops an open agent journal as soon as a new org removes the agent', async () => {
@@ -96,7 +96,7 @@ describe('restricted access screens', () => {
     mockApi({
       ...allowed,
       'GET /api/agents/b1': () => access ? [200, CARD] : refused,
-      'GET /api/agents/b1/events?after=0': () => access ? EVENTS_REPLY : refused,
+      'GET /api/agents/b1/events?last=300': () => access ? EVENTS_REPLY : refused,
     });
     render(<Windows />);
     expect(await screen.findByText(SECRET)).toBeInTheDocument();

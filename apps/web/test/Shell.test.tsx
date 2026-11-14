@@ -111,7 +111,7 @@ describe('Shell', () => {
     const calls = mockApi({
       'GET /api/org': [200, ORG],
       'GET /api/agents/orchestrator': [200, { id: 'orchestrator' }],
-      'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(<Shell me={ME} welcome onSignOut={() => {}} />);

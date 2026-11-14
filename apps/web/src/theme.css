@@ -929,6 +929,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
   .t-access-more { width: 24px; }
   .t-access-count { padding: 0 2px; }
 }
+/* Earlier lines of a conversation come above the oldest one kept. */
+.chat-earlier { justify-content: center; }
 .notebook { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
 .notebook .entries, .inbox .entries { display: grid; list-style: none; min-width: 0; margin: 0; padding: 0; }
 .notebook .entry, .inbox .entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; padding-block: 16px; border-block-end: 1px solid var(--line); }

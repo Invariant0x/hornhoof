@@ -27,6 +27,10 @@ import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLa
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
+/* The window keeps the newest lines only, so a long day open leaves the page light; a person reads further back a page at a
+   time, and what they asked for stays too. */
+const KEEP = 300;
+const EARLIER = 200;
 /* Machines come and go without a message on the stream, so the window asks again now and then. */
 const POLL_MS = 15_000;
 /* Many lines can arrive in a second while he works; one catch-up covers them. */
@@ -306,6 +310,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The chat shows once its whole history is in: drawn a page at a time from the oldest, it would open on old lines and run
      down to the newest. */
   const [historyIn, setHistoryIn] = useState(false);
+  /* Whether the server may have lines older than the oldest kept here, and how many the window keeps now. */
+  const [older, setOlder] = useState(false);
+  const [readingOlder, setReadingOlder] = useState(false);
+  const keep = useRef(KEEP);
   const [text, setText] = useState('');
   /* The hand-made card: null follows the orchestrator (shown while he cannot answer), true or false is the CEO's choice. */
   const [manual, setManual] = useState<boolean | null>(null);
@@ -375,12 +383,14 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       err => mounted.current && setFailure(err),
     );
 
-  /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. */
+  /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. A
+     window with no line yet takes the newest ones only. */
   const catchUp = useCallback(async () => {
     try {
       for (;;) {
         const n = ++catchUps.current;
-        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${path}/events?after=${last.current}`);
+        const fresh = last.current === 0;
+        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(fresh ? `${path}/events?last=${KEEP}` : `${path}/events?after=${last.current}`);
         if (!mounted.current) return;
         merge(res.events);
         if (n > stateFrom.current) {
@@ -388,7 +398,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           setState(res.state);
         }
         if (res.events.length) last.current = Math.max(last.current, ...res.events.map(e => e.seq));
-        if (res.events.length < PAGE) {
+        if (fresh && res.events.length === KEEP) setOlder(true);
+        if (fresh || res.events.length < PAGE) {
           setHistoryIn(true);
           break;
         }
@@ -402,6 +413,33 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     }
     await loadCommands();
   }, [loadCommands, merge, path]);
+
+  /* Past what it keeps, the oldest lines go; the server still has them for the person who asks. */
+  useEffect(() => {
+    if (events.length <= keep.current) return;
+    setEvents(list => list.slice(-keep.current));
+    setOlder(true);
+  }, [events]);
+
+  /* Where the person reads, as far from the end as before the older lines came above it. */
+  const fromEnd = useRef<number | null>(null);
+  const earlier = async (log: HTMLElement | null) => {
+    const first = events[0];
+    if (!first) return;
+    setReadingOlder(true);
+    try {
+      const res = await api.get<{ events: EventView[] }>(`${path}/events?last=${EARLIER}&before=${first.seq}`);
+      if (!mounted.current) return;
+      fromEnd.current = log ? log.scrollHeight - log.scrollTop : null;
+      keep.current += res.events.length;
+      merge(res.events);
+      setOlder(res.events.length === EARLIER);
+    } catch (err) {
+      if (mounted.current) setFailure(err);
+    } finally {
+      if (mounted.current) setReadingOlder(false);
+    }
+  };
 
   const soon = useCallback(() => {
     if (catchUpTimer.current) return;
@@ -579,6 +617,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const after = <WindowAfter offerByHand={offerByHand} needsOrchestrator={needsOrchestrator} failure={failure} t={t} onPickByHand={() => setManual(true)} />;
   const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
   const { log, onScroll } = useChatScroll(chat && !place?.minimized, `${events.length} ${state?.busy} ${commands.length} ${hasCards}`);
+  useLayoutEffect(() => {
+    const el = log.current;
+    if (fromEnd.current === null || !el) return;
+    el.scrollTop = el.scrollHeight - fromEnd.current;
+    fromEnd.current = null;
+  }, [events, log]);
 
   const agentName = orchestrator ? t.window.orchestrator : card?.name || listedName(org, agentId);
   const authorOf = (e: LogEvent): string => {
@@ -711,6 +755,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       )}
       {chat && (
         <div className="t-log chat" ref={log} role="log" aria-label={t.window.chat.conversation} onScroll={onScroll}>
+          {older && (
+            <div className="entry-actions chat-earlier">
+              <button className="btn small ghost" type="button" disabled={readingOlder} onClick={() => void earlier(log.current)}>
+                {t.window.chat.earlier}
+              </button>
+            </div>
+          )}
           {ready && !shown.length && <p className="chat-empty">{t.window.chat.empty}</p>}
           {chatItems(shown).map(item =>
             item.kind === 'steps' ? (

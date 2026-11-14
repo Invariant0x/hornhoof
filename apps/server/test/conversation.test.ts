@@ -196,6 +196,27 @@ describe('the orchestrator\'s conversation', () => {
     await until(() => stream.messages.filter(m => m.type === 'agent_event').length === 3);
   });
 
+  it('gives the newest events, and as many before any of them, so a window keeps only the last ones', async () => {
+    const { app, ceo, builtin } = await live();
+    await start(app, ceo);
+    const run = await nextRun(builtin);
+    builtin.send({ type: 'job.started', jobId: run.jobId });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Hello, Ivan.' } });
+    builtin.send({ type: 'job.event', jobId: run.jobId, seq: 1, event: { kind: 'tool', name: 'hornhoof.company', input: '{}' } });
+    await until(async () => (await events(app, ceo)).length === 3);
+    const all = await events(app, ceo);
+    const last = async (query: string) => {
+      const res = await app.inject({ url: `/api/agents/orchestrator/events?${query}`, ...as(ceo) });
+      expect(res.statusCode).toBe(200);
+      return res.json().events.map((e: { kind: string }) => e.kind);
+    };
+    expect(await last('last=2')).toEqual(['text', 'tool']);
+    expect(await last(`last=2&before=${all[2].seq}`)).toEqual(['message', 'text']);
+    expect(await last(`last=5&before=${all[1].seq}`)).toEqual(['message']);
+    expect(await last(`last=5&before=${all[0].seq}`)).toEqual([]);
+    expect((await app.inject({ url: '/api/agents/orchestrator/events?last=501', ...as(ceo) })).statusCode).toBe(400);
+  });
+
   it('puts a turn back in line when sending it breaks, and sends it on the next try', async () => {
     const { app, db, ceo, builtin } = await live();
     const send = app.ctx.hub.send.bind(app.ctx.hub);

@@ -14,8 +14,6 @@ import { RULES } from './css';
 const EVENTS = '/api/agents/b1/events';
 const READY: OrchestratorState = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const BUSY: OrchestratorState = { ...READY, busy: true, runningJobId: 'j1' };
-/* The most events the server sends at a time. */
-const PAGE = 500;
 /* How long the window waits to catch up after a live sign of work. */
 const CATCH_UP_MS = 300;
 const LINE = 100;
@@ -147,32 +145,31 @@ describe('a chat opening', () => {
   it('stands on its newest line, with nothing moving, before its first frame', async () => {
     virtualTime();
     const anim = animations();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 30), state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(1, 30), state: READY }] });
     const seen = await firstSight(log => ({ lines: lines(log).length, atEnd: atEnd(log), moving: anim.moving(log).length }));
     expect(seen).toMatchObject({ lines: 30, atEnd: true, moving: 0 });
   });
 
-  it('shows a long history only once all of it is in, at its newest line, not page by page from the top', async () => {
+  it('opens a long history at its newest line with one read, not page by page from the top', async () => {
     virtualTime();
     const anim = animations();
-    let rest!: (reply: [number, unknown]) => void;
-    let asked!: () => void;
-    const askedForRest = new Promise<void>(resolve => (asked = resolve));
+    const { calls } = open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(201, 300), state: READY }] });
+    const seen = await firstSight(log => ({ lines: lines(log).length, atEnd: atEnd(log), moving: anim.moving(log).length }));
+    expect(seen).toEqual({ lines: 300, atEnd: true, moving: 0 });
+    expect(calls.filter(c => c.path.startsWith(EVENTS)).map(c => c.path)).toEqual([`${EVENTS}?last=300`]);
+  });
+
+  it('keeps the line the person reads where it was when earlier lines come above it', async () => {
+    virtualTime();
     open({
-      [`GET ${EVENTS}?after=0`]: [200, { events: history(1, PAGE), state: READY }],
-      [`GET ${EVENTS}?after=${PAGE}`]: () => {
-        asked();
-        return new Promise(resolve => (rest = resolve));
-      },
+      [`GET ${EVENTS}?last=300`]: [200, { events: history(201, 300), state: READY }],
+      [`GET ${EVENTS}?last=200&before=201`]: [200, { events: history(1, 200), state: READY }],
     });
-    await askedForRest;
-    await act(async () => {});
-    /* The first page is in, the newest lines are not: the chat does not show its oldest lines meanwhile. */
-    expect(screen.queryByRole('log')).not.toBeInTheDocument();
-    expect(screen.queryByText('Line 1')).not.toBeInTheDocument();
-    const sight = firstSight(log => ({ lines: lines(log).length, atEnd: atEnd(log), moving: anim.moving(log).length }));
-    rest([200, { events: history(PAGE + 1, 20), state: READY }]);
-    expect(await sight).toEqual({ lines: PAGE + 20, atEnd: true, moving: 0 });
+    const log = await shownLog();
+    scrollPerson(log, 0);
+    fireEvent.click(screen.getByRole('button', { name: 'Show earlier' }));
+    await until(() => (lines(log).length === 500 ? true : null));
+    expect(log.scrollTop).toBe(200 * LINE);
   });
 
   it('keeps scrolling to the browser: the chat asks for no smooth scroll', () => {
@@ -186,7 +183,7 @@ describe('a chat that is open', () => {
     virtualTime();
     const stream = fakeStream();
     const anim = animations();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(1, 10), state: READY }] });
     const log = await shownLog();
     expect(atEnd(log)).toBe(true);
     stream.send({ type: 'agent_event', agentId: 'b1', event: ev(11) });
@@ -202,7 +199,7 @@ describe('a chat that is open', () => {
     let state = READY;
     let more: EventView[] = [];
     open({
-      [`GET ${EVENTS}?after=0`]: () => [200, { events: history(1, 10), state }],
+      [`GET ${EVENTS}?last=300`]: () => [200, { events: history(1, 10), state }],
       [`GET ${EVENTS}?after=10`]: () => [200, { events: more, state }],
     });
     const log = await shownLog();
@@ -222,7 +219,7 @@ describe('a chat that is open', () => {
   it('keeps following new lines when its lines grew under it at its end, as pictures that loaded', async () => {
     virtualTime();
     const stream = fakeStream();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(1, 10), state: READY }] });
     const log = await shownLog();
     lineHeight = LINE + LINE / 2;
     /* The browser tells of the chat's own move at its next frame, after the lines grew: the person did not move. */
@@ -234,7 +231,7 @@ describe('a chat that is open', () => {
   it('follows new lines again once the person scrolled back down to the end', async () => {
     virtualTime();
     const stream = fakeStream();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(1, 10), state: READY }] });
     const log = await shownLog();
     scrollPerson(log);
     /* A browser can stop a fraction of a pixel short of the end. */
@@ -249,7 +246,7 @@ describe('switching back to a chat', () => {
     virtualTime();
     const stream = fakeStream();
     const anim = animations();
-    const { show } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
+    const { show } = open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(1, 10), state: READY }] });
     const log = await shownLog();
     /* Another chat is shown: this one hides, and lines keep coming to it. */
     show(true);
@@ -264,7 +261,7 @@ describe('switching back to a chat', () => {
 
   it('stands on its newest line even when the person had scrolled up in it before switching away', async () => {
     virtualTime();
-    const { show } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] });
+    const { show } = open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(1, 10), state: READY }] });
     const log = await shownLog();
     scrollPerson(log);
     show(true);
@@ -275,7 +272,7 @@ describe('switching back to a chat', () => {
 
   it('stands on its newest line when it was hidden before its history came', async () => {
     virtualTime();
-    const { show } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: history(1, 10), state: READY }] }, true);
+    const { show } = open({ [`GET ${EVENTS}?last=300`]: [200, { events: history(1, 10), state: READY }] }, true);
     await until(() => chatLog());
     const sight = firstSight(atEnd);
     show(false);

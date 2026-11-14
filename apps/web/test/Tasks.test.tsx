@@ -43,7 +43,7 @@ describe('the tracker', () => {
 
   it('opens the orchestrator to write to him, for people who see the whole company', async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }] });
+    shell({ 'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }] });
     await openTasks(user);
     await user.click(screen.getByRole('button', { name: 'Write to the orchestrator' }));
     expect(await screen.findByRole('complementary', { name: /Orchestrator/ })).toBeInTheDocument();

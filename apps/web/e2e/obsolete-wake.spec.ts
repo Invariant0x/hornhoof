@@ -38,7 +38,7 @@ for (const lang of ['en', 'ru'] as const) {
           '/api/updates': { current: { version: '0.6.1', commit: 'browser-test' }, available: false, latest: null, updater: { status: null, waiting: null } },
           '/api/tasks?status=open&department=d2': { tasks: [] },
           '/api/agents/b1': CARD,
-          '/api/agents/b1/events?after=0': { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'j1', queued: 0, terminal: false } },
+          '/api/agents/b1/events?last=300': { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'j1', queued: 0, terminal: false } },
         };
         await page.route('**/api/**', route => {
           const url = new URL(route.request().url());

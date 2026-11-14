@@ -819,6 +819,7 @@ export const en = {
     /* The window's chat: the conversation with the agent as anyone reads it. */
     chat: {
       conversation: 'Conversation',
+      earlier: 'Show earlier',
       you: 'You',
       viaTelegram: (name: string) => `${name}, via Telegram`,
       viaAssistant: (name: string, assistant: string) => `${name}, through the assistant ${assistant}`,

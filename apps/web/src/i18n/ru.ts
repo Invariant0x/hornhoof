@@ -836,6 +836,7 @@ export const ru: Messages = {
     showTerminal: 'Терминал',
     chat: {
       conversation: 'Переписка',
+      earlier: 'Показать раньше',
       you: 'Вы',
       viaTelegram: name => `${name}, через Telegram`,
       viaAssistant: (name, assistant) => `${name}, через ассистента ${assistant}`,

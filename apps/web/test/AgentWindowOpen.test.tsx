@@ -13,7 +13,7 @@ function company(busy: boolean) {
     'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents }] }],
     'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, running: { agents, parts: [] } }] }],
     'GET /api/agents/b1': [200, CARD],
-    'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy, runningJobId: busy ? 'j1' : null, queued: 0 } }],
+    'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy, runningJobId: busy ? 'j1' : null, queued: 0 } }],
     'POST /api/agents/b1/messages': [200, { queued: true }],
   });
 }
@@ -34,7 +34,7 @@ describe("an employee's inbox in its window", () => {
       'GET /api/org': [200, DEV_ORG],
       'GET /api/requests': [200, decisions([])],
       'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents: [{ ...RUNNING_AGENTS[0]!, busy: false }] }] }],
-      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       ...(routes as Record<string, [number, unknown]>),
     });
     const user = userEvent.setup();
@@ -151,7 +151,7 @@ describe('one agent window', () => {
       'GET /api/machines': [200, { machines: MACHINES }],
       'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents: [{ ...RUNNING_AGENTS[0]!, id: 'a1', name: 'Orchestrator' }] }] }],
       'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
-      'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
       'GET /api/tasks?status=open': [200, { tasks: [] }],
     });

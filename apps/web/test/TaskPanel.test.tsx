@@ -150,7 +150,7 @@ describe('a task', () => {
     shell({
       'GET /api/requests': [200, decisions([asked])],
       'GET /api/agents/b1': [200, CARD],
-      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
     });
     await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
     await user.click(within(await screen.findByRole('region', { name: 'Waiting for you' })).getByRole('button', { name: /#12/ }));
@@ -506,7 +506,7 @@ describe('a task', () => {
       'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents }] }],
       'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, running: { agents, parts: [] } }] }],
       'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
-      'GET /api/agents/orchestrator/events?after=0': [200, { events: [{ seq: 1, kind: 'proposal', data: proposal, jobId: null, person: null, at: '2026-11-03T10:00:00.000Z' }], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/orchestrator/events?last=300': [200, { events: [{ seq: 1, kind: 'proposal', data: proposal, jobId: null, person: null, at: '2026-11-03T10:00:00.000Z' }], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
       'GET /api/proposals/pr-window/materials': [200, manifest],
     });

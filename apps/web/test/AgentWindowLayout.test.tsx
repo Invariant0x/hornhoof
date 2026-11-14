@@ -17,7 +17,7 @@ function company(hasTask = true, busy = false, events: EventView[] = []) {
     'GET /api/people': [200, { people: PEOPLE }],
     'GET /api/requests': [200, decisions([])],
     'GET /api/agents/b1': [200, card],
-    'GET /api/agents/b1/events?after=0': [200, { events, state: { ready: true, reason: null, busy, runningJobId: busy ? 'j1' : null, queued: 0 } }],
+    'GET /api/agents/b1/events?last=300': [200, { events, state: { ready: true, reason: null, busy, runningJobId: busy ? 'j1' : null, queued: 0 } }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
     'GET /api/tasks?status=open': [200, { tasks: [] }],
     'GET /api/updates': [200, { current: { version: '0.5.1', commit: 'abc1234', migrations: 1 }, available: false, latest: null, versions: [], updater: { present: false, status: null, waiting: null } }],
@@ -169,7 +169,7 @@ describe('agent window task and controls', () => {
       'GET /api/org': [200, DEV_ORG],
       'GET /api/requests': [200, decisions([])],
       'GET /api/agents/b1': () => new Promise(() => {}),
-      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
     });
     const user = userEvent.setup();
     render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
@@ -272,7 +272,7 @@ describe('agent window task and controls', () => {
       'GET /api/tasks?status=open': [200, { tasks: [{ ...TASK_DETAIL, assignee: null }, own] }],
       'GET /api/tasks/t12': [200, { task: own }],
       'GET /api/requests': [200, decisions([])],
-      'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     const user = userEvent.setup();

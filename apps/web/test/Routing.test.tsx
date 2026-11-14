@@ -193,7 +193,7 @@ describe('shareable workspace', () => {
   it('minimizes the current agent when history opens a task, keeping its window mounted', async () => {
     fixture({
       'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
-      'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/orchestrator/events?last=300': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(<Shell me={ME} welcome onSignOut={() => {}} />);
