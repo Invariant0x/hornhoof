@@ -1,7 +1,7 @@
 ---
 id: hh-work-fast
 title: { en: "Work fast, keep the proof", ru: "Работать быстро, сохраняя проверку" }
-description: { en: "Says what to spend less on so work finishes sooner and its result stays just as checkable.", ru: "Говорит, на что тратить меньше, чтобы работа заканчивалась быстрее, а результат оставался таким же проверяемым." }
+description: { en: "What to spend less on so work finishes sooner with the same proof.", ru: "На что тратить меньше, чтобы работа заканчивалась быстрее с той же проверкой." }
 kind: checklist
 sources: [unclebob/ub-mode SKILL.md, addyosmani/agent-skills skills/incremental-implementation/SKILL.md, addyosmani/agent-skills skills/context-engineering/SKILL.md, affaan-m/ECC skills/iterative-retrieval/SKILL.md, affaan-m/ECC skills/search-first/SKILL.md, affaan-m/ECC skills/parallel-execution-optimizer/SKILL.md, affaan-m/ECC skills/agentic-engineering/SKILL.md, obra/superpowers skills/subagent-driven-development/SKILL.md, garrytan/gstack ETHOS.md]
 ---

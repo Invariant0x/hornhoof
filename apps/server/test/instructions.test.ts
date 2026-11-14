@@ -710,6 +710,16 @@ describe('single pre-release full suite and DEV-HEAD inline byte budget', () => 
     }
   });
 
+  it('reserves inline byte headroom in DEV-HEAD for combined release branches and starts employee hh-* skills with You can', () => {
+    const devHead = renderRole('DEV-HEAD');
+    expect(Buffer.byteLength(devHead.text)).toBeLessThanOrEqual(23_500);
+    for (const skill of shipped.skills.values()) {
+      if (skill.id.startsWith('hh-') && skill.id !== 'hh-assistant') {
+        expect(skill.body.startsWith('You can '), skill.id).toBe(true);
+      }
+    }
+  });
+
   it('forbids per-task and parallel-turnkey run_tests and requires one full run per release candidate on the combined release branch before main', () => {
     for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
       const whole = renderRole(roleId).whole;
