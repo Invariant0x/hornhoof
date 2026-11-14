@@ -12,7 +12,7 @@ import { partDone, pumpTests, startRun } from '../src/modules/testruns/runs.js';
 import { company } from './department-owner-fixture.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { planningEnvironment } from './fixtures/run-planning/environment.js';
-import { as, mcp } from './helpers.js';
+import { as, listen, mcp } from './helpers.js';
 
 const MAIN_BASE = '1'.repeat(40);
 const CANDIDATE = HEAD;
@@ -22,6 +22,7 @@ type ToolRes = { content: { type: string; text: string }[]; isError?: boolean };
 
 async function releaseFixture() {
   const f = await fixture({ turn: null });
+  await listen(f.app);
   /* Outside a turn, echelons code tasks integrate to main; we still drive full echelons + MCP tools on the repository. */
   const { app, ctx, db, ceoToken, head, author, reviewer, tester } = f;
   const [ceo] = await db.select().from(people);
@@ -64,7 +65,7 @@ async function releaseFixture() {
         prompt: 'Release check',
         timeoutMs: 900_000,
         status: 'running',
-        startedAt: new Date(),
+        startedAt: new Date(Date.now() + tokenSeq * 1_000),
         toolTokenHash: hashToken(token),
         createdBy,
         answersCeo: createdBy !== null,
@@ -103,17 +104,19 @@ async function releaseFixture() {
     candidate?: { candidateId: string; revision: number; baseCommit: string };
   } = {}) => {
     const sha = opts.commit ?? CANDIDATE;
-    const branch = opts.branch ?? `task-${task.number}`;
+    const runTask = opts.candidate ? task : f.task;
+    const runner = opts.candidate ? tester : author;
+    const branch = opts.branch ?? `task-${runTask.number}`;
     const chosenProfile = opts.profile ?? 'full';
     const prevBranchCommit = branchCommit;
     branchCommit = sha;
 
-    const { job } = await openTools(tester);
+    const { job } = await openTools(runner);
     await startRun(
       ctx,
-      { id: job.id, companyId: head.companyId, agentId: tester.id, agentKind: tester.kind, departmentId },
+      { id: job.id, companyId: head.companyId, agentId: runner.id, agentKind: runner.kind, departmentId },
       {
-        task: task.id,
+        task: runTask.id,
         branch,
         profile: chosenProfile,
         ...(opts.suite ? { suite: opts.suite } : {}),
@@ -123,7 +126,7 @@ async function releaseFixture() {
     const [started] = await db
       .select()
       .from(testRuns)
-      .where(and(eq(testRuns.taskId, task.id), eq(testRuns.agentId, tester.id)))
+      .where(and(eq(testRuns.taskId, runTask.id), eq(testRuns.agentId, runner.id)))
       .orderBy(desc(testRuns.number))
       .limit(1);
     const request = { ...started!.environmentRequest!, requestId: randomUUID(), builtin: true, sentAt: new Date().toISOString() };
@@ -250,7 +253,7 @@ async function releaseFixture() {
   const verifyThroughEchelons = async () => {
     await submit(ctx, author.id, task.id, { summary: 'Keep totals.', evidence: 'Focused checks.', review: { baseCommit: BASE } });
     await verdict(ctx, reviewer.id, task.id, { pass: true, comment: 'Independent review passed.', reviewedCommit: CANDIDATE });
-    const snap = (await f.detail()).echelons;
+    const snap = (await f.detail(task.id)).echelons;
     const candidateRun = await runProductSuite({
       commit: CANDIDATE,
       profile: 'full',
@@ -261,7 +264,7 @@ async function releaseFixture() {
       summary: 'Candidate verified.',
       verification: { candidateId: snap.candidateId!, revision: snap.revision, runIds: [candidateRun.id] },
     });
-    const ready = (await f.detail()).echelons;
+    const ready = (await f.detail(task.id)).echelons;
     return {
       candidateRun,
       acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: CANDIDATE },
@@ -357,7 +360,7 @@ describe('autonomous release for exact commits to main', () => {
     expect(autoAsked.isError).toBe(false);
     expect(autoAsked.text).not.toContain('waits for a person');
     expect(autoAsked.text).toContain(CANDIDATE);
-    expect((await loadTask(f.db, releaseTask.id)).status).toBe('working');
+    expect((await loadTask(f.db, releaseTask.id)).status).toBe('open');
     expect(await f.db.select().from(requests).where(eq(requests.taskId, releaseTask.id))).toEqual([]);
 
     /* request_approval on channel commit with exact commit also auto-approves without opening a card. */
@@ -386,6 +389,8 @@ describe('autonomous release for exact commits to main', () => {
 
     /* Company journal shows who requested each auto-approval, the 40-char SHA, the run_tests number and the reviewer PASS verdict. */
     const entries = (await f.journal()).json().entries;
+    const deptEntries = (await f.app.inject({ method: 'GET', url: `/api/autonomous-releases?department=${f.departmentId}`, ...as(f.ceoToken) })).json().entries;
+    expect(deptEntries).toEqual(entries);
     expect(entries.length).toBeGreaterThanOrEqual(3);
     expect(entries).toEqual(
       expect.arrayContaining([
@@ -408,9 +413,9 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     const { acceptance } = await f.verifyThroughEchelons();
-    const { call: headCall } = await f.openTools(f.head);
 
     const expectNeedsCard = async (label: string, sha = CANDIDATE) => {
+      const { call: headCall } = await f.openTools(f.head);
       const t = (
         await createTask(
           f.ctx,
@@ -464,9 +469,9 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
-    const { call: headCall } = await f.openTools(f.head);
 
     const checkRequiresCard = async (title: string) => {
+      const { call: turnCall } = await f.openTools(f.head);
       const rel = (
         await createTask(
           f.ctx,
@@ -474,7 +479,7 @@ describe('autonomous release for exact commits to main', () => {
           { title, brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
         )
       ).task;
-      const res = await headCall('ask_person', { task: rel.number, question: title, commit: CANDIDATE });
+      const res = await turnCall('ask_person', { task: rel.number, question: title, commit: CANDIDATE });
       expect(res.text, title).toContain('waits for a person');
       expect((await loadTask(f.db, rel.id)).status, title).toBe('waiting');
     };
@@ -523,7 +528,8 @@ describe('autonomous release for exact commits to main', () => {
         { title: 'missing-sec-pass', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
       )
     ).task;
-    const beforeSecRes = await headCall('ask_person', { task: beforeSec.number, question: 'Ship before security?', commit: OTHER_SEC_SHA });
+    const { call: secHeadCall } = await f.openTools(f.head);
+    const beforeSecRes = await secHeadCall('ask_person', { task: beforeSec.number, question: 'Ship before security?', commit: OTHER_SEC_SHA });
     expect(beforeSecRes.text).toContain('waits for a person');
     await verdict(f.ctx, f.security.id, secTask.id, { pass: true, comment: 'Security ok.', reviewedCommit: OTHER_SEC_SHA });
     const afterSec = (
@@ -533,7 +539,7 @@ describe('autonomous release for exact commits to main', () => {
         { title: 'after-sec-pass', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
       )
     ).task;
-    const afterSecRes = await headCall('ask_person', { task: afterSec.number, question: 'Ship after security.', commit: OTHER_SEC_SHA });
+    const afterSecRes = await secHeadCall('ask_person', { task: afterSec.number, question: 'Ship after security.', commit: OTHER_SEC_SHA });
     expect(afterSecRes.text).not.toContain('waits for a person');
   });
 
@@ -591,6 +597,21 @@ describe('autonomous release for exact commits to main', () => {
         canSetAutonomousRelease: false,
       });
     }
+
+    /* Someone without department access cannot inspect that department's autonomous release journal. */
+    const hiddenDeptJournal = await c.app.inject({
+      method: 'GET',
+      url: `/api/autonomous-releases?department=${c.dev.id}`,
+      ...as(c.samToken),
+    });
+    expect(hiddenDeptJournal.statusCode).toBe(404);
+    const filteredJournal = await c.app.inject({
+      method: 'GET',
+      url: '/api/autonomous-releases',
+      ...as(c.samToken),
+    });
+    expect(filteredJournal.statusCode).toBe(200);
+    expect(filteredJournal.json().entries).toEqual([]);
 
     /* Orchestrator acting on a turn — EVEN when answering the CEO — is an agent and MUST be refused. */
     const orchDirect = await c.app.inject({

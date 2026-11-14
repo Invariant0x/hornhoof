@@ -16,6 +16,7 @@ export type ErrorReason =
   | 'owner_on_department'
   | 'policy_not_allowed'
   | 'policy_invalid'
+  | 'autonomous_release_ceo_only'
   | 'model_check_not_allowed'
   | 'model_check_place'
   | 'model_check_thresholds'

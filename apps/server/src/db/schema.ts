@@ -83,6 +83,9 @@ export const companies = pgTable('companies', {
      task-N or a version 0.N.0 never names two pieces of work. */
   taskNumbersUsed: integer('task_numbers_used').notNull().default(0),
   turnNumbersUsed: integer('turn_numbers_used').notNull().default(0),
+  /* Only the human CEO toggles this: when on, exact commits for main with a green full run, an independent PASS verdict and
+     a fast-forward path from main pass without a human approval card. */
+  autonomousRelease: boolean('autonomous_release').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -2165,4 +2168,28 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
   check('model_check_certificates_validity', sql`${t.validUntil} > ${t.evaluatedAt}`),
   check('model_check_certificates_end', sql`(${t.status} = 'invalidated') = (${t.invalidatedReason} IS NOT NULL) AND (${t.status} = 'invalidated') = (${t.invalidatedAt} IS NOT NULL)`),
   isDigest('model_check_certificates_binding', t.bindingDigest),
+]);
+
+/* Each exact commit Hornhoof let go to main without a card while the CEO had autonomous release on: who asked for it,
+   the full commit SHA, the full test run that proved it and the independent PASS verdict it stood on. */
+export const autonomousReleases = pgTable('autonomous_releases', {
+  id: id(),
+  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'set null' }),
+  taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  taskNumber: integer('task_number').notNull(),
+  agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  agentName: text('agent_name').notNull(),
+  commitSha: text('commit_sha').notNull(),
+  testRunId: uuid('test_run_id').references(() => testRuns.id, { onDelete: 'set null' }),
+  testRunNumber: integer('test_run_number').notNull(),
+  reviewerAgentId: uuid('reviewer_agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  reviewerName: text('reviewer_name').notNull(),
+  verdictEventId: bigint('verdict_event_id', { mode: 'number' }).references(() => taskEvents.id, { onDelete: 'set null' }),
+  verdictStage: text('verdict_stage').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  index('autonomous_releases_company_created').on(t.companyId, t.createdAt),
+  index('autonomous_releases_company_commit').on(t.companyId, t.commitSha),
+  check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
 ]);

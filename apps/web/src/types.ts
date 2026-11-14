@@ -205,11 +205,30 @@ export type { ApprovalChannel, ApprovalMode };
 /* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
 export type ApprovalRule = { channel: ApprovalChannel } & ChannelRule;
 /* A department's owner and rules as this person may see them; no owner means the CEO. */
+export type AutonomousReleaseEntry = {
+  id: string;
+  departmentId?: string | null;
+  taskId: string | null;
+  taskNumber: number;
+  agentId: string | null;
+  agentName: string;
+  commitSha: string;
+  testRunId: string | null;
+  testRunNumber: number;
+  reviewerAgentId: string | null;
+  reviewerName: string;
+  verdictStage: string;
+  createdAt: string;
+};
+
 export type ApprovalPolicyView = {
   departmentId: string;
   owner: { id: string; name: string } | null;
   canSetOwner: boolean;
   canChangePolicy: boolean;
+  autonomousRelease?: boolean;
+  canSetAutonomousRelease?: boolean;
+  hasAutonomousReleases?: boolean;
   /* Who the CEO may name: active people with access to the department. */
   candidates: { id: string; name: string; title: string }[];
   rules: ApprovalRule[];
