@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireDepartmentChanger } from '../../auth/departments.js';
-import { requirePerson } from '../../auth/session.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { googleSheets } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -71,21 +71,22 @@ export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row!;
   }
 
-  async function requireWholeCompanyPerson(req: Parameters<typeof requirePerson>[0]) {
-    const me = await requirePerson(req, db);
+  /* Only a person who may change the whole company, by themselves and never through a model, holds the company's Google key. */
+  async function requireWholeCompany(me: Person): Promise<void> {
     if (me.via) throw new ApiError(403, 'forbidden', 'A person connects Google Sheets directly in Company settings.');
     await requireDepartmentChanger(db, me, null);
-    return me;
   }
 
   app.get('/api/google-sheets', async req => {
-    const me = await requireWholeCompanyPerson(req);
+    const me = await requirePerson(req, db);
+    await requireWholeCompany(me);
     const [row] = await db.select().from(googleSheets).where(eq(googleSheets.companyId, me.companyId));
     return { google: row ? googleSheetsView(row) : null };
   });
 
   app.put('/api/google-sheets', async req => {
-    const me = await requireWholeCompanyPerson(req);
+    const me = await requirePerson(req, db);
+    await requireWholeCompany(me);
     const body = PutBody.parse(req.body);
     const [saved] = await db.select().from(googleSheets).where(eq(googleSheets.companyId, me.companyId));
     const rawCreds = body.credentials?.trim() ?? '';
@@ -99,7 +100,8 @@ export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.delete('/api/google-sheets', async (req, reply) => {
-    const me = await requireWholeCompanyPerson(req);
+    const me = await requirePerson(req, db);
+    await requireWholeCompany(me);
     await db.delete(googleSheets).where(eq(googleSheets.companyId, me.companyId));
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();
