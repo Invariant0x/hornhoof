@@ -198,33 +198,79 @@ describe('a running turn with a live program', () => {
 });
 
 describe('a live program its queue waits behind', () => {
-  it('wakes Operations once, not a person, when the program stands idle and its messages wait', async () => {
-    const c = await company();
+  /* The orchestrator's turn its node still runs, whose program has stood idle at its prompt since a minute after it began,
+     while Ivan's message waits behind it: the end of that turn never reached Hornhoof. */
+  async function idleBehind(c: Awaited<ReturnType<typeof company>>) {
     const turn = await c.message(c.orchestrator.id, 'Plan the company.');
     c.later();
     const waiting = await c.message(c.orchestrator.id, 'Ivan: are you there?');
-    expect((await c.job(waiting)).status).toBe('queued');
     const idle = Date.now();
-    for (let i = 0; i < 6; i++) {
+    const round = async () => {
       c.later();
-      /* The program sits at its prompt: its node still gives signs of it, so the quiet alarm stays silent. */
       await c.pulse(BUILTIN, turn, 'idle', idle);
+      await reconcile(c.ctx, new Date());
+      const asked = c.checks().at(-1);
+      if (asked) await c.answer(BUILTIN, asked.jobIds, asked.jobIds);
+    };
+    return { turn, waiting, round };
+  }
+  const sentOf = (c: Awaited<ReturnType<typeof company>>, type: string) =>
+    c.send.mock.calls.flatMap(([, m], i) => ((m as { type: string }).type === type ? [{ i, jobId: (m as { jobId?: string }).jobId }] : []));
+  const toldOtto = async (c: Awaited<ReturnType<typeof company>>) => (await c.turnsOf(c.otto.id)).filter(j => j.prompt.includes(c.orchestrator.name));
+
+  it('closes the turn once its live program stands idle at its prompt and gives the waiting messages to the same session', async () => {
+    const c = await company();
+    const { turn, waiting, round } = await idleBehind(c);
+    expect((await c.job(waiting)).status).toBe('queued');
+    await round();
+    expect((await c.job(turn)).status).toBe('running');
+    await round();
+
+    expect(await c.job(turn)).toMatchObject({ status: 'done' });
+    expect((await c.facts(turn)).map(f => f.text)).toEqual([expect.stringMatching(/idle at its prompt/)]);
+    expect((await c.job(waiting)).status).toBe('running');
+    const [cancel] = sentOf(c, 'job.cancel');
+    const run = sentOf(c, 'job.run').find(r => r.jobId === waiting);
+    expect(cancel).toMatchObject({ jobId: turn });
+    expect(run!.i).toBeGreaterThan(cancel!.i);
+    /* The program goes on in its session: nothing starts it again or closes it. */
+    expect([...sentOf(c, 'agent.restart'), ...sentOf(c, 'agent.release')]).toEqual([]);
+    expect(await toldOtto(c)).toEqual([]);
+    /* The node's own end of the closed turn comes later and changes nothing. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: turn, ok: false, sessionId: null, result: '', tail: '', error: 'cancelled' });
+    expect(await c.job(turn)).toMatchObject({ status: 'done' });
+    expect((await c.job(waiting)).status).toBe('running');
+  });
+
+  it('wakes Operations once, not a person, when the queue still stands after that', async () => {
+    const c = await company();
+    const first = await idleBehind(c);
+    await first.round();
+    await first.round();
+    expect((await c.job(first.waiting)).status).toBe('running');
+    c.later();
+    const more = await c.message(c.orchestrator.id, 'Ivan: hello?');
+    const idle = Date.now();
+    for (let i = 0; i < 4; i++) {
+      c.later();
+      await c.pulse(BUILTIN, first.waiting, 'idle', idle);
       await reconcile(c.ctx, new Date());
       const asked = c.checks().at(-1);
       if (asked) await c.answer(BUILTIN, asked.jobIds, asked.jobIds);
     }
 
-    const told = (await c.turnsOf(c.otto.id)).filter(j => j.prompt.includes('Orchestrator'));
+    const told = await toldOtto(c);
     expect(told).toHaveLength(1);
     expect(told[0]!.prompt).toMatch(/queue/i);
-    expect(told[0]!.prompt).toContain(turn);
-    expect((await c.job(turn)).status).toBe('running');
+    expect(told[0]!.prompt).toContain(first.waiting);
+    expect((await c.job(first.waiting)).status).toBe('running');
+    expect((await c.job(more)).status).toBe('queued');
     for (let i = 0; i < 3; i++) {
       c.later();
-      await c.pulse(BUILTIN, turn, 'idle', idle);
+      await c.pulse(BUILTIN, first.waiting, 'idle', idle);
       await reconcile(c.ctx, new Date());
     }
-    expect((await c.turnsOf(c.otto.id)).filter(j => j.prompt.includes('Orchestrator'))).toHaveLength(1);
+    expect(await toldOtto(c)).toHaveLength(1);
     expect(await c.db.select().from(requests)).toEqual([]);
   });
 });
