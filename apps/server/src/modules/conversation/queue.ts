@@ -322,11 +322,14 @@ export class NoSubscription extends Error {
 const actsForCeo = async (ctx: Ctx, personId: string | null | undefined): Promise<boolean> => Boolean(personId && (await actingCeo(ctx.db, personId)));
 
 /* Keeps what no person wrote in the employee's inbox, with the turn it went into or waits for, and tells its screens. */
-async function keepLetter(ctx: Ctx, t: Turn, jobId: string, status: InboxStatus): Promise<void> {
+export async function keepLetter(ctx: Ctx, t: Turn, jobId: string, status: InboxStatus): Promise<void> {
   if (!isMail(t)) return;
   await keepMail(ctx.db, t, jobId, status);
   await inboxChanged(ctx, t.agentId);
 }
+
+/* The turns a switched-off employee still takes: no task's and not the one for its inbox. */
+const peopleTurns = and(isNull(jobs.taskId), eq(jobs.inboxWake, false));
 
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
@@ -359,8 +362,10 @@ async function intoInbox(ctx: Ctx, t: Turn & { message: TurnMessage }): Promise<
   return wake;
 }
 
-/* Letters wait unread with no turn for them, as after a turn that took the inbox did not reach its program: one goes now. */
-async function inboxTurnDue(ctx: Ctx, agent: { id: string; companyId: string }): Promise<boolean> {
+/* Letters wait unread with no turn for them, as after a turn that took the inbox did not reach its program: one goes now.
+   A switched-off employee reads them once it is on again. */
+async function inboxTurnDue(ctx: Ctx, agent: { id: string; companyId: string; switchedOffAt: Date | null }): Promise<boolean> {
+  if (agent.switchedOffAt) return false;
   if ((await inboxModeOf(ctx.db, agent.id)).effective !== 'inbox' || !(await unreadMail(ctx.db, agent.id)).length) return false;
   const [open] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
   if (open) return false;
@@ -606,8 +611,8 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     if (!on) return false;
     const { agent, sub } = on;
     if (node.kind === 'node' && await resumeOperatorProcess(ctx, agentId, node.nodeId)) return true;
-    /* Task turns of an agent that is switched off wait for it to be on and start nothing. */
-    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits, sub.limitsUpdatedAt) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
+    /* Task turns and the inbox's turn of an agent that is switched off wait for it to be on and start nothing. */
+    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits, sub.limitsUpdatedAt) ? programStart : agent.switchedOffAt ? peopleTurns : undefined);
     const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
     if (open) return false;
     await insertTurn(ctx, { companyId: agent.companyId, agentId, prompt: '', createdBy: null });
@@ -994,9 +999,10 @@ async function tellOperationsOfHold(ctx: Ctx, agent: PlanAgent & { name: string 
   await notifyFailure(ctx, held.job, heldNotice(agent, held), `plan-hold:${agent.id}:${holdMinute(held.until)}`);
 }
 
-/* Switched off, it still answers people who write to it; its task turns wait until it is on. */
+/* Switched off, it still answers people who write to it; its task turns and the turn that takes its inbox wait until it is
+   on. Past the share set for tasks only task turns wait. */
 function turnsThatMayGo(agent: PlanAgent & { switchedOffAt: Date | null }, until: string | null, spent: string | null) {
-  return and(conversationOf(agent.id), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined);
+  return and(conversationOf(agent.id), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt ? peopleTurns : spent ? isNull(jobs.taskId) : undefined);
 }
 
 /* The turn that may go out now, if any, with the line woken for what comes next: the plan's limit or share starting over,

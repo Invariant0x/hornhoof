@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentInbox, agents, companies, departments, jobs, people, requests, subscriptions, tasks, teams } from '../src/db/schema.js';
@@ -525,9 +525,10 @@ describe('the inbox a person opens', () => {
   it('names a sender that is no longer in the company "Employee", not by the name its letter kept', async () => {
     const c = await company();
     await c.letter(c.rita, c.bruno.id, 'I pushed the fixtures.');
-    await c.db.$client.transaction(async tx => {
-      await tx.exec('set local session_replication_role = replica');
-      await tx.query('delete from agents where id = $1', [c.rita.id]);
+    /* No employee leaves the company by a route yet: Rita goes as a removal would take her, past what still points at her. */
+    await c.db.transaction(async tx => {
+      await tx.execute(sql`set local session_replication_role = replica`);
+      await tx.delete(agents).where(eq(agents.id, c.rita.id));
     });
     const [letter] = (await open(c, c.bruno.id)).letters;
     expect(letter!.sender).toEqual({ kind: 'agent', id: null, name: 'Employee', role: null, department: null });

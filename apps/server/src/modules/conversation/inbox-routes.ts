@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -25,7 +25,8 @@ const ReadBody = z.union([z.strictObject({ ids: z.array(z.uuid()).min(1).max(200
 const NOT_YOURS = 'Only the CEO, the CEO delegate or the owner of its department changes how this employee takes its mail.';
 const NOT_YOURS_TO_MARK = 'Only the CEO, the CEO delegate or the owner of its department marks this employee\'s letters.';
 
-/* Who sent each letter as this person reads it: an employee they do not know of is "Employee", as in the window. */
+/* Who sent each letter as this person reads it: an employee they do not know of, or one no longer in the company, is
+   "Employee", as in the window. */
 async function sendersOf(ctx: Ctx, viewer: AgentViewer, companyId: string, rows: InboxRow[]): Promise<(row: InboxRow) => MessageParty> {
   const agentIds = [...new Set(rows.flatMap(r => (r.senderAgentId ? [r.senderAgentId] : [])))];
   const personIds = [...new Set(rows.flatMap(r => (r.senderPersonId ? [r.senderPersonId] : [])))];
@@ -41,7 +42,7 @@ async function sendersOf(ctx: Ctx, viewer: AgentViewer, companyId: string, rows:
   return row => {
     const id = row.senderAgentId ?? row.senderPersonId;
     if (row.senderKind === 'hornhoof' || !id) return HORNHOOF;
-    return parties.get(id) ?? { kind: row.senderKind, id: null, name: row.senderName, role: null, department: null };
+    return parties.get(id) ?? { kind: row.senderKind, id: null, name: row.senderKind === 'agent' ? 'Employee' : row.senderName, role: null, department: null };
   };
 }
 
@@ -125,7 +126,8 @@ export function inboxRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { mode } = ModeBody.parse(req.body);
-    const [department] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
+    /* A product's id is not a department's: its mode is its department's. */
+    const [department] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId), isNull(departments.parentId)));
     if (!department) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     if (!(await mayChangeRules(db, me, department.id))) throw new ApiError(403, 'forbidden', "Only this department's owner, the CEO or the CEO delegate changes how its employees take their mail.", 'not_owner');
     await db.update(departments).set({ inboxMode: mode }).where(eq(departments.id, department.id));

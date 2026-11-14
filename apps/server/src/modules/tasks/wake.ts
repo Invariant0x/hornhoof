@@ -3,7 +3,7 @@ import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, 
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
+import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
 import { inboxChanged, mailBack } from '../conversation/inbox.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
@@ -269,7 +269,9 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
   const into = await deliverLive(ctx, w.agentId, text, { source: { data: message } }, (jobId, kept) =>
     appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: message }, kept).then(() => {}),
   );
-  if (!into) await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message });
+  const turn = { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message };
+  if (into) await keepLetter(ctx, turn, into, 'read');
+  else await insertTurn(ctx, turn);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
 }
@@ -357,7 +359,10 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
     const into = await deliverLive(ctx, agent.id, data.text, { taskId: task.id, source: { data } }, (jobId, kept) =>
       appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data }, kept).then(() => {}),
     );
-    if (into) return false;
+    if (into) {
+      await keepLetter(ctx, wakeTurn(agent, task, data), into, 'read');
+      return false;
+    }
   }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
@@ -373,12 +378,17 @@ async function keepTaskWake(ctx: Ctx, agent: typeof agents.$inferSelect, task: T
     if (LIVE_WAKES.includes(w.why) || w.cause?.actor) {
       await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${data.text}`}` }).where(eq(jobs.id, waiting.id));
       await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data });
+      await keepLetter(ctx, wakeTurn(agent, task, data), waiting.id, 'unread');
     }
     return true;
   }
-  await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: data.text, createdBy: null, taskId: task.id, message: { personId: null, ...data } });
+  await insertTurn(ctx, wakeTurn(agent, task, data));
   return true;
 }
+
+/* The turn a wake's words make on its task, and the letter they are in the inbox wherever they went. */
+const wakeTurn = (agent: typeof agents.$inferSelect, task: Task, data: Omit<TurnMessage, 'personId'>) =>
+  ({ companyId: agent.companyId, agentId: agent.id, prompt: data.text, createdBy: null, taskId: task.id, message: { personId: null, ...data } });
 
 /* The open task the agent holds after a turn about this one: the task itself, or the task it gave this one out from. */
 async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task | null> {

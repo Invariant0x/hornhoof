@@ -5,7 +5,7 @@ import type { Db } from '../../db/client.js';
 import { agentInbox, agents, companies, departments, jobs, type InboxMode, type LetterKind } from '../../db/schema.js';
 
 type Reader = Pick<Db, 'select'>;
-type Writer = Pick<Db, 'update' | 'insert' | 'select'>;
+type Writer = Pick<Db, 'update' | 'insert' | 'select' | 'delete'>;
 export type InboxStatus = (typeof agentInbox.$inferSelect)['status'];
 export type InboxRow = typeof agentInbox.$inferSelect;
 
@@ -47,8 +47,9 @@ export function isMail(t: MailTurn): t is MailTurn & { message: MailMessage } {
   return Boolean(m && !t.repeated && m.personId === null && !m.channel && m.text.trim());
 }
 
-/* Mail the inbox takes instead of a turn: everything but a task's own wake from Hornhoof, which stays a turn on its task. */
-export const takesInsteadOfTurn = (t: MailTurn & { message: MailMessage }): boolean => Boolean(t.message.from) || !t.message.taskWake;
+/* Mail the inbox takes instead of a turn: everything but what wakes a task, from Hornhoof or an employee's letter on it, which
+   stays a turn on that task and is kept in the inbox with that turn. */
+export const takesInsteadOfTurn = (t: MailTurn & { message: MailMessage }): boolean => !t.message.taskWake;
 
 /* What the letter is, as the tab names it: another's words, a report on work, a comment on a task, a task given to the
    employee (to do or to check), or any other notice of Hornhoof. */
@@ -110,6 +111,12 @@ export async function mailWentOut(db: Writer, agentId: string, jobIds: string[])
   if (!jobIds.length) return 0;
   const read = await db.update(agentInbox).set({ status: 'read', readAt: new Date() }).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.jobId, jobIds), eq(agentInbox.status, 'unread'))).returning({ id: agentInbox.id });
   return read.length;
+}
+
+/* The letters of a turn that never went out, whose senders heard so: none of them waits for the employee. How many went. */
+export async function dropMail(db: Writer, agentId: string, jobId: string): Promise<number> {
+  const dropped = await db.delete(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.jobId, jobId), eq(agentInbox.status, 'unread'))).returning({ id: agentInbox.id });
+  return dropped.length;
 }
 
 /* The turn that took the inbox went out with these letters in its summary: read, as letters of that turn. */
