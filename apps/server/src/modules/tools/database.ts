@@ -58,6 +58,7 @@ const RULES: Record<string, string> = {
   assistant_events: ASSISTANT_READS,
   assistant_replies: ASSISTANT_READS,
   assistant_requests: ASSISTANT_READS,
+  agent_inbox: "Hornhoof keeps employees' inboxes itself, as each letter names who wrote it: the tool only reads them, and an employee marks its own letters with inbox_mark.",
 };
 const secretsOf = (table: string) => {
   const columns = SECRET[table];

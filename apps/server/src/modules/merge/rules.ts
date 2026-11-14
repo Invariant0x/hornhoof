@@ -79,6 +79,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   agent_events: { kind: 'log', topic: 'work', match: 'id', sequence: 'seq' },
   task_events: { kind: 'log', topic: 'work', match: 'uuid', sequence: 'id', task: 'task_id' },
   agent_changes: { kind: 'log', topic: 'work', match: 'id' },
+  /* A letter the leader lacks joins an employee's inbox after its own letters; one both hold keeps how the leader read it. */
+  agent_inbox: { kind: 'log', topic: 'work', match: 'id', sequence: 'seq', task: 'task_id' },
 
   people: rows('people'),
   /* A restore's carry ended every session on purpose. */
@@ -94,8 +96,9 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   telegram_bots: rows('access'),
   /* An assistant's key is a way in from outside, under its owner's rights. */
   assistants: rows('access'),
-  /* The key of a git host is a way out to an account of the company's. */
+  /* The key of a git host is a way out to an account of the company's, and so is the Google key that makes its sheets. */
   repo_hosts: rows('access'),
+  google_sheets: rows('access'),
 
   ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
 
@@ -108,6 +111,9 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   ...each(OUTBOUND.filter(name => name !== 'outbound_messages'), rows('protected')),
 
   ...each(['companies', 'departments', 'teams', 'agents', 'improvements', 'test_parts', 'backlog_items', 'briefings', 'map_layouts'], rows('work')),
+  /* The cards of Hornhoof's own feedback inbox and who sent each: a card only the source holds whose number or finding the
+     leader gave another card stays out. */
+  ...each(['feedback_inbox', 'feedback_signals'], rows('work')),
   tasks: rows('work', { number: ['company_id'], task: 'id' }),
   turns: rows('work', { number: ['company_id'], task: 'task_id' }),
   test_runs: rows('work', { number: ['company_id'], task: 'task_id' }),
@@ -129,6 +135,8 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   outbound_accounts: ['updated_at'],
   outbound_messages: ['updated_at'],
   map_layouts: ['updated_at'],
+  feedback_inbox: ['updated_at'],
+  feedback_signals: ['signals', 'updated_at'],
   telegram_bots: ['update_offset'],
   agents: ['context_used', 'timer_at'],
   nodes: ['last_seen_at', 'status', 'version', 'boot'],

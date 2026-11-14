@@ -636,6 +636,8 @@ describe('the orchestrator reads and changes the database itself', () => {
       ['SELECT wake_secret_enc FROM assistants', /wake_secret_enc/],
       ['DELETE FROM assistant_events', /only reads/],
       ['UPDATE assistant_replies SET answered = true', /only reads/],
+      [`UPDATE agent_inbox SET sender_name = 'Ivan'`, /inbox_mark/],
+      ['DELETE FROM agent_inbox', /inbox_mark/],
     ];
     for (const [sql, why] of refused) {
       const res = await call(client, 'database', { sql });
