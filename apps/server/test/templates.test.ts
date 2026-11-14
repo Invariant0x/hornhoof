@@ -311,6 +311,14 @@ describe('templates', () => {
     expect(hornhoof).not.toMatch(/Answer in your reply or with/);
   });
 
+  it('tells everyone that letters may wait in the inbox, how to read and mark them, and that a person\'s words never wait there', () => {
+    const hornhoof = body('hh-hornhoof');
+    expect(hornhoof).toMatch(/inbox/);
+    expect(hornhoof).toMatch(/"inbox"[^.]*"inbox_mark"/);
+    expect(hornhoof).toMatch(/A person's words[^.]*never[^.]*inbox/);
+    expect(hornhoof).not.toMatch(/\u2014/);
+  });
+
   it('asks for reports to people and heads in ordinary words with spaces', () => {
     for (const id of ['hh-report-to-head', 'hh-hornhoof']) expect(body(id), id).toMatch(/ordinary words[^.]*with spaces/);
   });
