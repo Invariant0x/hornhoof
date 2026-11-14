@@ -73,7 +73,7 @@ const inKeeper = (at: { machine: LabMachine; folder: string }, cmd: string): Pro
   at.machine.exec(`docker exec ${at.folder.split('/').pop()!}-keeper-1 sh -c '${cmd.replaceAll("'", `'\\''`)}'`);
 
 /* Script run inside a keeper container to bridge its peer doors and visitor loopback ports through the host PeerRelay. */
-function bridgeScript(host: string, relayPort: number, offers: Record<string, number>, visits: Array<{ port: number; service: string }>): string {
+export function bridgeScript(host: string, relayPort: number, offers: Record<string, number>, visits: Array<{ port: number; service: string }>): string {
   const cfg = JSON.stringify({ host: host.replace(/^\[|\]$/g, ''), relayPort, offers, visits });
   return `const net = require('node:net');
 const cfg = ${cfg};
@@ -138,6 +138,30 @@ export function directPeerBlockScript(blocked: boolean, publishedPort = 8180, co
     `iptables -C ${forwardRule} 2>/dev/null || iptables -I ${forwardRule}`,
     `iptables -C ${inputRule} 2>/dev/null || iptables -I ${inputRule}`,
   ].join('; ');
+}
+
+export function keeperTcpProbeScript(host: string, port: number, timeoutMs = 3000): string {
+  const target = JSON.stringify({ host: host.replace(/^\[|\]$/g, ''), port, timeout: timeoutMs });
+  return [
+    'const net = require("node:net");',
+    `const s = net.connect(${target}, () => { console.log("CONNECTED"); s.destroy(); process.exit(0); });`,
+    's.on("timeout", () => { console.log("TIMEOUT"); s.destroy(); process.exit(2); });',
+    's.on("error", err => { console.log("REJECTED:" + (err.code || err.message)); process.exit(1); });',
+  ].join(' ');
+}
+
+export function keeperTcpProbeCommand(_folder: string, host: string, port: number, timeoutMs = 3000): string {
+  const script = keeperTcpProbeScript(host, port, timeoutMs).replaceAll("'", `'\\''`);
+  return `node -e '${script}'`;
+}
+
+export function probeKeeperTcp(
+  at: { machine: Pick<LabMachine, 'exec'>; folder: string },
+  host: string,
+  port: number,
+  timeoutMs = 3000,
+): Promise<Ran> {
+  return at.machine.exec(keeperTcpProbeCommand(at.folder, host, port, timeoutMs));
 }
 
 export class Lab {

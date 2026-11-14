@@ -1,5 +1,6 @@
 import http from 'node:http';
 import net from 'node:net';
+import vm from 'node:vm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../../test-support/ports.mjs';
 import { LeaseProofs } from '../../src/modules/keeper/proofs.js';
@@ -11,7 +12,7 @@ import { DbDoor } from '../../src/net/db-door.js';
 import { PeerServer } from '../../src/net/peer-server.js';
 import { PeerSessions } from '../../src/net/peer-sessions.js';
 import { fakeRelay } from '../fake-relay.js';
-import { directPeerBlockScript } from './lab.js';
+import { bridgeScript, directPeerBlockScript, keeperTcpProbeCommand, probeKeeperTcp, type Ran } from './lab.js';
 import { closedPort, createDelayGate, createPeerRelay, ed25519Key, virtualClock } from './network.js';
 
 const COMPANY_ID = '00000000-0000-4000-8000-0000000000aa';
@@ -351,7 +352,7 @@ describe('the network lab relay and peer path with controllable delay', () => {
     await offerB.close();
   });
 
-  it('builds FORWARD and DOCKER-USER TCP-RST rules for blockDirect and bridges remote TCP offer/visit streams when direct fails', async () => {
+  it('builds FORWARD and DOCKER-USER TCP-RST rules for blockDirect and probes TCP inside keeper rather than on docker:dind', async () => {
     const installCmd = directPeerBlockScript(true, 8180, 7070);
     expect(installCmd).toContain('DOCKER-USER ! -i lo -p tcp -m conntrack --ctorigdstport 8180 -j REJECT --reject-with tcp-reset');
     expect(installCmd).toContain('DOCKER-USER ! -i lo -p tcp --dport 7070 -j REJECT --reject-with tcp-reset');
@@ -362,7 +363,9 @@ describe('the network lab relay and peer path with controllable delay', () => {
     expect(removeCmd).toContain('iptables -D FORWARD');
     expect(removeCmd).toContain('iptables -D INPUT');
 
-    /* Exercise the TCP line protocol (offer -> knock -> accept / visit) that container bridges use when 8180 is refused. */
+    /* Exercise the generated bridgeScript and keeper TCP probe on virtual time: LabMachine (machine.Dockerfile:
+       docker:28.5.2-dind + bash/curl/jq/coreutils/iptables) lacks node, whereas container keeper (root Dockerfile:
+       node:22.23.4-alpine) has node. */
     const clock = virtualClock();
     const gate = createDelayGate({ oneWayMs: 120, schedule: clock.schedule });
     const relay = await createPeerRelay(gate);
@@ -370,51 +373,101 @@ describe('the network lab relay and peer path with controllable delay', () => {
     const svc = serviceName('acme', NET_A, 'data');
 
     const bridgeSockets = new Set<net.Socket>();
-    const offerCtrl = net.connect({ port: relay.port, host: '127.0.0.1', noDelay: true }, () => {
-      offerCtrl.write(`${JSON.stringify({ op: 'offer', service: svc })}\n`);
-    });
-    bridgeSockets.add(offerCtrl);
-    let ctrlBuf = '';
-    offerCtrl.setEncoding('utf8');
-    offerCtrl.on('data', (chunk: string) => {
-      ctrlBuf += chunk;
-      const lines = ctrlBuf.split('\n');
-      ctrlBuf = lines.pop()!;
-      for (const line of lines) {
-        const { knock } = JSON.parse(line) as { knock: string };
-        const local = net.connect({ port: backend.port, host: '127.0.0.1', noDelay: true });
-        const up = net.connect({ port: relay.port, host: '127.0.0.1', noDelay: true }, () => {
-          up.write(`${JSON.stringify({ op: 'accept', token: knock })}\n`);
-        });
-        bridgeSockets.add(local);
-        bridgeSockets.add(up);
-        local.pipe(up);
-        up.pipe(local);
-      }
+    const bridgeServers = new Set<net.Server>();
+    let bridgeStopped = false;
+    let visitorPort = 0;
+    const listeningPromises: Array<Promise<void>> = [];
+    const trackedNet = {
+      connect: (...args: Parameters<typeof net.connect>) => {
+        const s = net.connect(...args);
+        bridgeSockets.add(s);
+        s.once('close', () => bridgeSockets.delete(s));
+        return s;
+      },
+      createServer: (...args: Parameters<typeof net.createServer>) => {
+        const srv = net.createServer(...args);
+        bridgeServers.add(srv);
+        listeningPromises.push(
+          new Promise<void>(resolve => {
+            srv.once('listening', () => {
+              visitorPort = (srv.address() as net.AddressInfo).port;
+              resolve();
+            });
+          }),
+        );
+        return srv;
+      },
+    };
+    const runBridge = (code: string): void => {
+      vm.runInNewContext(code, {
+        require: (id: string) => {
+          if (id !== 'node:net') throw new Error(`unexpected module ${id}`);
+          return trackedNet;
+        },
+        setTimeout: (fn: () => void, ms: number) => {
+          if (!bridgeStopped) clock.schedule.after(ms, () => !bridgeStopped && fn());
+        },
+        process: {
+          exit: (codeNum: number) => {
+            throw new Error(`bridgeScript exited with ${codeNum}`);
+          },
+        },
+      });
+    };
+    onTestFinished(async () => {
+      bridgeStopped = true;
+      for (const s of bridgeSockets) s.destroy();
+      await Promise.all([...bridgeServers].map(srv => new Promise<void>(resolve => srv.close(() => resolve()))));
     });
 
-    const visitorSrv = net.createServer({ noDelay: true }, client => {
-      client.setNoDelay(true);
-      bridgeSockets.add(client);
-      const up = net.connect({ port: relay.port, host: '127.0.0.1', noDelay: true }, () => {
-        up.write(`${JSON.stringify({ op: 'visit', service: svc })}\n`);
-        client.pipe(up);
-        up.pipe(client);
-      });
-      bridgeSockets.add(up);
-    });
-    const visitorPort = await listenIn(visitorSrv, '127.0.0.1');
-    onTestFinished(
-      () =>
-        new Promise<void>(resolve => {
-          for (const s of bridgeSockets) s.destroy();
-          visitorSrv.close(() => resolve());
-        }),
-    );
+    runBridge(bridgeScript('127.0.0.1', relay.port, { [svc]: backend.port }, []));
+    runBridge(bridgeScript('127.0.0.1', relay.port, {}, [{ port: 0, service: svc }]));
+    await Promise.all(listeningPromises);
     await clock.flush();
+    expect(visitorPort).toBeGreaterThan(0);
+
+    const ranCommands: string[] = [];
+    const dindMachine = {
+      exec: (cmd: string): Promise<Ran> => {
+        ranCommands.push(cmd);
+        /* On docker:28.5.2-dind, invoking node outside `docker compose exec -T keeper` fails with exit code 127. */
+        const match = /^cd '([^']+)' && docker compose exec -T keeper node -e '([\s\S]+)'$/.exec(cmd);
+        if (!match) {
+          return Promise.resolve({ code: 127, out: 'bash: line 1: node: command not found\n' });
+        }
+        const script = match[2]!.replaceAll(`'\\''`, "'");
+        return new Promise<Ran>(resolve => {
+          const lines: string[] = [];
+          let settled = false;
+          const finish = (code: number) => {
+            if (settled) return;
+            settled = true;
+            resolve({ code, out: lines.length ? `${lines.join('\n')}\n` : '' });
+          };
+          vm.runInNewContext(script, {
+            require: (id: string) => {
+              if (id !== 'node:net') throw new Error(`unexpected module ${id}`);
+              return net;
+            },
+            console: { log: (...parts: unknown[]) => lines.push(parts.map(String).join(' ')) },
+            process: { exit: finish },
+          });
+        });
+      },
+    };
 
     const deadDirect = await closedPort();
-    await expect(askLine(deadDirect, 'PING')).rejects.toThrow();
+    const directRes = await probeKeeperTcp({ machine: dindMachine, folder: '/root/hornhoof-abcdef' }, '127.0.0.1', deadDirect);
+    expect(directRes.code, directRes.out).toBe(1);
+    expect(directRes.out.trim()).toBe('REJECTED:ECONNREFUSED');
+
+    const builtCmd = keeperTcpProbeCommand('/root/hornhoof-abcdef', '10.200.4.2', 8180);
+    expect(builtCmd).toMatch(/^cd '\/root\/hornhoof-abcdef' && docker compose exec -T keeper node -e '/);
+
+    const relayedRes = await probeKeeperTcp({ machine: dindMachine, folder: '/root/hornhoof-abcdef' }, '127.0.0.1', visitorPort);
+    expect(relayedRes.code, relayedRes.out).toBe(0);
+    expect(relayedRes.out.trim()).toBe('CONNECTED');
+    expect(ranCommands).toHaveLength(2);
 
     let relayedReply: string | undefined;
     void askLine(visitorPort, 'PING').then(res => {

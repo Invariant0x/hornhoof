@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Lab, type LabMachine } from './lab.js';
+import { VISIT_FIRST_PORT } from '../../src/modules/link/visit-client.js';
+import { Lab, probeKeeperTcp, type LabMachine } from './lab.js';
 import { http, installServer, joinWorker, ownerKey, PASSWORD, pause, PEER_PORT, quoted, sessionOf, setUp, sql, WEB_PORT, within, type Server } from './steps.js';
 import { sqlIn, startWriterAt } from './writer.js';
 
@@ -68,20 +69,35 @@ describe('the lab, two machines over a delayed relay and peer path', () => {
     lab.frps(relay.fake, link, places);
     await lab.peerRelay(link, places, { gate: peerGate, blockDirect: true });
 
-    /* Direct LAN connections on published port 8180 must be rejected with TCP reset, forcing PeerSessions onto PeerRelay. */
-    const probeDirect = (from: LabMachine, toIp: string) =>
-      from.exec(
-        `node -e "const net = require('node:net'); const s = net.connect({ host: '${toIp}', port: ${PEER_PORT}, timeout: 2000 }, () => { s.destroy(); process.exit(0); }); s.on('timeout', () => { s.destroy(); process.exit(2); }); s.on('error', err => { console.log(err.code || err.message); process.exit(1); });"`,
-      );
-    const [directToM1, directToM2] = await Promise.all([probeDirect(m2, m1.address), probeDirect(m1, m2.address)]);
+    /* Direct LAN connections on published port 8180 must be rejected with TCP reset inside each keeper container,
+       forcing PeerSessions onto PeerRelay (where loopback port VISIT_FIRST_PORT inside keeper connects through). */
+    const [directToM1, directToM2] = await within(1, 'direct peer port 8180 is rejected from both keepers', async () => {
+      const [toM1, toM2] = await Promise.all([
+        probeKeeperTcp(p2, m1.address, PEER_PORT),
+        probeKeeperTcp(p1, m2.address, PEER_PORT),
+      ]);
+      if (toM1.code === 0 || toM2.code === 0) return [toM1, toM2];
+      return toM1.out.trim().startsWith('REJECTED:') && toM2.out.trim().startsWith('REJECTED:') ? [toM1, toM2] : null;
+    });
     expect(directToM1.code, directToM1.out).toBe(1);
+    expect(directToM1.out.trim()).toMatch(/^REJECTED:/);
     expect(directToM2.code, directToM2.out).toBe(1);
+    expect(directToM2.out.trim()).toMatch(/^REJECTED:/);
 
     /* 1. Copy becomes ready over the delayed peer relay; m1 keeps its lease under the 1.2 s two-RTT probe. */
-    await within(15, 'copy on m2 is ready over the relay path', async () => {
+    const copyState = await within(15, 'copy on m2 is ready over the relay path', async () => {
       const state = await sqlIn(p1.machine, p1.folder, `SELECT copy_state || ':' || coalesce(path, '') FROM machines WHERE id = '${p2.id}'`);
-      return state === 'ready:relay';
+      return state.startsWith('ready:') ? state : null;
     });
+    expect(copyState).toBe('ready:relay');
+    const [directStillBlocked, relayedToM1] = await Promise.all([
+      probeKeeperTcp(p2, m1.address, PEER_PORT),
+      probeKeeperTcp(p2, '127.0.0.1', VISIT_FIRST_PORT),
+    ]);
+    expect(directStillBlocked.code, directStillBlocked.out).toBe(1);
+    expect(directStillBlocked.out.trim()).toMatch(/^REJECTED:/);
+    expect(relayedToM1.code, relayedToM1.out).toBe(0);
+    expect(relayedToM1.out.trim()).toBe('CONNECTED');
     expect(peerGate.stats().bytes).toBeGreaterThan(0);
     const syncOf = () => (relay.fake.syncs.get(link)?.state === 'on' ? (relay.fake.syncs.get(link)?.copy ?? null) : null);
     await within(3, 'the relay names m2 as the synchronous copy', async () => syncOf() === p2.network);
