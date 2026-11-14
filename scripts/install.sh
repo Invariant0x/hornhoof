@@ -1121,8 +1121,11 @@ remove_core() {
     take_port_lock
     registry=$(read_registry) || registry=''
     other_lines "$registry" | write_registry || say "Could not take $core off the list of Hornhoof's ports on this computer."
-    subnets=$(read_subnets) || subnets=''
-    other_lines "$subnets" | write_subnets || say "Could not take $core off the list of Hornhoof's subnets on this computer."
+    if subnets=$(read_subnets); then
+      other_lines "$subnets" | write_subnets || say "Could not take $core off the list of Hornhoof's subnets on this computer."
+    else
+      say "Could not read the list of Hornhoof's subnets on this computer, so $core stayed on it."
+    fi
     drop_port_lock "$PORT_LOCK_ID"
   fi
   rm -rf "$core"
@@ -1632,13 +1635,14 @@ inspect_docker_networks() {
 
 parse_ifconfig_cidrs() {
   awk -v own_bridges="$OWN_BRIDGES" '
-    /^[A-Za-z0-9._-]+:/ {
+    BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
+    /^[^[:space:]:]+:/ {
       iface = $1
       sub(/:.*/, "", iface)
       next
     }
     $1 == "inet" {
-      if (iface == "lo" || iface == "lo0" || iface ~ /^veth/ || (" " own_bridges " ") ~ (" " iface " ")) next
+      if (iface == "lo" || iface == "lo0" || iface ~ /^veth/ || (iface in skip)) next
       ip = $2
       if (ip ~ /^127\./) next
       mask = ""
@@ -1673,25 +1677,25 @@ parse_ifconfig_cidrs() {
   '
 }
 
-# The computer's own IPv4 addresses and routes, read only outside the updater's container.
-host_network_cidrs() {
-  [ -z "$FROM_UPDATER" ] || return 0
+raw_host_network_cidrs() {
   local iface ip
   if [ "$OS" = linux ]; then
     if command -v ip > /dev/null 2>&1; then
       ip -4 -o addr show 2> /dev/null | awk -v own_bridges="$OWN_BRIDGES" '
+        BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
         $3 == "inet" {
           iface = $2
           sub(/:.*/, "", iface)
-          if (iface == "lo" || iface ~ /^veth/ || (" " own_bridges " ") ~ (" " iface " ") || (" " own_bridges " ") ~ (" " $2 " ")) next
+          if (iface == "lo" || iface ~ /^veth/ || (iface in skip) || ($2 in skip)) next
           print $4
         }
       ' || true
       ip -4 route show 2> /dev/null | awk -v own_bridges="$OWN_BRIDGES" '
+        BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
         $1 != "default" && $1 != "" {
           dev = ""
           for (i = 2; i < NF; i++) if ($i == "dev") { dev = $(i + 1); break }
-          if (dev == "lo" || dev ~ /^veth/ || (" " own_bridges " ") ~ (" " dev " ")) next
+          if (dev == "lo" || dev ~ /^veth/ || (dev in skip)) next
           print $1
         }
       ' || true
@@ -1704,10 +1708,11 @@ host_network_cidrs() {
     fi
     if command -v netstat > /dev/null 2>&1; then
       netstat -rn -f inet 2> /dev/null | awk -v own_bridges="$OWN_BRIDGES" '
+        BEGIN { for (i = 1; i <= split(own_bridges, b, " "); i++) if (b[i] != "") skip[b[i]] = 1 }
         NF >= 2 && $1 != "Destination" && $1 != "Routing" && $1 != "Internet:" && $1 != "default" {
           netif = $NF
           if ($4 != "" && $4 !~ /^[0-9]+$/) netif = $4
-          if (netif == "lo0" || $NF == "lo0" || (" " own_bridges " ") ~ (" " netif " ")) next
+          if (netif == "lo0" || $NF == "lo0" || (netif in skip) || ($NF in skip)) next
           print $1
         }
       ' || true
@@ -1721,6 +1726,12 @@ host_network_cidrs() {
   fi
 }
 
+# The computer's own IPv4 addresses and routes, read only outside the updater's container.
+host_network_cidrs() {
+  [ -z "$FROM_UPDATER" ] || return 0
+  raw_host_network_cidrs
+}
+
 reserved_other_cidrs() {
   local line env
   other_lines "$1" | while IFS= read -r line; do printf '%s\n' "$(line_ports "$line")"; done
@@ -1732,10 +1743,11 @@ reserved_other_cidrs() {
   printf '%s\n' "$REFUSED_SUBNETS"
 }
 
-# select_subnet_pair <kept default> <kept internal>: reads blocked CIDRs and routes on stdin and prints two non-overlapping
-# /24 subnets, keeping the given ones when they remain valid and outside every blocked range.
+# select_subnet_pair <kept default> <kept internal> [<force keep>]: reads blocked CIDRs and routes on stdin and prints two
+# non-overlapping /24 subnets, keeping the given ones when they remain valid and outside every blocked range (or unconditionally
+# when force keep is set for an automatic update running on the live network).
 select_subnet_pair() {
-  awk -v kept_def="$1" -v kept_int="$2" '
+  awk -v kept_def="$1" -v kept_int="$2" -v force_keep="${3:-}" '
     function parse_range(tok,    slash, ip_part, p, n, oct, i, v, ip, size) {
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", tok)
       if (tok == "" || tok == "default") return 0
@@ -1806,11 +1818,11 @@ select_subnet_pair() {
     END {
       picked_def = ""
       picked_int = ""
-      if (valid_cidr(kept_def) && !overlaps_blocked(R_START, R_END)) {
+      if (valid_cidr(kept_def) && (force_keep != "" || !overlaps_blocked(R_START, R_END))) {
         picked_def = kept_def
         b_start[++nb] = R_START; b_end[nb] = R_END
       }
-      if (valid_cidr(kept_int) && !overlaps_blocked(R_START, R_END)) {
+      if (valid_cidr(kept_int) && (force_keep != "" || !overlaps_blocked(R_START, R_END))) {
         picked_int = kept_int
         b_start[++nb] = R_START; b_end[nb] = R_END
       }
@@ -1836,6 +1848,103 @@ select_subnet_pair() {
   '
 }
 
+manual_subnet_heal_command() {
+  local project=$1 suffix
+  if [ -n "${WORKER:-}" ]; then
+    printf 'the Hornhoof install command (or HORNHOOF_SERVER_DIR=%s install.sh worker)' "$SERVER_DIR"
+    return 0
+  fi
+  case "$project" in
+    hornhoof-?*)
+      suffix=${project#hornhoof-}
+      if [ "$SERVER_DIR" = "$BASE_DIR-$suffix" ]; then
+        printf 'install.sh server --name %s in %s' "$suffix" "$SERVER_DIR"
+        return 0
+      fi
+      ;;
+  esac
+  printf 'install.sh server in %s' "$SERVER_DIR"
+}
+
+warn_updater_subnet_overlap() {
+  local project=$1 def_sub=$2 int_sub=$3 addr_file="${HORNHOOF_CONTROL_DIR:-/control}/addresses.json" hits sub host cmd
+  hits=$(
+    {
+      env_value HORNHOOF_ADDRESSES | tr ',' '\n'
+      if [ -r "$addr_file" ]; then grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$addr_file" 2> /dev/null || true; fi
+      printf -- '---\n'
+      raw_host_network_cidrs
+    } | awk -v def_sub="$def_sub" -v int_sub="$int_sub" -v live_def="$LIVE_DEFAULT_SUBNET" -v live_int="$LIVE_INTERNAL_SUBNET" '
+      function parse_range(tok,    slash, ip_part, p, n, oct, i, v, ip, size) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", tok)
+        if (tok == "" || tok == "default") return 0
+        slash = index(tok, "/")
+        if (slash > 0) {
+          ip_part = substr(tok, 1, slash - 1)
+          p = substr(tok, slash + 1)
+          if (p !~ /^[0-9]+$/) return 0
+          p += 0
+        } else {
+          ip_part = tok
+          p = -1
+        }
+        n = split(ip_part, oct, ".")
+        if (n < 1 || n > 4) return 0
+        for (i = 1; i <= n; i++) {
+          if (oct[i] !~ /^[0-9]+$/) return 0
+          v = oct[i] + 0
+          if (v < 0 || v > 255) return 0
+          oct[i] = v
+        }
+        for (i = n + 1; i <= 4; i++) oct[i] = 0
+        if (oct[1] == 127 || oct[1] == 0 || oct[1] >= 224) return 0
+        if (p < 0) p = n * 8
+        if (p < 4 || p > 32) return 0
+        ip = ((oct[1] * 256 + oct[2]) * 256 + oct[3]) * 256 + oct[4]
+        size = 2 ^ (32 - p)
+        R_START = int(ip / size) * size
+        R_END = R_START + size - 1
+        return 1
+      }
+      BEGIN {
+        has_ld = parse_range(live_def); ld_s = R_START; ld_e = R_END
+        has_li = parse_range(live_int); li_s = R_START; li_e = R_END
+      }
+      $0 == "---" { raw_mode = 1; next }
+      {
+        for (f = 1; f <= NF; f++) {
+          if (!parse_range($f)) continue
+          if (raw_mode && ((has_ld && R_START == ld_s && R_END == ld_e) || (has_li && R_START == li_s && R_END == li_e))) continue
+          h_tok[++nh] = $f
+          h_start[nh] = R_START
+          h_end[nh] = R_END
+        }
+      }
+      function check_sub(sub_cidr,    s, e, i) {
+        if (sub_cidr == "" || seen[sub_cidr]++) return
+        if (!parse_range(sub_cidr)) return
+        s = R_START; e = R_END
+        for (i = 1; i <= nh; i++) {
+          if (s <= h_end[i] && h_start[i] <= e) {
+            print sub_cidr " " h_tok[i]
+            return
+          }
+        }
+      }
+      END {
+        check_sub(def_sub)
+        check_sub(int_sub)
+      }
+    '
+  ) || true
+  [ -n "$hits" ] || return 0
+  cmd=$(manual_subnet_heal_command "$project")
+  while IFS=' ' read -r sub host; do
+    [ -n "$sub" ] || continue
+    say "Docker network $sub in $SERVER_DIR overlaps this computer's network ($host), and an automatic update cannot recreate the network it runs on. Run $cmd on this computer once to move it to a free subnet."
+  done <<< "$hits"
+}
+
 choose_subnets() {
   local subnets_list=$1 own_sub kept_def kept_int pair def_sub int_sub project
   project=$(env_value COMPOSE_PROJECT_NAME)
@@ -1852,17 +1961,17 @@ choose_subnets() {
   case " $REFUSED_SUBNETS " in *" $kept_int "*) kept_int='' ;; esac
 
   if [ -n "$FROM_UPDATER" ]; then
-    # The updater runs on the project's live network, so an update keeps the live subnets when they exist.
+    # The updater runs on the project's live network, so an update keeps the live subnets when they exist and logs a clear
+    # recovery instruction when a live project subnet covers the computer's own network.
     pair=$(
       {
         printf '%s\n' "$OTHER_DOCKER_CIDRS"
         reserved_other_cidrs "$subnets_list"
-      } | select_subnet_pair "$kept_def" "$kept_int"
+      } | select_subnet_pair "$kept_def" "$kept_int" 1
     ) || fail "No free Docker subnet for Hornhoof that avoids other Docker projects."
-    [ -z "$kept_def" ] || pair="${kept_def} ${pair#* }"
-    [ -z "$kept_int" ] || pair="${pair%% *} ${kept_int}"
     CHOSEN_DEFAULT_SUBNET=${pair%% *}
     CHOSEN_INTERNAL_SUBNET=${pair#* }
+    warn_updater_subnet_overlap "$project" "$CHOSEN_DEFAULT_SUBNET" "$CHOSEN_INTERNAL_SUBNET"
     return 0
   fi
 
@@ -2260,7 +2369,14 @@ worker_core_update() {
   if [ -z "$PULLED" ]; then
     (cd "$SERVER_DIR" && "${COMPOSE[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
+  if ! grep -q '^HORNHOOF_PORT=$' "$SERVER_DIR/.env"; then ENV_BEFORE=1; fi
+  reserve_ports
   say "Starting the company's core${PIN:+ $PIN}."
+  if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
+    compose_step "${COMPOSE[@]}" down || true
+    compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
+    return 0
+  fi
   # shellcheck disable=SC2046 # the services are compose service names, one word each.
   compose_step "${COMPOSE[@]}" up -d --no-build $(core_services) || start_failed
 }
