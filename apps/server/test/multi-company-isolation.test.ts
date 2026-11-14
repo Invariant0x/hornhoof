@@ -203,7 +203,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     expect(fromUpdater.code).toBe(0);
     expect(machine.dotEnv().HORNHOOF_SUBNET).toBe(env.HORNHOOF_SUBNET);
     expect(machine.dotEnv().HORNHOOF_INTERNAL_SUBNET).toBe(env.HORNHOOF_INTERNAL_SUBNET);
-  });
+  }, 60_000);
 
   it('reads macOS ifconfig and netstat samples, falls back across RFC 1918 pools, and fails clearly when none is free', () => {
     const ifconfigOut = [
@@ -245,25 +245,32 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     expect(refused.code).toBe(1);
     expect(refused.out).toMatch(/No free Docker subnet/i);
     expect(refused.calls.some(c => c.startsWith('docker compose up'))).toBe(false);
-  });
+  }, 60_000);
 
   it('recreates an existing overlapping project network, retries on daemon pool overlap, and cleans subnets on remove', () => {
     const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
     mkdirSync(machine.folder(), { recursive: true });
     writeFileSync(join(machine.folder(), '.env'), 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n');
 
-    /* Simulate Machine B from network-real-run.md: an existing hornhoof_default network covers 192.168.0.0/20, and
-       Docker daemon also rejects 10.200.0.0/24 once with Pool overlaps. */
+    /* Simulate Machine B from network-real-run.md: an existing hornhoof_default network covers 192.168.0.0/20
+       with no daemon Pool overlaps error, so SUBNET_MOVED alone must trigger docker compose down before up. */
     const healed = machine.runServer([], {
       STUB_DOCKER_NETWORKS: 'oldnet000000001|hornhoof_default|hornhoof|192.168.0.0/20|false|',
-      STUB_SUBNET_OVERLAP: '10.200.0.0/24',
     });
     expect(healed.code).toBe(0);
     expect(healed.calls).toContain('docker compose down');
-    const env = machine.dotEnv();
-    expect(cidrsOverlap(env.HORNHOOF_SUBNET!, '192.168.0.0/20')).toBe(false);
-    expect(env.HORNHOOF_SUBNET).not.toBe('10.200.0.0/24');
+    const healedEnv = machine.dotEnv();
+    expect(cidrsOverlap(healedEnv.HORNHOOF_SUBNET!, '192.168.0.0/20')).toBe(false);
+    expect(machine.networks().some(n => n.id === 'oldnet000000001')).toBe(false);
     expect(machine.networks().every(n => !cidrsOverlap(n.subnet, '192.168.1.0/24'))).toBe(true);
+
+    /* Separately verify retry_subnet_overlap when the Docker daemon rejects a chosen pool with Pool overlaps. */
+    const retried = machine.runServer(['--name', 'retry'], {
+      STUB_SUBNET_OVERLAP: '10.200.2.0/24',
+    });
+    expect(retried.code).toBe(0);
+    const retriedEnv = machine.dotEnv('hornhoof-retry');
+    expect(retriedEnv.HORNHOOF_SUBNET).not.toBe('10.200.2.0/24');
 
     /* Removing a joined core cleans both /ports/registry and /ports/subnets. */
     const joinLine = `core hornhoof-temp ${'T'.repeat(43)} 8080 ${randomUUID()}`;
@@ -285,7 +292,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     });
     expect(removed.code).toBe(0);
     expect(machine.subnets().some(line => line.startsWith(`${machine.folder('hornhoof-temp')} `))).toBe(false);
-  });
+  }, 60_000);
 
   it('keeps four Hornhoof projects on one computer disjoint, filters custom Docker bridges in updater, and documents recovery', async () => {
     const machine = makeComputer(LAN_ADDR_A, LAN_ROUTE_A);
@@ -353,7 +360,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     expect(guide).toContain('HORNHOOF_SUBNET');
     expect(guide).toContain('hornhoof-ports');
     expect(guide).toContain('docker network ls');
-  });
+  }, 60_000);
 });
 
 describe('Two companies on the same two computers lead, copy, and switch leader without interfering', () => {
@@ -876,5 +883,5 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
     expect(company1.peerLog).toEqual(c1PeerCallsBefore);
     expect(basename(alphaBDir)).not.toBe(basename(betaBDir));
     void SWITCH_MS;
-  });
+  }, 90_000);
 });

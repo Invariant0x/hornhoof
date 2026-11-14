@@ -1517,6 +1517,8 @@ LIVE_INTERNAL_SUBNET=''
 OWN_BRIDGES=''
 OTHER_DOCKER_CIDRS=''
 SUBNET_MOVED=''
+CHOSEN_DEFAULT_SUBNET=''
+CHOSEN_INTERNAL_SUBNET=''
 
 # Whoever made a lock more than 2 minutes ago is gone. It goes by the id just read, so a lock made meanwhile stays.
 remove_stale_port_lock() {
@@ -1859,7 +1861,8 @@ choose_subnets() {
     ) || fail "No free Docker subnet for Hornhoof that avoids other Docker projects."
     [ -z "$kept_def" ] || pair="${kept_def} ${pair#* }"
     [ -z "$kept_int" ] || pair="${pair%% *} ${kept_int}"
-    printf '%s' "$pair"
+    CHOSEN_DEFAULT_SUBNET=${pair%% *}
+    CHOSEN_INTERNAL_SUBNET=${pair#* }
     return 0
   fi
 
@@ -1877,7 +1880,8 @@ choose_subnets() {
     { [ -n "$LIVE_INTERNAL_SUBNET" ] && [ "$LIVE_INTERNAL_SUBNET" != "$int_sub" ]; }; then
     SUBNET_MOVED=1
   fi
-  printf '%s %s' "$def_sub" "$int_sub"
+  CHOSEN_DEFAULT_SUBNET=$def_sub
+  CHOSEN_INTERNAL_SUBNET=$int_sub
 }
 
 # From the updater localhost is its own container, so only a run by hand can ask it.
@@ -1937,7 +1941,7 @@ check_registry_project_collision() {
 }
 
 choose_ports() {
-  local registry subnets_list own held web peer subnet_pair
+  local registry subnets_list own held web peer
   registry=$(read_registry) || fail "Could not read the list of Hornhoof's ports on this computer. Run this command again."
   subnets_list=$(read_subnets) || fail "Could not read the list of Hornhoof's subnets on this computer. Run this command again."
   check_registry_project_collision "$registry"
@@ -1961,8 +1965,8 @@ choose_ports() {
     peer=$(first_free_port "$FIRST_PEER_PORT" "$held")
     NEW_PEER=1
   fi
-  subnet_pair=$(choose_subnets "$subnets_list")
-  record_ports "$registry" "$web" "$peer" "$subnets_list" "${subnet_pair%% *}" "${subnet_pair#* }"
+  choose_subnets "$subnets_list"
+  record_ports "$registry" "$web" "$peer" "$subnets_list" "$CHOSEN_DEFAULT_SUBNET" "$CHOSEN_INTERNAL_SUBNET"
 }
 
 # reserve_ports [<port>]: settles this company's ports and subnets under the lock, which goes whatever happens. Given a
