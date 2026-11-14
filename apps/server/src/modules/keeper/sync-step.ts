@@ -10,8 +10,8 @@ export const SILENT_REPLY_MS = 2_000;
 export const SLOW_WAIT_MS = 1_000;
 export const SLOW_FOR_MS = 5_000;
 export const SLOW_BYTES = 1_048_576;
-/* A copy keeps pace while it holds what the leader had written this long ago; after this long of that it may be named. */
-export const PACE_MS = 1_000;
+/* A copy keeps pace while it holds what the leader had written this long ago; after PACE_FOR_MS of that it may be named. */
+export const PACE_MS = 5_000;
 export const PACE_FOR_MS = 30_000;
 /* A commit that waited this long on a copy that cannot be dropped stops the lease from being renewed. */
 export const STOP_RENEW_MS = 10_000;
@@ -76,9 +76,17 @@ const NONE: SyncAction = { do: 'none' };
 const POST_OFF: SyncAction = { do: 'post', state: 'off' };
 const CLEAR: SyncAction = { do: 'clear' };
 
+export type DropReason = 'silent' | 'slow';
+
+/* Why commits stop waiting on a named copy: either its connection brought no new answer in SILENT_REPLY_MS, or commits
+   waited over SLOW_WAIT_MS at every look for SLOW_FOR_MS while the copy took fewer than SLOW_BYTES. */
+export function dropReason(copy: CopySample, s: SyncSample): DropReason | null {
+  if (copy.replyAgeMs === null || copy.replyAgeMs > SILENT_REPLY_MS) return 'silent';
+  return s.slowForMs >= SLOW_FOR_MS && s.namedBytes5s < SLOW_BYTES ? 'slow' : null;
+}
+
 function silent(copy: CopySample, s: SyncSample): boolean {
-  if (copy.replyAgeMs === null || copy.replyAgeMs > SILENT_REPLY_MS) return true;
-  return s.slowForMs >= SLOW_FOR_MS && s.namedBytes5s < SLOW_BYTES;
+  return dropReason(copy, s) !== null;
 }
 
 /* The lowest-numbered copy that holds every table and has kept pace long enough to be named. */

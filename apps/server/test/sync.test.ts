@@ -41,7 +41,7 @@ function catalogOf() {
   return { state, catalog };
 }
 
-async function stand(over: { leads?: boolean } = {}) {
+async function stand(over: { leads?: boolean; bytes?: () => number; routeEveryMs?: number; link?: () => Promise<{ name: string; key: string; client: string } | null | undefined> } = {}) {
   const relay = await fakeRelay();
   relay.bindings.set('acme', { key: 'k'.repeat(32) });
   relay.register('acme', CLIENT);
@@ -51,12 +51,12 @@ async function stand(over: { leads?: boolean } = {}) {
   const controller = new SyncController({
     catalog,
     relay: new Relay(relay.url),
-    link: async () => ({ name: 'acme', key: 'k'.repeat(32), client: CLIENT }),
-    dbBytes: () => 0,
+    link: over.link ?? (async () => ({ name: 'acme', key: 'k'.repeat(32), client: CLIENT })),
+    dbBytes: () => (over.bytes ? over.bytes() : 0),
     leads: () => over.leads ?? true,
     log: line => lines.push(line),
     now: () => clock.now,
-    routeEveryMs: 0,
+    routeEveryMs: over.routeEveryMs ?? 0,
   });
   /* One look after the clock moved on, with the copy's answer new each time unless the test stops it. */
   const state2 = { answers: true };
@@ -346,5 +346,218 @@ describe('the sync controller', () => {
     const s = await stand({ leads: false });
     await s.looks(8, 1000);
     expect(s.state.pulses).toBe(0);
+  });
+
+  it('waits for the copy again and names it at the relay after ten seconds of silence on a delayed path', async () => {
+    const s = await stand();
+    const lsnAt = (step: number) => `0/${(0x3000000 + step * 0x1000).toString(16).toUpperCase()}`;
+    let step = 0;
+    const history: string[] = [lsnAt(0)];
+    const advance = async (writes: boolean, lagLooks: number | null) => {
+      if (writes) {
+        step += 1;
+        s.state.position = lsnAt(step);
+      }
+      history.push(s.state.position);
+      if (lagLooks !== null) {
+        s.state.replication[0]!.confirmed = history[Math.max(0, history.length - 1 - lagLooks)]!;
+        s.state.replication[0]!.syncState = s.state.setting === C.copyName ? 'sync' : 'async';
+      }
+      await s.look(250);
+    };
+
+    /* Reach initial synchronous state with the copy named at the relay. */
+    await s.looks(2);
+    await s.looks(Math.ceil(PACE_FOR_MS / 1000) + 3, 1000);
+    s.state.replication[0]!.syncState = 'sync';
+    await s.looks(4);
+    expect([s.state.setting, s.record()?.state, s.record()?.copy]).toEqual([C.copyName, 'on', C.networkId]);
+
+    /* Ten seconds of silence while the leader keeps committing: sync turns off and stays off while silent. */
+    s.answering(false);
+    for (let i = 0; i < 40; i++) await advance(true, null);
+    expect(s.state.setting).toBeNull();
+    expect(s.record()).toMatchObject({ state: 'off', copy: null });
+    expect(s.controller.flag()).toBe('relay_off');
+
+    /* The copy returns over a relay path whose replication feedback lags by 2.5 s (10 looks) under continuous writes. */
+    s.answering(true);
+    const returnedAt = s.clock.now;
+    for (let i = 0; i < 240 && !(s.state.setting === C.copyName && s.record()?.state === 'on'); i++) {
+      await advance(true, 10);
+    }
+    expect(s.clock.now - returnedAt).toBeLessThanOrEqual(60_000);
+    expect(s.state.setting).toBe(C.copyName);
+    expect(s.controller.flag()).toBe('copy');
+    expect(s.record()).toMatchObject({ state: 'on', copy: C.networkId });
+
+    /* Even when no new writes arrive during ten seconds of silence, a silent open socket is never re-named. */
+    const clearsBefore = s.state.did.filter(what => what === 'clear').length;
+    const setsBefore = s.state.did.filter(what => what === `set ${C.copyName}`).length;
+    s.answering(false);
+    await s.looks(40, 250);
+    expect(s.state.setting).toBeNull();
+    expect(s.record()).toMatchObject({ state: 'off', copy: null });
+    expect(s.state.did.filter(what => what === 'clear').length - clearsBefore).toBe(1);
+    expect(s.state.did.filter(what => what === `set ${C.copyName}`).length - setsBefore).toBe(0);
+  });
+
+  it('logs the relay status and error code when storing fails, without hiding route read errors or leaking the key', async () => {
+    const key = 's'.repeat(32);
+    const { catalog } = catalogOf();
+    const lines: string[] = [];
+    let routeReply: Awaited<ReturnType<Relay['route']>> = {
+      known: true,
+      state: 'held',
+      client: CLIENT,
+      since: 10,
+      generation: 1,
+      relayStarted: 1,
+      evictionBound: 30,
+      sync: { state: 'off', copy: null, epoch: 0, generation: 0, at: null },
+    };
+    let syncReply: Awaited<ReturnType<Relay['setSync']>> = { stored: false, why: 'slow' };
+    let linkValue: { name: string; key: string; client: string } | null | undefined = { name: 'acme', key, client: CLIENT };
+    let now = 0;
+    const controller = new SyncController({
+      catalog,
+      relay: {
+        route: async () => routeReply,
+        setSync: async () => syncReply,
+      },
+      link: async () => linkValue,
+      dbBytes: () => 0,
+      leads: () => true,
+      log: line => lines.push(line),
+      now: () => (now += 250),
+      routeEveryMs: 0,
+    });
+
+    syncReply = { stored: false, why: 'refused', status: 503, error: 'unknown' };
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (503 unknown)');
+
+    syncReply = { stored: false, why: 'not_holder', status: 409, error: 'not_holder' };
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (409 not_holder)');
+
+    syncReply = { stored: false, why: 'refused', status: 502, error: null };
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (502)');
+
+    syncReply = { stored: false, why: 'slow' };
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (slow)');
+
+    routeReply = { known: false, why: 'refused' };
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not answer who holds the route (refused)');
+
+    routeReply = {
+      known: true,
+      state: 'held',
+      client: 'acme-ffffffff-link',
+      since: 10,
+      generation: 2,
+      relayStarted: 1,
+      evictionBound: 30,
+      sync: { state: 'off', copy: null, epoch: 0, generation: 0, at: null },
+    };
+    await controller.look();
+    expect(lines.at(-1)).toBe("Could not tell hornhoof.org which machine holds the latest changes: this keeper's own link does not hold the company's route now");
+
+    linkValue = undefined;
+    await controller.look();
+    expect(lines.at(-1)).toBe("Could not tell hornhoof.org which machine holds the latest changes: the company's link could not be read now");
+
+    linkValue = null;
+    await controller.look();
+    expect(lines.at(-1)).toBe("Could not tell hornhoof.org which machine holds the latest changes: this keeper's own link does not hold the company's route now");
+    expect(lines.every(line => !line.includes(key))).toBe(true);
+  });
+
+  it('requires PACE_FOR_MS again and logs the drop reason without keys or addresses after dropping a slow copy on a 2.5 s path', async () => {
+    const runProbe = async (bytesPerSecond: number, sequential = false) => {
+      let bytes = 0;
+      const s = await stand({ bytes: () => bytes });
+      const lsnAt = (step: number) => `0/${(0x3000000 + step * 0x1000).toString(16).toUpperCase()}`;
+      let step = 0;
+      const history: string[] = [lsnAt(0)];
+      const setTimes: number[] = [];
+      const clearTimes: number[] = [];
+      let lastSetting: string | null = null;
+      for (let i = 0; i < 4 * 150; i++) {
+        step += 1;
+        s.state.position = lsnAt(step);
+        history.push(s.state.position);
+        s.state.replication[0]!.confirmed = history[Math.max(0, history.length - 1 - 10)]!;
+        s.state.replication[0]!.syncState = s.state.setting === C.copyName ? 'sync' : 'async';
+        s.state.oldestWaitMs = s.state.setting === C.copyName ? (sequential ? (s.clock.now + 250) % 2500 : 2500) : null;
+        bytes += bytesPerSecond / 4;
+        await s.look(250);
+        if (s.state.setting !== lastSetting) {
+          if (s.state.setting === C.copyName) setTimes.push(s.clock.now);
+          else clearTimes.push(s.clock.now);
+          lastSetting = s.state.setting;
+        }
+      }
+      return { s, setTimes, clearTimes };
+    };
+
+    /* P1: light writes with a commit always waiting 2.5 s on the copy. After each slow drop, PACE_FOR_MS is required again. */
+    const light = await runProbe(0);
+    expect(light.clearTimes.length).toBeGreaterThanOrEqual(3);
+    expect(light.setTimes.length).toBeLessThanOrEqual(4);
+    for (let idx = 0; idx < light.clearTimes.length; idx++) {
+      const nextSet = light.setTimes[idx + 1];
+      if (nextSet !== undefined) expect(nextSet - light.clearTimes[idx]!).toBeGreaterThanOrEqual(PACE_FOR_MS);
+    }
+    const dropLines = light.s.lines.filter(line => line.includes(C.copyName));
+    expect(dropLines).toHaveLength(light.clearTimes.length);
+    for (const line of dropLines) {
+      expect(line).toContain('commits waited');
+      expect(line).not.toContain('k'.repeat(32));
+      expect(line).not.toContain('127.0.0.1');
+      expect(line).not.toContain('hornhoof.test');
+    }
+
+    /* P2 and P3: 300 KB/s of writes, or one sequential writer whose wait resets below 1 s each commit, never drops the copy. */
+    const steady = await runProbe(300_000);
+    expect([steady.setTimes.length, steady.clearTimes.length, steady.s.lines.length]).toEqual([1, 0, 0]);
+    const sequential = await runProbe(0, true);
+    expect([sequential.setTimes.length, sequential.clearTimes.length, sequential.s.lines.length]).toEqual([1, 0, 0]);
+  });
+
+  it('keeps the last known route and sync record across unknown relay answers, while failing closed at startup and on link removal', async () => {
+    let linkValue: { name: string; key: string; client: string } | null | undefined = { name: 'acme', key: 'k'.repeat(32), client: CLIENT };
+    const s = await stand({ routeEveryMs: 5_000, link: async () => linkValue });
+    s.state.machines = [{ ...C, ready: false }];
+
+    /* Startup while the relay answers unknown: fails closed with no route and null flag. */
+    s.relay.frpsDown = true;
+    await s.looks(4, 1_000);
+    expect([s.controller.flag(), s.controller.generation()]).toEqual([null, null]);
+
+    /* Once the relay answers, off is stored and relay_off holds. */
+    s.relay.frpsDown = false;
+    await s.looks(6, 1_000);
+    expect([s.controller.flag(), s.controller.generation()]).toEqual(['relay_off', 1]);
+    const syncPostsBefore = s.relay.calls.filter(call => call.includes('/sync')).length;
+
+    /* Four-second unknown answers around 6 and 12 virtual minutes never clear the known route or drop the flag. */
+    for (let second = 11; second <= 730; second++) {
+      const atMs = second * 1_000;
+      s.relay.frpsDown = (atMs >= 357_000 && atMs < 361_000) || (atMs >= 717_000 && atMs < 721_000);
+      await s.look(1_000);
+      expect(s.controller.flag(), `at ${second}s`).toBe('relay_off');
+      expect(s.controller.generation(), `at ${second}s`).toBe(1);
+    }
+    expect(s.relay.calls.filter(call => call.includes('/sync')).length).toBe(syncPostsBefore);
+
+    /* Removing the link still clears both route and flag at once. */
+    s.relay.frpsDown = false;
+    linkValue = null;
+    await s.looks(6, 1_000);
+    expect([s.controller.flag(), s.controller.generation()]).toEqual([null, null]);
   });
 });
