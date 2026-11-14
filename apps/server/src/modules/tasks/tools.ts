@@ -1,3 +1,4 @@
+import { earlierWork } from '../departments/branches.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
@@ -352,7 +353,7 @@ class TaskTools {
       },
       async ({ task: ref }) =>
         this.find(ref).then(
-          async ({ agent, task }) => say(fitted({ ...await taskDetail(this.ctx, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id) })),
+          async ({ agent, task }) => say(fitted({ ...await taskDetail(this.ctx, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, task) })),
           (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
         ),
     );

@@ -120,11 +120,13 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
     log: shownLog(viewer, detail.log),
     requests: detail.requests.filter(r => sees(r.agent?.id)),
     files: detail.files.filter(f => f.fromPerson || sees(f.by?.id)),
+    /* Whose machine it is goes only to who knows the holder. */
+    assigneeOffline: knowsAgentId(viewer, detail.assignee?.id) ? detail.assigneeOffline : null,
   };
 }
 
 /* One task as this person reads it. */
-export async function detailFor(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'>, viewer: AgentViewer, task: Task): Promise<TaskDetail> {
+export async function detailFor(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'> & Partial<Pick<Ctx, 'hub'>>, viewer: AgentViewer, task: Task): Promise<TaskDetail> {
   const detail = await taskDetail(ctx, task, t => seesTask(viewer, t));
   return viewer.full ? detail : maskDetail(viewer, detail);
 }

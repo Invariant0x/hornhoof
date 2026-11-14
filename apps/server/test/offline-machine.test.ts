@@ -43,11 +43,11 @@ async function staged() {
   const c = await company();
   const away = await plan(c, 'Dana at home', c.ids.dana);
   const spare = await plan(c, 'Dana at work', c.ids.dana);
-  const sales = await plan(c, 'Sam', c.ids.sam);
+  const salesPlan = await plan(c, 'Sam', c.ids.sam);
   await machineOf(c, away, 'Marselle', SEEN);
   connect(c, (await machineOf(c, spare, 'Office', new Date('2026-11-13T21:00:00.000Z'))).id);
   await c.db.update(agents).set({ subscriptionId: away.id }).where(eq(agents.id, c.worker.id));
-  return { ...c, away, spare, sales };
+  return { ...c, away, spare, salesPlan };
 }
 
 describe('an employee whose machine is offline', () => {
@@ -64,7 +64,7 @@ describe('an employee whose machine is offline', () => {
     await c.db.update(agents).set({ subscriptionId: c.spare.id }).where(eq(agents.id, c.worker.id));
     expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().offline).toBeNull();
     expect((await send(c, c.danaToken, 'GET', `/api/tasks/${c.task.id}`)).json().task.assigneeOffline).toBeNull();
-    await c.db.update(agents).set({ subscriptionId: c.sales.id }).where(eq(agents.id, c.worker.id));
+    await c.db.update(agents).set({ subscriptionId: c.salesPlan.id }).where(eq(agents.id, c.worker.id));
     expect((await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`)).json().offline).toBeNull();
   });
 
@@ -87,11 +87,11 @@ describe('moving an employee to another plan in one step', () => {
 
   it('refuses a plan that does not serve the department, and an employee of another department', async () => {
     const c = await staged();
-    const foreign = await send(c, c.danaToken, 'PATCH', `/api/agents/${c.worker.id}`, { subscription: c.sales.id });
+    const foreign = await send(c, c.danaToken, 'PATCH', `/api/agents/${c.worker.id}`, { subscription: c.salesPlan.id });
     expect([foreign.statusCode, foreign.json().error.reason]).toEqual([400, 'subscription_cannot_serve']);
     const theirs = await send(c, c.danaToken, 'PATCH', `/api/agents/${c.seller.id}`, { subscription: c.spare.id });
     expect(theirs.statusCode).toBe(403);
-    const bySam = await send(c, c.samToken, 'PATCH', `/api/agents/${c.worker.id}`, { subscription: c.sales.id });
+    const bySam = await send(c, c.samToken, 'PATCH', `/api/agents/${c.worker.id}`, { subscription: c.salesPlan.id });
     expect(bySam.statusCode).toBe(403);
     expect((await c.db.select({ sub: agents.subscriptionId }).from(agents).where(eq(agents.id, c.worker.id)))[0]!.sub).toBe(c.away.id);
   });

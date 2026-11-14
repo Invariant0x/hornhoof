@@ -4,6 +4,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { departments, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import type { RepoAddress } from '../src/modules/testruns/refs.js';
+import { mergedIn } from '../src/modules/testruns/compare.js';
 import { company } from './department-owner-fixture.js';
 import { as } from './helpers.js';
 
@@ -97,5 +98,19 @@ describe("a department's branches not in main yet", () => {
     await c.db.update(departments).set({ repoUrl: null }).where(eq(departments.id, c.dev.id));
     expect((await send(c, c.danaToken, `/api/departments/${c.dev.id}/branches`)).json()).toEqual({ branches: [], problem: null });
     expect(c.asked).toEqual([]);
+  });
+});
+
+/* GitHub's compare of the main line with a branch head, as GitHub answers it (recorded, trimmed to what is read). */
+describe("whether GitHub's compare says a branch is in the main line", () => {
+  it.each([
+    [{ status: 'behind', ahead_by: 0, behind_by: 3 }, true],
+    [{ status: 'identical', ahead_by: 0, behind_by: 0 }, true],
+    [{ status: 'ahead', ahead_by: 2, behind_by: 0 }, false],
+    [{ status: 'diverged', ahead_by: 2, behind_by: 5 }, false],
+    [{ message: 'Not Found' }, null],
+    [null, null],
+  ])('reads %j as %s', (body, merged) => {
+    expect(mergedIn(body)).toBe(merged);
   });
 });

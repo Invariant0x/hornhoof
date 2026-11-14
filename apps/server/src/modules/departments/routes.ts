@@ -31,6 +31,7 @@ import { workModeRoutes } from './work-mode.js';
 import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { checkFolderFree, repoView } from './repository.js';
+import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
@@ -452,6 +453,15 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       .where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();
+  });
+
+  /* Which accepted and handed-in task branches of the department are not in the main line yet, for those who run it. */
+  app.get('/api/departments/:id/branches', async req => {
+    const me = await requirePerson(req, db);
+    const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
+    if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    await requireDepartmentChanger(db, me, dept.id);
+    return departmentBranches(ctx, dept.id);
   });
 
   /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first

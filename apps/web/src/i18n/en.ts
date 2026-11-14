@@ -847,6 +847,16 @@ export const en = {
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
   },
   dept: {
+    branches: {
+      title: 'Branches not in main yet',
+      hint: 'Accepted and handed-in tasks of the department whose work is on a branch main does not have yet. Whoever goes on with it starts from the branch.',
+      none: 'Every accepted branch of the department is in main.',
+      loading: 'Reading the branches of the repository…',
+      state: {
+        done: { notIn: 'Accepted, not in main yet', unknown: 'Accepted, not known whether it is in main' },
+        review: { notIn: 'Handed in, not in main yet', unknown: 'Handed in, not known whether it is in main' },
+      },
+    },
     /* Whether a department works in turns of its own, which count its tasks on the map, or all the time. */
     workMode: {
       title: 'How it works',
@@ -1135,6 +1145,10 @@ export const en = {
     noOutput: 'No output.',
     runsOn: 'Runs on',
     onMachine: (host: string) => `Works on the machine ${host}`,
+    offlineSince: (host: string, at: string | null) => (at ? `Machine ${host} is offline since ${at}.` : `Machine ${host} is offline.`),
+    moveTo: (plan: string) => `Move to ${plan}`,
+    movesLabel: 'Move to a plan of this department that is online',
+    noPlanOnline: 'No other plan of this department is online now.',
     model: 'Model',
     default: 'Default',
     subUnit: 'Sub-unit',

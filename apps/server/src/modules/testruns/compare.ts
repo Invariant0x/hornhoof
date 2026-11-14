@@ -77,6 +77,23 @@ export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000)
   } catch { return { complete: false, reason: 'compare-unavailable' }; }
 };
 
+/* Whether a branch's commit is in the main line: GitHub's compare of the main line with it says behind or identical once every
+   commit of it is there. None where GitHub cannot tell or the repository is not on GitHub. */
+export type MergeReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<boolean | null>;
+const Status = z.object({ status: z.enum(['ahead', 'behind', 'diverged', 'identical']) });
+
+export function mergedIn(body: unknown): boolean | null {
+  const parsed = Status.safeParse(body);
+  return parsed.success ? parsed.data.status === 'behind' || parsed.data.status === 'identical' : null;
+}
+
+export const readMerged: MergeReader = async (repo, refs, timeoutMs = 10_000) => {
+  try {
+    const answer = await githubJson(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}?per_page=1`, timeoutMs);
+    return answer ? mergedIn(answer.body) : null;
+  } catch { return null; }
+};
+
 /* The files of a commit, every one: GitHub cuts a long list short and says so, and a cut list is no list. */
 export type TreeAt = { complete: true; paths: string[] } | { complete: false; reason: string };
 export type TreeReader = (repo: RepoAddress, commitSha: string, timeoutMs?: number) => Promise<TreeAt>;

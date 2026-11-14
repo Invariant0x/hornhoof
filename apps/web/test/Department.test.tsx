@@ -1536,8 +1536,8 @@ describe("a department's branches not in main yet", () => {
     localStorage.setItem('hh-lang', language);
     const user = userEvent.setup();
     shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, BRANCHES] }, withRepo());
-    await flyIn(user);
-    await user.click(screen.getByRole('button', { name: language === 'en' ? 'About the department' : ru.dept.about }));
+    await user.click(await screen.findByRole('button', { name: language === 'en' ? /^Development/ : /^Разработка/ }));
+    await user.click(await screen.findByRole('button', { name: language === 'en' ? 'About the department' : ru.dept.about }));
     const region = await screen.findByRole('region', { name: heading });
     const items = (await within(region).findAllByRole('listitem')).map(li => li.textContent!);
     expect(items).toHaveLength(2);

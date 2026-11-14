@@ -26,6 +26,7 @@ import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
 import { releaseLeftProgram } from './left-programs.js';
 import { telegramOf, type TelegramView } from '../telegram/routes.js';
+import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
 
 export type AgentCard = FailureState & {
   id: string;
@@ -42,6 +43,8 @@ export type AgentCard = FailureState & {
   subscription: SubView | null;
   /* The machine its program is on; none on the built-in node and before it first ran. */
   machine: { id: string; hostname: string } | null;
+  /* The machine its plan was heard from last while none of the plan's machines is online; none while it can run. */
+  offline: OfflineMachine | null;
   state: 'working' | 'sleeping' | 'needs_subscription';
   currentTask: { id: string; number: number; title: string } | null;
   program: TurnProgram | null;
@@ -267,6 +270,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     effort: agent.effort,
     subscription: cardSubscription(agent, views),
     machine: await cardMachine(ctx, agent),
+    offline: await offlineMachine(ctx, agent.subscriptionId),
     state: cardState(agent, Boolean(running)),
     currentTask: await currentAgentTask(db, agent, me),
     ...agentProgramState(ctx, running),

@@ -3,6 +3,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or,
 import { z } from 'zod';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
+import { offlineMachine } from '../nodes/offline.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { answerBy, wrote } from '../conversation/prompt.js';
@@ -25,6 +26,15 @@ type ToolJob = { id: string; companyId: string; agentId: string; agentKind: stri
 type Agent = typeof agents.$inferSelect;
 
 /* What one turn may send to others, so a round that goes wrong cannot flood the company. */
+
+/* Why an employee cannot take a message now. A machine that is off stops none of the work it pushed: someone else goes on
+   from its branch, or it moves to a plan of the department that is online. */
+async function cannotRun(ctx: Pick<Ctx, 'db' | 'hub'>, target: { name: string; subscriptionId: string | null }, reason: string | null): Promise<string> {
+  const offline = reason === 'machine_offline' ? await offlineMachine(ctx, target.subscriptionId) : null;
+  if (!offline) return `${target.name} cannot run now. Tell your head, who tells the CEO.`;
+  return `${target.name} cannot run now: ${offline.hostname}, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move ${target.name} to a plan of the department that is online.`;
+}
+
 export const TURN_NUDGES = 10;
 const TAIL = 400;
 const FAILED_MAX = 50;
@@ -374,7 +384,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           : say(`${target.name} works in another department. Ask your head, who has the orchestrator pass it on.`, true);
       if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
       const state = await agentState(ctx, target.id);
-      if (!state.ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
+      if (!state.ready) return say(await cannotRun(ctx, target, state.reason), true);
       if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
       return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {

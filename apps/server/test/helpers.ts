@@ -65,7 +65,7 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   const db = drizzle(client, { schema }) as unknown as Db;
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }) }));
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), readMerged: async () => null }));
   onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
 }

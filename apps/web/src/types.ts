@@ -298,6 +298,8 @@ export type AgentCardView = {
   /* The level a person picked, or null for the Default. */
   effort: string | null;
   subscription: SubView | null;
+  /* The machine its plan was heard from last while none of the plan's machines is online, and when; none while it can run. */
+  offline?: OfflineMachine | null;
   /* The machine its program runs on; none before its first turn, or on a key. */
   machine: Machine | null;
   state: AgentState;
@@ -441,7 +443,16 @@ export type TaskDetail = TaskLine & {
   log: TaskLogLine[];
   requests: TaskRequest[];
   files?: TaskFile[];
+  /* The machine the holder's plan was heard from last while none of its machines is online. */
+  assigneeOffline?: OfflineMachine | null;
 };
+
+/* A machine of a plan that is offline, and when it last spoke: none if it never did. */
+export type OfflineMachine = { hostname: string; since: string | null };
+
+/* An accepted or handed-in task of a department whose branch is not in main yet; merged null: the repository cannot tell. */
+export type DepartmentBranch = { task: number; title: string; status: 'done' | 'review'; branch: string; commit: string; merged: false | null };
+export type DepartmentBranches = { branches: DepartmentBranch[]; problem: string | null };
 
 /* What an agent asks of people, under "Waiting for you". */
 /* An improvement as a short case: what is wrong, the facts with where each comes from, the guesses kept apart, why it

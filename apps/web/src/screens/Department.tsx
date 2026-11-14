@@ -15,6 +15,7 @@ import { WorkMode } from '../ui/WorkMode';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { Repositories } from '../ui/RepoSettings';
+import { DeptBranches } from '../ui/DeptBranches';
 import { StaffCard } from '../ui/StaffCard';
 import { BriefingPanel } from '../ui/Briefing';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
@@ -610,6 +611,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                   </section>
                 )}
                 {runs && <Repositories department={d} />}
+                {runs && (d.repository || d.products.some(p => p.repository)) && <DeptBranches departmentId={d.id} />}
                 {d.products.length > 0 && (
                   <section aria-labelledby={`${id}-products`}>
                     <h3 id={`${id}-products`}>{t.dept.products}</h3>

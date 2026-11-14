@@ -12,6 +12,9 @@ export type RepoAddress = { url: string; token: string };
 export type CommitWanted = { branch: string } | { task: number };
 export type CommitAt = { branch: string; commitSha: string } | { problem: string };
 export type CommitReader = (repo: RepoAddress, want: CommitWanted, timeoutMs?: number) => Promise<CommitAt>;
+/* Every branch of a repository with the commit it is at now, by name. */
+export type BranchesAt = { heads: Record<string, string> } | { problem: string };
+export type BranchReader = (repo: RepoAddress, timeoutMs?: number) => Promise<BranchesAt>;
 
 /* The refs in git's smart HTTP answer: lines that start with their length in bytes, in four hex digits, each an object
    name and a ref, the first with what the server can do after a NUL. A flush has a length and no line. */
@@ -66,9 +69,9 @@ async function within(res: Response): Promise<Buffer | null> {
   return Buffer.concat(chunks);
 }
 
-/* The commit a repository's branch is at now, asked of the repository itself. Git's own protocol over HTTP, as the
-   server's image has no git. It says what went wrong rather than throw, and never with the token. */
-export const readCommit = async (repo: RepoAddress, want: CommitWanted, timeoutMs = READ_MS): Promise<CommitAt> => {
+/* The refs of a repository, asked of the repository itself. Git's own protocol over HTTP, as the server's image has no git.
+   It says what went wrong rather than throw, and never with the token. */
+async function refsOf(repo: RepoAddress, timeoutMs: number): Promise<Map<string, string> | { problem: string }> {
   const cannot = (why: string) => ({ problem: `Hornhoof could not read the branches of ${repo.url}: ${why}.` });
   const signal = AbortSignal.timeout(timeoutMs);
   try {
@@ -76,8 +79,24 @@ export const readCommit = async (repo: RepoAddress, want: CommitWanted, timeoutM
     if (!res.ok) return cannot(`it answered ${res.status}`);
     if (!res.headers.get('content-type')?.startsWith(ADVERTISEMENT)) return cannot('the address is not a git repository');
     const body = await within(res);
-    return body ? commitIn(advertisedRefs(body), want) : cannot('its answer is too long');
+    return body ? advertisedRefs(body) : cannot('its answer is too long');
   } catch {
     return cannot(signal.aborted ? `it did not answer within ${timeoutMs} ms` : 'it could not be reached');
   }
+}
+
+/* The commit a repository's branch is at now. */
+export const readCommit = async (repo: RepoAddress, want: CommitWanted, timeoutMs = READ_MS): Promise<CommitAt> => {
+  const refs = await refsOf(repo, timeoutMs);
+  return refs instanceof Map ? commitIn(refs, want) : refs;
+};
+
+/* The branches in a repository's refs, by name; tags are no branches. */
+export const headsIn = (refs: Map<string, string>): Record<string, string> =>
+  Object.fromEntries([...refs].filter(([ref]) => ref.startsWith(HEADS)).map(([ref, sha]) => [ref.slice(HEADS.length), sha]));
+
+/* Every branch a repository has now, with its commit. */
+export const readBranches: BranchReader = async (repo, timeoutMs = READ_MS) => {
+  const refs = await refsOf(repo, timeoutMs);
+  return refs instanceof Map ? { heads: headsIn(refs) } : refs;
 };
