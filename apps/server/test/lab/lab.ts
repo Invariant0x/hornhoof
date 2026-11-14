@@ -3,7 +3,10 @@ import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { serviceName } from '../../src/modules/link/peer-client.js';
+import { VISIT_FIRST_PORT } from '../../src/modules/link/visit-client.js';
 import { fakeRelay, type FakeRelay } from '../fake-relay.js';
+import { createDelayGate, createPeerRelay, type DelayGate, type PeerRelay } from './network.js';
 
 /* The lab: computers with a Docker of their own, as containers on one network of this computer's Docker. The server is
    installed on one by install.sh and the others join it with the Machines tab's command, from the images this worktree
@@ -68,6 +71,51 @@ async function makeNetwork(name: string, label: string): Promise<void> {
 const inKeeper = (at: { machine: LabMachine; folder: string }, cmd: string): Promise<Ran> =>
   at.machine.exec(`docker exec ${at.folder.split('/').pop()!}-keeper-1 sh -c '${cmd.replaceAll("'", `'\\''`)}'`);
 
+/* Script run inside a keeper container to bridge its peer doors and visitor loopback ports through the host PeerRelay. */
+function bridgeScript(host: string, relayPort: number, offers: Record<string, number>, visits: Array<{ port: number; service: string }>): string {
+  const cfg = JSON.stringify({ host: host.replace(/^\[|\]$/g, ''), relayPort, offers, visits });
+  return `const net = require('node:net');
+const cfg = ${cfg};
+for (const [service, localPort] of Object.entries(cfg.offers)) {
+  const connectOffer = () => {
+    const ctrl = net.connect({ port: cfg.relayPort, host: cfg.host, noDelay: true }, () => ctrl.write(JSON.stringify({ op: 'offer', service }) + '\\n'));
+    let buf = '';
+    ctrl.setEncoding('utf8');
+    ctrl.on('data', chunk => {
+      buf += chunk;
+      const lines = buf.split('\\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        const { knock } = JSON.parse(line);
+        const local = net.connect({ port: localPort, host: '127.0.0.1', noDelay: true });
+        const up = net.connect({ port: cfg.relayPort, host: cfg.host, noDelay: true }, () => up.write(JSON.stringify({ op: 'accept', token: knock }) + '\\n'));
+        local.on('error', () => up.destroy());
+        up.on('error', () => local.destroy());
+        local.pipe(up);
+        up.pipe(local);
+      }
+    });
+    ctrl.on('error', () => {});
+    ctrl.on('close', () => setTimeout(connectOffer, 500));
+  };
+  connectOffer();
+}
+for (const { port, service } of cfg.visits) {
+  const srv = net.createServer({ noDelay: true }, client => {
+    client.setNoDelay(true);
+    const up = net.connect({ port: cfg.relayPort, host: cfg.host, noDelay: true }, () => {
+      up.write(JSON.stringify({ op: 'visit', service }) + '\\n');
+      client.pipe(up);
+      up.pipe(client);
+    });
+    client.on('error', () => up.destroy());
+    up.on('error', () => client.destroy());
+  });
+  srv.on('error', () => {});
+  srv.listen(port, '127.0.0.1');
+}`;
+}
+
 export class Lab {
   private made = 0;
   private relays: { close(): Promise<void> }[] = [];
@@ -111,6 +159,13 @@ export class Lab {
     return machine;
   }
 
+  /* Controllable latency and path cuts shared by the lab's relay, link probe and peer relay. */
+  network(opts: { oneWayMs?: number; cut?: boolean } = {}): DelayGate {
+    const gate = createDelayGate({ ...opts, keep: true });
+    this.relays.push(gate);
+    return gate;
+  }
+
   /* That machine is gone with everything on it, as a computer that was lost: its container, the Docker inside it and
      its volumes. Its address is free again. */
   async remove(i: number): Promise<void> {
@@ -142,13 +197,13 @@ export class Lab {
     this.cuts.delete(machine.name);
   }
 
-  /* A stand-in for the relay at hornhoof.org, served by this test on every interface of this computer. url: where the
-     lab's machines reach it, by the address they know this computer by: the containers inside a machine do not have
-     its name. No frps runs in the lab, so the test registers a link's client itself, as frps would. */
-  async relay(): Promise<{ url: string; fake: FakeRelay }> {
+  /* A stand-in for the relay at hornhoof.org, served by this test on every interface of this computer, optionally
+     behind a DelayGate so every route, sync and health request crosses 2 * oneWayMs. */
+  async relay(opts: { gate?: DelayGate } = {}): Promise<{ url: string; fake: FakeRelay }> {
     const fake = await fakeRelay({ keep: true, host: '0.0.0.0' });
     this.relays.push(fake);
-    return { url: `http://${await this.hostAddress()}:${new URL(fake.url).port}`, fake };
+    const port = opts.gate ? (await opts.gate.httpProxy(fake.url, { host: '0.0.0.0' })).port : new URL(fake.url).port;
+    return { url: `http://${await this.hostAddress()}:${port}`, fake };
   }
 
   /* The address the lab's machines know this computer by, as it goes into a web address: its IPv4 one where it has
@@ -160,25 +215,28 @@ export class Lab {
     return address.includes(':') ? `[${address}]` : address;
   }
 
-  /* A stand-in for hornhoof.org's part when a machine asks, through the company's public name, who answers there: it
-     looks up which client the fake relay's route for that name is held by, finds the machine whose link client has
-     that id, and passes the question on to that machine's keeper, at the door its link client carries the name to.
-     No machine holds the name, or the one that does is cut off or its keeper is stopped: 502. It plays the edge and
-     frps in the probe, as register plays frps's plugin. */
-  async edge(fake: FakeRelay, name: string, machines: { machine: LabMachine; folder: string }[]): Promise<{ url: string; close(): Promise<void> }> {
-    /* Which machine's link client has which id, looked up every two seconds beside the questions: a question is
-       answered within the two seconds a keeper waits only when it takes one command on one machine. */
+  /* A stand-in for hornhoof.org's part when a machine asks, through the company's public name, who answers there. When
+     a DelayGate is passed, each probe crosses two round trips (machine -> edge and edge -> tunnel -> holder keeper). */
+  async edge(
+    fake: FakeRelay,
+    name: string,
+    machines: { machine: LabMachine; folder: string }[],
+    opts: { gate?: DelayGate } = {},
+  ): Promise<{ url: string; close(): Promise<void> }> {
     const holders = new Map<string, { machine: LabMachine; folder: string }>();
+    const refreshHolders = async (): Promise<void> => {
+      await Promise.all(
+        machines.map(async at => {
+          const settings = await inKeeper(at, 'cat /tmp/frpc.toml 2> /dev/null').catch(() => null);
+          const client = settings && settings.code === 0 ? /clientID = "([^"]+)"/.exec(settings.out)?.[1] : undefined;
+          if (client) holders.set(client, at);
+        }),
+      );
+    };
     let going = true;
     const looking = (async () => {
       while (going) {
-        await Promise.all(
-          machines.map(async at => {
-            const settings = await inKeeper(at, 'cat /tmp/frpc.toml 2> /dev/null').catch(() => null);
-            const client = settings && settings.code === 0 ? /clientID = "([^"]+)"/.exec(settings.out)?.[1] : undefined;
-            if (client) holders.set(client, at);
-          }),
-        );
+        await refreshHolders();
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     })();
@@ -187,6 +245,7 @@ export class Lab {
       const nonce = url.searchParams.get('nonce') ?? '';
       if (req.method !== 'GET' || url.pathname !== '/api/network/lease' || !/^[A-Za-z0-9_-]{1,128}$/.test(nonce)) return { status: 404, body: '' };
       const route = fake.routes.get(name);
+      if (route?.state === 'held' && route.client && !holders.has(route.client)) await refreshHolders();
       const at = route?.state === 'held' && route.client ? holders.get(route.client) : undefined;
       if (!at || this.cuts.has(at.machine.name)) return { status: 502, body: '' };
       const asked = await inKeeper(at, `node -e "fetch('http://127.0.0.1:7081/api/network/lease?nonce=${nonce}').then(async r => console.log(JSON.stringify({ status: r.status, body: await r.text() })))"`);
@@ -202,13 +261,65 @@ export class Lab {
         .then(({ status, body }) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(body));
     });
     await new Promise<void>((resolve, reject) => server.once('error', reject).listen(0, '0.0.0.0', resolve));
+    const rawPort = (server.address() as AddressInfo).port;
+    const port = opts.gate ? (await opts.gate.httpProxy(`http://127.0.0.1:${rawPort}`, { hops: 2, host: '0.0.0.0' })).port : rawPort;
     const close = async () => {
       going = false;
       await looking;
       await new Promise<void>(resolve => (server.closeAllConnections(), server.close(() => resolve())));
     };
     this.relays.push({ close });
-    return { url: `http://${await this.hostAddress()}:${(server.address() as AddressInfo).port}`, close };
+    return { url: `http://${await this.hostAddress()}:${port}`, close };
+  }
+
+  /* Stand-in for frps's stcp peer relay between machines in the Docker lab, with optional TCP-RST blocking of direct
+     LAN port 8180 so PeerSessions switches onto the delayed relay path (path = 'relay', directFails = true). */
+  async peerRelay(
+    linkName: string,
+    places: { machine: LabMachine; folder: string; network: string }[],
+    opts: { gate?: DelayGate; blockDirect?: boolean } = {},
+  ): Promise<{ relay: PeerRelay; blockDirect(blocked: boolean): Promise<void>; stop(): Promise<void> }> {
+    const gate = opts.gate ?? this.network({ oneWayMs: 0 });
+    const relay = await createPeerRelay(gate, { host: '0.0.0.0', keep: true });
+    const host = await this.hostAddress();
+    const blockDirect = async (blocked: boolean): Promise<void> => {
+      const rule = 'INPUT -p tcp --dport 8180 -j REJECT --reject-with tcp-reset';
+      const cmd = blocked ? `iptables -C ${rule} 2>/dev/null || iptables -I ${rule}` : `iptables -D ${rule} 2>/dev/null || true`;
+      await Promise.all(places.map(at => at.machine.exec(cmd)));
+    };
+    if (opts.blockDirect) await blockDirect(true);
+    let going = true;
+    const loop = (async () => {
+      const signatures = new Map<string, string>();
+      while (going) {
+        await Promise.all(
+          places.map(async at => {
+            if (this.cuts.has(at.machine.name)) {
+              await inKeeper(at, 'pkill -f hh-lab-peer-bridge || true').catch(() => null);
+              signatures.delete(at.machine.name);
+              return;
+            }
+            const others = places.filter(p => p.network !== at.network);
+            const visits = others.map((p, idx) => ({ port: VISIT_FIRST_PORT + idx, service: serviceName(linkName, p.network, 'data') }));
+            const sig = `${at.network}:${visits.map(v => `${v.port}=${v.service}`).join(',')}`;
+            const alive = await inKeeper(at, 'ps -o args | grep -q "[h]h-lab-peer-bridge"').catch(() => null);
+            if (signatures.get(at.machine.name) === sig && alive?.code === 0) return;
+            const offers = { [serviceName(linkName, at.network, 'data')]: 8180, [serviceName(linkName, at.network, 'app')]: 7082 };
+            const code = bridgeScript(host, relay.port, offers, visits).replaceAll("'", `'\\''`);
+            await inKeeper(at, `pkill -f "frpc -c .*frpc-visit.toml" || true; pkill -f hh-lab-peer-bridge || true; nohup node -e '${code}' -- hh-lab-peer-bridge >/tmp/hh-peer-bridge.log 2>&1 &`).catch(() => null);
+            signatures.set(at.machine.name, sig);
+          }),
+        );
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    })();
+    const stop = async (): Promise<void> => {
+      going = false;
+      await loop;
+      await relay.close();
+    };
+    this.relays.push({ close: stop });
+    return { relay, blockDirect, stop };
   }
 
   /* Plays frps for the company's name, as hornhoof.org's relay does for as long as a scenario runs: each second it

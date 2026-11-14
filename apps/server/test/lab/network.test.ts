@@ -48,7 +48,11 @@ async function dataCerts() {
 }
 
 async function echoDbServer(): Promise<{ port: number }> {
-  const server = net.createServer(socket => {
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer({ noDelay: true }, socket => {
+    socket.setNoDelay(true);
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
     let buffer = '';
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
@@ -59,13 +63,19 @@ async function echoDbServer(): Promise<{ port: number }> {
     });
   });
   const port = await listenIn(server, '127.0.0.1');
-  onTestFinished(() => new Promise<void>(resolve => server.close(() => resolve())));
+  onTestFinished(
+    () =>
+      new Promise<void>(resolve => {
+        for (const s of sockets) s.destroy();
+        server.close(() => resolve());
+      }),
+  );
   return { port };
 }
 
 function askLine(port: number, text: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const socket = net.connect(port, '127.0.0.1', () => socket.write(`${text}\n`));
+    const socket = net.connect({ port, host: '127.0.0.1', noDelay: true }, () => socket.write(`${text}\n`));
     let buffer = '';
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
@@ -127,7 +137,7 @@ describe('the network lab relay and peer path with controllable delay', () => {
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ machine: NET_A, nonce }));
     });
     const doorPort = await listenIn(keeperDoor, '127.0.0.1');
-    onTestFinished(() => new Promise<void>(resolve => keeperDoor.close(() => resolve())));
+    onTestFinished(() => new Promise<void>(resolve => (keeperDoor.closeAllConnections(), keeperDoor.close(() => resolve()))));
 
     /* Hop 1: keeper -> hornhoof.org edge; Hop 2: edge -> frps tunnel -> keeper door (4 * oneWayMs total). */
     const edge = await gate.httpProxy(`http://127.0.0.1:${doorPort}`, { hops: 2 });
@@ -171,12 +181,21 @@ describe('the network lab relay and peer path with controllable delay', () => {
     const clock = virtualClock();
     const gate = createDelayGate({ oneWayMs: 400, schedule: clock.schedule });
     const received: string[] = [];
+    const sinkSockets = new Set<net.Socket>();
     const sink = net.createServer(socket => {
+      sinkSockets.add(socket);
+      socket.once('close', () => sinkSockets.delete(socket));
       socket.setEncoding('utf8');
       socket.on('data', (chunk: string) => received.push(chunk));
     });
     const sinkPort = await listenIn(sink, '127.0.0.1');
-    onTestFinished(() => new Promise<void>(resolve => sink.close(() => resolve())));
+    onTestFinished(
+      () =>
+        new Promise<void>(resolve => {
+          for (const s of sinkSockets) s.destroy();
+          sink.close(() => resolve());
+        }),
+    );
     const proxy = await gate.tcpProxy({ host: '127.0.0.1', port: sinkPort });
 
     const client = net.connect(proxy.port, '127.0.0.1');
@@ -252,10 +271,14 @@ describe('the network lab relay and peer path with controllable delay', () => {
 
     /* Each peer ask crosses the relay (1 round trip = 400 ms). */
     const askStart = clock.now();
-    const asking = sessionsA.ask(NET_B, 'GET', '/peer/switch/status');
+    let askReply: { status: number; body: unknown } | null | undefined;
+    void sessionsA.ask(NET_B, 'GET', '/peer/switch/status').then(res => {
+      askReply = res;
+    });
     await clock.advance(350);
-    await clock.advance(100);
-    expect(await asking).toEqual({ status: 200, body: { echoedPath: '/peer/switch/status' } });
+    expect(askReply).toBeUndefined();
+    await clock.until(() => askReply !== undefined, { maxMs: 1000 });
+    expect(askReply).toEqual({ status: 200, body: { echoedPath: '/peer/switch/status' } });
     expect(clock.now() - askStart).toBeGreaterThanOrEqual(400);
 
     /* DbDoor streams database queries over HTTP/2 CONNECT db:5432 through PeerRelay with 2 * oneWayMs per trip. */
@@ -268,9 +291,14 @@ describe('the network lab relay and peer path with controllable delay', () => {
     onTestFinished(() => door.close());
     const doorPort = await door.listen(0);
     const dbStart = clock.now();
-    const queried = askLine(doorPort, 'SELECT 1');
-    await clock.advance(900);
-    expect(await queried).toBe('db:SELECT 1');
+    let dbAnswer: string | undefined;
+    void askLine(doorPort, 'SELECT 1').then(res => {
+      dbAnswer = res;
+    });
+    await clock.advance(750);
+    expect(dbAnswer).toBeUndefined();
+    await clock.until(() => dbAnswer !== undefined, { maxMs: 1500 });
+    expect(dbAnswer).toBe('db:SELECT 1');
     expect(clock.now() - dbStart).toBeGreaterThanOrEqual(800);
 
     /* Cutting the gate or closing B's offer tears down active relay streams. */
