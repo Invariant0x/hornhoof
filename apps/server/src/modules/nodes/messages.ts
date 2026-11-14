@@ -33,16 +33,19 @@ const OPEN_JOBS = ['queued', 'running'] as const;
 const LOAD_SEEN_MS = 60_000;
 const loadSeenAt = new WeakMap<Ctx, Map<string, number>>();
 
+/* Whether this server wrote the node's lastSeenAt less than a minute before; if not, it notes that it writes it now. */
+function seenLately(ctx: Ctx, nodeId: string, at: number): boolean {
+  const byNode = loadSeenAt.get(ctx) ?? new Map<string, number>();
+  loadSeenAt.set(ctx, byNode);
+  const since = at - (byNode.get(nodeId) ?? -Infinity);
+  if (since >= 0 && since < LOAD_SEEN_MS) return true;
+  byNode.set(nodeId, at);
+  return false;
+}
+
+/* A node that only reports its load is still heard from: its lastSeenAt keeps up, at most once a minute. */
 async function touchNodeSeen(ctx: Ctx, id: NodeIdentity, now: Date): Promise<void> {
-  if (id.kind !== 'node') return;
-  let byNode = loadSeenAt.get(ctx);
-  if (!byNode) {
-    byNode = new Map();
-    loadSeenAt.set(ctx, byNode);
-  }
-  const at = now.getTime(), prev = byNode.get(id.nodeId);
-  if (prev !== undefined && at >= prev && at - prev < LOAD_SEEN_MS) return;
-  byNode.set(id.nodeId, at);
+  if (id.kind !== 'node' || seenLately(ctx, id.nodeId, now.getTime())) return;
   await ctx.db.update(nodes).set({ lastSeenAt: now }).where(and(eq(nodes.id, id.nodeId), liveNode));
 }
 
