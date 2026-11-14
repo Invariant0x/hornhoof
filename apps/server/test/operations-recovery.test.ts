@@ -3,7 +3,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
-import { agentEvents, agents, jobs, type AgentKind } from '../src/db/schema.js';
+import { encryptSecret } from '../src/crypto/secrets.js';
+import { agentEvents, agents, jobs, subscriptions, taskEvents, tasks, type AgentKind } from '../src/db/schema.js';
 import { placeOf, renderInstructions } from '../src/modules/agents/instructions.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { stopEmployeeTurn } from '../src/modules/program-operator/stop.js';
@@ -83,6 +84,28 @@ describe('Operations stop a turn that stands', () => {
     for (const caller of refused.slice(0, 2)) expect(c.tools(caller).names).not.toContain('stop_employee');
     expect(await c.statusOf(target.id)).toEqual({ status: 'running', error: null });
     expect(await c.log(target.id)).toEqual([]);
+  });
+
+  it('keeps a secret named in the reason out of both logs', async () => {
+    const c = await staged();
+    const secret = 'sk-live-0123456789abcdef';
+    await c.db.update(subscriptions).set({ secretEnc: encryptSecret(secret, c.ctx.config.secret) }).where(eq(subscriptions.id, c.sub.id));
+    const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 7, title: 'Plan', status: 'working', assigneeAgentId: c.head.id, executorAgentId: c.head.id }).returning();
+    const target = await c.standing(c.head);
+    await c.db.update(jobs).set({ taskId: task!.id }).where(eq(jobs.id, target.id));
+    await stopEmployeeTurn(c.ctx, await c.turn(c.opsHead), { employee: c.head.id, reason: `It stands on the key ${secret} it was shown.` });
+    const said = JSON.stringify([await c.log(target.id), await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task!.id))]);
+    expect(said).not.toContain(secret);
+    expect(said).toContain('Olga stopped the turn of Hana. Reason: It stands on the key [hidden] it was shown.');
+  });
+
+  it("leaves a person's own assistant to its owner", async () => {
+    const c = await staged();
+    const [assistant] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', model: '', name: 'Ava', subscriptionId: c.sub.id }).returning();
+    const own = await c.standing(assistant!);
+    await expect(stopEmployeeTurn(c.ctx, await c.turn(c.opsHead), { employee: assistant!.id, reason: 'Stuck.' })).rejects.toMatchObject({ status: 403 });
+    expect(await c.statusOf(own.id)).toEqual({ status: 'running', error: null });
+    expect(await c.log(own.id)).toEqual([]);
   });
 
   it('says nothing runs when the employee runs no turn, and never stops the caller itself', async () => {

@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -18,7 +18,8 @@ export type StopResult = { result: 'stopped'; employee: string; name: string; jo
    queue. Who stopped whom, in which turn and why, with secrets masked, goes first into the log of the turn it ended. */
 export async function stopEmployeeTurn(ctx: Ctx, caller: OperatorCaller, input: StopInput): Promise<StopResult> {
   const me = await authorizeAccess(ctx, caller);
-  const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, input.employee), eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
+  /* A person's own assistant is no employee of the company: its owner alone stops it. */
+  const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, input.employee), eq(agents.companyId, me.companyId), ne(agents.kind, 'assistant'), isNull(agents.removedAt)));
   if (!target || target.id === me.id) throw accessRefused();
   const { runningJobId } = await agentState(ctx, target.id);
   const [job] = runningJobId ? await ctx.db.select().from(jobs).where(and(eq(jobs.id, runningJobId), eq(jobs.companyId, me.companyId))) : [];
