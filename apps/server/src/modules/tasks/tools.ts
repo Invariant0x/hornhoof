@@ -533,7 +533,7 @@ class TaskTools {
             : "Lays out a new turn of your own department: a short title, the main point in one or two sentences, and its tasks, which come to you; ") +
           'a new goal of people gets a new turn, and no separate tasks for plans, contracts or proofs. ' +
           "When the department runs no turn it starts at once; otherwise it waits after the department's planned turns and starts by itself when the one before it is done. Other departments' turns run on their own. department and product ids from company. " +
-          'mode is required and fixed once the turn starts: echelons, or turnkey when members of a turnkey team carry tasks alone on task branches with local changed-area checks and one release owner runs run_tests once on the combined release branch before main; a turnkey turn needs such a team.',
+          'mode is required and fixed once the turn starts: echelons, or turnkey when members of a turnkey team carry tasks alone on task branches with local changed-area checks and one release owner runs run_tests once per release candidate on the combined release branch before main; a turnkey turn needs such a team.',
         inputSchema: { department: z.uuid().optional().describe(this.boss ? 'The department whose turn it is.' : 'Your own department; it may be left out.'), title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), mode: Mode, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional(), backlog: Backlog.optional() },
       },
       async input =>
