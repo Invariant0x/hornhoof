@@ -21,36 +21,30 @@ export type PageSample = {
 export const ROBOT_MARKERS = ['.g-recaptcha', '.h-captcha', '.cf-turnstile', '#challenge-form', '#challenge-running', '#cf-challenge-running', '#px-captcha', '[data-sitekey]'];
 
 export function collectPage({ maxText, maxLinks, markers }: { maxText: number; maxLinks: number; markers: string[] }): PageSample {
-  const shown = (el: Element): boolean => {
-    const style = getComputedStyle(el);
-    const box = el.getBoundingClientRect();
-    return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
-  };
-  const body = document.body as HTMLElement | null;
-  const text = body ? body.innerText : '';
-  const links: PageLink[] = [];
+  const root = document.documentElement;
+  const text = root.innerText;
   const seen = new Set<string>();
-  for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
-    const url = a.href;
-    if (!/^https?:/i.test(url) || seen.has(url)) continue;
-    seen.add(url);
-    if (links.length >= maxLinks) continue;
-    const label = a.innerText || a.getAttribute('aria-label') || a.title || '';
-    links.push({ text: label.replace(/\s+/g, ' ').trim().slice(0, 200), url });
-  }
+  /* Each http and https address once, under the words of its first link. */
+  const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).filter(a => /^https?:/i.test(a.href) && !seen.has(a.href) && seen.add(a.href));
+  const label = (a: HTMLAnchorElement): string => a.innerText || a.getAttribute('aria-label') || a.title;
   const sources = (selector: string): string[] =>
     Array.from(document.querySelectorAll<HTMLIFrameElement | HTMLScriptElement>(selector)).map(el => el.src).filter(Boolean).slice(0, 100);
+  /* What a person can see: drawn with a size, and not hidden. */
+  const shown = (el: Element): boolean => {
+    const box = el.getBoundingClientRect();
+    return getComputedStyle(el).visibility !== 'hidden' && box.width * box.height > 0;
+  };
   return {
     title: document.title,
     text: text.slice(0, maxText),
     textLength: text.length,
-    links,
-    linkCount: seen.size,
+    links: anchors.slice(0, maxLinks).map(a => ({ text: label(a).replace(/\s+/g, ' ').trim().slice(0, 200), url: a.href })),
+    linkCount: anchors.length,
     frames: sources('iframe[src]'),
     scripts: sources('script[src]'),
     markers: markers.filter(selector => document.querySelector(selector) !== null),
     passwordFields: Array.from(document.querySelectorAll('input[type=password]')).filter(shown).length,
-    height: Math.max(document.documentElement.scrollHeight, body ? body.scrollHeight : 0),
+    height: (document.scrollingElement ?? root).scrollHeight,
   };
 }
 

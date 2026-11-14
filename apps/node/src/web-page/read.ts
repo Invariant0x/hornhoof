@@ -42,31 +42,58 @@ const pathOf = (address: string): string => {
   }
 };
 
-const robot = (reason: string): Judgement => ({ status: 'robot_check', reason, notes: [] });
-const login = (reason: string): Judgement => ({ status: 'login_required', reason, notes: [] });
+const CHECKS_FIRST = 'The page checks that a person is there before it shows anything.';
+const SIGN_IN = 'The page asks to sign in.';
+const WIDGET_NOTE = 'The page has a robot check widget, probably on a form; the page itself was read.';
+const judged = (status: PageStatus, reason: string): Judgement => ({ status, reason, notes: [] });
 
-export function judgePage({ requested, finalUrl, answer, sample }: { requested: string; finalUrl: string; answer: Answer; sample: PageSample }): Judgement {
-  const status = answer?.status ?? null;
-  const headers = Object.fromEntries(Object.entries(answer?.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]));
+/* The answer's status and its headers by lower-case name; a page the browser shows without an answer has neither. */
+function answered(answer: Answer): { status: number | null; headers: Record<string, string> } {
+  if (!answer) return { status: null, headers: {} };
+  return { status: answer.status, headers: Object.fromEntries(Object.entries(answer.headers).map(([name, value]) => [name.toLowerCase(), value])) };
+}
+
+/* A check that stands in place of the page: one the site says it shows, or one the page itself is. */
+function challenged(sample: PageSample): boolean {
   const sources = [...sample.frames, ...sample.scripts];
-  const short = sample.textLength < SHORT;
+  return sample.markers.some(m => CHALLENGES.has(m)) || sources.some(s => CHALLENGE_SOURCES.test(s)) || ROBOT_TITLE.test(sample.title.trim()) || (sample.textLength < SHORT && ROBOT_TEXT.test(sample.text));
+}
 
-  if (headers['cf-mitigated'] === 'challenge') return robot('The site shows a check that a person is there.');
-  if (status === 429) return robot('The site answered 429: too many requests from this machine.');
-  if (sample.markers.some(m => CHALLENGES.has(m)) || sources.some(s => CHALLENGE_SOURCES.test(s)) || ROBOT_TITLE.test(sample.title.trim()) || (short && ROBOT_TEXT.test(sample.text))) {
-    return robot('The page checks that a person is there before it shows anything.');
-  }
+function robotReason(status: number | null, headers: Record<string, string>, sample: PageSample): string | null {
+  if (headers['cf-mitigated'] === 'challenge') return 'The site shows a check that a person is there.';
+  if (status === 429) return 'The site answered 429: too many requests from this machine.';
+  return challenged(sample) ? CHECKS_FIRST : null;
+}
 
-  if (status === 401 || status === 407) return login(`The site answered ${status}: it asks to sign in.`);
+/* A short page with a password field a person sees, a password field on a sign-in address, or a sign-in address the page
+   was sent on to or that names a sign-in. */
+function asksToSignIn(requested: string, finalUrl: string, sample: PageSample): boolean {
   const path = pathOf(finalUrl);
   const loginPath = LOGIN_PATH.test(path);
-  if (sample.passwordFields > 0 && (short || loginPath)) return login('The page asks to sign in.');
-  if (loginPath && (path !== pathOf(requested) || LOGIN_WORDS.test(sample.title) || LOGIN_WORDS.test(sample.text.slice(0, 600)))) return login('The page asks to sign in.');
+  if (sample.passwordFields > 0 && (sample.textLength < SHORT || loginPath)) return true;
+  return loginPath && (path !== pathOf(requested) || LOGIN_WORDS.test(sample.title) || LOGIN_WORDS.test(sample.text.slice(0, 600)));
+}
 
-  const widget = sample.markers.some(m => WIDGETS.has(m)) || sources.some(s => WIDGET_SOURCES.test(s));
-  if (widget && sample.textLength < GATE) return robot('The page checks that a person is there before it shows anything.');
-  if (status !== null && status >= 400) return { status: 'http_error', reason: `The site answered ${status}.`, notes: [] };
-  return { status: 'ok', reason: null, notes: widget ? ['The page has a robot check widget, probably on a form; the page itself was read.'] : [] };
+function loginReason(status: number | null, requested: string, finalUrl: string, sample: PageSample): string | null {
+  if (status === 401 || status === 407) return `The site answered ${status}: it asks to sign in.`;
+  return asksToSignIn(requested, finalUrl, sample) ? SIGN_IN : null;
+}
+
+/* A robot check widget, which also sits on ordinary forms. */
+function hasWidget(sample: PageSample): boolean {
+  return sample.markers.some(m => WIDGETS.has(m)) || [...sample.frames, ...sample.scripts].some(s => WIDGET_SOURCES.test(s));
+}
+
+export function judgePage({ requested, finalUrl, answer, sample }: { requested: string; finalUrl: string; answer: Answer; sample: PageSample }): Judgement {
+  const { status, headers } = answered(answer);
+  const robot = robotReason(status, headers, sample);
+  if (robot) return judged('robot_check', robot);
+  const login = loginReason(status, requested, finalUrl, sample);
+  if (login) return judged('login_required', login);
+  const widget = hasWidget(sample);
+  if (widget && sample.textLength < GATE) return judged('robot_check', CHECKS_FIRST);
+  if (status !== null && status >= 400) return judged('http_error', `The site answered ${status}.`);
+  return { status: 'ok', reason: null, notes: widget ? [WIDGET_NOTE] : [] };
 }
 
 const NEXT: Partial<Record<PageStatus, string>> = {
@@ -76,26 +103,37 @@ const NEXT: Partial<Record<PageStatus, string>> = {
   failed: 'Try the address once more if the reason allows it; otherwise note it for a person and go on with the other addresses.',
 };
 
+const when = (yes: unknown, line: string): string[] => (yes ? [line] : []);
+
+function headLines(r: BrowseResult): string[] {
+  return [
+    `Status: ${r.status}`,
+    ...when(r.reason, `Reason: ${r.reason}`),
+    `Address: ${r.address}`,
+    ...when(r.finalAddress && r.finalAddress !== r.address, `Final address: ${r.finalAddress}`),
+    ...when(r.httpStatus !== null, `HTTP status: ${r.httpStatus}`),
+    ...when(r.title, `Title: ${r.title}`),
+    ...r.notes.map(note => `Note: ${note}`),
+    ...when(r.screenshot, `Screenshot: ${r.screenshot} (show it to a person with hh-attach FILE, or put it on a task with hh-attach --task N FILE)`),
+    ...when(NEXT[r.status], `Next: ${NEXT[r.status]}`),
+  ];
+}
+
+function linkLines(r: BrowseResult): string[] {
+  if (!r.links.length) return [r.linkCount ? `Links: ${r.linkCount}, none shown; --max-links shows them.` : 'Links: none'];
+  const count = r.linkCount > r.links.length ? `${r.links.length} of ${r.linkCount}` : `${r.linkCount}`;
+  return [`Links (${count}):`, ...r.links.map(link => (link.text ? `- ${link.text}: ${link.url}` : `- ${link.url}`))];
+}
+
+function textLines(r: BrowseResult): string[] {
+  if (r.text === null) return [];
+  const size = r.textLength > r.text.length ? `first ${r.text.length} of ${r.textLength} characters` : `${r.textLength} characters`;
+  return ['', `Text (${size}):`, r.text, '', ...linkLines(r)];
+}
+
 /* The result as an agent reads it in its terminal. */
 export function formatResult(r: BrowseResult): string {
-  const lines = [`Status: ${r.status}`];
-  if (r.reason) lines.push(`Reason: ${r.reason}`);
-  lines.push(`Address: ${r.address}`);
-  if (r.finalAddress && r.finalAddress !== r.address) lines.push(`Final address: ${r.finalAddress}`);
-  if (r.httpStatus !== null) lines.push(`HTTP status: ${r.httpStatus}`);
-  if (r.title) lines.push(`Title: ${r.title}`);
-  for (const note of r.notes) lines.push(`Note: ${note}`);
-  if (r.screenshot) lines.push(`Screenshot: ${r.screenshot} (show it to a person with hh-attach FILE, or put it on a task with hh-attach --task N FILE)`);
-  if (NEXT[r.status]) lines.push(`Next: ${NEXT[r.status]}`);
-  if (r.text !== null) {
-    const size = r.textLength > r.text.length ? `first ${r.text.length} of ${r.textLength} characters` : `${r.textLength} characters`;
-    lines.push('', `Text (${size}):`, r.text);
-    const count = r.linkCount > r.links.length ? `${r.links.length} of ${r.linkCount}` : `${r.linkCount}`;
-    if (r.links.length) lines.push('', `Links (${count}):`);
-    else lines.push('', r.linkCount ? `Links: ${r.linkCount}, none shown; --max-links shows them.` : 'Links: none');
-    for (const link of r.links) lines.push(link.text ? `- ${link.text}: ${link.url}` : `- ${link.url}`);
-  }
-  return `${lines.join('\n')}\n`;
+  return `${[...headLines(r), ...textLines(r)].join('\n')}\n`;
 }
 
 /* 0: the page was reached and its status says what it holds. 2: the address is refused. 1: the call failed. */

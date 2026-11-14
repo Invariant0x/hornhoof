@@ -73,21 +73,32 @@ function v6Number(ip: string): bigint {
 const within = (n: bigint, first: bigint, bits: number): boolean => n >> BigInt(128 - bits) === first >> BigInt(128 - bits);
 const embeddedV4 = (n: bigint): string => [24n, 16n, 8n, 0n].map(shift => String((n >> shift) & 0xffn)).join('.');
 
+/* An IPv6 range that carries an IPv4 address in its last 32 bits, which then decides. */
+const EMBEDDED = 'an IPv4 address inside';
+/* Each IPv6 range as for V4. Of the rest only global unicast is public. */
+const V6: [bigint, number, string][] = [
+  [1n, 128, LOOPBACK],
+  [v6Number('fd00:ec2::254'), 128, METADATA],
+  [0xffffn << 32n, 96, EMBEDDED],
+  [0x0064ff9bn << 96n, 96, EMBEDDED],
+  [0x0064ff9b0001n << 80n, 48, PRIVATE],
+  [0xfc00n << 112n, 7, PRIVATE],
+  [0xfe80n << 112n, 10, LINK_LOCAL],
+  [0xff00n << 112n, 8, MULTICAST],
+  /* Ranges for protocols, documentation and 6to4. */
+  [0x2001n << 112n, 23, RESERVED],
+  [0x20010db8n << 96n, 32, RESERVED],
+  [0x2002n << 112n, 16, RESERVED],
+];
+const GLOBAL_UNICAST: [bigint, number] = [0x2000n << 112n, 3];
+
 function refusedV6(ip: string): string | null {
   if (ip.includes('%')) return LINK_LOCAL;
   const n = v6Number(ip);
-  if (n === 1n) return LOOPBACK;
-  if (n === v6Number('fd00:ec2::254')) return METADATA;
-  if (within(n, 0xffffn << 32n, 96)) return refusedV4(embeddedV4(n));
-  if (within(n, 0x0064ff9bn << 96n, 96)) return refusedV4(embeddedV4(n));
-  if (within(n, 0x0064ff9b0001n << 80n, 48)) return PRIVATE;
-  if (within(n, 0xfc00n << 112n, 7)) return PRIVATE;
-  if (within(n, 0xfe80n << 112n, 10)) return LINK_LOCAL;
-  if (within(n, 0xff00n << 112n, 8)) return MULTICAST;
-  /* Only global unicast is public, and of it not the ranges for protocols, documentation and 6to4. */
-  if (!within(n, 0x2000n << 112n, 3)) return RESERVED;
-  if (within(n, 0x2001n << 112n, 23) || within(n, 0x20010db8n << 96n, 32) || within(n, 0x2002n << 112n, 16)) return RESERVED;
-  return null;
+  const range = V6.find(([first, bits]) => within(n, first, bits));
+  if (range?.[2] === EMBEDDED) return refusedV4(embeddedV4(n));
+  if (range) return range[2];
+  return within(n, ...GLOBAL_UNICAST) ? null : RESERVED;
 }
 
 /* Why an IP address is refused, or null for a public one. */

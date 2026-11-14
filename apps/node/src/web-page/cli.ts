@@ -3,7 +3,7 @@ import { lookup as resolveName } from 'node:dns/promises';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { browse, realClock, type BrowseDeps, type BrowseRequest, type Launcher } from './browse.js';
 import { systemFolders, systemProcesses } from './processes.js';
 import { exitCode, formatResult, type BrowseResult } from './read.js';
@@ -44,44 +44,69 @@ the call is wrong, 1 when the call failed.
 
 export type Parsed = { kind: 'help' } | { kind: 'error'; message: string } | { kind: 'browse'; request: BrowseRequest; json: boolean };
 
-const VALUED: Record<string, Limit | 'screenshot' | 'waitFor'> = {
-  '--screenshot': 'screenshot', '--wait-for': 'waitFor', '--timeout': 'timeout', '--max-text': 'text', '--max-links': 'links', '--max-mb': 'megabytes',
-};
+/* The options that take a value, and what each sets. A Map, so that no word an object of JavaScript knows counts as one. */
+const VALUED = new Map<string, Limit | 'screenshot' | 'waitFor'>([
+  ['--screenshot', 'screenshot'], ['--wait-for', 'waitFor'], ['--timeout', 'timeout'], ['--max-text', 'text'], ['--max-links', 'links'], ['--max-mb', 'megabytes'],
+]);
+
+type Settings = { addresses: string[]; screenshot: string | null; waitFor: string | null; fullPage: boolean; json: boolean; limits: Record<Limit, number> };
+
+/* --name=value as two words. */
+const wordsOf = (argv: string[]): string[] =>
+  argv.flatMap(word => (/^--[\w-]+=/.test(word) ? [word.slice(0, word.indexOf('=')), word.slice(word.indexOf('=') + 1)] : [word]));
+
+/* Each setter answers with what is wrong, or null. */
+function setLimit(set: Settings, limit: Limit, word: string, value: string): string | null {
+  const { min, max } = LIMITS[limit];
+  const n = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!(n >= min && n <= max)) return `${word} must be a whole number from ${min} to ${max}.`;
+  set.limits[limit] = n;
+  return null;
+}
+
+function setScreenshot(set: Settings, value: string): string | null {
+  if (!/\.png$/i.test(value)) return '--screenshot needs a file name that ends in .png.';
+  set.screenshot = resolve(value);
+  return null;
+}
+
+function setValue(set: Settings, word: string, value: string | undefined): string | null {
+  if (value === undefined) return `${word} needs a value.`;
+  const key = VALUED.get(word)!;
+  if (key === 'screenshot') return setScreenshot(set, value);
+  if (key !== 'waitFor') return setLimit(set, key, word, value);
+  set.waitFor = value;
+  return null;
+}
+
+function setWord(set: Settings, word: string): string | null {
+  if (word === '--json') set.json = true;
+  else if (word === '--full-page') set.fullPage = true;
+  else if (word.startsWith('-')) return `hh-browse has no option ${word}.`;
+  else set.addresses.push(word);
+  return null;
+}
 
 export function parseArgs(argv: string[]): Parsed {
-  const addresses: string[] = [];
-  const set: { screenshot: string | null; waitFor: string | null; fullPage: boolean; json: boolean } = { screenshot: null, waitFor: null, fullPage: false, json: false };
-  const limits: Record<Limit, number> = { timeout: LIMITS.timeout.fallback, text: LIMITS.text.fallback, links: LIMITS.links.fallback, megabytes: LIMITS.megabytes.fallback };
-  const words = argv.flatMap(word => (/^--[\w-]+=/.test(word) ? [word.slice(0, word.indexOf('=')), word.slice(word.indexOf('=') + 1)] : [word]));
+  const set: Settings = {
+    addresses: [], screenshot: null, waitFor: null, fullPage: false, json: false,
+    limits: { timeout: LIMITS.timeout.fallback, text: LIMITS.text.fallback, links: LIMITS.links.fallback, megabytes: LIMITS.megabytes.fallback },
+  };
+  const words = wordsOf(argv);
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!;
     if (word === '--help' || word === '-h') return { kind: 'help' };
-    if (word === '--json') set.json = true;
-    else if (word === '--full-page') set.fullPage = true;
-    else if (VALUED[word]) {
-      const value = words[++i];
-      if (value === undefined) return { kind: 'error', message: `${word} needs a value.` };
-      const key = VALUED[word];
-      if (key === 'screenshot') {
-        if (!/\.png$/i.test(value)) return { kind: 'error', message: '--screenshot needs a file name that ends in .png.' };
-        set.screenshot = resolve(value);
-      } else if (key === 'waitFor') set.waitFor = value;
-      else {
-        const { min, max } = LIMITS[key];
-        const n = /^\d+$/.test(value) ? Number(value) : NaN;
-        if (!(n >= min && n <= max)) return { kind: 'error', message: `${word} must be a whole number from ${min} to ${max}.` };
-        limits[key] = n;
-      }
-    } else if (word.startsWith('-')) return { kind: 'error', message: `hh-browse has no option ${word}.` };
-    else addresses.push(word);
+    const wrong = VALUED.has(word) ? setValue(set, word, words[++i]) : setWord(set, word);
+    if (wrong) return { kind: 'error', message: wrong };
   }
-  if (addresses.length !== 1) return { kind: 'error', message: 'Give one address, such as https://example.org/.' };
+  if (set.addresses.length !== 1) return { kind: 'error', message: 'Give one address, such as https://example.org/.' };
+  const { timeout, text, links, megabytes } = set.limits;
   return {
     kind: 'browse',
     json: set.json,
     request: {
-      address: addresses[0]!, screenshot: set.screenshot, fullPage: set.fullPage, waitFor: set.waitFor,
-      limits: { timeoutMs: limits.timeout * 1000, maxText: limits.text, maxLinks: limits.links, maxBytes: limits.megabytes * 1024 * 1024 },
+      address: set.addresses[0]!, screenshot: set.screenshot, fullPage: set.fullPage, waitFor: set.waitFor,
+      limits: { timeoutMs: timeout * 1000, maxText: text, maxLinks: links, maxBytes: megabytes * 1024 * 1024 },
     },
   };
 }
@@ -105,13 +130,16 @@ export async function main(argv: string[], io: Io, run: Run = request => browse(
 }
 
 /* The image's own Playwright and browsers, which the node keeps ready; nothing is installed for a call. */
-const IMAGE_PLAYWRIGHT = '/usr/local/lib/node_modules/playwright';
+const IMAGE_PLAYWRIGHT = '/usr/local/lib/node_modules/playwright/package.json';
 const IMAGE_BROWSERS = ['/data/browsers', '/opt/ms-playwright'];
 
+export const browsersPath = (exists: (path: string) => boolean): string => IMAGE_BROWSERS.find(exists) ?? IMAGE_BROWSERS[0]!;
+/* Where playwright-core is looked up from: the image's Playwright, else beside this file. */
+export const playwrightFrom = (exists: (path: string) => boolean): string => (exists(IMAGE_PLAYWRIGHT) ? IMAGE_PLAYWRIGHT : import.meta.url);
+
 function chromium(): Launcher {
-  process.env.PLAYWRIGHT_BROWSERS_PATH ||= IMAGE_BROWSERS.find(dir => existsSync(dir)) ?? IMAGE_BROWSERS[0]!;
-  const from = existsSync(join(IMAGE_PLAYWRIGHT, 'package.json')) ? join(IMAGE_PLAYWRIGHT, 'package.json') : import.meta.url;
-  return (createRequire(from)('playwright-core') as { chromium: Launcher }).chromium;
+  process.env.PLAYWRIGHT_BROWSERS_PATH ||= browsersPath(existsSync);
+  return (createRequire(playwrightFrom(existsSync))('playwright-core') as { chromium: Launcher }).chromium;
 }
 
 export function systemDeps(): BrowseDeps {

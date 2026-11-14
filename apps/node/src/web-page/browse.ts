@@ -144,142 +144,209 @@ function shotOptions(fullPage: boolean, height: number, timeout: number): Shot {
   return { type: 'png', fullPage: true, clip: { x: 0, y: 0, width: VIEWPORT.width, height: MAX_SHOT_HEIGHT }, timeout };
 }
 
-export async function browse(request: BrowseRequest, deps: BrowseDeps): Promise<BrowseResult> {
-  const result = emptyResult(request.address);
-  const checked = checkAddress(request.address);
-  if (!checked.ok) return { ...result, status: 'refused', reason: `The address is refused: ${checked.reason}.` };
-  const vetted = await vetHost(checked.url.hostname, deps.lookup);
-  if (!vetted.ok) return { ...result, status: 'refused', reason: `The address is refused: ${vetted.reason}.` };
+/* One call while it runs: what it was asked, its limits and alarms, and what it started, which it ends. */
+type Call = {
+  request: BrowseRequest;
+  deps: BrowseDeps;
+  base: BrowseResult;
+  seconds: number;
+  settleMs: number;
+  settle: { done: Promise<void>; cancel(): void };
+  hard: { done: Promise<void>; cancel(): void };
+  stop: Promise<void>;
+  dir: string;
+  profile: string;
+  credentials: { username: string; password: string };
+  left(until: number): number;
+  proxy: Proxy | null;
+  context: BrowserContext | null;
+};
 
-  sweepStale(deps.tmp, deps.folders, deps.table, deps.uid);
-  const { timeoutMs, maxText, maxLinks, maxBytes } = request.limits;
-  const seconds = Math.round(timeoutMs / 1000);
+/* A step that ends the call before the page is read, with the result it ends with. */
+class Ended {
+  constructor(readonly result: BrowseResult) {}
+}
+
+const failed = (call: Call, reason: string): Ended => new Ended({ ...call.base, status: 'failed', reason });
+const refusedBy = (call: Call, reason: string): Ended => new Ended({ ...call.base, status: 'refused', reason });
+const stopped = (call: Call): Ended => failed(call, 'The call was stopped before the page was read.');
+const lateRead = (call: Call): Ended => failed(call, `The page could not be read within the time limit of ${call.seconds} seconds.`);
+const sizeLimit = (call: Call): string => `${Math.round(call.request.limits.maxBytes / 1048576)} MB`;
+
+/* What finished first of the step and its limit; a stop ends the call. */
+async function step<T>(call: Call, work: Promise<T>, limit: Promise<void>): Promise<Exclude<Outcome<T>, { kind: 'stopped' }>> {
+  const outcome = await race(work, limit, call.stop);
+  if (outcome.kind === 'stopped') throw stopped(call);
+  return outcome;
+}
+
+/* The step's value; a step that is late or fails ends the call with the reason given. */
+async function must<T>(call: Call, work: Promise<T>, limit: Promise<void>, late: () => Ended, cannot: string): Promise<T> {
+  const outcome = await step(call, work, limit);
+  if (outcome.kind === 'done') return outcome.value;
+  throw outcome.kind === 'late' ? late() : failed(call, `${cannot}: ${said(outcome.error)}`);
+}
+
+/* Why the address may not be opened at all, or null. */
+async function refusal(address: string, lookup: Lookup): Promise<string | null> {
+  const checked = checkAddress(address);
+  if (!checked.ok) return checked.reason;
+  const vetted = await vetHost(checked.url.hostname, lookup);
+  return vetted.ok ? null : vetted.reason;
+}
+
+function begin(request: BrowseRequest, deps: BrowseDeps): Call {
+  const { timeoutMs } = request.limits;
   const settleMs = timeoutMs - Math.min(MAX_RESERVE_MS, Math.floor(timeoutMs / 5));
   const start = deps.clock.now();
-  const left = (until: number) => Math.max(1, until - (deps.clock.now() - start));
   const settle = deps.clock.after(settleMs);
   const hard = deps.clock.after(timeoutMs);
   const stop = stopOf(request.signal);
   const dir = deps.makeDir(join(deps.tmp, `${FOLDER_PREFIX}${deps.pid}-`));
-  const profile = profileOf(dir);
-  let proxy: Proxy | null = null;
-  let context: BrowserContext | null = null;
-  const failed = (reason: string): BrowseResult => ({ ...result, status: 'failed', reason });
-  const stopped = () => failed('The call was stopped before the page was read.');
-  const lateRead = () => failed(`The page could not be read within the time limit of ${seconds} seconds.`);
+  return {
+    request, deps, base: emptyResult(request.address), seconds: Math.round(timeoutMs / 1000), settleMs, settle, hard, stop, dir,
+    profile: profileOf(dir),
+    /* Only this call's browser knows the proxy's password: no other process on the machine uses the proxy. */
+    credentials: { username: 'hh-browse', password: deps.secret() },
+    left: until => Math.max(1, until - (deps.clock.now() - start)),
+    proxy: null,
+    context: null,
+  };
+}
 
-  /* Only this call's browser knows the proxy's password: no other process on the machine uses the proxy. */
-  const credentials = { username: 'hh-browse', password: deps.secret() };
+function launchOptions(call: Call, proxy: Proxy): LaunchOptions {
+  return {
+    headless: true,
+    /* <-loopback> sends the loopback addresses through the proxy too, which refuses them. */
+    proxy: { server: `http://127.0.0.1:${proxy.port}`, bypass: '<-loopback>', ...call.credentials },
+    args: BROWSER_ARGS,
+    viewport: VIEWPORT,
+    acceptDownloads: false,
+    serviceWorkers: 'block',
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
+    timeout: call.left(call.settleMs),
+  };
+}
 
+async function launch(call: Call, proxy: Proxy): Promise<BrowserContext> {
+  /* A browser that cannot even be loaded fails the call like one that cannot start. */
+  const launching = Promise.resolve().then(() => call.deps.launcher().launchPersistentContext(call.profile, launchOptions(call, proxy)));
+  const launched = await race(launching, call.settle.done, call.stop);
+  if (launched.kind === 'done') return launched.value;
+  /* A browser that starts after the call gave up on it closes at once. */
+  void launching.then(late => late.close(), () => {});
+  if (launched.kind === 'stopped') throw stopped(call);
+  if (launched.kind === 'late') throw failed(call, `The browser did not start within the time limit of ${call.seconds} seconds.`);
+  throw failed(call, `The browser could not start: ${said(launched.error)}`);
+}
+
+type Requests = ReturnType<typeof watchRequests>;
+
+/* Where the browser was sent on to that the proxy refused. */
+const sentOnTo = (proxy: Proxy, requests: Requests): Refused | undefined => proxy.refused.find(r => requests.sentTo.has(r.host));
+
+function notOpened(call: Call, proxy: Proxy, requests: Requests, error: unknown): Ended {
+  const refused = sentOnTo(proxy, requests);
+  if (refused) return refusedBy(call, `The page sent the browser on to ${refused.host}, ${refused.reason}, which stays closed.`);
+  if (proxy.overLimit()) return failed(call, `The page is larger than the size limit of ${sizeLimit(call)}.`);
+  return failed(call, `The page could not be opened: ${said(error)}`);
+}
+
+/* The page's load, then its requests ended: the answer it came with, and whether it was still loading at the limit. */
+async function open(call: Call, page: BrowserPage, proxy: Proxy, requests: Requests): Promise<{ answer: Answer; stillLoading: boolean }> {
+  const went = await step(call, page.goto(call.request.address, { waitUntil: 'load', timeout: call.left(call.settleMs) }), call.settle.done);
+  if (went.kind === 'error') throw notOpened(call, proxy, requests, went.error);
+  const response = went.kind === 'done' ? went.value : null;
+  const answer: Answer = response ? { status: response.status(), headers: response.headers() } : null;
+  const closed = answer?.headers[REFUSED_HEADER];
+  if (closed) throw refusedBy(call, `The page sent the browser on to ${sentOnTo(proxy, requests)?.host ?? 'an address'}, ${closed}, which stays closed.`);
+  if (went.kind === 'late') return { answer, stillLoading: true };
+  const settled = await step(call, requests.quiet(), call.settle.done);
+  return { answer, stillLoading: settled.kind === 'late' };
+}
+
+async function waitForElement(call: Call, page: BrowserPage): Promise<string[]> {
+  const selector = call.request.waitFor;
+  if (!selector) return [];
+  const seen = await step(call, page.waitForSelector(selector, { state: 'visible', timeout: call.left(call.settleMs) }), call.settle.done);
+  return seen.kind === 'done' ? [] : [`The page showed no ${selector} within the time limit.`];
+}
+
+async function takeShot(call: Call, page: BrowserPage, height: number): Promise<{ screenshot: string | null; notes: string[] }> {
+  const file = call.request.screenshot;
+  if (!file) return { screenshot: null, notes: [] };
+  const shot = await step(call, page.screenshot(shotOptions(call.request.fullPage, height, call.left(call.request.limits.timeoutMs))), call.hard.done);
+  if (shot.kind === 'done') {
+    call.deps.writeFile(file, shot.value);
+    return { screenshot: file, notes: [] };
+  }
+  return { screenshot: null, notes: [shot.kind === 'late' ? 'The screenshot was not taken within the time limit.' : `The screenshot could not be taken: ${said(shot.error)}`] };
+}
+
+async function readPage(call: Call): Promise<BrowseResult> {
+  const { request } = call;
+  const proxy = (call.proxy = await startProxy({ lookup: call.deps.lookup, maxBytes: request.limits.maxBytes, credentials: call.credentials, dial: call.deps.dial, listen: call.deps.listen }));
+  const context = (call.context = await launch(call, proxy));
+  const first = context.pages()[0];
+  const page = await must(call, first ? Promise.resolve(first) : context.newPage(), call.settle.done, () => lateRead(call), 'The browser could not open a page');
+  const requests = watchRequests(context, page);
+  const { answer, stillLoading } = await open(call, page, proxy, requests);
+  const drawn = await step(call, page.evaluate(afterTwoFrames), call.hard.done);
+  if (drawn.kind === 'late') throw lateRead(call);
+  const waited = await waitForElement(call, page);
+  const { maxText, maxLinks } = request.limits;
+  const sample = (await must(call, page.evaluate(collectPage, { maxText, maxLinks, markers: ROBOT_MARKERS }), call.hard.done, () => lateRead(call), 'The page could not be read')) as PageSample;
+  const { screenshot, notes: shotNotes } = await takeShot(call, page, sample.height);
+
+  const finalAddress = page.url();
+  const judged = judgePage({ requested: request.address, finalUrl: finalAddress, answer, sample });
+  const kept = proxy.refused.filter(r => r.reason !== SIZE_LIMIT && !requests.sentTo.has(r.host));
+  const notes = [
+    ...(stillLoading ? ['The page was still loading at the time limit; what it showed by then is below.'] : []),
+    ...waited,
+    ...shotNotes,
+    ...(proxy.overLimit() ? [`The page reached the size limit of ${sizeLimit(call)}; the rest of it did not load.`] : []),
+    ...keptOut(kept),
+    ...judged.notes,
+  ];
+  return {
+    status: judged.status, reason: judged.reason, address: request.address, finalAddress, httpStatus: answer?.status ?? null,
+    title: sample.title, text: sample.text, textLength: sample.textLength, links: sample.links, linkCount: sample.linkCount, screenshot, notes,
+  };
+}
+
+export async function browse(request: BrowseRequest, deps: BrowseDeps): Promise<BrowseResult> {
+  const refused = await refusal(request.address, deps.lookup);
+  if (refused) return { ...emptyResult(request.address), status: 'refused', reason: `The address is refused: ${refused}.` };
+  sweepStale(deps.tmp, deps.folders, deps.table, deps.uid);
+  const call = begin(request, deps);
   try {
-    const shut = await startProxy({ lookup: deps.lookup, maxBytes, credentials, dial: deps.dial, listen: deps.listen });
-    proxy = shut;
-    /* A browser that cannot even be loaded fails the call like one that cannot start. */
-    const launching = Promise.resolve().then(() => deps.launcher().launchPersistentContext(profile, {
-      headless: true,
-      /* <-loopback> sends the loopback addresses through the proxy too, which refuses them. */
-      proxy: { server: `http://127.0.0.1:${shut.port}`, bypass: '<-loopback>', ...credentials },
-      args: BROWSER_ARGS,
-      viewport: VIEWPORT,
-      acceptDownloads: false,
-      serviceWorkers: 'block',
-      handleSIGINT: false,
-      handleSIGTERM: false,
-      handleSIGHUP: false,
-      timeout: left(settleMs),
-    }));
-    const launched = await race(launching, settle.done, stop);
-    if (launched.kind !== 'done') void launching.then(late => late.close(), () => {});
-    if (launched.kind === 'stopped') return stopped();
-    if (launched.kind === 'late') return failed(`The browser did not start within the time limit of ${seconds} seconds.`);
-    if (launched.kind === 'error') return failed(`The browser could not start: ${said(launched.error)}`);
-    context = launched.value;
-
-    const opened = await race(context.pages()[0] ? Promise.resolve(context.pages()[0]!) : context.newPage(), settle.done, stop);
-    if (opened.kind === 'stopped') return stopped();
-    if (opened.kind === 'late') return lateRead();
-    if (opened.kind === 'error') return failed(`The browser could not open a page: ${said(opened.error)}`);
-    const page = opened.value;
-    const requests = watchRequests(context, page);
-    const refusal = () => shut.refused.find(r => requests.sentTo.has(r.host));
-
-    const went = await race(page.goto(request.address, { waitUntil: 'load', timeout: left(settleMs) }), settle.done, stop);
-    if (went.kind === 'stopped') return stopped();
-    if (went.kind === 'error') {
-      const refused = refusal();
-      if (refused) return { ...result, status: 'refused', reason: `The page sent the browser on to ${refused.host}, ${refused.reason}, which stays closed.` };
-      if (shut.overLimit()) return failed(`The page is larger than the size limit of ${Math.round(maxBytes / 1048576)} MB.`);
-      return failed(`The page could not be opened: ${said(went.error)}`);
-    }
-    const response = went.kind === 'done' ? went.value : null;
-    const answer: Answer = response ? { status: response.status(), headers: response.headers() } : null;
-    if (answer && answer.headers[REFUSED_HEADER]) {
-      const refused = refusal();
-      return { ...result, status: 'refused', reason: `The page sent the browser on to ${refused?.host ?? 'an address'}, ${answer.headers[REFUSED_HEADER]}, which stays closed.` };
-    }
-    let stillLoading = went.kind === 'late';
-    if (!stillLoading) {
-      const settled = await race(requests.quiet(), settle.done, stop);
-      if (settled.kind === 'stopped') return stopped();
-      stillLoading = settled.kind === 'late';
-    }
-
-    const drawn = await race(page.evaluate(afterTwoFrames), hard.done, stop);
-    if (drawn.kind === 'stopped') return stopped();
-    if (drawn.kind === 'late') return lateRead();
-    const notes: string[] = [];
-    if (request.waitFor) {
-      const seen = await race(page.waitForSelector(request.waitFor, { state: 'visible', timeout: left(settleMs) }), settle.done, stop);
-      if (seen.kind === 'stopped') return stopped();
-      if (seen.kind !== 'done') notes.push(`The page showed no ${request.waitFor} within the time limit.`);
-    }
-
-    const got = await race(page.evaluate(collectPage, { maxText, maxLinks, markers: ROBOT_MARKERS }), hard.done, stop);
-    if (got.kind === 'stopped') return stopped();
-    if (got.kind === 'late') return lateRead();
-    if (got.kind === 'error') return failed(`The page could not be read: ${said(got.error)}`);
-    const sample = got.value as PageSample;
-
-    let screenshot: string | null = null;
-    if (request.screenshot) {
-      const shot = await race(page.screenshot(shotOptions(request.fullPage, sample.height, left(timeoutMs))), hard.done, stop);
-      if (shot.kind === 'stopped') return stopped();
-      if (shot.kind === 'done') {
-        deps.writeFile(request.screenshot, shot.value);
-        screenshot = request.screenshot;
-      } else notes.push(shot.kind === 'late' ? 'The screenshot was not taken within the time limit.' : `The screenshot could not be taken: ${said(shot.error)}`);
-    }
-
-    const finalAddress = page.url();
-    const judged = judgePage({ requested: request.address, finalUrl: finalAddress, answer, sample });
-    if (stillLoading) notes.unshift('The page was still loading at the time limit; what it showed by then is below.');
-    if (shut.overLimit()) notes.push(`The page reached the size limit of ${Math.round(maxBytes / 1048576)} MB; the rest of it did not load.`);
-    const kept = shut.refused.filter(r => r.reason !== SIZE_LIMIT && !requests.sentTo.has(r.host));
-    if (kept.length) notes.push(keptOut(kept));
-    return {
-      status: judged.status, reason: judged.reason, address: request.address, finalAddress, httpStatus: answer?.status ?? null,
-      title: sample.title, text: sample.text, textLength: sample.textLength, links: sample.links, linkCount: sample.linkCount,
-      screenshot, notes: [...notes, ...judged.notes],
-    };
+    return await readPage(call);
+  } catch (error) {
+    if (error instanceof Ended) return error.result;
+    throw error;
   } finally {
-    settle.cancel();
-    hard.cancel();
-    await cleanUp(context, profile, dir, proxy, deps);
+    call.settle.cancel();
+    call.hard.cancel();
+    await cleanUp(call);
   }
 }
 
 /* What the page's own requests asked for that the proxy never opened. */
-function keptOut(refused: Refused[]): string {
+function keptOut(refused: Refused[]): string[] {
+  if (!refused.length) return [];
   const hosts = [...new Set(refused.map(r => r.host))];
   const named = hosts.slice(0, 3);
   const list = named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}` : named[0];
-  if (refused.length === 1) return `The page asked for ${list}, an address that is not public; the browser did not open it.`;
-  return `The page asked for ${refused.length} addresses that are not public, such as ${list}; the browser opened none of them.`;
+  if (refused.length === 1) return [`The page asked for ${list}, an address that is not public; the browser did not open it.`];
+  return [`The page asked for ${refused.length} addresses that are not public, such as ${list}; the browser opened none of them.`];
 }
 
 /* The browser closes, or is killed by its profile when it does not close within its allowance; then the proxy stops and
    the call's folder goes. */
-async function cleanUp(context: BrowserContext | null, profile: string, dir: string, proxy: Proxy | null, deps: BrowseDeps): Promise<void> {
+async function cleanUp({ context, profile, dir, proxy, deps }: Call): Promise<void> {
   if (context) {
     const allowance = deps.clock.after(CLOSE_MS);
     await Promise.race([context.close().catch(() => {}), allowance.done]);
