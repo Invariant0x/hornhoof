@@ -33,5 +33,6 @@ function questionKind(tool: string, protectedQuestion: boolean): OperatorQuestio
 }
 
 function questionInput(data: Record<string, unknown>): unknown {
-  return data.tool_input ?? data.input ?? data.message ?? null;
+  /* Grouped, so a mutant that turns one ?? into || still compiles. */
+  return ((data.tool_input ?? data.input) ?? data.message) ?? null;
 }
