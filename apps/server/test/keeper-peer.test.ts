@@ -853,9 +853,7 @@ describe('the peer link in the keeper', () => {
     return { c, keeper, lines, offered, failOnce, startMono, linkStarts: () => linkStarts, silentReads: () => silentReads, stepUntil };
   }
 
-  /* Expected to fail until #842 keeps the last known route in SyncController.readRoute on an unknown relay answer;
-     remove .fails once #842 lands in the same branch (network-1). */
-  it.fails('keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes', async () => {
+  it('keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes', async () => {
     /* Every six virtual minutes the path through hornhoof.org gives no answer for four seconds. */
     const { c, keeper, lines, offered, failOnce, startMono, linkStarts, stepUntil } = await relaySilenceStand(
       elapsed => (elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000),
