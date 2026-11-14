@@ -320,7 +320,6 @@ test('non-CEO department owner answers head in question card, chat and terminal 
       const dec: Decisions = {
         requests: reqs,
         proposals: [],
-        computerAccess: null,
         counts: {
           byPerson: answered ? {} : { [MAX_ME.person.id]: 1 },
           byAgent: answered ? {} : { [fx.headId]: 1 },
