@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import type { Duplex } from 'node:stream';
 import { onTestFinished, vi } from 'vitest';
 import { listenIn, testPort } from '../../../../test-support/ports.mjs';
+import type { MachineKey } from '../../src/modules/keeper/machine-keys.js';
 
 /* A clock and timer source for the network stand: virtual in unit tests, and the process clock in the Docker lab. */
 export type Schedule = {
@@ -180,6 +181,14 @@ export function virtualClock(opts: { keep?: boolean; startWall?: number } = {}):
 /* A port in this worker's corridor where nothing listens, so a direct LAN dial gets an immediate refusal. */
 export async function closedPort(host = '127.0.0.1'): Promise<number> {
   return testPort(host);
+}
+
+export function ed25519Key(): MachineKey {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+  return { privatePem: privateKey, publicPem: publicKey };
 }
 
 function readRequestBody(req: http.IncomingMessage): Promise<Buffer | null> {

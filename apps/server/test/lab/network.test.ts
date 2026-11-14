@@ -1,11 +1,9 @@
-import { generateKeyPairSync } from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../../test-support/ports.mjs';
 import { LeaseProofs } from '../../src/modules/keeper/proofs.js';
 import type { HeldCertificate } from '../../src/modules/keeper/certificate.js';
-import type { MachineKey } from '../../src/modules/keeper/machine-keys.js';
 import { serviceName } from '../../src/modules/link/peer-client.js';
 import { Relay } from '../../src/modules/link/relay.js';
 import { issueCertificate, makeAuthority, makeCrl } from '../../src/modules/network/authority.js';
@@ -14,7 +12,7 @@ import { PeerServer } from '../../src/net/peer-server.js';
 import { PeerSessions } from '../../src/net/peer-sessions.js';
 import { fakeRelay } from '../fake-relay.js';
 import { directPeerBlockScript } from './lab.js';
-import { closedPort, createDelayGate, createPeerRelay, virtualClock } from './network.js';
+import { closedPort, createDelayGate, createPeerRelay, ed25519Key, virtualClock } from './network.js';
 
 const COMPANY_ID = '00000000-0000-4000-8000-0000000000aa';
 const MACHINE_A = '11111111-0000-4000-8000-000000000001';
@@ -22,19 +20,11 @@ const MACHINE_B = '22222222-0000-4000-8000-000000000002';
 const NET_A = 'aa11bb22'.repeat(8);
 const NET_B = 'cc33dd44'.repeat(8);
 
-function ed25519(): MachineKey {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-  });
-  return { privatePem: privateKey, publicPem: publicKey };
-}
-
 async function dataCerts() {
   const authority = await makeAuthority(COMPANY_ID);
   const crlPem = await makeCrl(authority, []);
   const make = async (machineId: string) => {
-    const key = ed25519();
+    const key = ed25519Key();
     const issued = await issueCertificate(authority, { machineId, role: 'data', signKey: key.publicPem });
     const held: HeldCertificate = {
       machine: machineId,

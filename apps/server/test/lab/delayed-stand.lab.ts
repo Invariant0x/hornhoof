@@ -1,4 +1,3 @@
-import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
@@ -14,7 +13,6 @@ import type { HeldCertificate } from '../../src/modules/keeper/certificate.js';
 import { Keeper } from '../../src/modules/keeper/keeper.js';
 import { LeaseHolder } from '../../src/modules/keeper/lease-holder.js';
 import { leaseStore, type Sql } from '../../src/modules/keeper/lease-store.js';
-import type { MachineKey } from '../../src/modules/keeper/machine-keys.js';
 import { writeKeeperState } from '../../src/modules/keeper/state.js';
 import { SyncController, type SyncCatalog } from '../../src/modules/keeper/sync.js';
 import { PACE_FOR_MS } from '../../src/modules/keeper/sync-step.js';
@@ -35,7 +33,7 @@ import { fakeRelay } from '../fake-relay.js';
 import { appOn, setUpCompany, TEST_SECRET } from '../helpers.js';
 import { forkOf, pgliteSource, type Side } from '../merge-fixture.js';
 import { migratedPgliteDump, readPgliteTemplate } from '../prepare-environment.js';
-import { closedPort, createDelayGate, createPeerRelay, virtualClock } from './network.js';
+import { closedPort, createDelayGate, createPeerRelay, ed25519Key, virtualClock } from './network.js';
 
 let migratedTemplate: Blob | undefined;
 
@@ -70,19 +68,11 @@ function tempDir(prefix: string): string {
   return dir;
 }
 
-function ed25519(): MachineKey {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-  });
-  return { privatePem: privateKey, publicPem: publicKey };
-}
-
 async function pairCerts(companyId: string, idA: string, idB: string) {
   const authority = await makeAuthority(companyId);
   const crlPem = await makeCrl(authority, []);
   const issue = async (machineId: string) => {
-    const key = ed25519();
+    const key = ed25519Key();
     const cert = await issueCertificate(authority, { machineId, role: 'data', signKey: key.publicPem });
     const held: HeldCertificate = {
       machine: machineId,
@@ -645,7 +635,7 @@ describe('delayed network lab verification of #825 items 1-4', () => {
     await clock.until(() => keeper.mode() === 'lead' && peerOffersStarted === 1 && activeOffer !== null, { maxMs: 10_000, stepMs: 50 });
 
     /* Issue Machine B's data certificate under the company's real authority and connect B -> PeerRelay -> A. */
-    const keyB = ed25519();
+    const keyB = ed25519Key();
     const [rowB] = await db
       .insert(machines)
       .values({ companyId: acme!.id, personId: owner!.id, machineKey: 'copy-b', role: 'data', networkId: NET_B, signKey: keyB.publicPem })
