@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from './api';
 import { errorText, useT } from './i18n';
 import { forgetOrg } from './org';
+import { forgetRequestDrafts } from './ui/Requests';
 import { AcceptInvite } from './screens/AcceptInvite';
 import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
@@ -29,13 +30,17 @@ export function App() {
 }
 
 /* Whoever comes on this tab next sees nothing of the company the one before saw, however they came: the company leaves
-   every screen, with the answers still on their way for it, before the next screen draws. */
+   every screen, with the answers still on their way for it, and so do the answers the one before typed and did not
+   send, before the next screen draws. */
 function useScreen() {
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
   const person = useRef<string | null>(null);
   const show = useCallback((next: Screen) => {
     const id = next.kind === 'shell' ? next.me.person.id : null;
-    if (id !== person.current) forgetOrg();
+    if (id !== person.current) {
+      forgetOrg();
+      forgetRequestDrafts();
+    }
     person.current = id;
     setScreen(next);
   }, []);

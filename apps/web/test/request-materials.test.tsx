@@ -10,7 +10,7 @@ import type { ProposalDecision, WaitingRequest } from '../src/types';
 import { extractPdfTextItems, setPdfLoaderForTests } from '../src/ui/MaterialDocument';
 import { MaterialViewer } from '../src/ui/MaterialViewer';
 import { readMaterialStamp, type MaterialManifestView } from '../src/ui/RequestMaterials';
-import { Requests, clearRequestDraftsForTests } from '../src/ui/Requests';
+import { Requests, forgetRequestDrafts } from '../src/ui/Requests';
 import { DEV_ORG, ROSTER, TASKS, TURN, decisions, mockApi } from './api-mock';
 
 const DEV = { id: 'd-dev', name: 'Development' };
@@ -84,7 +84,7 @@ function chunkedStream(chunks: Uint8Array[], failAfter?: number): ReadableStream
 describe('separate question materials preview and explicit answering (#512)', () => {
   afterEach(() => {
     cleanup();
-    clearRequestDraftsForTests();
+    forgetRequestDrafts();
     setPdfLoaderForTests(null);
     localStorage.removeItem('hh-lang');
     document.documentElement.removeAttribute('dir');

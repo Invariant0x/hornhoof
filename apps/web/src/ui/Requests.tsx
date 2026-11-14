@@ -14,9 +14,11 @@ import { proseErrorText } from './TaskAttachments';
    may take take them, a pick and a commit to approve do not. */
 export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.canAnswer && (r.kind === 'question' || r.kind === 'stuck'));
 
+/* What this person typed and did not send yet, kept while a card closes and opens again. */
 const draftsByRequest = new Map<string, string>();
 
-export function clearRequestDraftsForTests(): void {
+/* A person leaving the tab takes what they typed and did not send with them: the next one starts with empty answers. */
+export function forgetRequestDrafts(): void {
   draftsByRequest.clear();
 }
 
