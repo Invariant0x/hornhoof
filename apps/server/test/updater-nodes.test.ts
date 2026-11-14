@@ -1,19 +1,16 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { eventually } from '../../../test-support/eventually.mjs';
+import { JQ, killProcessGroup, pidAlive, runUpdater, SCRIPT, tempUpdaterDir } from './updater-fixture.js';
 
-const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
 const DOCKERFILE = fileURLToPath(new URL('../../updater/Dockerfile', import.meta.url));
 const INSTALL = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
-const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
-const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
-const TOOLS = mkdtempSync(join(tmpdir(), 'hh-updater-tools-'));
-if (JQ) symlinkSync(JQ, join(TOOLS, 'jq'));
 
 const SERVER = 'https://hornhoof.example.test';
 const HOST = 'a'.repeat(64);
@@ -62,6 +59,7 @@ function bundled(dir: string): string {
     'UPDATER_BUILD="__HORNHOOF_UPDATER_IMAGE__"',
     'SERVER_HOST_ID="__HORNHOOF_HOST_ID__"',
     'printf \'bundled installer SERVER=%s BUILD_IMAGE=%s UPDATER_BUILD=%s SERVER_HOST_ID=%s NODES_ONLY=%s FROM_UPDATER=%s TTY=%s\\n\' "$SERVER" "$BUILD_IMAGE" "$UPDATER_BUILD" "$SERVER_HOST_ID" "${HORNHOOF_NODES_ONLY:-}" "${HORNHOOF_FROM_UPDATER:-}" "${HORNHOOF_TTY:-}" >> "$STUB_LOG"',
+    '[ -z "${STUB_INSTALLER_HOLD:-}" ] || { mkfifo "$STUB_STATE/installer-hold"; printf \'%s %s\\n\' "$$" "$PPID" > "$STUB_INSTALLER_HOLD"; read -r _ < "$STUB_STATE/installer-hold"; }',
     '[ -z "${STUB_INSTALLER_FAILS:-}" ] || { echo "Could not start the node." >&2; exit 1; }',
     'echo "Starting the node."',
     '',
@@ -71,23 +69,23 @@ function bundled(dir: string): string {
 
 /* The updater with these arguments, as long as it takes: only the runner's limit for the test ends one that never ends. */
 async function updater(args: string[], env: Record<string, string> = {}, served: Served = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-updater-nodes-'));
+  const dir = tempUpdaterDir('hh-updater-nodes-');
   const log = join(dir, 'stub.log');
   writeFileSync(log, '');
-  const child = spawn('bash', [SCRIPT, ...args], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`, HOME: dir, STUB_LOG: log, STUB_STATE: dir, STUB_SERVED: serve(dir, served), HORNHOOF_INSTALLER: bundled(dir), ...env },
+  const { code, out } = await runUpdater(args, {
+    TMPDIR: dir,
+    HOME: dir,
+    STUB_LOG: log,
+    STUB_STATE: dir,
+    STUB_SERVED: serve(dir, served),
+    HORNHOOF_INSTALLER: bundled(dir),
+    ...env,
   });
-  let stdout = '';
-  let stderr = '';
-  child.stdout.setEncoding('utf8').on('data', (text: string) => (stdout += text));
-  child.stderr.setEncoding('utf8').on('data', (text: string) => (stderr += text));
-  const [code] = (await once(child, 'close')) as [number | null];
-  const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+  const calls = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [];
   /* Whatever happens, nothing of what the server served ran. */
   expect(existsSync(join(dir, 'pwned'))).toBe(false);
   expect(calls).not.toContain('served installer ran');
-  return { code, out: stdout + stderr, calls };
+  return { code, out, calls };
 }
 
 const look = (env: Record<string, string> = {}, served: Served = {}) => updater(['nodes', SERVER, SELF, HOST, '--once'], { STUB_PLAN_NODES: BEHIND, ...env }, served);
@@ -243,3 +241,76 @@ describe('updater start-nodes', () => {
     expect(r.calls.filter(c => c.startsWith('docker rm') || c.startsWith('docker run'))).toEqual([]);
   });
 });
+
+describe('updater nodes process group cleanup', () => {
+  const leakedPids = new Set<number>();
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const pid of leakedPids) killProcessGroup(pid);
+    leakedPids.clear();
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('stops background node installers and updater.sh when a test fails in afterEach', async () => {
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    const work = mkdtempSync(join(tmpdir(), 'hh-nodes-abort-'));
+    tempDirs.push(work);
+    const holdFile = join(work, 'hold');
+    const resultFile = join(work, 'result.json');
+    const probeConfig = join(work, 'vitest.probe.config.mjs');
+    writeFileSync(
+      probeConfig,
+      `export default { root: ${JSON.stringify(repoRoot)}, test: { pool: 'forks', testTimeout: 20000, reporters: ['default'], include: ['apps/server/test/updater-nodes.test.ts'] } };\n`,
+    );
+    const runner = spawn(
+      process.execPath,
+      [join(repoRoot, 'node_modules/vitest/vitest.mjs'), 'run', '--config', probeConfig, 'apps/server/test/updater-nodes.test.ts', '-t', 'updater nodes abort probe'],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          VITEST: '',
+          VITEST_WORKER_ID: '',
+          VITEST_POOL_ID: '',
+          HH_TEST_REPORT: '',
+          HH_TEST_PART: '',
+          HH_TEST_FILES: '',
+          HH_NODES_ABORT_HOLD: holdFile,
+          HH_NODES_ABORT_RESULT: resultFile,
+        },
+        stdio: 'ignore',
+      },
+    );
+    await once(runner, 'exit');
+    const observed = JSON.parse(readFileSync(resultFile, 'utf8')) as {
+      installerPid: number; updaterPid: number; installerAlive: boolean; updaterAlive: boolean;
+    };
+    leakedPids.add(observed.installerPid);
+    leakedPids.add(observed.updaterPid);
+    expect(observed.installerAlive).toBe(false);
+    expect(observed.updaterAlive).toBe(false);
+    expect(pidAlive(observed.installerPid)).toBe(false);
+    expect(pidAlive(observed.updaterPid)).toBe(false);
+  });
+});
+
+const nodesAbortHold = process.env.HH_NODES_ABORT_HOLD;
+const nodesAbortResult = process.env.HH_NODES_ABORT_RESULT;
+if (nodesAbortHold && nodesAbortResult) {
+  describe('updater nodes abort probe', () => {
+    let saved = { installerPid: 0, updaterPid: 0 };
+    it('fails while a background node installer is running', async () => {
+      void look({ STUB_PLAN_NODES: `${CLAUDE}=${PLAN_A}=${OLD_NODE}`, STUB_INSTALLER_HOLD: nodesAbortHold }).catch(() => {});
+      await eventually(() => existsSync(nodesAbortHold) && readFileSync(nodesAbortHold, 'utf8').includes('\n'));
+      const [installerPid, updaterPid] = readFileSync(nodesAbortHold, 'utf8').trim().split(/\s+/).map(Number);
+      saved = { installerPid: installerPid!, updaterPid: updaterPid! };
+      writeFileSync(nodesAbortResult, JSON.stringify({ ...saved, installerAlive: true, updaterAlive: true }));
+      throw new Error('simulated failure');
+    });
+    it('observes cleanup right after afterEach', () => {
+      writeFileSync(nodesAbortResult, JSON.stringify({ ...saved, installerAlive: pidAlive(saved.installerPid), updaterAlive: pidAlive(saved.updaterPid) }));
+      expect(saved.updaterPid).toBeGreaterThan(1);
+    });
+  });
+}

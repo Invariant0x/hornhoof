@@ -105,7 +105,12 @@ case "$1 $2" in
       start)
         echo "ran: $(cat "$STUB_STATE/computer-command")"
         [ -z "${STUB_COMPUTER_CLOSES:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
-        if [ -n "${STUB_COMPUTER_RUNS:-}" ]; then
+        if [ -n "${STUB_COMPUTER_HOLD:-}" ]; then
+          mkfifo "$STUB_STATE/computer-removed"
+          printf '%s %s\n' "$$" "$PPID" > "$STUB_COMPUTER_HOLD"
+          read -r _ < "$STUB_STATE/computer-removed"
+          rm -f "$STUB_STATE/computer-removed"
+        elif [ -n "${STUB_COMPUTER_RUNS:-}" ]; then
           mkfifo "$STUB_STATE/computer-removed"
           touch "$STUB_STATE/computer-runs"
           read -r _ < "$STUB_STATE/computer-removed"

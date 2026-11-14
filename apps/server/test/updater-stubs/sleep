@@ -2,8 +2,26 @@
 # The updater waits a second before it asks the server or the database again. Here they answer at once or never, so a
 # wait only costs the test that second. STUB_WATCH: a second of the watch over a command on the computer passes once the
 # command is under way, as the docker stub runs it: still running, or ended and seen to end by the updater, which marks
-# that in a file of its own in TMPDIR. No clock decides what the watch sees.
+# that in a file of its own in TMPDIR. No clock decides what the watch sees; /bin/sleep yields the processor between
+# checks, and the stub exits once its folders or its parent are gone.
 [ -n "${STUB_WATCH:-}" ] || exit 0
+if [ -z "${STUB_STATE:-}" ] || [ ! -d "$STUB_STATE" ] || [ -z "${TMPDIR:-}" ] || [ ! -d "$TMPDIR" ]; then
+  exit 1
+fi
+[ ! -e "$STUB_STATE/computer-runs" ] || exit 0
+parent="${PPID:-0}"
+[ "$parent" -gt 1 ] 2> /dev/null || exit 1
+grandparent=$(ps -o ppid= -p "$parent" 2> /dev/null | tr -d ' ')
 until [ -e "$STUB_STATE/computer-runs" ]; do
+  if [ ! -d "$STUB_STATE" ] || [ ! -d "$TMPDIR" ]; then exit 1; fi
   for mark in "$TMPDIR"/*.done; do [ ! -e "$mark" ] || exit 0; done
+  kill -0 "$parent" 2> /dev/null || exit 1
+  [ "$(ps -o ppid= -p "$$" 2> /dev/null | tr -d ' ')" = "$parent" ] || exit 1
+  if [ -n "$grandparent" ] && [ "$(ps -o ppid= -p "$parent" 2> /dev/null | tr -d ' ')" != "$grandparent" ]; then
+    exit 1
+  fi
+  if [ -n "${STUB_OWNER:-}" ] && ! kill -0 "$STUB_OWNER" 2> /dev/null; then
+    exit 1
+  fi
+  /bin/sleep 0.02
 done
