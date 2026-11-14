@@ -105,13 +105,20 @@ export const codexProgram: TermProgram = {
   },
 };
 
-/* What Claude's /usage shows, asked from Anthropic's own servers only, with the token Claude Code keeps fresh while it
-   runs. A token that ran out gives nothing, and the host keeps what it knew. */
-export async function claudePlanLimits(home: string, base = 'https://api.anthropic.com'): Promise<Limits | null> {
+function claudeAccessToken(home: string): string | null {
+  const longToken = planToken(home);
+  if (longToken) return longToken;
   const oauth = readJson(join(home, '.credentials.json')).claudeAiOauth;
   const { accessToken: token, expiresAt: expires } = (oauth && typeof oauth === 'object' ? oauth : {}) as Record<string, unknown>;
   if (typeof token !== 'string' || !token) return null;
-  if (typeof expires === 'number' && expires < Date.now() + 30_000) return null;
+  return typeof expires === 'number' && expires < Date.now() + 30_000 ? null : token;
+}
+
+/* What Claude's /usage shows, asked from Anthropic's own servers only, with the long token Hornhoof keeps or the one
+   Claude Code keeps fresh while it runs. A token that ran out gives nothing, and the host keeps what it knew. */
+export async function claudePlanLimits(home: string, base = 'https://api.anthropic.com'): Promise<Limits | null> {
+  const token = claudeAccessToken(home);
+  if (!token) return null;
   try {
     const res = await fetch(`${base}/api/oauth/usage`, {
       headers: { authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', accept: 'application/json' },

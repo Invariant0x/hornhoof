@@ -120,16 +120,27 @@ type RunOptions = {
   browserCheckMs?: number;
 };
 
-/* A complete list of the plan's windows replaces what the node knew. A partial one, such as the single window a turn
-   tells, updates the windows it names and leaves the others as they were; one of those still full keeps the plan at
-   its limit until it starts over. */
-function merged(known: Limits | null, news: Limits): Limits {
-  if (news.complete || !known) return news;
+const MODEL_WEEK = /^seven_day_[a-z]+$/;
+const stillOpen = (w: Limits['windows'][number]) => w.resetsAt === null || Date.parse(w.resetsAt) > Date.now();
+const windowFull = (w: Limits['windows'][number]) => (w.utilization ?? 0) >= 1 && stillOpen(w);
+
+/* A complete reading from the usage page replaces what the node knew. A turn's complete reading names every unified window
+   of the plan, while keeping any unexpired model week from the usage page. A partial reading updates only what it names. */
+function keptWindows(known: Limits, news: Limits, fromPage: boolean): Limits['windows'] {
+  if (fromPage && news.complete) return [];
+  const fresh = new Set(news.windows.map(w => w.name));
+  return known.windows.filter(w => !fresh.has(w.name) && (!news.complete || (MODEL_WEEK.test(w.name) && stillOpen(w))));
+}
+
+function merged(known: Limits | null, news: Limits, fromPage = false): Limits {
+  if (!known || (fromPage && news.complete)) return news;
   const fresh = new Map(news.windows.map(w => [w.name, w]));
-  const kept = known.windows.filter(w => !fresh.has(w.name));
-  const windows = [...known.windows.map(w => fresh.get(w.name) ?? w), ...news.windows.filter(w => !known.windows.some(k => k.name === w.name))];
-  const full = kept.some(w => (w.utilization ?? 0) >= 1 && (w.resetsAt === null || Date.parse(w.resetsAt) > Date.now()));
-  return { status: full ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(known.complete ? { complete: true } : {}) };
+  const kept = keptWindows(known, news, fromPage);
+  const windows = news.complete
+    ? [...news.windows, ...kept]
+    : [...known.windows.map(w => fresh.get(w.name) ?? w), ...news.windows.filter(w => !known.windows.some(k => k.name === w.name))];
+  const complete = Boolean(news.complete || known.complete);
+  return { status: kept.some(windowFull) ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(complete ? { complete: true } : {}) };
 }
 
 /* What the node knows of the plan's limits, and whether Hornhoof has heard its last reading. Hornhoof counts them fresh from
@@ -140,14 +151,14 @@ class PlanLimits {
   private known: Limits | null = null;
   private unsaid = false;
 
-  read(news: Limits | null): void {
+  read(news: Limits | null, fromPage = false): void {
     if (!news) return;
-    this.known = merged(this.known, news);
+    this.known = merged(this.known, news, fromPage);
     this.unsaid = true;
   }
 
   looked(news: Limits | null, online: boolean): void {
-    this.read(news);
+    this.read(news, true);
     if (!news && !online) this.unsaid = false;
   }
 

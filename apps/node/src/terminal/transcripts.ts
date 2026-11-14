@@ -312,11 +312,13 @@ export function claudeStatusContext(status: unknown): number | null {
   return isRecord(status) && isRecord(status.context_window) ? share(status.context_window.used_percentage) : null;
 }
 
-/* The limits Claude Code hands its status line: five hours and seven days. */
+/* The limits Claude Code hands its status line: every unified window the plan reports, such as five hours and seven days. */
 export function claudeStatusLimits(status: unknown): Limits | null {
   if (!isRecord(status) || !isRecord(status.rate_limits)) return null;
-  const windows = Object.entries(status.rate_limits)
-    .filter((e): e is [string, Record<string, unknown>] => isRecord(e[1]))
-    .map(([name, w]) => ({ name, utilization: share(w.used_percentage), resetsAt: isoFrom(w.resets_at) }));
-  return { status: 'allowed', windows: windows.slice(0, 8) };
+  const windows = Object.entries(status.rate_limits).flatMap(([name, w]) => {
+    const used = isRecord(w) ? share(w.used_percentage) : null;
+    return isRecord(w) && used !== null ? [{ name, utilization: used, resetsAt: isoFrom(w.resets_at) }] : [];
+  });
+  if (!windows.length) return null;
+  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows: windows.slice(0, 8), complete: true };
 }

@@ -405,6 +405,7 @@ export const en = {
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',
     unknown: (at: string | null) => at ? `Unknown, last data from ${at}` : 'Unknown, no limit data received yet',
+    offlineLimit: (at: string | null) => at ? `Machine offline, last data from ${at}` : 'Machine offline, no limit data yet',
     noPlanLimits: 'Pay as you go, no plan limits',
     share: 'Tasks may use',
     shareLabel: (name: string) => `Share of ${name} for tasks`,
@@ -525,6 +526,7 @@ export const en = {
     notes: {
       limit: (at: string, duration: string) => `Until ${at}, in ${duration}. Its agents wait until then.`,
       limitUnknown: 'Its agents wait until the limit resets.',
+      offline: (host: string) => host ? `On ${host}. Its agents wait until the machine is back online.` : 'Its agents wait until a machine is back online.',
       login: (host: string, owner: string) => `On ${host}. Only ${owner} can sign in.`,
       loginOffline: (host: string) => `It needs a sign-in on ${host}, and the machine is offline.`,
       setup: (host: string, owner: string, program: string) => `On ${host}, ${program} asks its owner to accept its terms. Only ${owner} can do it, by running the install command on that machine again.`,

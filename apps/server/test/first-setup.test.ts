@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, jobs, machines, nodes, subscriptions } from '../src/db/schema.js';
 import { agentState, enqueueTurn, pump } from '../src/modules/conversation/queue.js';
-import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { expireStaleNodes, NODE_STALE_MS, settlePlans } from '../src/modules/nodes/nodes.js';
 import { subViews } from '../src/modules/subscriptions/views.js';
@@ -82,5 +82,31 @@ describe("a program's first setup that only the plan's owner passes", () => {
     await c.db.update(nodes).set({ status: 'needs_setup', lastSeenAt: new Date(now.getTime() - NODE_STALE_MS - 60_000) }).where(eq(nodes.id, c.node.id));
     await expireStaleNodes(c.db, now);
     expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_login', 'needs_login']);
+  });
+
+  it('updates lastSeenAt when a live node reports its load without sending a new status', async () => {
+    const c = await planOnMachine();
+    const oldSeen = new Date('2026-11-13T18:07:00.000Z');
+    const loadSeen = new Date('2026-11-13T21:06:00.000Z');
+    await c.db.update(nodes).set({ lastSeenAt: oldSeen }).where(eq(nodes.id, c.node.id));
+    await handleNodeMessage(c.ctx, c.id, { type: 'load', cpus: 8, load: 1.2, memFree: 4096, memTotal: 8192, tests: 0, jobs: 0 }, loadSeen);
+    const [after] = await c.db.select().from(nodes).where(eq(nodes.id, c.node.id));
+    expect(after!.lastSeenAt?.toISOString()).toBe(loadSeen.toISOString());
+  });
+
+  it('writes lastSeenAt from load at most once a minute per node, and again when the clock went back', async () => {
+    const c = await planOnMachine();
+    const load = { type: 'load', cpus: 8, load: 1.2, memFree: 4096, memTotal: 8192, tests: 0, jobs: 0 } as const;
+    const seen = async () => (await c.db.select().from(nodes).where(eq(nodes.id, c.node.id)))[0]!.lastSeenAt?.toISOString();
+    const at = (iso: string) => new Date(iso);
+    await handleNodeMessage(c.ctx, c.id, load, at('2026-11-13T21:06:00.000Z'));
+    await handleNodeMessage(c.ctx, c.id, load, at('2026-11-13T21:06:59.999Z'));
+    expect(await seen()).toBe('2026-11-13T21:06:00.000Z');
+    await handleNodeMessage(c.ctx, c.id, load, at('2026-11-13T21:07:00.000Z'));
+    expect(await seen()).toBe('2026-11-13T21:07:00.000Z');
+    await handleNodeMessage(c.ctx, c.id, load, at('2026-11-13T21:05:00.000Z'));
+    expect(await seen()).toBe('2026-11-13T21:05:00.000Z');
+    await handleNodeMessage(c.ctx, BUILTIN, load, at('2026-11-13T21:20:00.000Z'));
+    expect(await seen()).toBe('2026-11-13T21:05:00.000Z');
   });
 });
