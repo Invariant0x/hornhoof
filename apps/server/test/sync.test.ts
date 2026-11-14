@@ -347,4 +347,127 @@ describe('the sync controller', () => {
     await s.looks(8, 1000);
     expect(s.state.pulses).toBe(0);
   });
+
+  it('waits for the copy again and names it at the relay after ten seconds of silence on a delayed path', async () => {
+    const s = await stand();
+    const lsnAt = (step: number) => `0/${(0x3000000 + step * 0x1000).toString(16).toUpperCase()}`;
+    let step = 0;
+    const history: string[] = [lsnAt(0)];
+    const advance = async (writes: boolean, lagLooks: number | null) => {
+      if (writes) {
+        step += 1;
+        s.state.position = lsnAt(step);
+      }
+      history.push(s.state.position);
+      if (lagLooks !== null) {
+        s.state.replication[0]!.confirmed = history[Math.max(0, history.length - 1 - lagLooks)]!;
+        s.state.replication[0]!.syncState = s.state.setting === C.copyName ? 'sync' : 'async';
+      }
+      await s.look(250);
+    };
+
+    /* Reach initial synchronous state with the copy named at the relay. */
+    await s.looks(2);
+    await s.looks(Math.ceil(PACE_FOR_MS / 1000) + 3, 1000);
+    s.state.replication[0]!.syncState = 'sync';
+    await s.looks(4);
+    expect([s.state.setting, s.record()?.state, s.record()?.copy]).toEqual([C.copyName, 'on', C.networkId]);
+
+    /* Ten seconds of silence while the leader keeps committing: sync turns off and stays off while silent. */
+    s.answering(false);
+    for (let i = 0; i < 40; i++) await advance(true, null);
+    expect(s.state.setting).toBeNull();
+    expect(s.record()).toMatchObject({ state: 'off', copy: null });
+    expect(s.controller.flag()).toBe('relay_off');
+
+    /* The copy returns over a relay path whose replication feedback lags by 2.5 s (10 looks) under continuous writes. */
+    s.answering(true);
+    const returnedAt = s.clock.now;
+    for (let i = 0; i < 240 && !(s.state.setting === C.copyName && s.record()?.state === 'on'); i++) {
+      await advance(true, 10);
+    }
+    expect(s.clock.now - returnedAt).toBeLessThanOrEqual(60_000);
+    expect(s.state.setting).toBe(C.copyName);
+    expect(s.controller.flag()).toBe('copy');
+    expect(s.record()).toMatchObject({ state: 'on', copy: C.networkId });
+
+    /* Even when no new writes arrive during ten seconds of silence, a silent open socket is never re-named. */
+    const clearsBefore = s.state.did.filter(what => what === 'clear').length;
+    const setsBefore = s.state.did.filter(what => what === `set ${C.copyName}`).length;
+    s.answering(false);
+    await s.looks(40, 250);
+    expect(s.state.setting).toBeNull();
+    expect(s.record()).toMatchObject({ state: 'off', copy: null });
+    expect(s.state.did.filter(what => what === 'clear').length - clearsBefore).toBe(1);
+    expect(s.state.did.filter(what => what === `set ${C.copyName}`).length - setsBefore).toBe(0);
+  });
+
+  it('logs the relay status and error code when storing fails, without hiding route read errors or leaking the key', async () => {
+    const key = 's'.repeat(32);
+    const { catalog } = catalogOf();
+    const lines: string[] = [];
+    let routeReply: Awaited<ReturnType<Relay['route']>> = {
+      known: true,
+      state: 'held',
+      client: CLIENT,
+      since: 10,
+      generation: 1,
+      relayStarted: 1,
+      evictionBound: 30,
+      sync: { state: 'off', copy: null, epoch: 0, generation: 0, at: null },
+    };
+    let syncReply: Awaited<ReturnType<Relay['setSync']>> = { stored: false, why: 'unknown' } as Awaited<ReturnType<Relay['setSync']>>;
+    let linkValue: { name: string; key: string; client: string } | null | undefined = { name: 'acme', key, client: CLIENT };
+    let now = 0;
+    const controller = new SyncController({
+      catalog,
+      relay: {
+        route: async () => routeReply,
+        setSync: async () => syncReply,
+      },
+      link: async () => linkValue,
+      dbBytes: () => 0,
+      leads: () => true,
+      log: line => lines.push(line),
+      now: () => (now += 250),
+      routeEveryMs: 0,
+    });
+
+    syncReply = { stored: false, why: 'refused', status: 503, error: 'unknown' } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (503 unknown)');
+
+    syncReply = { stored: false, why: 'not_holder', status: 409, error: 'not_holder' } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (409 not_holder)');
+
+    syncReply = { stored: false, why: 'refused', status: 502, error: null } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (502)');
+
+    syncReply = { stored: false, why: 'slow' } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (slow)');
+
+    routeReply = { known: false, why: 'refused' };
+    await controller.look();
+    expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not answer who holds the route (refused)');
+
+    routeReply = {
+      known: true,
+      state: 'held',
+      client: 'acme-ffffffff-link',
+      since: 10,
+      generation: 2,
+      relayStarted: 1,
+      evictionBound: 30,
+      sync: { state: 'off', copy: null, epoch: 0, generation: 0, at: null },
+    };
+    await controller.look();
+    expect(lines.at(-1)).toBe("Could not tell hornhoof.org which machine holds the latest changes: this keeper's own link does not hold the company's route now");
+
+    linkValue = null;
+    await controller.look();
+    expect(lines.every(line => !line.includes(key))).toBe(true);
+  });
 });

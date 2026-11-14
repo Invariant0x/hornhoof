@@ -59,24 +59,24 @@ describe('posting the sync record', () => {
     expect(result).toMatchObject({ stored: true, sync: { state: 'on', copy: 'copy-1', epoch: 1, generation: 1 } });
     const route = await relay.route('acme', key);
     expect(route.known && route.sync).toEqual(result.stored && result.sync);
-    expect(await relay.setSync('acme', key, post())).toEqual({ stored: false, why: 'stale_epoch' });
-    expect(await relay.setSync('acme', key, post({ client: 'acme-bbbbbbbb-link', epoch: 2 }))).toEqual({ stored: false, why: 'not_holder' });
+    expect(await relay.setSync('acme', key, post())).toEqual({ stored: false, why: 'stale_epoch', status: 409, error: 'stale_epoch' });
+    expect(await relay.setSync('acme', key, post({ client: 'acme-bbbbbbbb-link', epoch: 2 }))).toEqual({ stored: false, why: 'not_holder', status: 409, error: 'not_holder' });
     fake.frpsDown = true;
-    expect(await relay.setSync('acme', key, post({ epoch: 3 }))).toEqual({ stored: false, why: 'unknown' });
+    expect(await relay.setSync('acme', key, post({ epoch: 3 }))).toEqual({ stored: false, why: 'refused', status: 503, error: 'unknown' });
   });
 
   it('fails closed inside its time budget when the relay is slow', async () => {
     const relay = new Relay(await oneAnswer({ sync: { state: 'on', copy: 'copy-1', epoch: 1, generation: 1, at: 100 } }, 1000));
     const started = Date.now();
-    expect(await relay.setSync('acme', 'k'.repeat(20), post(), 100)).toEqual({ stored: false, why: 'unknown' });
+    expect(await relay.setSync('acme', 'k'.repeat(20), post(), 100)).toEqual({ stored: false, why: 'slow' });
     expect(Date.now() - started).toBeLessThan(250);
   });
 
-  it('reads a slow or unreachable relay as unknown', async () => {
+  it('distinguishes a refused status from an unreachable relay', async () => {
     const { fake, relay, key } = await acme();
     fake.down = true;
-    expect(await relay.setSync('acme', key, post())).toEqual({ stored: false, why: 'unknown' });
-    expect(await new Relay('http://127.0.0.1:1').setSync('acme', key, post())).toEqual({ stored: false, why: 'unknown' });
+    expect(await relay.setSync('acme', key, post())).toEqual({ stored: false, why: 'refused', status: 502, error: null });
+    expect(await new Relay('http://127.0.0.1:1').setSync('acme', key, post())).toEqual({ stored: false, why: 'unreachable' });
   });
 });
 
@@ -87,21 +87,30 @@ describe('reading a sync answer that is not what was posted', () => {
     const changes = [{ state: 'off' }, { copy: 'copy-2' }, { epoch: 2 }, { generation: 2 }];
     for (const change of changes) {
       const relay = new Relay(await oneAnswer({ sync: { ...stored, ...change } }));
-      expect(await relay.setSync('acme', 'k'.repeat(20), post()), JSON.stringify(change)).toEqual({ stored: false, why: 'unknown' });
+      expect(await relay.setSync('acme', 'k'.repeat(20), post()), JSON.stringify(change)).toEqual({ stored: false, why: 'mismatch' });
     }
     expect(await new Relay(await oneAnswer({ sync: stored })).setSync('acme', 'k'.repeat(20), post())).toEqual({ stored: true, sync: stored });
   });
 
   it('stores nothing from a 200 that is not a sync record', async () => {
     for (const body of [{}, { sync: { state: 'on' } }, { sync: { ...stored, at: -1 } }]) {
-      expect(await new Relay(await oneAnswer(body)).setSync('acme', 'k'.repeat(20), post())).toEqual({ stored: false, why: 'unknown' });
+      expect(await new Relay(await oneAnswer(body)).setSync('acme', 'k'.repeat(20), post())).toEqual({ stored: false, why: 'malformed' });
     }
   });
 
-  it('reads a 409 that names nothing known, or has no body, as unknown', async () => {
-    for (const body of [{ error: 'something_else' }, 'not json']) {
-      expect(await new Relay(await oneAnswer(body, 0, 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({ stored: false, why: 'unknown' });
-    }
+  it('reads a 409 that names nothing known, or has no body, as refused with its status', async () => {
+    expect(await new Relay(await oneAnswer({ error: 'something_else' }, 0, 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({
+      stored: false,
+      why: 'refused',
+      status: 409,
+      error: 'something_else',
+    });
+    expect(await new Relay(await oneAnswer('not json', 0, 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({
+      stored: false,
+      why: 'refused',
+      status: 409,
+      error: null,
+    });
   });
 });
 
@@ -255,6 +264,7 @@ describe('the key stays out of results and errors', () => {
     results.push(await relay.route('acme', key, 100));
     const closed = new Relay('http://127.0.0.1:1');
     results.push(await closed.route('acme', key), await closed.setSync('acme', key, post()), await failure(closed.changeKey('acme', key)));
+    results.push(await new Relay(await oneAnswer({ error: key }, 0, 503)).setSync('acme', key, post()));
     results.push(await relay.changeKey('acme', key));
     expect(results.every(result => !shown(result).includes(key))).toBe(true);
   });
