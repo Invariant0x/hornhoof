@@ -23,7 +23,36 @@ async function serveMotion(page: Page) {
   return () => { department.name = 'Development refreshed'; };
 }
 
-async function sample(page: Page, selector: string) {
+type MotionView = 'map' | 'department' | 'tree';
+
+async function sample(page: Page, view: MotionView, selector: string) {
+  if (view === 'map') {
+    return page.locator('.map').evaluate(map => {
+      const box = [...map.querySelectorAll<SVGSVGElement>('.map-live .pt-box')].at(-1)!;
+      const dot = box.querySelector<SVGCircleElement>('circle.pt')!;
+      const anim = box.getAnimations()[0]!;
+      const world = map.querySelector<HTMLElement>('.world')!.getBoundingClientRect();
+      const rect = dot.getBoundingClientRect();
+      const track = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      track.setAttribute('d', box.dataset.path!);
+      const durSec = (Number(anim.effect!.getComputedTiming().duration) / 1000) / (anim.playbackRate || 1);
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const dashNodes = reduced ? [...map.querySelectorAll('.wires .tr.live')] : [...map.querySelectorAll('.map-live .way-run-svg')];
+      return {
+        time: ((anim.currentTime as number | null) ?? 0) / 1000,
+        start: Number(anim.startTime ?? 0),
+        x: rect.left + rect.width / 2 - world.left,
+        y: rect.top + rect.height / 2 - world.top,
+        speed: track.getTotalLength() / durSec,
+        dots: map.querySelectorAll('.map-live circle.pt').length,
+        dashes: dashNodes.map(el => getComputedStyle(el).animationName),
+        animations: map.getAnimations({ subtree: true })
+          .filter(a => (a.effect as KeyframeEffect)?.target?.matches('.way-run-svg'))
+          .map(a => ({ time: a.currentTime as number, state: a.playState })),
+        reduced,
+      };
+    });
+  }
   return page.locator(selector).evaluate(svg => {
     const el = svg as SVGSVGElement, dot = [...el.querySelectorAll<SVGCircleElement>('circle.pt')].at(-1)!;
     const matrix = dot.getCTM()!, motion = dot.querySelector<SVGAnimationElement>('animateMotion')!;
@@ -42,9 +71,18 @@ async function sample(page: Page, selector: string) {
 
 /* The dashes' animations on the live ways. */
 const DASHES = '.wires .tr.live';
+const MAP_ANIMATED = '.pt-box, .way-run-svg';
 
 /* Holds the SVG's own clock and the dashes' animations, so only the test moves them and no check waits for time to pass. */
-async function hold(page: Page, selector: string) {
+async function hold(page: Page, view: MotionView, selector: string) {
+  if (view === 'map') {
+    await page.locator('.map').evaluate((map, targets) => {
+      for (const a of map.getAnimations({ subtree: true })) {
+        if ((a.effect as KeyframeEffect)?.target?.matches(targets)) a.pause();
+      }
+    }, MAP_ANIMATED);
+    return;
+  }
   await page.locator(selector).evaluate((svg, dashes) => {
     (svg as SVGSVGElement).pauseAnimations();
     for (const a of document.getAnimations()) if ((a.effect as KeyframeEffect)?.target?.matches(dashes)) a.pause();
@@ -52,7 +90,17 @@ async function hold(page: Page, selector: string) {
 }
 
 /* Moves the held clocks on by the given seconds. */
-async function run(page: Page, selector: string, seconds: number) {
+async function run(page: Page, view: MotionView, selector: string, seconds: number) {
+  if (view === 'map') {
+    await page.locator('.map').evaluate((map, [targets, s]) => {
+      for (const a of map.getAnimations({ subtree: true })) {
+        if ((a.effect as KeyframeEffect)?.target?.matches(targets as string)) {
+          a.currentTime = ((a.currentTime as number | null) ?? 0) + (s as number) * 1000;
+        }
+      }
+    }, [MAP_ANIMATED, seconds] as const);
+    return;
+  }
   await page.locator(selector).evaluate((svg, [dashes, s]) => {
     const el = svg as SVGSVGElement;
     el.setCurrentTime(el.getCurrentTime() + (s as number));
@@ -85,13 +133,18 @@ for (const look of looks) {
           await page.getByRole('button', { name: look.lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
           await page.locator('.tv-scroll').evaluate(el => { el.scrollLeft = el.scrollWidth; });
         }
-        const selector = view === 'map' ? '.map svg.wires' : view === 'department' ? '.dcanvas svg.wires' : '.tv-in > svg';
-        await expect(page.locator(`${selector} circle.pt`).first()).toBeAttached();
-        const original = await page.locator(selector).evaluateHandle(svg => ({ svg, dot: [...svg.querySelectorAll('circle.pt')].at(-1), path: svg.querySelector('.tr.live, .seg.w') }));
-        await hold(page, selector);
-        const starting = await sample(page, selector);
-        await run(page, selector, 0.5);
-        const first = await sample(page, selector);
+        const selector = view === 'map' ? '.map .world' : view === 'department' ? '.dcanvas svg.wires' : '.tv-in > svg';
+        const dotScope = view === 'map' ? '.map .map-live' : selector;
+        await expect(page.locator(`${dotScope} circle.pt`).first()).toBeAttached();
+        const original = await page.locator(selector).evaluateHandle((root, dotSel) => ({
+          root,
+          dot: [...(dotSel ? root.querySelectorAll(`${dotSel} circle.pt`) : root.querySelectorAll('circle.pt'))].at(-1),
+          path: root.querySelector('.tr.live, .seg.w'),
+        }), view === 'map' ? '.map-live' : '');
+        await hold(page, view, selector);
+        const starting = await sample(page, view, selector);
+        await run(page, view, selector, 0.5);
+        const first = await sample(page, view, selector);
         expect([first.x, first.y], 'The signal must move as its clock goes before the redraw check').not.toEqual([starting.x, starting.y]);
         change();
         const refresh = page.waitForResponse(r => r.url().endsWith('/api/org'));
@@ -99,12 +152,16 @@ for (const look of looks) {
         await refresh;
         await expect(page.getByText('Development refreshed', { exact: true }).last()).toBeVisible();
         /* The held clocks go one second on past the redraw; screenshots can alter SMIL's timeline. Video records both samples. */
-        await run(page, selector, 1);
-        const second = await sample(page, selector);
+        await run(page, view, selector, 1);
+        const second = await sample(page, view, selector);
         const evidence = info.outputPath('motion-clocks.json');
         await writeFile(evidence, JSON.stringify({ view, ...look, first, second, expectedSpeed: { map: 100, department: 160, tree: 60 }[view] / (reduce ? 4 : 1) }, null, 2));
         await info.attach('motion-clocks.json', { path: evidence, contentType: 'application/json' });
-        expect(await original.evaluate(({ svg, dot, path }) => svg.isConnected && dot === [...svg.querySelectorAll('circle.pt')].at(-1) && path === svg.querySelector('.tr.live, .seg.w'))).toBe(true);
+        expect(await original.evaluate(({ root, dot, path }, dotSel) =>
+          root.isConnected
+          && dot === [...(dotSel ? root.querySelectorAll(`${dotSel} circle.pt`) : root.querySelectorAll('circle.pt'))].at(-1)
+          && path === root.querySelector('.tr.live, .seg.w'),
+        view === 'map' ? '.map-live' : '')).toBe(true);
         expect(second.time - first.time).toBeGreaterThan(0.9);
         expect(second.start).toBe(first.start);
         expect([second.x, second.y]).not.toEqual([first.x, first.y]);
@@ -127,7 +184,7 @@ for (const look of looks) {
 }
 
 
-test('starts a late message on arrival instead of at the SVG document start', async ({ page }, info) => {
+test('starts a late message on arrival instead of at the document start', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.addInitScript(() => { localStorage.setItem('hh-lang', 'en'); });
@@ -137,35 +194,40 @@ test('starts a late message on arrival instead of at the SVG document start', as
   await page.clock.install({ time: start });
   let sentAt = 0;
   await page.route('**/api/stream', async route => {
-    const svg = page.locator('.map svg.wires');
-    await expect(svg).toBeAttached();
+    const liveDot = page.locator('.map .map-live .pt-box').first();
+    await expect(liveDot).toBeAttached();
     await page.clock.pauseAt(start + 60_000);
-    /* The SVG's held clock goes past the message's 3.81-second trip before the message comes. */
-    await hold(page, '.map svg.wires');
-    await run(page, '.map svg.wires', 4.5);
-    sentAt = await svg.evaluate(el => (el as SVGSVGElement).getCurrentTime());
-    expect(sentAt).toBeGreaterThan(4.5);
+    /* Existing map animations advance past the message's 3.81-second trip before the message arrives. */
+    await hold(page, 'map', '.map .world');
+    await run(page, 'map', '.map .world', 4.5);
+    sentAt = await liveDot.evaluate(el => ((el.getAnimations()[0]?.currentTime as number | null) ?? 0) / 1000);
+    expect(sentAt).toBeGreaterThanOrEqual(4.5);
     await route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd2' } }) + '\n\n' });
   });
   await page.goto('/');
-  const motion = page.locator('.map svg.wires animateMotion[repeatCount="1"]');
-  await expect(motion).toBeAttached();
-  const read = () => page.locator('.map svg.wires').evaluate(svg => {
-    const animation = svg.querySelector<SVGAnimationElement>('animateMotion[repeatCount="1"]');
-    if (!animation) return null;
-    let start: number;
-    try { start = animation.getStartTime(); } catch { return null; }
-    const matrix = (animation.parentElement as unknown as SVGCircleElement).getCTM()!;
-    return { start, now: animation.getCurrentTime(), x: matrix.e, y: matrix.f };
+  const shot = page.locator('.map .map-live .pt-box[data-once="1"]');
+  await expect(shot).toBeAttached();
+  const read = () => shot.evaluate(box => {
+    const anim = box.getAnimations()[0];
+    if (!anim) return null;
+    anim.pause();
+    const dot = box.querySelector<SVGCircleElement>('circle.pt')!;
+    const world = box.closest('.world')!.getBoundingClientRect();
+    const rect = dot.getBoundingClientRect();
+    return {
+      now: ((anim.currentTime as number | null) ?? 0) / 1000,
+      duration: Number(anim.effect!.getComputedTiming().duration) / 1000,
+      x: rect.left + rect.width / 2 - world.left,
+      y: rect.top + rect.height / 2 - world.top,
+    };
   });
-  await expect.poll(read, { message: 'A newly arrived message must have an active SVG interval' }).not.toBeNull();
+  await expect.poll(read, { message: 'A newly arrived message must have an active Web Animation' }).not.toBeNull();
   const first = (await read())!;
-  expect(first.start).toBeGreaterThanOrEqual(sentAt - 0.05);
-  await run(page, '.map svg.wires', 1);
-  const second = await motion.evaluate(m => {
-    const matrix = (m.parentElement as unknown as SVGCircleElement).getCTM()!;
-    return { now: (m as SVGAnimationElement).getCurrentTime(), x: matrix.e, y: matrix.f };
-  });
+  expect(first.now).toBeLessThan(0.5);
+  expect(first.now).toBeLessThan(first.duration);
+  await run(page, 'map', '.map .world', 1);
+  const second = (await read())!;
+  expect(second.now - first.now).toBeCloseTo(1, 2);
   expect([second.x, second.y]).not.toEqual([first.x, first.y]);
   const evidence = info.outputPath('late-message.json');
   await writeFile(evidence, JSON.stringify({ sentAt, first, second }, null, 2));
