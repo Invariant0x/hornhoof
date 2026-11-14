@@ -406,11 +406,13 @@ select:disabled { opacity: .55; }
 .body.page::before { content: ''; position: sticky; z-index: 5; top: 0; display: block; height: 68px; margin-bottom: -68px; background: var(--bg); }
 
 /* Map */
-.map {
-  position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+.map { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.map::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+.map[inert] *, .map[inert] *::before, .map[inert] *::after { animation-play-state: paused !important; }
 .map:active { cursor: grabbing; }
 .map-failure { margin: 24px; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -418,6 +420,14 @@ select:disabled { opacity: .55; }
 .wires { left: 0; top: 0; pointer-events: none; overflow: visible; }
 .wires .tr { fill: none; stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .wires .via { fill: var(--bg); stroke: var(--line2); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.map-live { left: 0; top: 0; width: 0; height: 0; pointer-events: none; overflow: visible; }
+.pt-box { position: absolute; pointer-events: none; overflow: visible; }
+.way-seg { position: absolute; overflow: hidden; pointer-events: none; transform-origin: 0 50%; }
+.way-run-svg { position: absolute; top: 0; display: block; pointer-events: none; animation: way-shift 0.9s linear infinite; }
+.way-run-svg > line { fill: none; stroke-width: 2; stroke-dasharray: 3 9; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.way-run-svg > line.c { stroke: var(--cyan); }
+.way-run-svg > line.a { stroke: var(--amber); }
+@keyframes way-shift { to { transform: translateX(calc(12px / var(--k, 1))); } }
 .pt { pointer-events: none; }
 .pt.k { fill: var(--ink); }
 .halo { border-radius: 50%; background: radial-gradient(circle, var(--glow), transparent 68%); pointer-events: none; }
@@ -438,7 +448,8 @@ select:disabled { opacity: .55; }
 .hub > .hub-art { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .hub-bg { fill: var(--bg); }
 .hub-ring { fill: none; stroke: var(--line2); stroke-width: 1.2; stroke-dasharray: 3 9; }
-.spin { transform-origin: 120px 120px; animation: spin 60s linear infinite; }
+.hub > .hub-spin { pointer-events: none; transform-origin: 50% 50%; animation: spin 60s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .hub > .hub-spin { animation: none; } }
 .gauge-bg { fill: none; stroke: var(--idle); stroke-width: 12; stroke-dasharray: .72 .28; }
 .gauge { fill: none; stroke: var(--cyan); stroke-width: 12; stroke-dasharray: .72 .28; }
 .hub-in { fill: var(--surface); stroke: var(--line2); stroke-width: 1.2; }
@@ -964,17 +975,27 @@ button.dept { padding: 0; border: 0; background: none; font: inherit; color: inh
 button.dept:hover > .edge, button.dept:focus-visible > .edge { background: var(--cyan); }
 button.dept:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* While someone works the frame breathes cyan, while the department waits for people it breathes amber, and it flashes
-   once when work reaches or leaves it. */
-button.dept.busy, button.dept.waits { animation: dglow 2.6s ease-in-out infinite; }
-button.dept.busy { --glow: var(--cyan); }
-button.dept.waits { --glow: var(--amber); }
-button.dept.busy > .edge, button.dept.waits > .edge { animation: dbreathe 2.6s ease-in-out infinite; }
-button.dept.flash > .edge { animation: eflash 1.4s ease-out; }
-@keyframes dbreathe { 50% { background: var(--glow); } }
-@keyframes dglow { 50% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--glow) 45%, transparent)); } }
+   once when work reaches or leaves it. Both layers animate opacity outside .edge's clip-path so WebKit composites them. */
+button.dept.busy { --glow: var(--cyan); --frame: var(--cyan); }
+button.dept.waits { --glow: var(--amber); --frame: var(--amber); }
+button.dept.flash { --frame: var(--cyan); }
+button.dept.busy::before, button.dept.waits::before, button.chip-btn.attn::before, .hub.attn::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--glow) 45%, transparent);
+  animation: dglow 2.6s ease-in-out infinite;
+}
+.hub.attn { --glow: var(--amber); }
+.hub.attn::before { inset: 1px; border-radius: 50%; }
+.frame-breathe { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; opacity: 0; animation: dbreathe 2.6s ease-in-out infinite; }
+.frame-breathe > polygon, .frame-breathe > polyline { fill: none; stroke: var(--frame); stroke-width: 1.2; }
+button.dept.flash > .frame-breathe { animation: frame-flash 1.4s ease-out; }
+button.dept:hover > .frame-breathe, button.dept:focus-visible > .frame-breathe, button.chip-btn:hover > .frame-breathe, button.chip-btn:focus-visible > .frame-breathe { visibility: hidden; }
+@keyframes dbreathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes dglow { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes frame-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  button.dept.busy, button.dept.waits, button.dept.flash > .edge { animation: none; }
-  button.dept.busy > .edge, button.dept.waits > .edge { animation: none; background: var(--glow); }
+  button.dept.busy::before, button.dept.waits::before, button.chip-btn.attn::before, .hub.attn::before, .frame-breathe { animation: none; display: none; }
+  button.dept.busy > .edge, button.dept.waits > .edge { background: var(--glow); }
 }
 /* A person's card opens the decisions waiting for them; while any wait, it shows their number and breathes amber, and so
    does the hub. */
@@ -983,11 +1004,9 @@ button.chip-btn > .edge { height: 100%; }
 button.chip-btn:hover > .edge, button.chip-btn:focus-visible > .edge { background: var(--cyan); }
 button.chip-btn:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .chip-count { position: absolute; top: -8px; right: -8px; margin: 0; }
-button.chip-btn.attn, .hub.attn > .hub-art { --glow: var(--amber); animation: dglow 2.6s ease-in-out infinite; }
-button.chip-btn.attn > .edge { --glow: var(--amber); animation: dbreathe 2.6s ease-in-out infinite; }
+button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
 .hub.attn .hub-ring, .hub.attn .hub-in { stroke: var(--amber); }
 @media (prefers-reduced-motion: reduce) {
-  button.chip-btn.attn, .hub.attn > .hub-art, button.chip-btn.attn > .edge { animation: none; }
   button.chip-btn.attn > .edge { background: var(--amber); }
 }
 
@@ -1013,6 +1032,10 @@ button.chip-btn.attn > .edge { --glow: var(--amber); animation: dbreathe 2.6s ea
 .wires .tr.live { stroke-width: 2; stroke-dasharray: 3 9; stroke-linecap: round; pointer-events: none; animation: way-run 0.9s linear infinite; }
 .wires .tr.live.c { stroke: var(--cyan); }
 .wires .tr.live.a { stroke: var(--amber); }
+.map .wires .tr.live { animation: none; }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-light]) .map .wires .tr.live { stroke: none; }
+}
 @keyframes way-run { to { stroke-dashoffset: -12; } }
 @media (prefers-reduced-motion: reduce) { .wires .tr.live { animation: none; } }
 .llab { z-index: 1; transform: translate(-50%, -50%) scale(var(--k, 1)); padding: 0 7px; background: var(--bg); color: var(--muted); font-size: 12px; line-height: 18px; white-space: nowrap; pointer-events: none; }

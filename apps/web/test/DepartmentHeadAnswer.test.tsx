@@ -402,6 +402,75 @@ describe('department owner answering head on a large company', () => {
     }
   });
 
+  it('runs map signal dots without SMIL and pauses Web Animations on the hidden map behind a department', async () => {
+    let paused = 0;
+    let played = 0;
+    let state: AnimationPlayState = 'running';
+    const fakeAnim = {
+      get playState() {
+        return state;
+      },
+      pause() {
+        state = 'paused';
+        paused++;
+      },
+      play() {
+        state = 'running';
+        played++;
+      },
+    } as unknown as Animation;
+    const elemProto = Element.prototype as Element & { getAnimations?: (opts?: GetAnimationsOptions) => Animation[] };
+    const prevGetAnims = elemProto.getAnimations;
+    elemProto.getAnimations = function () {
+      return this instanceof HTMLElement && this.classList.contains('map') ? [fakeAnim] : [];
+    };
+    try {
+      const activeOrg: Org = {
+        ...DEV_ORG,
+        agents: { total: 2, working: 1 },
+        workLines: [{ upstreamAgentId: 'a1', downstreamAgentId: 'b0', working: true, workEpoch: 1, returnedEpoch: null, returnedAt: null }],
+        departments: DEV_ORG.departments.map(d => ({
+          ...d,
+          ownerPersonId: DEPT_OWNER_ME.person.id,
+          people: [{
+            id: DEPT_OWNER_ME.person.id,
+            name: DEPT_OWNER_ME.person.name,
+            email: DEPT_OWNER_ME.person.email,
+            title: DEPT_OWNER_ME.person.title,
+            status: 'active',
+            isOwner: false,
+            access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] },
+          }],
+        })),
+      };
+      mockApi({
+        'GET /api/org': [200, activeOrg],
+        'GET /api/requests': [200, decisions([])],
+        'GET /api/turns': [200, { turns: [TURN] }],
+        'GET /api/map/layout': [200, { blocks: {} }],
+        'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }],
+      });
+
+      window.history.replaceState(null, '', '/departments/d2');
+      const { container } = render(
+        <LanguageProvider>
+          <Shell me={DEPT_OWNER_ME} onSignOut={() => {}} />
+        </LanguageProvider>,
+      );
+
+      expect(await screen.findByRole('region', { name: 'Department schema' })).toBeInTheDocument();
+      expect(container.querySelectorAll('.map circle.pt').length).toBeGreaterThan(0);
+      expect(container.querySelectorAll('.map animateMotion')).toHaveLength(0);
+      expect(paused).toBe(1);
+      expect(played).toBe(0);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back to the map' }));
+      await waitFor(() => expect(played).toBe(1));
+    } finally {
+      elemProto.getAnimations = prevGetAnims;
+    }
+  });
+
   it('keeps the switched state reference until an employee toggle actually settles in the roster', () => {
     const employees = DEV_ORG.departments[0]!.employees;
     const empty: Record<string, boolean> = {};

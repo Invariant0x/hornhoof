@@ -6,6 +6,17 @@ import { growth, installRenderProbe, listenersGrown, readListeners, readProbe, s
 
 const AT = '2026-11-14T18:00:00.000Z';
 const COMPANY = bigCompany();
+const ACTIVE_COMPANY = {
+  ...COMPANY,
+  workLines: COMPANY.departments.map(d => ({
+    upstreamAgentId: 'a1',
+    downstreamAgentId: d.employees[0]!.id,
+    working: true,
+    workEpoch: 1,
+    returnedEpoch: null,
+    returnedAt: null,
+  })),
+};
 const DEPT = COMPANY.departments[0]!;
 const HEAD = DEPT.employees[0]!;
 const AGENT_IDS = COMPANY.departments.flatMap(d => d.employees.map(e => e.id));
@@ -204,6 +215,125 @@ test.describe('a 120-agent company in the browser', () => {
     expect(storm.orgFetches).toBe(2);
     expect(storm.requestFetches).toBe(2);
     expect(storm.commits).toBeLessThanOrEqual(100);
+  });
+
+  test('animates the 120-agent map on composited layers only and pauses all of it behind a department', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await onTestClock(page);
+    await page.addInitScript(installRenderProbe);
+    const onTheirWay = requestsOnTheirWay(page);
+    await bigCompanyServer(page);
+    await page.route('**/api/org', route => route.fulfill({ json: ACTIVE_COMPANY }));
+    await page.goto('/');
+    await expect(page.locator('.map .dept')).toHaveCount(ACTIVE_COMPANY.departments.length);
+    await quiet(page, onTheirWay);
+
+    /* Every running animation on the map: SMIL clocks, CSS or Web Animations that paint or filter on the main thread,
+       transforms on internal SVG children that have no compositor layer in WebKit, and composited opacity/transform layers. */
+    const readMapMotion = () => page.evaluate(() => {
+      const map = document.querySelector<HTMLElement>('.map')!;
+      const meta = new Set(['offset', 'computedOffset', 'easing', 'composite']);
+      const composited = new Set(['opacity', 'transform']);
+      const running = map.getAnimations({ subtree: true }).filter(a => a.playState === 'running');
+      let paint = 0;
+      let svgChildTransform = 0;
+      let compositedCount = 0;
+      for (const anim of running) {
+        const effect = anim.effect as KeyframeEffect | null;
+        const target = effect?.target;
+        const props = new Set(
+          (effect?.getKeyframes() ?? []).flatMap(frame => Object.keys(frame).filter(k => !meta.has(k))),
+        );
+        if ([...props].some(p => !composited.has(p))) paint++;
+        else if (props.has('transform') && target instanceof SVGElement && !(target instanceof SVGSVGElement)) svgChildTransform++;
+        else compositedCount++;
+      }
+      const svgs = [...map.querySelectorAll('svg')];
+      return {
+        smil: map.querySelectorAll('animateMotion').length,
+        paint,
+        svgChildTransform,
+        composited: compositedCount,
+        running: running.length,
+        dots: map.querySelectorAll('circle.pt').length,
+        svgsPaused: svgs.length > 0 && svgs.every(s => s.animationsPaused?.() ?? true),
+      };
+    });
+
+    const probeBefore = await readProbe(page);
+    await page.clock.runFor(2000);
+    const probeAfter = await readProbe(page);
+    await page.evaluate(() => {
+      for (const a of document.querySelector('.map')!.getAnimations({ subtree: true })) {
+        if ('transitionProperty' in a) a.finish();
+      }
+    });
+    const openMap = await readMapMotion();
+
+    /* Stepping the map's running Web Animations by half a second moves the dots on the world without real-clock waits. */
+    const movedDots = await page.evaluate(() => {
+      const map = document.querySelector<HTMLElement>('.map')!;
+      const world = map.querySelector<HTMLElement>('.world')!;
+      const dots = [...map.querySelectorAll<SVGCircleElement>('circle.pt')];
+      const anims = map.getAnimations({ subtree: true });
+      for (const a of anims) a.pause();
+      const at = () => {
+        const w = world.getBoundingClientRect();
+        return dots.map(d => {
+          const r = d.getBoundingClientRect();
+          return `${(r.left - w.left).toFixed(1)}:${(r.top - w.top).toFixed(1)}`;
+        });
+      };
+      const before = at();
+      for (const a of anims) a.currentTime = ((a.currentTime as number | null) ?? 0) + 500;
+      const after = at();
+      for (const a of anims) a.play();
+      return dots.filter((_, i) => before[i] !== after[i]).length;
+    });
+
+    /* Opening a department flies into its card for 600 ms on the test's clock and covers the map, pausing all of it. */
+    await page.locator('.map .dept').first().click();
+    await page.clock.runFor(650);
+    await expect(page.getByRole('region', { name: 'Department schema' })).toBeVisible();
+    await page.evaluate(() => {
+      for (const a of document.querySelector('.map')!.getAnimations({ subtree: true })) {
+        if ('transitionProperty' in a) a.finish();
+      }
+    });
+    const hiddenMap = await readMapMotion();
+
+    await page.getByRole('button', { name: 'Back to the map' }).click();
+    await quiet(page, onTheirWay);
+    await page.evaluate(() => {
+      for (const a of document.querySelector('.map')!.getAnimations({ subtree: true })) {
+        if ('transitionProperty' in a) a.finish();
+      }
+    });
+    const backOnMap = await readMapMotion();
+
+    const summary = {
+      openMap,
+      idleCommits: probeAfter.commits - probeBefore.commits,
+      movedDots,
+      hiddenRunning: hiddenMap.running,
+      hiddenSvgsPaused: hiddenMap.svgsPaused,
+      resumedRunning: backOnMap.running,
+    };
+    report('map-motion', summary);
+
+    expect(errors).toEqual([]);
+    expect(openMap.dots).toBe(31);
+    expect(openMap.smil).toBe(0);
+    expect(openMap.paint).toBe(0);
+    expect(openMap.svgChildTransform).toBe(0);
+    expect(openMap.composited).toBeGreaterThanOrEqual(80);
+    expect(summary.idleCommits).toBe(0);
+    expect(movedDots).toBe(31);
+    expect(hiddenMap.running).toBe(0);
+    expect(hiddenMap.svgsPaused).toBe(true);
+    expect(backOnMap.running).toBe(openMap.running);
   });
 
   /* Design (#874): glass over the moving canvas has no blur under it, only the dense --hud of the skin. Pictures of the map

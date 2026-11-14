@@ -554,7 +554,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           </section>
           {reach.map((p, k) => (
             <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
-              <PersonButton person={p} onOpen={() => openDecisions(p.id)}>
+              <PersonButton person={p} frame={{ w: PW, h: PH, cut: 8 }} onOpen={() => openDecisions(p.id)}>
                 <Edge cut={8}>
                   <PersonIcon />
                   <span className="pn">
