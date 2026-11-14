@@ -204,7 +204,8 @@ describe('mail from employees in inbox mode', () => {
   it('shows each employee only its own letters, cut short, and no task text it does not see', async () => {
     const c = await company();
     const task = await c.task(c.bruno.id, 'SECRET-BODY of the checkout.');
-    await c.letter(c.hana, c.bruno.id, `Look at the totals. ${'x'.repeat(1000)}`, task.number);
+    /* A notice about a task that wakes nothing on it waits in the inbox; a letter on a task is a turn of its own. */
+    await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.bruno.id, prompt: 'Tests ended.', createdBy: null, message: { personId: null, text: `Look at the totals. ${'x'.repeat(1000)}`, task: { id: task.id, number: task.number }, notification: { source: 'tests', tasks: [] } } });
     await c.letter(c.hana, c.rita.id, 'Only for Rita.');
     const [batch] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'running');
     const prompt = c.runs().find(r => r.jobId === batch!.id)!.prompt;
@@ -386,6 +387,15 @@ describe('the delivery mode', () => {
     expect((await put(c, `/api/departments/${c.sales.id}/inbox-mode`, 'direct', pia)).statusCode).toBe(200);
     expect((await put(c, `/api/agents/${c.sara.id}/inbox-mode`, 'inbox', pia)).statusCode).toBe(200);
   });
+
+  it('sets a mode for a department alone, and knows no department by the id of a product in it', async () => {
+    const c = await company();
+    const [shop] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Shop', parentId: c.dev.id, roleCode: 'DEV' }).returning();
+    const res = await put(c, `/api/departments/${shop!.id}/inbox-mode`, 'direct');
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: { code: 'not_found', reason: 'department_unknown' } });
+    expect((await c.db.select({ mode: departments.inboxMode }).from(departments).where(eq(departments.id, shop!.id)))).toEqual([{ mode: null }]);
+  });
 });
 
 type Letter = { id: string; sender: { kind: string; id: string | null; name: string; role: { en: string; ru: string } | null; department: { id: string; name: { en: string; ru: string } } | null }; kind: string; task: { id: string | null; number: number; title: string | null } | null; receivedAt: string; text: string; unread: boolean };
@@ -510,6 +520,17 @@ describe('the inbox a person opens', () => {
     expect((await markRead(c, c.bruno.id, { ids: [seen.letters[0]!.id] }, lena)).statusCode).toBe(403);
     expect((await markRead(c, c.bruno.id, { all: true }, lena)).statusCode).toBe(403);
     expect((await c.inboxOf(c.bruno.id))[0]!.status).toBe('unread');
+  });
+
+  it('names a sender that is no longer in the company "Employee", not by the name its letter kept', async () => {
+    const c = await company();
+    await c.letter(c.rita, c.bruno.id, 'I pushed the fixtures.');
+    await c.db.$client.transaction(async tx => {
+      await tx.exec('set local session_replication_role = replica');
+      await tx.query('delete from agents where id = $1', [c.rita.id]);
+    });
+    const [letter] = (await open(c, c.bruno.id)).letters;
+    expect(letter!.sender).toEqual({ kind: 'agent', id: null, name: 'Employee', role: null, department: null });
   });
 
   it('gives the newest 50 letters first, and the older ones a page at a time', async () => {
