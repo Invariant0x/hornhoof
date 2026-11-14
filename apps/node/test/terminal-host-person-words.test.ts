@@ -74,11 +74,13 @@ describe("a person's words sent while Hornhoof's turn waits to type its prompt",
     expect(before, 'no prompt goes into a program that answers the person').toBe(0);
   });
 
-  it('get their answer when they stop it themselves, and the prompt goes in after', async () => {
+  it('get their answer when they stop it themselves with Esc, and the prompt goes in after', async () => {
     const c = await personWrites();
     await c.pass(1_000);
     const before = c.enters();
-    await c.ended({ stopped: true });
+    /* Claude Code's own line for it: no Stop hook and no end of a turn come. */
+    c.record({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
+    c.drain();
     await c.until(() => c.enters() > 0);
     await c.takes('hook first');
     await c.ended({ last_assistant_message: 'The answer of the turn.' });
