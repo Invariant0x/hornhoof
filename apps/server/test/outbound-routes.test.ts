@@ -114,7 +114,11 @@ describe('an agent\'s way in', () => {
     await aJob(w, w.c.worker.id);
     const names = (await (await toolsOf(w)).listTools()).tools.map(t => t.name);
     expect(names.filter(n => n.startsWith('outbound_')).sort()).toEqual(['outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit']);
-    expect(names.filter(n => /send_|publish|smtp|webhook|mail/.test(n))).toEqual([]);
+    /* The one tool that sends, and only to people of the agent's own company: send_telegram_file gives a file to an active
+       person who connected Telegram and may see both the agent and the file, through the company's own bots, as a reply to
+       a person goes there. It takes no outside address, so it is no way around the gateway to anyone outside. */
+    const toCompanyPeople = ['send_telegram_file'];
+    expect(names.filter(n => /send_|publish|smtp|webhook|mail/.test(n))).toEqual(toCompanyPeople);
   });
 
   it('shows an author what it may name, and nothing of contacts or accounts beyond that', async () => {

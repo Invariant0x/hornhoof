@@ -123,14 +123,24 @@ export function TaskFiles({ files }: { files?: TaskFile[] }) {
     <section aria-label={t.tasks.files}>
       <h4>{t.tasks.files}</h4>
       <ul className="tp-subs">
-        {files.map(f => (
-          <li key={f.id}>
-            <a className="req-link" href={attachmentPath(f.id)} target="_blank" rel="noopener noreferrer">
-              {displayFileName(f.name)}
-            </a>
-            <small>{formatFileSize(t, f.size)}</small>
-          </li>
-        ))}
+        {files.map(f => {
+          const autoText = AUTO_TEXT_FILE.test(f.name);
+          const name = displayFileName(f.name);
+          return (
+            <li key={f.id}>
+              <a
+                className="req-link"
+                href={attachmentPath(f.id)}
+                download={autoText ? undefined : name}
+                target={autoText ? '_blank' : undefined}
+                rel={autoText ? 'noopener noreferrer' : undefined}
+              >
+                {name}
+              </a>
+              <small>{formatFileSize(t, f.size)}</small>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

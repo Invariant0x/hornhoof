@@ -1147,9 +1147,11 @@ body:has(.dview) .version-mark { display: none; }
 .new-task textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
 .new-task textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 /* A repository at the side: its address, branch and token ending, changed in place. */
-.repo, .repo-form { display: grid; gap: 6px; justify-items: start; }
+.repo, .repo-form { display: grid; gap: 6px; justify-items: start; min-width: 0; }
 .repo-form { gap: 10px; justify-items: stretch; }
-.repo p { margin: 0; font-size: 13px; }
+.repo p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.repo-form textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
+.repo-form textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 .repo-url { font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
 .repo-command { overflow-wrap: anywhere; }
 .repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }

@@ -222,6 +222,7 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 export type RepoKey = { provider: 'github'; owner: string; tokenLast4: string };
 /* The key a department's repositories are created with: its own, else the company's. */
 export type RepoHost = RepoKey & { own: boolean };
+export type GoogleSheetsConfig = { kind: 'service_account' | 'oauth'; account: string; shareEmail: string | null; keyLast4: string };
 
 /* What a department or a product keeps for its agents: its way of working and its repositories. connected: the one its
    agents get cloned, as its repository settings name it. */

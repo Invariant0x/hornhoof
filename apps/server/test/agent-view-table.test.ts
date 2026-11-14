@@ -171,6 +171,7 @@ const NO_AGENT_DATA: string[] = [
   'PUT /api/departments/:id/work-mode',
   'PUT /api/departments/:id/owner', 'PUT /api/departments/:id/repository', 'DELETE /api/departments/:id/repository', 'POST /api/departments/:id/repositories', 'POST /api/departments/:id/staff',
   'POST /api/departments/:id/repositories/new', 'PUT /api/departments/:id/repo-host', 'DELETE /api/departments/:id/repo-host', 'GET /api/repo-host', 'PUT /api/repo-host', 'DELETE /api/repo-host',
+  'GET /api/google-sheets', 'PUT /api/google-sheets', 'DELETE /api/google-sheets',
   'POST /api/departments/:id/teams', 'PATCH /api/departments/:id/teams/:teamId', 'DELETE /api/departments/:id/teams/:teamId', 'POST /api/departments/build',
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',
   'GET /api/link', 'PUT /api/link', 'DELETE /api/link', 'GET /api/link/names/:name',

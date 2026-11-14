@@ -4,10 +4,11 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
-import { requirePerson } from '../../auth/session.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { appendEvent } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
@@ -108,17 +109,21 @@ export async function picturesOf(db: Db, rows: { id: string; options: RequestOpt
 /* Removes the files on the tasks of turns closed 30 days or more before now, and people's pictures sent as long ago or
    never sent, and says how many went. */
 export async function dropOldFiles(db: Db, now: Date): Promise<number> {
-  const pictures = await db.delete(attachments).where(and(isNotNull(attachments.personId), isNull(attachments.taskId), lt(attachments.createdAt, new Date(now.getTime() - KEEP_FILES_MS)))).returning({ id: attachments.id });
+  const cutoff = new Date(now.getTime() - KEEP_FILES_MS);
+  const loose = await db
+    .delete(attachments)
+    .where(and(or(isNotNull(attachments.personId), and(isNull(attachments.requestId), isNotNull(attachments.name))), isNull(attachments.taskId), lt(attachments.createdAt, cutoff)))
+    .returning({ id: attachments.id });
   const old = db
     .select({ id: tasks.id })
     .from(tasks)
     .innerJoin(turns, eq(turns.id, tasks.turnId))
-    .where(and(eq(turns.status, 'closed'), lt(turns.closedAt, new Date(now.getTime() - KEEP_FILES_MS))));
-  return pictures.length + (await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id })).length;
+    .where(and(eq(turns.status, 'closed'), lt(turns.closedAt, cutoff)));
+  return loose.length + (await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id })).length;
 }
 
-/* What counts towards what the company keeps: files on tasks and people's pictures. */
-const kept = (companyId: string) => and(eq(attachments.companyId, companyId), or(isNotNull(attachments.taskId), isNotNull(attachments.personId)));
+/* What counts towards what the company keeps: files on tasks, chat files and people's pictures. */
+const kept = (companyId: string) => and(eq(attachments.companyId, companyId), or(isNotNull(attachments.taskId), isNotNull(attachments.personId), isNotNull(attachments.name)));
 
 const companyFull = (inCompany: number, limit: number) =>
   new ApiError(413, 'validation', `The company's task files take ${sizeText(inCompany)} of the ${sizeText(limit)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`, 'attachment_invalid');
@@ -146,34 +151,56 @@ export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pi
   if (inCompany + size > ctx.config.taskFilesBytes) throw companyFull(inCompany, ctx.config.taskFilesBytes);
 }
 
-/* Sends a task file in pieces, so the server never holds a whole one. */
-export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }) {
-  const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
-  if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
-  async function* pieces(id: string, length: number) {
-    for (let at = 0; at < length; at += PIECE_BYTES) {
-      const [piece] = await db
-        .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
-        .from(attachments)
-        .where(and(eq(attachments.id, id), isNull(attachments.operatorCaseId)));
-      if (!piece) throw new Error('The file was removed while it was being sent.');
-      yield Buffer.from(piece.bytes);
-    }
-  }
-  return reply
-    .header('x-content-type-options', 'nosniff')
-    .header('x-file-name', encodeURIComponent(found.name ?? ''))
-    .header('content-security-policy', "default-src 'none'")
-    .header('content-length', String(found.length))
-    .type(found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream')
-    .send(Readable.from(pieces(found.id, found.length)));
+function personDownloadType(found: { name: string | null; mediaType?: string }): string {
+  if (found.mediaType === 'text/plain') return 'text/plain; charset=utf-8';
+  if (found.mediaType?.startsWith('image/')) return found.mediaType;
+  const lower = (found.name ?? '').toLowerCase();
+  if (lower.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (lower.endsWith('.csv')) return 'text/csv; charset=utf-8';
+  return 'application/octet-stream';
 }
 
 /* A file's name as a header carries it: every character past plain letters and digits encoded. */
 const headerName = (name: string) => encodeURIComponent(name).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
+/* A file's bytes a piece at a time, each read as it goes out. */
+async function* filePieces(db: Db, id: string, length: number) {
+  for (let at = 0; at < length; at += PIECE_BYTES) {
+    const [piece] = await db
+      .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
+      .from(attachments)
+      .where(and(eq(attachments.id, id), isNull(attachments.operatorCaseId)));
+    if (!piece) throw new Error('The file was removed while it was being sent.');
+    yield Buffer.from(piece.bytes);
+  }
+}
+
+/* A person gets a text or a picture to look at, and any other file to save under its name. */
+const savedByPerson = (found: { mediaType?: string }, forPerson: boolean): boolean =>
+  forPerson && found.mediaType !== 'text/plain' && !found.mediaType?.startsWith('image/');
+
+/* What a file goes out as: to a person by what it is; to an agent a text as text, anything else as bytes. */
+function sentType(found: { name: string | null; mediaType?: string }, forPerson: boolean): string {
+  if (forPerson) return personDownloadType(found);
+  return found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream';
+}
+
+/* Sends a task or chat file in pieces, so the server never holds a whole one. */
+export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }, forPerson = false) {
+  const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
+  if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
+  if (savedByPerson(found, forPerson)) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
+  return reply
+    .header('x-content-type-options', 'nosniff')
+    .header('x-file-name', encodeURIComponent(found.name ?? ''))
+    .header('content-security-policy', "default-src 'none'")
+    .header('content-length', String(found.length))
+    .type(sentType(found, forPerson))
+    .send(Readable.from(filePieces(db, found.id, found.length)));
+}
+
 const IdParams = z.object({ id: z.uuid() });
-const SendQuery = z.object({ task: z.string().optional(), name: z.string().optional() });
+const SendQuery = z.object({ task: z.string().optional(), chat: z.enum(['1', 'true']).optional(), name: z.string().optional() });
 const FetchQuery = z.object({ task: z.string().min(1), file: z.string().min(1) });
 /* What hh-fetch names instead of a task for a picture that came with a message. */
 const MESSAGE_FILES = 'message';
@@ -191,7 +218,7 @@ async function messagePicture(db: Db, job: ToolJob, id: string) {
 
 /* A file of a task goes with its task and with who wrote it: a person, or an agent this person sees. A picture shown with a
    request answers to the request instead, as below. */
-async function taskFileForPerson(db: Db, me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
+async function taskFileForPerson(db: Db, me: Person, id: string) {
   const [found] = await db.select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: attachments.size, personId: attachments.personId, agentId: attachments.agentId, task: tasks }).from(attachments)
     .innerJoin(tasks, eq(tasks.id, attachments.taskId))
     .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), eq(tasks.companyId, me.companyId), isNull(attachments.requestId), isNull(attachments.operatorCaseId)));
@@ -201,38 +228,131 @@ async function taskFileForPerson(db: Db, me: Awaited<ReturnType<typeof requirePe
   return found;
 }
 
+/* A file an agent attached to its chat reply (hh-attach --chat FILE): only people who may see that agent download it. */
+async function chatFileForPerson(db: Db, me: Person, id: string) {
+  const [found] = await db
+    .select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: attachments.size, agent: agents })
+    .from(attachments)
+    .innerJoin(agents, eq(agents.id, attachments.agentId))
+    .where(
+      and(
+        eq(attachments.id, id),
+        eq(attachments.companyId, me.companyId),
+        isNull(attachments.personId),
+        isNull(attachments.taskId),
+        isNull(attachments.requestId),
+        isNull(attachments.operatorCaseId),
+        isNotNull(attachments.name),
+      ),
+    );
+  if (!found) return null;
+  if (!(await canViewAgent(db, me, found.agent))) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
+  return found;
+}
+
+/* A file of a task or of an agent's chat that this person may download; it throws when they may not see it. */
+const personFile = async (db: Db, me: Person, id: string) => (await taskFileForPerson(db, me, id)) ?? (await chatFileForPerson(db, me, id));
+
+/* Reads an attachment's bytes for a person only when that active person is allowed to see it on its task or agent chat. */
+export async function attachmentBytesForPerson(
+  db: Db,
+  person: Person,
+  id: string,
+): Promise<{ id: string; name: string; mediaType: string; bytes: Buffer } | null> {
+  if (person.status !== 'active') return null;
+  let allowed: { id: string; name: string | null; mediaType: string } | null = null;
+  try {
+    allowed = await personFile(db, person, id);
+  } catch {
+    return null;
+  }
+  if (!allowed) return null;
+  const [row] = await db
+    .select({ bytes: attachments.bytes })
+    .from(attachments)
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, person.companyId), isNull(attachments.operatorCaseId)));
+  if (!row) return null;
+  return {
+    id,
+    name: allowed.name ?? 'file',
+    mediaType: personDownloadType(allowed),
+    bytes: Buffer.from(row.bytes),
+  };
+}
+
 /* Ordinary uploaded files keep their sharing rule; automatic plain-text logs keep the task's read boundary. */
 function readsTaskFile(job: ToolJob, task: Task | null, file: { mediaType: string }): boolean {
   return file.mediaType !== 'text/plain' || (task !== null && agentSeesTask({ id: job.agentId, kind: job.agentKind, departmentId: job.departmentId }, task));
+}
+
+/* A file's name, which a file for a task or the chat needs; a picture for a request goes without one. */
+function uploadName(asFile: boolean, rawName: string | undefined): string | null {
+  if (!asFile) return null;
+  const name = fileName(rawName ?? '');
+  if (!name) throw new ApiError(400, 'validation', 'Name the file: name=<file name>.', 'attachment_invalid');
+  return name;
+}
+
+function checkUploadSize(bytes: Buffer, asFile: boolean, toChat: boolean): void {
+  if (toChat && !bytes.length) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
+  if (!asFile && bytes.length > PICTURE_BYTES) {
+    throw new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid');
+  }
+}
+
+/* What an upload is kept as: a picture as its own type, unless it goes on a task, where every file is bytes. */
+function uploadType(asFile: boolean, hasTask: boolean, pic: string | null): string | null {
+  if (!asFile) return pic;
+  return !hasTask && pic ? pic : 'application/octet-stream';
+}
+
+function checkedUploadMeta(bytes: Buffer, asFile: boolean, toChat: boolean, hasTask: boolean, rawName: string | undefined) {
+  const name = uploadName(asFile, rawName);
+  checkUploadSize(bytes, asFile, toChat);
+  const pic = pictureType(bytes);
+  const type = uploadType(asFile, hasTask, pic);
+  if (!type) throw new ApiError(400, 'validation', 'Send a PNG, JPEG or WebP picture, or name the task a file is for.', 'attachment_invalid');
+  return { name, pic, type };
+}
+
+async function checkAttachmentSpace(ctx: Ctx, companyId: string, task: Task | null, toChat: boolean, size: number) {
+  if (task) await checkRoom(ctx, companyId, task, size);
+  else if (toChat) await checkPictureRoom(ctx, companyId, size);
 }
 
 export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   /* An agent's running turn sends a picture as raw bytes with its tool token, through hh-attach; or, naming a task it
-     works on (?task=12&name=build.tar.gz), a file of any kind for that task. */
+     works on (?task=12&name=build.tar.gz) or the chat (?chat=1&name=contacts.xlsx), a file of any kind. */
   void app.register(async scope => {
     scope.addContentTypeParser(['application/octet-stream', 'image/png', 'image/jpeg', 'image/webp'], { parseAs: 'buffer', bodyLimit: FILE_BYTES }, (_req, body, done) => done(null, body));
     scope.post('/api/attachments', { bodyLimit: FILE_BYTES }, async (req, reply) => {
       const job = await jobOf(ctx, req);
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-      const { task: ref, name: raw } = SendQuery.parse(req.query);
+      const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
+      const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
-      const name = task ? fileName(raw ?? '') : null;
-      if (task && !name) throw new ApiError(400, 'validation', 'Name the file: name=<file name>.', 'attachment_invalid');
-      if (!task && bytes.length > PICTURE_BYTES) throw new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid');
-      const type = task ? 'application/octet-stream' : pictureType(bytes);
-      if (!type) throw new ApiError(400, 'validation', 'Send a PNG, JPEG or WebP picture, or name the task a file is for.', 'attachment_invalid');
+      const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, toChat, ref !== undefined, raw);
       const [sent] = await db.select({ n: count() }).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
-      if (task) await checkRoom(ctx, job.companyId, task, bytes.length);
+      await checkAttachmentSpace(ctx, job.companyId, task, toChat, bytes.length);
       const [row] = await db
         .insert(attachments)
         .values({ companyId: job.companyId, jobId: job.id, agentId: job.agentId, taskId: task?.id ?? null, name, mediaType: type, bytes, size: bytes.length })
         .returning({ id: attachments.id });
+      if (toChat && name) {
+        await appendEvent(ctx, {
+          companyId: job.companyId,
+          agentId: job.agentId,
+          jobId: job.id,
+          kind: 'text',
+          data: { text: '', pictures: [{ id: row!.id, name, ...(pic ? {} : { file: true }) }] },
+        });
+      }
       reply.code(201);
-      return task ? { id: row!.id, name } : { id: row!.id };
+      return name ? { id: row!.id, name } : { id: row!.id };
     });
   });
 
@@ -266,8 +386,8 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const file = await taskFileForPerson(db, me, id);
-    if (file) return sendFile(db, reply, file);
+    const file = await personFile(db, me, id);
+    if (file) return sendFile(db, reply, file, true);
     const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     const [found] = await db

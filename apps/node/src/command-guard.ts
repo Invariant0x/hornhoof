@@ -1019,7 +1019,7 @@ const commandName = (text: string): string => {
 const ORDINARY = new Set([
   ':', 'true', 'false', 'echo', 'printf', 'cat', 'ls', 'pwd', 'test', '[', '[[', 'mkdir', 'rmdir', 'rm', 'cp', 'mv', 'ln', 'touch', 'chmod', 'chown', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'tr', 'tee',
   'sed', 'awk', 'gawk', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'fd', 'xxd', 'od', 'stat', 'file', 'du', 'df', 'date', 'sleep', 'which', 'type', 'hash', 'unset', 'set', 'shopt', 'local', 'read', 'wait', 'trap',
-  'exit', 'return', 'break', 'continue', 'shift', 'basename', 'dirname', 'realpath', 'readlink', 'diff', 'cmp', 'comm', 'patch', 'tar', 'gzip', 'gunzip', 'zip', 'unzip', 'jq', 'yq', 'git', 'gh', 'hh-attach', 'hh-fetch',
+  'exit', 'return', 'break', 'continue', 'shift', 'basename', 'dirname', 'realpath', 'readlink', 'diff', 'cmp', 'comm', 'patch', 'tar', 'gzip', 'gunzip', 'zip', 'unzip', 'jq', 'yq', 'git', 'gh', 'hh-attach', 'hh-fetch', 'hh-xlsx',
   'curl', 'wget', 'ps', 'kill', 'pgrep', 'uname', 'id', 'whoami', 'hostname', 'seq', 'less', 'more', 'nl', 'rev', 'tac', 'vi', 'vim', 'nano', 'alias', 'unalias', 'declare', 'typeset', 'umask', 'ulimit', 'dirs',
 ]);
 
