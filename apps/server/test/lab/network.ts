@@ -69,7 +69,8 @@ export type PeerRelay = {
 
 const realDateNow = Date.now.bind(Date);
 /* One hour behind real wall time so X.509 certificates minted after minutes of virtual-clock advancement still satisfy
-   OpenSSL's C-level notBefore <= time(NULL) check while remaining well before their multi-day notAfter expiry. */
+   OpenSSL's C-level notBefore <= time(NULL) check while remaining well before their multi-day notAfter expiry. Virtual
+   TLS scenarios advancing more than an hour must pass an earlier startWall. */
 const OPENSSL_SKEW_MS = 3_600_000;
 const ignore = (): void => {};
 
@@ -226,21 +227,44 @@ type GateInternals = {
 };
 
 function pipeDelayed(from: Duplex, to: Duplex, g: GateInternals): () => void {
+  const queue: Array<{ due: number; fn: () => void }> = [];
   let lastDue = g.schedule.now();
-  const cancels = new Set<() => void>();
+  let cancelTimer: (() => void) | null = null;
   const clearAll = (): void => {
-    for (const cancel of cancels) cancel();
-    cancels.clear();
+    queue.length = 0;
+    if (cancelTimer) {
+      const cancel = cancelTimer;
+      cancelTimer = null;
+      cancel();
+    }
+  };
+  const arm = (): void => {
+    if (cancelTimer || queue.length === 0) return;
+    const waitMs = Math.max(0, Math.ceil(queue[0]!.due - g.schedule.now()));
+    cancelTimer = g.schedule.after(waitMs, flush);
+  };
+  const flush = (): void => {
+    cancelTimer = null;
+    if (g.cut()) {
+      queue.length = 0;
+      return;
+    }
+    const now = g.schedule.now();
+    while (queue.length > 0 && queue[0]!.due <= now) {
+      queue.shift()!.fn();
+      if (g.cut()) {
+        queue.length = 0;
+        return;
+      }
+    }
+    arm();
   };
   const enqueue = (fn: () => void): void => {
     const now = g.schedule.now();
     const due = Math.max(lastDue, now + g.oneWayMs());
     lastDue = due;
-    const cancel = g.schedule.after(due - now, () => {
-      cancels.delete(cancel);
-      if (!g.cut()) fn();
-    });
-    cancels.add(cancel);
+    queue.push({ due, fn });
+    arm();
   };
   from.on('data', (chunk: Buffer) => {
     if (g.cut() || to.destroyed) {

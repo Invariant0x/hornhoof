@@ -13,6 +13,7 @@ import { DbDoor } from '../../src/net/db-door.js';
 import { PeerServer } from '../../src/net/peer-server.js';
 import { PeerSessions } from '../../src/net/peer-sessions.js';
 import { fakeRelay } from '../fake-relay.js';
+import { directPeerBlockScript } from './lab.js';
 import { closedPort, createDelayGate, createPeerRelay, virtualClock } from './network.js';
 
 const COMPANY_ID = '00000000-0000-4000-8000-0000000000aa';
@@ -358,5 +359,80 @@ describe('the network lab relay and peer path with controllable delay', () => {
     await clock.advance(100);
     expect(sessionsA.reaches(MACHINE_B)).toBe(false);
     await offerB.close();
+  });
+
+  it('builds FORWARD and DOCKER-USER TCP-RST rules for blockDirect and bridges remote TCP offer/visit streams when direct fails', async () => {
+    const installCmd = directPeerBlockScript(true, 8180, 7070);
+    expect(installCmd).toContain('DOCKER-USER ! -i lo -p tcp -m conntrack --ctorigdstport 8180 -j REJECT --reject-with tcp-reset');
+    expect(installCmd).toContain('DOCKER-USER ! -i lo -p tcp --dport 7070 -j REJECT --reject-with tcp-reset');
+    expect(installCmd).toContain('FORWARD ! -i lo -p tcp --dport 7070 -j REJECT --reject-with tcp-reset');
+    expect(installCmd).toContain('INPUT ! -i lo -p tcp --dport 8180 -j REJECT --reject-with tcp-reset');
+    const removeCmd = directPeerBlockScript(false, 8180, 7070);
+    expect(removeCmd).toContain('iptables -D DOCKER-USER');
+    expect(removeCmd).toContain('iptables -D FORWARD');
+    expect(removeCmd).toContain('iptables -D INPUT');
+
+    /* Exercise the TCP line protocol (offer -> knock -> accept / visit) that container bridges use when 8180 is refused. */
+    const clock = virtualClock();
+    const gate = createDelayGate({ oneWayMs: 120, schedule: clock.schedule });
+    const relay = await createPeerRelay(gate);
+    const backend = await echoDbServer();
+    const svc = serviceName('acme', NET_A, 'data');
+
+    const bridgeSockets = new Set<net.Socket>();
+    const offerCtrl = net.connect({ port: relay.port, host: '127.0.0.1', noDelay: true }, () => {
+      offerCtrl.write(`${JSON.stringify({ op: 'offer', service: svc })}\n`);
+    });
+    bridgeSockets.add(offerCtrl);
+    let ctrlBuf = '';
+    offerCtrl.setEncoding('utf8');
+    offerCtrl.on('data', (chunk: string) => {
+      ctrlBuf += chunk;
+      const lines = ctrlBuf.split('\n');
+      ctrlBuf = lines.pop()!;
+      for (const line of lines) {
+        const { knock } = JSON.parse(line) as { knock: string };
+        const local = net.connect({ port: backend.port, host: '127.0.0.1', noDelay: true });
+        const up = net.connect({ port: relay.port, host: '127.0.0.1', noDelay: true }, () => {
+          up.write(`${JSON.stringify({ op: 'accept', token: knock })}\n`);
+        });
+        bridgeSockets.add(local);
+        bridgeSockets.add(up);
+        local.pipe(up);
+        up.pipe(local);
+      }
+    });
+
+    const visitorSrv = net.createServer({ noDelay: true }, client => {
+      client.setNoDelay(true);
+      bridgeSockets.add(client);
+      const up = net.connect({ port: relay.port, host: '127.0.0.1', noDelay: true }, () => {
+        up.write(`${JSON.stringify({ op: 'visit', service: svc })}\n`);
+        client.pipe(up);
+        up.pipe(client);
+      });
+      bridgeSockets.add(up);
+    });
+    const visitorPort = await listenIn(visitorSrv, '127.0.0.1');
+    onTestFinished(
+      () =>
+        new Promise<void>(resolve => {
+          for (const s of bridgeSockets) s.destroy();
+          visitorSrv.close(() => resolve());
+        }),
+    );
+    await clock.flush();
+
+    const deadDirect = await closedPort();
+    await expect(askLine(deadDirect, 'PING')).rejects.toThrow();
+
+    let relayedReply: string | undefined;
+    void askLine(visitorPort, 'PING').then(res => {
+      relayedReply = res;
+    });
+    await clock.advance(200);
+    expect(relayedReply).toBeUndefined();
+    await clock.until(() => relayedReply !== undefined, { maxMs: 1000 });
+    expect(relayedReply).toBe('db:PING');
   });
 });

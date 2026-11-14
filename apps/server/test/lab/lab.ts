@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { KEEPER_PORTS } from '../../src/modules/keeper/doors.js';
 import { serviceName } from '../../src/modules/link/peer-client.js';
 import { VISIT_FIRST_PORT } from '../../src/modules/link/visit-client.js';
 import { fakeRelay, type FakeRelay } from '../fake-relay.js';
@@ -111,9 +112,32 @@ for (const { port, service } of cfg.visits) {
     client.on('error', () => up.destroy());
     up.on('error', () => client.destroy());
   });
-  srv.on('error', () => {});
+  srv.on('error', () => process.exit(1));
   srv.listen(port, '127.0.0.1');
 }`;
+}
+
+/* Builds the netfilter script run inside each lab machine to block or restore direct peer connections on published port
+   8180. Because compose publishes 8180 -> keeper:7070 via Docker DNAT in PREROUTING, remote packets traverse FORWARD /
+   DOCKER-USER with dport 7070 (ctorigdstport 8180) rather than INPUT; loopback traffic inside containers is untouched. */
+export function directPeerBlockScript(blocked: boolean, publishedPort = 8180, containerPort = KEEPER_PORTS.peer): string {
+  const inputRule = `INPUT ! -i lo -p tcp --dport ${publishedPort} -j REJECT --reject-with tcp-reset`;
+  const forwardRule = `FORWARD ! -i lo -p tcp --dport ${containerPort} -j REJECT --reject-with tcp-reset`;
+  const dockerOrigRule = `DOCKER-USER ! -i lo -p tcp -m conntrack --ctorigdstport ${publishedPort} -j REJECT --reject-with tcp-reset`;
+  const dockerDestRule = `DOCKER-USER ! -i lo -p tcp --dport ${containerPort} -j REJECT --reject-with tcp-reset`;
+  if (!blocked) {
+    return [
+      `while iptables -D ${dockerOrigRule} 2>/dev/null; do :; done`,
+      `while iptables -D ${dockerDestRule} 2>/dev/null; do :; done`,
+      `while iptables -D ${forwardRule} 2>/dev/null; do :; done`,
+      `while iptables -D ${inputRule} 2>/dev/null; do :; done`,
+    ].join('; ');
+  }
+  return [
+    `if iptables -nL DOCKER-USER >/dev/null 2>&1; then (iptables -C ${dockerOrigRule} 2>/dev/null || iptables -I ${dockerOrigRule} 2>/dev/null || true); (iptables -C ${dockerDestRule} 2>/dev/null || iptables -I ${dockerDestRule}); fi`,
+    `iptables -C ${forwardRule} 2>/dev/null || iptables -I ${forwardRule}`,
+    `iptables -C ${inputRule} 2>/dev/null || iptables -I ${inputRule}`,
+  ].join('; ');
 }
 
 export class Lab {
@@ -282,10 +306,11 @@ export class Lab {
     const gate = opts.gate ?? this.network({ oneWayMs: 0 });
     const relay = await createPeerRelay(gate, { host: '0.0.0.0', keep: true });
     const host = await this.hostAddress();
+    let directBlocked = false;
     const blockDirect = async (blocked: boolean): Promise<void> => {
-      const rule = 'INPUT -p tcp --dport 8180 -j REJECT --reject-with tcp-reset';
-      const cmd = blocked ? `iptables -C ${rule} 2>/dev/null || iptables -I ${rule}` : `iptables -D ${rule} 2>/dev/null || true`;
+      const cmd = directPeerBlockScript(blocked);
       await Promise.all(places.map(at => at.machine.exec(cmd)));
+      directBlocked = blocked;
     };
     if (opts.blockDirect) await blockDirect(true);
     let going = true;
@@ -304,7 +329,7 @@ export class Lab {
             const sig = `${at.network}:${visits.map(v => `${v.port}=${v.service}`).join(',')}`;
             const alive = await inKeeper(at, 'ps -o args | grep -q "[h]h-lab-peer-bridge"').catch(() => null);
             if (signatures.get(at.machine.name) === sig && alive?.code === 0) return;
-            const offers = { [serviceName(linkName, at.network, 'data')]: 8180, [serviceName(linkName, at.network, 'app')]: 7082 };
+            const offers = { [serviceName(linkName, at.network, 'data')]: KEEPER_PORTS.peer, [serviceName(linkName, at.network, 'app')]: KEEPER_PORTS.peerApp };
             const code = bridgeScript(host, relay.port, offers, visits).replaceAll("'", `'\\''`);
             await inKeeper(at, `pkill -f "frpc -c .*frpc-visit.toml" || true; pkill -f hh-lab-peer-bridge || true; nohup node -e '${code}' -- hh-lab-peer-bridge >/tmp/hh-peer-bridge.log 2>&1 &`).catch(() => null);
             signatures.set(at.machine.name, sig);
@@ -316,6 +341,7 @@ export class Lab {
     const stop = async (): Promise<void> => {
       going = false;
       await loop;
+      if (directBlocked) await blockDirect(false).catch(() => undefined);
       await relay.close();
     };
     this.relays.push({ close: stop });
