@@ -1,10 +1,10 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentInbox, agents, companies, departments, jobs, people, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agentInbox, agents, companies, departments, jobs, people, requests, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { said } from '../src/modules/conversation/live.js';
 import { letterKind, type MailMessage } from '../src/modules/conversation/inbox.js';
-import { enqueueTurn } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { comment, createTask } from '../src/modules/tasks/engine.js';
@@ -133,18 +133,63 @@ describe('mail from employees in inbox mode', () => {
     expect((await c.turnsOf(c.hana.id)).filter(j => j.inboxWake).map(j => j.status)).toEqual(['queued']);
   });
 
-  it('wakes a holder whose task waits at once with one turn, and ends the wait as before', async () => {
+  it('wakes a holder whose task waits with a turn on that task that has the letter whole, and ends the wait as before', async () => {
     const c = await company();
     const task = await c.task(c.bruno.id);
     await waitFor(c.ctx, c.bruno.id, task.id, { reason: 'Images', until: new Date(Date.now() + 60 * MIN).toISOString(), on: { kind: 'employee', employee: c.hana.id } });
-    await c.letter(c.hana, c.bruno.id, 'The images are ready.', task.number);
+    const text = `The images are ready. ${'Each one is checked against the brief and named by its page. '.repeat(6)}`.trim();
+    await c.letter(c.hana, c.bruno.id, text, task.number);
 
     expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toBeNull();
-    const [batch] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'running');
-    expect(batch).toMatchObject({ inboxWake: true });
-    const prompt = c.runs().find(r => r.jobId === batch!.id)!.prompt;
-    expect(prompt).toContain('The images are ready.');
-    expect(prompt).toContain(`#${task.number}`);
+    const [turn] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'running');
+    expect(turn).toMatchObject({ inboxWake: false, taskId: task.id });
+    expect(c.runs().find(r => r.jobId === turn!.id)!.prompt).toContain(text);
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.inboxWake)).toEqual([]);
+    expect(await c.inboxOf(c.bruno.id)).toMatchObject([{ kind: 'message', taskId: task.id, jobId: turn!.id, status: 'read' }]);
+  });
+
+  it('keeps a letter on a task for a turn on that task, so its holder cannot wait past it', async () => {
+    const c = await company();
+    const task = await c.task(c.bruno.id);
+    const talk = await c.ivanWrites(c.bruno.id, 'How is it going?');
+    expect((await c.job(talk)).status).toBe('running');
+    c.refuseLiveWords();
+    await c.letter(c.hana, c.bruno.id, 'Use the new totals.', task.number);
+
+    const [waiting] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    expect(waiting).toMatchObject({ taskId: task.id, inboxWake: false });
+    await expect(waitFor(c.ctx, c.bruno.id, task.id, { reason: 'Images', until: new Date(Date.now() + 60 * MIN).toISOString(), on: { kind: 'employee', employee: c.hana.id } })).rejects.toMatchObject({ status: 409 });
+    expect(await c.inboxOf(c.bruno.id)).toMatchObject([{ taskId: task.id, jobId: waiting!.id, status: 'unread' }]);
+    await c.ends(talk);
+    expect((await c.job(waiting!.id)).status).toBe('running');
+    expect((await c.inboxOf(c.bruno.id))[0]!.status).toBe('read');
+  });
+
+  it('fails a letter on a task that cannot go out alone: the sender hears it, the wait goes on, and nothing of it waits unread', async () => {
+    const c = await company();
+    const task = await c.task(c.bruno.id);
+    await waitFor(c.ctx, c.bruno.id, task.id, { reason: 'Images', until: new Date(Date.now() + 60 * MIN).toISOString(), on: { kind: 'employee', employee: c.hana.id } });
+    await c.ivanWrites(c.bruno.id, 'How is it going?');
+    c.refuseLiveWords();
+    await c.letter(c.rita, c.bruno.id, 'I pushed the fixtures.');
+    /* The plan is at its limit: a turn that waits for it does not end by itself. */
+    await c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 60 * MIN).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.key.id));
+
+    await expect(c.letter(c.hana, c.bruno.id, 'The images are ready.', task.number)).rejects.toMatchObject({ status: 409, reason: 'agent_not_ready' });
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.inboxWake).map(j => j.status)).toEqual(['queued']);
+    expect((await c.inboxOf(c.bruno.id)).map(m => [m.text, m.status])).toEqual([['I pushed the fixtures.', 'unread']]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toMatchObject({ reason: 'Images' });
+  });
+
+  it('keeps a letter without a task in the inbox for an employee whose plan is at its limit, and fails no turn of it', async () => {
+    const c = await company();
+    await c.ivanWrites(c.bruno.id, 'How is it going?');
+    c.refuseLiveWords();
+    await c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 60 * MIN).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.key.id));
+    await c.letter(c.rita, c.bruno.id, 'I pushed the fixtures.');
+    await c.letter(c.hana, c.bruno.id, 'Review it when you can.');
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.inboxWake).map(j => j.status)).toEqual(['queued']);
+    expect((await c.inboxOf(c.bruno.id)).map(m => m.status)).toEqual(['unread', 'unread']);
   });
 
   it('takes a person\'s words that came by Telegram or an assistant as a person\'s, not as mail', async () => {
@@ -167,6 +212,71 @@ describe('mail from employees in inbox mode', () => {
     expect(prompt).not.toContain('SECRET-BODY');
     expect(prompt).not.toContain('Only for Rita.');
     expect(prompt).not.toContain('x'.repeat(600));
+  });
+});
+
+describe("Hornhoof's words on a task", () => {
+  it('keep a comment that goes into the turn on its task in the inbox as read with that turn', async () => {
+    const c = await company();
+    vi.mocked(c.ctx.hub.hasTerminals).mockReturnValue(true);
+    const given = await c.given(c.bruno.id);
+    const [working] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'running');
+    await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.hana.id }, given.task.id, 'Mind the rounding.')).wakes);
+    expect(c.liveWords().map(m => m.text).join('\n')).toContain('Mind the rounding.');
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+    expect((await c.inboxOf(c.bruno.id)).filter(m => m.kind === 'comment')).toMatchObject([{ taskId: given.task.id, jobId: working!.id, status: 'read' }]);
+  });
+
+  it('keep each comment that joins a turn already waiting on its task in the inbox with that turn', async () => {
+    const c = await company();
+    const given = await c.given(c.bruno.id);
+    c.refuseLiveWords();
+    await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.hana.id }, given.task.id, 'Mind the rounding.')).wakes);
+    await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.hana.id }, given.task.id, 'And the tax.')).wakes);
+    const waiting = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    expect(waiting).toHaveLength(1);
+    expect((await c.inboxOf(c.bruno.id)).filter(m => m.kind === 'comment').map(m => [m.jobId, m.status])).toEqual([
+      [waiting[0]!.id, 'unread'],
+      [waiting[0]!.id, 'unread'],
+    ]);
+  });
+
+  it('keep a request the orchestrator explains in its running turn in its inbox as read with that turn', async () => {
+    const c = await company();
+    vi.mocked(c.ctx.hub.hasTerminals).mockReturnValue(true);
+    const given = await c.given(c.bruno.id);
+    const talk = await c.ivanWrites(c.orchestrator.id, 'What is waiting for me?');
+    expect((await c.job(talk)).status).toBe('running');
+    const [request] = await c.db.insert(requests).values({ companyId: c.companyId, taskId: given.task.id, agentId: c.bruno.id, kind: 'question', text: 'Is tax in scope?' }).returning();
+    await wakeAll(c.ctx, [{ agentId: c.orchestrator.id, taskId: given.task.id, why: 'explain', text: request!.id }]);
+    expect(c.liveWords().map(m => m.text).join('\n')).toContain('Is tax in scope?');
+    expect(await c.inboxOf(c.orchestrator.id)).toMatchObject([{ taskId: given.task.id, jobId: talk, status: 'read' }]);
+  });
+});
+
+describe('an employee that is switched off', () => {
+  it('takes no turn for its inbox until it is on again, and then takes one for all its letters', async () => {
+    const c = await company();
+    await c.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, c.bruno.id));
+    const notice = (text: string) => enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.bruno.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'tests', tasks: [] } } });
+    await notice('The test run ended.');
+    await notice('The second run ended.');
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'running')).toEqual([]);
+    expect((await c.inboxOf(c.bruno.id)).map(m => m.status)).toEqual(['unread', 'unread']);
+
+    await c.db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, c.bruno.id));
+    await pump(c.ctx, c.bruno.id);
+    const running = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'running');
+    expect(running).toMatchObject([{ inboxWake: true }]);
+    expect(c.runs().find(r => r.jobId === running[0]!.id)!.prompt).toMatch(/2 unread letters/);
+  });
+
+  it('starts no turn for letters that wait with no turn while it is off', async () => {
+    const c = await company();
+    await c.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, c.bruno.id));
+    await c.db.insert(agentInbox).values({ companyId: c.companyId, agentId: c.bruno.id, senderKind: 'hornhoof', senderName: 'Hornhoof', kind: 'notification', source: 'tests', text: 'The test run ended.', status: 'unread' });
+    await pump(c.ctx, c.bruno.id);
+    expect(await c.turnsOf(c.bruno.id)).toEqual([]);
   });
 });
 
