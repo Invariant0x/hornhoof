@@ -47,6 +47,7 @@ const FILTERS: Filters = {
   requests: passes,
   notebook: passes,
   improvements: passes,
+  feedback: passes,
   backlog: passes,
   computer: passes,
   'subscription.signin': passes,

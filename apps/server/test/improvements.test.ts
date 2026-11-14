@@ -5,7 +5,9 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, improvements, jobs, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { orchestratorHeaders } from '../src/auth/internal.js';
+import { agentEvents, agents, companies, departments, feedbackInbox, improvements, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { fakeRelay } from './fake-relay.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState } from '../src/modules/conversation/queue.js';
 
@@ -13,9 +15,10 @@ const NODE_KEY = 'k'.repeat(40);
 const TOKENS = { orchestrator: 'tool-token-orch-0123456789abcdef0123', hana: 'tool-token-hana-0123456789abcdef0123', bruno: 'tool-token-bruno-0123456789abcdef012', wendy: 'tool-token-wendy-0123456789abcdef012' };
 
 /* Development with Hana at its head and Bruno in it, Operations with Wendy, who collects weak points, and a running turn
-   for each of them and the orchestrator, whose tokens reach their tools. */
-async function company() {
-  const { app, db } = await testApp({ NODE_KEY });
+   for each of them and the orchestrator, whose tokens reach their tools. It reaches a relay of the test's own. */
+async function company(env: NodeJS.ProcessEnv = {}) {
+  const relay = await fakeRelay();
+  const { app, db } = await testApp({ NODE_KEY, RELAY_URL: relay.url, ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
@@ -39,7 +42,7 @@ async function company() {
     [wendy.id, TOKENS.wendy],
   ] as const)
     await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
-  return { app, db, ceo, acme: acme!, orchestrator: orchestrator!, dev: dev!, hana, bruno, wendy };
+  return { app, db, relay, ceo, acme: acme!, orchestrator: orchestrator!, dev: dev!, hana, bruno, wendy };
 }
 
 async function mcp(app: FastifyInstance, token: string): Promise<Client> {
@@ -322,5 +325,178 @@ describe('improvements', () => {
     const rows = await db.select().from(improvements);
     expect(rows.find(r => r.id === first)).toMatchObject({ status: 'open', result: 'This costs money: the CEO has to choose the machine.' });
     expect(rows.find(r => r.id === second)).toMatchObject({ status: 'dismissed' });
+  });
+});
+
+describe('findings about Hornhoof itself', () => {
+  const ON_NODE = { title: 'Install git-lfs on the nodes', problem: 'The node image has no git-lfs.', change: 'Add git-lfs to the node image.' };
+
+  it("are told apart from the company's own work, with the error code Hornhoof gave, and putting one sends nothing out", async () => {
+    const { app, relay, ceo } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const own = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Write the release steps down', change: 'Add them to the notebook.' })).content[0]!.text).improvement;
+    const platform = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform', code: 'git_lfs_missing' })).content[0]!.text).improvement;
+    expect((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'everywhere' })).isError).toBe(true);
+    expect((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform', code: 'Not a code' })).isError).toBe(true);
+    const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    expect(listed.find((i: { id: string }) => i.id === own)).toMatchObject({ scope: 'company', code: null });
+    expect(listed.find((i: { id: string }) => i.id === platform)).toMatchObject({ scope: 'platform', code: 'git_lfs_missing', status: 'open' });
+    const seen = JSON.parse((await call(wendy, 'improvements')).content[0]!.text);
+    expect(seen.find((i: { id: string }) => i.id === platform)).toMatchObject({ scope: 'platform' });
+    expect(relay.calls).toEqual([]);
+  });
+
+  it("are not taken into another company's own work: the CEO sends them to Hornhoof's developers instead", async () => {
+    const { app, db, ceo, orchestrator, dev } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform' })).content[0]!.text);
+    const taken = await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
+    expect([taken.statusCode, taken.json().error.reason]).toEqual([409, 'improvement_platform_elsewhere']);
+    await instruct(app, db, ceo, orchestrator.id);
+    const planned = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { mode: 'echelons', title: 'Install git-lfs', goal: 'Have git-lfs.', improvement: id, tasks: [work(dev.id, 'Change the node image')] });
+    expect(planned.isError).toBe(true);
+    expect(await db.select().from(tasks)).toEqual([]);
+    expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]).toMatchObject({ status: 'open', decidedBy: null });
+    expect((await app.inject({ method: 'POST', url: `/api/improvements/${id}/dismiss`, ...as(ceo) })).statusCode).toBe(200);
+  });
+
+  it("go into the engine's own work on Hornhoof's own installation, like any other", async () => {
+    const { app, db, ceo, orchestrator, dev } = await company({ FEEDBACK_INBOX: 'true' });
+    const wendy = await mcp(app, TOKENS.wendy);
+    const first = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, scope: 'platform' })).content[0]!.text).improvement;
+    expect((await app.inject({ method: 'POST', url: `/api/improvements/${first}/take`, ...as(ceo) })).statusCode).toBe(200);
+    const second = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, title: 'Install jq too', scope: 'platform' })).content[0]!.text).improvement;
+    await instruct(app, db, ceo, orchestrator.id);
+    const planned = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { mode: 'echelons', title: 'Install jq', goal: 'Have jq.', improvement: second, tasks: [work(dev.id, 'Change the node image')] });
+    expect(planned.isError).toBeFalsy();
+    expect((await db.select().from(improvements).where(eq(improvements.id, second)))[0]).toMatchObject({ status: 'taken' });
+  });
+});
+
+describe('a finding about Hornhoof itself, once sent to its developers', () => {
+  const ON_NODE = { title: 'Install git-lfs on the nodes', problem: 'The node image has no git-lfs.', change: 'Add git-lfs to the node image.', scope: 'platform', code: 'git_lfs_missing' };
+  const ISSUE = { number: 1347, url: 'https://github.com/invariant0x/hornhoof/issues/1347' };
+
+  /* An installation of another company, its clock in the test's hands, with Wendy's finding about Hornhoof itself. */
+  async function installation() {
+    const found = await company();
+    let now = Date.parse('2026-11-13T09:00:00Z');
+    found.app.ctx.clock = () => now;
+    const wendy = await mcp(found.app, TOKENS.wendy);
+    const propose = async (over: Record<string, unknown> = {}) => call(wendy, 'propose_improvement', { ...ON_NODE, ...over });
+    const id: string = JSON.parse((await propose()).content[0]!.text).improvement;
+    const listed = async () => ((await found.app.inject({ url: '/api/improvements', ...as(found.ceo) })).json().improvements as { id: string; status: string; seen: number; sent?: unknown }[]);
+    const card = async () => (await listed()).find(i => i.id === id)!;
+    /* The CEO sends it from its card as a bug, as the feedback window does. */
+    const send = async () => {
+      const report = { kind: 'bug', title: ON_NODE.title, text: 'The node image has no git-lfs.', improvement: id };
+      const { digest } = (await found.app.inject({ method: 'POST', url: '/api/feedback/preview', payload: report, ...as(found.ceo) })).json();
+      return found.app.inject({ method: 'POST', url: '/api/feedback', payload: { ...report, digest }, ...as(found.ceo) });
+    };
+    const reportRepeats = () => found.app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, ...as(found.ceo) });
+    return { ...found, wendy, id, propose, listed, card, send, reportRepeats, later: (ms: number) => (now += ms) };
+  }
+
+  it('leaves what waits and shows when it went, its number in the inbox of Hornhoof developers and, once there, its issue', async () => {
+    const { relay, wendy, id, card, send } = await installation();
+    relay.feedbackAnswer = { status: 202, body: { received: true, number: 7, issue: null } };
+    expect((await send()).statusCode).toBe(200);
+    expect(await card()).toMatchObject({ status: 'sent', sent: { at: '2026-11-13T09:00:00.000Z', number: 7, issue: null, fixedIn: null, repeats: 0 } });
+    expect(JSON.parse((await call(wendy, 'improvements')).content[0]!.text).map((i: { id: string }) => i.id)).not.toContain(id);
+  });
+
+  it('takes the issue from the answer only at its exact address on GitHub', async () => {
+    const answers: [unknown, unknown][] = [
+      [{ number: 12, url: 'https://evil.example/invariant0x/hornhoof/issues/12' }, null],
+      [{ number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/13' }, null],
+      [{ number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12?x=1' }, null],
+      [{ number: 12, url: 'javascript:alert(1)' }, null],
+      [{ number: 12, url: 'https://github.com/Invariant0x/Hornhoof/issues/12' }, { number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12' }],
+    ];
+    for (const [issue, kept] of answers) {
+      const { relay, card, send } = await installation();
+      relay.feedbackAnswer = { status: 202, body: { received: true, number: 7, issue } };
+      expect((await send()).statusCode).toBe(200);
+      expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: kept } });
+    }
+    const { relay, card, send } = await installation();
+    relay.feedbackAnswer = { status: 202, body: { received: true } };
+    expect((await send()).statusCode).toBe(200);
+    expect(await card()).toMatchObject({ status: 'sent', sent: { number: null, issue: null } });
+  });
+
+  it('counts a finding found again on the sent card instead of a new one, until a person reports the repeats, which the inbox counts as signals', async () => {
+    const { db, relay, id, propose, card, send, reportRepeats } = await installation();
+    /* hornhoof.org passes each report to the inbox of Hornhoof's own installation, and its answer back. */
+    const inbox = await testApp({ FEEDBACK_INBOX: 'true' });
+    const inboxCeo = await setUpCompany(inbox.app);
+    relay.forward = async report => {
+      const res = await inbox.app.inject({ method: 'POST', url: '/api/feedback/inbound', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(report) });
+      return { status: res.statusCode, body: res.json() };
+    };
+    const signals = async () => (await inbox.app.inject({ url: '/api/feedback/inbox', ...as(inboxCeo) })).json().cards.map((c: { number: number; signals: number }) => [c.number, c.signals]);
+    expect((await send()).statusCode).toBe(200);
+    expect(await signals()).toEqual([[1, 1]]);
+
+    const again = await propose({ title: 'Install git-lfs on the nodes!', problem: 'git-lfs is missing again.' });
+    expect(again.isError).toBeFalsy();
+    expect(JSON.parse(again.content[0]!.text)).toMatchObject({ improvement: id, sent: { number: 1 } });
+    await propose();
+    expect(await db.select().from(improvements)).toHaveLength(1);
+    expect(await card()).toMatchObject({ status: 'sent', seen: 3, sent: { number: 1, repeats: 2 } });
+    /* Nothing went out by itself. */
+    expect(relay.feedback).toHaveLength(1);
+    expect(await signals()).toEqual([[1, 1]]);
+
+    await inbox.db.update(feedbackInbox).set({ issueNumber: ISSUE.number, issueUrl: ISSUE.url });
+    const told = await reportRepeats();
+    expect([told.statusCode, told.json()]).toEqual([200, { sent: true }]);
+    expect(relay.feedback[1]).toEqual({ ...(relay.feedback[0] as object), repeats: 2 });
+    expect(await signals()).toEqual([[1, 3]]);
+    expect(await card()).toMatchObject({ status: 'sent', seen: 3, sent: { number: 1, issue: ISSUE, repeats: 0 } });
+    const nothingNew = await reportRepeats();
+    expect([nothingNew.statusCode, nothingNew.json().error.reason]).toEqual([409, 'feedback_no_repeats']);
+    expect(relay.feedback).toHaveLength(2);
+  });
+
+  it('lets only a person who sees the whole company report the repeats, never an agent or the orchestrator', async () => {
+    const { app, db, ceo, relay, orchestrator, propose, send, reportRepeats, id } = await installation();
+    expect((await send()).statusCode).toBe(200);
+    await propose();
+    const [dev] = await db.select().from(departments).where(eq(departments.roleCode, 'DEV'));
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev!.id] } });
+    expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, ...as(dana) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers: { authorization: `Bearer ${TOKENS.orchestrator}` } })).statusCode).toBe(401);
+    const [ivan] = await db.select().from(people);
+    expect((await app.inject({ method: 'POST', url: '/api/feedback/repeats', payload: { improvement: id }, headers: orchestratorHeaders(ivan!.id, orchestrator.id) })).statusCode).toBe(403);
+    expect(relay.feedback).toHaveLength(1);
+    expect((await reportRepeats()).statusCode).toBe(200);
+  });
+
+  it('keeps the repeats when hornhoof.org does not answer, and counts them on without failing the agent', async () => {
+    const { relay, propose, card, send, reportRepeats } = await installation();
+    expect((await send()).statusCode).toBe(200);
+    relay.down = true;
+    expect((await propose()).isError).toBeFalsy();
+    const failed = await reportRepeats();
+    expect([failed.statusCode, failed.json().error.reason]).toEqual([503, 'relay_unreachable']);
+    expect(await card()).toMatchObject({ seen: 2, sent: { repeats: 1 } });
+  });
+
+  it('shows "fixed in version X" once Hornhoof runs the release whose data names its report, and a finding found again after it is a new one', async () => {
+    const { app, db, relay, id, propose, card, send } = await installation();
+    relay.feedbackAnswer = { status: 202, body: { received: true, number: 7, issue: null } };
+    expect((await send()).statusCode).toBe(200);
+    expect(await card()).toMatchObject({ sent: { number: 7, issue: null, fixedIn: null } });
+    /* The installation updates: the same database, the new version and the release data it brings, which names the issue
+       of report 7 and its fix, still to come in a later version. */
+    app.ctx.config.version = '99.0.0';
+    app.ctx.released = [{ report: 7, issue: ISSUE, fixedIn: '99.0.1' }, { report: 8, issue: null, fixedIn: '0.1.0' }];
+    expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: ISSUE, fixedIn: null } });
+    app.ctx.config.version = '99.0.1';
+    expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: ISSUE, fixedIn: '99.0.1', repeats: 0 } });
+    const after = JSON.parse((await propose()).content[0]!.text).improvement;
+    expect(after).not.toBe(id);
+    expect((await db.select().from(improvements).where(eq(improvements.id, after)))[0]).toMatchObject({ status: 'open', seen: 1 });
   });
 });

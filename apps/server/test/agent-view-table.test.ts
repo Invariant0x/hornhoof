@@ -44,6 +44,16 @@ const anIdea = (end: string) => async (c: AclCompany, agent: Crew): Promise<Call
   const [idea] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Idea', text: 'x' }).returning();
   return { method: 'POST', url: `/api/improvements/${idea!.id}/${end}` };
 };
+/* A finding about Hornhoof itself, sent on from its card: the window shows what goes, and only the right digest sends it. */
+const aFinding = (url: string, extra: object = {}) => async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [finding] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Finding', text: 'x', scope: 'platform' }).returning();
+  return { method: 'POST', url, payload: { kind: 'bug', title: 'Finding', text: 'x', improvement: finding!.id, ...extra } };
+};
+/* Its repeats, told from its card: a finding not sent yet has none to tell, so nothing reaches the relay from here. */
+const aRepeated = async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [finding] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Finding', text: 'x', scope: 'platform' }).returning();
+  return { method: 'POST', url: '/api/feedback/repeats', payload: { improvement: finding!.id } };
+};
 const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
   const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
@@ -71,6 +81,10 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true, ownerToo: true },
   { route: 'POST /api/improvements/:id/take', of: anIdea('take'), companyOnly: true },
   { route: 'POST /api/improvements/:id/dismiss', of: anIdea('dismiss'), companyOnly: true },
+  { route: 'POST /api/feedback/preview', of: aFinding('/api/feedback/preview'), companyOnly: true },
+  /* A digest of nothing: what reaches the relay is never sent from here. */
+  { route: 'POST /api/feedback', of: aFinding('/api/feedback', { digest: '0'.repeat(64) }), companyOnly: true },
+  { route: 'POST /api/feedback/repeats', of: aRepeated, companyOnly: true },
   /* Hidden attachments have the same answer as missing files; other closed resources still answer 403. */
   { route: 'GET /api/attachments/:id', of: aPicture, closedStatus: 404 },
 ];
@@ -160,6 +174,8 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/assistant/mcp': "assistants-mcp.test.ts: the same reads and writes over MCP, by the assistant's key and with its owner's rights",
   'GET /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',
   'DELETE /api/assistant/mcp': 'assistants-mcp.test.ts: 405, the MCP door takes POST alone',
+  'GET /api/feedback/inbox': "feedback-inbox.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one; its cards came from installations, not from this company's agents",
+  'POST /api/feedback/inbox/:id/issue': "feedback-issue.test.ts: only on Hornhoof's own installation, a person with the whole company, 403 for another one",
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
@@ -171,6 +187,7 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/outbound/unsubscribe/*', 'POST /api/outbound/unsubscribe/*',
   'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
   'POST /api/machines/:id/access/close', 'POST /api/machines/:id/access/decline', 'POST /api/machines/:id/access/open',
+  'GET /api/feedback', 'POST /api/feedback/inbound',
   'PUT /api/departments/:id/model-checks/:kind/thresholds', 'POST /api/departments/:id/model-checks/:kind/sets', 'POST /api/departments/:id/model-checks/:kind/misses',
   'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',
   'PUT /api/departments/:id/work-mode',

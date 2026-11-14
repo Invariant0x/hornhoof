@@ -409,6 +409,8 @@ export type StreamMessage =
   /* The orchestrator's request for the computer changed; only the CEO's screen hears it. */
   | { type: 'computer' }
   | { type: 'improvements' }
+  /* The feedback inbox of Hornhoof's own installation changed. */
+  | { type: 'feedback' }
   /* A department's list of work kept for later turns changed. */
   | { type: 'backlog'; spot: { departmentId: string | null } }
   | { type: 'context'; agentId: string; used: number }
@@ -487,14 +489,17 @@ export type ImprovementParts = {
   gain: string | null;
 };
 
-/* Something an employee found to improve in how the company works. open waits for the CEO, taken is with the
-   orchestrator, done is done, dismissed was set aside. result: the orchestrator's word on what came of it. */
+/* Something an employee found to improve. open waits for the CEO, taken is with the orchestrator, done is done, dismissed
+   was set aside, sent went to Hornhoof's developers. scope: company for how the company works, platform for Hornhoof
+   itself, with the error code Hornhoof gave if any. result: the orchestrator's word on what came of it. */
 export type Improvement = {
   id: string;
   title: string;
   text: string;
   seen: number;
-  status: 'open' | 'taken' | 'done' | 'dismissed';
+  status: 'open' | 'taken' | 'done' | 'dismissed' | 'sent';
+  scope: 'company' | 'platform';
+  code: string | null;
   result: string | null;
   at: string;
   updatedAt: string;
@@ -504,6 +509,39 @@ export type Improvement = {
   tasks?: { id: string; number: number; title: string }[];
   /* null for one filed as one text; an older server sends none. */
   parts?: ImprovementParts | null;
+  /* What became of one sent to Hornhoof's developers, null for any other; an older server sends none. */
+  sent?: SentFate | null;
+};
+
+/* When it went, its number in the inbox of Hornhoof's developers once it gave one, its issue there, the version that fixed
+   it once this Hornhoof runs it, and how many more rounds found it since they last heard of it. */
+export type SentFate = { at: string; number: number | null; issue: { number: number; url: string } | null; fixedIn: string | null; repeats: number };
+
+export type FeedbackKind = 'bug' | 'improvement' | 'idea';
+/* What goes to Hornhoof's developers, as the server cleaned it, with the technical data beside it, how much it hid of each
+   kind and the digest that ties a press of Send to exactly this. */
+export type FeedbackShown = {
+  report: { kind: FeedbackKind; title: string; text: string; facts: { version: string; platform: string[]; errorCode: string | null } };
+  hidden: { secret: number; email: number; address: number; path: number };
+  digest: string;
+};
+/* A card of the inbox on Hornhoof's own installation: one report and its repeats, from how many installations. */
+export type InboxCard = {
+  id: string;
+  /* What an installation calls the report by. */
+  number: number;
+  kind: FeedbackKind;
+  title: string;
+  text: string;
+  errorCode: string | null;
+  versions: string[];
+  platforms: string[];
+  signals: number;
+  installations: number;
+  priority: 'high' | 'normal' | 'low';
+  firstAt: string;
+  lastAt: string;
+  issue: { number: number; url: string } | null;
 };
 
 export type MaterialStampView = {

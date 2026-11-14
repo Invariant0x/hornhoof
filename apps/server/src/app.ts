@@ -91,6 +91,9 @@ import type { Db } from './db/client.js';
 
 import { readCompare, readMerged, readTree, type CompareReader, type MergeReader, type TreeReader } from './modules/testruns/compare.js';
 import { createOnGitHub } from './modules/departments/github-create.js';
+import { openIssueOnGitHub, type IssueCreator } from './modules/feedback/github-issue.js';
+import { RELEASED, type Released } from './modules/feedback/released.js';
+import { feedbackRoutes } from './modules/feedback/routes.js';
 import type { RepositoryCreator } from './modules/departments/repo-hosts.js';
 import { googleSheetsRoutes } from './modules/google/routes.js';
 import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/sheets.js';
@@ -98,7 +101,7 @@ import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. onRoute is called for every
    route before any is added; a test uses it to ask each route what it tells a stranger. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; templates?: Templates };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; clock?: () => number; templates?: Templates; released?: readonly Released[] };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
@@ -113,6 +116,12 @@ export type Ctx = Deps & {
   createRepository: RepositoryCreator;
   /* Creates a spreadsheet on Google Sheets with a key the company saved. */
   createSpreadsheet: SpreadsheetCreator;
+  /* Opens an issue on GitHub with a key the company saved, for a card of the feedback inbox. */
+  createIssue: IssueCreator;
+  /* What the releases up to this build say about reports installations sent: their issues and the versions that fixed them. */
+  released: readonly Released[];
+  /* The time limits are counted on, which tests move. */
+  clock: () => number;
   log: FastifyBaseLogger;
   hub: NodeHub;
   bus: EventBus;
@@ -210,6 +219,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     readMerged,
     createRepository: createOnGitHub(),
     createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),
+    createIssue: openIssueOnGitHub(),
+    clock: Date.now,
+    released: RELEASED,
     ...deps,
     log: app.log,
     bus: new EventBus(),
@@ -400,6 +412,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   notebookRoutes(app, ctx);
   briefingRoutes(app, ctx);
   improvementRoutes(app, ctx);
+  feedbackRoutes(app, ctx);
   backlogRoutes(app, ctx);
   startTimers(app, ctx);
   startOperationsCheck(app, ctx);

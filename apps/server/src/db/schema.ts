@@ -8,7 +8,7 @@ import type { BindingPart } from '../modules/model-checks/lifecycle.js';
 import type { UnitFingerprint } from '@hornhoof/protocol';
 import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -1566,8 +1566,11 @@ export const briefings = pgTable(
 );
 
 /* open: waits for the CEO. taken: the CEO gave it to the orchestrator. done: the orchestrator did it. dismissed: the CEO
-   set it aside. */
-export const IMPROVEMENT_STATUSES = ['open', 'taken', 'done', 'dismissed'] as const;
+   set it aside. sent: a person sent it to Hornhoof's developers, as a finding about Hornhoof itself. */
+export const IMPROVEMENT_STATUSES = ['open', 'taken', 'done', 'dismissed', 'sent'] as const;
+/* company: how this company works, its setup, its instructions, its own work. platform: Hornhoof itself, such as a system
+   package its node image lacks or a failure of its terminal or queue. */
+export const IMPROVEMENT_SCOPES = ['company', 'platform'] as const;
 
 /* An improvement as a short case: what is wrong, the facts with where each comes from, kept apart from what its finder only
    guesses, why it matters, the change and what it gives. */
@@ -1597,14 +1600,79 @@ export const improvements = pgTable(
     /* How many rounds found it: one that finds it again rewrites it and adds one. */
     seen: integer('seen').notNull().default(1),
     status: text('status', { enum: IMPROVEMENT_STATUSES }).notNull().default('open'),
-    /* The person who took it into work or set it aside. */
+    scope: text('scope', { enum: IMPROVEMENT_SCOPES }).notNull().default('company'),
+    /* The error code Hornhoof gave, for a finding about Hornhoof itself that has one. */
+    code: text('code'),
+    /* The person who took it into work, set it aside or sent it. */
     decidedBy: uuid('decided_by').references(() => people.id),
     /* The orchestrator's word on what came of it, or why it could not be done. */
     result: text('result'),
+    /* For one sent to Hornhoof's developers: when it went, the report exactly as it went, what tells its repeats, its number
+       in their inbox and the issue it became there, as their inbox answered, and how many rounds had found it when they
+       last heard of it. */
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    sentReport: jsonb('sent_report').$type<SentReport>(),
+    sentFingerprint: text('sent_fingerprint'),
+    reportNumber: integer('report_number'),
+    issueNumber: integer('issue_number'),
+    issueUrl: text('issue_url'),
+    reportedSeen: integer('reported_seen'),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  t => [index('improvements_company_id_status').on(t.companyId, t.status)],
+  t => [index('improvements_company_id_status').on(t.companyId, t.status), index('improvements_sent_fingerprint').on(t.companyId, t.sentFingerprint)],
+);
+
+/* What a report to Hornhoof's developers is. */
+export const FEEDBACK_KINDS = ['bug', 'improvement', 'idea'] as const;
+/* A report as an installation sent it: its kind, cleaned words and technical data. */
+export type SentReport = {
+  kind: (typeof FEEDBACK_KINDS)[number];
+  title: string;
+  text: string;
+  facts: { version: string; platform: string[]; errorCode: string | null };
+};
+
+/* On Hornhoof's own installation, one card of the inbox: a report every installation may send, its repeats counted on it.
+   fingerprint: what tells repeats apart, its kind, error code and title written plainly. The text is the first report's,
+   as text. versions and platforms: every one the signals came with. The issue it became on GitHub, once a person made it. */
+export const feedbackInbox = pgTable(
+  'feedback_inbox',
+  {
+    id: id(),
+    companyId: companyId(),
+    /* What an installation calls the report by: its place in the order cards were opened. */
+    number: serial('number').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    kind: text('kind', { enum: FEEDBACK_KINDS }).notNull(),
+    title: text('title').notNull(),
+    text: text('text').notNull(),
+    errorCode: text('error_code'),
+    versions: text('versions').array().notNull().default(sql`'{}'::text[]`),
+    platforms: text('platforms').array().notNull().default(sql`'{}'::text[]`),
+    issueNumber: integer('issue_number'),
+    issueUrl: text('issue_url'),
+    issuedBy: uuid('issued_by').references(() => people.id),
+    createdAt: createdAt(),
+    /* When its last signal came. */
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [unique('feedback_inbox_fingerprint').on(t.companyId, t.fingerprint), unique('feedback_inbox_number').on(t.number)],
+);
+
+/* How many times one installation sent a card's report, by the id it signs its reports with. */
+export const feedbackSignals = pgTable(
+  'feedback_signals',
+  {
+    cardId: uuid('card_id')
+      .notNull()
+      .references(() => feedbackInbox.id, { onDelete: 'cascade' }),
+    installation: text('installation').notNull(),
+    signals: integer('signals').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [primaryKey({ columns: [t.cardId, t.installation] })],
 );
 
 /* The company's public link at the relay, like acme.hornhoof.org: its name and address, the key that changes or removes

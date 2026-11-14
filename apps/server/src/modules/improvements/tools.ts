@@ -2,9 +2,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, count, eq, gte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { improvements, jobs } from '../../db/schema.js';
+import { improvements, IMPROVEMENT_SCOPES, jobs, type ImprovementParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { caseText, improvementsChanged, listImprovements, moveImprovement } from './store.js';
+import { caseText, countOnSent, improvementsChanged, listImprovements, moveImprovement } from './store.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 
@@ -32,6 +32,17 @@ const Case = {
   why: Line(1000).optional().describe('Why it matters: what it costs or holds up now.'),
   change: Line(2000).describe('What exactly to change: the package to install, the words to add to an instruction, the setting.'),
   gain: Line(1000).optional().describe('What it gives once it is done.'),
+  scope: z
+    .enum(IMPROVEMENT_SCOPES)
+    .optional()
+    .describe(
+      'company (the default): how this company works, its setup, instructions or work. platform: Hornhoof itself is at fault, such as a system package its node image lacks, or a failure of its terminal, queue or tools.',
+    ),
+  code: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]{0,63}$/)
+    .optional()
+    .describe('For a platform finding, the error code Hornhoof gave, as it gave it, like relay_unreachable.'),
 };
 /* A refusal comes back to the agent as its reason. */
 const refused = async (fn: () => Promise<ReturnType<typeof say>>) => {
@@ -42,8 +53,21 @@ const refused = async (fn: () => Promise<ReturnType<typeof say>>) => {
     throw err;
   }
 };
+/* Whose work a finding is, and for one about Hornhoof itself, the error code Hornhoof gave. */
+function kindOf(scope: (typeof IMPROVEMENT_SCOPES)[number] = 'company', code?: string) {
+  return { scope, code: scope === 'platform' ? (code ?? null) : null };
+}
+/* Files a new finding, or counts one about Hornhoof itself on the sent card its developers have it as already. */
+async function fileFinding(ctx: Ctx, job: ToolJob, values: { title: string; text: string; parts: ImprovementParts } & ReturnType<typeof kindOf>) {
+  const known = values.scope === 'platform' ? await countOnSent(ctx, job.companyId, { title: values.title, code: values.code }) : null;
+  if (known) return json({ improvement: known.id, sent: { number: known.number }, note: "Hornhoof's developers have this already. It is counted once more on its card." });
+  const [row] = await ctx.db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, ...values }).returning({ id: improvements.id });
+  improvementsChanged(ctx, job.companyId);
+  return json({ improvement: row!.id });
+}
+
 const brief = (list: Awaited<ReturnType<typeof listImprovements>>) =>
-  list.map(({ id, title, seen, status, result, agent, department }) => ({ id, title, seen, status, result, foundBy: agent.name, department: department?.name ?? null }));
+  list.map(({ id, title, seen, status, scope, result, agent, department }) => ({ id, title, seen, status, scope, result, foundBy: agent.name, department: department?.name ?? null }));
 
 /* For heads and the employees a skill lets: what is under Improvements now, and putting a new one there or finding one
    again. */
@@ -81,21 +105,22 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
         'Puts something you found to improve in how the company works under Improvements, where the CEO takes it into work and the orchestrator does it: a program to install on the nodes ahead, words to add to an instruction, ' +
         'something to write down, a role to move to another subscription. Write it as a short case in the CEO\'s language and plain words, keeping names, commands and packages as they are: ' +
         'the title, what is wrong, the facts with where each comes from, apart from what you only guess, why it matters, the exact change and what it gives. ' +
+        'Say with scope whether the company can change it itself, or whether Hornhoof itself is at fault: on an installation of another company a platform finding goes to Hornhoof developers once the CEO sends it, ' +
+        'and one they have already is counted once more on its card instead of a new one. ' +
         `With improvement, the id of one still waiting, you found it again: it is rewritten with your case and counted once more. One turn puts at most ${TURN_IMPROVEMENTS}.`,
       inputSchema: { ...Case, improvement: Id.optional() },
     },
-    async ({ title, problem, facts, guesses, why, change, gain, improvement }) =>
+    async ({ title, problem, facts, guesses, why, change, gain, scope, code, improvement }) =>
       refused(async () => {
         if (!(await room())) return say(`One turn puts at most ${TURN_IMPROVEMENTS} improvements. Go on in your next round.`, true);
         const parts = { problem: problem ?? null, facts: facts ?? [], guesses: guesses ?? [], why: why ?? null, change, gain: gain ?? null };
         const text = caseText(parts);
+        const kind = kindOf(scope, code);
         if (improvement) {
-          await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, parts, seen: sql`${improvements.seen} + 1` });
+          await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, parts, ...kind, seen: sql`${improvements.seen} + 1` });
           return json({ improvement });
         }
-        const [row] = await db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, title, text, parts }).returning({ id: improvements.id });
-        improvementsChanged(ctx, job.companyId);
-        return json({ improvement: row!.id });
+        return fileFinding(ctx, job, { title, text, parts, ...kind });
       }),
   );
 }

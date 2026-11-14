@@ -1358,6 +1358,39 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .imp-guesses li { font-style: italic; }
 .imp-source { display: block; font-size: 12px; color: var(--muted); }
 .imp-result { margin: 0; padding: 8px 12px; background: var(--surface2); border-left: 2px solid var(--line2); overflow-wrap: anywhere; }
+.imp-sent { border-left-color: var(--ok); }
+/* What became of a finding sent to Hornhoof's developers: its line of facts, its issue as a link, and the version that
+   fixed it. */
+.imp-fate { display: grid; gap: 8px; min-width: 0; }
+.imp-fate .imp-meta a { overflow-wrap: anywhere; }
+.imp-fixed { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--ok); background: var(--surface2); color: var(--ink); overflow-wrap: break-word; }
+.badge.imp-platform { color: var(--cyan-ink); }
+/* The feedback window: the kind as three 44 px choices that wrap by whole words, the description, a note on what is
+   hidden, then exactly what goes with its technical data. */
+.fb-kinds { flex-wrap: wrap; }
+.fb-kinds button { min-height: 44px; margin: 0; margin-inline-start: -1px; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
+.fb-kinds button:first-child { margin-inline-start: 0; }
+.fb-input { width: 100%; min-height: 120px; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; line-height: 1.45; resize: vertical; }
+.fb-input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+.fb-note { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.fb-check { display: grid; gap: 12px; min-width: 0; }
+.fb-check h3 { margin: 0; font-size: 15px; overflow-wrap: break-word; }
+.fb-check .facts dd { overflow-wrap: anywhere; }
+.fb-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fb-code { font-family: var(--f-mono); font-size: 12px; }
+.fb-hidden { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--amber); background: var(--surface2); color: var(--amber-ink); font-size: 13px; overflow-wrap: break-word; }
+/* A card of the inbox: its line on the start side and its priority word say how pressing it is, its words stay text. */
+.fb-card { border-left: 1px solid var(--line); border-inline-start: 3px solid var(--amber); min-width: 0; }
+.fb-card.fb-high { border-inline-start-color: var(--red); }
+.fb-card.fb-low { border-inline-start-color: var(--line2); }
+.fb-card .imp-meta { align-items: center; }
+.fb-card .imp-meta > span { min-width: 0; overflow-wrap: anywhere; }
+.badge.fb-kind { color: var(--cyan-ink); }
+.fb-high .badge.fb-priority { color: var(--red); }
+.fb-normal .badge.fb-priority { color: var(--amber-ink); }
+.fb-low .badge.fb-priority { color: var(--muted); }
+.fb-issue { margin: 0; overflow-wrap: anywhere; }
+.dialog.about .t-link { text-align: start; overflow-wrap: break-word; }
 .reqs { display: grid; gap: 10px; min-width: 0; }
 .req { display: grid; gap: 10px; min-width: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--amber); }
 .req-approval { border-left-color: var(--pink); }

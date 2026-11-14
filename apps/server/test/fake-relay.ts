@@ -22,6 +22,12 @@ export type FakeRelay = {
   down: boolean;
   /* The address it gives a new link. */
   urlFor: (name: string) => string;
+  /* The reports it took to pass on to Hornhoof's developers, as they came, and how it answers the next one, with the
+     body of the inbox's answer, which it passes back unchanged. */
+  feedback: unknown[];
+  feedbackAnswer: { status: number; headers?: Record<string, string>; body?: unknown };
+  /* While set, it passes each report on to this inbox and gives back what the inbox answered, as relay.py does. */
+  forward: ((report: unknown) => Promise<{ status: number; body: unknown }>) | null;
   routes: Map<string, FakeRoute>;
   syncs: Map<string, FakeSync>;
   visitorKeys: Map<string, string>;
@@ -122,6 +128,9 @@ function newRelay(): FakeRelay {
     calls: [],
     down: false,
     urlFor: name => `https://${name}.hornhoof.test`,
+    feedback: [],
+    feedbackAnswer: { status: 202 },
+    forward: null,
     routes: new Map(),
     syncs: new Map(),
     visitorKeys: new Map(),
@@ -224,6 +233,16 @@ export async function fakeRelay(opts: { keep?: boolean; host?: string } = {}): P
   app.get('/api/v1/health', async (_req, reply) =>
     relay.frpsDown ? reply.code(503).send({ ok: false, frps: false }) : { ok: true, frps: true, relayStarted: relay.relayStarted, passthrough: relay.passthrough },
   );
+  app.post('/api/v1/feedback', async (req, reply) => {
+    if (relay.forward) {
+      relay.feedback.push(req.body);
+      const answer = await relay.forward(req.body);
+      return reply.code(answer.status).send(answer.body);
+    }
+    const { status, headers = {}, body = { received: true, number: 1, issue: null } } = relay.feedbackAnswer;
+    if (status === 202) relay.feedback.push(req.body);
+    return reply.code(status).headers(headers).send(status === 202 ? body : { error: 'refused' });
+  });
   await listenAt(port => app.listen({ host: opts.host ?? '127.0.0.1', port }));
   relay.url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
   if (!opts.keep) onTestFinished(() => app.close());

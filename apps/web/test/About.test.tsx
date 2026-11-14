@@ -37,7 +37,6 @@ describe('About from the account menu', () => {
     for (const [name, href] of [
       ['MIT', 'https://github.com/Invariant0x/hornhoof/blob/main/LICENSE'],
       ['Source code', 'https://github.com/Invariant0x/hornhoof'],
-      ['Report a bug or suggest an idea', 'https://github.com/Invariant0x/hornhoof/issues'],
       ['hornhoof.org', 'https://hornhoof.org'],
     ]) {
       const link = within(box).getByRole('link', { name });
@@ -45,7 +44,8 @@ describe('About from the account menu', () => {
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     }
-    expect(within(box).getAllByRole('link')).toHaveLength(4);
+    expect(within(box).getAllByRole('link')).toHaveLength(3);
+    expect(within(box).getByRole('button', { name: 'Report a bug or suggest an idea' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Versions' })).not.toBeInTheDocument();
   });
 
@@ -69,7 +69,7 @@ describe('About from the account menu', () => {
     const box = await screen.findByRole('dialog', { name: 'О программе Hornhoof' });
     expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
     expect(within(box).getByText('Компания, где люди и агенты работают вместе.')).toBeInTheDocument();
-    expect(within(box).getByRole('link', { name: 'Сообщить об ошибке или предложить идею' })).toBeInTheDocument();
+    expect(within(box).getByRole('button', { name: 'Сообщить об ошибке или предложить идею' })).toBeInTheDocument();
     expect(within(box).queryByText('Разработчик')).not.toBeInTheDocument();
     expect(within(box).getByText('Автор: Ivan Korol, © 2026')).toBeInTheDocument();
     expect(box.textContent!).not.toMatch(/[\u0451\u2014]/);
@@ -90,9 +90,9 @@ describe('About from the account menu', () => {
     await user.tab({ shift: true });
     expect(website).toHaveFocus();
     await user.tab();
-    for (const name of ['MIT', 'Source code', 'Report a bug or suggest an idea', 'hornhoof.org']) {
+    for (const [role, name] of [['link', 'MIT'], ['link', 'Source code'], ['button', 'Report a bug or suggest an idea'], ['link', 'hornhoof.org']] as const) {
       await user.tab();
-      expect(within(box).getByRole('link', { name })).toHaveFocus();
+      expect(within(box).getByRole(role, { name })).toHaveFocus();
     }
     await user.tab();
     expect(close).toHaveFocus();

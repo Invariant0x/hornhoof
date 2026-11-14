@@ -60,6 +60,16 @@ describe('loadConfig', () => {
     }
   });
 
+  it("is Hornhoof's own feedback inbox only when FEEDBACK_INBOX says true", () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).feedbackInbox).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX: '' }).feedbackInbox).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX: 'false' }).feedbackInbox).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX: 'true' }).feedbackInbox).toBe(true);
+    for (const FEEDBACK_INBOX of ['yes', '1', 'TRUE']) {
+      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, FEEDBACK_INBOX })).toThrow('FEEDBACK_INBOX must be true or false.');
+    }
+  });
+
   it('runs behind a keeper only when HORNHOOF_KEEPER says on', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).keeper).toBe(false);
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: '' }).keeper).toBe(false);

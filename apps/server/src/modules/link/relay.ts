@@ -59,6 +59,9 @@ type Reply = { res: Response } | { failed: 'slow' | 'unreachable' };
 const unreachable = () => new ApiError(503, 'unavailable', 'hornhoof.org does not answer now. Try again in a few minutes.', 'relay_unreachable');
 const invalid = () => new ApiError(400, 'validation', 'A link name takes 1 to 63 lowercase Latin letters, digits and hyphens, with no hyphen at either end.', 'link_invalid');
 const busy = () => new ApiError(429, 'too_many', 'hornhoof.org got too many requests from here. Wait a little and try again.');
+/* The same, with the wait the relay asked for, when it named one in whole seconds. */
+const busyFor = (retryAfter: string | null) =>
+  retryAfter && /^\d{1,6}$/.test(retryAfter) ? new ApiError(429, 'too_many', busy().message, undefined, { retryAfterS: Number(retryAfter) }) : busy();
 
 /* The relay's word on a name it refused, as it gives it. */
 async function reasonOf(res: Response): Promise<string> {
@@ -181,6 +184,17 @@ export class Relay {
     const bound = res.status === 201 ? Bound.safeParse(await res.json().catch(() => null)) : null;
     if (!bound?.success) throw unreachable();
     return bound.data;
+  }
+
+  /* Passes a report on to Hornhoof's developers and gives back what their inbox answered, as the relay passes it back. One
+     it does not take is a fault of this build, and one it cannot pass on now is like the relay not answering. */
+  async feedback(report: object): Promise<unknown> {
+    const res = await this.call('POST', '/feedback', { body: report });
+    if (res.status === 202) return res.json().catch(() => null);
+    await res.body?.cancel();
+    if (res.status === 429) throw busyFor(res.headers.get('retry-after'));
+    if (res.status === 400 || res.status === 413) throw new ApiError(400, 'validation', 'hornhoof.org did not take this report. Update Hornhoof and send it again.', 'feedback_refused');
+    throw unreachable();
   }
 
   /* Takes the link away. One the relay no longer knows, or no longer takes this key for, is gone already. */

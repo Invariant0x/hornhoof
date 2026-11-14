@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { ME, serveApi } from './api';
 
 const VERSION = { version: '0.5.0', commit: 'abc1234' };
@@ -34,7 +36,8 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     await open();
     const dialog = page.getByRole('dialog', { name: language === 'en' ? 'About Hornhoof' : 'О программе Hornhoof' });
     await expect(dialog.getByText('0.5.0 (abc1234)')).toBeVisible();
-    await expect(dialog.getByRole('link')).toHaveCount(4);
+    await expect(dialog.getByRole('link')).toHaveCount(3);
+    await expect(dialog.getByRole('button', { name: language === 'en' ? en.about.issues : ru.about.issues, exact: true })).toBeVisible();
     await expect(dialog).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(dialog.getByRole('link', { name: 'hornhoof.org', exact: true })).toBeFocused();

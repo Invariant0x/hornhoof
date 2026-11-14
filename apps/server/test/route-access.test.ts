@@ -31,6 +31,7 @@ const publicRoutes = new Map([
   ['DELETE /mcp', 'public method rejection'],
   ['GET /api/assistant/mcp', 'public method rejection'],
   ['DELETE /api/assistant/mcp', 'public method rejection'],
+  ['POST /api/feedback/inbound', "public feedback receiver, only on Hornhoof's own installation: a report of the strict shape, at most 16 KB and 10 an hour from one installation, which adds a signal to the inbox and does nothing else"],
 ]);
 const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'requirePerson', path: /^\/api\//, rule: 'human session and company scope' },
@@ -46,7 +47,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'openInvite', path: /^\/api\/invites\/:token(?:\/accept)?$/, rule: 'valid invitation token' },
   { name: 'ownPlan', path: /^\/api\/subscriptions\/:id\/signin(?:\/(?:stop|terminal))?$/, rule: 'human subscription owner' },
   { name: 'ownScreen', path: /^\/api\/nodes\/commands(?:\/:id\/hide)?$/, rule: 'human owner of install commands' },
-  { name: 'requireCompanyPerson', path: /^\/api\/(?:updates|link)(?:\/.*)?$/, rule: 'human company scope' },
+  { name: 'requireCompanyPerson', path: /^\/api\/(?:updates|link|feedback\/inbox|feedback\/repeats)(?:\/.*)?$/, rule: 'human company scope' },
   { name: 'person', path: /^\/api\/improvements(?:\/:id\/(?:take|dismiss))?$/, rule: 'human company scope' },
   { name: 'bookFor', path: /^\/api\/(?:departments\/:id\/)?notebook(?:\/:number)?$/, rule: 'human reachable notebook' },
   { name: 'viewer', path: /^\/api\/computer$/, rule: 'human company scope' },

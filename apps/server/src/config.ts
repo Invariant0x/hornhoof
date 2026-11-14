@@ -38,8 +38,12 @@ export type Config = {
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
   templatesDir: string;
-  /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
+  /* The service that hands out public links like acme.hornhoof.org and relays them to this server. It also passes the
+     feedback of every installation on to Hornhoof's developers. */
   relayUrl: string;
+  /* This is Hornhoof's own installation: it keeps the inbox the feedback of every installation comes to, turns its cards
+     into GitHub issues and takes findings about Hornhoof itself into its own work. Every other one sends them on. */
+  feedbackInbox: boolean;
   /* Where the Telegram Bot API answers; tests put a stand-in here. */
   telegramApiUrl: string;
   /* Where Google OAuth2, Sheets and Drive APIs answer; tests put stand-ins here. */
@@ -110,6 +114,7 @@ const Env = z.object({
   NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+  FEEDBACK_INBOX: z.preprocess(unset, z.enum(['true', 'false'], { error: 'FEEDBACK_INBOX must be true or false.' }).optional()),
   TELEGRAM_API_URL: webAddress('TELEGRAM_API_URL must be an http:// or https:// address, like https://api.telegram.org.'),
   GOOGLE_TOKEN_URL: webAddress('GOOGLE_TOKEN_URL must be an http:// or https:// address.'),
   GOOGLE_SHEETS_URL: webAddress('GOOGLE_SHEETS_URL must be an http:// or https:// address.'),
@@ -231,6 +236,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     secureCookies: publicUrl.startsWith('https://'),
     nodeKey: nodeKeyOf(env),
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+    feedbackInbox: set.FEEDBACK_INBOX === 'true',
     telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
     ...googleUrls(set),
     ...(set.TRANSCRIBE_URL ? { transcribeUrl: set.TRANSCRIBE_URL } : {}),

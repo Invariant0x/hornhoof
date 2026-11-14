@@ -116,6 +116,8 @@ services:
       HORNHOOF_KEEPER: "on"
       # Where the link's certificate comes from: Let's Encrypt when empty, off for none.
       ACME_DIRECTORY: ${ACME_DIRECTORY:-}
+      # true only on Hornhoof's own installation: it keeps the inbox the feedback of every installation comes to.
+      FEEDBACK_INBOX: ${FEEDBACK_INBOX:-}
       # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
       TASK_FILES_MB: ${TASK_FILES_MB:-}
       # What machines share of products' test harnesses: its folder here, and how many MB it may take; 20480 when empty.

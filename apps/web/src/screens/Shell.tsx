@@ -21,6 +21,8 @@ import type { StaffAsk } from './AgentWindow';
 import { AgentWindowContext } from './AgentWindowContext';
 import { AgentWindows, useAgentWindows } from './AgentWindows';
 import { DepartmentView } from './Department';
+import { Feedback, useFeedbackInbox } from './Feedback';
+import { FeedbackInbox } from './FeedbackInbox';
 import { Improvements } from './Improvements';
 import { Machines } from './Machines';
 import { MapScreen } from './Map';
@@ -35,9 +37,9 @@ import { useRoute, type Route } from '../routes';
 import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { GuardBoundary, LightNotice } from '../ui/GuardBoundary';
 
-type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
-const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
-const ACCOUNT_DIALOGS = ['about', 'versions', 'profile', 'settings', 'themes'] as const;
+type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements' | 'inbox';
+const TABS: Exclude<Tab, 'improvements' | 'inbox'>[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
+const ACCOUNT_DIALOGS = ['about', 'versions', 'profile', 'settings', 'themes', 'feedback'] as const;
 type AccountDialogName = (typeof ACCOUNT_DIALOGS)[number];
 
 function dialogOf(route: Route): AccountDialogName | null {
@@ -54,12 +56,16 @@ function workspaceOf(route: Route, backgrounds: Route[]) {
   return { accountDialog, pageRoute, taskId, tab, deptId };
 }
 
-function AccountDialog({ active, me, updates, onRenamed, onSection, onClose, onHome }: { active: AccountDialogName | null; me: Me; updates: Updates; onRenamed: (name: string) => void; onSection: (section: SettingsSection) => void; onClose: () => void; onHome: () => void }) {
+function AccountDialog({ active, me, updates, inbox, onRenamed, onSection, onClose, onHome, onFeedback }: {
+  active: AccountDialogName | null; me: Me; updates: Updates; inbox: boolean; onRenamed: (name: string) => void;
+  onSection: (section: SettingsSection) => void; onClose: () => void; onHome: () => void; onFeedback: () => void;
+}) {
   if (!active) return null;
   /* Profile and Themes are two sections of one window, so switching keeps the window and its focus. */
   const personal = <Profile key="personal" me={me} section={active === 'themes' ? 'themes' : 'profile'} onSection={onSection} onRenamed={onRenamed} onClose={onClose} />;
   return {
-    about: <About onClose={onClose} />,
+    about: <About onClose={onClose} onFeedback={onFeedback} />,
+    feedback: <Feedback inbox={inbox} onClose={onClose} />,
     versions: <Versions updates={updates} onClose={onClose} onHome={onHome} />,
     profile: personal,
     settings: <Settings me={me} onClose={onClose} onHome={onHome} />,
@@ -99,17 +105,20 @@ function AccessHere({ onDone }: { onDone: () => void }) {
   );
 }
 
-/* onImprovements, onVersions and onSettings: only for people who see the whole company. */
+/* onImprovements, onInbox, onVersions and onSettings: only for people who see the whole company, onInbox only on
+   Hornhoof's own installation. */
 function AccountMenu({
   me,
   onClose,
   onSignOut,
   onOutbound,
   onImprovements,
+  onInbox,
   onVersions,
   onProfile,
   onSettings,
   onAbout,
+  onFeedback,
   onThemes,
   toDecide,
 }: {
@@ -118,10 +127,12 @@ function AccountMenu({
   onSignOut: () => void;
   onOutbound: () => void;
   onImprovements?: () => void;
+  onInbox?: () => void;
   onVersions?: () => void;
   onProfile: () => void;
   onSettings?: () => void;
   onAbout: () => void;
+  onFeedback: () => void;
   onThemes: () => void;
   toDecide: number;
 }) {
@@ -172,6 +183,11 @@ function AccountMenu({
           {toDecide > 0 && <span className="nav-count" aria-hidden="true">{toDecide}</span>}
         </button>
       )}
+      {onInbox && (
+        <button className="btn small ghost" type="button" onClick={() => { onClose(); onInbox(); }}>
+          {t.inbox.menu}
+        </button>
+      )}
       {onVersions && (
         <button
           className="btn small ghost"
@@ -199,6 +215,9 @@ function AccountMenu({
           {t.settings.menu}
         </button>
       )}
+      <button className="btn small ghost" type="button" onClick={() => { onClose(); onFeedback(); }}>
+        {t.feedback.menu}
+      </button>
       <button className="btn small ghost" type="button" onClick={() => { onClose(); onAbout(); }}>
         {t.about.menu}
       </button>
@@ -214,6 +233,16 @@ function AccountMenu({
       </button>
     </div>
   );
+}
+
+/* The pages of the account menu for people who see the whole company: what employees found to improve, and on Hornhoof's
+   own installation the feedback inbox. */
+function CompanyPage({ tab, improvements, inbox, onTask, onHome }: {
+  tab: Route['kind']; improvements: ReturnType<typeof useImprovements>; inbox: boolean; onTask: (taskId: string) => void; onHome: () => void;
+}) {
+  if (tab === 'improvements') return <Improvements improvements={improvements.improvements} failure={improvements.failure} inbox={inbox} onChanged={improvements.load} onTask={onTask} onHome={onHome} />;
+  if (tab === 'inbox') return <FeedbackInbox onHome={onHome} />;
+  return null;
 }
 
 function ShellTabs({ tab, waiting, navigate }: { tab: Route['kind']; waiting: number; navigate: ReturnType<typeof useRoute>['navigate'] }) {
@@ -242,8 +271,8 @@ function ShellTabs({ tab, waiting, navigate }: { tab: Route['kind']; waiting: nu
   );
 }
 
-function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSignOut, toDecide, account, accountButton }: {
-  me: Me; menu: boolean; setMenu: (open: boolean) => void; company: boolean;
+function ShellAccount({ me, menu, setMenu, company, inbox, navigate, openAccount, onSignOut, toDecide, account, accountButton }: {
+  me: Me; menu: boolean; setMenu: (open: boolean) => void; company: boolean; inbox: boolean;
   navigate: ReturnType<typeof useRoute>['navigate']; openAccount: (kind: AccountDialogName) => void;
   onSignOut: () => void; toDecide: number;
   account: RefObject<HTMLDivElement | null>; accountButton: RefObject<HTMLButtonElement | null>;
@@ -255,7 +284,7 @@ function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSig
         <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {me.person.name.trim().charAt(0).toUpperCase()}
         </button>
-        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onOutbound={() => navigate({ kind: 'outbound' })} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} onThemes={() => openAccount('themes')} toDecide={toDecide} />}
+        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onOutbound={() => navigate({ kind: 'outbound' })} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onInbox={company && inbox ? () => navigate({ kind: 'inbox' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} onFeedback={() => openAccount('feedback')} onThemes={() => openAccount('themes')} toDecide={toDecide} />}
       </div>
     </div>
   );
@@ -349,7 +378,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [selfName, setSelfName] = useState(me.person.name);
   const currentMe = { ...me, person: { ...me.person, name: selfName } };
   const company = me.person.scopeKind === 'company';
-  const denied = !company && ['improvements', 'settings', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
+  const inbox = useFeedbackInbox();
+  const denied = !company && ['improvements', 'inbox', 'settings', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
   /* The orchestrator's window opens over the map, for people who see the whole company. */
   const windows = useAgentWindows(welcome && company ? 'orchestrator' : null);
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
@@ -422,7 +452,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <span className="sr">{me.company.name}</span>
         </div>
         <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} />
-        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} toDecide={toDecide} account={account} accountButton={accountButton} />
+        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} inbox={inbox} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} toDecide={toDecide} account={account} accountButton={accountButton} />
       </header>
       <SwitchBanner>
         {company && <UpdateBanner updates={updates} onDetails={() => openAccount('versions')} />}
@@ -461,7 +491,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'subscriptions' && <Subscriptions me={me} onHome={goHome} />}
         {pageRoute.kind === 'machines' && <Machines me={me} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
         {tab === 'outbound' && <Outbound onOpenTask={openTask} onHome={goHome} />}
-        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} onHome={goHome} />}
+        {company && <CompanyPage tab={tab} improvements={{ improvements, failure: improvementsFailure, load: loadImprovements }} inbox={inbox} onTask={openTask} onHome={goHome} />}
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
       <LightNotice />
@@ -478,7 +508,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onOpenAgent={openAgent}
         />
       )}
-      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onSection={section => switchOverlay({ kind: section })} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
+      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} inbox={inbox} onHome={goHome} onRenamed={setSelfName} onSection={section => switchOverlay({ kind: section })} onFeedback={() => navigate({ kind: 'feedback' }, backgrounds[0])} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </AgentWindowContext>
