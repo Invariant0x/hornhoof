@@ -421,15 +421,15 @@ describe('tools a skill grants', () => {
        its end. */
     const second = 'ghp_' + 'stopTurnSecondToken0'.repeat(3);
     const output = `Asked about ${second} ` + 'y'.repeat(390);
-    const [asked, stuck, round] = await db.insert(jobs).values([
+    const [asked, , round] = await db.insert(jobs).values([
       { ...turn, status: 'done' as const, result: `token=${GITHUB_TOKEN} path=${HOME}`, tail: '', startedAt: ago(30), finishedAt: ago(29) },
       { ...turn, status: 'done' as const, result: '', tail: output, startedAt: ago(20), finishedAt: ago(19) },
       /* A turn on no task is read as its agent's department may. */
       { ...turn, taskId: null, status: 'done' as const, result: '', tail: '', startedAt: ago(25), finishedAt: ago(23) },
     ]).returning();
     await db.insert(requests).values([
-      { companyId: acme.id, taskId: task.id, agentId: bruno.id, jobId: asked!.id, kind: 'question', text: `May I push with ${GITHUB_TOKEN} from ${HOME} now?`, status: 'answered', answer: `No, keep /Users/fixture/keys to yourself.`, createdAt: ago(28) },
-      { companyId: acme.id, taskId: task.id, agentId: bruno.id, jobId: stuck!.id, kind: 'stuck', text: 'Needs help.', createdAt: ago(18) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: `May I push with ${GITHUB_TOKEN} from ${HOME} now?`, status: 'answered', answer: `No, keep /Users/fixture/keys to yourself.`, createdAt: ago(28) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'stuck', text: 'Needs help.', createdAt: ago(18) },
     ]);
     await db.insert(agentEvents).values([
       { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool_result', data: { ok: false, summary: `bash: line 1: ps: command not found; could not read ${HOME} with ${GITHUB_TOKEN}` }, createdAt: ago(27) },
