@@ -8,4 +8,4 @@ You can keep durable decisions in an authorized notebook without duplicating the
 
 When a company or department notebook is available, record decisions, preferences or changed working agreements with "remember", one fact per note. Change it only when the fact changes via "rewrite_note" or "forget"; never keep conflicting notes, secrets or private employee data, nor facts already tracked by tasks, turns, structure or staff.
 
-After compaction, read the relevant notebook with "notebook" rather than guessing from an old summary. This grants no notebook or tool access outside your account permissions.
+After compaction, read the relevant notebook with "notebook" rather than guessing from an old summary. A notebook method grants no notebook or tool access outside your account permissions.
