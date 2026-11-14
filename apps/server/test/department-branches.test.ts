@@ -1,10 +1,10 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { departments, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import type { RepoAddress } from '../src/modules/testruns/refs.js';
-import { mergedIn } from '../src/modules/testruns/compare.js';
+import { mergedIn, readMerged } from '../src/modules/testruns/compare.js';
 import { company } from './department-owner-fixture.js';
 import { as } from './helpers.js';
 
@@ -112,5 +112,26 @@ describe("whether GitHub's compare says a branch is in the main line", () => {
     [null, null],
   ])('reads %j as %s', (body, merged) => {
     expect(mergedIn(body)).toBe(merged);
+  });
+});
+
+describe('asking GitHub whether a branch is in the main line', () => {
+  const repo = { url: 'https://github.com/acme/shop.git', token: 'fixture-token-never-output' };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('compares the main line with the branch head and reads the answer GitHub gave', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'behind', ahead_by: 0, behind_by: 3 })));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await readMerged(repo, { base: 'main', head: 'b'.repeat(40) })).toBe(true);
+    expect(fetcher.mock.calls[0][0]).toBe(`https://api.github.com/repos/acme/shop/compare/main...${'b'.repeat(40)}?per_page=1`);
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ redirect: 'manual', headers: { authorization: `Bearer ${repo.token}` } });
+  });
+
+  it('cannot tell for a repository off GitHub, nor when GitHub refuses, and asks nothing off GitHub', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{"message":"Bad credentials"}', { status: 401 }));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await readMerged({ ...repo, url: 'https://gitlab.com/acme/shop.git' }, { base: 'main', head: 'task-7' })).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await readMerged(repo, { base: 'main', head: 'task-7' })).toBeNull();
   });
 });

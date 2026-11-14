@@ -40,35 +40,47 @@ async function headsByRepo(ctx: Readers & Pick<Required<Readers>, 'readBranches'
   return repos;
 }
 
-/* What the department's accepted and handed-in tasks left on branches the main line does not have yet, newest first. A
-   task in the department's own repository counts, as does one of its products. except: the task being read. */
-export async function departmentBranches(ctx: Readers, departmentId: string, except: string | null = null): Promise<DepartmentBranches> {
-  if (!ctx.readBranches) return NONE;
-  const rows = await ctx.db
+type Places = Awaited<ReturnType<typeof headsByRepo>>;
+
+/* The newest accepted and handed-in tasks of the department, but the one being read. */
+function lookedAt(ctx: Readers, departmentId: string, except: string | null) {
+  return ctx.db
     .select()
     .from(tasks)
     .where(and(eq(tasks.departmentId, departmentId), inArray(tasks.status, ['done', 'review']), except ? ne(tasks.id, except) : undefined))
     .orderBy(desc(tasks.number))
     .limit(LOOKED_AT);
-  const repos = await headsByRepo({ ...ctx, readBranches: ctx.readBranches }, rows);
-  const problems: string[] = [];
+}
+
+/* Each task with a branch of its own in its repository, and what kept a repository from saying its branches. */
+async function onBranches(rows: (typeof tasks.$inferSelect)[], repos: Places): Promise<{ found: Found[]; problems: string[] }> {
   const found: Found[] = [];
+  const problems = new Set<string>();
   for (const task of rows) {
     const place = repos.get(task.productId ?? '');
-    if (!place) continue;
-    const read = await place.read;
-    if ('problem' in read) {
-      if (!problems.includes(read.problem)) problems.push(read.problem);
-      continue;
-    }
-    const at = branchOf(task, read.heads);
-    if (at) found.push({ task, repo: place.repo, ...at });
+    const read = place ? await place.read : null;
+    if (read && 'problem' in read) problems.add(read.problem);
+    const at = read && 'heads' in read ? branchOf(task, read.heads) : null;
+    if (at) found.push({ task, repo: place!.repo, ...at });
   }
+  return { found, problems: [...problems] };
+}
+
+/* The branches GitHub does not show in the main line, and those it cannot tell of. */
+async function notMerged(ctx: Readers, found: Found[]): Promise<DepartmentBranch[]> {
   const readMerged = ctx.readMerged ?? (async () => null);
   const merged = await Promise.all(found.map(f => readMerged(f.repo, { base: f.repo.branch, head: f.commit }, READ_MS)));
-  const branches = found.flatMap((f, i): DepartmentBranch[] =>
+  return found.flatMap((f, i): DepartmentBranch[] =>
     merged[i] === true ? [] : [{ task: f.task.number, title: f.task.title, status: f.task.status as 'done' | 'review', branch: f.branch, commit: f.commit, merged: merged[i] === false ? false : null }]);
-  return { branches: branches.slice(0, SHOWN), problem: problems[0] ?? null };
+}
+
+/* What the department's accepted and handed-in tasks left on branches the main line does not have yet, newest first. A
+   task in the department's own repository counts, as does one of its products. except: the task being read. */
+export async function departmentBranches(ctx: Readers, departmentId: string, except: string | null = null): Promise<DepartmentBranches> {
+  if (!ctx.readBranches) return NONE;
+  const rows = await lookedAt(ctx, departmentId, except);
+  const { found, problems } = await onBranches(rows, await headsByRepo({ ...ctx, readBranches: ctx.readBranches }, rows));
+  return { branches: (await notMerged(ctx, found)).slice(0, SHOWN), problem: problems[0] ?? null };
 }
 
 /* What an agent reading a task of its department learns of the work before it, only when there is something to say. */

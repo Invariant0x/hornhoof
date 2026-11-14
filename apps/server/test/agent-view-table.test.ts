@@ -121,6 +121,8 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: DEPARTMENT_ITSELF },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: DEPARTMENT_ITSELF },
+  /* Ann has App of Development and does not run Development: its branches are closed to her, as its roster is. */
+  { route: 'GET /api/departments/:id/branches', url: c => `/api/departments/${c.dev.id}/branches`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
 ];
 
 /* Elsewhere, with the reason it is not a row above. */

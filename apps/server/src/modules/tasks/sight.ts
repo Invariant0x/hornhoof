@@ -109,6 +109,9 @@ function shownLog(viewer: AgentViewer, log: LogLine[]): LogLine[] {
     .map(l => (l.by?.kind === 'agent' && !seesAgentId(viewer, l.by.id) ? { ...l, text: '', data: {} } : { ...l, data: scrubbed(viewer, l.data) }));
 }
 
+/* Whose machine it is goes only to who knows the holder. */
+const shownOffline = (viewer: AgentViewer, detail: TaskDetail) => (knowsAgentId(viewer, detail.assignee?.id) ? detail.assigneeOffline : null);
+
 function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
   const sees = (id: string | undefined) => seesAgentId(viewer, id);
   return {
@@ -120,8 +123,7 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
     log: shownLog(viewer, detail.log),
     requests: detail.requests.filter(r => sees(r.agent?.id)),
     files: detail.files.filter(f => f.fromPerson || sees(f.by?.id)),
-    /* Whose machine it is goes only to who knows the holder. */
-    assigneeOffline: knowsAgentId(viewer, detail.assignee?.id) ? detail.assigneeOffline : null,
+    assigneeOffline: shownOffline(viewer, detail),
   };
 }
 
