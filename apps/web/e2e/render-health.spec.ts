@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import type { AgentCardView, EventView } from '../src/types';
 import { chooseTerminal, serveApi } from './api';
 import { bigCompany } from './big-company-api';
@@ -37,11 +37,33 @@ async function bigCompanyServer(page: Page): Promise<Map<string, number>> {
   await page.route(`**/api/agents/${HEAD.id}/events*`, route => route.fulfill({ json: { events: HEAD_EVENTS, state: HEAD_STATE } }));
   await page.routeWebSocket(`**/api/agents/${HEAD.id}/terminal*`, ws => {
     ws.onMessage(() => {});
+    /* The session's lines come before word that the program runs, so a terminal with no loader has them. */
     ws.send(JSON.stringify({ type: 'ready', write: true, message: true }));
-    ws.send(JSON.stringify({ type: 'program', running: true }));
     ws.send(JSON.stringify({ type: 'data', data: 'READY\r\n> ' }));
+    ws.send(JSON.stringify({ type: 'program', running: true }));
   });
   return asked;
+}
+
+const T0 = Date.parse(AT);
+
+/* The page runs on the test's clock, paused from the start: its timers and frames, the guard's frame watch among them,
+   move only when a step of this test moves them, by the same virtual milliseconds in every run and engine. */
+async function onTestClock(page: Page) {
+  await page.clock.install({ time: T0 });
+  /* A minute on, past whatever real time went by since the clock was put in, so every run starts at the same moment. */
+  await page.clock.pauseAt(T0 + 60_000);
+}
+
+/* How many requests of the page are on their way, the stream that never answers left aside. */
+function requestsOnTheirWay(page: Page): () => number {
+  const open = new Set<Request>();
+  page.on('request', r => {
+    if (!r.url().endsWith('/api/stream')) open.add(r);
+  });
+  page.on('requestfinished', r => open.delete(r));
+  page.on('requestfailed', r => open.delete(r));
+  return () => open.size;
 }
 
 /* The head's window opens from its department with its terminal, as the person last chose, and closes, back to the map. */
@@ -50,9 +72,14 @@ async function windowCycle(page: Page) {
   await page.locator('button.shead').click();
   const window = page.locator('aside.orch');
   await expect(window).toBeVisible();
+  await expect(window.locator('.t-load')).toHaveCount(0);
+  /* xterm writes and draws on timers and frames: six frames of the test's clock. */
+  await page.clock.runFor(100);
   await expect(window.locator('.xterm-rows')).toContainText('READY');
   await window.getByRole('button', { name: 'Close', exact: true }).first().click();
   await expect(window).toHaveCount(0);
+  /* The closed terminal goes on the next frame and a timer after it. */
+  await page.clock.runFor(50);
   await page.getByRole('button', { name: 'Back to the map' }).click();
   await expect(page.locator('.map .dept')).toHaveCount(COMPANY.departments.length);
 }
@@ -76,12 +103,13 @@ async function mapCycle(page: Page) {
   await expect(page.locator('.map .dept')).toHaveCount(COMPANY.departments.length);
 }
 
-/* Nothing is left to happen: no timer is due within a second, no request is on its way, and the screen drew what came. */
-async function quiet(page: Page) {
-  await settled(page);
-  await expect.poll(async () => (await readProbe(page)).soonTimeouts).toBe(0);
-  await page.waitForLoadState('networkidle');
-  await settled(page);
+/* Nothing is left to happen: what the page waits for within two seconds of its clock ran, and no request is on its way. */
+async function quiet(page: Page, onTheirWay: () => number) {
+  for (let i = 0; i < 2; i++) {
+    await expect.poll(onTheirWay).toBe(0);
+    await page.clock.runFor(1000);
+  }
+  await expect.poll(onTheirWay).toBe(0);
 }
 
 /* A burst of the stream as 120 working agents make it in a moment: context bars, states, tasks, questions, the company. */
@@ -104,7 +132,9 @@ test.describe('a 120-agent company in the browser', () => {
   test('leaves nothing alive behind its windows, forms and map after ten rounds', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
+    await onTestClock(page);
     await page.addInitScript(installRenderProbe);
+    const onTheirWay = requestsOnTheirWay(page);
     await bigCompanyServer(page);
     await page.goto('/');
     await expect(page.locator('.map .dept')).toHaveCount(COMPANY.departments.length);
@@ -112,7 +142,7 @@ test.describe('a 120-agent company in the browser', () => {
     await windowCycle(page);
     await formCycle(page);
     await mapCycle(page);
-    await quiet(page);
+    await quiet(page, onTheirWay);
     const before = await readProbe(page);
     const listenersBefore = await readListeners(page);
     for (let i = 0; i < CYCLES; i++) {
@@ -120,7 +150,7 @@ test.describe('a 120-agent company in the browser', () => {
       await formCycle(page);
       await mapCycle(page);
     }
-    await quiet(page);
+    await quiet(page, onTheirWay);
     const after = await readProbe(page);
     const grew = growth(before, after);
     report('baseline', before);
@@ -129,9 +159,9 @@ test.describe('a 120-agent company in the browser', () => {
     report('listeners-grown', listenersGrown(listenersBefore, await readListeners(page)));
     expect(errors).toEqual([]);
     const held: Partial<RenderProbe> = {
-      timeouts: grew.timeouts <= 0 ? 0 : grew.timeouts,
+      timeouts: grew.timeouts,
+      frames: grew.frames,
       intervals: grew.intervals,
-      frames: grew.frames <= 0 ? 0 : grew.frames,
       resizeTargets: grew.resizeTargets,
       mutationObservers: grew.mutationObservers,
       globalListeners: grew.globalListeners,
@@ -139,24 +169,26 @@ test.describe('a 120-agent company in the browser', () => {
       sockets: grew.sockets,
       xterms: grew.xterms,
     };
-    expect(held).toEqual({ timeouts: 0, intervals: 0, frames: 0, resizeTargets: 0, mutationObservers: 0, globalListeners: 0, streams: 0, sockets: 0, xterms: 0 });
+    expect(held).toEqual({ timeouts: 0, frames: 0, intervals: 0, resizeTargets: 0, mutationObservers: 0, globalListeners: 0, streams: 0, sockets: 0, xterms: 0 });
     expect(grew.nodes).toBeLessThanOrEqual(0);
   });
 
   test('rides out a storm of the stream in a fraction of the renders and a few fetches of the company', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
+    await onTestClock(page);
     await page.addInitScript(installRenderProbe);
+    const onTheirWay = requestsOnTheirWay(page);
     const asked = await bigCompanyServer(page);
     await page.goto('/');
     await expect(page.locator('.map .dept')).toHaveCount(COMPANY.departments.length);
-    await quiet(page);
+    await quiet(page, onTheirWay);
     const before = await readProbe(page);
     const orgBefore = asked.get('/api/org') ?? 0;
     const requestsBefore = asked.get('/api/requests') ?? 0;
     const messages = burst();
     await sendLiveApart(page, messages);
-    await quiet(page);
+    await quiet(page, onTheirWay);
     const after = await readProbe(page);
     const storm = {
       messages: messages.length,
@@ -166,9 +198,11 @@ test.describe('a 120-agent company in the browser', () => {
     };
     report('storm', storm);
     expect(errors).toEqual([]);
-    /* Before #877 the 280 messages took about 200 drawings, 81 fetches of the company and 60 of what waits for people. */
-    expect(storm.orgFetches).toBeLessThanOrEqual(3);
-    expect(storm.requestFetches).toBeLessThanOrEqual(3);
+    /* Before #877 the 280 messages took about 200 drawings, 81 fetches of the company and 60 of what waits for people. On
+       the paused clock the first 30 come one by one and the rest at the stream's next hand-on, all at once: two requests
+       of each go out at once and the rest of the burst is in their answers. */
+    expect(storm.orgFetches).toBe(2);
+    expect(storm.requestFetches).toBe(2);
     expect(storm.commits).toBeLessThanOrEqual(100);
   });
 
