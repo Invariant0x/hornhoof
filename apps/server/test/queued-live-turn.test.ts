@@ -6,7 +6,8 @@ import { decisionPrincipal, enterPressed } from '../src/modules/conversation/dec
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { appendEvent, messageForJob } from '../src/modules/events/store.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
-import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { disconnectMachines } from '../src/modules/nodes/disconnect.js';
 import { failureCompany } from './failure-company.js';

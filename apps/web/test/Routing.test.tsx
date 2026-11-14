@@ -11,7 +11,7 @@ function fixture(extra: Parameters<typeof mockApi>[0] = {}) {
     'GET /api/org': [200, DEV_ORG], 'GET /api/people': [200, { people: PEOPLE }],
     'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }],
     'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS }], 'GET /api/turns': [200, { turns: [] }],
-    'GET /api/requests': [200, { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } }],
+    'GET /api/requests': [200, { requests: [], proposals: [], machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
     'GET /api/link': [200, { link: null, domain: 'example.test' }],
     'GET /api/nodes/commands': [200, { commands: [] }],

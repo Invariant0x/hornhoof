@@ -1,23 +1,34 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, machines, nodes, subscriptions, tasks, testParts } from '../../db/schema.js';
 import { enqueueTurn } from '../conversation/queue.js';
-import type { NodeIdentity } from '../nodes/hub.js';
+import { ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 
+/* The work that runs on a node now. Each machine that holds the data has a built-in node of its own, so a built-in
+   node's work is what names its machine; work that names none is of the built-in node of the machine this server
+   runs on, as all of it was before machines had theirs. */
 export async function drainWork(ctx: Ctx, node: NodeIdentity) {
-  const here = node.kind === 'builtin' ? isNull(jobs.nodeId) : eq(jobs.nodeId, node.nodeId);
+  const own = node.kind === 'builtin' && node.machine === ownMachine(ctx.config);
+  const onBuiltin = (machine: typeof jobs.builtinMachine | typeof testParts.builtinMachine, id: string) => (own ? or(eq(machine, id), isNull(machine)) : eq(machine, id));
+  const here = node.kind === 'builtin' ? and(isNull(jobs.nodeId), onBuiltin(jobs.builtinMachine, node.machine)) : eq(jobs.nodeId, node.nodeId);
   const turns = await ctx.db.select({ id: jobs.id, kind: jobs.kind, companyId: jobs.companyId, task: tasks.number, agent: agents.name })
     .from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId)).leftJoin(agents, eq(agents.id, jobs.agentId)).where(and(eq(jobs.status, 'running'), here));
   const parts = await ctx.db.select({ id: testParts.id, companyId: testParts.companyId }).from(testParts)
-    .where(and(eq(testParts.status, 'running'), node.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, node.nodeId)));
+    .where(and(eq(testParts.status, 'running'), node.kind === 'builtin' ? and(eq(testParts.builtin, true), onBuiltin(testParts.builtinMachine, node.machine)) : eq(testParts.nodeId, node.nodeId)))
+    .orderBy(testParts.part);
   return { turns, parts, turnsLeft: turns.filter(t => t.kind === 'conversation').length, partsLeft: parts.length };
 }
 
 type Work = Awaited<ReturnType<typeof drainWork>>;
 
 async function machineName(ctx: Ctx, node: NodeIdentity): Promise<string> {
-  if (node.kind === 'builtin') return 'the built-in node';
+  if (node.kind === 'builtin') {
+    if (node.machine === ownMachine(ctx.config)) return 'the built-in node';
+    /* The built-in node of another machine that holds the data goes by that machine's name. */
+    const [machine] = await ctx.db.select({ hostname: machines.hostname }).from(machines).where(and(eq(machines.networkId, node.machine), isNull(machines.revokedAt)));
+    return `the built-in node of ${machine?.hostname || 'a machine'}`;
+  }
   const [machine] = await ctx.db.select({ hostname: machines.hostname }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
   return machine?.hostname || 'a machine';
 }
@@ -50,7 +61,7 @@ export type ServerNode = { name: string; node: NodeIdentity };
 
 /* All identities on the server's physical host, across companies. The installer also sweeps its personal nodes. */
 export async function namedServerNodes(ctx: Ctx): Promise<ServerNode[]> {
-  const builtin: ServerNode = { name: 'builtin', node: { kind: 'builtin' } };
+  const builtin: ServerNode = { name: 'builtin', node: ownBuiltin(ctx.config) };
   if (!ctx.config.hostId) return [builtin];
   const { hashToken } = await import('../../crypto/tokens.js');
   const hosts = await ctx.db.select({ id: machines.id, key: machines.machineKey }).from(machines).where(isNull(machines.revokedAt));

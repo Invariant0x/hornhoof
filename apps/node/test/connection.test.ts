@@ -863,3 +863,22 @@ describe('connect', () => {
     expect(latestSend!({ type: 'removed' })).toBe(false);
   });
 });
+
+describe('connect acks', () => {
+  async function openedWith(confirms: boolean): Promise<boolean> {
+    const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    onTestFinished(() => server.close());
+    await new Promise(r => server.once('listening', r));
+    if (confirms) server.on('headers', headers => headers.push('Hornhoof-Acks: 1'));
+    const opened = new Promise<boolean>(resolve => {
+      const conn = connect({ url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`, key: 'node-key-1234567890', handshakeTimeoutMs: NEVER, onOpen: (_send, acks) => resolve(acks), onMessage: () => {} });
+      onTestFinished(() => conn.close());
+    });
+    return opened;
+  }
+
+  it('knows a server that confirms', async () => {
+    expect(await openedWith(true)).toBe(true);
+    expect(await openedWith(false)).toBe(false);
+  });
+});

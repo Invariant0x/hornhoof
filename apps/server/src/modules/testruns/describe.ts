@@ -4,7 +4,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection, type TestRunFileCache } from '../../db/schema.js';
-import { BUILTIN, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
 import { canReach } from '../../auth/access.js';
@@ -50,9 +50,9 @@ export type ProductPlanningPorts = {
 };
 const planningSources = new WeakMap<Ctx, PlanningSources>(), planningPorts = new WeakMap<Ctx, ProductPlanningPorts>();
 export function setProductPlanningPorts(ctx: Ctx, ports: ProductPlanningPorts): void { planningPorts.set(ctx, ports); }
-const requestNode = (request: TestEnvironmentRequest): NodeIdentity | null => request.builtin ? BUILTIN : request.nodeId ? nodeIdentity(request.nodeId) : null;
+const requestNode = (ctx: Ctx, request: TestEnvironmentRequest): NodeIdentity | null => request.builtin ? builtinOf(request.builtinMachine ?? ownMachine(ctx.config)) : request.nodeId ? nodeIdentity(request.nodeId) : null;
 export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | null): void {
-  const node = request && requestNode(request);
+  const node = request && requestNode(ctx, request);
   if (node && request?.requestId) ctx.hub.send(node, { type: 'tests.describe.cancel', requestId: request.requestId });
 }
 export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, baseCommit?: string): TestEnvironmentRequest {
@@ -130,7 +130,7 @@ const pendingDescription = (id: string) => and(eq(testRuns.id, id), eq(testRuns.
 const requestMatches = (id: string, requestId: string) => and(pendingDescription(id), sql`${testRuns.environmentRequest}->>'requestId' = ${requestId}`);
 async function assignedDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<Run | undefined> {
   const [run] = await ctx.db.select().from(testRuns).where(and(eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot), sql`${testRuns.environmentRequest}->>'requestId' = ${message.requestId}`));
-  const request = run?.environmentRequest, assigned = request && requestNode(request);
+  const request = run?.environmentRequest, assigned = request && requestNode(ctx, request);
   if (!run || !request || !assigned || !sameNode(id, assigned) || run.commitSha !== message.commitSha || request.problem) return;
   return run;
 }
@@ -219,11 +219,11 @@ async function assignDescription(ctx: Ctx, run: Run, open: Place[], target: Targ
   if (!place) return null;
   if (request.attempts >= 3) { await descriptionFailure(ctx, run, { code: 'commit_unavailable', detail: 'The metadata node was lost repeatedly.' }); return null; }
   cancelDescription(ctx, request);
-  const assigned = { ...request, requestId: randomUUID(), nodeId: place.nodeId, builtin: place.builtin, sentAt: new Date().toISOString(), attempts: request.attempts + 1 };
+  const assigned = { ...request, requestId: randomUUID(), nodeId: place.nodeId, builtin: place.builtin, builtinMachine: place.builtin ? place.builtinMachine : null, sentAt: new Date().toISOString(), attempts: request.attempts + 1 };
   await ctx.db.update(testRuns).set({ environmentRequest: assigned }).where(pendingDescription(run.id)); return assigned;
 }
 async function currentDescriptionAssignment(ctx: Ctx, run: Run, open: Place[], target: Target): Promise<TestEnvironmentRequest> {
-  const request = run.environmentRequest!, assigned = requestNode(request);
+  const request = run.environmentRequest!, assigned = requestNode(ctx, request);
   if (!assigned || !ctx.hub.isOnline(assigned)) return request;
   if (open.some(place => sameNode(place.node, assigned) && descriptionEligible(ctx, place, target))) return request;
   cancelDescription(ctx, request);
@@ -233,14 +233,14 @@ async function currentDescriptionAssignment(ctx: Ctx, run: Run, open: Place[], t
 }
 async function dispatchDescription(ctx: Ctx, run: Run, open: Place[], target: Target): Promise<void> {
   let request: TestEnvironmentRequest | null = await currentDescriptionAssignment(ctx, run, open, target);
-  const assigned = requestNode(request);
+  const assigned = requestNode(ctx, request);
   if (waitingForReconnect(ctx, assigned)) return;
   if (!assigned || !ctx.hub.isOnline(assigned)) request = await assignDescription(ctx, { ...run, environmentRequest: request }, open, target);
   if (request) publishDescription(ctx, run, request, target?.repo ?? null);
 }
 function publishDescription(ctx: Ctx, run: Run, request: TestEnvironmentRequest, repo: NonNullable<Target>['repo']): void {
   if (!request.requestId || !repo) return;
-  const node = requestNode(request)!, delivered = sent.get(ctx) ?? new Map<string, string>(); sent.set(ctx, delivered);
+  const node = requestNode(ctx, request)!, delivered = sent.get(ctx) ?? new Map<string, string>(); sent.set(ctx, delivered);
   if (delivered.get(run.id) === request.requestId) return;
   if (ctx.hub.send(node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, ...(request.baseCommit ? { baseCommit: request.baseCommit } : {}), repo: { url: repo.url, token: repo.token } })) delivered.set(run.id, request.requestId);
 }

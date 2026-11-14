@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
 import { checkQueueLoad } from '../src/modules/nodes/check-slots.js';

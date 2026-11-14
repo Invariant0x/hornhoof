@@ -4,7 +4,6 @@ import type { Ctx } from '../../app.js';
 import { canReach, type Access } from '../../auth/access.js';
 import { viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
-import { canViewComputer } from '../computer/access.js';
 import type { StreamMessage } from './bus.js';
 import { heardBy, heardInFull } from './stream-view.js';
 
@@ -12,7 +11,9 @@ import { heardBy, heardInFull } from './stream-view.js';
    company, who sees all of its work; the rest that names a place goes where the person reaches. */
 function isFor(m: StreamMessage, me: Person, access: Access): boolean {
   if ('spot' in m && m.type !== 'task' && !canReach(access, m.spot)) return false;
-  if (m.type === 'computer' && !canViewComputer(me)) return false;
+  /* It carries nothing, so every person's screens load the access that is theirs to see; the orchestrator acting for
+     anyone sees none of it. */
+  if (m.type === 'computer' && me.via) return false;
   return m.type !== 'subscription.signin' || m.owner === me.id;
 }
 

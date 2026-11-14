@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx src/migrate.ts && tsx watch src/main.ts",
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/modules/program-operator/fonts', 'dist/modules/program-operator/fonts', { recursive: true })\"",
-    "start": "node dist/main.js",
+    "start": "node dist/migrate.js && node dist/main.js",
     "pretest": "npm run build -w @hornhoof/protocol",
     "test": "vitest run",
-    "lint:part": "eslint"
+    "test:real": "sh test/real/run.sh",
+    "test:lab": "vitest run --config vitest.lab.config.ts",
+    "lint:part": "eslint . --ignore-pattern \"test/**\" --ignore-pattern \"src/modules/[t-z]*/**\" && eslint \"src/modules/[t-z]*/**\" && eslint test --ignore-pattern \"test/[m-z]*.ts\" && eslint \"test/[m-s]*.ts\" && eslint \"test/[t-z]*.ts\""
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
@@ -16,9 +18,13 @@
     "@fastify/websocket": "^11.3.4",
     "@hornhoof/protocol": "*",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@peculiar/x509": "1.14.3",
     "@resvg/resvg-js": "^2.6.2",
+    "acme-client": "5.4.0",
+    "age-encryption": "0.3.1",
     "drizzle-orm": "^0.45.4",
     "fastify": "^5.12.7",
+    "libpg-query": "17.7.3",
     "nodemailer": "^10.3.1",
     "pg": "^8.23.1",
     "yaml": "^2.9.1",

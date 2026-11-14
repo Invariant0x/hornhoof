@@ -13,7 +13,7 @@ import { parseRoute } from './routes';
 type Screen =
   | { kind: 'loading' }
   | { kind: 'invite'; token: string }
-  | { kind: 'setup'; linkDomain?: string }
+  | { kind: 'setup'; linkDomain?: string; recovering?: boolean }
   | { kind: 'login' }
   | { kind: 'shell'; me: Me; welcome?: boolean }
   | { kind: 'error'; failure: unknown };
@@ -35,8 +35,8 @@ function Screens() {
     const route = parseRoute(window.location.pathname);
     if (route.kind === 'invite') return setScreen({ kind: 'invite', token: route.token });
     try {
-      const { needed, linkDomain } = await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup');
-      if (needed) return setScreen({ kind: 'setup', linkDomain });
+      const { needed, linkDomain, recovering } = await api.get<{ needed: boolean; linkDomain?: string; recovering?: boolean }>('/api/setup');
+      if (needed) return setScreen({ kind: 'setup', linkDomain, recovering });
       setScreen({ kind: 'shell', me: await api.get<Me>('/api/me'), welcome });
     } catch (err) {
       if (err instanceof ApiFailure && err.status === 401) return setScreen({ kind: 'login' });
@@ -62,7 +62,7 @@ function Screens() {
     case 'invite':
       return <AcceptInvite token={screen.token} onDone={() => home()} />;
     case 'setup':
-      return <Setup linkDomain={screen.linkDomain} onDone={({ welcome }) => home(welcome)} />;
+      return <Setup linkDomain={screen.linkDomain} recovering={screen.recovering} onDone={({ welcome }) => home(welcome)} />;
     case 'login':
       return <Login onDone={() => void decide()} />;
     case 'shell':

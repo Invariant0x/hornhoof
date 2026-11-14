@@ -6,12 +6,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents } from '../src/db/schema.js';
-import { ceoPrincipal, computerPrincipal, decisionPrincipal, typedWentIn, withInputLock } from '../src/modules/conversation/decision-context.js';
+import { ceoPrincipal, decisionPrincipal, machinePrincipal, typedWentIn, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { personParty } from '../src/modules/events/parties.js';
 import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/modules/events/store.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
@@ -411,7 +411,8 @@ describe('words of a person to an agent directly', () => {
 });
 
 describe("a turn's mark that it answers the CEO", () => {
-  const principals = async (c: Awaited<ReturnType<typeof company>>) => [await ceoPrincipal(c.db, c.job.id), await computerPrincipal(c.db, c.job.id)];
+  /* The second is for a machine the CEO owns, as the server's own is. */
+  const principals = async (c: Awaited<ReturnType<typeof company>>) => [await ceoPrincipal(c.db, c.job.id), await machinePrincipal(c.db, c.job.id, c.ids.ivan)];
   const answeredBy = async (c: Awaited<ReturnType<typeof company>>, id: string) => (await c.db.select().from(requests).where(eq(requests.id, id)))[0]!.answeredBy;
 
   it('leaves a release approval and a choice waiting for their own answer when the CEO delegate writes to the agent', async () => {

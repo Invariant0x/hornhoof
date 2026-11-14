@@ -6,7 +6,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, jobs, subscriptions, taskRoutes, tasks, taskWaits, teams } from '../src/db/schema.js';
 import { listEvents } from '../src/modules/events/store.js';
 import { said } from '../src/modules/conversation/live.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { comment, createTask, updateTask } from '../src/modules/tasks/engine.js';
 import { withInputLock } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn, onAgent } from '../src/modules/conversation/queue.js';

@@ -123,6 +123,59 @@ describe("a plan's sign-in sealed to its nodes", () => {
     expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'claude_token', version: 1, recipients: [{ nodeId: b.nodeId, publicKey: KEY('b') }] });
   });
 
+  it('has a holder that comes online seal the sign-in for a node that waited', async () => {
+    const { db, plan, a, b, online } = await plans();
+    const first = await online(a, KEY('a'));
+    first.send({ type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('a') }] });
+    await until(async () => (await stored(db, plan)).length === 1);
+    first.close();
+    await first.closed;
+    /* B comes while the holder is away: nobody is there to seal for it. */
+    const nb = await online(b, KEY('b'));
+    expect(await got(nb, 'cred.put')).toBe(false);
+
+    const na = await online(a, KEY('a'));
+    expect(await nextOf(na, 'cred.put')).toEqual({ type: 'cred.put', kind: 'claude_token', version: 1, sealed: SEALED('a') });
+    expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'claude_token', version: 1, recipients: [{ nodeId: b.nodeId, publicKey: KEY('b') }] });
+    na.send({ type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [{ nodeId: b.nodeId, sealed: SEALED('b') }] });
+    expect(await nextOf(nb, 'cred.put')).toEqual({ type: 'cred.put', kind: 'claude_token', version: 1, sealed: SEALED('b') });
+  });
+
+  it('asks a holder that comes online for nothing when every node of the plan holds the sign-in', async () => {
+    const { db, plan, a, b, online } = await plans();
+    const first = await online(a, KEY('a'));
+    await online(b, KEY('b'));
+    first.send({ type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('a') }, { nodeId: b.nodeId, sealed: SEALED('b') }] });
+    await until(async () => (await stored(db, plan)).length === 2);
+    first.close();
+    await first.closed;
+    const na = await online(a, KEY('a'));
+    expect(await nextOf(na, 'cred.put')).toMatchObject({ sealed: SEALED('a') });
+    expect(await got(na, 'cred.seal')).toBe(false);
+  });
+
+  it('has a holder seal for no node without a key, and for none that was disconnected', async () => {
+    const { app, db, ceo, plan, a, b, online } = await plans();
+    const first = await online(a, KEY('a'));
+    first.send({ type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('a') }] });
+    await until(async () => (await stored(db, plan)).length === 1);
+    first.close();
+    await first.closed;
+    /* B never said a key. A third node of the plan had one, and its machine was disconnected. */
+    const tower = (await join(app, await machineCode(app, ceo), { ...MAC, machineId: 'spare-0004-abcd', hostname: 'ivan-spare' })).json();
+    const added = await app.inject({ method: 'POST', url: `/api/machines/${tower.machine.id}/plans`, payload: { subscription: plan }, ...as(ceo) });
+    const c = (await join(app, codeOf(added.json().command), { ...MAC, machineId: 'spare-0004-abcd', hostname: 'ivan-spare' })).json().nodes[0] as Joined;
+    const nc = await online(c, KEY('c'));
+    nc.close();
+    await nc.closed;
+    expect((await app.inject({ method: 'POST', url: `/api/machines/${tower.machine.id}/disconnect`, ...as(ceo) })).statusCode).toBeLessThan(300);
+    expect((await db.select({ k: nodes.publicKey }).from(nodes).where(eq(nodes.id, b.nodeId)))[0]!.k).toBeNull();
+
+    const na = await online(a, KEY('a'));
+    expect(await nextOf(na, 'cred.put')).toMatchObject({ sealed: SEALED('a') });
+    expect(await got(na, 'cred.seal')).toBe(false);
+  });
+
   it('throws out what was sealed to a key a node no longer has, and has the sign-in sealed to its new one', async () => {
     const { db, plan, a, b, online } = await plans();
     const na = await online(a, KEY('a'));

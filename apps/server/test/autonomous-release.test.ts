@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, people, requests, taskEvents, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { acceptDescription, noteTestCapabilities } from '../src/modules/testruns/describe.js';
 import { partDone, pumpTests, startRun } from '../src/modules/testruns/runs.js';

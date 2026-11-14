@@ -9,7 +9,7 @@ import { publicUrl } from '../link/link.js';
 import { isOn } from '../model-checks/lifecycle.js';
 import { CLOSED, type Task, type Tx } from '../tasks/engine.js';
 import { taskByRef } from '../tasks/views.js';
-import { approvalNeed, approvalState, askApproval, authorityFingerprint, deciderOf, rulesFor, sendingChannel, type ApprovalState, type Bound, type Need, type Shared } from './approvals.js';
+import { approvalNeed, approvalState, askApproval, authorityFingerprint, deciderOf, rulesFor, sendingChannel, type ApprovalState, type Bound, type Need, type Shared, withdrawAskedBefore } from './approvals.js';
 import { catalogValue, currentRevision, digestOf, unsafeLink, usable, type Catalog, type Money, type Place, type Source } from './checks.js';
 import { recipientDigest, unsubscribeUrl } from './contacts.js';
 import { currentPolicy, dayOf, lockBuckets, releaseAttempt, reviewCheck, selectedForReview, stopChannel, usedWithin, type Channel, type CurrentPolicy } from './policies.js';
@@ -246,8 +246,9 @@ async function reviewGate(tx: Tx, channel: Channel, m: UnderReview, now: Date): 
   return receipt.result.kind === 'review' ? DECISIONS[receipt.result.decision]! : DECISIONS.block!;
 }
 
-type Asked = { need: Need; state: ApprovalState; bound: Bound | null };
-type ToApprove = { channel: Channel; account: Account; bindingGeneration: number; decider: string; policy: CurrentPolicy; sources: string; money: readonly Money[]; escalated: boolean; document: MessageDocument; segmentId: string | null; messageId: string; revision: number; contentDigest: string };
+/* restored: the message came back with a restored database, and waits for a person's word given since. */
+type Asked = { need: Need; state: ApprovalState; bound: Bound | null; restored?: boolean };
+type ToApprove = { channel: Channel; account: Account; bindingGeneration: number; decider: string; policy: CurrentPolicy; sources: string; money: readonly Money[]; escalated: boolean; document: MessageDocument; segmentId: string | null; messageId: string; revision: number; contentDigest: string; restored?: Date | null };
 
 function boundFor(a: ToApprove, need: Need): Bound {
   const shared: Shared = {
@@ -258,19 +259,32 @@ function boundFor(a: ToApprove, need: Need): Bound {
   return { kind: 'message', messageId: a.messageId, messageRevision: a.revision, contentDigest: a.contentDigest, accountId: a.account.id, bindingGeneration: a.bindingGeneration, ...shared };
 }
 
-/* The department's rules as they are now, and what a person said of exactly this. */
+/* When the database in use was last put back from a backup, for a message that was in it then: such a message may have
+   gone out between the backup and the restore, which the restored database cannot know. Null for one written since, and
+   where nothing was restored. */
+async function restoredOver(tx: Tx, m: Pick<Message, 'createdAt'>): Promise<Date | null> {
+  const answer: unknown = await tx.execute(sql`SELECT max(at) AS at FROM net.restores`);
+  const [last] = Array.isArray(answer) ? (answer as { at: Date | string | null }[]) : (answer as { rows: { at: Date | string | null }[] }).rows;
+  const at = last?.at ? new Date(last.at) : null;
+  return at && m.createdAt <= at ? at : null;
+}
+
+/* The department's rules as they are now, and what a person said of exactly this. A message that came back with a
+   restored database goes only on a person's word for this very message, given after the restore, whatever the rules. */
 async function approvalGate(tx: Tx, a: ToApprove): Promise<Asked> {
   const rules = await rulesFor(tx, a.channel.departmentId, a.channel.audience);
-  const need = approvalNeed(rules, { audience: a.channel.audience, money: a.money, escalated: a.escalated, hasSegment: a.segmentId !== null });
+  const need = a.restored ? 'message' : approvalNeed(rules, { audience: a.channel.audience, money: a.money, escalated: a.escalated, hasSegment: a.segmentId !== null });
   if (need === 'none') return { need, state: 'approved', bound: null };
   const bound = boundFor(a, need);
-  return { need, state: await approvalState(tx, a.channel.companyId, bound), bound };
+  if (a.restored) await withdrawAskedBefore(tx, a.channel.companyId, bound, a.restored, new Date());
+  return { need, state: await approvalState(tx, a.channel.companyId, bound, a.restored ?? null), bound, restored: Boolean(a.restored) };
 }
 
 /* What a person reads. A stop link is nobody's to follow but its contact's, so it is not in these words. */
-const peopleText = (rendered: Rendered, stop: string | null, channel: Channel): string => {
+const RESTORED = 'Hornhoof was restored from a backup after this message was written. It may have gone out already: check before you let it go.';
+const peopleText = (rendered: Rendered, stop: string | null, channel: Channel, restored = false): string => {
   const body = stop ? rendered.text.split(stop).join('[unsubscribe link]') : rendered.text;
-  return `Approve this exact message on ${channel.name}.\nSubject: ${rendered.subject}\n\n${body}`;
+  return `${restored ? `${RESTORED}\n` : ''}Approve this exact message on ${channel.name}.\nSubject: ${rendered.subject}\n\n${body}`;
 };
 
 const asking = (m: Pick<Message, 'companyId' | 'taskId' | 'authorAgentId' | 'authorJobId'>, channel: Channel, bound: Bound, text: string) => ({
@@ -279,7 +293,7 @@ const asking = (m: Pick<Message, 'companyId' | 'taskId' | 'authorAgentId' | 'aut
 
 type Prepared = { decider: string; base: string; now: Date };
 
-const stateReasons = (asked: Asked): GateCode[] => (asked.state === 'approved' ? [] : ['approval_required']);
+const stateReasons = (asked: Asked): GateCode[] => (asked.state === 'approved' ? [] : asked.restored ? ['approval_required', 'restored'] : ['approval_required']);
 
 const firstStatus = (review: Reviewed, asked: Asked): SubmitResult['status'] => {
   if (review.codes.length) return 'waiting_checks';
@@ -472,12 +486,12 @@ async function peopleAndChecks(tx: Tx, ctx: Ctx, l: Look, drawn: Extract<Drawn, 
   const { message: m, revision, channel, account, prepared } = l;
   const review = await reviewGate(tx, channel, { id: m.id, revision: revision.revision, contentDigest: revision.contentDigest, samplingOrdinals: m.samplingOrdinals, targetKind: m.targetKind }, prepared.now);
   if (review.codes.includes('review_failed')) return ended(['review_failed']);
-  const asked = await approvalGate(tx, { channel, account, bindingGeneration: m.bindingGeneration, decider: prepared.decider, policy, sources: drawn.sourcesDigest, money: drawn.rendered.money, escalated: review.escalated || (await wantsPerson(tx, m.companyId, m.classificationId)), document: revision.document, segmentId: m.segmentId, messageId: m.id, revision: revision.revision, contentDigest: revision.contentDigest });
+  const asked = await approvalGate(tx, { channel, account, bindingGeneration: m.bindingGeneration, decider: prepared.decider, policy, sources: drawn.sourcesDigest, money: drawn.rendered.money, escalated: review.escalated || (await wantsPerson(tx, m.companyId, m.classificationId)), document: revision.document, segmentId: m.segmentId, messageId: m.id, revision: revision.revision, contentDigest: revision.contentDigest, restored: await restoredOver(tx, m) });
   if (asked.state === 'declined') return ended(['approval_required']);
   const hold = [...(channel.status === 'stopped' ? (['channel_stopped'] as const) : []), ...review.codes, ...stateReasons(asked)];
   const stop = m.contactId ? stopAddress(ctx, { channel, account, document: revision.document, contactId: m.contactId, segment: null, audience: null, base: prepared.base, now: prepared.now }) : null;
-  const onlyAPerson = hold.length === 1 && asked.state === 'missing' && asked.bound;
-  return { final: [], hold, ask: onlyAPerson ? asking(m, channel, asked.bound!, peopleText(drawn.rendered, stop, channel)) : null, sealed };
+  const onlyAPerson = hold.filter(code => code !== 'restored').length === 1 && asked.state === 'missing' && asked.bound;
+  return { final: [], hold, ask: onlyAPerson ? asking(m, channel, asked.bound!, peopleText(drawn.rendered, stop, channel, asked.restored)) : null, sealed };
 }
 
 /* All the gates over again, as of this moment, under the locks. */

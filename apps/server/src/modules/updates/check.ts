@@ -38,6 +38,11 @@ export class UpdateCheck {
     return this.opts.registry.siblings(tag);
   }
 
+  /* The build of one tag, as a commit's is, for whoever needs to know a build that is no newer one. */
+  find(tag: string): Promise<Build | null> {
+    return this.opts.registry.find(tag);
+  }
+
   async #check(): Promise<void> {
     try {
       const [latest, versions] = await Promise.all([this.opts.registry.latest(), this.opts.registry.versions()]);

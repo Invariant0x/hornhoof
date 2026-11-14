@@ -5,9 +5,12 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { builtinOf } from '../src/modules/nodes/hub.js';
+import { drainPostponed, drainWork } from '../src/modules/updates/drain-work.js';
 import { nodeDrain } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'builtin-drain-key-0123456789abcdef';
 const headers = { authorization: `Bearer ${NODE_KEY}` };
@@ -48,10 +51,30 @@ describe('planned node updates', () => {
     const logs: string[] = [];
     const { app } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control }, { level: 'error', stream: { write: (line: string) => void logs.push(line) } });
     expect(logs.join('\n')).toContain('node-drains.json');
-    expect(nodeDrain(app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(app.ctx, BUILTIN)).toBeNull();
     const response = await app.inject({ method: 'POST', url: '/api/nodes/update', headers, payload: {} });
     expect(response.statusCode).toBe(200);
-    expect(nodeDrain(app.ctx, { kind: 'builtin' })?.state).toBe('restarting');
+    expect(nodeDrain(app.ctx, BUILTIN)?.state).toBe('restarting');
+  });
+
+  it("counts a built-in node's own work, and none of another machine's built-in node", async () => {
+    const f = await fixture();
+    const other = 'b0'.repeat(16);
+    /* The job of the fixture names no machine: it is of this server's own built-in node, from before machines had theirs. */
+    const [there] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, kind: 'conversation', prompt: 'On the copy', status: 'running', startedAt: new Date(), timeoutMs: 900_000, builtinMachine: other }).returning();
+    const [dept] = await f.db.insert(departments).values({ companyId: f.company.id, name: 'Dev', roleCode: 'DEV' }).returning();
+    const [task] = await f.db.insert(tasks).values({ companyId: f.company.id, number: 901, title: 'Run the tests', departmentId: dept!.id }).returning();
+    const [run] = await f.db.insert(testRuns).values({ companyId: f.company.id, number: 1, kind: 'tests', departmentId: dept!.id, taskId: task!.id, agentId: f.agent.id, jobId: f.job.id, branch: 'main', command: 'echo ok', parts: 2, timeoutMs: 60_000, status: 'running' }).returning();
+    const part = (n: number, builtinMachine: string | null) => f.db.insert(testParts).values({ companyId: f.company.id, runId: run!.id, part: n, status: 'running', builtin: true, builtinMachine, startedAt: new Date() }).returning();
+    const [[mine], [theirs]] = [await part(1, null), await part(2, other)];
+    const own = await drainWork(f.app.ctx, BUILTIN);
+    expect([own.turns.map(turn => turn.id), own.parts.map(one => one.id), own.turnsLeft, own.partsLeft]).toEqual([[f.job.id], [mine!.id], 1, 1]);
+    const copy = await drainWork(f.app.ctx, builtinOf(other));
+    expect([copy.turns.map(turn => turn.id), copy.parts.map(one => one.id)]).toEqual([[there!.id], [theirs!.id]]);
+    /* So this server's own node restarts once its own turn ended, whatever the copy's node still runs. */
+    await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, f.job.id));
+    await f.db.update(testParts).set({ status: 'passed' }).where(eq(testParts.id, mine!.id));
+    expect((await f.prepare()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
   });
 
   it('waits for the last running turn without interrupting it, then permits the update', async () => {
@@ -105,6 +128,22 @@ describe('planned node updates', () => {
     expect(notice!.prompt).not.toContain(f.job.id);
   });
 
+  it("names the machine of another machine's built-in node to the head of Operations", async () => {
+    const f = await fixture();
+    const other = 'b0'.repeat(16);
+    const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [head] = await f.db.insert(agents).values({ companyId: f.company.id, departmentId: ops!.id, subscriptionId: f.agent.subscriptionId, kind: 'head', model: '', roleKey: 'OPS-HEAD', name: 'Operations' }).returning();
+    const [person] = await f.db.select({ id: people.id }).from(people);
+    await f.db.insert(machines).values({ companyId: f.company.id, personId: person!.id, machineKey: 'studio-key', hostname: 'studio', role: 'data', networkId: other });
+    const [turn] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, kind: 'conversation', prompt: 'On the copy', status: 'running', startedAt: new Date(), timeoutMs: 900_000, builtinMachine: other }).returning();
+    await drainPostponed(f.app.ctx, builtinOf(other), '2026-11-11T13:00:00.000Z', await drainWork(f.app.ctx, builtinOf(other)));
+    const [notice] = await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id));
+    /* The built-in node of a machine that keeps a copy is named by its machine; this server's own stays "the built-in node". */
+    expect(notice!.prompt).toContain('the planned update of the built-in node of studio:');
+    expect(notice!.prompt).toContain(turn!.id);
+    expect(notice!.prompt).not.toContain(f.job.id);
+  });
+
   it('keeps asking within the lease while postponed, so the machine still says so until the retry', async () => {
     stillClock();
     const f = await fixture({ NODE_DRAIN_MS: '50', NODE_UPDATE_RETRY_MS: '3600000' });
@@ -136,11 +175,11 @@ describe('planned node updates', () => {
     const turn = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, nodeId, kind: 'conversation', prompt: 'On the host', status: 'running', startedAt: new Date(), timeoutMs: 900_000 }).returning();
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, f.job.id));
     expect((await server('POST')).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toMatchObject({ state: 'restarting' });
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toMatchObject({ state: 'restarting' });
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, turn[0]!.id));
     expect((await server('POST')).json().ready).toBe(true);
     expect((await server('DELETE')).statusCode).toBe(204);
-    expect(nodeDrain(f.app.ctx, { kind: 'builtin' })).toBeNull();
+    expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId })).toBeNull();
   });
 
@@ -156,9 +195,9 @@ describe('planned node updates', () => {
     const node = await connectNode(url, NODE_KEY);
     const boot = { startedAt: '2026-11-04T10:00:00.000Z', machineUpAt: '2026-11-04T09:00:00.000Z', container: 'first' };
     node.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [f.job.id], boot });
-    await until(() => f.app.ctx.hub.isReady({ kind: 'builtin' }));
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
     await f.prepare();
-    expect(f.app.ctx.hub.isReady({ kind: 'builtin' })).toBe(true);
+    expect(f.app.ctx.hub.isReady(BUILTIN)).toBe(true);
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, f.job.id));
     expect((await f.prepare()).json().ready).toBe(true);
     node.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], boot });

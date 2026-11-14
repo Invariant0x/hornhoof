@@ -93,3 +93,16 @@ it('keeps the controlled selection visible through search and filters, then clos
   await user.click(screen.getByRole('button', { name: 'Clear filters' }));
   expect(names()).toEqual(['Alpha', 'Beta', 'Offline']);
 });
+
+it('keeps the name the cell that opens the card when a narrow column stands before it', async () => {
+  const lead: TableColumn<Row>[] = [{ key: 'place', label: 'Priority', direction: 1, className: 'k-prio', lead: true, value: r => r.load, cell: r => r.load ?? 'none' }, ...columns];
+  render(<SortTable rows={rows} columns={lead} name={r => r.name} initialSort={{ key: 'place', direction: 1 }} card={r => <article aria-label={r.name} />} />);
+  const cells = [...screen.getByRole('row', { name: 'Alpha' }).querySelectorAll('td')];
+  expect(cells.map(cell => [cell.className, cell.getAttribute('data-label')])).toEqual([['k-prio', 'Priority'], ['k-name', null], ['', 'Load']]);
+  /* The button that opens the card is in the name's cell, and the first header sorts as any other. */
+  expect(within(cells[1]!).getByRole('button', { name: 'Open the card of Alpha' })).toBeInTheDocument();
+  expect(screen.getByRole('columnheader', { name: 'Priority' })).toHaveAttribute('aria-sort', 'ascending');
+  expect(names()).toEqual(['Alpha', 'Beta', 'Offline']);
+  await userEvent.setup().click(cells[0]!);
+  expect(screen.getByRole('article', { name: 'Alpha' })).toBeInTheDocument();
+});

@@ -3,10 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { isLinkName } from '@hornhoof/protocol/link';
 import { eq } from 'drizzle-orm';
 import { loadConfig, type Config } from './config.js';
-import { createDb, type Db } from './db/client.js';
+import { APP_NAME, openDb, type Db } from './db/client.js';
 import { companies, people } from './db/schema.js';
 import { ApiError } from './errors.js';
-import { linkOf, publicUrl, saveLink, writeTunnelSettings } from './modules/link/link.js';
+import { linkOf, publicUrl, saveLink, tunnelSettings, writeTunnelSettings } from './modules/link/link.js';
 import { Relay } from './modules/link/relay.js';
 import { reinvite } from './modules/people/routes.js';
 import { setupLink } from './modules/setup/code.js';
@@ -71,8 +71,12 @@ async function takeLink(name: string | undefined, { db, config, print, read }: D
   }
   const relay = new URL(config.relayUrl);
   const url = `https://${name}.${relay.hostname}`;
+  /* A hidden name Hornhoof took for the company's machines gives way to the link, and is let go at hornhoof.org so it
+     does not stay taken there; a relay that does not answer now keeps it, which costs nothing but the name. */
+  const hidden = await tunnelSettings(db, config);
   await saveLink(db, config, company.id, { name, url, key, tunnel: { serverAddr: relay.hostname, serverPort: Number(relay.port) || 443, protocol: 'wss' } });
   await writeTunnelSettings(db, config);
+  if (hidden?.hidden) await new Relay(config.relayUrl).unbind(hidden.name, hidden.key).catch(() => undefined);
   print(`Hornhoof keeps the link ${url}, and the tunnel opens it in a few seconds.`);
   print('hornhoof.org carries one tunnel per link, so stop any other tunnel for this link first.');
   return 0;
@@ -90,7 +94,7 @@ const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
 if (entry === fileURLToPath(import.meta.url)) {
   const config = loadConfig(process.env);
   if (!config.databaseUrl) throw new Error('DATABASE_URL is not set.');
-  const db = await createDb(config.databaseUrl);
+  const db = openDb(config.databaseUrl, APP_NAME, { fenced: config.keeper });
   const read = async () => {
     let text = '';
     for await (const chunk of process.stdin) text += String(chunk);

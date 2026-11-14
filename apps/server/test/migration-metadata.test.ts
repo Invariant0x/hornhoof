@@ -18,9 +18,14 @@ async function snapshot(tag: string): Promise<Snapshot> {
   return JSON.parse(await readFile(join(folder, 'meta', `${tag.slice(0, 4)}_snapshot.json`), 'utf8')) as Snapshot;
 }
 
+/* Named by the journal and not by a tag, so that each new migration does not have to move these tests along. */
+async function latestSnapshot(): Promise<Snapshot> {
+  return snapshot((await journal()).entries.at(-1)!.tag);
+}
+
 describe('merged migration metadata', () => {
   it('carries both histories into the latest snapshot used to generate the next migration', async () => {
-    const latest = await snapshot((await journal()).entries.at(-1)!.tag);
+    const latest = await latestSnapshot();
     expect(Object.keys(latest.tables['public.person_changes']!.columns)).toEqual(expect.arrayContaining([
       'company_id', 'person_id', 'actor_id', 'field', 'before', 'after', 'created_at',
     ]));
@@ -62,7 +67,7 @@ describe('merged migration metadata', () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     await migrate(drizzle(client), { migrationsFolder: folder });
-    const latest = await snapshot((await journal()).entries.at(-1)!.tag);
+    const latest = await latestSnapshot();
     for (const [table, definition] of Object.entries(latest.tables)) {
       const name = table.slice('public.'.length);
       const columns = await client.query<{ column_name: string }>('select column_name from information_schema.columns where table_schema = $1 and table_name = $2', ['public', name]);

@@ -1,20 +1,34 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
-import { linkNameOf } from '@hornhoof/protocol/link';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
-import type { Me } from '../types';
+import type { Me, TlsView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
+import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { CompanyRepoHost } from '../ui/RepoHost';
 import { useDialogClose } from '../ui/use-dialog-close';
+import { Backups } from './Backups';
 
 type Link = { name: string; url: string };
-type Loaded = { link: Link | null; domain: string };
+type Loaded = { link: Link | null; domain: string; tls?: TlsView | null };
+
+/* Where the link's https ends, and whose agreement its certificate rests on. */
+function Encryption({ tls }: { tls: TlsView | null }) {
+  const t = useT();
+  if (!tls) return null;
+  return (
+    <>
+      <p className="update-note">{tls.mode === 'https' ? t.settings.encryptedHere : t.settings.encryptedRelay}</p>
+      <LetsEncryptNote />
+    </>
+  );
+}
 
 /* The company's settings, for people who see the whole company: its public link at hornhoof.org, which they copy, move
-   to another name or remove, and the GitHub key Hornhoof creates repositories with. The themes are each person's own,
-   in their settings. */
+   to another name or remove, the GitHub key Hornhoof creates repositories with, and for the CEO alone its backups. A
+   company with no link starts on a long random name, as link names are public. The themes are each person's own, in
+   their settings. */
 export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void; onHome?: () => void }) {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -24,26 +38,20 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const box = useDialogClose(onClose);
-  const suggested = linkNameOf(me.company.name);
 
   useEffect(() => {
-    api
-      .get<Loaded>('/api/link')
-      .then(found => {
-        setLoaded(found);
-        if (!found.link) setName(suggested);
-      })
-      .catch(setFailure);
-  }, [suggested]);
+    api.get<Loaded>('/api/link').then(setLoaded).catch(setFailure);
+  }, []);
 
   async function run(change: () => Promise<Link | null>) {
     setBusy(true);
     setFailure(null);
     try {
       const link = await change();
-      setLoaded(was => ({ domain: was?.domain ?? '', link }));
+      /* The old certificate is not shown after a change, since it was for the old name. */
+      setLoaded(was => ({ domain: was?.domain ?? '', link, tls: null }));
       setMode('view');
-      if (!link) setName(suggested);
+      if (!link) setName('');
     } catch (err) {
       setFailure(err);
     } finally {
@@ -74,6 +82,7 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
                   <a href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
                   <CopyButton text={link.url} />
                 </div>
+                <Encryption tls={loaded.tls ?? null} />
                 {mode === 'remove' ? (
                   <div className="settings-actions">
                     <span className="entry-main">{t.settings.removeAsk(link.url)}</span>
@@ -108,7 +117,7 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
                 }}
               >
                 {!link && <p>{t.settings.closed}</p>}
-                <LinkName name={name} onName={setName} domain={loaded.domain} check={check} onState={setState} current={link?.name} />
+                <LinkName name={name} onName={setName} domain={loaded.domain} check={check} onState={setState} current={link?.name} startRandom={!link} />
                 {link && <p className="update-note">{t.settings.moveNote}</p>}
                 <div className="settings-actions">
                   <button className="btn small" type="submit" disabled={busy || blocks(state)}>{link ? t.common.save : t.settings.open}</button>
@@ -120,6 +129,7 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
         )}
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
         <CompanyRepoHost />
+        {me.person.isOwner && <Backups />}
       </div>
     </div>
   );
