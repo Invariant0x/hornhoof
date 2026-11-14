@@ -139,7 +139,8 @@ describe('the accepted review fixes', () => {
     const wake = moved.wakes.find(each => each.agentId === f.tester.id)!;
     expect(wake).toMatchObject({ taskId: f.task.id, why: 'assigned' });
     const prompt = wakePrompt(f.tester, await loadTask(f.db, f.task.id), wake);
-    expect(prompt).toContain('report verified final-candidate runs in Tests');
+    expect(prompt).toContain('verify local affected checks in Tests without calling run_tests on non-main task branches');
+    expect(prompt).not.toContain('report verified final-candidate runs in Tests');
     expect(prompt).not.toContain('The tests you ran');
   });
 

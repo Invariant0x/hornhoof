@@ -71,4 +71,65 @@ describe('accepting only a checked and integrated candidate', () => {
     const moved = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Observed the approved main commit.', ...{ acceptance: f.acceptance } });
     expect(moved.task.status).toBe('done');
   });
+  it('verifies, accepts and coordinates a non-main turn task branch without requiring run_tests on its commit', async () => {
+    const f = await testsFixture();
+    const group = (await f.create({ title: 'Coordinate release batch', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
+    const [existing] = await f.db.select().from(turns).where(and(eq(turns.companyId, f.task.companyId), eq(turns.status, 'open')));
+    const turn = existing ?? (await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() }).returning())[0]!;
+    await f.db.update(tasks).set({ parentId: group.id, turnId: turn.id }).where(eq(tasks.id, f.task.id));
+    f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: f.finalCommit });
+    const before = (await f.detail()).echelons;
+    await report(f.ctx, f.tester.id, f.task.id, {
+      done: true,
+      summary: 'Verified named local tests, types and lint on the task branch.',
+      verification: { candidateId: before.candidateId!, revision: before.revision } as never,
+    });
+    const afterTests = (await f.detail()).echelons;
+    const accepted = await report(f.ctx, f.head.id, f.task.id, {
+      done: true,
+      summary: 'Integrated the checked task branch into the turn branch.',
+      acceptance: { candidateId: afterTests.candidateId!, revision: afterTests.revision, integrationCommit: f.finalCommit },
+    });
+    expect(accepted.task).toMatchObject({ status: 'done', assigneeAgentId: null });
+    const detail = await f.detail();
+    expect(detail.log.findLast(event => event.kind === 'report')?.data).toMatchObject({
+      acceptedCandidate: {
+        candidateId: afterTests.candidateId,
+        commit: f.finalCommit,
+        evidence: [],
+        integration: { branch: `turn-${turn.number}`, commit: f.finalCommit },
+      },
+    });
+    const closedParent = await report(f.ctx, f.head.id, group.id, { done: true, summary: 'All turn branches accepted; ready for one release full run.' });
+    expect(closedParent.task).toMatchObject({ status: 'done' });
+  });
+  it('still requires completed run_tests evidence when integrating a task directly into main', async () => {
+    const f = await testsFixture();
+    await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
+    f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: f.finalCommit });
+    const direct = (await f.detail()).echelons;
+    await expect(report(f.ctx, f.tester.id, f.task.id, {
+      done: true,
+      summary: 'Only local checks.',
+      verification: { candidateId: direct.candidateId!, revision: direct.revision, runIds: [] },
+    })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/run_tests/i) as unknown });
+
+    const [turn] = await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 18, goal: 'Temp turn.', status: 'open', openedAt: new Date() }).returning();
+    await f.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, f.task.id));
+    const inTurn = (await f.detail()).echelons;
+    await report(f.ctx, f.tester.id, f.task.id, {
+      done: true,
+      summary: 'Verified for turn branch.',
+      verification: { candidateId: inTurn.candidateId!, revision: inTurn.revision, runIds: [] },
+    });
+    await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
+    const asked = await ask(f.ctx, f.head.id, f.task.id, { kind: 'approval', text: 'Approve direct main commit.', commit: f.finalCommit });
+    await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { approve: true });
+    const ready = (await f.detail()).echelons;
+    await expect(report(f.ctx, f.head.id, f.task.id, {
+      done: true,
+      summary: 'Try main without run_tests.',
+      acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: f.finalCommit },
+    })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/run_tests/i) as unknown });
+  });
 });

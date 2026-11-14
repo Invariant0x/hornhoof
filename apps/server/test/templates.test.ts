@@ -1782,3 +1782,83 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
   });
 });
+
+type SingleReleaseRunSkills = {
+  leadTasks: string;
+  runChecks: string;
+  devLead: string;
+  devTaskFlow: string;
+  devGates: string;
+  devCiRelease: string;
+  devTdd: string;
+  devTestEnv: string;
+  devImplement: string;
+  devPolicy: string;
+  briefMembers: string;
+  orchPlanTurn: string;
+  orchCompany: string;
+};
+
+const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills) => boolean }[] = [
+  {
+    id: 'no-turnkey-merge-and-release-ambiguity',
+    holds: s =>
+      forbidsAll(Object.values(s).join('\n'), [
+        /from code and checks to merge and release/i,
+        /tests,\s*merge and release/i,
+        /\brun_tests\b[^.!?\n]*\bevery\s+(?:task|turnkey)\s+branch\b/i,
+      ]),
+  },
+  {
+    id: 'local-branch-checks-and-no-per-task-run-tests',
+    holds: s =>
+      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devTdd, s.devTestEnv, s.devImplement, s.briefMembers], text =>
+        matchesAll(text, [
+          /\b(?:individual|turnkey|task)\b[\s\S]*\b(?:named|affected|area)\b[\s\S]*\brun_tests\b|\brun_tests\b[\s\S]*\b(?:individual|turnkey|task)\b/i,
+        ]),
+      ) &&
+      forEvery([s.leadTasks, s.devLead, s.devTaskFlow], text =>
+        matchesAll(text, [/\bbuild\b[\s\S]*\btypes\b[\s\S]*\blint\b/i, /\bhand\w*\s+in\b[\s\S]*\bbranch\b|\bbranch\b[\s\S]*\bhand\w*\s+in\b/i]),
+      ),
+  },
+  {
+    id: 'single-full-run-on-combined-release-branch-before-main',
+    holds: s =>
+      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devCiRelease, s.devPolicy, s.orchPlanTurn, s.orchCompany], text =>
+        matchesAll(text, [/\bonce\b[\s\S]*\bcombined release (?:branch|candidate)\b[\s\S]*\bmain\b/i]),
+      ),
+  },
+];
+
+describe('full test suite strictly once before release', () => {
+  const bundle = (): SingleReleaseRunSkills => ({
+    leadTasks: templates.skills.get('hh-lead-tasks')!.body,
+    runChecks: templates.skills.get('hh-run-checks')!.body,
+    devLead: templates.skills.get('dev-lead')!.body,
+    devTaskFlow: templates.skills.get('dev-task-flow')!.body,
+    devGates: templates.skills.get('dev-gates')!.body,
+    devCiRelease: templates.skills.get('dev-ci-release')!.body,
+    devTdd: templates.skills.get('dev-tdd')!.body,
+    devTestEnv: templates.skills.get('dev-test-environment')!.body,
+    devImplement: templates.skills.get('dev-implement')!.body,
+    devPolicy: templates.skills.get('dev-testing-policy')!.body,
+    briefMembers: templates.skills.get('hh-brief-members')!.body,
+    orchPlanTurn: templates.skills.get('orch-plan-turn')!.body,
+    orchCompany: templates.skills.get('orch-company')!.body,
+  });
+
+  it('requires local changed-area checks on task and turnkey branches and strictly one run_tests run on the combined release branch before main', () => {
+    expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, bundle())).toEqual([]);
+  });
+
+  it('rejects re-introducing turnkey merge-and-release ambiguity or per-task run_tests', () => {
+    const base = bundle();
+    expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, base)).toEqual([]);
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, devLead: `${base.devLead}\nThat member does it from code and checks to merge and release.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, runChecks: `${base.runChecks}\nCall run_tests on every turnkey branch before review.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
+  });
+});
