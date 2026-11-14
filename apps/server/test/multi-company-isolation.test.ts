@@ -22,7 +22,7 @@ import type { Bound, SyncRecord } from '../src/modules/link/relay.js';
 import { visitClientId, visitConfigFor } from '../src/modules/link/visit-client.js';
 import { createTestSql, ownDatabases, TEST_SECRET } from './helpers.js';
 import { CODE, install, SUB_A } from './install-script-helpers.js';
-import { runOnce, stand } from './updater-fixture.js';
+import { ask, runOnce, stand } from './updater-fixture.js';
 
 /* Multi-company leader/copy/switch tests write net_local terms directly, so each test gets isolated databases. */
 ownDatabases();
@@ -360,6 +360,127 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     expect(guide).toContain('HORNHOOF_SUBNET');
     expect(guide).toContain('hornhoof-ports');
     expect(guide).toContain('docker network ls');
+  }, 60_000);
+
+  it('matches interface and bridge names containing regex metacharacters as literal strings', () => {
+    const hostAddr = [
+      LAN_ADDR_B,
+      '3: br[own    inet 10.200.0.1/24 scope global br[own\\       valid_lft forever preferred_lft forever',
+      '4: wg[x    inet 10.200.1.5/24 scope global wg[x\\       valid_lft forever preferred_lft forever',
+      '5: tun(1)    inet 10.200.2.5/24 scope global tun(1)\\       valid_lft forever preferred_lft forever',
+    ].join('\n');
+    const hostRoute = [
+      LAN_ROUTE_B,
+      '10.200.0.0/24 dev br[own proto kernel scope link src 10.200.0.1',
+      '10.200.3.0/24 dev wg[x proto kernel scope link src 10.200.1.5',
+      '10.200.4.0/24 dev eth0 proto static via 192.168.1.1',
+    ].join('\n');
+    const linux = makeComputer(hostAddr, hostRoute);
+    mkdirSync(linux.folder(), { recursive: true });
+    writeFileSync(join(linux.folder(), '.env'), 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n');
+
+    const res = linux.runServer([], {
+      STUB_DOCKER_NETWORKS: 'ownnet000000001|hornhoof_default|hornhoof|10.200.0.0/24|false|br[own',
+    });
+    expect(res.code).toBe(0);
+    const linuxEnv = linux.dotEnv();
+    expect(linuxEnv.HORNHOOF_SUBNET).toBe('10.200.0.0/24');
+    expect(linuxEnv.HORNHOOF_INTERNAL_SUBNET).toBe('10.200.5.0/24');
+
+    const ifconfigOut = [
+      'wg[x: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1420',
+      '\tinet 10.200.0.5 netmask 0xffffff00',
+      'en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500',
+      '\tinet 10.200.1.5 netmask 0xffffff00 broadcast 10.200.1.255',
+    ].join('\n');
+    const netstatOut = [
+      'Routing tables',
+      'Internet:',
+      'Destination        Gateway            Flags               Netif Expire',
+      '10.200.2/24        link#19            UCS                 wg[x',
+      '10.200.3/24        link#14            UCS                  en0',
+    ].join('\n');
+    const mac = makeComputer('', '');
+    const macRes = mac.runServer([], {
+      STUB_OS: 'Darwin',
+      STUB_IFCONFIG: ifconfigOut,
+      STUB_NETSTAT: netstatOut,
+    });
+    expect(macRes.code).toBe(0);
+    expect(mac.dotEnv().HORNHOOF_SUBNET).toBe('10.200.4.0/24');
+    expect(mac.dotEnv().HORNHOOF_INTERNAL_SUBNET).toBe('10.200.5.0/24');
+  }, 60_000);
+
+  it('keeps existing subnet reservations untouched and logs an error when remove_core cannot read /ports/subnets', () => {
+    const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
+    writeFileSync(join(machine.portsDir, 'registry'), '/home/other/hornhoof-gamma 8080 8180\n');
+    writeFileSync(join(machine.portsDir, 'subnets'), '/home/other/hornhoof-gamma 10.200.0.0/24 10.200.1.0/24\n');
+
+    const joined = machine.runJoin([], {
+      STUB_JOIN_BODY: `core hornhoof-temp ${'T'.repeat(43)} 8080 ${randomUUID()}\n${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\n`,
+    });
+    expect(joined.code).toBe(0);
+    const beforeSubnets = machine.subnets();
+    expect(beforeSubnets).toHaveLength(2);
+
+    const removed = install({
+      args: ['--uninstall'],
+      tty: 'y\nn\n',
+      env: {
+        HOME: machine.home,
+        HORNHOOF_HOME: join(machine.home, '.hornhoof'),
+        HORNHOOF_DIR: join(machine.home, 'hornhoof'),
+        STUB_PORTS_DIR: machine.portsDir,
+        STUB_SUBNETS: 'unreadable',
+      },
+    });
+    expect(removed.code).toBe(0);
+    expect(removed.calls.some(c => c.includes('cat > /ports/subnets.new'))).toBe(false);
+    expect(machine.subnets()).toEqual(beforeSubnets);
+    expect(removed.out).toMatch(/Could not read the list of Hornhoof's subnets on this computer/);
+  }, 60_000);
+
+  it('keeps the live network safe during automatic updates and warns clearly in the update log when it overlaps the home network', async () => {
+    const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
+    mkdirSync(machine.folder(), { recursive: true });
+    writeFileSync(join(machine.folder(), '.env'), 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n');
+
+    const fromUpdater = machine.runServer([], {
+      STUB_DOCKER_NETWORKS: 'oldnet000000001|hornhoof_default|hornhoof|192.168.0.0/20|false|',
+      HORNHOOF_FROM_UPDATER: '1',
+      HORNHOOF_UPDATER_REV: '2',
+      HORNHOOF_SERVER_DIR: machine.folder(),
+      STUB_HOSTNAME: 'updater-cid',
+    });
+    expect(fromUpdater.code).toBe(0);
+    expect(fromUpdater.calls).not.toContain('docker compose down');
+    expect(machine.dotEnv().HORNHOOF_SUBNET).toBe('192.168.0.0/20');
+    expect(cidrsOverlap(machine.dotEnv().HORNHOOF_INTERNAL_SUBNET!, '192.168.0.0/20')).toBe(false);
+    expect(fromUpdater.out).toContain('192.168.0.0/20');
+    expect(fromUpdater.out).toContain("overlaps this computer's network");
+    expect(fromUpdater.out).toContain('install.sh server');
+
+    const s = stand('HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\nCOMPOSE_PROJECT_NAME=hornhoof\n');
+    const upd = await runOnce(s, ask('u-overlap'), {
+      HORNHOOF_HOST_OS: 'linux',
+      STUB_IP: LAN_ADDR_B,
+      STUB_DOCKER_NETWORKS: 'oldnet000000001|hornhoof_default|hornhoof|192.168.0.0/20|false|',
+    });
+    expect(upd.code).toBe(0);
+    expect(upd.status?.state).toBe('done');
+    expect(upd.status?.log).toContain('192.168.0.0/20');
+    expect(upd.status?.log).toContain("overlaps this computer's network");
+    expect(upd.status?.log).toContain('install.sh server');
+
+    const sClean = stand('HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\nCOMPOSE_PROJECT_NAME=hornhoof\n');
+    const cleanUpd = await runOnce(sClean, ask('u-clean'), {
+      HORNHOOF_HOST_OS: 'linux',
+      STUB_IP: LAN_ADDR_B,
+      STUB_DOCKER_NETWORKS: 'oknet0000000001|hornhoof_default|hornhoof|10.200.0.0/24|false|',
+    });
+    expect(cleanUpd.code).toBe(0);
+    expect(cleanUpd.status?.state).toBe('done');
+    expect(cleanUpd.status?.log).not.toContain("overlaps this computer's network");
   }, 60_000);
 });
 
