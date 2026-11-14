@@ -91,7 +91,7 @@ describe('the proofs a leader keeps its lease by', () => {
     /* With no lease there is no term to vouch for. */
     p.answer(B, { kind: 'follow', term: TERM }, 1100);
     p.said.term = null;
-    expect(p.it.proof()).toBeNull();
+    expect([p.it.proof(), p.it.ended()]).toEqual([null, null]);
   });
 
   it('takes the newer of the two', async () => {
@@ -268,6 +268,24 @@ describe('the proofs a leader keeps its lease by', () => {
     await vi.advanceTimersByTimeAsync(3500);
     await dropped;
     expect(it.missing()).toBe('no new answer from link probe; no sync copy named');
+  });
+
+  it('writes no missing-proof line when the link fails while the named sync copy vouches each second', async () => {
+    const p = proofs();
+    const lines: string[] = [];
+    const log = (line: string) => void lines.push(line);
+
+    p.said.link = 'throws';
+    p.said.now = 2000;
+    await p.it.tick();
+    p.answer(B, { kind: 'follow', term: TERM }, 2000);
+    p.said.now = 3000;
+    p.it.reportMissing(clocks(2000).wall + LEASE_MS, log);
+    expect(lines).toEqual([]);
+
+    p.said.now = 4000;
+    p.it.reportMissing(clocks(2000).wall + LEASE_MS, log);
+    expect(lines).toEqual(['Lease renewal skipped (missing proof: link probe failed; no new beat from mac).']);
   });
 });
 
@@ -449,8 +467,9 @@ describe('keeping the lease when the first copy finishes on a slow link', () => 
 
   it('writes no missing-proof line over 30 s on a healthy 3 s +-300 ms link with 50 ms renewals, and writes one when the link goes silent', async () => {
     let n = 0;
+    let fast = false;
     const { keeper, lease, lines, state } = await slowLinkStand({
-      probeMs: () => 3000 + ((n++ % 3) - 1) * 300,
+      probeMs: () => (fast ? 200 : 3000 + ((n++ % 3) - 1) * 300),
       renew: () => new Promise(resolve => setTimeout(() => resolve(true), 50)),
     });
     await vi.advanceTimersByTimeAsync(2500);
@@ -465,21 +484,38 @@ describe('keeping the lease when the first copy finishes on a slow link', () => 
 
     /* Real silence on the link surfaces the missing-proof warning before the lease fences. */
     state.link = 'blackhole';
-    await vi.advanceTimersByTimeAsync(7500);
+    await vi.advanceTimersByTimeAsync(7000);
+    expect(keeper.mode()).toBe('lead');
     expect(lines.filter(line => line.includes('missing proof'))).toEqual([
       'Lease renewal skipped (missing proof: link probe timed out; no sync copy named).',
     ]);
 
-    /* Once a fast probe recovers the standing lease, a later outage logs anew. */
+    /* Once a fresh probe recovers the standing lease, a later outage logs the same reason anew. */
+    fast = true;
     state.link = 'self';
-    n = 1;
-    await vi.advanceTimersByTimeAsync(4500);
+    await vi.advanceTimersByTimeAsync(2000);
     expect(keeper.mode()).toBe('lead');
     state.link = 'blackhole';
-    await vi.advanceTimersByTimeAsync(7500);
+    await vi.advanceTimersByTimeAsync(7000);
+    expect(keeper.mode()).toBe('lead');
     expect(lines.filter(line => line.includes('missing proof'))).toEqual([
       'Lease renewal skipped (missing proof: link probe timed out; no sync copy named).',
       'Lease renewal skipped (missing proof: link probe timed out; no sync copy named).',
     ]);
+  });
+
+  it('writes no missing-proof line over 30 s on a healthy 4.5 s link with 50 ms renewals', async () => {
+    const { keeper, lease, lines, state } = await slowLinkStand({
+      probeMs: 4500,
+      renew: () => new Promise(resolve => setTimeout(() => resolve(true), 50)),
+    });
+    await vi.advanceTimersByTimeAsync(2500);
+    state.needed = true;
+    for (let step = 0; step < 60; step++) {
+      await vi.advanceTimersByTimeAsync(500);
+      expect([step, keeper.mode(), keeper.term()?.number]).toEqual([step, 'lead', 1]);
+    }
+    expect(lease.calls.filter(call => call.method === 'fence')).toEqual([]);
+    expect(lines.filter(line => line.includes('missing proof'))).toEqual([]);
   });
 });

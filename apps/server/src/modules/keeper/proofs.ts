@@ -12,7 +12,7 @@ import { above } from './takeover-step.js';
 
 const EVERY_MS = 1000;
 const PROBE_MS = 5000;
-const MAX_PROBES = 5;
+const MAX_PROBES = 6;
 const LATE = Symbol('late');
 /* The copy states of a machine whose copy finished at least once. */
 const FINISHED = ['ready', 'remaking', 'stopped', 'saving'];
@@ -101,15 +101,24 @@ export class LeaseProofs {
   private another = false;
   private linkMiss: LinkMiss = 'idle';
   private missingSaid = '';
+  private missingWall: number | null = null;
   private readonly clocks: () => Clocks;
 
   constructor(private readonly opts: LeaseProofsOptions) {
     this.clocks = opts.now ?? (() => ({ wall: Date.now(), mono: performance.now() }));
   }
 
+  private everyMs(): number {
+    return this.opts.everyMs ?? EVERY_MS;
+  }
+
+  private probeMs(): number {
+    return this.opts.probeMs ?? PROBE_MS;
+  }
+
   start(): void {
     if (this.timer || this.stopped) return;
-    this.timer = setInterval(() => void this.tick(), this.opts.everyMs ?? EVERY_MS);
+    this.timer = setInterval(() => void this.tick(), this.everyMs());
     this.timer.unref();
   }
 
@@ -146,7 +155,7 @@ export class LeaseProofs {
   private async raceProbe(nonce: string): Promise<ProbeRace> {
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<typeof LATE>(resolve => {
-      timer = setTimeout(() => resolve(LATE), this.opts.probeMs ?? PROBE_MS);
+      timer = setTimeout(() => resolve(LATE), this.probeMs());
       timer.unref();
     });
     try {
@@ -157,23 +166,29 @@ export class LeaseProofs {
     }
   }
 
+  private recordMiss(miss: LinkMiss, sent: Clocks): void {
+    if (!this.byLink || sent.mono > this.byLink.mono) this.linkMiss = miss;
+  }
+
   private applyProbe(said: ProbeRace, nonce: string, sent: Clocks): void {
     const miss = classifyMiss(said, nonce);
-    if (miss) {
-      this.linkMiss = miss;
+    if (miss) return this.recordMiss(miss, sent);
+    const answer = (said as { ok: true; value: NonNullable<ProbeAnswer> }).value;
+    if (answer.machine !== this.opts.self) {
+      this.another = true;
       return;
     }
-    const answer = (said as { ok: true; value: NonNullable<ProbeAnswer> }).value;
-    if (answer.machine === this.opts.self) {
-      this.byLink = newer(sent, this.byLink);
-      this.linkMiss = 'idle';
-    } else this.another = true;
+    this.byLink = newer(sent, this.byLink);
+    this.linkMiss = 'idle';
+  }
+
+  private copyProof(): Clocks | null {
+    const b = this.opts.b();
+    return b ? copyFollows(this.opts.beats.answer(b), this.opts.term()) : null;
   }
 
   private vouched(): Clocks | null {
-    const b = this.opts.b();
-    const follows = b ? copyFollows(this.opts.beats.answer(b), this.opts.term()) : null;
-    return newer(follows, this.byLink);
+    return newer(this.copyProof(), this.byLink);
   }
 
   /* When the newest proof was sent: a question at the link this machine itself answered, a beat whose answer from the
@@ -195,23 +210,36 @@ export class LeaseProofs {
     return `${this.linkWhy()}; ${copyMiss(b, heard, this.opts.term())}`;
   }
 
-  /* Says which proof is missing when a standing lease went past a renewal tick with no newer proof; once for each
-     reason, and forgotten again once a newer proof arrives or the lease is taken anew. */
-  reportMissing(untilWall: number, log: (line: string) => void): void {
-    const lastWall = untilWall - LEASE_MS;
-    const vouched = this.vouched();
-    if (vouched && vouched.wall > lastWall) {
-      this.missingSaid = '';
-      return;
-    }
-    const needMs = this.linkMiss === 'idle' ? 2 * EVERY_MS : EVERY_MS;
-    if (this.clocks().wall - lastWall < needMs) return;
-    this.sayMissing(`Lease renewal skipped (missing proof: ${this.missing()}).`, log);
+  private missingThresholdMs(): number {
+    const every = this.everyMs();
+    if (this.linkMiss !== 'idle') return this.copyProof() ? 2 * every : every;
+    return this.inFlight > 0 ? this.probeMs() + every : 2 * every;
   }
 
-  private sayMissing(line: string, log: (line: string) => void): void {
+  private clearMissing(): void {
+    this.missingSaid = '';
+    this.missingWall = null;
+  }
+
+  private freshProof(lastWall: number): boolean {
+    const proof = this.proof();
+    return proof !== null && proof.wall > lastWall;
+  }
+
+  /* Says which proof is missing when a standing lease is genuinely unrenewed past the window a healthy in-flight probe
+     needs; once for each reason, and forgotten again once a newer proof or renewal commits or the lease is taken anew. */
+  reportMissing(untilWall: number, log: (line: string) => void): void {
+    const lastWall = untilWall - LEASE_MS;
+    if (this.missingWall !== null && lastWall > this.missingWall) this.clearMissing();
+    if (this.freshProof(lastWall)) return this.clearMissing();
+    if (this.clocks().wall - lastWall < this.missingThresholdMs()) return;
+    this.sayMissing(lastWall, `Lease renewal skipped (missing proof: ${this.missing()}).`, log);
+  }
+
+  private sayMissing(lastWall: number, line: string, log: (line: string) => void): void {
     if (line === this.missingSaid) return;
     this.missingSaid = line;
+    this.missingWall = lastWall;
     log(line);
   }
 
@@ -234,6 +262,6 @@ export class LeaseProofs {
     this.began = null;
     this.another = false;
     this.linkMiss = 'idle';
-    this.missingSaid = '';
+    this.clearMissing();
   }
 }
