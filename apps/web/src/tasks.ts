@@ -5,6 +5,8 @@ import { useStream, type LiveMessage } from './live';
 import { deptLabel, type Messages } from './i18n';
 import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDepartments, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
 
+const hasBody = <B,>(body: B | null | undefined, fresh: () => boolean): body is B => body !== null && body !== undefined && fresh();
+
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
 export function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
   const [data, setData] = useState<T | undefined>(undefined);
@@ -27,7 +29,7 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, refres
     };
     api.get<never>(path).then(
       body => {
-        if (body === null || body === undefined || !fresh()) return;
+        if (!hasBody(body, fresh)) return;
         setData(pickRef.current(body));
         setFailure(null);
       },

@@ -293,6 +293,14 @@ function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: bo
   );
 }
 
+function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c: AgentCardView) => void): void {
+  if (mounted && card) save(card);
+}
+
+function readyEvents<T>(mounted: boolean, res: T | null): res is T {
+  return mounted && res !== null;
+}
+
 export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -339,7 +347,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* Every agent's current task comes from its card; the company supplies the orchestrator's other details. */
   const loadCard = useCallback(() => {
     api.get<AgentCardView>(path).then(
-      c => mounted.current && c && setCard(c),
+      c => applyLoadedCard(mounted.current, c, setCard),
       err => mounted.current && setFailure(err),
     );
   }, [path]);
@@ -377,7 +385,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       for (;;) {
         const n = ++catchUps.current;
         const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${path}/events?after=${last.current}`);
-        if (!mounted.current || !res) return;
+        if (!readyEvents(mounted.current, res)) return;
         merge(res.events);
         if (n > stateFrom.current) {
           stateFrom.current = n;

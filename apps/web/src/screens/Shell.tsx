@@ -272,13 +272,16 @@ function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel,
   );
 }
 
+function departmentFallback(deptId: string | null, org: Org | null, orgFailure: unknown) {
+  return deptId && !org && orgFailure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
+}
+
 function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, taskId, panel, goHome, openAgent, openTask, openDecisions, onHire }: MapRouteProps & {
   deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; taskId: string | null; panel: 'window' | 'task' | null;
   openTask: (id: string) => void; onHire: (dept: Department) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
-  if (deptId && !dept) return !org && orgFailure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
-  if (!dept) return null;
+  if (!dept) return departmentFallback(deptId, org, orgFailure);
   return (
     <DepartmentView
       me={me}

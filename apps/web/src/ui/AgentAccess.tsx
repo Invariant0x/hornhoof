@@ -30,6 +30,20 @@ function keepsVerified(prev: AccessState, path: string, org: Org, agentId: strin
   return prev.verified === path && !(!listed(org, agentId) && listed(prev.org, agentId));
 }
 
+function nextCardAccess(prev: AccessState, card: unknown, path: string, snapshot: Org, agentId: string): AccessState {
+  if (card !== null) return { status: 'allowed', org: snapshot, failure: null, verified: path };
+  if (keepsVerified(prev, path, snapshot, agentId)) return { status: 'allowed', org: snapshot, failure: null, verified: path };
+  return { status: 'failure', org: snapshot, failure: new ApiFailure(502, 'internal', ''), verified: null };
+}
+
+function nextErrorAccess(prev: AccessState, err: unknown, path: string, snapshot: Org, agentId: string): AccessState {
+  const next = statusOf(err);
+  if (next !== 'denied' && keepsVerified(prev, path, snapshot, agentId)) {
+    return { status: 'allowed', org: snapshot, failure: null, verified: path };
+  }
+  return { status: next, org: snapshot, failure: err, verified: null };
+}
+
 export function AgentAccess({ agentId, org, onClose, children }: { agentId: string; org: Org; onClose(): void; children: ReactNode }) {
   const t = useT();
   const path = `/api/agents/${agentId}`;
@@ -49,20 +63,10 @@ export function AgentAccess({ agentId, org, onClose, children }: { agentId: stri
     try {
       const card = await api.get(path);
       if (sequence.current !== own) return;
-      if (card === null) {
-        const cutOff = new ApiFailure(502, 'internal', '');
-        setAccess(prev => (keepsVerified(prev, path, snapshot, agentId) ? { status: 'allowed', org: snapshot, failure: null, verified: path } : { status: 'failure', org: snapshot, failure: cutOff, verified: null }));
-        return;
-      }
-      setAccess({ status: 'allowed', org: snapshot, failure: null, verified: path });
+      setAccess(prev => nextCardAccess(prev, card, path, snapshot, agentId));
     } catch (err) {
       if (sequence.current !== own) return;
-      const next = statusOf(err);
-      if (next === 'denied') {
-        setAccess({ status: 'denied', org: snapshot, failure: err, verified: null });
-        return;
-      }
-      setAccess(prev => (keepsVerified(prev, path, snapshot, agentId) ? { status: 'allowed', org: snapshot, failure: null, verified: path } : { status: 'failure', org: snapshot, failure: err, verified: null }));
+      setAccess(prev => nextErrorAccess(prev, err, path, snapshot, agentId));
     }
   }, [path, snapshot, agentId, closed]);
 

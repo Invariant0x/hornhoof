@@ -47,6 +47,16 @@ function useScreen() {
   return [screen, show] as const;
 }
 
+function validSetup(setup: { needed: boolean; linkDomain?: string } | null) {
+  if (!setup || typeof setup.needed !== 'boolean') throw new ApiFailure(502, 'internal', '');
+  return setup;
+}
+
+function validMe(me: Me | null): Me {
+  if (!me?.person?.id || !me?.company?.id) throw new ApiFailure(502, 'internal', '');
+  return me;
+}
+
 function Screens() {
   const t = useT();
   const [screen, show] = useScreen();
@@ -55,11 +65,9 @@ function Screens() {
     const route = parseRoute(window.location.pathname);
     if (route.kind === 'invite') return show({ kind: 'invite', token: route.token });
     try {
-      const setup = await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup');
-      if (!setup || typeof setup.needed !== 'boolean') throw new ApiFailure(502, 'internal', '');
+      const setup = validSetup(await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup'));
       if (setup.needed) return show({ kind: 'setup', linkDomain: setup.linkDomain });
-      const me = await api.get<Me>('/api/me');
-      if (!me?.person?.id || !me?.company?.id) throw new ApiFailure(502, 'internal', '');
+      const me = validMe(await api.get<Me>('/api/me'));
       show({ kind: 'shell', me, welcome });
     } catch (err) {
       if (err instanceof ApiFailure && err.status === 401) return show({ kind: 'login' });
