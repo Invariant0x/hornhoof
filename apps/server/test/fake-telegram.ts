@@ -21,6 +21,8 @@ export type FakeTelegram = {
   offsets: Map<string, number[]>;
   /* Chats that blocked the bot: a message to them is refused as Telegram refuses it. */
   blocked: Set<number>;
+  /* Chats that never started a bot, as "token:chat": Telegram refuses that bot's messages to them, as it does to a bot no one wrote to. */
+  strangers: Set<string>;
   /* While set, it answers 502 to everything, as a proxy in front of it does when it is away. */
   down: boolean;
   /* Methods that answer 502 while the rest work. */
@@ -58,6 +60,7 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
     sentDocuments: [],
     offsets: new Map(),
     blocked: new Set(),
+    strangers: new Set(),
     down: false,
     broken: new Set(),
     webhooks: new Set(),
@@ -80,6 +83,8 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
     },
   };
   const refuse = (code: number, description: string) => ({ ok: false, error_code: code, description });
+  const stranger = (token: string, chatId: number) => tg.strangers.has(`${token}:${chatId}`);
+  const NOT_STARTED = "Forbidden: bot can't initiate conversation with a user";
   app.addContentTypeParser('multipart/form-data', { parseAs: 'buffer', bodyLimit: 60 * 1024 * 1024 }, (_req, body, done) => done(null, body));
 
   app.addHook('onRequest', async (req, reply) => {
@@ -136,6 +141,7 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
       case 'sendMessage': {
         const chatId = Number(body.chat_id);
         if (tg.blocked.has(chatId)) return reply.code(403).send(refuse(403, 'Forbidden: bot was blocked by the user'));
+        if (stranger(token, chatId)) return reply.code(403).send(refuse(403, NOT_STARTED));
         const text = String(body.text ?? '');
         if (!text || text.length > 4096) return reply.code(400).send(refuse(400, 'Bad Request: message text is empty or too long'));
         tg.sent.push({ token, chat_id: chatId, text, ...(typeof body.parse_mode === 'string' ? { parse_mode: body.parse_mode } : {}) });
@@ -150,6 +156,7 @@ export async function fakeTelegram(): Promise<FakeTelegram> {
         }).formData();
         const chatId = Number(form.get('chat_id'));
         if (tg.blocked.has(chatId)) return reply.code(403).send(refuse(403, `Forbidden: bot ${token} was blocked by the user`));
+        if (stranger(token, chatId)) return reply.code(403).send(refuse(403, NOT_STARTED));
         const doc = form.get('document');
         if (!(doc instanceof File) || doc.size === 0 || doc.size > 50 * 1024 * 1024) {
           return reply.code(400).send(refuse(400, 'Bad Request: file must be non-empty and up to 50 MB'));

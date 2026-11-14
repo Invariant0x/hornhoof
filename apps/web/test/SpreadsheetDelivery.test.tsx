@@ -130,4 +130,33 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     expect(await within(ruDialog).findByRole('region', { name: 'Google Таблицы' })).toBeInTheDocument();
     localStorage.removeItem('hh-lang');
   });
+
+  it('says in plain words that a service account key needs the Google account its spreadsheets open for', async () => {
+    const user = userEvent.setup();
+    const said = {
+      en: 'A service account opens the spreadsheets it creates to no one else. Enter the email of the Google account to share them with.',
+      ru: 'Сервисный аккаунт никому не открывает созданные им таблицы. Укажите почту аккаунта Google, которому открывать к ним доступ.',
+    };
+    for (const lang of ['en', 'ru'] as const) {
+      localStorage.setItem('hh-lang', lang);
+      mockApi({
+        'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+        'GET /api/repo-host': [200, { host: null }],
+        'GET /api/google-sheets': [200, { google: null }],
+        'PUT /api/google-sheets': [400, { error: { code: 'validation', reason: 'google_sheets_share_needed', message: 'Share needed.' } }],
+      });
+      const shown = render(
+        <LanguageProvider>
+          <Settings me={ME} onClose={() => {}} />
+        </LanguageProvider>,
+      );
+      const part = await screen.findByRole('region', { name: lang === 'en' ? 'Google Sheets' : 'Google Таблицы' });
+      await user.click(within(part).getByRole('button', { name: lang === 'en' ? 'Connect Google Sheets' : 'Подключить Google Таблицы' }));
+      await user.type(within(part).getByLabelText(lang === 'en' ? 'Google key JSON' : 'JSON-ключ Google'), '{{"type":"service_account"}');
+      await user.click(within(part).getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить' }));
+      expect(await within(part).findByRole('alert')).toHaveTextContent(said[lang]);
+      shown.unmount();
+    }
+    localStorage.removeItem('hh-lang');
+  });
 });

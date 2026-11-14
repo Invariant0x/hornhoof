@@ -14,6 +14,7 @@ import { as, connectNode, invitePerson, listen, mcp, nextOf, setUpCompany, testA
 
 const NODE_KEY = 'k'.repeat(40);
 const BOT_TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
+const ORCHESTRATOR_BOT_TOKEN = '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
 const CEO_TG: TelegramUser = { id: 7770001, first_name: 'Ivan', username: 'ivan_ceo', language_code: 'ru' };
 const MKT_TG: TelegramUser = { id: 7770002, first_name: 'Luiza', username: 'luiza_mkt', language_code: 'ru' };
 const SALES_TG: TelegramUser = { id: 7770003, first_name: 'Sam', username: 'sam_sales', language_code: 'en' };
@@ -358,6 +359,53 @@ describe('1b. Telegram sendDocument delivery and recipient access boundaries', (
   });
 });
 
+describe('1b. a file to a person who connected Telegram through another bot', () => {
+  /* The CEO connected Telegram by writing to the orchestrator's bot and never wrote to the Marketing bot, which Telegram then
+     does not let write to them. */
+  async function upload(c: Awaited<ReturnType<typeof marketingCompany>>) {
+    const { token } = await c.startTurn(c.mktSeo.id);
+    const up = await c.app.inject({
+      method: 'POST',
+      url: `/api/attachments?task=${c.task.number}&name=partner-contacts.xlsx`,
+      payload: SAMPLE_XLSX,
+      headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
+    });
+    expect(up.statusCode).toBe(201);
+    return { client: await mcp(c.app, token), attachment: up.json().id as string };
+  }
+
+  it('goes through the next bot the person may see when they never started the department bot', async () => {
+    const c = await marketingCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(and(eq(agents.companyId, c.companyId), eq(agents.kind, 'orchestrator')));
+    c.tg.bots.set(ORCHESTRATOR_BOT_TOKEN, { id: 987654321, username: 'acme_orchestrator_bot', first_name: 'Orchestrator' });
+    const connected = await c.app.inject({ method: 'PUT', url: `/api/agents/${orchestrator!.id}/telegram`, payload: { token: ORCHESTRATOR_BOT_TOKEN }, ...as(c.ceoSession) });
+    expect(connected.statusCode).toBe(200);
+    c.tg.strangers.add(`${BOT_TOKEN}:${CEO_TG.id}`);
+    const { client, attachment } = await upload(c);
+
+    const sent = (await client.callTool({ name: 'send_telegram_file', arguments: { person: c.ceo.id, attachment } })) as ToolReply;
+
+    expect(sent.isError).toBeFalsy();
+    expect(c.tg.sentDocuments.map(d => ({ token: d.token, chat_id: d.chat_id, file_name: d.file_name }))).toEqual([
+      { token: ORCHESTRATOR_BOT_TOKEN, chat_id: CEO_TG.id, file_name: 'partner-contacts.xlsx' },
+    ]);
+  });
+
+  it('names the bot the person has to write to once when no bot they may see can write to them', async () => {
+    const c = await marketingCompany();
+    c.tg.strangers.add(`${BOT_TOKEN}:${CEO_TG.id}`);
+    const { client, attachment } = await upload(c);
+
+    const refused = (await client.callTool({ name: 'send_telegram_file', arguments: { person: c.ceo.id, attachment } })) as ToolReply;
+
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toContain('@acme_mkt_bot');
+    expect(refused.content[0]!.text).toContain('hh-attach');
+    expect(refused.content[0]!.text).not.toContain(BOT_TOKEN);
+    expect(c.tg.sentDocuments).toHaveLength(0);
+  });
+});
+
 describe('1c. Google Sheets integration and clear .xlsx fallback when Google is not connected', () => {
   it('saves Google Sheets credentials only for whole-company admins, hides google_sheets from agent SQL, creates sheets, and instructs .xlsx fallback when disconnected', async () => {
     const google = await fakeGoogle();
@@ -463,5 +511,34 @@ describe('1c. Google Sheets integration and clear .xlsx fallback when Google is 
     /* Deleting disconnects Google Sheets. */
     expect((await c.app.inject({ method: 'DELETE', url: '/api/google-sheets', ...as(c.ceoSession) })).statusCode).toBe(204);
     expect((await c.app.inject({ url: '/api/google-sheets', ...as(c.ceoSession) })).json()).toEqual({ google: null });
+  });
+});
+
+describe('1c. a Google key whose spreadsheets a person can open', () => {
+  it('takes a service account key only with the Google account its spreadsheets are shared with, and an OAuth key without one', async () => {
+    const google = await fakeGoogle();
+    const c = await marketingCompany();
+    const put = (payload: Record<string, unknown>) => c.app.inject({ method: 'PUT', url: '/api/google-sheets', payload, ...as(c.ceoSession) });
+    const shown = async () => (await c.app.inject({ url: '/api/google-sheets', ...as(c.ceoSession) })).json().google;
+
+    /* A service account owns what it creates and opens it to no one else: its links would open for nobody. */
+    const bare = await put({ credentials: google.serviceAccountJson });
+    expect(bare.statusCode).toBe(400);
+    expect(bare.json().error.reason).toBe('google_sheets_share_needed');
+    expect(await shown()).toBeNull();
+
+    expect((await put({ credentials: google.serviceAccountJson, shareEmail: 'ivan@acme.test' })).statusCode).toBe(200);
+    const cleared = await put({ shareEmail: null });
+    expect(cleared.statusCode).toBe(400);
+    expect(cleared.json().error.reason).toBe('google_sheets_share_needed');
+    expect((await shown()).shareEmail).toBe('ivan@acme.test');
+
+    /* What an OAuth key creates belongs to its own Google account, which opens it. */
+    const oauth = await put({
+      credentials: JSON.stringify({ client_id: 'cid.apps.googleusercontent.com', client_secret: 'client-secret', refresh_token: '1//refresh-token-abcd', account: 'owner@acme.test' }),
+      shareEmail: null,
+    });
+    expect(oauth.statusCode).toBe(200);
+    expect(oauth.json().google).toEqual({ kind: 'oauth', account: 'owner@acme.test', shareEmail: null, keyLast4: 'abcd' });
   });
 });
