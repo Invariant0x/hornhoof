@@ -26,7 +26,8 @@ type Refusal = 'file_empty' | 'file_too_big' | 'pictures_too_many';
 const refusal = (reason: Refusal) => new ApiFailure(400, 'validation', '', reason);
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
-const inPanel = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(PANELS));
+const elementOf = (target: EventTarget | null) => (target instanceof Element ? target : target instanceof Node ? target.parentElement : null);
+const inPanel = (target: EventTarget | null) => Boolean(elementOf(target)?.closest(PANELS));
 
 /* Nothing else on the page takes a file, so one pasted with the window showing is for it, wherever the focus is, unless it
    goes into a field of its own. */
@@ -175,6 +176,7 @@ const owns = (e: DragEvent, d: Drags) => d.exclusive && hasFiles(e) && !inPanel(
 function dragIn(e: DragEvent, d: Drags) {
   if (owns(e, d)) e.stopPropagation();
   if (!takes(e, d)) return;
+  e.preventDefault();
   d.depth.current += 1;
   d.setDragging(true);
 }
@@ -187,22 +189,23 @@ function dragOut(e: DragEvent, d: Drags) {
 }
 
 function dragOver(e: DragEvent, d: Drags) {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
   if (owns(e, d)) e.stopPropagation();
-  if (hasFiles(e) && e.dataTransfer) e.dataTransfer.dropEffect = takes(e, d) ? 'copy' : 'none';
+  if (e.dataTransfer) e.dataTransfer.dropEffect = takes(e, d) ? 'copy' : 'none';
 }
 
 function dropped(e: DragEvent, d: Drags) {
   if (!hasFiles(e)) return;
-  if (owns(e, d)) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
+  e.preventDefault();
+  if (owns(e, d)) e.stopPropagation();
   d.depth.current = 0;
   d.setDragging(false);
   if (takes(e, d)) d.add(Array.from(e.dataTransfer?.files ?? []));
 }
 
-/* Here and past the box: a browser opens a file dropped on a page in place of the page. This also lets a file drop at all. */
+/* Past the box: a browser opens a file dropped on a page in place of the page. Each open box keeps its own listener, so
+   closing another window never leaves the one on the screen without it. */
 function keepPage(e: DragEvent) {
   if (hasFiles(e)) e.preventDefault();
 }
@@ -233,19 +236,20 @@ export function usePictureDrop(box: RefObject<HTMLElement | null>, on: boolean, 
     const onLeave = (e: DragEvent) => dragOut(e, d);
     const onOver = (e: DragEvent) => dragOver(e, d);
     const onDrop = (e: DragEvent) => dropped(e, d);
+    const onPage = (e: DragEvent) => keepPage(e);
     el.addEventListener('dragenter', onEnter);
     el.addEventListener('dragleave', onLeave);
     el.addEventListener('dragover', onOver);
     el.addEventListener('drop', onDrop);
-    document.addEventListener('dragover', keepPage);
-    document.addEventListener('drop', keepPage);
+    document.addEventListener('dragover', onPage);
+    document.addEventListener('drop', onPage);
     return () => {
       el.removeEventListener('dragenter', onEnter);
       el.removeEventListener('dragleave', onLeave);
       el.removeEventListener('dragover', onOver);
       el.removeEventListener('drop', onDrop);
-      document.removeEventListener('dragover', keepPage);
-      document.removeEventListener('drop', keepPage);
+      document.removeEventListener('dragover', onPage);
+      document.removeEventListener('drop', onPage);
       depth.current = 0;
       setDragging(false);
     };
