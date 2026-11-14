@@ -416,7 +416,7 @@ describe('the sync controller', () => {
       evictionBound: 30,
       sync: { state: 'off', copy: null, epoch: 0, generation: 0, at: null },
     };
-    let syncReply: Awaited<ReturnType<Relay['setSync']>> = { stored: false, why: 'unknown' } as Awaited<ReturnType<Relay['setSync']>>;
+    let syncReply: Awaited<ReturnType<Relay['setSync']>> = { stored: false, why: 'slow' };
     let linkValue: { name: string; key: string; client: string } | null | undefined = { name: 'acme', key, client: CLIENT };
     let now = 0;
     const controller = new SyncController({
@@ -433,19 +433,19 @@ describe('the sync controller', () => {
       routeEveryMs: 0,
     });
 
-    syncReply = { stored: false, why: 'refused', status: 503, error: 'unknown' } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    syncReply = { stored: false, why: 'refused', status: 503, error: 'unknown' };
     await controller.look();
     expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (503 unknown)');
 
-    syncReply = { stored: false, why: 'not_holder', status: 409, error: 'not_holder' } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    syncReply = { stored: false, why: 'not_holder', status: 409, error: 'not_holder' };
     await controller.look();
     expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (409 not_holder)');
 
-    syncReply = { stored: false, why: 'refused', status: 502, error: null } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    syncReply = { stored: false, why: 'refused', status: 502, error: null };
     await controller.look();
     expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (502)');
 
-    syncReply = { stored: false, why: 'slow' } as unknown as Awaited<ReturnType<Relay['setSync']>>;
+    syncReply = { stored: false, why: 'slow' };
     await controller.look();
     expect(lines.at(-1)).toBe('Could not tell hornhoof.org which machine holds the latest changes: hornhoof.org did not store it (slow)');
 
@@ -466,8 +466,13 @@ describe('the sync controller', () => {
     await controller.look();
     expect(lines.at(-1)).toBe("Could not tell hornhoof.org which machine holds the latest changes: this keeper's own link does not hold the company's route now");
 
+    linkValue = undefined;
+    await controller.look();
+    expect(lines.at(-1)).toBe("Could not tell hornhoof.org which machine holds the latest changes: the company's link could not be read now");
+
     linkValue = null;
     await controller.look();
+    expect(lines.at(-1)).toBe("Could not tell hornhoof.org which machine holds the latest changes: this keeper's own link does not hold the company's route now");
     expect(lines.every(line => !line.includes(key))).toBe(true);
   });
 });

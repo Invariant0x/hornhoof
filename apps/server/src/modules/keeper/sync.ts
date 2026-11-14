@@ -1,4 +1,4 @@
-import type { Route, SyncPost, SyncRecord, SyncResult } from '../link/relay.js';
+import type { Route, SyncFailure, SyncPost, SyncRecord, SyncResult } from '../link/relay.js';
 import { moveTarget } from '../copies/move.js';
 import type { Sql } from './lease-store.js';
 import { reasonOf } from './machine-keys.js';
@@ -101,6 +101,7 @@ export type SyncControllerOptions = {
 };
 
 type Seen = { pid: number | null; replyTime: string | null; at: number };
+type HeldLink = { name: string; key: string; client: string; generation: number };
 
 /* Decides, look by look, whether a commit waits for a copy, and keeps hornhoof.org told which machine holds the latest
    changes. A copy that holds every table and keeps pace is named, and the relay learns it only once the copy holds
@@ -232,25 +233,33 @@ export class SyncController {
 
   /* The relay is asked now and again while a copy exists or something of one is left to undo; a company of one
      machine that never had a copy asks it once. */
-  private async readRoute(force = false): Promise<void> {
-    const now = this.now();
-    if (!force && now - this.routeAt < (this.opts.routeEveryMs ?? ROUTE_EVERY_MS)) return;
-    this.routeAt = now;
+  private async readRoute(): Promise<void> {
+    if (this.now() - this.routeAt >= (this.opts.routeEveryMs ?? ROUTE_EVERY_MS)) await this.refreshRoute();
+  }
+
+  private async refreshRoute(): Promise<HeldLink | string> {
+    this.routeAt = this.now();
     const link = await this.opts.link();
-    if (link === undefined) return;
-    if (link === null) {
-      this.route = null;
-      this.stored = null;
-      return;
-    }
+    if (!link) return this.noLink(link);
     const route = await this.opts.relay.route(link.name, link.key);
     if (!route.known) {
       this.route = null;
-      return;
+      return `hornhoof.org did not answer who holds the route (${route.why})`;
     }
     this.stored = route.sync;
     this.route = route.state === 'held' && route.client === link.client ? { client: link.client, generation: route.generation } : null;
-    if (this.route) this.made = this.route.generation;
+    if (!this.route) return "this keeper's own link does not hold the company's route now";
+    this.made = this.route.generation;
+    return { ...link, generation: this.route.generation };
+  }
+
+  private noLink(link: null | undefined): string {
+    if (link === null) {
+      this.route = null;
+      this.stored = null;
+      return "this keeper's own link does not hold the company's route now";
+    }
+    return "the company's link could not be read now";
   }
 
   private async sample(): Promise<SyncSample> {
@@ -263,19 +272,18 @@ export class SyncController {
     const position = machines.length > 0 ? await catalog.position() : null;
     if (position) this.positions.push({ at: now, lsn: position });
     this.positions = this.positions.filter(seen => now - seen.at <= PACE_MS * 4);
-    const before = [...this.positions].reverse().find(seen => now - seen.at >= PACE_MS);
+    const target = ([...this.positions].reverse().find(seen => now - seen.at >= PACE_MS) ?? this.positions[0])?.lsn;
     const others: CopySample[] = [];
     for (const machine of machines) {
       if (!machine.copyName) continue;
       const found = replication.find(row => row.name === machine.copyName);
-      const keeps = Boolean(before && found?.confirmed && found.pid !== null && lsnAtLeast(found.confirmed, before.lsn));
-      if (!keeps) this.paceSince.delete(machine.copyName);
-      else if (!this.paceSince.has(machine.copyName)) this.paceSince.set(machine.copyName, now);
+      const replyAgeMs = this.replyAge(machine.copyName, found ?? null, now);
+      const confirmed = found?.confirmed ?? null;
       others.push({
         machine: machine.machine, networkId: machine.networkId, number: machine.number ?? Number.MAX_SAFE_INTEGER, name: machine.copyName, finished: machine.ready,
-        keptPaceMs: keeps ? now - this.paceSince.get(machine.copyName)! : 0,
-        replyAgeMs: this.replyAge(machine.copyName, found ?? null, now),
-        confirmed: found?.confirmed ?? null,
+        keptPaceMs: this.paceOf(machine.copyName, confirmed, replyAgeMs, target, now),
+        replyAgeMs,
+        confirmed,
         syncState: found?.syncState ?? null,
       });
     }
@@ -299,6 +307,17 @@ export class SyncController {
       namedBytes5s: named ? this.bytesOver(named.machine, now) : 0,
       target: others.some(copy => copy.networkId === this.target) ? this.target : null,
     };
+  }
+
+  private paceOf(name: string, confirmed: string | null, replyAgeMs: number | null, target: string | undefined, now: number): number {
+    const answers = replyAgeMs !== null && replyAgeMs <= SILENT_REPLY_MS;
+    if (!answers || !target || !confirmed || !lsnAtLeast(confirmed, target)) {
+      this.paceSince.delete(name);
+      return 0;
+    }
+    const since = this.paceSince.get(name) ?? now;
+    this.paceSince.set(name, since);
+    return now - since;
   }
 
   /* The time since the copy's answer last changed, by this machine's own clock: the answer carries the copy's clock,
@@ -344,11 +363,10 @@ export class SyncController {
      above the one the relay has. Anything but a stored record is one line, and the next look decides again. */
   private async post(state: 'on' | 'off', copy: string | null): Promise<void> {
     try {
-      await this.readRoute(true);
-      const link = await this.opts.link();
-      if (!link || !this.route) throw new Error("this keeper's own link does not hold the company's route now");
-      const stored = await this.opts.relay.setSync(link.name, link.key, { client: this.route.client, generation: this.route.generation, state, copy, epoch: (this.stored?.epoch ?? 0) + 1 });
-      if (!stored.stored) throw new Error(`hornhoof.org did not store it (${stored.why})`);
+      const held = await this.refreshRoute();
+      if (typeof held === 'string') throw new Error(held);
+      const stored = await this.opts.relay.setSync(held.name, held.key, { client: held.client, generation: held.generation, state, copy, epoch: (this.stored?.epoch ?? 0) + 1 });
+      if (!stored.stored) throw new Error(`hornhoof.org did not store it (${syncReason(stored)})`);
       this.stored = stored.sync;
       this.posted('');
     } catch (err) {
@@ -363,6 +381,11 @@ export class SyncController {
     if (line && line !== this.postLine) this.opts.log(line);
     this.postLine = line;
   }
+}
+
+function syncReason(failed: SyncFailure): string {
+  if (!('status' in failed)) return failed.why;
+  return failed.error ? `${failed.status} ${failed.error}` : `${failed.status}`;
 }
 
 /* A copy as the last look found it: the name of its slot, its machine's network id, and how it does. */

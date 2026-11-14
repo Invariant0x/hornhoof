@@ -38,7 +38,10 @@ const RouteBody = z.object({
 export type Route = ({ known: true } & z.infer<typeof RouteBody>) | { known: false; why: 'unreachable' | 'slow' | 'refused' | 'malformed' };
 
 export type SyncPost = { client: string; generation: number; state: 'on' | 'off'; copy: string | null; epoch: number };
-export type SyncResult = { stored: true; sync: SyncRecord } | { stored: false; why: 'not_holder' | 'stale_epoch' | 'unknown' };
+export type SyncFailure =
+  | { stored: false; why: 'slow' | 'unreachable' | 'malformed' | 'mismatch' }
+  | { stored: false; why: 'not_holder' | 'stale_epoch' | 'refused'; status: number; error: string | null };
+export type SyncResult = { stored: true; sync: SyncRecord } | SyncFailure;
 
 /* A relay from before passthrough has no such field, and that reads as not passing through. */
 const Health = z.object({ ok: z.literal(true), frps: z.literal(true), relayStarted: Count, passthrough: z.boolean().default(false) });
@@ -64,10 +67,19 @@ async function reasonOf(res: Response): Promise<string> {
   return typeof said === 'string' ? said : typeof (said as { reason?: unknown })?.reason === 'string' ? (said as { reason: string }).reason : '';
 }
 
-/* The relay's 409 on a sync post names why; any other word reads as unknown. */
-async function conflictOf(res: Response): Promise<'not_holder' | 'stale_epoch' | 'unknown'> {
+const ERROR_CODE = /^[a-z][a-z0-9_]{0,31}$/;
+
+/* A short error code from a non-200 JSON body, never the bearer key. */
+async function errorCodeOf(res: Response, key: string): Promise<string | null> {
   const said = ((await res.json().catch(() => null)) as { error?: unknown } | null)?.error;
-  return said === 'not_holder' || said === 'stale_epoch' ? said : 'unknown';
+  return typeof said === 'string' && said !== key && ERROR_CODE.test(said) ? said : null;
+}
+
+/* The relay's non-200 answer on a sync post, with its status and short error code. */
+async function refusedSync(res: Response, key: string): Promise<SyncFailure> {
+  const error = await errorCodeOf(res, key);
+  const why = res.status === 409 && (error === 'not_holder' || error === 'stale_epoch') ? error : 'refused';
+  return { stored: false, why, status: res.status, error };
 }
 
 /* The stored record carries the post's own fields and nothing else changed them. */
@@ -112,11 +124,11 @@ export class Relay {
   /* Posts the sync record. It counts as stored only when the relay answers with exactly what was posted. */
   async setSync(name: string, key: string, post: SyncPost, timeoutMs = READ_MS): Promise<SyncResult> {
     const reply = await this.attempt('POST', `/links/${encodeURIComponent(name)}/sync`, { key, body: post }, timeoutMs);
-    if ('failed' in reply) return { stored: false, why: 'unknown' };
-    if (reply.res.status === 409) return { stored: false, why: await conflictOf(reply.res) };
-    if (reply.res.status !== 200) return { stored: false, why: 'unknown' };
+    if ('failed' in reply) return { stored: false, why: reply.failed };
+    if (reply.res.status !== 200) return refusedSync(reply.res, key);
     const answer = z.object({ sync: SyncRecord }).safeParse(await reply.res.json().catch(() => null));
-    return answer.success && echoes(answer.data.sync, post) ? { stored: true, sync: answer.data.sync } : { stored: false, why: 'unknown' };
+    if (!answer.success) return { stored: false, why: 'malformed' };
+    return echoes(answer.data.sync, post) ? { stored: true, sync: answer.data.sync } : { stored: false, why: 'mismatch' };
   }
 
   /* Whether frps takes logins, since when the relay runs, and whether it routes by TLS server name. */
