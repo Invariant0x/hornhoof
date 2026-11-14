@@ -1644,6 +1644,7 @@ export const en = {
     staff_invalid: 'This roster does not fit the department as it is now. Ask the orchestrator to correct the card.',
     department_unknown: 'This department no longer exists. Reload the page.',
     agent_unknown: 'This employee no longer exists. Reload the page.',
+    letter_unknown: 'Some of these letters are no longer in this employee\'s inbox. Reload the page.',
     agent_not_ready: 'This employee cannot answer right now.',
     not_your_department: 'This employee works in a department you do not have access to.',
     agent_hidden: 'You can open only employees on your own plan in your departments, and every employee of a department you own.',

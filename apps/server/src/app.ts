@@ -1,3 +1,4 @@
+import { inboxRoutes } from './modules/conversation/inbox-routes.js';
 import { closeCheckQueue } from './modules/nodes/check-slots.js';
 import type { Socket } from 'node:net';
 import type { ProviderId } from '@hornhoof/protocol';
@@ -216,6 +217,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   startOperationsCheck(app, ctx);
   terminalRoutes(app, ctx);
   agentRoutes(app, ctx);
+  inboxRoutes(app, ctx);
   departmentRoutes(app, ctx);
   updateRoutes(app, ctx);
   computerRoutes(app, ctx);

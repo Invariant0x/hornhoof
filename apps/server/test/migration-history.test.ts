@@ -38,9 +38,11 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
   /* Every head and member gets the speed skill its role lists. */
-  if (table === 'agents') return rows.map(({ row }) => ({ row: ['head', 'worker'].includes(row.kind as string) ? { ...row, skills: [...(row.skills as string[]), 'hh-work-fast'] } : row }));
+  /* Migration 0107 gives every card an empty inbox mode of its own, every company the inbox and every turn no inbox wake. */
+  if (table === 'agents') return rows.map(({ row }) => ({ row: { ...(['head', 'worker'].includes(row.kind as string) ? { ...row, skills: [...(row.skills as string[]), 'hh-work-fast'] } : row), inbox_mode: null } }));
   /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. */
-  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0 } }));
+  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0, inbox_mode: 'inbox' } }));
+  if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, inbox_wake: false } }));
   /* Migration 0098 gives every person an empty Telegram, and 0100 makes every one a person and no assistant. */
   if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null } }));
   /* Migration 0100: nobody's assistant answered a request before. */

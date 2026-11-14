@@ -32,6 +32,8 @@ export type StreamMessage =
   | { type: 'improvements'; spot: Spot }
   /* A department's list of work kept for later turns changed; its people fetch it again. */
   | { type: 'backlog'; spot: Spot }
+  /* An employee's inbox changed; people who reach its place and open it fetch it again. */
+  | { type: 'inbox'; agentId: string; spot: Spot }
   /* How full an agent's context is now, for the bar on the map, which everyone sees. */
   | { type: 'context'; agentId: string; used: number }
   /* The orchestrator's request for the computer the server runs on, or its access, changed; only the CEO hears it. */

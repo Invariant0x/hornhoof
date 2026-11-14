@@ -698,25 +698,34 @@ export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
 /* An agent's conversation as people see it: their messages, what the agent did, and what came of it. */
 /* Every message an employee gets from another employee, the orchestrator or Hornhoof: who sent it, on which task, what it
    says, and whether the employee has read it or dealt with it. job: the turn it went in or waits for. */
+/* What a letter is, as the inbox tab names it. */
+export const LETTER_KINDS = ['message', 'report', 'comment', 'assignment', 'notification'] as const;
+export type LetterKind = (typeof LETTER_KINDS)[number];
+
 export const agentInbox = pgTable(
   'agent_inbox',
   {
     id: id(),
     companyId: companyId(),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
-    senderKind: text('sender_kind', { enum: ['agent', 'hornhoof'] }).notNull(),
+    senderKind: text('sender_kind', { enum: ['agent', 'person', 'hornhoof'] }).notNull(),
     senderAgentId: uuid('sender_agent_id').references(() => agents.id),
+    senderPersonId: uuid('sender_person_id').references(() => people.id),
     senderName: text('sender_name').notNull(),
     taskId: uuid('task_id').references(() => tasks.id),
     taskNumber: integer('task_number'),
-    kind: text('kind').notNull(),
+    kind: text('kind', { enum: LETTER_KINDS }).notNull(),
+    /* Which of Hornhoof's notices it is, when it is one (NOTIFICATION_NAMES). */
+    source: text('source'),
     text: text('text').notNull(),
     jobId: uuid('job_id').references(() => jobs.id),
     status: text('status', { enum: ['unread', 'read', 'done'] }).notNull().default('unread'),
     readAt: timestamp('read_at', { withTimezone: true }),
+    /* The order letters came in, of one moment too. */
+    seq: bigserial('seq', { mode: 'number' }).notNull(),
     createdAt: createdAt(),
   },
-  t => [index('agent_inbox_agent_status').on(t.agentId, t.status, t.createdAt), index('agent_inbox_job').on(t.jobId)],
+  t => [index('agent_inbox_agent_status').on(t.agentId, t.status, t.seq), index('agent_inbox_job').on(t.jobId)],
 );
 
 export const agentEvents = pgTable(

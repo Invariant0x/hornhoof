@@ -1,5 +1,5 @@
 {
-  "id": "69544276-1c23-4801-b8c9-5eb9effe9b98",
+  "id": "5d5f4f57-caa8-46b2-9f57-d0a26a063daa",
   "prevId": "5daa823e-cc25-4b3d-afca-371d392a231a",
   "version": "7",
   "dialect": "postgresql",
@@ -488,6 +488,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "sender_person_id": {
+          "name": "sender_person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "sender_name": {
           "name": "sender_name",
           "type": "text",
@@ -511,6 +517,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "text": {
           "name": "text",
@@ -537,6 +549,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "seq": {
+          "name": "seq",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -562,7 +580,7 @@
               "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "seq",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -622,6 +640,19 @@
           "tableTo": "agents",
           "columnsFrom": [
             "sender_agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_inbox_sender_person_id_people_id_fk": {
+          "name": "agent_inbox_sender_person_id_people_id_fk",
+          "tableFrom": "agent_inbox",
+          "tableTo": "people",
+          "columnsFrom": [
+            "sender_person_id"
           ],
           "columnsTo": [
             "id"

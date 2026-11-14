@@ -40,6 +40,7 @@ import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from 
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
+import { inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. Their window is named outright too:
@@ -304,6 +305,12 @@ export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string
   return next ?? null;
 }
 
+/* A turn its words went into as it ran. */
+async function runsNow(ctx: Ctx, jobId: string): Promise<boolean> {
+  const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
+  return job?.status === 'running';
+}
+
 /* Thrown before anything is stored, so the caller may undo what it did for the turn. */
 export class NoSubscription extends Error {
   constructor() {
@@ -314,10 +321,51 @@ export class NoSubscription extends Error {
 /* Whether the person is the CEO or the CEO delegate now, whose words count as the CEO's. */
 const actsForCeo = async (ctx: Ctx, personId: string | null | undefined): Promise<boolean> => Boolean(personId && (await actingCeo(ctx.db, personId)));
 
+/* Keeps what no person wrote in the employee's inbox, with the turn it went into or waits for, and tells its screens. */
+async function keepLetter(ctx: Ctx, t: Turn, jobId: string, status: InboxStatus): Promise<void> {
+  if (!isMail(t)) return;
+  await keepMail(ctx.db, t, jobId, status);
+  await inboxChanged(ctx, t.agentId);
+}
+
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
   const combined = t.message?.report ? await combineReport(ctx, t) : null;
-  return combined ?? insertFreshTurn(ctx, t);
+  const id = combined ?? (await insertFreshTurn(ctx, t));
+  await keepLetter(ctx, t, id, 'unread');
+  return id;
+}
+
+/* What the turn that takes the inbox asks before it goes out, when its prompt is written from the inbox. */
+export const INBOX_PROMPT = 'Hornhoof: your inbox.';
+export const NOTHING_UNREAD = 'Nothing in the inbox was unread when this turn was due.';
+
+/* The one waiting turn of the agent that takes its inbox, made for the first letter that has none to wait for. */
+async function inboxTurn(ctx: Ctx, t: Pick<Turn, 'companyId' | 'agentId'>): Promise<string> {
+  const [open] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(t.agentId), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
+  if (open) return open.id;
+  const sub = await liveSubscription(ctx, t.agentId);
+  if (!sub) throw new NoSubscription();
+  const [job] = await ctx.db.insert(jobs).values({ companyId: t.companyId, subscriptionId: sub.id, agentId: t.agentId, kind: 'conversation', prompt: INBOX_PROMPT, inboxWake: true, timeoutMs: TURN_TIMEOUT_MS, createdBy: null }).returning({ id: jobs.id });
+  return job!.id;
+}
+
+/* A letter in inbox mode waits in the inbox for the one turn that takes it, and shows in the window with that turn; it goes
+   into no running turn. */
+async function intoInbox(ctx: Ctx, t: Turn & { message: TurnMessage }): Promise<string> {
+  const wake = await inboxTurn(ctx, t);
+  await keepLetter(ctx, t, wake, 'unread');
+  await showMessage(ctx, t, wake, async () => undefined);
+  return wake;
+}
+
+/* Letters wait unread with no turn for them, as after a turn that took the inbox did not reach its program: one goes now. */
+async function inboxTurnDue(ctx: Ctx, agent: { id: string; companyId: string }): Promise<boolean> {
+  if ((await inboxModeOf(ctx.db, agent.id)).effective !== 'inbox' || !(await unreadMail(ctx.db, agent.id)).length) return false;
+  const [open] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
+  if (open) return false;
+  await inboxTurn(ctx, { companyId: agent.companyId, agentId: agent.id });
+  return true;
 }
 
 async function insertFreshTurn(ctx: Ctx, t: Turn): Promise<string> {
@@ -386,8 +434,12 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
 
 /* Direct messages need the node's receipt, including when their topic is a task. The caller owns the input lock. */
 export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): Promise<string> {
+  if (isMail(t) && takesInsteadOfTurn(t) && (await inboxModeOf(ctx.db, t.agentId)).effective === 'inbox') return intoInbox(ctx, t);
   const combined = await combineReport(ctx, t, { send: deliverLockedInput, required });
-  if (combined) return combined;
+  if (combined) {
+    if (isMail(t)) await keepLetter(ctx, t, combined, (await runsNow(ctx, combined)) ? 'read' : 'unread');
+    return combined;
+  }
   const message = t.repeated ? undefined : t.message;
   const into = message
     ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
@@ -395,7 +447,10 @@ export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): 
         await showMessage(ctx, t, jobId, kept, true);
       })
     : null;
-  if (into) return into;
+  if (into) {
+    await keepLetter(ctx, t, into, 'read');
+    return into;
+  }
   return insertTurn(ctx, t);
 }
 
@@ -957,7 +1012,7 @@ async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffA
   await tellOperationsOfHold(ctx, agent, sub);
   const mayGo = turnsThatMayGo(agent, until, spent);
   const now = new Date(Date.now());
-  const [job] = await ctx.db.select().from(jobs).where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now)))).orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.createdAt)).limit(1);
+  const [job] = await ctx.db.select().from(jobs).where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now)))).orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.inboxWake), asc(jobs.createdAt)).limit(1);
   if (job) return job;
   const [later] = await ctx.db.select({ at: jobs.notBefore }).from(jobs).where(and(mayGo, gt(jobs.notBefore, now))).orderBy(asc(jobs.notBefore)).limit(1);
   /* The earlier wake stands; the one at the reset is set again when the earlier one comes. */
@@ -977,9 +1032,16 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
   if (await waitsForRetry(ctx, agentId)) return;
-  const job = await dueTurn(ctx, agent, sub);
-  if (!job) return;
-  if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
+  const due = await dueTurn(ctx, agent, sub);
+  if (!due) return (await inboxTurnDue(ctx, agent)) ? sendNext(ctx, agentId) : undefined;
+  if (await heldBack(ctx, due)) return sendNext(ctx, agentId);
+  /* The turn that takes the inbox asks what is unread in it when it goes, or goes nowhere when nothing is. */
+  const mail = due.inboxWake ? await unreadMail(db, agentId) : [];
+  if (due.inboxWake && !mail.length) {
+    await db.update(jobs).set({ status: 'done', result: NOTHING_UNREAD, finishedAt: new Date() }).where(and(eq(jobs.id, due.id), eq(jobs.status, 'queued')));
+    return sendNext(ctx, agentId);
+  }
+  const job = due.inboxWake ? { ...due, prompt: mailSummary(mail) } : due;
   const at = await repoAt(ctx, await turnPlaces(db, agent, job.taskId));
   const repo = at?.repo ?? null;
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
@@ -1011,7 +1073,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
      A session that goes on may have begun anew on its machine, which only the node sees: the conversation goes beside the
      words, for the node to type in their place then. */
   const fresh = agent.kind === 'assistant' && job.prompt ? await freshConversation(ctx, job.id) : null;
-  const prompt = !job.prompt ? '' : agent.kind === 'assistant' ? (sessionId === null ? fresh : null) ?? composed : addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf }));
+  const prompt = !job.prompt ? '' : job.inboxWake ? composed : agent.kind === 'assistant' ? (sessionId === null ? fresh : null) ?? composed : addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf }));
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
@@ -1053,6 +1115,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   }
   if (sent) {
     turnSent(ctx, place.node, agentId);
+    const read = await mailWentOut(db, agentId, [job.id, ...along.map(j => j.id)]);
+    if (job.inboxWake) await mailShown(db, agentId, mail.map(m => m.id), job.id);
+    if (read || mail.length) await inboxChanged(ctx, agentId);
     if (agent.kind === 'assistant') await forgetFresh(ctx, job.id);
     return wentOut(ctx, job, along, taken.lines);
   }

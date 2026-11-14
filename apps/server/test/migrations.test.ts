@@ -344,7 +344,8 @@ describe('migration 0086 composable skills', () => {
       (${C}, 'worker', 'Existing developer', 'DEV-ENG', '', null, '["dev-tdd"]', '{"base":"Existing assignment."}', '{"DEV-ENG":"existing-hash"}', null),
       (${C}, 'worker', 'Other role', 'DEV-BE', '', null, '["dev-tdd"]', '{}', '{}', null),
       (${C}, 'worker', 'No role', null, '', null, '["retired-kept"]', '{"base":"Roleless assignment."}', '{}', null)`);
-    const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key')::text as data from agents a order by name`)).rows;
+    /* Migration 0107 adds each card's own inbox mode, empty. */
+    const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key' - 'inbox_mode')::text as data from agents a order by name`)).rows;
     const plans = async () => (await db.execute<{ data: string }>(sql`select to_jsonb(s)::text as data from subscriptions s order by id`)).rows;
     const before = { cards: await cards(), plans: await plans() };
 
@@ -393,7 +394,8 @@ describe('migration 0086 composable skills', () => {
         values (${C}, ${card.kind}, ${card.name}, 'custom-model', ${JSON.stringify(card.skills)}::jsonb, ${JSON.stringify(overrides)}::jsonb,
         ${JSON.stringify(hashes)}::jsonb, 'high', 23, 'Keep the custom timer.', '2026-11-06T10:00:00Z', true)`);
     }
-    const unchanged = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'skills')::text as data from agents a order by name`)).rows;
+    /* Migration 0107 adds each card's own inbox mode, empty. */
+    const unchanged = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'skills' - 'inbox_mode')::text as data from agents a order by name`)).rows;
     const before = await unchanged();
 
     await migrate(db, { migrationsFolder: MIGRATIONS });

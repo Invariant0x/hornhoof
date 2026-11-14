@@ -21,6 +21,7 @@ import { registerTaskTools } from '../tasks/tools.js';
 import { registerTelegramTools } from '../telegram/tools.js';
 import { registerGoogleSheetsTools } from '../google/tools.js';
 import { registerTestTools } from '../testruns/tools.js';
+import { registerInboxTools } from './inbox.js';
 import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerBriefingTool } from '../briefings/tools.js';
@@ -59,6 +60,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
+  registerInboxTools(server, ctx, job);
   registerTelegramTools(server, ctx, job);
   registerGoogleSheetsTools(server, ctx, job);
   registerApprovalTools(server, ctx, job);

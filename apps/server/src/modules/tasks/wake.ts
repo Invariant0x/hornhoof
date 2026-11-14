@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
+import { inboxChanged, mailBack } from '../conversation/inbox.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
@@ -686,11 +687,13 @@ async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): P
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   const program = clearTurnProgram(ctx, jobId);
   const [job] = await ctx.db
-    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure })
+    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
     .from(jobs)
     .where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
+  /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
+  if (job.status === 'failed' && job.inboxWake && (await mailBack(ctx.db, job.agentId, jobId))) await inboxChanged(ctx, job.agentId);
   const handled = await afterFailure(ctx, jobId);
   if (job.taskId) {
     const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
