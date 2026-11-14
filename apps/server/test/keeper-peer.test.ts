@@ -722,7 +722,7 @@ describe('the peer link in the keeper', () => {
     expect(statSync(join(dir, CRL_FILE)).mode & 0o777).toBe(0o600);
   });
 
-  it('keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes', async () => {
+  async function relaySilenceStand(silent: (elapsedMs: number) => boolean) {
     const c = await company(true);
     const target = await listening(c.app);
     const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
@@ -753,11 +753,11 @@ describe('the peer link in the keeper', () => {
     const startMono = performance.now();
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
-    /* Every six virtual minutes the path through hornhoof.org gives no answer for a second. */
+    let silentReads = 0;
     const relayClient: SyncControllerOptions['relay'] = {
       route: async () => {
-        const elapsed = performance.now() - startMono;
-        if ((elapsed >= 359_500 && elapsed < 360_500) || (elapsed >= 719_500 && elapsed < 720_500)) {
+        if (silent(performance.now() - startMono)) {
+          silentReads += 1;
           return { known: false, why: 'unreachable' };
         }
         return { known: true, state: 'held', client: ownClient, since: 1, generation: 1, relayStarted: 100, evictionBound: 30, sync: syncRecord };
@@ -792,13 +792,24 @@ describe('the peer link in the keeper', () => {
         await new Promise<void>(resolve => setImmediate(resolve));
       }
     };
-    await stepUntil(3000, () => keeper.mode() === 'lead' && offered.length === 1 && linkStarts === 1);
+    return { c, keeper, lines, offered, failOnce, startMono, linkStarts: () => linkStarts, silentReads: () => silentReads, stepUntil };
+  }
+
+  /* Expected to fail until #842 keeps the last known route in SyncController.readRoute on an unknown relay answer;
+     remove .fails once #842 lands in the same branch (network-1). */
+  it.fails('keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes', async () => {
+    /* Every six virtual minutes the path through hornhoof.org gives no answer for four seconds. */
+    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, stepUntil } = await relaySilenceStand(
+      elapsed => (elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000),
+    );
+    await stepUntil(3000, () => keeper.mode() === 'lead' && offered.length === 1 && linkStarts() === 1);
 
     /* Six virtual minutes in: the relay hiccup drops neither tunnel, and restarts neither frpc. */
     const toSixMin = 360_000 - (performance.now() - startMono);
     await vi.advanceTimersByTimeAsync(toSixMin + 6_000);
     await new Promise<void>(resolve => setImmediate(resolve));
-    expect([offered.length, linkStarts]).toEqual([1, 1]);
+    expect(keeper.mode()).toBe('lead');
+    expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
 
     /* Twelve virtual minutes in, with a failed settings read at the same mark: ownLink stays known, so leading resumes
@@ -808,7 +819,43 @@ describe('the peer link in the keeper', () => {
     failOnce.on = true;
     await vi.advanceTimersByTimeAsync(4_000);
     expect(keeper.mode()).toBe('lead');
-    expect([offered.length, linkStarts]).toEqual([1, 1]);
+    expect([offered.length, linkStarts()]).toEqual([1, 1]);
+    expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
+
+    /* When the link goes for good, the keeper says why before stopping each tunnel. */
+    await c.db.delete(publicLinks);
+    await stepUntil(3000, () => lines.includes('No public link: the tunnel waits.') && lines.includes('No public link: this machine is not offered to its peers through it.'));
+    const linkWhyAt = lines.indexOf('Stopping the public link: the database holds no public link.');
+    const peerWhyAt = lines.indexOf('Stopping the peer tunnel: the database holds no public link.');
+    expect(linkWhyAt).toBeGreaterThanOrEqual(0);
+    expect(linkWhyAt).toBeLessThan(lines.indexOf('No public link: the tunnel waits.'));
+    expect(peerWhyAt).toBeGreaterThanOrEqual(0);
+    expect(peerWhyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
+
+    await keeper.stop();
+    vi.useRealTimers();
+  });
+
+  it('holds the peer tunnel through one empty read during a one-second relay silence, and says why when the link goes', async () => {
+    let silenceFrom = Number.POSITIVE_INFINITY;
+    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, silentReads, stepUntil } = await relaySilenceStand(
+      elapsed => elapsed >= silenceFrom && elapsed < silenceFrom + 1_000,
+    );
+    await stepUntil(3000, () => offered.length === 1 && linkStarts() === 1);
+
+    /* A one-second relay silence leaves one peer read empty; holdThroughOneEmptyRead keeps the peer frpc running. */
+    silenceFrom = performance.now() - startMono + 2_500;
+    await vi.advanceTimersByTimeAsync(9_000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(silentReads()).toBeGreaterThan(0);
+    expect([offered.length, linkStarts()]).toEqual([1, 1]);
+    expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
+
+    /* A single failed settings read keeps the last settings as well, restarting neither tunnel. */
+    failOnce.on = true;
+    await vi.advanceTimersByTimeAsync(3_000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
 
     /* When the link goes for good, the keeper says why before stopping each tunnel. */
