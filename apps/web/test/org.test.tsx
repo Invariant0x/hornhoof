@@ -198,7 +198,7 @@ describe('a burst of the stream', () => {
     vi.useRealTimers();
   });
 
-  it('fetches the company once for every screen that shows it, and once more after, not once a message on each screen', async () => {
+  it('fetches the company a few times for all the screens that show it, not once a message on each screen', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const stream = fakeStream();
     const calls = mockApi({ 'GET /api/org': [200, working(1)] });
@@ -214,7 +214,7 @@ describe('a burst of the stream', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('fetches what waits for people once, and once more after, not once a message', async () => {
+  it('fetches what waits for people a few times, not once a message', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const stream = fakeStream();
     const calls = mockApi({ 'GET /api/requests': [200, { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } }] });

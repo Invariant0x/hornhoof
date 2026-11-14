@@ -3,6 +3,7 @@ import { api, ApiFailure } from './api';
 import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 import { answeredUpdate } from './update-state';
+import { everyVisible } from './guard';
 
 /* A seam for tests: the page reloads once the server runs another build. */
 export const page = { reload: () => window.location.reload() };
@@ -110,8 +111,7 @@ export function useUpdates(enabled: boolean): Updates {
   useEffect(() => {
     if (!enabled) return;
     void load();
-    const timer = setInterval(() => void load(), pollMs);
-    return () => clearInterval(timer);
+    return everyVisible(() => void load(), pollMs);
   }, [enabled, pollMs, load]);
 
   const dropCut = useCallback(() => setCut(null), []);

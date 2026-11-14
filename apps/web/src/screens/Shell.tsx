@@ -29,6 +29,7 @@ import { Versions } from './Versions';
 import { takeEscape } from '../ui/escape';
 import { useRoute, type Route } from '../routes';
 import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
+import { GuardBoundary, LightNotice } from '../ui/GuardBoundary';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
@@ -389,12 +390,17 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         {deptId && orgFailure !== null && !unavailableFailure(orgFailure) && <p className="alert" role="alert">{errorText(t, orgFailure)}</p>}
-        <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
+        <GuardBoundary block="map" reset={deptId}>
+          <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
+        </GuardBoundary>
+        <GuardBoundary block="department" reset={deptId}>
         <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} taskId={taskId} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />
+        </GuardBoundary>
         {tab === 'tasks' && (
+          <GuardBoundary block="tasks">
           <Tasks
             onHome={goHome}
             decisions={decisions.all}
@@ -407,6 +413,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onOpenAgent={openAgent}
             onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
+          </GuardBoundary>
         )}
         {pageRoute.kind === 'people' && <People me={currentMe} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'people', id } : { kind: 'people' })} onHome={goHome} onRenamed={setSelfName} />}
         {tab === 'subscriptions' && <Subscriptions me={me} onHome={goHome} />}
@@ -415,6 +422,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} onHome={goHome} />}
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
+      <LightNotice />
       {taskId && (
         <TaskPanel
           key={taskId}

@@ -23,6 +23,7 @@ import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type 
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
+import { guardedResizeObserver, useRenderGuard } from '../guard';
 
 export { deptLayout, type DeptSpot } from '../map-arrange';
 
@@ -549,6 +550,7 @@ type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrche
 
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
 export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions, onHome }: Props) {
+  useRenderGuard('map');
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
@@ -690,7 +692,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     auto();
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(auto);
+    const ro = guardedResizeObserver(auto, 'map');
     ro.observe(el);
     return () => ro.disconnect();
   }, [shown, inside, layout.version, mine]);

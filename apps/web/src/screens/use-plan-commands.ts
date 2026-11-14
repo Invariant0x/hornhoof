@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { api } from '../api';
 import type { ShownCommand, SubView } from '../types';
 import { toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
+import { everyVisible } from '../guard';
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 type Controls = {
@@ -52,8 +53,7 @@ export function usePlanCommands(live: { current: boolean }, setFailure: Setter<u
   }, [live, setFailure]);
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 5000);
-    return () => clearInterval(timer);
+    return everyVisible(() => void load(), 5000);
   }, [load]);
 
   const connected = (shown: ActiveCommand, added: SubView[]) => {

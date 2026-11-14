@@ -169,4 +169,29 @@ test.describe('a 120-agent company in the browser', () => {
     expect(storm.orgFetches).toBeLessThanOrEqual(3);
     expect(storm.commits).toBeLessThanOrEqual(12);
   });
+
+  /* Design (#874): glass over the moving canvas has no blur under it, only the dense --hud of the skin. Pictures of the map
+     and of a department in every built-in skin go to the report for Design. */
+  for (const skin of ['cyberpunk', 'light', 'matrix', 'pixel']) {
+    test(`draws the map and a department in ${skin} with glass that has no blur under it`, async ({ page }, info) => {
+      await page.addInitScript(id => localStorage.setItem('hh-theme', id), skin);
+      await bigCompanyServer(page);
+      await page.goto('/');
+      await expect(page.locator('.map .dept')).toHaveCount(COMPANY.departments.length);
+      const blurred = () => page.evaluate(() => [...document.querySelectorAll('*')]
+        .filter(el => [null, '::before', '::after'].some(pseudo => {
+          const style = getComputedStyle(el, pseudo) as CSSStyleDeclaration & { webkitBackdropFilter?: string };
+          return (style.backdropFilter || style.webkitBackdropFilter || 'none') !== 'none';
+        }))
+        .map(el => el.className.toString()));
+      expect(await blurred()).toEqual([]);
+      await settled(page);
+      await page.screenshot({ path: info.outputPath(`${skin}-map.png`) });
+      await page.locator('.map .dept').first().click();
+      await expect(page.getByRole('region', { name: 'Department schema' })).toBeVisible();
+      expect(await blurred()).toEqual([]);
+      await settled(page);
+      await page.screenshot({ path: info.outputPath(`${skin}-department.png`) });
+    });
+  }
 });

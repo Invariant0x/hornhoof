@@ -5,6 +5,7 @@ import { useStream } from '../live';
 import { notOpened, rosterOf } from '../org';
 import { RouteUnavailable } from '../screens/RouteUnavailable';
 import type { Org } from '../types';
+import { everyVisible } from '../guard';
 
 type Status = 'checking' | 'allowed' | 'denied' | 'failure';
 type AccessState = { status: Status; org: Org; failure: unknown; verified: string | null };
@@ -76,10 +77,10 @@ export function AgentAccess({ agentId, org, onClose, children }: { agentId: stri
 
   useEffect(() => {
     void check();
-    const timer = setInterval(() => void check(), RECHECK_MS);
+    const stop = everyVisible(() => void check(), RECHECK_MS);
     return () => {
       sequence.current++;
-      clearInterval(timer);
+      stop();
     };
   }, [check]);
 

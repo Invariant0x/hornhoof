@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { rateMeter } from './guard';
 import type { StreamMessage } from './types';
 
 export type LiveMessage = StreamMessage | { type: 'reconnected' };
@@ -12,9 +13,40 @@ const RETRY_MS = 1000, RETRY_MAX_MS = 30000;
 let retry: ReturnType<typeof setTimeout> | null = null;
 let wait = RETRY_MS;
 
-const tell = (m: LiveMessage) => {
+/* A company of 120 agents says dozens of things a second, each message a task of its own and a drawing of every screen
+   that hears it. Past STORM_LIMIT messages a second the stream hands them on together every FLUSH_MS, so each screen
+   draws once for all of them. More than QUEUE_MAX waiting is more than a screen should catch up on one by one: they
+   become one "reconnected", and every screen fetches what it shows anew. */
+const STORM_LIMIT = 30, STORM_WINDOW_MS = 1000, FLUSH_MS = 50, QUEUE_MAX = 1000;
+let storm = rateMeter(STORM_LIMIT, STORM_WINDOW_MS);
+let queue: LiveMessage[] = [];
+let flushing: ReturnType<typeof setTimeout> | null = null;
+
+const deliver = (m: LiveMessage) => {
   for (const fn of [...listeners]) fn(m);
 };
+
+function flush(): void {
+  flushing = null;
+  const batch = queue;
+  queue = [];
+  batch.forEach(deliver);
+}
+
+const tell = (m: LiveMessage) => {
+  if (!storm.hit() && !flushing) return deliver(m);
+  if (queue.length >= QUEUE_MAX) queue = [{ type: 'reconnected' }];
+  queue.push(m);
+  flushing ??= setTimeout(flush, FLUSH_MS);
+};
+
+/* No one listens any more: nothing waits to be handed on, and the next listener starts with no storm behind it. */
+function calm(): void {
+  if (flushing) clearTimeout(flushing);
+  flushing = null;
+  queue = [];
+  storm = rateMeter(STORM_LIMIT, STORM_WINDOW_MS);
+}
 
 /* One stream per tab. After a break the browser reconnects by itself, or Hornhoof opens a new stream when the browser gave up;
    listeners hear "reconnected" and fetch what they missed. */
@@ -63,6 +95,7 @@ export function listen(fn: Listener): () => void {
     if (retry) clearTimeout(retry);
     retry = null;
     wait = RETRY_MS;
+    calm();
   };
 }
 

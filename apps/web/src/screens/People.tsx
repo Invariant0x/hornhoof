@@ -11,6 +11,7 @@ import { BusyLabel } from '../ui/BusyLabel';
 import { AgentIcon, DeputyIcon, EditIcon, PersonIcon } from '../ui/icons';
 import { AssistantCard, KindSwitch, looksAfter, NewAssistant } from './PeopleAssistant';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
+import { guardedResizeObserver } from '../guard';
 
 /* assistant: a person without the whole company adds their own assistant. */
 type Panel = { kind: 'invite' } | { kind: 'assistant' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView; titleOnly: boolean; deputy: boolean } | null;
@@ -372,7 +373,7 @@ function usePeopleTable(people: PersonView[] | null) {
     const measure = () => fitTable(table);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    const observer = guardedResizeObserver(measure, 'people');
     observer.observe(host);
     void document.fonts.ready.then(measure);
     return () => observer.disconnect();

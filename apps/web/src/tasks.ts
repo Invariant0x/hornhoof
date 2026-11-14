@@ -2,13 +2,15 @@ import type { DepartmentPipeline } from '@hornhoof/protocol/pipeline-report';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
+import { refetcher } from './refetch';
 import { deptLabel, type Messages } from './i18n';
 import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDepartments, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
+import { everyVisible } from './guard';
 
 const hasBody = <B,>(body: B | null | undefined, fresh: () => boolean): body is B => body !== null && body !== undefined && fresh();
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
-export function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
+export function useLive<T>(path: string | null, pick: (body: never) => T, wanted: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
   const [data, setData] = useState<T | undefined>(undefined);
   const [failure, setFailure] = useState<unknown>(null);
   const latest = useRef(path);
@@ -19,15 +21,15 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, refres
   const asked = useRef(0);
   const shown = useRef(0);
 
-  const load = useCallback(() => {
-    if (!path) return;
+  const ask = useCallback(() => {
+    if (!path) return Promise.resolve();
     const n = ++asked.current;
     const fresh = () => {
       if (latest.current !== path || n < shown.current) return false;
       shown.current = n;
       return true;
     };
-    api.get<never>(path).then(
+    return api.get<never>(path).then(
       body => {
         if (!hasBody(body, fresh)) return;
         setData(pickRef.current(body));
@@ -37,14 +39,22 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, refres
     );
   }, [path]);
 
+  /* What the stream asks for again, a burst of it in a few requests. */
+  const askNow = useRef(ask);
+  askNow.current = ask;
+  const [again] = useState(() => refetcher(() => askNow.current()));
+
   useEffect(() => {
     setData(undefined);
-    load();
-  }, [load]);
+    void ask();
+    return () => again.forget();
+  }, [ask, again]);
 
   useStream(m => {
-    if (path && (m.type === 'reconnected' || refresh(m))) load();
+    if (path && (m.type === 'reconnected' || wanted(m))) again.run();
   });
+
+  const load = useCallback(() => void ask(), [ask]);
 
   return { data, failure, load };
 }
@@ -115,8 +125,7 @@ export function useDepartmentPipeline(departmentId: string, turn: number | null)
   const running = result.data?.turn.source === 'live';
   useEffect(() => {
     if (!running) return;
-    const timer = setInterval(result.load, 60_000);
-    return () => clearInterval(timer);
+    return everyVisible(result.load, 60_000);
   }, [running, result.load]);
   return { report: result.data, failure: result.failure, load: result.load };
 }
@@ -126,8 +135,7 @@ export function useDepartmentTree(departmentId: string, on: boolean) {
     m => m.type === 'task' && (m.spot?.departmentId === departmentId || m.spot?.parentId === departmentId));
   useEffect(() => {
     if (!on) return;
-    const timer = setInterval(result.load, 60_000);
-    return () => clearInterval(timer);
+    return everyVisible(result.load, 60_000);
   }, [on, result.load]);
   return { tree: result.data, failure: result.failure, load: result.load };
 }

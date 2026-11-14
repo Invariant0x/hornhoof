@@ -48,7 +48,8 @@ describe('a skin file of version 2', () => {
 
   it('takes colours as #RRGGBB or rgba(), see-through only where Design allows it, and the cut from 0 to 1.5', () => {
     for (const value of ['#ffffff', '#FFF4DA', 'rgba(255,244,218,1)', 'rgba(255, 244, 218, 1.0)']) expect(refused(file(raw => (colors(raw).ink = value))), value).toBeNull();
-    for (const role of SEE_THROUGH) expect(refused(file(raw => (colors(raw)[role] = 'rgba(0, 0, 0, .25)'))), role).toBeNull();
+    /* Glass as thin as a quarter would fade muted text over a white page, so it is see-through as densely as Design sets it. */
+    for (const role of SEE_THROUGH) expect(refused(file(raw => (colors(raw)[role] = role === 'hud' ? 'rgba(0, 0, 0, .94)' : 'rgba(0, 0, 0, .25)'))), role).toBeNull();
     expect(SEE_THROUGH).toEqual(['dot', 'glow', 'hud', 'shadow', 'scrim']);
     /* No repeats, so a list is never longer than its role allows: at most the six names Design set. */
     for (const role of FONT_ROLES) expect(FILE_FONTS[role].length, role).toBeLessThanOrEqual(6);

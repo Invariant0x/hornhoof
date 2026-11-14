@@ -23,6 +23,7 @@ import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
 import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
+import { everyVisible, useRenderGuard } from '../guard';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
@@ -302,6 +303,7 @@ function readyEvents<T>(mounted: boolean, res: T | null): res is T {
 }
 
 export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
+  useRenderGuard('agent-window');
   const t = useT();
   const { language } = useLanguage();
   const orchestrator = agentId === 'orchestrator';
@@ -430,10 +432,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       await history;
       await greet();
     })();
-    const poll = setInterval(() => void catchUp(), POLL_MS);
+    const stopPoll = everyVisible(() => void catchUp(), POLL_MS);
     return () => {
       mounted.current = false;
-      clearInterval(poll);
+      stopPoll();
       if (catchUpTimer.current) clearTimeout(catchUpTimer.current);
       catchUpTimer.current = null;
     };

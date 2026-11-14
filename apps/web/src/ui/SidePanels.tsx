@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useT } from '../i18n';
 import { takeEscape } from './escape';
+import { guardedResizeObserver } from '../guard';
 
 /* The panels that slide out of an agent's window, all alike. They stand in a row left of the window, in the order they were
    opened, and the terminal never moves for them. A row the free space cannot hold reaches over the window as far as it must;
@@ -93,7 +94,7 @@ export function usePanelsCover(row: RefObject<HTMLElement | null>, under: RefObj
     const measure = () => setCovered(liesOver(panels, shown));
     measure();
     window.addEventListener('resize', measure);
-    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    const resized = typeof ResizeObserver === 'undefined' ? null : guardedResizeObserver(measure, 'side-panels');
     resized?.observe(panels);
     resized?.observe(shown);
     return () => {

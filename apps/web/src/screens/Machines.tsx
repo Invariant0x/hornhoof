@@ -20,6 +20,7 @@ import { ProgramVersions } from '../ui/ProgramVersions';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
+import { everyVisible } from '../guard';
 
 const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
@@ -306,8 +307,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   /* Machines come online, sign in and take work on their own, so the screen looks again every few seconds. */
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), REFRESH_MS);
-    return () => clearInterval(timer);
+    return everyVisible(() => void load(), REFRESH_MS);
   }, [load]);
 
   async function run(action: () => Promise<void>) {

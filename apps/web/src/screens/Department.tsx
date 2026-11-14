@@ -28,6 +28,7 @@ import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CY, FT, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
 import { takeEscape } from '../ui/escape';
+import { guardedResizeObserver, useRenderGuard } from '../guard';
 
 export { employeeGroups };
 
@@ -269,7 +270,7 @@ function useDepartmentSpace(language: string, panel: Props['panel']) {
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    const observer = guardedResizeObserver(measure, 'department-actions');
     observer.observe(el);
     observer.observe(acts);
     return () => observer.disconnect();
@@ -288,6 +289,7 @@ export function pruneSwitched(switched: Record<string, boolean>, employees: Empl
 }
 
 export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions }: Props) {
+  useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
@@ -347,7 +349,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     place(false);
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => place(false));
+    const ro = guardedResizeObserver(() => place(false), 'department');
     ro.observe(el);
     return () => ro.disconnect();
   }, [place, tree]);
