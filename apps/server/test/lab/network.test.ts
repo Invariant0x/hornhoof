@@ -213,6 +213,58 @@ describe('the network lab relay and peer path with controllable delay', () => {
     expect(received.join('')).toBe('first;second;');
   });
 
+  it('preserves byte order across 4000 writes through tcpProxy under fractional delays and sub-ms clock steps', async () => {
+    const clock = virtualClock();
+    await clock.advance(13);
+    let subMs = 0;
+    const subMsSchedule = {
+      ...clock.schedule,
+      /* Models monotonic sub-millisecond performance.now() progression where (now + 20) - now alternates around 20. */
+      now: () => clock.schedule.now() + (subMs += 0.00005),
+    };
+
+    for (const [schedule, oneWayMs] of [
+      [subMsSchedule, 20],
+      [clock.schedule, 7.35],
+    ] as const) {
+      const gate = createDelayGate({ oneWayMs, schedule });
+      const got: number[] = [];
+      let buf = Buffer.alloc(0);
+      const count = 4000;
+      const sinkSockets = new Set<net.Socket>();
+      const sink = net.createServer({ noDelay: true }, socket => {
+        socket.setNoDelay(true);
+        sinkSockets.add(socket);
+        socket.once('close', () => sinkSockets.delete(socket));
+        socket.on('data', (chunk: Buffer) => {
+          buf = Buffer.concat([buf, chunk]);
+          while (buf.length >= 4) {
+            got.push(buf.readUInt32BE(0));
+            buf = buf.subarray(4);
+          }
+        });
+      });
+      const sinkPort = await listenIn(sink, '127.0.0.1');
+      const proxy = await gate.tcpProxy({ host: '127.0.0.1', port: sinkPort });
+      const client = net.connect({ port: proxy.port, host: '127.0.0.1', noDelay: true });
+      await new Promise<void>(resolve => client.once('connect', resolve));
+
+      for (let i = 0; i < count; i++) {
+        const b = Buffer.alloc(4);
+        b.writeUInt32BE(i);
+        client.write(b);
+        if (i % 3 === 0) await clock.flush(1);
+      }
+      await clock.until(() => got.length === count, { maxMs: 500, stepMs: 1 });
+      const firstOutOfOrder = got.findIndex((v, i) => v !== i);
+      client.destroy();
+      await proxy.close();
+      for (const s of sinkSockets) s.destroy();
+      await new Promise<void>(resolve => sink.close(() => resolve()));
+      expect(firstOutOfOrder).toBe(-1);
+    }
+  });
+
   it('carries mTLS + HTTP/2 PeerSessions and DbDoor between A and B over PeerRelay when direct LAN fails', async () => {
     const clock = virtualClock();
     const gate = createDelayGate({ oneWayMs: 200, schedule: clock.schedule });

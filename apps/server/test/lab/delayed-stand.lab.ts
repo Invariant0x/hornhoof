@@ -9,7 +9,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../../test-support/ports.mjs';
 import { loadConfig } from '../../src/config.js';
 import type { Db } from '../../src/db/client.js';
-import { certificates, companies, departments, machines, people, publicLinks } from '../../src/db/schema.js';
+import { certificates, companies, departments, machines, people } from '../../src/db/schema.js';
 import type { HeldCertificate } from '../../src/modules/keeper/certificate.js';
 import { Keeper } from '../../src/modules/keeper/keeper.js';
 import { LeaseHolder } from '../../src/modules/keeper/lease-holder.js';
@@ -543,10 +543,15 @@ describe('delayed network lab verification of #825 items 1-4', () => {
     expect(lines.some(line => line.includes('503 unknown'))).toBe(true);
   });
 
-  it('#825 item 4: keeps leader peer tunnel running over PeerRelay through a brief mode dip and a single empty read', async () => {
+  it('#825 item 4: keeps leader on lead and its one peer offer through a 4 s delayed-relay silence and brief mode dip', async () => {
     const clock = virtualClock();
-    const gate = createDelayGate({ oneWayMs: 250, schedule: clock.schedule });
-    const peerRelay = await createPeerRelay(gate);
+    const peerGate = createDelayGate({ oneWayMs: 250, schedule: clock.schedule });
+    const relayGate = createDelayGate({ oneWayMs: 150, schedule: clock.schedule });
+    const peerRelay = await createPeerRelay(peerGate);
+    const upstream = await fakeRelay();
+    upstream.bindings.set('acme', { key: 'k'.repeat(32) });
+    upstream.register('acme', linkClientId('acme', NET_A));
+    const relayProxy = await relayGate.httpProxy(upstream.url);
 
     const { app, db, config } = await standApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: NET_A });
     await setUpCompany(app);
@@ -561,12 +566,27 @@ describe('delayed network lab verification of #825 items 1-4', () => {
     await app.listen({ host: '127.0.0.1', port: 0 });
     const appPort = (app.server.address() as AddressInfo).port;
 
+    const copyName = `copy_${NET_B.slice(0, 16)}_1`;
+    const catalog: SyncCatalog = {
+      machines: async () => [{ machine: MACHINE_B_UUID, networkId: NET_B, number: 2, copyName, ready: false }],
+      replication: async () => [],
+      setting: async () => null,
+      position: async () => '0/3000000',
+      oldestWaitMs: async () => null,
+      set: async () => undefined,
+      clear: async () => undefined,
+      checkpoint: async () => undefined,
+      pulse: async () => undefined,
+      moveTarget: async () => null,
+    };
+
     const STOP_LINE = 'No public link: this machine is not offered to its peers through it.';
     let fenceActive = false;
     let activeOffer: { close(): Promise<void> } | null = null;
-    const baseLease = fakeLease();
+    const baseLease = fakeLease({ othersHoldData: true });
     const lines: string[] = [];
     let peerOffersStarted = 0;
+    let linkStarts = 0;
     let peerStartedAt = 0;
 
     const keeper = new Keeper({
@@ -590,11 +610,16 @@ describe('delayed network lab verification of #825 items 1-4', () => {
       host: '127.0.0.1',
       ports: { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 },
       everyMs: 1000,
-      linkEveryMs: 500,
+      linkEveryMs: 1000,
       peerEveryMs: 500,
+      guardEveryMs: 500,
       reportEveryMs: 3_600_000,
       dir: tempDir('hh-keeper-4-'),
-      clientFor: () => ({ program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      sync: { catalog, relay: new Relay(relayProxy.url), everyMs: 1000, routeEveryMs: 0 },
+      clientFor: () => {
+        linkStarts += 1;
+        return { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
+      },
       peerClientFor: (_services: PeerServices, _clientId: string, local: { data: number; app: number }) => {
         peerOffersStarted += 1;
         if (peerOffersStarted === 1) peerStartedAt = clock.now();
@@ -606,14 +631,18 @@ describe('delayed network lab verification of #825 items 1-4', () => {
       },
     });
     let openSessionsB: PeerSessions | null = null;
-    await keeper.start();
+    let started = false;
+    const starting = keeper.start().then(() => void (started = true));
+    await clock.until(() => started, { maxMs: 10_000, stepMs: 50 });
+    await starting;
     onTestFinished(async () => {
       clock.restore();
-      await gate.close();
+      await relayGate.close();
+      await peerGate.close();
       await openSessionsB?.close();
       await keeper.stop();
     });
-    await clock.until(() => peerOffersStarted === 1 && activeOffer !== null, { maxMs: 5000, stepMs: 50 });
+    await clock.until(() => keeper.mode() === 'lead' && peerOffersStarted === 1 && activeOffer !== null, { maxMs: 10_000, stepMs: 50 });
 
     /* Issue Machine B's data certificate under the company's real authority and connect B -> PeerRelay -> A. */
     const keyB = ed25519();
@@ -640,30 +669,41 @@ describe('delayed network lab verification of #825 items 1-4', () => {
     });
     openSessionsB = sessionsB;
     sessionsB.use([{ machine: rowA.id, networkId: NET_A, addresses: ['127.0.0.1'], peerPort: await closedPort(), relayPort: visitB.ports[dataServiceA]! }]);
-    await clock.until(() => sessionsB.reaches(rowA.id), { maxMs: 5000, stepMs: 50 });
+    await clock.until(() => sessionsB.reaches(rowA.id), { maxMs: 8000, stepMs: 50 });
 
-    /* 1) Brief 1-poll dip out of lead across PeerLink's 3000 ms tick: PeerLink must NOT drop its peer frpc offer. */
-    const beforeDip = peerStartedAt + 2000 - clock.now();
-    if (beforeDip > 0) await clock.advance(beforeDip, 50);
-    fenceActive = true;
-    await clock.until(() => keeper.mode() === 'read', { maxMs: 800, stepMs: 50 });
-    const acrossFirstTick = peerStartedAt + 3500 - clock.now();
-    if (acrossFirstTick > 0) await clock.advance(acrossFirstTick, 50);
-    fenceActive = false;
-    await clock.until(() => keeper.mode() === 'lead', { maxMs: 800, stepMs: 50 });
-    const acrossRecoveryTick = peerStartedAt + 6500 - clock.now();
-    if (acrossRecoveryTick > 0) await clock.advance(acrossRecoveryTick, 50);
-    expect(peerOffersStarted).toBe(1);
-    expect(lines).not.toContain(STOP_LINE);
+    /* 1) Real two-Macs trigger: relay behind DelayGate goes silent for 4 s (route unknown). Leader must stay on lead
+       every second, keep its single peer offer without restarting, and keep B's peer session alive. */
+    const modes: string[] = [];
+    const sample = async (seconds: number): Promise<void> => {
+      for (let i = 0; i < seconds; i++) {
+        await clock.advance(1000, 50);
+        modes.push(`${Math.round(clock.now() / 1000)}s:${keeper.mode()}`);
+      }
+    };
+    await sample(4);
+    relayGate.setCut(true);
+    await sample(4);
+    relayGate.setCut(false);
+    await sample(10);
+    expect(modes.filter(m => !m.endsWith(':lead'))).toEqual([]);
+    expect([peerOffersStarted, linkStarts]).toEqual([1, 1]);
+    expect(lines.filter(l => l.startsWith('Stopping the peer tunnel'))).toEqual([]);
     expect(sessionsB.reaches(rowA.id)).toBe(true);
 
-    /* 2) Single transient empty public_links read across one 3000 ms PeerLink tick: peer session stays up. */
-    const beforeEmpty = peerStartedAt + 7500 - clock.now();
-    if (beforeEmpty > 0) await clock.advance(beforeEmpty, 50);
-    const [removedLink] = await db.delete(publicLinks).returning();
-    await clock.advance(2000, 50);
-    await db.insert(publicLinks).values(removedLink!);
-    await clock.advance(3000, 50);
+    /* 2) Brief 1-poll mode dip across one 3000 ms PeerLink tick: PeerLink holds its offer without dropping B's session. */
+    baseLease.othersHold(false);
+    await clock.advance(1000, 50);
+    const elapsed = clock.now() - peerStartedAt;
+    const nextTick = (Math.floor((elapsed + 1200) / 3000) + 1) * 3000;
+    const beforeDip = peerStartedAt + nextTick - 1200 - clock.now();
+    if (beforeDip > 0) await clock.advance(beforeDip, 50);
+    fenceActive = true;
+    await clock.until(() => keeper.mode() === 'read', { maxMs: 1100, stepMs: 50 });
+    const acrossFirstTick = peerStartedAt + nextTick + 400 - clock.now();
+    if (acrossFirstTick > 0) await clock.advance(acrossFirstTick, 50);
+    fenceActive = false;
+    await clock.until(() => keeper.mode() === 'lead', { maxMs: 1100, stepMs: 50 });
+    await clock.advance(3500, 50);
     expect(peerOffersStarted).toBe(1);
     expect(lines).not.toContain(STOP_LINE);
     expect(sessionsB.reaches(rowA.id)).toBe(true);

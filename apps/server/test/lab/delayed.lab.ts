@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Lab, type LabMachine } from './lab.js';
-import { http, installServer, joinWorker, ownerKey, PASSWORD, pause, quoted, sessionOf, setUp, sql, WEB_PORT, within, type Server } from './steps.js';
+import { http, installServer, joinWorker, ownerKey, PASSWORD, pause, PEER_PORT, quoted, sessionOf, setUp, sql, WEB_PORT, within, type Server } from './steps.js';
 import { sqlIn, startWriterAt } from './writer.js';
 
 type Place = { machine: LabMachine; folder: string; id: string; network: string; host: string; url: string };
@@ -68,11 +68,21 @@ describe('the lab, two machines over a delayed relay and peer path', () => {
     lab.frps(relay.fake, link, places);
     await lab.peerRelay(link, places, { gate: peerGate, blockDirect: true });
 
+    /* Direct LAN connections on published port 8180 must be rejected with TCP reset, forcing PeerSessions onto PeerRelay. */
+    const probeDirect = (from: LabMachine, toIp: string) =>
+      from.exec(
+        `node -e "const net = require('node:net'); const s = net.connect({ host: '${toIp}', port: ${PEER_PORT}, timeout: 2000 }, () => { s.destroy(); process.exit(0); }); s.on('timeout', () => { s.destroy(); process.exit(2); }); s.on('error', err => { console.log(err.code || err.message); process.exit(1); });"`,
+      );
+    const [directToM1, directToM2] = await Promise.all([probeDirect(m2, m1.address), probeDirect(m1, m2.address)]);
+    expect(directToM1.code, directToM1.out).toBe(1);
+    expect(directToM2.code, directToM2.out).toBe(1);
+
     /* 1. Copy becomes ready over the delayed peer relay; m1 keeps its lease under the 1.2 s two-RTT probe. */
     await within(15, 'copy on m2 is ready over the relay path', async () => {
       const state = await sqlIn(p1.machine, p1.folder, `SELECT copy_state || ':' || coalesce(path, '') FROM machines WHERE id = '${p2.id}'`);
       return state === 'ready:relay';
     });
+    expect(peerGate.stats().bytes).toBeGreaterThan(0);
     const syncOf = () => (relay.fake.syncs.get(link)?.state === 'on' ? (relay.fake.syncs.get(link)?.copy ?? null) : null);
     await within(3, 'the relay names m2 as the synchronous copy', async () => syncOf() === p2.network);
     expect(leads(await wordOf(p1))).toBe(true);
