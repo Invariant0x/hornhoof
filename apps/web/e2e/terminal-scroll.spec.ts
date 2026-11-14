@@ -13,6 +13,9 @@ function history(profile: Profile): string {
   return `${lines}\r\n${alternate}${mouse}${profile}-LIVE-0`;
 }
 
+/* What the terminal sent its program besides its size: a card that comes in below the window just after it opens resizes it. */
+const input = (sent: string[]) => sent.filter(message => JSON.parse(message).type !== 'resize');
+
 async function openTerminal(page: Page, profile: Profile, write: boolean) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
@@ -56,7 +59,7 @@ for (const profile of PROFILES) {
       await page.screenshot({ path: info.outputPath(`${profile}-${write}-${SNAPSHOT}-initial.png`) });
       await wheel(-8000);
       await expect(rows).toContainText('HISTORY-0');
-      expect(sent).toEqual([]);
+      expect(input(sent)).toEqual([]);
       await page.screenshot({ path: info.outputPath(`${profile}-${write}-${SNAPSHOT}.png`) });
       expect(errors).toEqual([]);
     });
@@ -72,7 +75,7 @@ for (const write of [false, true]) {
     await expect(rows).toContainText('HISTORY-0');
     for (let i = 0; i < 2; i++) await wheel(2000);
     await expect(rows).toContainText('agy-LIVE-UPDATE');
-    expect(sent).toEqual([]);
+    expect(input(sent)).toEqual([]);
     expect(errors).toEqual([]);
   });
 }
@@ -83,6 +86,6 @@ test('resizing keeps the alternate history line being read', async ({ page }) =>
   await expect(rows).toContainText('HISTORY-0');
   await page.setViewportSize({ width: 1100, height: 900 });
   await expect(rows).toContainText('HISTORY-0');
-  expect(sent.filter(message => JSON.parse(message).type !== 'resize')).toEqual([]);
+  expect(input(sent)).toEqual([]);
   expect(errors).toEqual([]);
 });
