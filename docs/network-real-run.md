@@ -158,6 +158,4 @@ same two computers each lead, copy and switch without touching the other.
 
 ## What is left on the machines
 
-The throwaway company and both of its databases stay on A and B until the team lead says otherwise. Removing them is
-plan 13's Step 7: the company's folder and its line in the ports registry on each machine, and its name at
-hornhoof.org.
+The throwaway company of `eb17b961` and its link name at hornhoof.org were removed before the second run on `64551f6a`.
