@@ -2,18 +2,19 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { EventView } from '../src/types';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
-/* A chat with a long history opens on its newest line from the first frame it shows, and nothing in it moves; switching away
-   and back brings it on its newest line again. Every frame the browser draws is written down: where the chat stands, how many
+/* A chat with a long history opens on its newest lines from the first frame it shows, and nothing in it moves; switching
+   away and back brings it on its newest line again. Every frame the browser draws is written down: where the chat stands, how many
    lines it shows and how many of them still move in. Waits go by frames and states, never by the clock. */
 
 const AT = '2026-11-04T10:00:00Z';
-/* The most events the server sends at a time. */
+/* The most events the server sends after a line at a time, and the newest lines a window keeps. */
 const PAGE = 500;
+const KEEP = 300;
 const ev = (seq: number): EventView =>
   seq % 2
     ? { seq, kind: 'message', data: { text: `Question ${seq}: please check the checkout form again.` }, jobId: 'j1', person: { id: 'p1', name: 'Ivan' }, at: AT }
     : { seq, kind: 'text', data: { text: `Answer ${seq}. The checkout form works and **all checks pass**.` }, jobId: 'j1', person: null, at: AT };
-const HISTORY = Array.from({ length: PAGE + 100 }, (_, i) => ev(i + 1));
+const HISTORY = Array.from({ length: KEEP + 300 }, (_, i) => ev(i + 1));
 const STATE = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: false, canType: true, turnRefused: null };
 
 type Frame = { top: number; height: number; view: number; lines: number; moving: number };
@@ -67,15 +68,22 @@ async function openChat(page: Page, live: AgentFixture, releaseOnce: { held: Pro
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.addInitScript(watchFrames);
   await serveAgentWindow(page, live);
-  /* History comes a page at a time from the oldest, as the server sends it; the second page waits until the test lets it go. */
+  /* The newest lines come first, as the server sends them, or the lines before one; the first answer waits until the test
+     lets it go. After a line, the server sends a page at a time. */
   await page.route('**/api/agents/b1/events*', async route => {
-    const after = Number(new URL(route.request().url()).searchParams.get('after') ?? 0);
-    if (after === PAGE && releaseOnce.held) {
-      const held = releaseOnce.held;
-      releaseOnce.held = null;
-      await held;
+    const query = new URL(route.request().url()).searchParams;
+    const events = live.events ?? [];
+    if (query.has('last')) {
+      if (releaseOnce.held) {
+        const held = releaseOnce.held;
+        releaseOnce.held = null;
+        await held;
+      }
+      const before = Number(query.get('before') ?? Infinity);
+      return route.fulfill({ json: { events: events.filter(e => e.seq < before).slice(-Number(query.get('last'))), state: STATE } });
     }
-    await route.fulfill({ json: { events: (live.events ?? []).filter(e => e.seq > after).slice(0, PAGE), state: STATE } });
+    const after = Number(query.get('after') ?? 0);
+    await route.fulfill({ json: { events: events.filter(e => e.seq > after).slice(0, PAGE), state: STATE } });
   });
   await page.goto('/');
   await page.getByRole('button', { name: /^Development/ }).click();
@@ -92,10 +100,10 @@ test('a chat with a long history opens on its newest line, and comes back on it 
   const live: AgentFixture = { awake: false, hasTask: false, messages: [], connections: 0, events: [...HISTORY] };
   let release!: () => void;
   const hold = { held: new Promise<void>(resolve => (release = resolve)) as Promise<void> | null };
-  const secondPage = page.waitForRequest(r => r.url().includes(`/api/agents/b1/events?after=${PAGE}`));
+  const newest = page.waitForRequest(r => r.url().includes(`/api/agents/b1/events?last=${KEEP}`));
   await openChat(page, live, hold);
-  await secondPage;
-  /* The first page is in and frames go by while the rest is on its way: the chat shows none of its old lines meanwhile. */
+  await newest;
+  /* Frames go by while the newest lines are on their way: the chat shows none of its lines meanwhile. */
   await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(done)))));
   release();
   const chat = page.getByRole('log', { name: 'Conversation' });
@@ -104,14 +112,17 @@ test('a chat with a long history opens on its newest line, and comes back on it 
   const opening = await frames(page);
   await info.attach('open-frames.json', { body: JSON.stringify(opening, null, 1), contentType: 'application/json' });
   await page.screenshot({ path: info.outputPath(`open-${info.project.name}.png`) });
-  expect(opening.filter(f => f.lines !== HISTORY.length || !atEnd(f) || f.moving > 0)).toEqual([]);
+  expect(opening.filter(f => f.lines !== KEEP || !atEnd(f) || f.moving > 0)).toEqual([]);
+  await expect(chat.locator(':scope > .t-line').last()).toContainText(`Answer ${HISTORY.length}.`);
 
-  /* Open, at its end: a new line shows, and only it moves in. */
+  /* Open, at its end: a new line shows at the end, the oldest one goes, and the chat stays on its end. */
+  const lines = chat.locator(':scope > .t-line');
   let from = await frameCount(page);
   await sendLine(page, live, HISTORY.length + 1);
-  await expect(chat.locator(':scope > .t-line')).toHaveCount(HISTORY.length + 1);
+  await expect(lines.last()).toContainText(`Question ${HISTORY.length + 1}:`);
+  await expect(lines).toHaveCount(KEEP);
   await drawn(page, from, 5);
-  expect((await framesAfter(page, from)).filter(f => f.lines === HISTORY.length + 1 && !atEnd(f))).toEqual([]);
+  expect((await framesAfter(page, from)).filter(f => !atEnd(f))).toEqual([]);
 
   /* Switching away: the window hides, and lines keep coming to it. */
   await page.getByRole('button', { name: 'Minimize' }).click();
@@ -124,7 +135,8 @@ test('a chat with a long history opens on its newest line, and comes back on it 
   const back = await framesAfter(page, from);
   await info.attach('switch-back-frames.json', { body: JSON.stringify(back, null, 1), contentType: 'application/json' });
   await page.screenshot({ path: info.outputPath(`switch-back-${info.project.name}.png`) });
-  expect(back.filter(f => f.lines !== HISTORY.length + 3 || !atEnd(f) || f.moving > 0)).toEqual([]);
+  expect(back.filter(f => f.lines !== KEEP || !atEnd(f) || f.moving > 0)).toEqual([]);
+  await expect(lines.last()).toContainText(`Question ${HISTORY.length + 3}:`);
 });
 
 test('a person who scrolled up to read stays where they read while new lines come', async ({ page }) => {
