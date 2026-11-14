@@ -71,9 +71,16 @@ const resolutionChecks = (name: string, t: ResolutionColumns) => [
 ];
 
 /* One deployment serves one company: the unique singleton column makes a second row impossible. */
+/* How mail from employees and Hornhoof reaches an employee: kept in its inbox and taken in one turn for the lot, or each
+   as a turn of its own and into the turn that runs. */
+export const INBOX_MODES = ['inbox', 'direct'] as const;
+export type InboxMode = (typeof INBOX_MODES)[number];
+
 export const companies = pgTable('companies', {
   id: id(),
   name: text('name').notNull(),
+  /* The delivery of every employee whose department and own card say none. */
+  inboxMode: text('inbox_mode', { enum: INBOX_MODES }).notNull().default('inbox'),
   /* What the orchestrator learned about the company, saved when the CEO creates the structure. */
   brief: text('brief').notNull().default(''),
   /* The ready-made template the CEO started from, so the orchestrator's greeting knows it. Null when the CEO started empty. */
@@ -258,6 +265,8 @@ export const departments = pgTable('departments', {
   templateKey: text('template_key', { enum: TEMPLATE_KEYS }),
   /* New departments receive their template's mode through their creation path. */
   workMode: text('work_mode', { enum: ['turns', 'continuous'] }).notNull().default('turns'),
+  /* The delivery of its employees whose own card says none; none takes the company's. */
+  inboxMode: text('inbox_mode', { enum: INBOX_MODES }),
   parentId: uuid('parent_id').references((): AnyPgColumn => departments.id),
   about: text('about').notNull().default(''),
   roleCode: text('role_code').notNull(),
@@ -526,6 +535,8 @@ export const agents = pgTable(
     departmentId: uuid('department_id').references(() => departments.id),
     teamId: uuid('team_id').references(() => teams.id),
     subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
+    /* Its own delivery; none takes its department's, then the company's. */
+    inboxMode: text('inbox_mode', { enum: INBOX_MODES }),
     /* The node of its plan its program lives on, with its folder, session and terminal; it stays there while that node is
        ready. None on a company key, which runs on the built-in node, and before its first turn. */
     nodeId: uuid('node_id').references((): AnyPgColumn => nodes.id),
@@ -635,6 +646,8 @@ export const jobs = pgTable(
     nodeId: uuid('node_id').references(() => nodes.id),
     agentId: uuid('agent_id').references(() => agents.id),
     prompt: text('prompt').notNull(),
+    /* The one turn that takes the agent's unread inbox: its prompt is written from the inbox when it goes out. */
+    inboxWake: boolean('inbox_wake').notNull().default(false),
     /* What the turn was asked before the queue composed its sent prompt. Null for turns from before this was kept. */
     requestedPrompt: text('requested_prompt'),
     sessionId: text('session_id'),
@@ -683,6 +696,29 @@ export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'tod
 export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
 
 /* An agent's conversation as people see it: their messages, what the agent did, and what came of it. */
+/* Every message an employee gets from another employee, the orchestrator or Hornhoof: who sent it, on which task, what it
+   says, and whether the employee has read it or dealt with it. job: the turn it went in or waits for. */
+export const agentInbox = pgTable(
+  'agent_inbox',
+  {
+    id: id(),
+    companyId: companyId(),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    senderKind: text('sender_kind', { enum: ['agent', 'hornhoof'] }).notNull(),
+    senderAgentId: uuid('sender_agent_id').references(() => agents.id),
+    senderName: text('sender_name').notNull(),
+    taskId: uuid('task_id').references(() => tasks.id),
+    taskNumber: integer('task_number'),
+    kind: text('kind').notNull(),
+    text: text('text').notNull(),
+    jobId: uuid('job_id').references(() => jobs.id),
+    status: text('status', { enum: ['unread', 'read', 'done'] }).notNull().default('unread'),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  t => [index('agent_inbox_agent_status').on(t.agentId, t.status, t.createdAt), index('agent_inbox_job').on(t.jobId)],
+);
+
 export const agentEvents = pgTable(
   'agent_events',
   {
