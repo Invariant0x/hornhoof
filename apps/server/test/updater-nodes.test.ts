@@ -104,7 +104,7 @@ describe('updater of a server\'s nodes on another computer', () => {
     const r = await look();
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('curl') && c.includes(`${SERVER}/install.sh`))).toBe(true);
-    expect(r.calls).toContain(`docker ps --filter label=hornhoof.subscription --filter label=hornhoof.server=${SERVER} --format {{.Names}} {{.Label "hornhoof.subscription"}}`);
+    expect(r.calls).toContain(`docker ps -a --filter label=hornhoof.subscription --filter label=hornhoof.server=${SERVER} --format {{.Names}} {{.Label "hornhoof.subscription"}}`);
     /* Each installer asks the server, with the node's own key in its volume, to let the node's work end, and replaces only it.
        It goes to the address the updater was started with, not one the server's answer names. */
     expect(installers(r.calls).sort()).toEqual([ran(PLAN_A), ran(PLAN_B)].sort());

@@ -185,6 +185,82 @@ describe('install.sh', () => {
     expect(r.calls).toContain('docker volume rm hornhoof-kimi-00000000');
   });
 
+  it('removes a stopped node whose volume marks its plan removed instead of starting it again', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({
+      args: [],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_NODES_ONLY: `id-of-${name}`,
+        STUB_CONTAINERS: `${name}=${SERVER}`,
+        STUB_STOPPED: name,
+        STUB_REMOVED: name,
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`docker rm -f ${name}`);
+    expect(r.calls).toContain(`docker volume rm ${name}`);
+    expect(r.calls.some(c => c.startsWith(`docker run -d --name ${name}`))).toBe(false);
+  });
+
+  it('recreates a stopped node of this server without /data/removed on the same volume and removes no volume', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({
+      args: [],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_NODES_ONLY: `id-of-${name}`,
+        STUB_CONTAINERS: `${name}=${SERVER}`,
+        STUB_STOPPED: name,
+        STUB_REMOVED: '',
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`docker cp ${name}:/data/removed -`);
+    const rm = indexOf(r.calls, `docker rm -f ${name}`);
+    const run = indexOf(r.calls, `docker run -d --name ${name} `);
+    expect(rm).toBeGreaterThanOrEqual(0);
+    expect(run).toBeGreaterThan(rm);
+    expect(r.calls[run]).toContain(`-v ${name}:/data`);
+    expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
+  });
+
+  it('leaves a stopped node labeled for another server alone even when its volume has /data/removed', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({
+      args: [],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_NODES_ONLY: `id-of-${name}`,
+        STUB_CONTAINERS: `${name}=https://other.example`,
+        STUB_STOPPED: name,
+        STUB_REMOVED: name,
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.includes(`${name}:/data/removed`))).toBe(false);
+    expect(r.calls.some(c => c.includes(`rm -f ${name}`) || c.includes(`volume rm ${name}`))).toBe(false);
+    expect(r.calls.some(c => c.startsWith(`docker run -d --name ${name}`))).toBe(false);
+  });
+
+  it('leaves a stopped node from before the server label alone even when its volume has /data/removed', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({
+      args: [],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_NODES_ONLY: `id-of-${name}`,
+        STUB_CONTAINERS: name,
+        STUB_STOPPED: name,
+        STUB_REMOVED: name,
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.includes(`${name}:/data/removed`))).toBe(false);
+    expect(r.calls.some(c => c.includes(`rm -f ${name}`) || c.includes(`volume rm ${name}`))).toBe(false);
+    expect(r.calls.some(c => c.startsWith(`docker run -d --name ${name}`))).toBe(false);
+  });
+
   it('points nodes at host.docker.internal when the server is on localhost', () => {
     const r = install({ env: { HORNHOOF_SERVER: 'http://localhost:8080' } });
     expect(r.code).toBe(0);

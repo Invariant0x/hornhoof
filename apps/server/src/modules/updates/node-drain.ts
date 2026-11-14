@@ -9,6 +9,7 @@ import { loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { keyOf, type NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
+import { hasLiveDrainWork } from './drain-live.js';
 import { drainPostponed, drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
 
 /* heldAt: when this hold of the node began. A wait saved before this began when the server read it. */
@@ -124,10 +125,11 @@ class NodeDrains {
       this.save();
     }
     const node = nodeOf(record.key);
-    const work = await drainWork(this.ctx, node);
-    if (this.records.get(record.key) !== record) return;
+    const found = await this.workOf(record, node, now);
+    if (!found) return;
+    const { work, live } = found;
     const counts = { turnsLeft: work.turnsLeft, partsLeft: work.partsLeft };
-    if (!work.turns.length && !work.parts.length) {
+    if (!live) {
       record.view = { state: 'restarting', since: new Date(now).toISOString() };
       this.save();
       return;
@@ -142,6 +144,14 @@ class NodeDrains {
     this.save();
     this.wake();
     await drainPostponed(this.ctx, node, retryAt, work);
+  }
+
+  /* The work that holds the node and whether any of it is live, or null when this hold ended meanwhile. */
+  private async workOf(record: Saved, node: NodeIdentity, now: number): Promise<{ work: Awaited<ReturnType<typeof drainWork>>; live: boolean } | null> {
+    const work = await drainWork(this.ctx, node);
+    if (this.records.get(record.key) !== record) return null;
+    const live = (work.turns.length > 0 || work.parts.length > 0) && (await hasLiveDrainWork(this.ctx, node, now));
+    return this.records.get(record.key) === record ? { work, live } : null;
   }
 
   private save(): void {
