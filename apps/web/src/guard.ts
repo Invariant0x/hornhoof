@@ -98,12 +98,23 @@ const HOLD_MS = 250;
 
 const sizeOf = (entries: ResizeObserverEntry[] | undefined) => (entries ?? []).map(e => `${e.contentRect?.width}x${e.contentRect?.height}`).join(' ');
 
-/* A ResizeObserver for block that hands every size on, until the box swings between two sizes or the calls come faster
-   than frames: then the page goes light and the observer hands on only its newest size, once every HOLD_MS. */
-export function guardedResizeObserver(callback: ResizeObserverCallback, block: string, now: Clock = Date.now): ResizeObserver {
+/* Whether this call of an observer is a storm: its box came back to the size of two calls ago more than SWINGS times a
+   second, or the calls come faster than frames. */
+function swingWatch(now: Clock): (entries: ResizeObserverEntry[] | undefined) => boolean {
   const swings = rateMeter(SWINGS, SWING_WINDOW_MS, now);
   const calls = rateMeter(RESIZE_LIMIT, SWING_WINDOW_MS, now);
   const sizes: string[] = [];
+  return entries => {
+    const size = sizeOf(entries);
+    const swung = sizes.length === 2 && sizes[0] === size && sizes[1] !== size;
+    sizes.push(size);
+    if (sizes.length > 2) sizes.shift();
+    return (swung && swings.hit()) || calls.hit();
+  };
+}
+
+/* Holds an observer's calls back and hands on only the newest of them, HOLD_MS after the first. */
+function holdBack(callback: ResizeObserverCallback) {
   let held: [ResizeObserverEntry[], ResizeObserver] | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const release = () => {
@@ -112,22 +123,34 @@ export function guardedResizeObserver(callback: ResizeObserverCallback, block: s
     held = null;
     if (newest) callback(...newest);
   };
+  return {
+    holding: () => timer !== null,
+    hold(entries: ResizeObserverEntry[], self: ResizeObserver) {
+      held = [entries, self];
+      timer ??= setTimeout(release, HOLD_MS);
+    },
+    drop() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      held = null;
+    },
+  };
+}
+
+/* A ResizeObserver for block that hands every size on, until the box swings between two sizes or the calls come faster
+   than frames: then the page goes light and the observer hands on only its newest size, once every HOLD_MS. */
+export function guardedResizeObserver(callback: ResizeObserverCallback, block: string, now: Clock = Date.now): ResizeObserver {
+  const stormy = swingWatch(now);
+  const held = holdBack(callback);
   const observer = new ResizeObserver((entries, self) => {
-    const size = sizeOf(entries);
-    const swung = sizes.length === 2 && sizes[0] === size && sizes[1] !== size;
-    sizes.push(size);
-    if (sizes.length > 2) sizes.shift();
-    const storm = (swung && swings.hit()) || calls.hit();
-    if (!storm && !timer) return callback(entries, self);
+    const storm = stormy(entries);
+    if (!storm && !held.holding()) return callback(entries, self);
     if (storm) enterLight('resize', block);
-    held = [entries, self];
-    timer ??= setTimeout(release, HOLD_MS);
+    held.hold(entries, self);
   });
   const disconnect = observer.disconnect.bind(observer);
   observer.disconnect = () => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    held = null;
+    held.drop();
     disconnect();
   };
   return observer;
@@ -161,11 +184,11 @@ export function everyVisible(fn: () => void, ms: number): () => void {
   };
 }
 
-export type FrameWatch = { every: number; budget: number; strikes: number; now?: Clock; frame?: (cb: FrameRequestCallback) => void };
+export type FrameWatch = { every: number; budget: number; strikes: number; now: Clock; frame: (cb: FrameRequestCallback) => void };
 
 /* Every `every` ms while the tab is seen, how long two frames in a row take; past `budget` `strikes` times running, the
    page goes light. A hidden tab draws no frames, so the watch waits for it to come back. */
-export function watchFrames({ every, budget, strikes, now = () => performance.now(), frame = cb => requestAnimationFrame(cb) }: FrameWatch): () => void {
+export function watchFrames({ every, budget, strikes, now, frame }: FrameWatch): () => void {
   let late = 0;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;

@@ -268,4 +268,22 @@ describe('the frame budget', () => {
     stop();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('asks for no frame while the tab is hidden, and watches again once it is back', () => {
+    setHidden(true);
+    const frames: FrameRequestCallback[] = [];
+    const add = vi.spyOn(document, 'addEventListener');
+    const remove = vi.spyOn(document, 'removeEventListener');
+    const stop = watchFrames({ every: 2000, budget: 250, strikes: 3, now: () => 0, frame: cb => frames.push(cb) });
+    vi.advanceTimersByTime(10_000);
+    expect(frames).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    setHidden(false);
+    vi.advanceTimersByTime(2000);
+    expect(frames).toHaveLength(1);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+    const watched = add.mock.calls.filter(c => c[0] === 'visibilitychange').map(c => c[1]);
+    expect(remove.mock.calls.filter(c => c[0] === 'visibilitychange').map(c => c[1])).toEqual(expect.arrayContaining(watched));
+  });
 });

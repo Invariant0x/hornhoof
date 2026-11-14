@@ -5,6 +5,8 @@ export type RenderProbe = {
   /* React commits since the page loaded, as React tells devtools of each. */
   commits: number;
   timeouts: number;
+  /* Timeouts due within a second: what a page still has to do. A long one is a page waiting, as its frame watch does. */
+  soonTimeouts: number;
   intervals: number;
   frames: number;
   /* Elements a ResizeObserver watches, and the observers that watch any. */
@@ -51,7 +53,7 @@ export function installRenderProbe() {
   };
   host.__REACT_DEVTOOLS_GLOBAL_HOOK__ = hook;
 
-  const timeouts = new Set<unknown>();
+  const timeouts = new Map<unknown, number>();
   const intervals = new Set<unknown>();
   const frames = new Set<number>();
   const setTimeout0 = window.setTimeout.bind(window);
@@ -65,7 +67,7 @@ export function installRenderProbe() {
       timeouts.delete(id);
       if (typeof fn === 'function') (fn as (...x: unknown[]) => void)(...a);
     }, ms, ...args);
-    timeouts.add(id);
+    timeouts.set(id, ms ?? 0);
     return id;
   }) as typeof window.setTimeout;
   host.clearTimeout = ((id?: number) => {
@@ -190,8 +192,10 @@ export function installRenderProbe() {
       sockets.add(this);
     }
   };
+  /* A socket of the page, or the stand-in Playwright puts in its place for a routed one. */
+  const isSocket = (t: EventTarget): t is WebSocket => t instanceof Socket0 || ('send' in t && 'url' in t && typeof (t as WebSocket).readyState === 'number');
   /* A closed stream or socket keeps no listener alive: the page lets go of it. */
-  const closed = (t: EventTarget) => (t instanceof FakeEventSource && t.readyState === 2) || (t instanceof Socket0 && t.readyState === Socket0.CLOSED);
+  const closed = (t: EventTarget) => (t instanceof FakeEventSource && t.readyState === 2) || (isSocket(t) && t.readyState === 3);
 
   const deliver = (m: unknown) => {
     const data = JSON.stringify(m);
@@ -229,6 +233,7 @@ export function installRenderProbe() {
   host.__hhProbe = () => ({
     commits,
     timeouts: timeouts.size,
+    soonTimeouts: [...timeouts.values()].filter(ms => ms < 1000).length,
     intervals: intervals.size,
     frames: frames.size,
     resizeTargets,
@@ -236,7 +241,7 @@ export function installRenderProbe() {
     mutationObservers,
     globalListeners: [...listeners.entries()].filter(([t]) => !closed(t)).reduce((n, [, s]) => n + s.size, 0),
     streams: streams.filter(s => (s as FakeEventSource).readyState !== 2).length,
-    sockets: [...sockets].filter(s => s.readyState !== Socket0.CLOSED).length,
+    sockets: [...new Set<EventTarget>([...sockets, ...listeners.keys()])].filter(t => isSocket(t) && !closed(t)).length,
     nodes: document.getElementsByTagName('*').length,
     xterms: document.querySelectorAll('.xterm').length,
   });

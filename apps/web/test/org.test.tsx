@@ -214,6 +214,20 @@ describe('a burst of the stream', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('tells every screen that asks when the request the stream made for them failed, and not a screen that does not ask', async () => {
+    const stream = fakeStream();
+    let down = false;
+    mockApi({ 'GET /api/org': () => (down ? [500, { error: { code: 'internal', message: 'Down.' } }] : [200, working(1)]) });
+    const asking = [renderHook(() => useOrg()), renderHook(() => useOrg())];
+    const idle = renderHook(() => useOrg(false));
+    await waitFor(() => expect(asking[0]!.result.current.org).toEqual(working(1)));
+    down = true;
+    stream.send({ type: 'org' });
+    await waitFor(() => expect(asking.every(s => s.result.current.failure !== null)).toBe(true));
+    expect(idle.result.current.failure).toBeNull();
+    expect(asking[0]!.result.current.org).toEqual(working(1));
+  });
+
   it('fetches what waits for people a few times, not once a message', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const stream = fakeStream();
