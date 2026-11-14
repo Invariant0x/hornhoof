@@ -12,9 +12,8 @@ function GuardStop({ storm, float, onRestart }: { storm: boolean; float: boolean
   const t = useT();
   return (
     <div className={float ? 'guard-stop float' : 'guard-stop'} role="alert">
-      <strong>{t.guard.stopped}</strong>
-      <p>{storm ? t.guard.loop : t.guard.failed}</p>
-      <button className="btn small" type="button" onClick={onRestart}>
+      <p>{storm ? t.guard.stopped : t.guard.failed}</p>
+      <button className="btn" type="button" onClick={onRestart}>
         {t.guard.restart}
       </button>
     </div>
@@ -54,9 +53,9 @@ export function LightNotice() {
   const light = useLight();
   if (!light) return null;
   return (
-    <div className="light-note glass" role="status">
-      <span>{t.guard.light}</span>
-      <button className="btn small ghost" type="button" onClick={leaveLight}>
+    <div className="light-note" role="status">
+      <p>{t.guard.light}</p>
+      <button className="btn" type="button" onClick={leaveLight}>
         {t.guard.effectsBack}
       </button>
     </div>

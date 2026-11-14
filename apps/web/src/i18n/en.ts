@@ -866,11 +866,10 @@ export const en = {
   },
   /* The guard that stops a block drawing without end and turns heavy effects off while the page slows down. */
   guard: {
-    stopped: 'This part stopped',
-    loop: 'It was redrawing without end, so it was stopped to keep the page responsive.',
-    failed: 'Something went wrong in it. The rest of the page works.',
+    stopped: 'This block was stopped: it was slowing the screen down.',
+    failed: 'This block was stopped: something went wrong in it.',
     restart: 'Restart block',
-    light: 'Light mode: animations and effects are off so the page stays responsive.',
+    light: 'Effects are off to keep the screen responsive.',
     effectsBack: 'Turn effects back on',
   },
   dept: {
