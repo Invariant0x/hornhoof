@@ -527,3 +527,28 @@ describe('a task', () => {
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
   });
 });
+
+describe('a task whose holder has its machine offline', () => {
+  afterEach(() => localStorage.removeItem('hh-lang'));
+  const SINCE = '2026-11-13T18:07:00.000Z';
+  const at = (locale: string) => new Date(SINCE).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' });
+
+  it.each([
+    ['en', `Machine Marselle is offline since ${at('en-GB')}.`],
+    ['ru', `Машина Marselle не в сети с ${at('ru-RU')}.`],
+  ])('says which machine is offline and since when, in %s', async (language, line) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, assigneeOffline: { hostname: 'Marselle', since: SINCE } } }] });
+    const panel = await openTask(user);
+    expect(await within(panel).findByText(line)).toBeInTheDocument();
+  });
+
+  it('says nothing of a machine while the holder can run', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, assigneeOffline: null } }] });
+    const panel = await openTask(user);
+    await within(panel).findByText(/Checkout API/);
+    expect(within(panel).queryByText(/is offline/)).not.toBeInTheDocument();
+  });
+});

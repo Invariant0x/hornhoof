@@ -634,3 +634,19 @@ describe('renderInstructions', () => {
     }
   });
 });
+
+describe('work a department did before', () => {
+  const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+  const rendered = (role: Role) =>
+    renderInstructions(shipped, agent({ roleKey: role.id, kind: role.kind === 'head' ? 'head' : 'worker', skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+
+  /* Every department, not only Development: a marketing pilot left its work on branches nobody took into main. */
+  it('tells every role of every department to start from the branch of earlier work, and that a machine that is off stops no work kept in git', () => {
+    for (const role of shipped.roles.values()) {
+      const whole = rendered(role).whole;
+      expect(whole, role.id).toMatch(/departmentBranches[^.]*branches of [^.]*accepted and handed-in tasks not in main/);
+      expect(whole, role.id).toMatch(/starts from that branch/);
+      expect(whole, role.id).toMatch(/machine that is off stops no work kept in the repository[^.]*plan of your department is online[^.]*never tell a person the work stands because a machine is off/);
+    }
+  });
+});
