@@ -130,6 +130,7 @@ describe('nextLeaseStep with proofs', () => {
     /* Only the monotonic clock decides what came after what: the wall clock can be corrected between the two. */
     ['a proof later on the wall clock alone', { ...onTime, proof: at(1500, 1000) }, { do: 'none' }],
     ['a proof later on the monotonic clock alone', { ...onTime, proof: at(500, 1500) }, { do: 'renew', kind: 'normal', endSessions: false, sent: at(500, 1500) }],
+    ['a proof already past a lease on the wall clock', { ...onTime, proof: at(-9000, 1500) }, { do: 'none' }],
     ['10 s after the last renewal with no newer proof', { now: at(11000), last: at(10000), held, maintenance: false, proof: null }, fence('no renewal for 10 s')],
     ['10 s after the last renewal, even with a newer proof', { now: at(11000), last: at(10000), held, maintenance: false, proof: at(10500) }, fence('no renewal for 10 s')],
     ['a late tick, even with a newer proof', { now: at(9000), last: at(2000), held, maintenance: false, proof: at(8500) }, fence('a tick came 7 s after the one before')],
