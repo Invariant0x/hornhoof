@@ -382,8 +382,9 @@ export type EventView = {
 /* An employee's inbox as its window shows it. A letter the employee dealt with is read to a person. */
 export type InboxMode = 'inbox' | 'direct';
 export type LetterKind = 'message' | 'report' | 'comment' | 'assignment' | 'notification';
-export type InboxLetter = { id: string; sender: MessageParty; kind: LetterKind; source: string | null; task: { number: number; title: string | null } | null; at: string; text: string; status: 'unread' | 'read' };
-export type InboxView = { unread: number; letters: InboxLetter[]; mode: { own: InboxMode | null; inherited: InboxMode; effective: InboxMode }; canChange: boolean };
+export type InboxLetter = { id: string; sender: MessageParty; kind: LetterKind; source: string | null; task: { id: string | null; number: number; title: string | null } | null; receivedAt: string; text: string; unread: boolean };
+/* mode: the employee's own choice, or null for its department's rule (the company's for one with none). */
+export type InboxView = { unreadCount: number; total: number; letters: InboxLetter[]; more: boolean; mode: InboxMode | null; inheritedMode: InboxMode; effectiveMode: InboxMode; canChangeMode: boolean; canMarkRead: boolean };
 
 /* What the browser hears live from /api/stream. */
 export type StreamMessage =

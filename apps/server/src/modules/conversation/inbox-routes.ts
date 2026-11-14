@@ -11,13 +11,15 @@ import { agentFor, type AgentRow } from '../agents/find.js';
 import { mayChangeRules } from '../departments/approval-policy.js';
 import { agentParty, HORNHOOF, personParty, type MessageParty } from '../events/parties.js';
 import { seesTask } from '../tasks/sight.js';
-import { inboxChanged, inboxModeOf, inboxView, readByPerson, type InboxRow } from './inbox.js';
+import { inboxChanged, inboxModeOf, letterTotal, lettersPage, readByPerson, unreadCount, type InboxRow } from './inbox.js';
 import { pump } from './queue.js';
 
 const IdParams = z.strictObject({ id: z.uuid() });
 const ModeBody = z.strictObject({ mode: z.enum(INBOX_MODES).nullable() });
 const CompanyModeBody = z.strictObject({ mode: z.enum(INBOX_MODES) });
-const InboxQuery = z.object({ status: z.enum(['unread', 'read', 'all']).optional(), limit: z.coerce.number().int().min(1).max(200).optional(), before: z.uuid().optional() });
+/* A person reads the newest letters first, this many at once, and older ones a page at a time. */
+const PAGE = 50;
+const InboxQuery = z.object({ limit: z.coerce.number().int().min(1).max(200).optional(), before: z.uuid().optional() });
 const ReadBody = z.union([z.strictObject({ ids: z.array(z.uuid()).min(1).max(200) }), z.strictObject({ all: z.literal(true) })]);
 
 const NOT_YOURS = 'Only the CEO, the CEO delegate or the owner of its department changes how this employee takes its mail.';
@@ -43,12 +45,18 @@ async function sendersOf(ctx: Ctx, viewer: AgentViewer, companyId: string, rows:
   };
 }
 
-/* The title of each letter's task when this person sees that task; else its number alone. */
+/* The title of each letter's task when this person sees that task, which its link then opens; else its number alone. */
 async function titlesOf(ctx: Ctx, viewer: AgentViewer, rows: InboxRow[]): Promise<Map<string, string>> {
   const ids = [...new Set(rows.flatMap(r => (r.taskId ? [r.taskId] : [])))];
   const found = ids.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, ids)) : [];
   return new Map(found.filter(t => seesTask(viewer, t)).map(t => [t.id, t.title]));
 }
+
+const taskOf = (row: InboxRow, titles: Map<string, string>) => {
+  if (row.taskNumber === null) return null;
+  const title = row.taskId ? titles.get(row.taskId) : undefined;
+  return { id: title !== undefined ? row.taskId : null, number: row.taskNumber, title: title ?? null };
+};
 
 /* The letters as the tab shows them. What the employee dealt with is read to a person: done is the employee's own mark. */
 async function lettersFor(ctx: Ctx, me: Person, rows: InboxRow[]) {
@@ -60,10 +68,10 @@ async function lettersFor(ctx: Ctx, me: Person, rows: InboxRow[]) {
     sender: sender(row),
     kind: row.kind,
     source: row.source,
-    task: row.taskNumber !== null ? { number: row.taskNumber, title: (row.taskId && titles.get(row.taskId)) || null } : null,
-    at: row.createdAt.toISOString(),
+    task: taskOf(row, titles),
+    receivedAt: row.createdAt.toISOString(),
     text: row.text,
-    status: row.status === 'unread' ? ('unread' as const) : ('read' as const),
+    unread: row.status === 'unread',
   }));
 }
 
@@ -77,10 +85,23 @@ export function inboxRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
   app.get('/api/agents/:id/inbox', async req => {
     const { me, agent } = await agentFor(ctx, req);
-    const { status, ...rest } = InboxQuery.parse(req.query);
+    const { limit = PAGE, before } = InboxQuery.parse(req.query);
     /* Opening the inbox marks nothing: a letter stays unread for the employee until it or a person marks it. */
-    const view = await inboxView(db, agent.id, { status: status === 'read' ? 'seen' : (status ?? 'all'), ...rest });
-    return { unread: view.unread, letters: await lettersFor(ctx, me, view.letters), mode: await inboxModeOf(db, agent.id), canChange: await changesRulesOf(ctx, me, agent) };
+    const page = await lettersPage(db, agent.id, { before, limit });
+    const mode = await inboxModeOf(db, agent.id);
+    const may = await changesRulesOf(ctx, me, agent);
+    return {
+      unreadCount: await unreadCount(db, agent.id),
+      total: await letterTotal(db, agent.id),
+      letters: await lettersFor(ctx, me, page.letters),
+      more: page.more,
+      mode: mode.own,
+      inheritedMode: mode.inherited,
+      effectiveMode: mode.effective,
+      /* Who changes how its letters come marks them read too. */
+      canChangeMode: may,
+      canMarkRead: may,
+    };
   });
   app.post('/api/agents/:id/inbox/read', async req => {
     const { me, agent } = await agentFor(ctx, req);
@@ -89,7 +110,7 @@ export function inboxRoutes(app: FastifyInstance, ctx: Ctx): void {
     const unread = await readByPerson(db, agent.id, 'all' in body ? 'all' : body.ids);
     if (unread === null) throw new ApiError(404, 'not_found', 'Some of these letters are not in this employee\'s inbox.', 'letter_unknown');
     await inboxChanged(ctx, agent.id);
-    return { unread };
+    return { unreadCount: unread };
   });
   app.put('/api/agents/:id/inbox-mode', async req => {
     const { me, agent } = await agentFor(ctx, req);

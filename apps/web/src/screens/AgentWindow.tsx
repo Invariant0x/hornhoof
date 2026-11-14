@@ -333,7 +333,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* The department whose notebook a head keeps. */
   const headOf = card?.kind === 'head' ? (card.department?.id ?? null) : null;
   const keepsInbox = card !== null && card.kind !== 'assistant';
-  const unreadLetters = useInboxCount(agentId, liveId, keepsInbox ? card.inboxUnread : undefined);
+  const [unreadLetters, heardUnread] = useInboxCount(agentId, liveId, keepsInbox ? card.inboxUnread : undefined);
   const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
   const model = orchestrator ? org.orchestrator?.model : card?.model;
   const machine = orchestrator ? org.orchestrator?.machine : card?.machine;
@@ -671,7 +671,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
 
   /* The orchestrator's notebook is the company's, a head's its department's. Every employee but a person's assistant, which
      answers its owner alone, keeps an inbox. */
-  const inbox: WindowPanel = { ...framedPanel('inbox', t.inbox.title, INBOX_ICON, <Inbox agentId={agentId} liveId={liveId} hasDepartment={Boolean(card?.department)} />), count: { n: unreadLetters, label: t.inbox.titleWithCount(unreadLetters) } };
+  const inbox: WindowPanel = {
+    id: 'inbox',
+    label: t.inbox.panel,
+    icon: INBOX_ICON,
+    count: { n: unreadLetters, label: t.inbox.button(unreadLetters) },
+    render: close => <Inbox agentId={agentId} liveId={liveId} hasDepartment={Boolean(card?.department)} onClose={close} onUnread={heardUnread} />,
+  };
   const sidePanels: WindowPanel[] = [
     ...(keepsInbox ? [inbox] : []),
     ...(orchestrator || headOf ? [framedPanel('notebook', t.window.notebook, NOTEBOOK_ICON, <Notebook departmentId={orchestrator ? null : headOf} />)] : []),

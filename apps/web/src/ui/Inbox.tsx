@@ -1,25 +1,24 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
+import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
-import { useLive } from '../tasks';
-import type { InboxLetter, InboxMode, InboxView } from '../types';
-import { partyName } from './AgentMessage';
+import { useOpenWindowTask } from '../screens/AgentWindowContext';
+import type { InboxLetter, InboxMode, InboxView, MessageParty } from '../types';
+import { PanelFrame } from './SidePanels';
 
 type Choice = InboxMode | 'rule';
 const CHOICES: Choice[] = ['rule', 'inbox', 'direct'];
+/* A person sees the newest letters first, this many, and as many more each time they ask. */
+export const LETTER_PAGE = 50;
+/* The most one read brings; more come a page after the last one shown. */
+const READ_AT_ONCE = 200;
 
 export const inboxPath = (agentId: string) => `/api/agents/${agentId}/inbox`;
 
-/* The employee's inbox as the server keeps it, read again when it changes. liveId: the employee's own id, which the live
+/* How many letters are unread, for the counter on the window's bar: as the employee's card says, again, read with one letter
+   only, each time its inbox changes, and as the open inbox last heard it. liveId: the employee's own id, which the live
    messages name, also for the orchestrator's window. */
-export function useInbox(agentId: string, liveId: string | undefined, on = true) {
-  return useLive(on ? inboxPath(agentId) : null, (b: InboxView) => b, m => m.type === 'inbox' && m.agentId === liveId);
-}
-
-/* How many letters are unread, for the counter on the window's bar: as the employee's card says, and again, read with one
-   letter only, each time its inbox changes. */
-export function useInboxCount(agentId: string, liveId: string | undefined, fromCard: number | undefined): number {
+export function useInboxCount(agentId: string, liveId: string | undefined, fromCard: number | undefined): [number, (n: number) => void] {
   const [count, setCount] = useState<{ n: number; asked: number } | null>(null);
   const asked = useRef(0);
   useEffect(() => setCount(null), [agentId, fromCard]);
@@ -27,148 +26,354 @@ export function useInboxCount(agentId: string, liveId: string | undefined, fromC
     if (fromCard === undefined || m.type !== 'inbox' || m.agentId !== liveId) return;
     const n = ++asked.current;
     api.get<InboxView>(`${inboxPath(agentId)}?limit=1`).then(
-      b => setCount(was => (was && was.asked > n ? was : { n: b.unread, asked: n })),
+      b => setCount(was => (was && was.asked > n ? was : { n: b.unreadCount, asked: n })),
       () => {},
     );
   });
-  return count?.n ?? fromCard ?? 0;
+  const heard = useCallback((n: number) => setCount({ n, asked: ++asked.current }), []);
+  return [count?.n ?? fromCard ?? 0, heard];
 }
 
-const when = (language: Language, iso: string) => new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
+/* The newest letters, as many as the person asked to see, read again whenever the inbox changes. What was shown stays while
+   it is read again. Answers can come back out of order; one older than the one shown is dropped. */
+function useLetters(agentId: string, liveId: string | undefined) {
+  const path = inboxPath(agentId);
+  const [wanted, setWanted] = useState(LETTER_PAGE);
+  const [view, setView] = useState<InboxView | undefined>(undefined);
+  const [failure, setFailure] = useState<unknown>(null);
+  const [reading, setReading] = useState(false);
+  const asked = useRef(0);
 
-function modeWords(t: Messages, hasDepartment: boolean): Record<Choice, string> {
-  const m = t.inbox.mode;
-  return { rule: hasDepartment ? m.byDepartment : m.byCompany, inbox: m.inbox, direct: m.direct };
+  const read = useCallback(
+    async (count: number) => {
+      const n = ++asked.current;
+      setReading(true);
+      try {
+        const first = await api.get<InboxView>(`${path}?limit=${Math.min(count, READ_AT_ONCE)}`);
+        let { letters, more } = first;
+        while (more && letters.length < count) {
+          const next = await api.get<InboxView>(`${path}?limit=${Math.min(count - letters.length, READ_AT_ONCE)}&before=${letters.at(-1)!.id}`);
+          letters = [...letters, ...next.letters];
+          more = next.more;
+        }
+        if (n !== asked.current) return;
+        setView({ ...first, letters, more });
+        setFailure(null);
+      } catch (err) {
+        if (n === asked.current) setFailure(err);
+      } finally {
+        if (n === asked.current) setReading(false);
+      }
+    },
+    [path],
+  );
+
+  useEffect(() => {
+    setView(undefined);
+    setFailure(null);
+    setWanted(LETTER_PAGE);
+    void read(LETTER_PAGE);
+  }, [read]);
+  useStream(m => {
+    if (m.type === 'reconnected' || (m.type === 'inbox' && m.agentId === liveId)) void read(wanted);
+  });
+
+  /* What a person's mark did, as its answer says, until the inbox is read again; a read asked before it is dropped. */
+  const marked = (ids: string[] | 'all', unreadCount: number) => {
+    asked.current++;
+    setReading(false);
+    setView(v => v && { ...v, unreadCount, letters: v.letters.map(l => (ids === 'all' || ids.includes(l.id) ? { ...l, unread: false } : l)) });
+  };
+  const more = () => {
+    setWanted(wanted + LETTER_PAGE);
+    void read(wanted + LETTER_PAGE);
+  };
+  return { view, failure, reading, again: () => void read(wanted), more, marked };
+}
+
+/* When a letter came, in the person's words: the time alone today, yesterday and the time, else the day and the time. */
+export function letterTime(language: Language, iso: string, now: number): { shown: string; full: string } {
+  const at = new Date(iso);
+  const time = new Intl.DateTimeFormat(language, { hour: 'numeric', minute: '2-digit' }).format(at);
+  const full = new Intl.DateTimeFormat(language, { dateStyle: 'long', timeStyle: 'short' }).format(at);
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const ago = Math.round((day(new Date(now)) - day(at)) / 86_400_000);
+  if (ago === 0) return { shown: time, full };
+  if (ago === 1) return { shown: `${new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(-1, 'day')}, ${time}`, full };
+  return { shown: new Intl.DateTimeFormat(language, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(at), full };
+}
+
+/* Who sent a letter: a name, and in muted words what they are. */
+function senderOf(t: Messages, language: Language, p: MessageParty): { name: string; about: string | null } {
+  if (p.kind === 'hornhoof') return { name: t.window.hornhoof, about: t.inbox.system };
+  if (p.agentKind === 'orchestrator') return { name: t.window.orchestrator, about: t.window.hornhoof };
+  if (p.kind === 'agent' && p.id === null) return { name: t.window.hiddenEmployee, about: null };
+  const role = p.role?.[language];
+  const named = role && role.toLocaleLowerCase(language) !== p.name.toLocaleLowerCase(language) ? role : null;
+  const about = [named, p.department?.name[language]].filter(Boolean).join(' · ');
+  return { name: p.name, about: about || null };
+}
+
+/* A word with a hyphen, as in a double surname, keeps whole while the line can hold it. */
+function keepWhole(text: string): ReactNode {
+  return text.split(' ').map((word, i) => (
+    <Fragment key={i}>
+      {i > 0 && ' '}
+      {word.includes('-') ? <span className="nb">{word}</span> : word}
+    </Fragment>
+  ));
 }
 
 /* How letters come to the employee: by its department's rule (the company's for one with none), through the inbox or each at
-   once. Whoever may change its rules picks one, saved as it is picked; anyone else reads it in words. */
+   once. Whoever may change its rules picks one, saved as it is picked; anyone else reads it. */
 function DeliveryMode({ agentId, view, hasDepartment, onSaved }: { agentId: string; view: InboxView; hasDepartment: boolean; onSaved(): void }) {
   const t = useT();
   const uid = useId();
   /* The way just picked shows picked while it is saved, and until the inbox read again says how letters come now. */
   const [picked, setPicked] = useState<Choice | null>(null);
+  const [saving, setSaving] = useState(false);
   const saved = useRef(false);
-  const [failure, setFailure] = useState<unknown>(null);
-  const words = modeWords(t, hasDepartment);
+  const [failed, setFailed] = useState(false);
+  /* Whether the person moves through the choices by keys: WebKit shows no keyboard focus on a radio an arrow key reached. */
+  const [keys, setKeys] = useState(false);
   useEffect(() => {
     if (!saved.current) return;
     saved.current = false;
     setPicked(null);
   }, [view]);
-  const hints: Record<Choice, string> = { rule: t.inbox.mode.byRuleHint(words[view.mode.inherited]), inbox: t.inbox.mode.inboxHint, direct: t.inbox.mode.directHint };
-  const stored: Choice = view.mode.own ?? 'rule';
+  const shown: Choice = picked ?? view.mode ?? 'rule';
+  const effective = shown === 'rule' ? view.inheritedMode : shown;
+  const words = { ...t.inbox.modes, rule: hasDepartment ? t.inbox.modes.rule : t.inbox.modes.companyRule };
+  const now = t.inbox.now(t.inbox.nowMode[effective], shown === 'rule' ? t.inbox.byRule[hasDepartment ? 'department' : 'company'] : null);
 
   async function pick(choice: Choice) {
+    if (saving) return;
     setPicked(choice);
-    setFailure(null);
+    setSaving(true);
+    setFailed(false);
     saved.current = false;
     try {
       await api.put(`${inboxPath(agentId)}-mode`, { mode: choice === 'rule' ? null : choice });
       saved.current = true;
       onSaved();
-    } catch (err) {
-      setFailure(err);
+    } catch {
+      setFailed(true);
       setPicked(null);
+    } finally {
+      setSaving(false);
     }
   }
 
-  if (!view.canChange) return <p>{t.inbox.mode.is(words[view.mode.effective])}</p>;
-  const shown = picked ?? stored;
-  return (
+  const state = (
     <>
-      <fieldset className="choice">
-        <legend className="inbox-legend">{t.inbox.mode.title}</legend>
+      <p className="inbox-now">{now}</p>
+      <p className="inbox-what">{t.inbox.modeWhat[effective]}</p>
+    </>
+  );
+  if (!view.canChangeMode) {
+    return (
+      <section className="inbox-mode" aria-labelledby={`${uid}-label`}>
+        <p className="inbox-mode-label" id={`${uid}-label`}>{t.inbox.modeLabel}</p>
+        {state}
+        <p className="inbox-what">{t.inbox.readOnly}</p>
+      </section>
+    );
+  }
+  return (
+    <fieldset className="inbox-mode" aria-busy={saving} data-keys={keys || undefined} onKeyDown={() => setKeys(true)} onPointerDown={() => setKeys(false)}>
+      <legend className="inbox-mode-label">{t.inbox.modeLabel}</legend>
+      <div className="inbox-choices">
         {CHOICES.map(choice => (
-          <label key={choice} className={shown === choice ? 'on' : ''}>
-            <input type="radio" name={uid} value={choice} checked={shown === choice} disabled={picked !== null} onChange={() => void pick(choice)} aria-labelledby={`${uid}-${choice}`} aria-describedby={`${uid}-${choice}-hint`} />
-            <b id={`${uid}-${choice}`}>{words[choice]}</b>
-            <span id={`${uid}-${choice}-hint`}>{hints[choice]}</span>
+          <label key={choice} className={shown === choice ? 'on' : undefined}>
+            <input type="radio" name={uid} value={choice} checked={shown === choice} onChange={() => void pick(choice)} />
+            <span className="inbox-dot" aria-hidden="true" />
+            <span>{words[choice]}</span>
           </label>
         ))}
-      </fieldset>
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-    </>
+      </div>
+      <div aria-live="polite">{state}</div>
+      {saving && <p className="inbox-what" role="status">{t.inbox.saving}</p>}
+      {failed && <p className="inbox-mark-err" role="alert">{t.inbox.modeFailed}</p>}
+    </fieldset>
   );
 }
 
-/* One letter: what it is and who sent it, its department, task and time, and its whole text. Reading it here marks
-   nothing; only the person's button does. */
-function Letter({ letter, canMark, busy, onMark }: { letter: InboxLetter; canMark: boolean; busy: boolean; onMark(): void }) {
+/* One letter: who sent it, what it is, when it came and whether it is read, its task and its first two lines; the rest opens
+   in place. Opening it marks nothing; only the person's button does. */
+function Letter({ letter, canMark, failed, onMark }: { letter: InboxLetter; canMark: boolean; failed: boolean; onMark(): void }) {
   const t = useT();
   const { language } = useLanguage();
-  const who = partyName(t, language, letter.sender);
-  const source = letter.kind === 'notification' && letter.source ? t.notificationSources[letter.source as keyof Messages['notificationSources']] : undefined;
-  const meta = [letter.sender.department?.name[language], source, letter.task && t.inbox.onTask(letter.task.number, letter.task.title), when(language, letter.at)].filter(Boolean).join(' · ');
-  const unread = letter.status === 'unread';
+  const openTask = useOpenWindowTask();
+  const uid = useId();
+  const [open, setOpen] = useState(false);
+  const { name, about } = senderOf(t, language, letter.sender);
+  const when = letterTime(language, letter.receivedAt, Date.now());
+  const lines = letter.text.split('\n');
+  const long = lines.length > 2;
+  const task = letter.task;
+  const taskWords = task && (
+    <>
+      <b>#{task.number}</b>
+      {task.title && <> {task.title}</>}
+    </>
+  );
   return (
-    <li className={`entry${unread ? ' unread' : ''}`}>
+    <li className={`entry${letter.unread ? ' unread' : ''}`} aria-labelledby={`${uid}-from`} aria-describedby={`${uid}-state`}>
       <div className="entry-main">
-        <b>{t.inbox.letter(t.inbox.kinds[letter.kind], who)}</b>
-        <small className="entry-meta">{meta}</small>
-        {unread && <span className="badge inbox-unread">{t.inbox.unread}</span>}
-        <p className="inbox-text">{letter.text}</p>
+        <p className="inbox-from" id={`${uid}-from`}>
+          <b>{keepWhole(name)}</b>
+          {about && <span>{keepWhole(about)}</span>}
+        </p>
+        <p className="inbox-meta">
+          <span className="inbox-kind">{t.inbox.kinds[letter.kind]}</span>
+          <time dateTime={letter.receivedAt} title={when.full}>{when.shown}</time>
+          <span className={`inbox-state ${letter.unread ? 'new' : 'old'}`} id={`${uid}-state`}>
+            <i aria-hidden="true" />
+            {letter.unread ? t.inbox.unread : t.inbox.read}
+          </span>
+        </p>
+        {task && (task.id && openTask ? (
+          <button className="t-link" type="button" onClick={e => openTask(task.id!, e.currentTarget)}>{taskWords}</button>
+        ) : (
+          <p className="inbox-task">{taskWords}</p>
+        ))}
+        <p className="inbox-text" id={`${uid}-text`}>{long && !open ? lines.slice(0, 2).join('\n') : letter.text}</p>
+        {long && !open && <p className="inbox-fold">{t.inbox.more(lines.length - 2)}</p>}
       </div>
-      {unread && canMark && (
-        <div className="entry-actions" role="group" aria-label={t.inbox.letter(t.inbox.kinds[letter.kind], who)}>
-          <button className="act" type="button" aria-label={t.inbox.markReadOf(who)} disabled={busy} onClick={onMark}>
-            {t.inbox.markRead}
-          </button>
+      {failed && <p className="inbox-mark-err" role="alert">{t.inbox.markFailed}</p>}
+      {(long || (letter.unread && canMark)) && (
+        <div className="entry-actions">
+          {long && (
+            <button className="btn ghost" type="button" aria-expanded={open} aria-controls={`${uid}-text`} aria-label={open ? t.inbox.foldOf(name) : t.inbox.openOf(name)} onClick={() => setOpen(!open)}>
+              {open ? t.inbox.fold : t.inbox.open}
+            </button>
+          )}
+          {letter.unread && canMark && (
+            <button className="btn ghost" type="button" aria-label={t.inbox.markOneOf(name)} onClick={onMark}>
+              {t.inbox.markOne}
+            </button>
+          )}
         </div>
       )}
     </li>
   );
 }
 
-/* The employee's inbox in its window: every letter, newest last, with the unread ones marked, and under them how its letters
-   come.
-   The CEO, the CEO delegate and the owner of its department mark letters read and change how they come. */
-export function Inbox({ agentId, liveId, hasDepartment }: { agentId: string; liveId: string | undefined; hasDepartment: boolean }) {
+function ListHead({ children }: { children?: ReactNode }) {
   const t = useT();
-  const { data, failure, load } = useInbox(agentId, liveId);
-  const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<unknown>(null);
+  return (
+    <div className="inbox-sum">
+      <h4>{t.inbox.title}</h4>
+      {children}
+    </div>
+  );
+}
 
-  async function mark(body: { ids: string[] } | { all: true }) {
-    setBusy(true);
-    setRefused(null);
+/* The employee's inbox, a panel of its window: how its letters come, then every letter, newest first, with the unread ones
+   marked. The CEO, the CEO delegate and whoever runs its department change how they come and mark them read. onUnread hears
+   how many are unread, each time the panel learns it. */
+export function Inbox({ agentId, liveId, hasDepartment, onClose, onUnread }: { agentId: string; liveId: string | undefined; hasDepartment: boolean; onClose(): void; onUnread?(n: number): void }) {
+  const t = useT();
+  const { view, failure, reading, again, more, marked } = useLetters(agentId, liveId);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [failed, setFailed] = useState<string | 'all' | null>(null);
+  const unread = view?.unreadCount;
+  useEffect(() => {
+    if (unread !== undefined) onUnread?.(unread);
+  }, [unread, onUnread]);
+
+  async function mark(which: string[] | 'all') {
+    setFailed(null);
     try {
-      await api.post(`${inboxPath(agentId)}/read`, body);
-      load();
-    } catch (err) {
-      setRefused(err);
-    } finally {
-      setBusy(false);
+      const { unreadCount } = await api.post<{ unreadCount: number }>(`${inboxPath(agentId)}/read`, which === 'all' ? { all: true } : { ids: which });
+      marked(which, unreadCount);
+      heading.current?.focus();
+    } catch {
+      setFailed(which === 'all' ? 'all' : which[0]!);
     }
   }
 
-  const loading = data === undefined && !failure;
-  return (
-    <section className="inbox" aria-label={t.inbox.title} aria-busy={busy || loading}>
-      <p className="muted">{t.inbox.intro}</p>
-      {loading && <p className="muted">{t.inbox.loading}</p>}
-      {failure ? (
-        <div className="notebook-unread">
-          <p className="error" role="alert">{t.inbox.unreadLoad} {errorText(t, failure)}</p>
-          <button className="btn small ghost" type="button" onClick={load}>{t.app.tryAgain}</button>
+  const loading = view === undefined && failure === null;
+  let list: ReactNode;
+  if (loading) {
+    list = (
+      <>
+        <ListHead />
+        <p className="inbox-status" role="status">
+          <span className="spinner" aria-hidden="true" />
+          {t.inbox.loading}
+        </p>
+        <div className="inbox-skel" aria-hidden="true">
+          <i />
+          <i />
+          <i />
         </div>
-      ) : null}
-      {data && data.letters.length > 0 && <p className="muted">{t.inbox.openingKeeps}</p>}
-      {data && data.unread > 0 && (
-        <div className="form-foot inbox-foot">
-          <span className="inbox-count" role="status">{t.inbox.unreadCount(data.unread)}</span>
-          {data.canChange && <button className="btn" type="button" disabled={busy} onClick={() => void mark({ all: true })}>{t.inbox.markAllRead}</button>}
+      </>
+    );
+  } else if (view === undefined) {
+    list = (
+      <>
+        <ListHead />
+        <Unread onRetry={again} />
+      </>
+    );
+  } else if (!view.letters.length) {
+    list = (
+      <>
+        <ListHead />
+        <div className="inbox-empty">
+          <b>{t.inbox.emptyHead}</b>
+          <p>{t.inbox.emptyText}</p>
         </div>
-      )}
-      {busy && <p className="muted" role="status">{t.inbox.marking}</p>}
-      {refused !== null && <p className="error" role="alert">{errorText(t, refused)}</p>}
-      {data && !data.letters.length && <p className="muted">{t.inbox.empty}</p>}
-      {data && data.letters.length > 0 && (
+      </>
+    );
+  } else {
+    list = (
+      <>
+        <div className="inbox-sum">
+          <div className="inbox-sum-text">
+            <h4 ref={heading} tabIndex={-1}>{t.inbox.title}</h4>
+            <p role="status">{view.unreadCount ? t.inbox.sumUnread(view.unreadCount, view.total) : t.inbox.sumAll(view.total)}</p>
+          </div>
+          {view.canMarkRead && view.unreadCount > 0 && (
+            <div className="entry-actions">
+              <button className="btn ghost" type="button" onClick={() => void mark('all')}>{t.inbox.markAll}</button>
+            </div>
+          )}
+        </div>
+        {failed === 'all' && <p className="inbox-mark-err" role="alert">{t.inbox.markAllFailed}</p>}
         <ul className="entries" aria-label={t.inbox.title}>
-          {data.letters.map(letter => <Letter key={letter.id} letter={letter} canMark={data.canChange} busy={busy} onMark={() => void mark({ ids: [letter.id] })} />)}
+          {view.letters.map(letter => (
+            <Letter key={letter.id} letter={letter} canMark={view.canMarkRead} failed={failed === letter.id && letter.unread} onMark={() => void mark([letter.id])} />
+          ))}
         </ul>
-      )}
-      {data && <DeliveryMode agentId={agentId} view={data} hasDepartment={hasDepartment} onSaved={load} />}
-    </section>
+        {failure !== null && <Unread onRetry={again} />}
+        {view.more && failure === null && (
+          <div className="entry-actions">
+            <button className="btn ghost" type="button" disabled={reading} onClick={more}>{t.inbox.showMore}</button>
+          </div>
+        )}
+      </>
+    );
+  }
+  return (
+    <PanelFrame label={t.inbox.panel} busy={loading} kind="inbox" onClose={onClose}>
+      {view && <DeliveryMode agentId={agentId} view={view} hasDepartment={hasDepartment} onSaved={again} />}
+      {list}
+    </PanelFrame>
+  );
+}
+
+function Unread({ onRetry }: { onRetry(): void }) {
+  const t = useT();
+  return (
+    <div className="alert inbox-alert" role="alert">
+      <p>
+        <b>{t.inbox.errorHead}</b> {t.inbox.errorText}
+      </p>
+      <div className="entry-actions">
+        <button className="btn" type="button" onClick={onRetry}>{t.inbox.retry}</button>
+      </div>
+    </div>
   );
 }

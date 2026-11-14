@@ -177,6 +177,23 @@ export async function inboxView(db: Reader, agentId: string, filter: InboxFilter
   return { unread: await unreadCount(db, agentId), letters: rows.reverse() };
 }
 
+/* A page of the employee's letters as a person reads them, newest first, older than the letter `before` names; more: whether
+   older ones follow. */
+export async function lettersPage(db: Reader, agentId: string, { before, limit }: { before?: string; limit: number }): Promise<{ letters: InboxRow[]; more: boolean }> {
+  const where: (SQL | undefined)[] = [eq(agentInbox.agentId, agentId)];
+  if (before) {
+    const [cursor] = await db.select({ seq: agentInbox.seq }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, before)));
+    if (cursor) where.push(lt(agentInbox.seq, cursor.seq));
+  }
+  const rows = await db.select().from(agentInbox).where(and(...where)).orderBy(desc(agentInbox.seq)).limit(limit + 1);
+  return { letters: rows.slice(0, limit), more: rows.length > limit };
+}
+
+export async function letterTotal(db: Reader, agentId: string): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(agentInbox).where(eq(agentInbox.agentId, agentId));
+  return row?.n ?? 0;
+}
+
 /* How many of the employee's letters nobody marked yet. */
 export async function unreadCount(db: Reader, agentId: string): Promise<number> {
   const [row] = await db.select({ n: count() }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.status, 'unread')));

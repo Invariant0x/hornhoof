@@ -26,31 +26,55 @@ async function openList(user: ReturnType<typeof userEvent.setup>, name: string) 
 }
 
 describe("an employee's inbox in its window", () => {
-  it('counts the unread letters on its icon, says so in its name, and opens the letters', async () => {
-    const view = { unread: 3, letters: [], mode: { own: null, inherited: 'inbox', effective: 'inbox' }, canChange: true };
-    const stream = fakeStream();
+  const LETTER = { id: 'l1', sender: { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null }, kind: 'notification', source: 'tests', task: null, receivedAt: '2030-01-01T08:00:00Z', text: 'The run ended.', unread: true };
+  const VIEW = { unreadCount: 3, total: 3, letters: [], more: false, mode: null, inheritedMode: 'inbox', effectiveMode: 'inbox', canChangeMode: true, canMarkRead: true };
+
+  async function openBruno(routes: Record<string, unknown>) {
     const calls = mockApi({
       'GET /api/org': [200, DEV_ORG],
       'GET /api/requests': [200, decisions([])],
       'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents: [{ ...RUNNING_AGENTS[0]!, busy: false }] }] }],
-      'GET /api/agents/b1': [200, { ...CARD, inboxUnread: 3 }],
       'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
-      'GET /api/agents/b1/inbox?limit=1': [200, { ...view, unread: 4 }],
-      'GET /api/agents/b1/inbox': [200, { ...view, letters: [{ id: 'l1', sender: { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null }, kind: 'notification', source: 'tests', task: null, at: '2030-01-01T08:00:00Z', text: 'The run ended.', status: 'unread' }] }],
+      ...(routes as Record<string, [number, unknown]>),
     });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await openList(user, 'Subscriptions');
     await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
-    const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
-    const icon = await within(window).findByRole('button', { name: 'Inbox, 3 unread' });
+    return { calls, user, window: await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' }) };
+  }
+
+  it('counts the unread letters beside its icon, says so in its name, and opens the letters', async () => {
+    const stream = fakeStream();
+    const { calls, user, window } = await openBruno({
+      'GET /api/agents/b1': [200, { ...CARD, inboxUnread: 3 }],
+      'GET /api/agents/b1/inbox?limit=1': [200, { ...VIEW, unreadCount: 4 }],
+      'GET /api/agents/b1/inbox?limit=50': [200, { ...VIEW, unreadCount: 1, total: 1, letters: [LETTER] }],
+    });
+    const icon = await within(window).findByRole('button', { name: 'Inbox: 3 unread' });
     expect(icon).toHaveTextContent('3');
+    expect(icon).toHaveAttribute('title', 'Inbox: 3 unread');
     expect(calls.filter(c => c.path === '/api/agents/b1/inbox?limit=1')).toEqual([]);
     stream.send({ type: 'inbox', agentId: 'b1' });
-    expect(await within(window).findByRole('button', { name: 'Inbox, 4 unread' })).toHaveTextContent('4');
-    await user.click(within(window).getByRole('button', { name: 'Inbox, 4 unread' }));
+    expect(await within(window).findByRole('button', { name: 'Inbox: 4 unread' })).toHaveTextContent('4');
+    await user.click(within(window).getByRole('button', { name: 'Inbox: 4 unread' }));
     expect(await within(window).findByText('The run ended.')).toBeInTheDocument();
+    /* The open inbox tells the bar what it read. */
+    expect(await within(window).findByRole('button', { name: 'Inbox: 1 unread' })).toHaveTextContent('1');
     expect(calls.filter(c => c.path.startsWith('/api/agents/b1/inbox') && c.method !== 'GET')).toEqual([]);
+  });
+
+  it('shows 99+ past 99, and no count once all are read', async () => {
+    const stream = fakeStream();
+    const { window } = await openBruno({
+      'GET /api/agents/b1': [200, { ...CARD, inboxUnread: 150 }],
+      'GET /api/agents/b1/inbox?limit=1': [200, { ...VIEW, unreadCount: 0 }],
+    });
+    expect(await within(window).findByRole('button', { name: 'Inbox: 150 unread' })).toHaveTextContent('99+');
+    stream.send({ type: 'inbox', agentId: 'b1' });
+    const read = await within(window).findByRole('button', { name: 'Inbox: all read' });
+    expect(read).toHaveTextContent('');
+    expect(read.querySelector('.panel-count')).toBeNull();
   });
 });
 

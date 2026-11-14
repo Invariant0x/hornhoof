@@ -4,7 +4,7 @@ import { useT } from '../i18n';
 import type { AgentCardView, WaitingRequest } from '../types';
 import { SidePanelRow, usePanelsCover, useSidePanels, type SidePanel, type WindowPanel } from '../ui/SidePanels';
 import { TaskPanel } from '../ui/TaskPanel';
-import { useOpenAgent } from './AgentWindowContext';
+import { useOpenAgent, WindowTaskContext } from './AgentWindowContext';
 
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged(): void };
 type Props = Waiting & {
@@ -32,14 +32,23 @@ const BACK_ICON = 'M15 6l-6 6 6 6';
 function TaskToggle({ currentId, open, onToggle, panelsId }: { currentId: string | null; open: boolean; onToggle(opener: HTMLElement): void; panelsId: string }) {
   const t = useT();
   const [label, other] = currentId ? [t.window.task, t.window.noTask] : [t.window.noTask, t.window.task];
-  return <button className="btn small ghost agent-task-toggle" data-other={other} type="button" disabled={!currentId} aria-disabled={!currentId} aria-expanded={open} aria-controls={panelsId} title={label} onClick={e => onToggle(e.currentTarget)}>{label}</button>;
+  return <button className="btn small ghost agent-task-toggle" data-other={other} data-short={t.window.task} type="button" disabled={!currentId} aria-disabled={!currentId} aria-expanded={open} aria-controls={panelsId} aria-label={label} title={label} onClick={e => onToggle(e.currentTarget)}><span>{label}</span></button>;
 }
 
-/* A panel's icon in the bar; one that counts what waits in it shows the number on the icon and says it in its name. */
+/* A panel's icon in the bar. One that counts what waits in it says the count in its name, and shows it beside the icon, or on
+   its corner on a phone; past 99 it shows 99+. */
 function PanelToggle({ panel, open, onToggle, panelsId }: { panel: WindowPanel; open: boolean; onToggle(opener: HTMLElement): void; panelsId: string }) {
   const n = panel.count?.n ?? 0;
-  const label = n ? panel.count!.label : panel.label;
-  return <button type="button" className={n ? 'has-count' : undefined} aria-label={label} title={label} aria-expanded={open} aria-controls={panelsId} onClick={e => onToggle(e.currentTarget)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={panel.icon} /></svg>{n ? <span className="nav-count panel-count" aria-hidden="true">{n}</span> : null}</button>;
+  const label = panel.count?.label ?? panel.label;
+  return (
+    <button type="button" className={panel.count ? 'counts' : undefined} data-panel={panel.id} aria-label={label} title={label} aria-expanded={open} aria-controls={panelsId} onClick={e => onToggle(e.currentTarget)}>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d={panel.icon} />
+      </svg>
+      {/* The number reads left to right in any language; the count itself stands where the page's direction ends. */}
+      {n > 0 && <span className="nav-count panel-count" aria-hidden="true"><span dir="ltr">{n > 99 ? '99+' : n}</span></span>}
+    </button>
+  );
 }
 
 const windowClasses = (terminal: boolean, withPanels: boolean, full: boolean): string => ['orch', terminal && 'term', withPanels && 'with-panels', full && 'fullscreen'].filter(Boolean).join(' ');
@@ -68,7 +77,7 @@ function useTaskPanel(currentId: string | null, { requests, onRequestsChanged }:
   const panels: SidePanel[] = taskId
     ? [{ id: TASK_PANEL, render: close => <TaskPanel key={taskId} taskId={taskId} active={false} onClose={close} onOpen={setTaskId} requests={requests.filter(r => r.task.id === taskId)} onRequestsChanged={onRequestsChanged} onOpenAgent={openAgent} /> }]
     : [];
-  return { panels, showCurrent: () => setTaskId(currentId) };
+  return { panels, showCurrent: () => setTaskId(currentId), show: setTaskId };
 }
 
 /* The focus goes to the strip when the person minimized this window; a window another one pushed aside leaves it to that one.
@@ -113,6 +122,11 @@ export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, 
   const conversation = useRef<HTMLDivElement>(null);
   const covered = usePanelsCover(stack.row, conversation, newest !== undefined);
   const toStrip = useWindowFocus(minimized, box, restoreButton);
+  /* A task a panel names opens in the task panel, as the task's own links do. */
+  const openTask = (id: string, opener: HTMLElement) => {
+    task.show(id);
+    stack.open(TASK_PANEL, opener);
+  };
   const classes = windowClasses(terminal, newest !== undefined, full);
   return <>
     <aside ref={box} className={classes} aria-label={title} tabIndex={-1} hidden={minimized}>
@@ -125,7 +139,9 @@ export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, 
         <TaskToggle currentId={currentId} open={stack.isOpen(TASK_PANEL)} onToggle={opener => { task.showCurrent(); stack.toggle(TASK_PANEL, opener); }} panelsId={panelsId} />
       </div>
       <div className="agent-workspace">
-        <SidePanelRow stack={stack} id={panelsId} />
+        <WindowTaskContext.Provider value={openTask}>
+          <SidePanelRow stack={stack} id={panelsId} />
+        </WindowTaskContext.Provider>
         <div ref={conversation} className="agent-conversation">{children}</div>
       </div>
     </aside>
