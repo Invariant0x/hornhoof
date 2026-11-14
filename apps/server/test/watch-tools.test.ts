@@ -421,9 +421,11 @@ describe('tools a skill grants', () => {
        its end. */
     const second = 'ghp_' + 'stopTurnSecondToken0'.repeat(3);
     const output = `Asked about ${second} ` + 'y'.repeat(390);
-    const [asked, stuck] = await db.insert(jobs).values([
+    const [asked, stuck, round] = await db.insert(jobs).values([
       { ...turn, status: 'done' as const, result: `token=${GITHUB_TOKEN} path=${HOME}`, tail: '', startedAt: ago(30), finishedAt: ago(29) },
       { ...turn, status: 'done' as const, result: '', tail: output, startedAt: ago(20), finishedAt: ago(19) },
+      /* A turn on no task is read as its agent's department may. */
+      { ...turn, taskId: null, status: 'done' as const, result: '', tail: '', startedAt: ago(25), finishedAt: ago(23) },
     ]).returning();
     await db.insert(requests).values([
       { companyId: acme.id, taskId: task.id, agentId: bruno.id, jobId: asked!.id, kind: 'question', text: `May I push with ${GITHUB_TOKEN} from ${HOME} now?`, status: 'answered', answer: `No, keep /Users/fixture/keys to yourself.`, createdAt: ago(28) },
@@ -432,6 +434,7 @@ describe('tools a skill grants', () => {
     await db.insert(agentEvents).values([
       { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool_result', data: { ok: false, summary: `bash: line 1: ps: command not found; could not read ${HOME} with ${GITHUB_TOKEN}` }, createdAt: ago(27) },
       { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool', data: { name: 'Bash', input: `pip install --user pyyaml --target ${HOME} --token ${GITHUB_TOKEN}` }, createdAt: ago(26) },
+      { companyId: acme.id, agentId: bruno.id, jobId: round!.id, kind: 'tool_result', data: { ok: false, summary: `zsh:1: command not found: jq while reading ${HOME}` }, createdAt: ago(24) },
       /* CUT of 120 falls inside the password of the index address, which a cut before cleaning would leave without its @. */
       { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool', data: { name: 'Bash', input: `pip install --index-url https://bruno:${'p'.repeat(60)}@pypi.example.com/simple ` + 'x'.repeat(20) + ' pyyaml' }, createdAt: ago(25) },
     ]);
@@ -470,7 +473,10 @@ describe('tools a skill grants', () => {
       expect.objectContaining({ text: 'Needs help.', lastTurn: ' [hidden] ' + 'y'.repeat(390) }),
       expect.objectContaining({ text: 'May I push with [hidden] from [hidden] now?', answer: 'No, keep [hidden] to yourself.', lastTurn: 'token=[hidden] path=[hidden]' }),
     ]);
-    expect(out.missing).toEqual([expect.objectContaining({ what: 'ps', example: 'bash: line 1: ps: command not found; could not read [hidden] with [hidden]' })]);
+    expect(out.missing).toEqual([
+      expect.objectContaining({ what: 'jq', example: 'zsh:1: command not found: jq while reading [hidden]', task: null }),
+      expect.objectContaining({ what: 'ps', example: 'bash: line 1: ps: command not found; could not read [hidden] with [hidden]', task: c.task.number }),
+    ]);
     expect(out.installed.map(i => i.command).sort()).toEqual([
       'pip install --index-url https://[hidden]@pypi.example.com/simple ' + 'x'.repeat(20) + ' pyyaml',
       'pip install --user pyyaml --target [hidden] --token [hidden]',
@@ -492,7 +498,10 @@ describe('tools a skill grants', () => {
       expect.objectContaining({ text: 'Needs help.', lastTurn: output.slice(-400) }),
       expect.objectContaining({ text: `May I push with ${GITHUB_TOKEN} from ${HOME} now?`, answer: 'No, keep /Users/fixture/keys to yourself.', lastTurn: `token=${GITHUB_TOKEN} path=${HOME}` }),
     ]);
-    expect(out.missing).toEqual([expect.objectContaining({ what: 'ps', example: `bash: line 1: ps: command not found; could not read ${HOME} with ${GITHUB_TOKEN}` })]);
+    expect(out.missing).toEqual([
+      expect.objectContaining({ what: 'jq', example: `zsh:1: command not found: jq while reading ${HOME}`, task: null }),
+      expect.objectContaining({ what: 'ps', example: `bash: line 1: ps: command not found; could not read ${HOME} with ${GITHUB_TOKEN}`, task: c.task.number }),
+    ]);
     expect(out.installed.map(i => i.command)).toContain(`pip install --user pyyaml --target ${HOME} --token ${GITHUB_TOKEN}`.slice(0, 120));
   });
 

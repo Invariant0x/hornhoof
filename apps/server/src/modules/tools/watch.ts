@@ -26,6 +26,8 @@ import { watchedTasks } from './watch-tasks.js';
 type Reader = Parameters<typeof agentSeesTask>[0];
 type TaskSight = Parameters<typeof agentSeesTask>[1];
 type Failure = { kind: string; text: string } | null;
+/* What of a task decides whether a reader may open it, read beside its work. */
+const SIGHT = { status: tasks.status, departmentId: tasks.departmentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId };
 
 /* Who reads failures, to know whose work it may open. */
 const readerOf = async (ctx: Ctx, agentId: string): Promise<Reader | undefined> =>
@@ -44,6 +46,16 @@ function opensTurn(reader: Reader | undefined, task: TaskSight | null, agent: { 
    before any cut so that no part of either is left at its edge. */
 const shown = (text: string, open: boolean): string => (open ? text : cleanDiagnostic(text));
 
+/* Every word of a line as a reader who may not open its work gets it, down into what a node reported, its long words
+   already cleaned before their cut. */
+function cleanedAll<T>(value: T): T {
+  if (typeof value === 'string') return cleanDiagnostic(value) as T;
+  if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype)
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, cleanedAll(inner)])) as T;
+  return value;
+}
+const shownAll = <T>(value: T, open: boolean): T => (open ? value : cleanedAll(value));
+
 /* Why a turn failed as Hornhoof recorded it, beside the end of its output, which a program that never wrote leaves empty. */
 function failureReason(failure: Failure, result: string | null, open: boolean): string | null {
   const reason = failure?.text ? `${failure.kind}: ${shown(failure.text, open)}` : shown(result?.trim() ?? '', open);
@@ -57,8 +69,19 @@ function failedLine<T extends FailedRow>(row: T, reader: Reader | undefined, nam
   /* What decides the reader's view stays out of what it reads. */
   const { agentId, departmentId, tail, failure, result, sight, ...line } = row;
   const open = opensTurn(reader, sight, { id: agentId, departmentId });
-  return { ...line, department: (departmentId && names.get(departmentId)) || null, tail: shown(tail, open).slice(-TAIL), reason: failureReason(failure, result, open) };
+  return shownAll({ ...line, department: (departmentId && names.get(departmentId)) || null, tail: shown(tail, open).slice(-TAIL), reason: failureReason(failure, result, open) }, open);
 }
+
+type SeenRow = { agentId: string; departmentId: string | null; sight: TaskSight | null; agent: string; text: string; at: Date; task: number | null };
+
+/* Tool calls and results as a reader gets them, cleaned before anything is read out of them or cut, so that what was
+   missing, the line that said so and what was installed come from cleaned words. */
+const seenBy = (rows: SeenRow[], reader: Reader | undefined) =>
+  rows.map(({ agentId, departmentId, sight, ...row }) => ({ ...row, text: shown(row.text, opensTurn(reader, sight, { id: agentId, departmentId })) }));
+
+/* How the turn a holder stopped from ended, the end of its output, cleaned before its cut. */
+const turnEnd = (last: { result: string | null; tail: string } | undefined, open: boolean): string | null =>
+  last ? shown(last.result?.trim() || last.tail, open).slice(-TAIL) : null;
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
 type Agent = typeof agents.$inferSelect;
@@ -248,8 +271,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         const names = await deptNames();
         const reader = await readerOf(ctx, job.agentId);
         const failed = await db
-          .select({ agent: agents.name, agentId: jobs.agentId, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, failure: jobs.failure, result: jobs.result, task: tasks.number, interruption: jobs.interruption,
-            sight: { status: tasks.status, departmentId: tasks.departmentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId } })
+          .select({ agent: agents.name, agentId: jobs.agentId, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, failure: jobs.failure, result: jobs.result, task: tasks.number, interruption: jobs.interruption, sight: SIGHT })
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
@@ -257,8 +279,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
         const stuck = await db
-          .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt,
-            sight: { status: tasks.status, departmentId: tasks.departmentId, assigneeAgentId: tasks.assigneeAgentId, executorAgentId: tasks.executorAgentId } })
+          .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt, sight: SIGHT })
           .from(tasks)
           .leftJoin(agents, eq(agents.id, tasks.assigneeAgentId))
           .where(and(eq(tasks.companyId, job.companyId), eq(tasks.status, 'blocked')))
@@ -282,23 +303,25 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             : [];
           /* A turn that went out inside another one ended as that one did. */
           const lastTurn = holderId && last?.result === GONE_ALONG && last.startedAt ? await carrierOf(ctx, { agentId: holderId, startedAt: last.startedAt }) : last && { status: last.status, error: last.error, at: last.at };
-          blocked.push({ ...task, ...heldWords(said, opensTask(reader, sight)), lastTurn: lastTurn ?? null });
+          const open = opensTask(reader, sight);
+          blocked.push(shownAll({ ...task, ...heldWords(said, open), lastTurn: lastTurn ?? null }, open));
         }
         const since = hoursAgo(hours);
         const seen = (kind: 'tool' | 'tool_result', field: string, hint: string) =>
           db
-            .select({ agent: agents.name, text: sql<string>`${agentEvents.data}->>${field}`, at: agentEvents.createdAt, task: tasks.number })
+            .select({ agentId: agents.id, departmentId: agents.departmentId, agent: agents.name, text: sql<string>`${agentEvents.data}->>${field}`, at: agentEvents.createdAt, task: tasks.number, sight: SIGHT })
             .from(agentEvents)
             .innerJoin(agents, eq(agents.id, agentEvents.agentId))
             .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
             .leftJoin(tasks, eq(tasks.id, jobs.taskId))
             .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, kind), gte(agentEvents.createdAt, since), sql`${agentEvents.data}->>${field} ~* ${hint}`))
             .orderBy(desc(agentEvents.seq))
-            .limit(STUMBLES_MAX);
+            .limit(STUMBLES_MAX)
+            .then(rows => seenBy(rows, reader));
         const missing = tally<Missing>((await seen('tool_result', 'summary', MISSING_HINT)).flatMap(r => missingIn(r.text).map(m => ({ ...r, key: `${m.kind} ${m.what}`, value: m, example: lineOf(r.text, m.what) }))));
         const installed = tally<string>((await seen('tool', 'input', INSTALL_HINT)).flatMap(r => installsIn(r.text).map(command => ({ ...r, key: command, value: command }))));
         const stopped = await db
-          .select({ kind: requests.kind, agentId: requests.agentId, taskId: requests.taskId, agent: agents.name, task: tasks.number, text: requests.text, status: requests.status, answer: requests.answer, at: requests.createdAt })
+          .select({ kind: requests.kind, agentId: requests.agentId, taskId: requests.taskId, agent: agents.name, task: tasks.number, text: requests.text, status: requests.status, answer: requests.answer, at: requests.createdAt, sight: SIGHT })
           .from(requests)
           .innerJoin(agents, eq(agents.id, requests.agentId))
           .innerJoin(tasks, eq(tasks.id, requests.taskId))
@@ -306,7 +329,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .orderBy(desc(requests.createdAt))
           .limit(STOPS_MAX);
         const stops = [];
-        for (const { agentId, taskId, at, ...stop } of stopped) {
+        for (const { agentId, taskId, at, sight, ...stop } of stopped) {
           /* The turn it asked from, or the last one it ended without moving the task. */
           const [last] = await db
             .select({ result: jobs.result, tail: jobs.tail })
@@ -314,7 +337,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), inArray(jobs.status, ['done', 'failed']), sql`coalesce(${jobs.startedAt}, ${jobs.createdAt}) <= ${at}`))
             .orderBy(desc(sql`coalesce(${jobs.startedAt}, ${jobs.createdAt})`))
             .limit(1);
-          stops.push({ ...stop, lastTurn: last ? (last.result?.trim() || last.tail).slice(-TAIL) : null });
+          const open = opensTask(reader, sight);
+          stops.push(shownAll({ ...stop, lastTurn: turnEnd(last, open) }, open));
         }
         return json({
           failed: failed.map(row => failedLine(row, reader, names)),
