@@ -9,7 +9,8 @@ import type { TLSSocket } from 'node:tls';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
 import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
@@ -22,7 +23,7 @@ import { CRL_FILE } from '../src/modules/keeper/peer-link.js';
 import { saveLink } from '../src/modules/link/link.js';
 import { linkClientId } from '../src/modules/link/client.js';
 import { Relay } from '../src/modules/link/relay.js';
-import type { SyncCatalog } from '../src/modules/keeper/sync.js';
+import type { SyncCatalog, SyncControllerOptions } from '../src/modules/keeper/sync.js';
 import { fakeRelay } from './fake-relay.js';
 import { peerConfigFor, type PeerServices } from '../src/modules/link/peer-client.js';
 import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
@@ -718,5 +719,108 @@ describe('the peer link in the keeper', () => {
     await keeper.peerPorts();
     expect(existsSync(join(dir, CRL_FILE))).toBe(true);
     expect(statSync(join(dir, CRL_FILE)).mode & 0o777).toBe(0o600);
+  });
+
+  it('keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes', async () => {
+    const c = await company(true);
+    const target = await listening(c.app);
+    const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
+    const { catalog } = syncCatalog(copy);
+    const failOnce = { on: false };
+    const db = new Proxy(c.db, {
+      get: (obj, prop, receiver) => {
+        if (prop !== 'select') return Reflect.get(obj, prop, receiver) as unknown;
+        return (...args: unknown[]) => {
+          const query = (obj.select as (...a: unknown[]) => { from: (table: unknown) => unknown })(...args);
+          return new Proxy(query, {
+            get: (q, name, qReceiver) =>
+              name !== 'from'
+                ? (Reflect.get(q, name, qReceiver) as unknown)
+                : (table: unknown) => {
+                    if (failOnce.on && table === publicLinks) {
+                      failOnce.on = false;
+                      throw new Error('statement timeout');
+                    }
+                    return q.from(table);
+                  },
+          });
+        };
+      },
+    }) as Db;
+
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
+    const startMono = performance.now();
+    const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
+    let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
+    /* Every six virtual minutes the path through hornhoof.org gives no answer for roughly three seconds. */
+    const relayClient: SyncControllerOptions['relay'] = {
+      route: async () => {
+        const elapsed = performance.now() - startMono;
+        if ((elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000)) {
+          return { known: false, why: 'unreachable' };
+        }
+        return { known: true, state: 'held', client: ownClient, since: 1, generation: 1, relayStarted: 100, evictionBound: 30, sync: syncRecord };
+      },
+      setSync: async (_name, _key, post) => {
+        syncRecord = { state: post.state, copy: post.copy, epoch: post.epoch, generation: post.generation, at: Math.floor(Date.now() / 1000) };
+        return { stored: true, sync: syncRecord };
+      },
+    };
+    let linkStarts = 0;
+    const { keeper, lines, offered } = await keeperBeside({ ...c, db }, target, folder(), {
+      lease: fakeLease({ othersHoldData: true }),
+      now: () => ({ wall: Date.now(), mono: performance.now() }),
+      throughput: { start: ignore, stop: ignore, best: () => ({}) },
+      everyMs: 3000,
+      linkEveryMs: 3000,
+      peerEveryMs: 60_000,
+      beatEveryMs: 60_000,
+      guardEveryMs: 60_000,
+      copies: { everyMs: 60_000 },
+      clientFor: () => (linkStarts++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      sync: { catalog, relay: relayClient, everyMs: 3000, routeEveryMs: 0 },
+    });
+    onTestFinished(async () => {
+      await keeper.stop();
+      vi.useRealTimers();
+    });
+
+    const stepUntil = async (stepMs: number, check: () => boolean) => {
+      while (!check()) {
+        await vi.advanceTimersByTimeAsync(stepMs);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+    };
+    await stepUntil(3000, () => keeper.mode() === 'lead' && offered.length === 1 && linkStarts === 1);
+
+    /* Six virtual minutes in: the relay hiccup drops neither tunnel, and restarts neither frpc. */
+    const toSixMin = 360_000 - (performance.now() - startMono);
+    await vi.advanceTimersByTimeAsync(toSixMin + 6_000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect([offered.length, linkStarts]).toEqual([1, 1]);
+    expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
+
+    /* Twelve virtual minutes in, with a failed settings read at the same mark: ownLink stays known, so leading resumes
+       as soon as the relay answers again, and the peer tunnel still never restarts. */
+    const toBeforeTwelveMin = 719_500 - (performance.now() - startMono);
+    await vi.advanceTimersByTimeAsync(toBeforeTwelveMin);
+    failOnce.on = true;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(keeper.mode()).toBe('lead');
+    expect([offered.length, linkStarts]).toEqual([1, 1]);
+    expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
+
+    /* When the link goes for good, the keeper says why before stopping each tunnel. */
+    await c.db.delete(publicLinks);
+    await stepUntil(3000, () => lines.includes('No public link: the tunnel waits.') && lines.includes('No public link: this machine is not offered to its peers through it.'));
+    const linkWhyAt = lines.indexOf('Stopping the public link: the database holds no public link.');
+    const peerWhyAt = lines.indexOf('Stopping the peer tunnel: the database holds no public link.');
+    expect(linkWhyAt).toBeGreaterThanOrEqual(0);
+    expect(linkWhyAt).toBeLessThan(lines.indexOf('No public link: the tunnel waits.'));
+    expect(peerWhyAt).toBeGreaterThanOrEqual(0);
+    expect(peerWhyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
+
+    await keeper.stop();
+    vi.useRealTimers();
   });
 });

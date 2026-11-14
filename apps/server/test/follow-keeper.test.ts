@@ -5,12 +5,14 @@ import http2 from 'node:http2';
 import net, { type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { certificates, machines } from '../src/db/schema.js';
+import type { TunnelSettings } from '../src/modules/link/tunnel.js';
+import { CERT_FILE } from '../src/modules/keeper/certificate.js';
 import { COPY_STATE, copyName } from '../src/modules/keeper/copy.js';
 import { FollowKeeper, OWN_APP_AFTER_MS, type FollowKeeperOptions } from '../src/modules/keeper/follow.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
-import { machineKey } from '../src/modules/keeper/machine-keys.js';
+import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
 import { RECOVERY_FILE } from '../src/modules/keeper/question.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { readTaking } from '../src/modules/keeper/taking.js';
@@ -18,8 +20,10 @@ import { readFollowed } from '../src/modules/keeper/watch.js';
 import { PROMISE_MS } from '../src/modules/keeper/update-steps.js';
 import { readWord } from '../src/modules/keeper/updating.js';
 import { LOAD_FILE, UPLOAD_FILE, UPLOADS_DIR, WIPE_FILE } from '../src/modules/keeper/uploads.js';
+import { PEERS_FILE } from '../src/modules/keeper/worker.js';
+import { issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
 import { TEST_SECRET, until } from './helpers.js';
-import { ask, company, folder, heldIn, HOST_ID, SLEEPER, worker, type Company } from './worker-keeper-fixture.js';
+import { ask, company, folder, heldIn, HOST_ID, hostIdOf, MAC, SLEEPER, worker, type Company } from './worker-keeper-fixture.js';
 
 const LOOPBACK = '127.0.0.1';
 
@@ -422,5 +426,121 @@ describe('the keeper of a machine that keeps a copy', () => {
     await until(() => existsSync(join(f.config.controlDir, WIPE_FILE)));
     expect(existsSync(join(f.config.dir, COPY_STATE))).toBe(false);
     for (const line of f.lines) expect(line).not.toContain(TEST_SECRET);
+  });
+
+  it('keeps its peer tunnel running through one empty settings read, and says why before stopping on a second', async () => {
+    const dir = folder();
+    const key = machineKey(dir);
+    const authority = await makeAuthority('00000000-0000-4000-8000-000000000001');
+    const machine = '11111111-0000-4000-8000-000000000002';
+    const issued = await issueCertificate(authority, { machineId: machine, role: 'data', signKey: key.publicPem });
+    const crlPem = await makeCrl(authority, []);
+    writePrivately(join(dir, CERT_FILE), JSON.stringify({ machine, role: 'data', certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() }));
+    writePrivately(
+      join(dir, PEERS_FILE),
+      JSON.stringify({
+        machine,
+        role: 'data',
+        authorityPem: authority.certPem,
+        revoked: [],
+        crlPem,
+        data: [],
+        link: { name: 'acme', url: 'https://acme.hornhoof.test', serverAddr: 'relay.hornhoof.test', serverPort: 443, appSecret: 'a'.repeat(32), visitorKey: 'v'.repeat(32), dataSecret: 'd'.repeat(32) },
+        copy: null,
+      }),
+    );
+
+    const realSettings: TunnelSettings = {
+      url: 'https://acme.hornhoof.test',
+      name: 'acme',
+      key: 'k'.repeat(32),
+      tunnel: { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' },
+      mode: 'http',
+    };
+    let currentSettings: TunnelSettings | null = realSettings;
+    const offered: string[] = [];
+    const lines: string[] = [];
+    const app = await ownApp();
+    const db = await tcpEcho('copy: ');
+
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const keeper = new FollowKeeper({
+      config: {
+        machineId: hostIdOf(MAC.machineId),
+        joinServer: 'http://127.0.0.1:1',
+        ticket: null,
+        controlDir: folder(),
+        dir,
+        commit: 'w0rker',
+        ports: { web: 18081, peer: null },
+        addresses: ['192.168.1.20'],
+        ownerKey: null,
+        hostOs: 'linux',
+        survivorMs: 600_000,
+        secret: Buffer.from(TEST_SECRET, 'base64'),
+        databaseUrl: 'postgres://hornhoof@127.0.0.1:1/hornhoof',
+      },
+      frontHost: null,
+      app,
+      db,
+      sql: emptyCluster().sql,
+      settings: async () => currentSettings,
+      log: line => lines.push(line),
+      host: LOOPBACK,
+      doorHost: LOOPBACK,
+      allowed: async () => [LOOPBACK],
+      ports: { door: 0, peer: 0, peerApp: 0 },
+      everyMs: 60_000,
+      beatEveryMs: 60_000,
+      watcher: { everyMs: 60_000 },
+      recovery: { everyMs: 60_000 },
+      peerClientFor: (_services, clientId) => (offered.push(clientId), SLEEPER),
+      worker: {
+        ports: { front: 0 },
+        visitClientFor: () => SLEEPER,
+        lookEveryMs: 60_000,
+        viewEveryMs: 360_000,
+        reportEveryMs: 360_000,
+        holderEveryMs: 360_000,
+        sessions: { everyMs: 60_000, helloMs: 50, connectMs: 1000, directEveryMs: 60_000, pingMs: 60_000 },
+        computer: { openEveryMs: 360_000, closedEveryMs: 360_000 },
+        internet: { start: () => undefined, stop: () => undefined, snapshot: () => ({ internetRttMs: null, internetMbps: null }) },
+      },
+    });
+    await keeper.start();
+    onTestFinished(async () => {
+      await keeper.stop();
+      vi.useRealTimers();
+    });
+
+    const stepUntil = async (stepMs: number, check: () => boolean) => {
+      while (!check()) {
+        await vi.advanceTimersByTimeAsync(stepMs);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+    };
+    await keeper.peerPorts();
+    await stepUntil(3_000, () => offered.length === 1);
+
+    /* One empty read six virtual minutes in does not drop the copy's peer tunnel. */
+    await vi.advanceTimersByTimeAsync(360_000);
+    currentSettings = null;
+    await vi.advanceTimersByTimeAsync(3_000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    currentSettings = realSettings;
+    await vi.advanceTimersByTimeAsync(3_000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(offered).toHaveLength(1);
+    expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
+
+    /* Two empty reads in a row stop the peer tunnel, saying why first. */
+    currentSettings = null;
+    await stepUntil(3_000, () => lines.includes('No public link: this machine is not offered to its peers through it.'));
+    const whyAt = lines.indexOf("Stopping the peer tunnel: this machine's database holds no public link.");
+    expect(whyAt).toBeGreaterThanOrEqual(0);
+    expect(whyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
+
+    await keeper.stop();
+    vi.useRealTimers();
   });
 });

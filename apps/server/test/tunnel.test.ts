@@ -92,6 +92,35 @@ describe('the tunnel keeper', () => {
     expect(started()).toHaveLength(1);
   });
 
+  it('holds a running client through one empty read, and stops it on a second in a row', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { keeper, answers, write, started, alive, lines } = tunnel();
+    onTestFinished(() => { vi.useRealTimers(); });
+    write('first');
+    keeper.start();
+    await until(() => started().length === 1);
+    const firstPid = started()[0]![1]!;
+
+    /* A single empty read, and another six virtual minutes later, never stop the running client. */
+    for (const gapMs of [20, 360_000]) {
+      await vi.advanceTimersByTimeAsync(gapMs);
+      answers(null);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(alive(firstPid)).toBe(true);
+      expect(lines).not.toContain('No public link: the tunnel waits.');
+      write('first');
+      await vi.advanceTimersByTimeAsync(20);
+      expect(started()).toHaveLength(1);
+    }
+
+    /* Two empty reads in a row confirm the link is gone and stop the client. */
+    answers(null);
+    await vi.advanceTimersByTimeAsync(40);
+    await until(() => !alive(firstPid));
+    expect(lines).toContain('No public link: the tunnel waits.');
+    await keeper.stop();
+  });
+
   it('keeps the client running while read answers undefined', async () => {
     const { keeper, answers, write, started, alive, readsFrom } = tunnel();
     write('first');
