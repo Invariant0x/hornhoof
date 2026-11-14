@@ -8,7 +8,7 @@ import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
 import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
-import { cardPrincipal, ceoPrincipal, decisionPrincipal, departmentPrincipal, withInputLock } from '../conversation/decision-context.js';
+import { cardPrincipal, ceoPrincipal, decisionPrincipal, departmentPrincipal, standingPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody, RepositoryBody } from '../departments/routes.js';
 import { NewRepositoryBody } from '../departments/repo-hosts.js';
@@ -45,7 +45,8 @@ const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company o
 
 /* The tools that change people, their access, money or the company's reach. The orchestrator is the CEO's hands, so he
    uses them only in a turn that answers the CEO or the CEO delegate now, as that person, never because an employee, a
-   timer, a task or another person asked. Those that change one department go for its owner too. create_repository also
+   timer, a task or another person asked. Those that change one department's own resources go in any turn of his, for the
+   last person who asked him if they run that department, as the CEO, the delegate or its owner. create_repository also
    creates a department's first repository in a turn of his own. */
 export const CEO_ONLY = new Set([
   'invite_person',
@@ -72,7 +73,9 @@ export const CEO_ONLY = new Set([
 ]);
 export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 export const ONLY_DEPARTMENT_OWNER =
-  "Only the CEO, the CEO delegate or this department's owner can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask one of them first.";
+  "Only the CEO, the CEO delegate or this department's owner can ask for this, and the last person who wrote to you is none of them. Nothing was changed. Ask one of them.";
+/* Making work urgent outside any department, which goes for the last person who asked, in any turn. */
+export const ONLY_CEO_ASKED = 'Only the CEO or the CEO delegate can ask for this, and the last person who wrote to you is neither. Nothing was changed. Ask the CEO.';
 const NO_PERMISSION =
   "That answer is no permission to change machines: it is the CEO's or the CEO delegate's own answer to a question about machines, in the card of a task that is still open. Nothing was changed. Ask the CEO first.";
 
@@ -84,13 +87,19 @@ const PERMISSION = {
     .describe("The id of the CEO's or the CEO delegate's answer in an open task's card to your ask_person with topic machines, when they answered there and not in this window."),
 };
 
-/* The tools that take a decision for a person: the one this turn answers, who must have the right to take it. */
+/* The tools that take a decision for a person, who must have the right to take it. answer_request takes the decision a
+   question asked of that person, so only in the turn that answers them; a structure or a hire is the orchestrator's own
+   work of running the company, which goes in any turn of his for the last person who asked him. */
 const DECIDES = new Set(['answer_request', 'build_structure', 'hire']);
+const FINDS: Record<string, typeof decisionPrincipal> = { answer_request: decisionPrincipal, build_structure: standingPrincipal, hire: standingPrincipal };
+const NOBODY_ASKED =
+  "No person's words stand behind this: nobody wrote to you yet, or words for this turn are still on their way. Nothing was changed. " +
+  'Ask the person who takes it (the CEO, the CEO delegate or, for a department, its people) to decide it.';
 const NO_PRINCIPAL =
   'This turn answers no person who may take a decision now: the last message in it came from an employee or from Hornhoof, or words for it are still on their way. ' +
   'Nothing was changed. Ask the person who takes it (the CEO, the CEO delegate or, for a department, its people) to decide it, or to tell you so in this window.';
 const NOT_THEIRS =
-  'The person this turn answers may not take this decision. Nothing was changed. Tell them who takes it (the CEO, the CEO delegate or, for a department, its people) and leave it to them.';
+  'The person you act for here may not take this decision. Nothing was changed. Tell them who takes it (the CEO, the CEO delegate or, for a department, its people) and leave it to them.';
 
 /* The tools that make a machine command. Hornhoof shows it to the CEO in this window and tells him only that, so the
    code reaches neither him nor his conversation. */
@@ -129,7 +138,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'Creates, changes and removes departments at once, as the CEO\'s click on a structure card does. brief: two to five sentences about the company, when it changed. ' +
       'Each item is a new department { template, name?, note?, products?, teams?, staff? } (name only when a template is used a second time; it comes with the people of its template, each on the plan and model its role asks for, or waiting for a plan; staff false only when the CEO asked for one without people) or a change { department, note?, products?, teams?, remove? }: ' +
       'products are added, teams creates sub-units by name or renames ({ id, name }) / removes ({ id, remove: true }) existing sub-units (moving their employees back to the pipeline), remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
-      'Only in a turn that answers the CEO or the CEO delegate, as their decision, or the owner of a department, for products and sub-units of their own department.',
+      'It goes as the decision of the last person who asked you, in this turn or an earlier one: the CEO or the CEO delegate, or the owner of a department for products and sub-units of their own department.',
     BuildBody.shape,
     /* A department he creates comes with its people unless he says otherwise, as the card's box is ticked at first. */
     body => ({ method: 'POST', url: '/api/departments/build', payload: { ...body, items: body.items.map(item => ('template' in item ? { ...item, staff: item.staff ?? true } : item)) } }),
@@ -140,7 +149,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'Hires employees into a department, as the CEO\'s click on a staff card does. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } } as in propose_staff: ' +
       'left out, the name is the role\'s title, the model is Default, the subscription is the first one that serves the department and runs the role, and the skills are the role\'s. ' +
       'Call staffing_options first. A department has one head. proposalId: the staff card this hires from, so it closes. ' +
-      'Only in a turn that answers the CEO, the CEO delegate or the owner of this department, as their decision.',
+      'It goes as the decision of the last person who asked you, in this turn or an earlier one: the CEO, the CEO delegate or the owner of this department.',
     { department: Id('department'), proposalId: z.uuid().optional(), people: z.array(StaffLine.omit({ checked: true })).min(1).max(30) },
     async ({ department, proposalId, people: lines }) => {
       const url = `/api/departments/${department}/staff`;
@@ -168,7 +177,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'create_repository',
     'Creates a private repository on GitHub for a department, with a first commit holding its README, and connects it with the same key: the key the department saved, else the company\'s. ' +
       'It becomes the repository of a department or product that has none, else a new product of the department named after it. name: its name on GitHub; author { name, email } as in set_repository. ' +
-      "In any turn it creates a department's first one, when neither the department nor its products keep one; any other only for the CEO or the department's owner, in a turn that answers them. " +
+      "In any turn it creates a department's first one, when neither the department nor its products keep one; any other for the last person who asked you, if they are the CEO, the CEO delegate or the department's owner. " +
       "Without a key it answers what is missing: tell the CEO or the department's owner that, and offer to connect a repository they have with set_repository instead.",
     { department: Id('department'), ...NewRepositoryBody.shape },
     ({ department, ...body }) => ({ method: 'POST', url: `/api/departments/${department}/repositories/new`, payload: body, department, first: true }),
@@ -396,12 +405,12 @@ async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url,
 
 /* What only the CEO asks for goes as the CEO or the CEO delegate this turn answers now, kept under the input lock from words
    that would change it meanwhile, so the route sees the person it is for and allows that person what their own screen
-   does. A change inside one department goes as its owner too. A machine change without them goes as the CEO whose answer
-   in a task's card it names. */
+   does. A change of one department's own resources goes, in any turn, as the last person who asked if they run it. A
+   machine change without them goes as the CEO whose answer in a task's card it names. */
 function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
   return withInputLock(ctx, job.agentId, async () => {
     if (made.department) {
-      const runs = await departmentPrincipal(ctx.db, job.id, made.department);
+      const runs = await departmentPrincipal(ctx.db, job.id, made.department, standingPrincipal);
       if (runs) return send(ctx, app, job, made, runs);
       /* A department's first repository, which the route creates as no other. */
       if (made.first) return send(ctx, app, job, { ...made, payload: { ...(made.payload as object), first: true } });
@@ -428,18 +437,18 @@ async function carry(ctx: Ctx, app: FastifyInstance, job: ToolJob, name: string,
       return say(err instanceof Error ? err.message : 'The internal stuck answer did not go through.', true);
     }
   }
-  if (DECIDES.has(name)) return decide(ctx, app, job, made);
+  if (DECIDES.has(name)) return decide(ctx, app, job, made, FINDS[name]!);
   return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made) : send(ctx, app, job, made);
 }
 
 /* Why a decision did not go through, in the orchestrator's words; nothing for any other answer. */
 const REFUSED: Record<string, string> = { decision_not_allowed: NOT_THEIRS, decision_context_missing: NO_PRINCIPAL };
 
-/* A decision goes as the person this turn answers, found from the turn itself; the route checks the turn again and that
-   person's right while it keeps the decision. */
-async function decide(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url, payload }: Call) {
-  const principal = await decisionPrincipal(ctx.db, job.id);
-  if (!principal) return say(NO_PRINCIPAL, true);
+/* A decision goes as the person found from the turn itself; the route checks the turn again and that person's right while
+   it keeps the decision. */
+async function decide(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url, payload }: Call, find: typeof decisionPrincipal) {
+  const principal = await find(ctx.db, job.id);
+  if (!principal) return say(find === decisionPrincipal ? NO_PRINCIPAL : NOBODY_ASKED, true);
   const headers = orchestratorDecisionHeaders({ ...principal, agentId: job.agentId, jobId: job.id });
   const res = await app.inject({ method, url, headers, ...(payload === undefined ? {} : { payload: payload as object }) });
   const refused = REFUSED[reasonOf(res.body) ?? ''];

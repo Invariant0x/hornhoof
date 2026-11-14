@@ -17,8 +17,8 @@ import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetai
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
 import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
-import { ceoPrincipal, departmentPrincipal } from '../conversation/decision-context.js';
-import { ONLY_CEO, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
+import { ceoPrincipal, departmentPrincipal, standingPrincipal } from '../conversation/decision-context.js';
+import { ONLY_CEO_ASKED, ONLY_DEPARTMENT_OWNER } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
@@ -281,10 +281,11 @@ class TaskTools {
     return settled && [orchestratorId, settled.headId].includes(this.job.agentId) ? `${text} ${settled.note}` : text;
   }
 
-  /* Only the CEO or delegate answered in this turn can make work urgent, or the owner of the department it is in. */
+  /* Only the CEO or delegate can make work urgent, or the owner of the department it is in: the last person who asked, in
+     this turn or an earlier one. */
   private async urgentBy(departmentId: string | null): Promise<void> {
-    if (!departmentId && !(await ceoPrincipal(this.db, this.job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
-    if (departmentId && !(await departmentPrincipal(this.db, this.job.id, departmentId))) throw refuse(403, 'urgent_not_allowed', ONLY_DEPARTMENT_OWNER);
+    if (!departmentId && !(await ceoPrincipal(this.db, this.job.id, standingPrincipal))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO_ASKED);
+    if (departmentId && !(await departmentPrincipal(this.db, this.job.id, departmentId, standingPrincipal))) throw refuse(403, 'urgent_not_allowed', ONLY_DEPARTMENT_OWNER);
   }
 
   private async urgentFromCeo(items: { department: string; urgent?: boolean | undefined }[]): Promise<void> {
@@ -571,7 +572,7 @@ class TaskTools {
       'set_urgent',
       {
         description:
-          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO, the CEO delegate or the owner of the task\'s department says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO, the CEO delegate or the owner of the task\'s department says so, as the last person who wrote to you, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
         inputSchema: { task: Ref, urgent: z.boolean() },
       },
       async ({ task: ref, urgent }) =>

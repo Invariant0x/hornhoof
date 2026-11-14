@@ -491,7 +491,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]!.status).toBe('open');
   });
 
-  it('only reads in a turn that answers anyone but the CEO and the CEO delegate', async () => {
+  it('only reads while the last person who wrote to it is neither the CEO nor the CEO delegate', async () => {
     const { app, db, ceo, ceoId, orchestrator, bruno } = await company();
     const zed = await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const [zedRow] = await db.select().from(people).where(eq(people.name, 'Zed'));
@@ -502,7 +502,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     await wrote(zedRow!.id);
     const refused = await rename('Bruno Z');
     expect(refused.isError).toBe(true);
-    expect(text(refused)).toContain('In this turn the tool only reads: it answers neither the CEO nor the CEO delegate.');
+    expect(text(refused)).toContain('The tool only reads now: the last person who wrote to you is neither the CEO nor the CEO delegate.');
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people ORDER BY name' })))[0].rows).toEqual([{ name: 'Ivan' }, { name: 'Zed' }]);
     await wrote(null);
     expect((await rename('Bruno N')).isError).toBe(true);
@@ -646,7 +646,7 @@ describe('the orchestrator reads and changes the database itself', () => {
 describe('what only the CEO may ask for', () => {
   const HEAD_TOKEN = 'tool-token-head-0123456789abcdef0123';
   const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
-  const ONLY_DEPARTMENT_OWNER = "Only the CEO, the CEO delegate or this department's owner can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask one of them first.";
+  const ONLY_DEPARTMENT_OWNER = "Only the CEO, the CEO delegate or this department's owner can ask for this, and the last person who wrote to you is none of them. Nothing was changed. Ask one of them.";
 
   /* The company without the test's own turn of the orchestrator, and Lena, who sees the whole company. */
   async function quiet() {
