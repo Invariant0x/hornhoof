@@ -116,4 +116,31 @@ describe('updater brings stopped nodes back up on the required image', () => {
     expect(onlyRemoved.calls).toContain(`docker volume rm ${removedName}`);
     expect(onlyRemoved.calls.filter(c => c.startsWith('started '))).toEqual([]);
   });
+
+  it('starts a stopped remote node without /data/removed and removes neither its container nor its volume', async () => {
+    const res = await remotePass({
+      STUB_PLAN_NODES: `hornhoof-codex-new=${PLAN_STOPPED_NEW}=${NEW_BUILD}`,
+      STUB_STOPPED_NODES: 'hornhoof-codex-new',
+      STUB_REMOVED_NODES: '',
+    });
+    expect(res.code).toBe(0);
+    expect(res.calls).toContain('docker cp hornhoof-codex-new:/data/removed -');
+    expect(res.calls.some(c => c.startsWith('docker rm') || c.startsWith('docker volume rm'))).toBe(false);
+    expect(res.calls.filter(c => c.startsWith('started '))).toEqual([
+      `started plan=${PLAN_STOPPED_NEW} image=${NEW_BUILD} server=${REMOTE_SERVER}`,
+    ]);
+  });
+
+  it('leaves a stopped node of another server alone even when its volume has /data/removed', async () => {
+    const res = await remotePass({
+      STUB_PLAN_NODES: `hornhoof-foreign=${PLAN_REMOVED}=${OLD_BUILD}`,
+      STUB_FOREIGN_NODES: 'hornhoof-foreign',
+      STUB_STOPPED_NODES: 'hornhoof-foreign',
+      STUB_REMOVED_NODES: 'hornhoof-foreign',
+    });
+    expect(res.code).toBe(0);
+    expect(res.calls.some(c => c.includes('hornhoof-foreign'))).toBe(false);
+    expect(res.calls.some(c => c.startsWith('docker rm') || c.startsWith('docker volume rm'))).toBe(false);
+    expect(res.calls.filter(c => c.startsWith('started '))).toEqual([]);
+  });
 });

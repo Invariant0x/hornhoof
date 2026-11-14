@@ -753,6 +753,29 @@ describe('install.sh', () => {
       expect(r.calls).toContain(`docker volume rm ${personal}`);
       expect(r.calls.some(c => c.startsWith(`docker run -d --name ${personal}`))).toBe(false);
     });
+
+    it('recreates a stopped plan node on the server computer without /data/removed on the same volume and leaves foreign or unlabeled stopped nodes alone', () => {
+      const foreign = 'hornhoof-codex-9f1e2d3c';
+      const unlabeled = 'hornhoof-kimi-00000000';
+      const r = fromUpdater({
+        HORNHOOF_NODES_FREE: '1',
+        STUB_CONTAINERS: `${personal}=http://localhost:8081 ${foreign}=https://other.example ${unlabeled}`,
+        STUB_STOPPED: `${personal} ${foreign} ${unlabeled}`,
+        STUB_REMOVED: `${foreign} ${unlabeled}`,
+      });
+      expect(r.code).toBe(0);
+      expect(r.calls).toContain(`docker cp ${personal}:/data/removed -`);
+      const rm = indexOf(r.calls, `docker rm -f ${personal}`);
+      const run = indexOf(r.calls, `docker run -d --name ${personal} `);
+      expect(rm).toBeGreaterThanOrEqual(0);
+      expect(run).toBeGreaterThan(rm);
+      expect(r.calls[run]).toContain(`-v ${personal}:/data`);
+      expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
+      for (const untouched of [foreign, unlabeled]) {
+        expect(r.calls.some(c => c.includes(`${untouched}:/data/removed`))).toBe(false);
+        expect(r.calls.some(c => c.includes(`rm -f ${untouched}`) || c.startsWith(`docker run -d --name ${untouched}`))).toBe(false);
+      }
+    });
   });
 
   it('refuses a server name it cannot use as a folder', () => {
