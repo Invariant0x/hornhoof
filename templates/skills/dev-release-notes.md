@@ -1,7 +1,7 @@
 ---
 id: dev-release-notes
 title: { en: "Release notes", ru: "Заметки к выпуску" }
-description: { en: "Writes what a release changes for the people who use it, in each language the product has.", ru: "Пишет, что выпуск меняет для тех, кто им пользуется, на каждом языке продукта." }
+description: { en: "Writes what a release changes for users in each product language.", ru: "Пишет, что выпуск меняет для пользователей на каждом языке продукта." }
 kind: procedure
 sources: [garrytan/gstack document-release/SKILL.md.tmpl]
 ---
