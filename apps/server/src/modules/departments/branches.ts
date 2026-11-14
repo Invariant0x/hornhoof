@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { tasks } from '../../db/schema.js';
 import type { BranchesAt, RepoAddress } from '../testruns/refs.js';
+import { worksIn, type Reader } from './inside.js';
 import { repoAt } from './repository.js';
 
 /* A task of the department that was accepted or handed in, whose branch is not in the main line yet: merged is false, or
@@ -83,9 +84,10 @@ export async function departmentBranches(ctx: Readers, departmentId: string, exc
   return { branches: (await notMerged(ctx, found)).slice(0, SHOWN), problem: problems[0] ?? null };
 }
 
-/* What an agent reading a task of its department learns of the work before it, only when there is something to say. */
-export async function earlierWork(ctx: Readers, task: { id: string; departmentId: string | null }): Promise<{ departmentBranches?: DepartmentBranch[]; departmentBranchesProblem?: string }> {
-  if (!task.departmentId) return {};
+/* What an agent reading a task of its department learns of the work before it, only when there is something to say. An
+   agent of another department given the task learns nothing of it, nor why it could not be read. */
+export async function earlierWork(ctx: Readers, reader: Reader, task: { id: string; departmentId: string | null }): Promise<{ departmentBranches?: DepartmentBranch[]; departmentBranchesProblem?: string }> {
+  if (!task.departmentId || !(await worksIn(ctx.db, reader, task.departmentId))) return {};
   const { branches, problem } = await departmentBranches(ctx, task.departmentId, task.id);
   return { ...(branches.length ? { departmentBranches: branches } : {}), ...(problem ? { departmentBranchesProblem: problem } : {}) };
 }

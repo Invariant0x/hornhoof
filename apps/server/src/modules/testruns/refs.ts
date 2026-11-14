@@ -1,4 +1,5 @@
 import { COMMIT_SHA, ownBranch } from '@hornhoof/protocol';
+import { bodyWithin } from './bounded.js';
 
 /* How long a repository may take to say where its branches are. */
 const READ_MS = 30_000;
@@ -57,18 +58,6 @@ const headersFor = (token: string): Record<string, string> => ({
   ...(token ? { authorization: `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}` } : {}),
 });
 
-/* An answer up to REFS_MAX_BYTES, read no further than that. */
-async function within(res: Response): Promise<Buffer | null> {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const chunk of res.body ?? []) {
-    size += chunk.length;
-    if (size > REFS_MAX_BYTES) return null;
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
 /* The refs of a repository, asked of the repository itself. Git's own protocol over HTTP, as the server's image has no git.
    It says what went wrong rather than throw, and never with the token. */
 async function refsOf(repo: RepoAddress, timeoutMs: number): Promise<Map<string, string> | { problem: string }> {
@@ -78,7 +67,7 @@ async function refsOf(repo: RepoAddress, timeoutMs: number): Promise<Map<string,
     const res = await fetch(refsAddress(repo.url), { headers: headersFor(repo.token), signal });
     if (!res.ok) return cannot(`it answered ${res.status}`);
     if (!res.headers.get('content-type')?.startsWith(ADVERTISEMENT)) return cannot('the address is not a git repository');
-    const body = await within(res);
+    const body = await bodyWithin(res, REFS_MAX_BYTES);
     return body ? advertisedRefs(body) : cannot('its answer is too long');
   } catch {
     return cannot(signal.aborted ? `it did not answer within ${timeoutMs} ms` : 'it could not be reached');

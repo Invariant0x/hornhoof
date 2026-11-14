@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RepoAddress } from './refs.js';
+import { bodyWithin } from './bounded.js';
 
 /* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
 export type OmittedPatch = { path: string; additions: number; deletions: number };
@@ -55,6 +56,13 @@ function parsedComparison(body: unknown): CompareResult {
   return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(patchOrName).join('\n'), omitted };
 }
 
+/* GitHub's answers are read no further than this, as a repository's refs are: a larger one is too large to take. */
+export const GITHUB_MAX_BYTES = 32 * 1024 * 1024;
+class TooLarge extends Error {}
+
+/* Why an answer could not be taken: too large, or not there at all. */
+const failed = (error: unknown, what: 'compare' | 'tree') => ({ complete: false as const, reason: `${what}-${error instanceof TooLarge ? 'too-large' : 'unavailable'}` });
+
 /* A GitHub API answer for this repository, or null where it has none to give. No redirect or remote error text can carry the
    repository token into a message. */
 async function githubJson(repo: RepoAddress, path: string, timeoutMs: number): Promise<{ body: unknown } | null> {
@@ -65,7 +73,9 @@ async function githubJson(repo: RepoAddress, path: string, timeoutMs: number): P
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'hornhoof', 'x-github-api-version': '2022-11-28', ...(repo.token ? { authorization: `Bearer ${repo.token}` } : {}) },
   });
   if (!response.ok) { await response.body?.cancel(); throw new Error('unavailable'); }
-  return { body: await response.json() };
+  const body = await bodyWithin(response, GITHUB_MAX_BYTES);
+  if (!body) throw new TooLarge('too-large');
+  return { body: JSON.parse(body.toString('utf8')) as unknown };
 }
 
 /* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or
@@ -74,7 +84,7 @@ export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000)
   try {
     const answer = await githubJson(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}`, timeoutMs);
     return answer ? parsedComparison(answer.body) : { complete: false, reason: 'unsupported-repository' };
-  } catch { return { complete: false, reason: 'compare-unavailable' }; }
+  } catch (error) { return failed(error, 'compare'); }
 };
 
 /* Whether a branch's commit is in the main line: GitHub's compare of the main line with it says behind or identical once every
@@ -110,5 +120,5 @@ export const readTree: TreeReader = async (repo, commitSha, timeoutMs = 10_000) 
   try {
     const answer = await githubJson(repo, `git/trees/${commitSha}?recursive=1`, timeoutMs);
     return answer ? treePaths(answer.body) : { complete: false, reason: 'unsupported-repository' };
-  } catch { return { complete: false, reason: 'tree-unavailable' }; }
+  } catch (error) { return failed(error, 'tree'); }
 };
