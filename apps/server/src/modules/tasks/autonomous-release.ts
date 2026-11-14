@@ -41,7 +41,7 @@ type VerifiedVerdict = {
 type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict; baseCommitSha: string };
 type VerdictRow = { id: number; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string; reviewedCommit: string };
 
-export type RecordedMainApproval = { entryId: string; baseCommitSha: string; department: Dept };
+export type RecordedMainApproval = { entryId: string; baseCommitSha: string; candidateBaseCommitSha: string; department: Dept };
 
 export type AutonomousReleaseEntry = {
   id: string;
@@ -502,25 +502,21 @@ function journalValues(
 }
 
 async function insertJournalRow(
-  ctx: Reader,
   tx: Tx,
   task: Task,
   agentId: string,
   commit: string,
-  department: Dept,
-  repo: Repo,
+  proof: VerifiedProof,
 ): Promise<{ id: string; baseCommitSha: string } | null> {
-  const fresh = await reverifyInTransaction(tx, task, commit, department);
-  if (!fresh) return null;
-  const baseCommitSha = await verifiedMainLine(ctx, repo, fresh.verdict.baseCommitSha, commit);
-  if (!baseCommitSha) return null;
+  const fresh = await reverifyInTransaction(tx, task, commit, proof.department);
+  if (!fresh || fresh.verdict.baseCommitSha !== proof.verdict.baseCommitSha) return null;
   const [requester] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId)));
   if (!requester) return null;
   const [inserted] = await tx
     .insert(autonomousReleases)
-    .values(journalValues(task, agentId, requester.name, commit, baseCommitSha, department, fresh))
+    .values(journalValues(task, agentId, requester.name, commit, proof.baseCommitSha, proof.department, fresh))
     .returning({ id: autonomousReleases.id });
-  return { id: inserted.id, baseCommitSha };
+  return { id: inserted.id, baseCommitSha: proof.baseCommitSha };
 }
 
 /* Auto-approves an exact commit before push without opening a human card when autonomous release is on and (a)+(b)+(c) hold. */
@@ -536,7 +532,7 @@ export async function tryAutonomousCommitApproval(
   refusePaused(fresh);
   const proof = await verifyAllConditions(ctx, fresh, commit);
   if (!proof) return null;
-  const recorded = await ctx.db.transaction(tx => insertJournalRow(ctx, tx, fresh, agentId, commit, proof.department, proof.repo));
+  const recorded = await ctx.db.transaction(tx => insertJournalRow(tx, fresh, agentId, commit, proof));
   if (!recorded) return null;
   const noteText =
     `Autonomous release approved exact commit ${commit} before push without a human card: ` +
@@ -583,7 +579,14 @@ export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, co
   const verdict = await verifiedIndependentVerdict(ctx.db, task, target.department.id, commit);
   if (!verdict || !(await verifiedRecordedLine(ctx, target.repo, verdict.baseCommitSha, target.recorded.baseCommitSha, commit))) return null;
   const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true, verdict.allowedRunBranches);
-  return run ? { entryId: target.recorded.id, baseCommitSha: target.recorded.baseCommitSha, department: target.department } : null;
+  return run
+    ? {
+        entryId: target.recorded.id,
+        baseCommitSha: target.recorded.baseCommitSha,
+        candidateBaseCommitSha: verdict.baseCommitSha,
+        department: target.department,
+      }
+    : null;
 }
 
 export async function confirmAutonomousMainAcceptance(
@@ -606,5 +609,6 @@ export async function confirmAutonomousMainAcceptance(
     )
     .limit(1);
   if (!existing) return null;
-  return (await reverifyInTransaction(tx, task, commit, proof.department)) ? existing.id : null;
+  const fresh = await reverifyInTransaction(tx, task, commit, proof.department);
+  return fresh && fresh.verdict.baseCommitSha === proof.candidateBaseCommitSha ? existing.id : null;
 }

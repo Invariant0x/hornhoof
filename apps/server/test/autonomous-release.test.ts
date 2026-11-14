@@ -1291,7 +1291,7 @@ describe('autonomous release for exact commits to main', () => {
 
     const callsInsideTx: string[] = [];
     const realReadCommit = f.ctx.readCommit;
-    const realReadCompare = f.ctx.readCompare;
+    const realReadCompare = f.ctx.readCompare!;
     f.ctx.readCommit = async (repo, ref, ms) => {
       if (txDepth > 0) callsInsideTx.push('readCommit');
       return realReadCommit(repo, ref, ms);
@@ -1327,7 +1327,7 @@ describe('autonomous release for exact commits to main', () => {
       releaseCompare = resolve;
     });
     let compareResolved = false;
-    const baseReadCompare = f2.ctx.readCompare;
+    const baseReadCompare = f2.ctx.readCompare!;
     f2.ctx.readCompare = async (repo, want, ms) => {
       notifyCompareStarted?.();
       await compareGate;
