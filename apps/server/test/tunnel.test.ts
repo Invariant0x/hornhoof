@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
+import { holdThroughOneEmptyRead, TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
 import { until } from './helpers.js';
 
 /* A stand-in for the tunnel client: it writes the token it was started with, its process id and whether it can see the
@@ -124,6 +124,20 @@ describe('the tunnel keeper', () => {
     expect(whyAt).toBeGreaterThanOrEqual(0);
     expect(whyAt).toBeLessThan(lines.indexOf('No public link: the tunnel waits.'));
     await keeper.stop();
+  });
+
+  it('holds a peer reader through one empty read, and lets a second empty read stop it', async () => {
+    const queue: Answer[] = [null, settingsWith('first'), null, undefined, settingsWith('first'), null, null, null];
+    let index = 0;
+    const read = holdThroughOneEmptyRead(async () => (index < queue.length ? queue[index++] : null));
+    expect(await read()).toBeNull();
+    expect(await read()).toEqual(settingsWith('first'));
+    expect(await read()).toBeUndefined();
+    expect(await read()).toBeUndefined();
+    expect(await read()).toEqual(settingsWith('first'));
+    expect(await read()).toBeUndefined();
+    expect(await read()).toBeNull();
+    expect(await read()).toBeNull();
   });
 
   it('keeps the client running while read answers undefined', async () => {

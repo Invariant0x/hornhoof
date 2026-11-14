@@ -37,6 +37,34 @@ const LONGEST_PAUSE_MS = 60_000;
 /* A client that ran this long counts as having worked, so the next pause starts short again. */
 const WORKED_MS = 60_000;
 
+/* Wraps a reader whose tunnel registers no shared public name, such as a machine's own peer tunnel, so one empty read
+   answers undefined and keeps the running frpc alive. Stopping and starting frpc again can cost up to 40 s at the relay
+   and drops every open peer stream, while a one-second hiccup on the path through hornhoof.org, in the leader's mode,
+   or in a stale view can leave one read empty before the next read finds the same link standing. A second empty read in
+   a row answers null and stops the tunnel; TunnelKeeper itself stops at the first null so the public link under
+   linkWanted and a disconnected visitor release at once. */
+export function holdThroughOneEmptyRead<T>(read: () => Promise<T | null | undefined>): () => Promise<T | null | undefined> {
+  let running = false;
+  let sawEmpty = false;
+  return async () => {
+    const next = await read();
+    if (next === undefined) return undefined;
+    if (next !== null) {
+      running = true;
+      sawEmpty = false;
+      return next;
+    }
+    if (!running) return null;
+    if (!sawEmpty) {
+      sawEmpty = true;
+      return undefined;
+    }
+    running = false;
+    sawEmpty = false;
+    return null;
+  };
+}
+
 /* It waits while there is no link, runs the client once there is, starts it again when the settings change, and stops it
    when they go. Only a change starts it again, since each start may cost the link up to 40 s at the relay. */
 export class TunnelKeeper<T = TunnelSettings> {
@@ -47,7 +75,6 @@ export class TunnelKeeper<T = TunnelSettings> {
   private pause: number;
   /* A read may outlast the pause between reads, and an older answer must not land after a newer one. */
   private reading = false;
-  private sawEmpty = false;
 
   constructor(private readonly opts: Options<T>) {
     this.pause = opts.restartMs;
@@ -62,7 +89,6 @@ export class TunnelKeeper<T = TunnelSettings> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.text = null;
-    this.sawEmpty = false;
     await this.end();
   }
 
@@ -75,26 +101,12 @@ export class TunnelKeeper<T = TunnelSettings> {
     if (settings !== undefined && this.timer) this.follow(settings);
   }
 
-  /* A single empty read must not tear down a running tunnel: stopping and starting frpc again can cost up to 40 s at
-     the relay and drops every open peer stream, while a one-second hiccup on the path through hornhoof.org, in the
-     leader's mode, or in a stale view can leave a single read empty before the next read finds the same link standing.
-     Only two empty reads in a row confirm that the link is gone and stop the running client. */
-  private holdThroughOneEmptyRead(settings: T | null): boolean {
-    if (settings !== null || this.text === null) {
-      this.sawEmpty = false;
-      return false;
-    }
-    this.sawEmpty = !this.sawEmpty;
-    return this.sawEmpty;
-  }
-
   private sayWhyStopped(): void {
     const why = this.opts.why?.();
     if (why) this.opts.log(why);
   }
 
   private follow(settings: T | null): void {
-    if (this.holdThroughOneEmptyRead(settings)) return;
     const text = settings && JSON.stringify(settings);
     if (text === this.text) return;
     if (!settings) this.sayWhyStopped();

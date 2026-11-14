@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Client, TunnelSettings } from '../link/tunnel.js';
-import { TunnelKeeper } from '../link/tunnel.js';
+import { holdThroughOneEmptyRead, TunnelKeeper } from '../link/tunnel.js';
 import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-client.js';
 import { PeerDoor } from '../../net/peer-door.js';
 import { PeerServer, type PeerServerOptions } from '../../net/peer-server.js';
@@ -247,12 +247,13 @@ export class PeerLink {
     return { machine: held.machine, role: held.role, lead: this.opts.mode() === 'lead', commit: this.opts.commit, ...this.opts.helloMore?.() };
   }
 
-  /* A second frpc of the keeper offers the two doors through hornhoof.org while the company has a link with both secrets. */
+  /* A second frpc of the keeper offers the two doors through hornhoof.org, while the app leads and the company has a
+     link with both secrets. */
   private offer(ports: PeerPorts): void {
     const local = { data: ports.peer, app: ports.peerApp };
     const { machineId } = this.opts;
     this.tunnel = new TunnelKeeper<PeerServices>({
-      read: () => this.services(),
+      read: holdThroughOneEmptyRead(() => this.services()),
       everyMs: FRPC_EVERY_MS,
       restartMs: FRPC_RESTART_MS,
       clientFor: services => (this.opts.peerClientFor ? this.opts.peerClientFor(services, peerClientId(services.settings.name, machineId), local) : peerClientFor(services, { machineId, local })),
@@ -263,26 +264,24 @@ export class PeerLink {
     this.tunnel.start();
   }
 
-  /* Null: no link or no secrets, and the client stops. Undefined: not known now, and the client it runs stays.
-     PeerServer listens in every mode and reports whether this machine leads in its hello, so a brief dip out of
-     leading must not tear down the peer tunnel. */
+  /* Null: not leading, no link or no secrets, and the client stops. Undefined: not known now, and the client it runs stays. */
   private async services(): Promise<PeerServices | null | undefined> {
     if (!this.answer) return undefined;
     const settings = await this.opts.settings().catch(() => undefined);
-    if (settings === undefined) return undefined;
-    this.lastSettings = settings;
-    return this.servicesFrom(settings, this.answer.link);
+    if (settings !== undefined) this.lastSettings = settings;
+    if (this.opts.mode() !== 'lead') return null;
+    return settings === undefined ? undefined : this.servicesFor(settings);
   }
 
-  private servicesFrom(settings: TunnelSettings | null, link: Answer['link']): PeerServices | null | undefined {
-    if (!settings) return null;
-    if (!link?.dataSecret) return this.opts.mode() === 'lead' ? null : undefined;
+  private servicesFor(settings: TunnelSettings | null): PeerServices | null {
+    const link = this.answer?.link;
+    if (!settings || !link?.dataSecret) return null;
     return { settings, secrets: { data: link.dataSecret, app: link.appSecret } };
   }
 
   private whyNoServices(): string {
-    return this.lastSettings
-      ? 'Stopping the peer tunnel: the app reported no public link or peer secrets.'
-      : 'Stopping the peer tunnel: the database holds no public link.';
+    if (!this.lastSettings) return 'Stopping the peer tunnel: the database holds no public link.';
+    if (!this.answer?.link?.dataSecret) return 'Stopping the peer tunnel: the app reported no public link or peer secrets.';
+    return 'Stopping the peer tunnel: this keeper no longer leads.';
   }
 }

@@ -878,9 +878,10 @@ describe('the peer link in the keeper', () => {
     /* When a leader's lease ends, its public link stops at the first read, and its peer tunnel stops once read mode holds. */
     const clock = { wall: Date.now(), mono: 1_000_000 };
     const renews = { hold: true };
+    const leaderLease = fakeLease({ othersHoldData: true, renew: async () => renews.hold });
     let linkStarts = 0;
     const leader = await keeperBeside(c, target, folder(), {
-      lease: fakeLease({ othersHoldData: true, renew: async () => renews.hold }),
+      lease: leaderLease,
       now: () => ({ ...clock }),
       throughput: { start: ignore, stop: ignore, best: () => ({}) },
       everyMs: 20,
@@ -899,6 +900,7 @@ describe('the peer link in the keeper', () => {
     await stepUntil(20, () => leaderPorts && leader.keeper.mode() === 'lead' && leader.offered.length === 1 && linkStarts === 1);
 
     const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+    leaderLease.problemsAre(['another machine holds the lease']);
     renews.hold = false;
     clock.wall += 11_000;
     clock.mono += 11_000;

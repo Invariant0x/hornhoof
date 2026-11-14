@@ -6,7 +6,7 @@ import { PEER_PATHS, PeerServer } from '../../net/peer-server.js';
 import type { Target } from '../../net/proxy.js';
 import { peerClientFor, peerClientId, type PeerServices } from '../link/peer-client.js';
 import type { Route } from '../link/relay.js';
-import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
+import { holdThroughOneEmptyRead, TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
 import type { BundleSecrets } from '../backups/bundle.js';
 import type { MakerView } from '../backups/types.js';
 import { ageKey } from './age-key.js';
@@ -427,7 +427,7 @@ export class FollowKeeper {
     if (this.stopped) return;
     const { machineId, dir } = this.opts.config;
     this.tunnel = new TunnelKeeper<PeerServices>({
-      read: () => this.services(),
+      read: holdThroughOneEmptyRead(() => this.services()),
       everyMs: FRPC_EVERY_MS,
       restartMs: FRPC_RESTART_MS,
       clientFor: services => (this.opts.peerClientFor ? this.opts.peerClientFor(services, peerClientId(services.settings.name, machineId), local) : peerClientFor(services, { machineId, local, dir })),
