@@ -194,6 +194,13 @@ describe('task tools', () => {
 });
 
 describe('asking a person', () => {
+  it('asks a person only with every promised material attached, and keeps a note that should not end a wait off the task', async () => {
+    const { head, tools } = await company();
+    const said = async (name: string) => (await (await tools(head)).listTools()).tools.find(t => t.name === name)!.description!;
+    expect(await said('ask_person')).toMatch(/Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once\./);
+    expect(await said('comment')).toMatch(/A note that should leave the wait standing goes to its holder with message_employee naming no task\./);
+  });
+
   it('keeps the question as an outgoing message to its responsible person', async () => {
     const { ctx, db, dev, head, bruno, ceo, tools } = await company();
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });

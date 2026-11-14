@@ -377,7 +377,7 @@ describe('the orchestrator\'s conversation', () => {
     expect((await nextRun(updated)).prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Hello`);
   });
 
-  it('lets a worker compact its conversation at half a million tokens, while heads and the orchestrator keep the full window', async () => {
+  it('lets a worker compact its conversation at half a million tokens, while heads and the orchestrator keep the full window, named outright', async () => {
     const { app, db, ceo, builtin } = await live();
     const [acme] = await db.select().from(companies);
     const [sub] = await db.select().from(subscriptions);
@@ -392,8 +392,9 @@ describe('the orchestrator\'s conversation', () => {
       await finish(builtin, run);
       return run;
     };
-    expect((await runOf('orchestrator')).compactWindow).toBeUndefined();
-    expect((await runOf(hana.id)).compactWindow).toBeUndefined();
+    /* Claude Code offers a smaller window in a dialog nobody answers unless the window it compacts at is given. */
+    expect((await runOf('orchestrator')).compactWindow).toBe(1_000_000);
+    expect((await runOf(hana.id)).compactWindow).toBe(1_000_000);
     expect((await runOf(bruno.id)).compactWindow).toBe(500_000);
   });
 

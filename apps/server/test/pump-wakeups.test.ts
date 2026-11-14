@@ -134,4 +134,27 @@ describe('the line of an agent whose waiting turn may not go out now', () => {
     expect(await c.jobOf(first.id)).toMatchObject({ status: 'failed', error: 'cancelled' });
     expect(await c.jobOf(second.id)).toMatchObject({ status: 'queued' });
   });
+
+  it('tells Operations of a hold once while its reset moves by milliseconds only, and again once it moves by minutes', async () => {
+    const c = await line('limit');
+    /* A provider gives the same reset with other milliseconds each time it is asked: a whole minute and a little. */
+    const minute = Math.ceil((Date.now() + HOUR) / MIN) * MIN;
+    const resetAt = (ms: number) => c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(minute + ms).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+    await resetAt(738);
+    const held = await c.waiting(new Date(Date.now() - 1000), { task: true });
+    await c.db.update(jobs).set({ createdAt: new Date(Date.now() - 11 * MIN) }).where(eq(jobs.id, held.id));
+    await pump(c.ctx, c.agent.id);
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+    const free = () => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.watcher.id));
+    for (const ms of [867, 929, 956, 12]) {
+      await free();
+      await resetAt(ms);
+      await pump(c.ctx, c.agent.id);
+    }
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+    await free();
+    await resetAt(5 * MIN + 400);
+    await pump(c.ctx, c.agent.id);
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(2);
+  });
 });

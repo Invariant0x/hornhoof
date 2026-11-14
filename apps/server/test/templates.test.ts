@@ -36,6 +36,35 @@ describe('templates', () => {
     for (const role of roles.filter(r => /we test our program/.test(r.body))) expect(role.body, role.id).toMatch(/on virtual time only\.$/);
   });
 
+  it('keeps a shared machine, its shared browsers and a stale preparation from costing a check', () => {
+    const policy = body('dev-testing-policy');
+    expect(policy).toMatch(/Stop only processes you started, by their process id[\s\S]*`pkill`[\s\S]*other employees' checks/);
+    expect(policy).toMatch(/shared browser folder[\s\S]*may be read-only: never install into it[\s\S]*run its test runner directly/);
+    expect(policy).toMatch(/check out another commit or make a worktree[\s\S]*stale preparation, not a failed check/);
+  });
+
+  it('turns a missing command into a step within the access an employee has, and a failed write into a read before it is repeated', () => {
+    const flow = body('hh-task-flow');
+    expect(flow).toMatch(/`sudo: command not found`, is no reason to install it or to get around the limit[\s\S]*own user[\s\S]*goes to your head/);
+    expect(flow).toMatch(/A write that Hornhoof answered with 502, 503 or 504 may have gone through: read whether it did before you repeat it/);
+  });
+
+  it('waits again after a comment or a message ended the wait before what it waits for came', () => {
+    expect(body('hh-task-flow')).toMatch(/A comment or a message on the task ends your wait too[\s\S]*call "wait_for" again/);
+  });
+
+  it('connects a repository only once its branch holds a commit', () => {
+    expect(body('orch-resources')).toMatch(/only once its branch exists with at least one commit[\s\S]*git ls-remote --heads[\s\S]*stops every turn of that department/);
+  });
+
+  it("lets the program operator clear a menu without a cursor and a program's own offers, keeping the session", () => {
+    const operator = body('ops-program-operator');
+    expect(operator).toMatch(/no cursor takes no Enter yet: press an arrow key, look again[\s\S]*then press Enter alone/);
+    expect(operator).toMatch(/offer of the program itself[\s\S]*never Escape[\s\S]*compact and go on in the same session/);
+    expect(operator).toMatch(/no_hold answer on an open case lifts and closes nothing[\s\S]*tell_orchestrator/);
+    expect(body('ops-failure-review')).toMatch(/reasons Hornhoof recorded, the end of each blocked reason/);
+  });
+
   it('makes each ability self-contained instead of relying on another selected skill', () => {
     const references = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
     for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch', 'hh-browse'].includes(ref)), skill.id).toEqual([]);

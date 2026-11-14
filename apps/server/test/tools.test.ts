@@ -84,7 +84,7 @@ describe('/mcp', () => {
     const [bruno, hana] = await db
       .insert(agents)
       .values([
-        { companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, productId: mascot!.id, model: 'claude-sonnet-5-5', subscriptionId: sub!.id },
+        { companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, productId: mascot!.id, model: 'claude-sonnet-5-5', subscriptionId: sub!.id, overrides: { base: 'Designs only: no product code.' } },
         { companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '' },
         { companyId, kind: 'worker', name: 'Gone', roleKey: 'DEV-FE', departmentId: dev!.id, model: '', removedAt: new Date() },
       ])
@@ -109,8 +109,9 @@ describe('/mcp', () => {
           products: [{ id: mascot!.id, name: 'Mascot', repository: { url: 'https://github.com/acme/mascot.git', branch: 'release' } }],
           employees: [
             /* The id is what create_task takes as the executor; the role id is what it takes as a gate. */
-            { id: hana!.id, name: 'Hana', roleId: 'DEV-HEAD', role: 'Head of development', kind: 'head', product: null, provider: null, model: null },
-            { id: bruno!.id, name: 'Bruno', roleId: 'DEV-BE', role: 'Backend engineer', kind: 'worker', product: 'Mascot', provider: 'anthropic_api', model: 'claude-sonnet-5-5' },
+            { id: hana!.id, name: 'Hana', roleId: 'DEV-HEAD', role: 'Head of development', kind: 'head', product: null, provider: null, model: null, ownText: false },
+            /* A person gave Bruno text of his own over his role's, which may narrow the work he takes: a head asks before giving him any. */
+            { id: bruno!.id, name: 'Bruno', roleId: 'DEV-BE', role: 'Backend engineer', kind: 'worker', product: 'Mascot', provider: 'anthropic_api', model: 'claude-sonnet-5-5', ownText: true },
           ],
         },
       ],
