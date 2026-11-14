@@ -129,42 +129,51 @@ function buildSheetPayload(spec: SheetSpec, index: number) {
   return { properties: { title }, data: [{ startRow: 0, startColumn: 0, rowData }] };
 }
 
+/* A call to Google with the access token of the company's key. */
+type GoogleCall = { headers: Record<string, string>; signal: AbortSignal };
+
+async function newSpreadsheet(sheetsUrl: string, call: GoogleCall, input: { title: string; sheets: SheetSpec[] }): Promise<{ id: string; url?: string } | { problem: string }> {
+  const res = await fetch(`${sheetsUrl}/v4/spreadsheets`, {
+    method: 'POST',
+    headers: call.headers,
+    body: JSON.stringify({
+      properties: { title: input.title.trim().slice(0, 200) },
+      sheets: input.sheets.map(buildSheetPayload),
+    }),
+    redirect: 'manual',
+    signal: call.signal,
+  });
+  const created = (await res.json().catch(() => null)) as { spreadsheetId?: string; spreadsheetUrl?: string } | null;
+  if (!res.ok || !created?.spreadsheetId) return { problem: `Google Sheets answered ${res.status} when creating the spreadsheet.` };
+  return { id: created.spreadsheetId, url: created.spreadsheetUrl };
+}
+
+/* Opens the spreadsheet to the Google account the company named, for editing. What went wrong, or null. */
+async function shareSpreadsheet(driveUrl: string, call: GoogleCall, id: string, email: string | null): Promise<string | null> {
+  if (!email) return null;
+  const res = await fetch(`${driveUrl}/drive/v3/files/${encodeURIComponent(id)}/permissions`, {
+    method: 'POST',
+    headers: call.headers,
+    body: JSON.stringify({ type: 'user', role: 'writer', emailAddress: email }),
+    redirect: 'manual',
+    signal: call.signal,
+  });
+  return res.ok ? null : `Google Drive answered ${res.status} when sharing the spreadsheet.`;
+}
+
+/* The address Google gave, when it is one of Google Sheets; else the one made from the spreadsheet's id. */
+const sheetUrl = (id: string, given: string | undefined): string =>
+  given?.startsWith('https://docs.google.com/') ? given : `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/edit`;
+
 export function createOnGoogleSheets(tokenUrl: string, sheetsUrl: string, driveUrl: string, timeoutMs = 30_000): SpreadsheetCreator {
   return async (key, input) => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
-      const accessToken = await fetchAccessToken(tokenUrl, key, signal);
-      const authHeaders = { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' };
-      const res = await fetch(`${sheetsUrl}/v4/spreadsheets`, {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({
-          properties: { title: input.title.trim().slice(0, 200) },
-          sheets: input.sheets.map(buildSheetPayload),
-        }),
-        redirect: 'manual',
-        signal,
-      });
-      const created = (await res.json().catch(() => null)) as { spreadsheetId?: string; spreadsheetUrl?: string } | null;
-      if (!res.ok || !created?.spreadsheetId) {
-        return { problem: `Google Sheets answered ${res.status} when creating the spreadsheet.` };
-      }
-      const id = created.spreadsheetId;
-      if (key.shareEmail) {
-        const shareRes = await fetch(`${driveUrl}/drive/v3/files/${encodeURIComponent(id)}/permissions`, {
-          method: 'POST',
-          headers: authHeaders,
-          body: JSON.stringify({ type: 'user', role: 'writer', emailAddress: key.shareEmail }),
-          redirect: 'manual',
-          signal,
-        });
-        if (!shareRes.ok) return { problem: `Google Drive answered ${shareRes.status} when sharing the spreadsheet.` };
-      }
-      const url =
-        created.spreadsheetUrl && created.spreadsheetUrl.startsWith('https://docs.google.com/')
-          ? created.spreadsheetUrl
-          : `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/edit`;
-      return { spreadsheetId: id, url };
+      const call = { headers: { authorization: `Bearer ${await fetchAccessToken(tokenUrl, key, signal)}`, 'content-type': 'application/json' }, signal };
+      const created = await newSpreadsheet(sheetsUrl, call, input);
+      if ('problem' in created) return created;
+      const problem = await shareSpreadsheet(driveUrl, call, created.id, key.shareEmail);
+      return problem ? { problem } : { spreadsheetId: created.id, url: sheetUrl(created.id, created.url) };
     } catch (err) {
       return { problem: err instanceof Error ? err.message : 'Google Sheets could not be reached.' };
     }

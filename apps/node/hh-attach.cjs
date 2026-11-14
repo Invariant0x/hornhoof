@@ -55,7 +55,12 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  process.stderr.write(`${err.message}\n`);
-  process.exit(1);
-});
+/* Run as a command it attaches; required, as its tests do, it only lends its reading of the arguments. */
+if (require.main === module) {
+  main().catch(err => {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(1);
+  });
+}
+
+module.exports = { parseArgs };

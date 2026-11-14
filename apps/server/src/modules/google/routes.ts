@@ -38,8 +38,38 @@ export const googleSheetsView = (row: Row) => ({
   keyLast4: row.keyLast4,
 });
 
+/* The Google account new spreadsheets are shared with: as given, or as saved when the change leaves it out. */
+const shareOf = (given: string | null | undefined, saved: Row | undefined): string | null =>
+  given === undefined ? (saved?.shareEmail ?? null) : checkShareEmail(given);
+
 export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+
+  /* The saved key with only the Google account changed. */
+  async function keepKey(saved: Row, shareEmail: string | null, by: string): Promise<Row> {
+    requireShareFor(saved.kind, shareEmail);
+    const [updated] = await db.update(googleSheets).set({ shareEmail, updatedBy: by, updatedAt: new Date() }).where(eq(googleSheets.id, saved.id)).returning();
+    return updated!;
+  }
+
+  /* A new key, encrypted, in place of the saved one if there is one. */
+  async function saveKey(companyId: string, saved: Row | undefined, rawCreds: string, shareEmail: string | null, by: string): Promise<Row> {
+    const parsed = parseGoogleCredentials(rawCreds);
+    requireShareFor(parsed.secret.kind, shareEmail);
+    const values = {
+      kind: parsed.secret.kind,
+      account: parsed.account,
+      shareEmail,
+      credentialsEnc: encryptSecret(JSON.stringify(parsed.secret), ctx.config.secret),
+      keyLast4: parsed.keyLast4,
+      updatedBy: by,
+      updatedAt: new Date(),
+    };
+    const [row] = saved
+      ? await db.update(googleSheets).set(values).where(eq(googleSheets.id, saved.id)).returning()
+      : await db.insert(googleSheets).values({ companyId, ...values }).returning();
+    return row!;
+  }
 
   async function requireWholeCompanyPerson(req: Parameters<typeof requirePerson>[0]) {
     const me = await requirePerson(req, db);
@@ -62,34 +92,10 @@ export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!rawCreds && !saved) {
       throw new ApiError(400, 'validation', 'Paste the Google JSON key to connect Google Sheets.', 'google_sheets_invalid');
     }
-    const shareEmail = body.shareEmail === undefined ? (saved?.shareEmail ?? null) : checkShareEmail(body.shareEmail);
-    if (!rawCreds && saved) {
-      requireShareFor(saved.kind, shareEmail);
-      const [updated] = await db
-        .update(googleSheets)
-        .set({ shareEmail, updatedBy: me.id, updatedAt: new Date() })
-        .where(eq(googleSheets.id, saved.id))
-        .returning();
-      ctx.bus.publish(me.companyId, { type: 'org' });
-      return { google: googleSheetsView(updated!) };
-    }
-    const parsed = parseGoogleCredentials(rawCreds);
-    requireShareFor(parsed.secret.kind, shareEmail);
-    const credentialsEnc = encryptSecret(JSON.stringify(parsed.secret), ctx.config.secret);
-    const values = {
-      kind: parsed.secret.kind,
-      account: parsed.account,
-      shareEmail,
-      credentialsEnc,
-      keyLast4: parsed.keyLast4,
-      updatedBy: me.id,
-      updatedAt: new Date(),
-    };
-    const [row] = saved
-      ? await db.update(googleSheets).set(values).where(eq(googleSheets.id, saved.id)).returning()
-      : await db.insert(googleSheets).values({ companyId: me.companyId, ...values }).returning();
+    const shareEmail = shareOf(body.shareEmail, saved);
+    const row = rawCreds ? await saveKey(me.companyId, saved, rawCreds, shareEmail, me.id) : await keepKey(saved!, shareEmail, me.id);
     ctx.bus.publish(me.companyId, { type: 'org' });
-    return { google: googleSheetsView(row!) };
+    return { google: googleSheetsView(row) };
   });
 
   app.delete('/api/google-sheets', async (req, reply) => {

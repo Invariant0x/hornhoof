@@ -87,76 +87,114 @@ function isObjectRow(item: unknown): item is Record<string, unknown> {
   return Boolean(item) && typeof item === 'object' && !Array.isArray(item);
 }
 
+/* A row of cells from a JSON row: an array cell by cell, anything else as the one cell of its row. */
+const cellRow = (row: unknown): SpreadsheetCell[] => (Array.isArray(row) ? row.map(toCell) : [toCell(row)]);
+
+const headerTexts = (raw: unknown): string[] | undefined => (Array.isArray(raw) ? raw.map(h => String(h ?? '')) : undefined);
+
+function rowsSheet(rows: unknown[], name?: string, headers?: string[]): SpreadsheetSheet {
+  return { ...(name ? { name } : {}), ...(headers ? { headers } : {}), rows: rows.map(cellRow) };
+}
+
 function normalizeSheetEntry(entry: unknown): SpreadsheetSheet {
   if (!isObjectRow(entry) || !Array.isArray(entry.rows)) throw new Error('Each sheet needs a rows array.');
   const name = typeof entry.name === 'string' ? entry.name : undefined;
   const rows = entry.rows as unknown[];
-  if (rows.length > 0 && isObjectRow(rows[0])) return sheetFromObjects(rows as Record<string, unknown>[], name);
-  const headers = Array.isArray(entry.headers) ? entry.headers.map(h => String(h ?? '')) : undefined;
-  return {
-    ...(name ? { name } : {}),
-    ...(headers ? { headers } : {}),
-    rows: rows.map(r => (Array.isArray(r) ? r.map(toCell) : [toCell(r)])),
-  };
+  if (isObjectRow(rows[0])) return sheetFromObjects(rows as Record<string, unknown>[], name);
+  return rowsSheet(rows, name, headerTexts(entry.headers));
+}
+
+const JSON_SHAPES = 'JSON table input must be an array of objects, an array of rows, or { sheets: [...] }.';
+
+function arrayInput(rows: unknown[]): SpreadsheetSheet[] {
+  if (rows.length === 0) return [{ headers: [], rows: [] }];
+  if (isObjectRow(rows[0])) return [sheetFromObjects(rows as Record<string, unknown>[])];
+  return [{ rows: rows.map(cellRow) }];
+}
+
+function objectInput(parsed: Record<string, unknown>): SpreadsheetSheet[] {
+  if (Array.isArray(parsed.sheets)) {
+    if (!parsed.sheets.length) throw new Error('Provide at least one sheet in sheets.');
+    return parsed.sheets.map(entry => normalizeSheetEntry(entry));
+  }
+  if (Array.isArray(parsed.rows)) return [normalizeSheetEntry(parsed)];
+  throw new Error(JSON_SHAPES);
 }
 
 function parseJsonInput(parsed: unknown): SpreadsheetSheet[] {
-  if (Array.isArray(parsed)) {
-    if (parsed.length === 0) return [{ headers: [], rows: [] }];
-    if (isObjectRow(parsed[0])) return [sheetFromObjects(parsed as Record<string, unknown>[])];
-    return [{ rows: parsed.map(r => (Array.isArray(r) ? r.map(toCell) : [toCell(r)])) }];
+  if (Array.isArray(parsed)) return arrayInput(parsed);
+  if (isObjectRow(parsed)) return objectInput(parsed);
+  throw new Error(JSON_SHAPES);
+}
+
+/* Where a CSV or TSV reader stands: the rows read, the row and the cell it reads, and whether it is inside quotes. */
+type Reading = { rows: string[][]; row: string[]; cell: string; quoted: boolean };
+
+function endRow(r: Reading): void {
+  r.row.push(r.cell);
+  r.rows.push(r.row);
+  r.row = [];
+  r.cell = '';
+}
+
+/* One character inside quotes: two quotes are one quote, one quote ends them. How many characters it took. */
+function quotedChar(r: Reading, raw: string, i: number): number {
+  const ch = raw[i]!;
+  if (ch !== '"') {
+    r.cell += ch;
+    return 1;
   }
-  if (isObjectRow(parsed) && Array.isArray(parsed.sheets)) {
-    if (!parsed.sheets.length) throw new Error('Provide at least one sheet in sheets.');
-    return parsed.sheets.map(normalizeSheetEntry);
+  if (raw[i + 1] === '"') {
+    r.cell += '"';
+    return 2;
   }
-  if (isObjectRow(parsed) && Array.isArray(parsed.rows)) return [normalizeSheetEntry(parsed)];
-  throw new Error('JSON table input must be an array of objects, an array of rows, or { sheets: [...] }.');
+  r.quoted = false;
+  return 1;
+}
+
+/* A line break ends the row; \r\n is one break. How many characters it took. */
+function lineBreak(r: Reading, raw: string, i: number): number {
+  endRow(r);
+  return raw[i] === '\r' && raw[i + 1] === '\n' ? 2 : 1;
+}
+
+/* One character outside quotes. How many characters it took. */
+function plainChar(r: Reading, raw: string, i: number, sep: ',' | '\t'): number {
+  const ch = raw[i]!;
+  if (ch === '\r' || ch === '\n') return lineBreak(r, raw, i);
+  if (ch === '"' && r.cell.length === 0) r.quoted = true;
+  else if (ch === sep) {
+    r.row.push(r.cell);
+    r.cell = '';
+  } else r.cell += ch;
+  return 1;
 }
 
 function parseDelimitedRows(raw: string, sep: ',' | '\t'): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let quoted = false;
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i]!;
-    if (quoted) {
-      if (ch === '"' && raw[i + 1] === '"') {
-        cell += '"';
-        i++;
-      } else if (ch === '"') quoted = false;
-      else cell += ch;
-      continue;
-    }
-    if (ch === '"' && cell.length === 0) quoted = true;
-    else if (ch === sep) {
-      row.push(cell);
-      cell = '';
-    } else if (ch === '\r' || ch === '\n') {
-      if (ch === '\r' && raw[i + 1] === '\n') i++;
-      row.push(cell);
-      rows.push(row);
-      row = [];
-      cell = '';
-    } else cell += ch;
-  }
-  if (quoted || cell.length > 0 || row.length > 0) {
-    row.push(cell);
-    rows.push(row);
-  }
-  return rows;
+  const r: Reading = { rows: [], row: [], cell: '', quoted: false };
+  for (let i = 0; i < raw.length; ) i += r.quoted ? quotedChar(r, raw, i) : plainChar(r, raw, i, sep);
+  if (r.quoted || r.cell.length > 0 || r.row.length > 0) endRow(r);
+  return r.rows;
+}
+
+/* JSON by its extension, or by its first character when the extension does not say CSV or TSV. */
+function isJsonInput(ext: string, trimmed: string): boolean {
+  if (ext === '.json') return true;
+  if (ext === '.csv' || ext === '.tsv') return false;
+  return trimmed.startsWith('[') || trimmed.startsWith('{');
+}
+
+/* Tabs by the extension, or, without one, a text with tabs and no commas. */
+function separatorOf(ext: string, text: string): ',' | '\t' {
+  if (ext === '.tsv') return '\t';
+  return !ext && text.includes('\t') && !text.includes(',') ? '\t' : ',';
 }
 
 export function parseTableInput(raw: string, sourceName = ''): SpreadsheetSheet[] {
   const text = raw.replace(/^\uFEFF/, '');
-  const trimmed = text.trim();
   const ext = extname(sourceName).toLowerCase();
-  if (ext === '.json' || (ext !== '.csv' && ext !== '.tsv' && (trimmed.startsWith('[') || trimmed.startsWith('{')))) {
-    return parseJsonInput(JSON.parse(trimmed));
-  }
-  const sep: ',' | '\t' = ext === '.tsv' || (!ext && text.includes('\t') && !text.includes(',')) ? '\t' : ',';
-  const parsed = parseDelimitedRows(text, sep);
+  if (isJsonInput(ext, text.trim())) return parseJsonInput(JSON.parse(text.trim()));
+  const parsed = parseDelimitedRows(text, separatorOf(ext, text));
   if (!parsed.length) return [{ headers: [], rows: [] }];
   return [{ headers: parsed[0]!, rows: parsed.slice(1) }];
 }
@@ -173,14 +211,18 @@ export function buildCsv(sheet: SpreadsheetSheet): string {
   return `${allRows.map(row => row.map(csvField).join(',')).join('\r\n')}\r\n`;
 }
 
+const blank = (value: SpreadsheetCell): boolean => value === null || value === undefined || value === '';
+
+/* The type and the value of a cell as the worksheet writes them: a number and a truth as such, anything else as its text. */
+function cellContent(value: SpreadsheetCell): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return ` t="n"><v>${value}</v>`;
+  if (typeof value === 'boolean') return ` t="b"><v>${value ? 1 : 0}</v>`;
+  return ` t="inlineStr"><is><t xml:space="preserve">${cleanXmlText(String(value ?? ''))}</t></is>`;
+}
+
 function renderCellXml(col: number, rowNumber: number, value: SpreadsheetCell, header: boolean): string {
-  if ((value === null || value === undefined || value === '') && !header) return '';
-  const ref = `${columnLetters(col)}${rowNumber}`;
-  const style = header ? ' s="1"' : '';
-  if (typeof value === 'number' && Number.isFinite(value)) return `<c r="${ref}"${style} t="n"><v>${value}</v></c>`;
-  if (typeof value === 'boolean') return `<c r="${ref}"${style} t="b"><v>${value ? 1 : 0}</v></c>`;
-  const text = cleanXmlText(value === null || value === undefined ? '' : String(value));
-  return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${text}</t></is></c>`;
+  if (blank(value) && !header) return '';
+  return `<c r="${columnLetters(col)}${rowNumber}"${header ? ' s="1"' : ''}${cellContent(value)}</c>`;
 }
 
 function renderWorksheetXml(sheet: SpreadsheetSheet): string {
@@ -331,14 +373,24 @@ export function buildXlsx(sheets: SpreadsheetSheet[]): Buffer {
   return packZip(entries);
 }
 
+/* The input and the output of a command line, or its usage when it names anything else. */
+function cliPaths(args: string[]): { input: string; output: string; csv: boolean } {
+  const [input, output] = args;
+  if (args.length !== 2 || !input || !output) throw new Error(USAGE);
+  const ext = extname(output).toLowerCase();
+  if (ext !== '.xlsx' && ext !== '.csv') throw new Error(`${USAGE} (output must end in .xlsx or .csv)`);
+  return { input, output, csv: ext === '.csv' };
+}
+
+/* The table text and the name that tells its kind; "-" is stdin, which has no name. */
+const readInput = (input: string, stdin: string | undefined): { raw: string; name: string } =>
+  input === '-' ? { raw: stdin ?? '', name: '' } : { raw: readFileSync(input, 'utf8'), name: input };
+
 export async function runSpreadsheetCli(args: string[], stdin?: string): Promise<{ out: string }> {
-  if (args.length !== 2 || !args[0] || !args[1]) throw new Error(USAGE);
-  const [inArg, outPath] = args;
-  const outExt = extname(outPath).toLowerCase();
-  if (outExt !== '.xlsx' && outExt !== '.csv') throw new Error(`${USAGE} (output must end in .xlsx or .csv)`);
-  const raw = inArg === '-' ? (stdin ?? '') : readFileSync(inArg, 'utf8');
-  const sheets = parseTableInput(raw, inArg === '-' ? '' : inArg);
-  if (outExt === '.csv') writeFileSync(outPath, buildCsv(sheets[0]!), 'utf8');
-  else writeFileSync(outPath, buildXlsx(sheets));
-  return { out: outPath };
+  const { input, output, csv } = cliPaths(args);
+  const { raw, name } = readInput(input, stdin);
+  const sheets = parseTableInput(raw, name);
+  if (csv) writeFileSync(output, buildCsv(sheets[0]!), 'utf8');
+  else writeFileSync(output, buildXlsx(sheets));
+  return { out: output };
 }

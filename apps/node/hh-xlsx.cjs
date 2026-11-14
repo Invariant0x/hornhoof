@@ -18,14 +18,17 @@ function readStdin() {
   });
 }
 
+const IMAGE_BUILD = '/app/apps/node/dist/spreadsheet.js';
+
+/* The built table maker: the node image's, else the one beside this script. */
+const builtModule = () => (existsSync(IMAGE_BUILD) ? IMAGE_BUILD : join(__dirname, 'dist', 'spreadsheet.js'));
+
+const stdinFor = args => (args[0] === '-' ? readStdin() : Promise.resolve(undefined));
+
 async function main() {
   const args = process.argv.slice(2);
-  const built = existsSync('/app/apps/node/dist/spreadsheet.js')
-    ? '/app/apps/node/dist/spreadsheet.js'
-    : join(__dirname, 'dist', 'spreadsheet.js');
-  const { runSpreadsheetCli } = await import(pathToFileURL(built).href);
-  const stdin = args[0] === '-' ? await readStdin() : undefined;
-  const { out } = await runSpreadsheetCli(args, stdin);
+  const { runSpreadsheetCli } = await import(pathToFileURL(builtModule()).href);
+  const { out } = await runSpreadsheetCli(args, await stdinFor(args));
   process.stdout.write(`${out}\n`);
 }
 

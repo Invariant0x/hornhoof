@@ -1283,12 +1283,20 @@ async function checkPictures(db: Db, companyId: string, agentId: string, ids: st
     .from(attachments)
     .where(and(inArray(attachments.id, ids), isNull(attachments.operatorCaseId)));
   for (const id of ids) {
-    const found = rows.find(r => r.id === id);
-    if (!found || !sentByAgent(found, companyId, agentId)) throw refuse(400, 'task_invalid', `${id} is not a picture you sent. Send it with hh-attach and use the id it prints.`);
-    if (found.taskId) throw refuse(400, 'task_invalid', `${id} is a file on a task, not a picture. Send the picture with hh-attach FILE, without --task.`);
-    if (found.name !== null) throw refuse(400, 'task_invalid', `${id} is a chat file, not a picture. Send the picture with hh-attach FILE, without --chat.`);
-    if (found.requestId) throw refuse(400, 'task_invalid', `${id} is shown in another request already. Send it again with hh-attach.`);
+    const problem = notAPicture(id, rows.find(r => r.id === id), companyId, agentId);
+    if (problem) throw refuse(400, 'task_invalid', problem);
   }
+}
+
+type PictureRow = { companyId: string; agentId: string | null; personId: string | null; requestId: string | null; taskId: string | null; name: string | null };
+
+/* Why an attachment is no picture this agent may show in a request, or null when it is one. */
+function notAPicture(id: string, found: PictureRow | undefined, companyId: string, agentId: string): string | null {
+  if (!found || !sentByAgent(found, companyId, agentId)) return `${id} is not a picture you sent. Send it with hh-attach and use the id it prints.`;
+  if (found.taskId) return `${id} is a file on a task, not a picture. Send the picture with hh-attach FILE, without --task.`;
+  if (found.name !== null) return `${id} is a chat file, not a picture. Send the picture with hh-attach FILE, without --chat.`;
+  if (found.requestId) return `${id} is shown in another request already. Send it again with hh-attach.`;
+  return null;
 }
 
 /* What a request is, for whom may take it. */

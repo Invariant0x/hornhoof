@@ -1,4 +1,4 @@
-import { createVerify, generateKeyPairSync } from 'node:crypto';
+import { createVerify, generateKeyPairSync, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { and, eq } from 'drizzle-orm';
 import Fastify from 'fastify';
@@ -39,6 +39,11 @@ async function fakeGoogle() {
     const grantType = params.get('grant_type') ?? '';
     const assertion = params.get('assertion') ?? '';
     tokenCalls.push({ assertion, grantType });
+    /* An OAuth key answers for itself; Google refuses a refresh token it took back. */
+    if (grantType === 'refresh_token') {
+      if (params.get('refresh_token') !== 'refresh-good') return reply.code(400).send({ error: 'invalid_grant' });
+      return { access_token: 'ya29.fake-google-token-secret', expires_in: 3600, token_type: 'Bearer' };
+    }
     const parts = assertion.split('.');
     if (parts.length !== 3) return reply.code(400).send({ error: 'invalid_grant' });
     const verify = createVerify('RSA-SHA256');
@@ -540,5 +545,122 @@ describe('1c. a Google key whose spreadsheets a person can open', () => {
     });
     expect(oauth.statusCode).toBe(200);
     expect(oauth.json().google).toEqual({ kind: 'oauth', account: 'owner@acme.test', shareEmail: null, keyLast4: 'abcd' });
+  });
+});
+
+describe('the edges of a table delivered to a person', () => {
+  const oauthKey = (refreshToken: string, account?: string) =>
+    JSON.stringify({ client_id: 'cid.apps.googleusercontent.com', client_secret: 'client-secret', refresh_token: refreshToken, ...(account ? { account } : {}) });
+
+  it('refuses a Google key it cannot use, says so in plain words, and keeps none of it', async () => {
+    const google = await fakeGoogle();
+    const c = await marketingCompany();
+    const put = (payload: Record<string, unknown>) => c.app.inject({ method: 'PUT', url: '/api/google-sheets', payload, ...as(c.ceoSession) });
+    const shown = async () => (await c.app.inject({ url: '/api/google-sheets', ...as(c.ceoSession) })).json().google;
+    const unusable = [
+      'not json',
+      '["a list"]',
+      JSON.stringify({ type: 'service_account', client_email: 'bot@acme.test' }),
+      JSON.stringify({ type: 'service_account', client_email: 'bot@acme.test', private_key: 'not a key' }),
+      JSON.stringify({ client_id: 'cid.apps.googleusercontent.com', client_secret: 'client-secret' }),
+    ];
+    for (const credentials of unusable) {
+      const refused = await put({ credentials, shareEmail: 'ivan@acme.test' });
+      expect(refused.statusCode, credentials).toBe(400);
+      expect(refused.json().error.reason, credentials).toBe('google_sheets_invalid');
+    }
+    const badEmail = await put({ credentials: google.serviceAccountJson, shareEmail: 'not an email' });
+    expect(badEmail.json().error.reason).toBe('google_sheets_invalid');
+    expect(await shown()).toBeNull();
+
+    /* A key without its id is known by the end of the key itself; an OAuth key without its account by its client. */
+    const withoutId = JSON.parse(google.serviceAccountJson) as Record<string, string>;
+    delete withoutId.private_key_id;
+    const saved = await put({ credentials: JSON.stringify(withoutId), shareEmail: 'ivan@acme.test' });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().google.keyLast4).toMatch(/^[A-Za-z0-9]{4}$/);
+    expect(saved.body).not.toContain('PRIVATE KEY');
+    const oauth = await put({ credentials: oauthKey('refresh-good') });
+    expect(oauth.json().google).toMatchObject({ kind: 'oauth', account: 'cid.apps.googleusercontent.com', keyLast4: 'good' });
+  });
+
+  it('creates a spreadsheet with an OAuth key, and on Google refusing tells the agent to attach the .xlsx', async () => {
+    const google = await fakeGoogle();
+    const c = await marketingCompany({ GOOGLE_TOKEN_URL: `${google.base}/token`, GOOGLE_SHEETS_URL: google.base, GOOGLE_DRIVE_URL: google.base });
+    const put = (payload: Record<string, unknown>) => c.app.inject({ method: 'PUT', url: '/api/google-sheets', payload, ...as(c.ceoSession) });
+    const { token } = await c.startTurn(c.mktSeo.id);
+    const client = await mcp(c.app, token);
+    const create = async () => (await client.callTool({ name: 'create_google_sheet', arguments: { title: 'Leads', sheets: [{ rows: [['North LLC', 3]] }] } })) as ToolReply;
+
+    expect((await put({ credentials: oauthKey('refresh-good', 'owner@acme.test') })).statusCode).toBe(200);
+    const created = await create();
+    expect(created.isError).toBeFalsy();
+    expect(JSON.parse(created.content[0]!.text)).toMatchObject({ connected: true, url: 'https://docs.google.com/spreadsheets/d/sheet-1/edit' });
+    expect(google.tokenCalls.map(call => call.grantType)).toEqual(['refresh_token']);
+    /* What an OAuth key creates is its own account's: it is shared with no one else, and a sheet without a name is Sheet1. */
+    expect(google.sharedPermissions).toEqual([]);
+    expect(google.createdSheets[0]).toMatchObject({ sheets: [{ properties: { title: 'Sheet1' } }] });
+
+    expect((await put({ credentials: oauthKey('refresh-revoked', 'owner@acme.test') })).statusCode).toBe(200);
+    const refused = await create();
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toContain('invalid_grant');
+    expect(refused.content[0]!.text).toContain('hh-xlsx');
+    expect(google.createdSheets).toHaveLength(1);
+  });
+
+  it('finds the person by their exact name and sends nothing a person may not see or cannot get', async () => {
+    const c = await marketingCompany();
+    const { token } = await c.startTurn(c.mktSeo.id);
+    const up = await c.app.inject({
+      method: 'POST',
+      url: `/api/attachments?task=${c.task.number}&name=partner-contacts.xlsx`,
+      payload: SAMPLE_XLSX,
+      headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
+    });
+    const attachment = up.json().id as string;
+    /* A Sales agent's chat file: Luiza works in Marketing and may not see it, the CEO sees the whole company. */
+    const sales = await c.startTurn(c.salesWorker.id);
+    const salesFile = await c.app.inject({
+      method: 'POST',
+      url: '/api/attachments?chat=1&name=sales-pipeline.xlsx',
+      payload: SAMPLE_XLSX,
+      headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${sales.token}` },
+    });
+    const client = await mcp(c.app, token);
+    const send = async (args: Record<string, unknown>) => (await client.callTool({ name: 'send_telegram_file', arguments: args })) as ToolReply;
+    const said = (reply: ToolReply) => ({ isError: reply.isError ?? false, text: reply.content[0]!.text });
+
+    expect(said(await send({ person: 'Luiza', attachment })).isError).toBe(false);
+    expect(c.tg.sentDocuments.map(d => d.chat_id)).toEqual([MKT_TG.id]);
+
+    expect(said(await send({ person: 'Nobody', attachment }))).toEqual({ isError: true, text: 'There is no active person named "Nobody" in this company.' });
+    expect(said(await send({ person: randomUUID(), attachment }))).toEqual({ isError: true, text: 'There is no active person with that id in this company.' });
+    expect(said(await send({ person: c.luiza.id, attachment: randomUUID() }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
+    expect(said(await send({ person: c.luiza.id, attachment: salesFile.json().id }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
+    expect(said(await send({ person: c.ceo.id, attachment: salesFile.json().id })).isError).toBe(false);
+
+    await invitePerson(c.app, c.ceoSession, { name: 'Luiza', email: 'luiza.two@acme.test', access: { departments: [c.mkt.id] } });
+    expect(said(await send({ person: 'Luiza', attachment })).text).toContain('More than one person is named "Luiza"');
+    await c.db.update(people).set({ telegramUserId: null }).where(eq(people.id, c.luiza.id));
+    expect(said(await send({ person: c.luiza.id, attachment })).text).toBe('Luiza has not connected Telegram yet. Attach the file to the task or chat with hh-attach instead.');
+    expect(c.tg.sentDocuments.map(d => d.chat_id)).toEqual([MKT_TG.id, CEO_TG.id]);
+  });
+
+  it('shows a picture an agent attached to its chat as a picture, and gives every other chat file to save', async () => {
+    const c = await marketingCompany();
+    const { token } = await c.startTurn(c.mktSeo.id);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const up = await c.app.inject({
+      method: 'POST',
+      url: '/api/attachments?chat=1&name=chart.png',
+      payload: png,
+      headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
+    });
+    const got = await c.app.inject({ url: `/api/attachments/${up.json().id as string}`, ...as(c.luizaSession) });
+    expect(got.statusCode).toBe(200);
+    expect(got.headers['content-type']).toBe('image/png');
+    expect(got.headers['content-disposition']).toBeUndefined();
+    expect(Buffer.compare(got.rawPayload, png)).toBe(0);
   });
 });

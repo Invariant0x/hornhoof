@@ -4,12 +4,13 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { crc32, inflateRawSync } from 'node:zlib';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
 import { classifyAgentCommand } from '../src/command-guard.js';
-import { buildCsv, buildXlsx, parseTableInput } from '../src/spreadsheet.js';
+import { buildCsv, buildXlsx, parseTableInput, runSpreadsheetCli } from '../src/spreadsheet.js';
 
 const XLSX_SCRIPT = fileURLToPath(new URL('../hh-xlsx.cjs', import.meta.url));
 const ATTACH_SCRIPT = fileURLToPath(new URL('../hh-attach.cjs', import.meta.url));
@@ -131,6 +132,32 @@ describe('built-in spreadsheet builder and hh-xlsx', () => {
     expect(roundTrip[0]!.rows).toEqual([['Alice, Inc.', 'Line 1\n"Line 2"', '19']]);
   });
 
+  it('reads TSV by its tabs and sheets by their rows, and refuses JSON it cannot read as a table', () => {
+    expect(parseTableInput('Name\tEmail\nAda\tada@example.com\n')).toEqual([{ headers: ['Name', 'Email'], rows: [['Ada', 'ada@example.com']] }]);
+    expect(parseTableInput('a,b\tc\n', 'leads.tsv')).toEqual([{ headers: ['a,b', 'c'], rows: [] }]);
+    expect(parseTableInput('', 'empty.csv')).toEqual([{ headers: [], rows: [] }]);
+    expect(parseTableInput('{"sheets":[{"name":"Leads","rows":[{"Name":"Ada"}]},{"headers":["N"],"rows":[["x"]]}]}')).toEqual([
+      { name: 'Leads', headers: ['Name'], rows: [['Ada']] },
+      { headers: ['N'], rows: [['x']] },
+    ]);
+    expect(parseTableInput('{"rows":[[1,true,null]]}')).toEqual([{ rows: [[1, true, null]] }]);
+    expect(() => parseTableInput('{"sheets":[]}')).toThrow('Provide at least one sheet in sheets.');
+    expect(() => parseTableInput('{"sheets":[{"name":"x"}]}')).toThrow('Each sheet needs a rows array.');
+    expect(() => parseTableInput('{"table":[]}')).toThrow('JSON table input must be');
+    expect(() => parseTableInput('"text"', 'leads.json')).toThrow('JSON table input must be');
+  });
+
+  it('takes an input file or stdin and writes the table the output names, or says how it is used', async () => {
+    const dir = tempDir('hh-xlsx-cli-');
+    writeFileSync(join(dir, 'in.json'), JSON.stringify([{ Name: 'Ada' }]));
+    await expect(runSpreadsheetCli([join(dir, 'in.json'), join(dir, 'out.csv')])).resolves.toEqual({ out: join(dir, 'out.csv') });
+    expect(readFileSync(join(dir, 'out.csv'), 'utf8')).toBe('Name\r\nAda\r\n');
+    await runSpreadsheetCli(['-', join(dir, 'piped.xlsx')], 'Name,Email\nAda,ada@example.com\n');
+    expect(unzipEntries(readFileSync(join(dir, 'piped.xlsx'))).get('xl/worksheets/sheet1.xml')).toContain('ada@example.com');
+    await expect(runSpreadsheetCli([join(dir, 'in.json')])).rejects.toThrow('Usage: hh-xlsx');
+    await expect(runSpreadsheetCli([join(dir, 'in.json'), join(dir, 'out.txt')])).rejects.toThrow('output must end in .xlsx or .csv');
+  });
+
   it('runs hh-xlsx from CLI files and stdin, is installed in the node image and allowed by command-guard', async () => {
     const dir = tempDir('hh-xlsx-');
     const inputPath = join(dir, 'leads.json');
@@ -158,6 +185,17 @@ describe('built-in spreadsheet builder and hh-xlsx', () => {
       coverage: 'recognized',
     });
     expect(readFileSync(DOCKERFILE, 'utf8')).toContain('COPY --chmod=755 apps/node/hh-xlsx.cjs /usr/local/bin/hh-xlsx');
+  });
+
+  it('reads hh-attach arguments: a task, the chat, both in either order, and refuses a task without its number or no file', () => {
+    const { parseArgs } = createRequire(import.meta.url)(ATTACH_SCRIPT) as { parseArgs(args: string[]): { task?: string; chat: boolean; files: string[] } | null };
+    expect(parseArgs(['shot.png'])).toEqual({ task: undefined, chat: false, files: ['shot.png'] });
+    expect(parseArgs(['--task', '#12', 'a.xlsx', 'b.csv'])).toEqual({ task: '#12', chat: false, files: ['a.xlsx', 'b.csv'] });
+    expect(parseArgs(['--chat', 'a.xlsx'])).toEqual({ task: undefined, chat: true, files: ['a.xlsx'] });
+    expect(parseArgs(['--chat', '--task', '12', 'a.xlsx'])).toEqual({ task: '12', chat: true, files: ['a.xlsx'] });
+    expect(parseArgs(['--task', '--chat', 'a.xlsx'])).toBeNull();
+    expect(parseArgs(['--task'])).toBeNull();
+    expect(parseArgs(['--chat'])).toBeNull();
   });
 
   it('supports hh-attach --chat FILE and hh-attach --task N --chat FILE for chat and task table delivery', async () => {

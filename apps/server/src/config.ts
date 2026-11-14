@@ -119,6 +119,13 @@ const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsW
 
 const harnessSettings = (set: z.infer<typeof Env>): Pick<Config, 'harnessDir' | 'harnessBytes'> => ({ ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}), harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024 });
 
+/* Where Google answers: its own addresses, unless the environment puts stand-ins in their place. */
+const googleUrls = (set: { GOOGLE_TOKEN_URL?: string; GOOGLE_SHEETS_URL?: string; GOOGLE_DRIVE_URL?: string }) => ({
+  googleTokenUrl: (set.GOOGLE_TOKEN_URL ?? 'https://oauth2.googleapis.com/token').replace(/\/+$/, ''),
+  googleSheetsUrl: (set.GOOGLE_SHEETS_URL ?? 'https://sheets.googleapis.com').replace(/\/+$/, ''),
+  googleDriveUrl: (set.GOOGLE_DRIVE_URL ?? 'https://www.googleapis.com').replace(/\/+$/, ''),
+});
+
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const raw = env.HORNHOOF_SECRET;
   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
@@ -157,9 +164,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
-    googleTokenUrl: (set.GOOGLE_TOKEN_URL ?? 'https://oauth2.googleapis.com/token').replace(/\/+$/, ''),
-    googleSheetsUrl: (set.GOOGLE_SHEETS_URL ?? 'https://sheets.googleapis.com').replace(/\/+$/, ''),
-    googleDriveUrl: (set.GOOGLE_DRIVE_URL ?? 'https://www.googleapis.com').replace(/\/+$/, ''),
+    ...googleUrls(set),
     ...(set.TRANSCRIBE_URL ? { transcribeUrl: set.TRANSCRIBE_URL } : {}),
     ...(set.TRANSCRIBE_KEY ? { transcribeKey: set.TRANSCRIBE_KEY } : {}),
     transcribeModel: set.TRANSCRIBE_MODEL ?? 'whisper-1',

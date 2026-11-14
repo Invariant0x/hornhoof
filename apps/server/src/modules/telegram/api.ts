@@ -51,11 +51,14 @@ async function postTelegram<T>(base: string, token: string, method: string, init
     throw new TelegramError(null, 'Telegram could not be reached.');
   }
   const answer = (await res.json().catch(() => null)) as Answer | null;
-  if (!answer?.ok) {
-    const words = (answer?.description ?? `Telegram answered ${res.status}.`).replaceAll(token, '[token]');
-    throw new TelegramError(answer?.error_code ?? res.status, words, answer?.parameters?.retry_after ?? null);
-  }
+  if (!answer?.ok) throw refusal(res.status, answer, token);
   return answer.result as T;
+}
+
+/* What Telegram refused, in its own words without the bot's token. */
+function refusal(status: number, answer: Answer | null, token: string): TelegramError {
+  const words = (answer?.description ?? `Telegram answered ${status}.`).replaceAll(token, '[token]');
+  return new TelegramError(answer?.error_code ?? status, words, answer?.parameters?.retry_after ?? null);
 }
 
 export async function callTelegram<T>(base: string, token: string, method: string, params: object, signal?: AbortSignal): Promise<T> {

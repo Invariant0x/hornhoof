@@ -198,17 +198,10 @@ class Listener {
     return sent;
   }
 
-  private async answerOne(row: ReplyRow, settling: boolean): Promise<void> {
+  /* Sends what the turn said since the last of it sent, with the files it attached, and keeps how far it got and whether
+     anything reached the person. Null when the chat is gone: it takes nothing from the bot any more. */
+  private async sayWords(person: Person, row: ReplyRow): Promise<boolean | null> {
     const { db } = this.ctx;
-    const person = await authorizedRecipient(db, this.bot, row.chatId);
-    if (!person) {
-      this.ended.delete(row.id);
-      await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
-      return;
-    }
-    /* Whether the turn is over is read before its words, so none it said before its end is missed. */
-    const [job] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, row.jobId));
-    const over = !job || !(OPEN as readonly string[]).includes(job.status);
     const said = await db
       .select({ seq: agentEvents.seq, data: agentEvents.data })
       .from(agentEvents)
@@ -224,12 +217,27 @@ class Listener {
       } catch (err) {
         if (!chatGone(err)) throw err;
         await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
-        return;
+        return null;
       }
       if (text.trim() || fileSent) answered = true;
       await db.update(telegramReplies).set({ afterSeq: words.seq, answered }).where(eq(telegramReplies.id, row.id));
     }
-    if (!over) return;
+    return answered;
+  }
+
+  private async answerOne(row: ReplyRow, settling: boolean): Promise<void> {
+    const { db } = this.ctx;
+    const person = await authorizedRecipient(db, this.bot, row.chatId);
+    if (!person) {
+      this.ended.delete(row.id);
+      await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
+      return;
+    }
+    /* Whether the turn is over is read before its words, so none it said before its end is missed. */
+    const [job] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, row.jobId));
+    const over = !job || !(OPEN as readonly string[]).includes(job.status);
+    const answered = await this.sayWords(person, row);
+    if (answered === null || !over) return;
     const next = await turnGoingOn(this.ctx, row.jobId);
     if (next) {
       this.ended.delete(row.id);

@@ -27,6 +27,7 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
           files={[
             { id: 'att-xlsx-1', name: 'partner-contacts.xlsx', size: 12_800, by: { id: 'a1', name: 'Nora' }, at: AT },
             { id: 'att-csv-2', name: 'leads-export.csv', size: 640, by: { id: 'a1', name: 'Nora' }, at: AT },
+            { id: 'att-log-3', name: `review-text-${'a'.repeat(64)}.txt`, size: 900, by: { id: 'a1', name: 'Nora' }, at: AT },
           ]}
         />
       </LanguageProvider>,
@@ -38,6 +39,11 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     const csvLink = screen.getByRole('link', { name: 'leads-export.csv' });
     expect(csvLink).toHaveAttribute('href', '/api/attachments/att-csv-2');
     expect(csvLink).toHaveAttribute('download', 'leads-export.csv');
+
+    /* A text Hornhoof keeps for a task opens to be read, under its short name. */
+    const textLink = screen.getByRole('link', { name: 'review-text.txt' });
+    expect(textLink).toHaveAttribute('target', '_blank');
+    expect(textLink).not.toHaveAttribute('download');
   });
 
   it('renders agent chat reply .xlsx and .csv attachments as 1-click download links inside AgentWindow', async () => {

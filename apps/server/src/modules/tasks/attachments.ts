@@ -163,30 +163,40 @@ function personDownloadType(found: { name: string | null; mediaType?: string }):
 /* A file's name as a header carries it: every character past plain letters and digits encoded. */
 const headerName = (name: string) => encodeURIComponent(name).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
+/* A file's bytes a piece at a time, each read as it goes out. */
+async function* filePieces(db: Db, id: string, length: number) {
+  for (let at = 0; at < length; at += PIECE_BYTES) {
+    const [piece] = await db
+      .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
+      .from(attachments)
+      .where(and(eq(attachments.id, id), isNull(attachments.operatorCaseId)));
+    if (!piece) throw new Error('The file was removed while it was being sent.');
+    yield Buffer.from(piece.bytes);
+  }
+}
+
+/* A person gets a text or a picture to look at, and any other file to save under its name. */
+const savedByPerson = (found: { mediaType?: string }, forPerson: boolean): boolean =>
+  forPerson && found.mediaType !== 'text/plain' && !found.mediaType?.startsWith('image/');
+
+/* What a file goes out as: to a person by what it is; to an agent a text as text, anything else as bytes. */
+function sentType(found: { name: string | null; mediaType?: string }, forPerson: boolean): string {
+  if (forPerson) return personDownloadType(found);
+  return found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream';
+}
+
 /* Sends a task or chat file in pieces, so the server never holds a whole one. */
 export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }, forPerson = false) {
   const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
   if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
-  async function* pieces(id: string, length: number) {
-    for (let at = 0; at < length; at += PIECE_BYTES) {
-      const [piece] = await db
-        .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
-        .from(attachments)
-        .where(and(eq(attachments.id, id), isNull(attachments.operatorCaseId)));
-      if (!piece) throw new Error('The file was removed while it was being sent.');
-      yield Buffer.from(piece.bytes);
-    }
-  }
-  if (forPerson && found.mediaType !== 'text/plain' && !found.mediaType?.startsWith('image/')) {
-    reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
-  }
+  if (savedByPerson(found, forPerson)) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
   return reply
     .header('x-content-type-options', 'nosniff')
     .header('x-file-name', encodeURIComponent(found.name ?? ''))
     .header('content-security-policy', "default-src 'none'")
     .header('content-length', String(found.length))
-    .type(forPerson ? personDownloadType(found) : found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream')
-    .send(Readable.from(pieces(found.id, found.length)));
+    .type(sentType(found, forPerson))
+    .send(Readable.from(filePieces(db, found.id, found.length)));
 }
 
 const IdParams = z.object({ id: z.uuid() });
@@ -240,6 +250,9 @@ async function chatFileForPerson(db: Db, me: Person, id: string) {
   return found;
 }
 
+/* A file of a task or of an agent's chat that this person may download; it throws when they may not see it. */
+const personFile = async (db: Db, me: Person, id: string) => (await taskFileForPerson(db, me, id)) ?? (await chatFileForPerson(db, me, id));
+
 /* Reads an attachment's bytes for a person only when that active person is allowed to see it on its task or agent chat. */
 export async function attachmentBytesForPerson(
   db: Db,
@@ -249,7 +262,7 @@ export async function attachmentBytesForPerson(
   if (person.status !== 'active') return null;
   let allowed: { id: string; name: string | null; mediaType: string } | null = null;
   try {
-    allowed = (await taskFileForPerson(db, person, id)) ?? (await chatFileForPerson(db, person, id));
+    allowed = await personFile(db, person, id);
   } catch {
     return null;
   }
@@ -272,15 +285,32 @@ function readsTaskFile(job: ToolJob, task: Task | null, file: { mediaType: strin
   return file.mediaType !== 'text/plain' || (task !== null && agentSeesTask({ id: job.agentId, kind: job.agentKind, departmentId: job.departmentId }, task));
 }
 
-function checkedUploadMeta(bytes: Buffer, asFile: boolean, toChat: boolean, hasTask: boolean, rawName: string | undefined) {
-  const name = asFile ? fileName(rawName ?? '') : null;
-  if (asFile && !name) throw new ApiError(400, 'validation', 'Name the file: name=<file name>.', 'attachment_invalid');
+/* A file's name, which a file for a task or the chat needs; a picture for a request goes without one. */
+function uploadName(asFile: boolean, rawName: string | undefined): string | null {
+  if (!asFile) return null;
+  const name = fileName(rawName ?? '');
+  if (!name) throw new ApiError(400, 'validation', 'Name the file: name=<file name>.', 'attachment_invalid');
+  return name;
+}
+
+function checkUploadSize(bytes: Buffer, asFile: boolean, toChat: boolean): void {
   if (toChat && !bytes.length) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
   if (!asFile && bytes.length > PICTURE_BYTES) {
     throw new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid');
   }
+}
+
+/* What an upload is kept as: a picture as its own type, unless it goes on a task, where every file is bytes. */
+function uploadType(asFile: boolean, hasTask: boolean, pic: string | null): string | null {
+  if (!asFile) return pic;
+  return !hasTask && pic ? pic : 'application/octet-stream';
+}
+
+function checkedUploadMeta(bytes: Buffer, asFile: boolean, toChat: boolean, hasTask: boolean, rawName: string | undefined) {
+  const name = uploadName(asFile, rawName);
+  checkUploadSize(bytes, asFile, toChat);
   const pic = pictureType(bytes);
-  const type = asFile ? (!hasTask && pic ? pic : 'application/octet-stream') : pic;
+  const type = uploadType(asFile, hasTask, pic);
   if (!type) throw new ApiError(400, 'validation', 'Send a PNG, JPEG or WebP picture, or name the task a file is for.', 'attachment_invalid');
   return { name, pic, type };
 }
@@ -356,12 +386,10 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const file = await taskFileForPerson(db, me, id);
+    const file = await personFile(db, me, id);
     if (file) return sendFile(db, reply, file, true);
     const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
-    const chatFile = await chatFileForPerson(db, me, id);
-    if (chatFile) return sendFile(db, reply, chatFile, true);
     const [found] = await db
       .select({ name: attachments.name, mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks, request: requests })
       .from(attachments)
