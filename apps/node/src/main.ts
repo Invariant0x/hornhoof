@@ -40,6 +40,7 @@ import { macOwner, type Command } from './terminal/mac-peer.js';
 import { ProgramUpdates, readInstalledVersion } from './program-updates.js';
 import { nodeLifecycle, stopNode } from './lifecycle.js';
 import { lifecycleCommand } from './lifecycle-command.js';
+import { heldJobs } from './held-jobs.js';
 import { nodeLog } from './node-log.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -360,6 +361,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   };
   const liveNow = () => (live ? { live } : {});
 
+  /* The turns this node holds. Finished jobs Hornhoof has not confirmed still count as running, so the server does not give
+     up on them. */
+  const holds = () => [...running.keys(), ...(host?.typedJobs() ?? []), ...unconfirmed.keys()];
+
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
@@ -370,11 +375,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       checks.online(true);
       host?.closeViews();
       login?.closeViews();
-      /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
-      const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, loggedIn, ...setup.field(), running: holds(), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       host?.operatorReplay();
       testMessages.replay();
       for (const m of outbox.splice(0)) emit(m);
@@ -414,6 +417,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
     if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
+    if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       await host?.cancel(m.jobId);

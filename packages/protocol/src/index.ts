@@ -517,6 +517,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* How the sign-in Hornhoof started on this node ended. */
   z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
+  /* Which of the turns Hornhoof asked about the node still runs, as its hello would list them. */
+  z.object({ type: z.literal('jobs.held'), asked: z.array(z.string()).max(100), held: z.array(z.string()).max(100) }),
   z.object({
     type: z.literal('job.done'),
     jobId: z.string(),
@@ -663,6 +665,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
+  /* Hornhoof asks which of these turns the node still runs: one it does not is over. */
+  z.object({ type: z.literal('jobs.check'), jobIds: z.array(Id).min(1).max(100) }),
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('job.ack'), jobId: Id }),
   z.object({ type: z.literal('remove') }),

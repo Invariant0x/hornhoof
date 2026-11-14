@@ -58,9 +58,10 @@ async function company() {
   /* What the server sent each node: the turns it gave it and what it asked it of the turns it runs. */
   const sentRun = (jobId: string) => send.mock.calls.some(([, m]) => m.type === 'job.run' && m.jobId === jobId);
   const checks = () => send.mock.calls.flatMap(([to, m]) => ((m as { type: string }).type === 'jobs.check' ? [{ to: keyOf(to), jobIds: (m as unknown as { jobIds: string[] }).jobIds }] : []));
-  /* The node tells what the turn's program does, as it does at least once a minute while it runs the turn. */
-  const pulse = (on: NodeIdentity, jobId: string, state: ProgramState, signAt = Date.now()) =>
-    handleNodeMessage(ctx, on, { type: 'job.program', jobId, state, since: Date.now(), screenAt: Date.now(), signAt });
+  /* The node tells what the turn's program does, as it does at least once a minute while it runs the turn: since when it is
+     in that state, and its last sign of life. */
+  const pulse = (on: NodeIdentity, jobId: string, state: ProgramState, since = Date.now(), signAt = Date.now()) =>
+    handleNodeMessage(ctx, on, { type: 'job.program', jobId, state, since, screenAt: since, signAt });
   /* The node answers which of the turns Hornhoof asked about it still runs. */
   const answer = (on: NodeIdentity, asked: string[], held: string[]) =>
     handleNodeMessage(ctx, on, { type: 'jobs.held', asked, held } as unknown as NodeMessage);
@@ -203,10 +204,11 @@ describe('a live program its queue waits behind', () => {
     c.later();
     const waiting = await c.message(c.orchestrator.id, 'Ivan: are you there?');
     expect((await c.job(waiting)).status).toBe('queued');
+    const idle = Date.now();
     for (let i = 0; i < 6; i++) {
       c.later();
       /* The program sits at its prompt: its node still gives signs of it, so the quiet alarm stays silent. */
-      await c.pulse(BUILTIN, turn, 'idle');
+      await c.pulse(BUILTIN, turn, 'idle', idle);
       await reconcile(c.ctx, new Date());
       const asked = c.checks().at(-1);
       if (asked) await c.answer(BUILTIN, asked.jobIds, asked.jobIds);
@@ -219,7 +221,7 @@ describe('a live program its queue waits behind', () => {
     expect((await c.job(turn)).status).toBe('running');
     for (let i = 0; i < 3; i++) {
       c.later();
-      await c.pulse(BUILTIN, turn, 'idle');
+      await c.pulse(BUILTIN, turn, 'idle', idle);
       await reconcile(c.ctx, new Date());
     }
     expect((await c.turnsOf(c.otto.id)).filter(j => j.prompt.includes('Orchestrator'))).toHaveLength(1);

@@ -7,6 +7,7 @@ import { failOpenJobs } from '../nodes/messages.js';
 import { expireStaleNodes } from '../nodes/nodes.js';
 import { CLOSED, giver, lastMove, openAfter, type Task, type Wake } from './engine.js';
 import { checkSignInFailures, sendWaitingFailureAlarms } from './failures.js';
+import { askOfRunningTurns, tellOfStalledQueues } from './orphan-turns.js';
 import { checkSilentTurns } from './silent.js';
 import { startWaitingTurns } from './turns.js';
 import { wakeAll } from './wake.js';
@@ -81,14 +82,16 @@ async function wakeMissing(ctx: Ctx, now: Date): Promise<void> {
 
 const reconciling = new WeakSet<Ctx>();
 
-/* Recover turns lost when a machine went away or a task move did not wake its holder, and start a department's planned
-   turn that waits while the department runs none. */
+/* Recover turns lost when a machine went away, no longer runs them or a task move did not wake its holder, tell Operations
+   of a program its queue waits behind, and start a department's planned turn that waits while the department runs none. */
 export async function reconcile(ctx: Ctx, now = new Date()): Promise<void> {
   if (reconciling.has(ctx)) return;
   reconciling.add(ctx);
   try {
     await expireStaleNodes(ctx.db, now);
     await failAwayTurns(ctx, now);
+    await askOfRunningTurns(ctx, now);
+    await tellOfStalledQueues(ctx, now);
     await wakeMissing(ctx, now);
     await wakeAll(ctx, await startWaitingTurns(ctx));
     await checkSilentTurns(ctx, now);
