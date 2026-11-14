@@ -96,3 +96,15 @@ describe('moving an employee to another plan in one step', () => {
     expect((await c.db.select({ sub: agents.subscriptionId }).from(agents).where(eq(agents.id, c.worker.id)))[0]!.sub).toBe(c.away.id);
   });
 });
+
+describe('an agent writing to an employee whose machine is offline', () => {
+  it('hears which machine is off, that the pushed work stays in the repository, and who goes on with it', async () => {
+    const c = await staged();
+    const hana = await c.tools(c.head);
+    const res = (await hana.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text: 'Go on with the leads' } })) as { content: { text: string }[]; isError?: boolean };
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toBe(
+      'Bruno cannot run now: Marselle, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.',
+    );
+  });
+});
