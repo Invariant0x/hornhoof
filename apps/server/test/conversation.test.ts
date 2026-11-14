@@ -421,16 +421,18 @@ describe('the orchestrator\'s conversation', () => {
     expect((await nextRun(mac)).effort).toBe('xhigh');
   });
 
+  /* dev-worktrees, not dev-tdd: DEV-BE with dev-tdd passes OLD_NODE_INSTRUCTIONS once hh-web-pages and hh-tables are core, and
+     a real old node gets node_too_old anyway, as no role with its default skills fits there, even on 0.23.5. */
   it('tells a machine that writes no skill files every skill in the text, and one that writes them only their list', async () => {
     const { app, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
     const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
     const [acme] = await db.select().from(companies);
     const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', skills: ['dev-tdd'] }).returning();
+    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', skills: ['dev-worktrees'] }).returning();
     expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) })).statusCode).toBe(202);
     const old = await nextRun(mac);
-    expect(old.instructions).toContain(app.ctx.templates.skills.get('dev-tdd')!.body);
+    expect(old.instructions).toContain(app.ctx.templates.skills.get('dev-worktrees')!.body);
     expect(old.instructions).not.toContain('<!-- hh:skill hh-superpowers -->');
     expect(old.skills).toBeUndefined();
     const fresh = await onMac('0.5.0');
