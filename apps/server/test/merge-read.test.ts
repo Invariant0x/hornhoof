@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import type { Db } from '../src/db/client.js';
-import { companies, departments, jobs, people, subscriptions, taskEvents, tasks, agents, attachments } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, companies, departments, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { runMerge } from '../src/modules/merge/apply.js';
 import { factsOf, type Query } from '../src/modules/merge/facts.js';
 import {
@@ -206,6 +206,106 @@ describe('reading both sides of a merge', () => {
       expect([codeReads, readsInTx]).toEqual([3, 0]);
       const [restored] = await db.select().from(attachments).where(eq(attachments.id, picture!.id));
       expect(Buffer.from(restored!.bytes).toString()).toBe('diagram');
+    } finally {
+      await raw.close();
+    }
+  });
+
+  it('streams compare pages of 500 rows for kept and uploaded databases without growing buffered rows with source size', async () => {
+    const sides = await twoSides();
+    const c = await company(sides.leader.db);
+    const { db, client } = sides.leader;
+    const [plan] = await db.insert(subscriptions).values({ companyId: c.acme.id, provider: 'claude', kind: 'personal', label: 'Plan', ownerPersonId: c.owner.id, status: 'ready' }).returning();
+    const [ana] = await db.insert(agents).values({ companyId: c.acme.id, subscriptionId: plan!.id, model: '', kind: 'worker', name: 'Ana', departmentId: c.sales.id }).returning();
+
+    const PAGE_ROWS = 500;
+    const insertEvents = async (count: number) => {
+      const batch = Array.from({ length: count }, (_, i) => ({ companyId: c.acme.id, agentId: ana!.id, kind: 'text' as const, data: { n: i } }));
+      for (let from = 0; from < batch.length; from += 400) await db.insert(agentEvents).values(batch.slice(from, from + 400));
+    };
+
+    const measurePeakBufferedRows = async (sourceName: string, kept: boolean): Promise<{ peak: number; path: string; equal: number }> => {
+      const fork = await sides.fork();
+      await fork.db.insert(tasks).values({ companyId: c.acme.id, number: kept ? 10 : 11, title: kept ? 'Kept task' : 'Uploaded task', departmentId: c.sales.id });
+      if (!kept) await db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, at) VALUES (${randomUUID()}, ${randomUUID()}, now(), now())`);
+      const made = (await db.execute(sql`INSERT INTO net.merges (source, label) VALUES (${sourceName}, 'local source') RETURNING id`)) as unknown as { rows: { id: string }[] };
+
+      let bufferedEventRows = 0;
+      let peakBufferedEventRows = 0;
+      const origQuery = client.query.bind(client);
+      client.query = (async (text: string, params?: unknown[]) => {
+        const res = await origQuery(text, params);
+        if (text.includes('FROM public."agent_events" t JOIN jsonb_to_recordset')) {
+          const keys = JSON.parse(String(params?.[0] ?? '[]')) as unknown[];
+          bufferedEventRows = Math.max(0, bufferedEventRows - keys.length);
+        }
+        return res;
+      }) as typeof client.query;
+
+      const raw = await fork.source();
+      const source = {
+        ...raw,
+        query: async <T = Record<string, unknown>>(text: string, params?: unknown[]) => {
+          const rows = await raw.query<T>(text, params);
+          if (text.includes('FROM public."agent_events" t') && text.includes('LIMIT $1')) {
+            bufferedEventRows += rows.length;
+            peakBufferedEventRows = Math.max(peakBufferedEventRows, bufferedEventRows);
+          }
+          return rows;
+        },
+      };
+      try {
+        const result = await runMerge(db, { id: made.rows[0]!.id, label: 'local source', kept, companyId: c.acme.id }, source, { log: () => undefined });
+        return { peak: peakBufferedEventRows, path: result.path, equal: result.counts.equal };
+      } finally {
+        client.query = origQuery;
+        await raw.close();
+      }
+    };
+
+    await insertEvents(1200);
+    const small = await measurePeakBufferedRows('kept:hornhoof_before_t_mem1', true);
+    expect(small.path).toBe('compare');
+    expect(small.equal).toBeGreaterThanOrEqual(1200);
+    expect(small.peak).toBe(PAGE_ROWS);
+
+    await insertEvents(1200);
+    const doubled = await measurePeakBufferedRows('upload:hornhoof_upload_99bb2233aabbccdd_20261114t040000', false);
+    expect(doubled.path).toBe('compare');
+    expect(doubled.equal).toBeGreaterThanOrEqual(2400);
+    expect(doubled.peak).toBe(PAGE_ROWS);
+  });
+
+  it('resets the forced compare flag between peer retries so journal fallback does not spin without progress', async () => {
+    const sides = await twoSides();
+    const c = await company(sides.leader.db);
+    const { db } = sides.leader;
+    const fork = await sides.fork();
+    await fork.db.update(tasks).set({ title: 'From peer' }).where(eq(tasks.id, c.one.id));
+
+    const attemptId = randomUUID();
+    const made = (await db.execute(sql`INSERT INTO net.merges (source, label) VALUES ('machine:reset-compare', 'peer fork') RETURNING id`)) as unknown as { rows: { id: string }[] };
+    const raw = await fork.source();
+    let codeReads = 0;
+    const source = {
+      ...raw,
+      query: async <T = Record<string, unknown>>(text: string, params?: unknown[]) => {
+        const rows = await raw.query<T>(text, params);
+        if (text.includes('FROM public.jobs j') && text.includes('JOIN public.tasks t')) {
+          codeReads += 1;
+          if (codeReads === 1) {
+            await db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, at) VALUES (${attemptId}, ${randomUUID()}, now(), now())`);
+          } else if (codeReads === 2) {
+            await db.execute(sql`DELETE FROM net.restores WHERE attempt = ${attemptId}::uuid`);
+          }
+        }
+        return rows;
+      },
+    };
+    try {
+      const result = await runMerge(db, { id: made.rows[0]!.id, label: 'peer fork', kept: false, companyId: c.acme.id }, source, { log: () => undefined });
+      expect(result.path).toBe('journal');
+      expect(codeReads).toBe(3);
     } finally {
       await raw.close();
     }

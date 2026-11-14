@@ -300,6 +300,45 @@ describe('a merge on real Postgres', () => {
     expect(await checked(db, name, merge.id)).toEqual({ ok: true, missing: [] });
   });
 
+  it('stops the commit when another session writes a FENCE while the merge transaction runs', async () => {
+    const name = await fork();
+    await into(name, `UPDATE tasks SET body = 'Only there' WHERE number = 1`);
+    const db = appDb();
+    const merging = merged(db, name, false, {
+      ...quiet,
+      onUnit: async n => {
+        if (n === 1) await run(live, `UPDATE net_local.lease SET until = '-infinity'`);
+      },
+    });
+    const err = await merging.then(
+      () => null,
+      (e: unknown) => e as { message: string; cause?: { code?: string; message?: string } },
+    );
+    expect([err?.message.split('\n')[0], err?.cause?.code, err?.cause?.message]).toEqual([
+      'Failed query: commit',
+      'HHF01',
+      'This machine holds no lease now, so nothing was changed.',
+    ]);
+    expect(await run(live, 'SELECT status FROM net.merges')).toEqual([{ status: 'pending' }]);
+    expect((await run<{ body: string }>(live, 'SELECT body FROM tasks WHERE number = 1'))[0]!.body).toBe('');
+  });
+
+  it('sees a lease renewal committed by another session while the merge transaction runs', async () => {
+    const name = await fork();
+    await into(name, `UPDATE tasks SET body = 'Only there' WHERE number = 1`);
+    const db = appDb();
+    await run(live, `UPDATE net_local.lease SET until = '-infinity'`);
+    const { result } = await merged(db, name, false, {
+      ...quiet,
+      onUnit: async n => {
+        if (n === 1) await run(live, `UPDATE net_local.lease SET until = 'infinity'`);
+      },
+    });
+    expect(result.counts.changed).toBe(1);
+    expect(await run(live, 'SELECT status FROM net.merges')).toEqual([{ status: 'applied' }]);
+    expect((await run<{ body: string }>(live, 'SELECT body FROM tasks WHERE number = 1'))[0]!.body).toBe('Only there');
+  });
+
   it('names the server its tests run on', () => {
     expect(realServer()).toMatch(/^postgres/);
   });
