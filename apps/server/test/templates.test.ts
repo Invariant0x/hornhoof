@@ -38,7 +38,7 @@ describe('templates', () => {
 
   it('makes each ability self-contained instead of relying on another selected skill', () => {
     const references = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
-    for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch'].includes(ref)), skill.id).toEqual([]);
+    for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch', 'hh-xlsx'].includes(ref)), skill.id).toEqual([]);
   });
 
   it('keeps small work proportionate without waiving gates or permissions', () => {
@@ -302,7 +302,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(54);
-    expect(skills).toHaveLength(180);
+    expect(skills).toHaveLength(181);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -371,12 +371,12 @@ describe('templates', () => {
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
-      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
     ]);
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
-    for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
+    for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
     expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
@@ -1722,5 +1722,34 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(steady.parts.map(part => part.kind)).toEqual(['base', 'assignment', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
     expect(steady.parts[0]!.text).toBe(ORCHESTRATOR_INSTRUCTIONS);
     for (const id of ORCHESTRATOR_SKILLS) expect(steady.parts.filter(part => part.id === id)).toHaveLength(1);
+  });
+
+  it('includes hh-tables in CORE_SKILLS and ORCHESTRATOR_SKILLS, forbids refusing spreadsheet delivery, and keeps DEV-HEAD within limits', () => {
+    expect(CORE_SKILLS).toContain('hh-tables');
+    const skill = templates.skills.get('hh-tables');
+    expect(skill).toBeDefined();
+    expect(skill!.title.en.length).toBeGreaterThan(3);
+    expect(skill!.title.ru.length).toBeGreaterThan(3);
+    expect(skill!.description.en.length).toBeGreaterThan(10);
+    expect(skill!.description.ru.length).toBeGreaterThan(10);
+    expect(skill!.body).toContain('hh-xlsx');
+    expect(skill!.body).toContain('hh-attach');
+    expect(skill!.body).toContain('send_telegram_file');
+    expect(skill!.body).toContain('create_google_sheet');
+    expect(skill!.body).toMatch(/error/i);
+    expect(skill!.body).toMatch(/no such capability|cannot generate files/i);
+    expect(skill!.body).not.toMatch(/ArSpatially|Ivan|David/i);
+    expect(skill!.body).not.toContain('\u2014');
+    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u0451');
+    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u2014');
+
+    for (const roleId of ['DEV-HEAD', 'MKT-HEAD', 'MKT-SEO']) {
+      const role = templates.roles.get(roleId)!;
+      const rendered = render(role, role.skills.filter(s => s.on).map(s => s.id));
+      expect(rendered.whole).toContain('<!-- hh:skill hh-tables -->');
+      expect(rendered.text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+      expect(rendered.whole.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    }
+    expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
   });
 });

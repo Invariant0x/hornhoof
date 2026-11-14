@@ -631,7 +631,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       case 'text':
         return (
           <ChatEntry side="agent" who={agentName} at={e.at}>
-            <Markdown text={field(e.data, 'text')} />
+            {field(e.data, 'text') ? <Markdown text={field(e.data, 'text')} /> : null}
+            <SentPictures data={e.data} />
           </ChatEntry>
         );
       case 'applied':

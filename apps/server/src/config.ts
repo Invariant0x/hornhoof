@@ -39,6 +39,10 @@ export type Config = {
   relayUrl: string;
   /* Where the Telegram Bot API answers; tests put a stand-in here. */
   telegramApiUrl: string;
+  /* Where Google OAuth2, Sheets and Drive APIs answer; tests put stand-ins here. */
+  googleTokenUrl: string;
+  googleSheetsUrl: string;
+  googleDriveUrl: string;
   /* A speech-to-text service that answers as OpenAI's /v1/audio/transcriptions does, its key and model: the words of voice
      messages that come through Telegram. None: a voice message goes to the agent as its recording alone. */
   transcribeUrl?: string;
@@ -92,6 +96,9 @@ const Env = z.object({
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TELEGRAM_API_URL: webAddress('TELEGRAM_API_URL must be an http:// or https:// address, like https://api.telegram.org.'),
+  GOOGLE_TOKEN_URL: webAddress('GOOGLE_TOKEN_URL must be an http:// or https:// address.'),
+  GOOGLE_SHEETS_URL: webAddress('GOOGLE_SHEETS_URL must be an http:// or https:// address.'),
+  GOOGLE_DRIVE_URL: webAddress('GOOGLE_DRIVE_URL must be an http:// or https:// address.'),
   TRANSCRIBE_URL: webAddress('TRANSCRIBE_URL must be an http:// or https:// address, like https://api.openai.com/v1/audio/transcriptions.'),
   TRANSCRIBE_KEY: z.preprocess(unset, z.string().min(1).optional()),
   TRANSCRIBE_MODEL: z.preprocess(unset, z.string().min(1).max(100).optional()),
@@ -150,6 +157,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     telegramApiUrl: (set.TELEGRAM_API_URL ?? 'https://api.telegram.org').replace(/\/+$/, ''),
+    googleTokenUrl: (set.GOOGLE_TOKEN_URL ?? 'https://oauth2.googleapis.com/token').replace(/\/+$/, ''),
+    googleSheetsUrl: (set.GOOGLE_SHEETS_URL ?? 'https://sheets.googleapis.com').replace(/\/+$/, ''),
+    googleDriveUrl: (set.GOOGLE_DRIVE_URL ?? 'https://www.googleapis.com').replace(/\/+$/, ''),
     ...(set.TRANSCRIBE_URL ? { transcribeUrl: set.TRANSCRIBE_URL } : {}),
     ...(set.TRANSCRIBE_KEY ? { transcribeKey: set.TRANSCRIBE_KEY } : {}),
     transcribeModel: set.TRANSCRIBE_MODEL ?? 'whisper-1',

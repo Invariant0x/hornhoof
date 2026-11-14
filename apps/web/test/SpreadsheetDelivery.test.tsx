@@ -104,7 +104,7 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
     const part = await within(dialog).findByRole('region', { name: 'Google Sheets' });
     await user.click(within(part).getByRole('button', { name: 'Connect Google Sheets' }));
-    await user.type(within(part).getByLabelText('Google key JSON'), '{"type":"service_account"}');
+    await user.type(within(part).getByLabelText('Google key JSON'), '{{"type":"service_account"}');
     await user.type(within(part).getByLabelText('Share new spreadsheets with'), 'ivan@acme.com');
     await user.click(within(part).getByRole('button', { name: 'Save' }));
     expect(await within(part).findByText(/sheets-bot@acme\.iam\.gserviceaccount\.com/)).toBeInTheDocument();

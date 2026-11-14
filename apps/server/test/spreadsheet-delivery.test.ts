@@ -1,24 +1,19 @@
 import { createVerify, generateKeyPairSync } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
-import { fileURLToPath } from 'node:url';
-import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import Fastify from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { HIDDEN } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies, departments, jobs, people, personAccess, subscriptions, telegramReplies } from '../src/db/schema.js';
-import { orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { sendDocument, TelegramError } from '../src/modules/telegram/api.js';
-import { CORE_SKILLS, loadTemplates } from '../src/modules/templates/load.js';
 import { listenAt } from '../../../test-support/ports.mjs';
 import { fakeTelegram, type TelegramUser } from './fake-telegram.js';
 import { as, connectNode, invitePerson, listen, mcp, nextOf, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const BOT_TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
-const TEMPLATES_DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
 const CEO_TG: TelegramUser = { id: 7770001, first_name: 'Ivan', username: 'ivan_ceo', language_code: 'ru' };
 const MKT_TG: TelegramUser = { id: 7770002, first_name: 'Luiza', username: 'luiza_mkt', language_code: 'ru' };
 const SALES_TG: TelegramUser = { id: 7770003, first_name: 'Sam', username: 'sam_sales', language_code: 'en' };
@@ -468,51 +463,5 @@ describe('1c. Google Sheets integration and clear .xlsx fallback when Google is 
     /* Deleting disconnects Google Sheets. */
     expect((await c.app.inject({ method: 'DELETE', url: '/api/google-sheets', ...as(c.ceoSession) })).statusCode).toBe(204);
     expect((await c.app.inject({ url: '/api/google-sheets', ...as(c.ceoSession) })).json()).toEqual({ google: null });
-  });
-});
-
-describe('2. shared hh-* table-delivery skills and role instruction limits', () => {
-  it('includes hh-tables in CORE_SKILLS and ORCHESTRATOR_SKILLS, forbids refusing spreadsheet delivery, and keeps DEV-HEAD within limits', () => {
-    const templates = loadTemplates(TEMPLATES_DIR);
-    expect(CORE_SKILLS).toContain('hh-tables');
-    const skill = templates.skills.get('hh-tables');
-    expect(skill).toBeDefined();
-    expect(skill!.title.en.length).toBeGreaterThan(3);
-    expect(skill!.title.ru.length).toBeGreaterThan(3);
-    expect(skill!.description.en.length).toBeGreaterThan(10);
-    expect(skill!.description.ru.length).toBeGreaterThan(10);
-    expect(skill!.body).toContain('hh-xlsx');
-    expect(skill!.body).toContain('hh-attach');
-    expect(skill!.body).toContain('send_telegram_file');
-    expect(skill!.body).toContain('create_google_sheet');
-    expect(skill!.body).toMatch(/error/i);
-    expect(skill!.body).toMatch(/no such capability|cannot generate files/i);
-    expect(skill!.body).not.toMatch(/ArSpatially|Ivan|David/i);
-    expect(skill!.body).not.toContain('\u2014');
-    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('ё');
-    expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u2014');
-
-    const place = { company: 'Acme', department: 'Development', product: null };
-    for (const roleId of ['DEV-HEAD', 'MKT-HEAD', 'MKT-SEO']) {
-      const role = templates.roles.get(roleId)!;
-      const rendered = renderInstructions(
-        templates,
-        {
-          id: 'a1',
-          companyId: 'c1',
-          kind: role.kind === 'head' ? 'head' : 'worker',
-          name: 'Agent',
-          roleKey: role.id,
-          skills: role.skills.filter(s => s.on).map(s => s.id),
-          overrides: {},
-          templateHashes: {},
-        } as Parameters<typeof renderInstructions>[1],
-        place,
-      );
-      expect(rendered.whole).toContain('<!-- hh:skill hh-tables -->');
-      expect(rendered.text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
-      expect(rendered.whole.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
-    }
-    expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
   });
 });

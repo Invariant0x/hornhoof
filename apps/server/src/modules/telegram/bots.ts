@@ -1,11 +1,14 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import { and, asc, eq, gt, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lte } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
+import { canViewAgent } from '../../auth/agent-view.js';
+import { personColumns, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
-import { agentEvents, agents, jobs, telegramBots, telegramReplies } from '../../db/schema.js';
+import { agentEvents, agents, jobs, people, telegramBots, telegramReplies } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { turnGoingOn } from '../conversation/queue.js';
-import { downloadFile, getUpdates, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
+import { attachmentBytesForPerson } from '../tasks/attachments.js';
+import { downloadFile, getUpdates, sendDocument, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
 import { transcribe } from './transcribe.js';
 import { receive } from './inbox.js';
 import { agentName, WORDS } from './words.js';
@@ -20,8 +23,37 @@ const LONGEST_PAUSE_MS = 60_000;
 const OPEN = ['queued', 'running'] as const;
 
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
+const picturesOfEvent = (data: unknown): { id: string }[] => {
+  if (!data || typeof data !== 'object' || !('pictures' in data) || !Array.isArray(data.pictures)) return [];
+  return data.pictures.filter((p): p is { id: string } => Boolean(p && typeof p === 'object' && 'id' in p && typeof p.id === 'string'));
+};
 /* A chat that blocked the bot, or that Telegram does not know, takes nothing from it any more. */
 const chatGone = (err: unknown) => err instanceof TelegramError && (err.code === 403 || err.code === 400);
+
+const sentTelegramFiles = new Set<string>();
+const sentKey = (jobId: string, chatId: number, attachmentId: string) => `${jobId}:${chatId}:${attachmentId}`;
+
+export function markTelegramFileSent(jobId: string, chatId: number, attachmentId: string): void {
+  if (sentTelegramFiles.size >= 5_000) {
+    const oldest = sentTelegramFiles.values().next().value;
+    if (oldest) sentTelegramFiles.delete(oldest);
+  }
+  sentTelegramFiles.add(sentKey(jobId, chatId, attachmentId));
+}
+
+export const wasTelegramFileSent = (jobId: string, chatId: number, attachmentId: string): boolean =>
+  sentTelegramFiles.has(sentKey(jobId, chatId, attachmentId));
+
+async function authorizedRecipient(db: Ctx['db'], bot: BotRow, chatId: number): Promise<Person | null> {
+  const [person] = await db
+    .select(personColumns)
+    .from(people)
+    .where(and(eq(people.companyId, bot.companyId), eq(people.telegramUserId, chatId)));
+  if (!person || person.status !== 'active') return null;
+  const [agent] = await db.select().from(agents).where(and(eq(agents.id, bot.agentId), isNull(agents.removedAt)));
+  if (!agent || !(await canViewAgent(db, person, agent))) return null;
+  return person;
+}
 
 /* The updates in turn, the photos and files of one album together, as the person sent them as one message. */
 export function albums(updates: TelegramUpdate[]): TelegramUpdate[][] {
@@ -143,8 +175,37 @@ class Listener {
     });
   }
 
+  private async sendEventFiles(person: Person, row: ReplyRow, data: unknown): Promise<boolean> {
+    let sent = false;
+    for (const pic of picturesOfEvent(data)) {
+      if (wasTelegramFileSent(row.jobId, row.chatId, pic.id)) {
+        sent = true;
+        continue;
+      }
+      const file = await attachmentBytesForPerson(this.ctx.db, person, pic.id);
+      if (!file) continue;
+      await sendDocument(
+        this.ctx.config.telegramApiUrl,
+        this.token,
+        row.chatId,
+        { bytes: file.bytes, name: file.name, mediaType: file.mediaType },
+        undefined,
+        this.abort.signal,
+      );
+      markTelegramFileSent(row.jobId, row.chatId, pic.id);
+      sent = true;
+    }
+    return sent;
+  }
+
   private async answerOne(row: ReplyRow, settling: boolean): Promise<void> {
     const { db } = this.ctx;
+    const person = await authorizedRecipient(db, this.bot, row.chatId);
+    if (!person) {
+      this.ended.delete(row.id);
+      await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
+      return;
+    }
     /* Whether the turn is over is read before its words, so none it said before its end is missed. */
     const [job] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, row.jobId));
     const over = !job || !(OPEN as readonly string[]).includes(job.status);
@@ -155,14 +216,17 @@ class Listener {
       .orderBy(asc(agentEvents.seq));
     let answered = row.answered;
     for (const words of said) {
+      const text = textOf(words.data);
+      let fileSent = false;
       try {
-        await this.say(row.chatId, textOf(words.data));
+        await this.say(row.chatId, text);
+        fileSent = await this.sendEventFiles(person, row, words.data);
       } catch (err) {
         if (!chatGone(err)) throw err;
         await db.delete(telegramReplies).where(eq(telegramReplies.id, row.id));
         return;
       }
-      answered = true;
+      if (text.trim() || fileSent) answered = true;
       await db.update(telegramReplies).set({ afterSeq: words.seq, answered }).where(eq(telegramReplies.id, row.id));
     }
     if (!over) return;

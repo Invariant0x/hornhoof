@@ -78,6 +78,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/map/layout': { blocks: {} },
   /* No GitHub key is saved, so the orchestrator creates no repository. */
   '/api/repo-host': { host: null },
+  '/api/google-sheets': { google: null },
   '/api/agents/orchestrator': {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
     model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'needs_subscription', currentTask: null,

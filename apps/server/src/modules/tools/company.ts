@@ -2,7 +2,7 @@ import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { accessesOf } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, companies, departments, nodes, people, subscriptions, teams } from '../../db/schema.js';
+import { agents, companies, departments, googleSheets, nodes, people, subscriptions, teams } from '../../db/schema.js';
 import { liveNode } from '../nodes/nodes.js';
 import { agreed } from '../subscriptions/views.js';
 import { employeeOrder } from '../agents/order.js';
@@ -64,9 +64,11 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         /* Off for now: it takes no work until a person switches it on. */
         on: !a.switchedOffAt,
       }));
+  const [gs] = await db.select({ id: googleSheets.id }).from(googleSheets).where(eq(googleSheets.companyId, companyId));
   return {
     name: company?.name ?? '',
     brief: company?.brief ?? '',
+    googleSheets: { connected: Boolean(gs) },
     people: leaders,
     departments: depts
       .filter(d => !d.parentId)
