@@ -222,7 +222,7 @@ class TurnStopped extends Error {}
 /* The message and its turn check share a transaction, so Stop cannot move between the check and the write. */
 async function liveInputKept(tx: Tx, jobId: string): Promise<void> {
   const [job] = await tx.select({ id: jobs.id }).from(jobs)
-    .where(and(eq(jobs.id, jobId), or(isNull(jobs.error), ne(jobs.error, 'cancelled')))).for('update');
+    .where(and(eq(jobs.id, jobId), or(isNull(jobs.error), ne(jobs.error, 'cancelled')))).for('no key update');
   if (!job) throw new TurnStopped();
   await inputKept(tx, jobId);
 }

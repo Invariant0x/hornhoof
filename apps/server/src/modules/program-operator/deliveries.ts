@@ -11,7 +11,7 @@ export const wordsDigest = (words: string): string => createHash('sha256').updat
 export async function reserveDelivery(db: Db, input: Reservation): Promise<OperatorDelivery> {
   const digest = wordsDigest(input.words);
   return db.transaction(async tx => {
-    const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, input.agentId), eq(agents.companyId, input.companyId), isNull(agents.removedAt))).for('update');
+    const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, input.agentId), eq(agents.companyId, input.companyId), isNull(agents.removedAt))).for('no key update');
     const [job] = agent ? await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId))
       .where(and(eq(jobs.id, input.jobId), eq(jobs.agentId, agent.id), eq(jobs.companyId, input.companyId), eq(nodes.id, input.nodeId), eq(nodes.companyId, input.companyId))) : [];
     if (!job) throw new Error('The program delivery target does not match its job and node.');

@@ -33,7 +33,7 @@ export type Scope = string | null;
 /* The people's words the orchestrator lays a turn out from: their newest messages to him, as many as he says, at most this. */
 export const TURN_MESSAGES = 6;
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
 async function headOf(db: Live['db'] | Tx, departmentId: string) {
   const [head] = await db

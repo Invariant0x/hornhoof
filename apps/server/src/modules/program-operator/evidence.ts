@@ -73,7 +73,7 @@ async function recordEvidence(tx: Tx, inside: Ctx, nodeId: string, frame: Operat
   if (!frame.jobId) return false;
   const [job] = await tx.select({ companyId: jobs.companyId, agentId: agents.id }).from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId)).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).innerJoin(nodes, eq(nodes.id, jobs.nodeId))
-    .where(and(eq(jobs.id, frame.jobId), eq(jobs.agentId, frame.agentKey), eq(nodes.id, nodeId), eq(nodes.companyId, agents.companyId), eq(jobs.companyId, agents.companyId), eq(subscriptions.kind, 'personal'), isNotNull(nodes.keyHash), isNull(agents.removedAt))).for('update', { of: agents });
+    .where(and(eq(jobs.id, frame.jobId), eq(jobs.agentId, frame.agentKey), eq(nodes.id, nodeId), eq(nodes.companyId, agents.companyId), eq(jobs.companyId, agents.companyId), eq(subscriptions.kind, 'personal'), isNotNull(nodes.keyHash), isNull(agents.removedAt))).for('no key update', { of: agents });
   if (!job || !await validDelivery(tx, frame, job.companyId, nodeId)) return false;
   const [old] = await tx.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.companyId, job.companyId), sql`${agentEvents.data}->>'operatorEvidenceId' = ${frame.evidenceId}`));
   if (old) return sameFact(old.data, frame);
