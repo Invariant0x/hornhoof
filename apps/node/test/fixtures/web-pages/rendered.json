@@ -1,0 +1,25 @@
+{
+  "title": "Spring catalogue",
+  "text": "Spring catalogue\nHand trowel costs 12 EUR\nPruner costs 18 EUR\nWatering can costs 9 EUR",
+  "textLength": 86,
+  "links": [
+    {
+      "text": "Hand trowel",
+      "url": "https://shop.example/items/1"
+    },
+    {
+      "text": "Pruner",
+      "url": "https://shop.example/items/2"
+    },
+    {
+      "text": "Watering can",
+      "url": "https://shop.example/items/3"
+    }
+  ],
+  "linkCount": 3,
+  "frames": [],
+  "scripts": [],
+  "markers": [],
+  "passwordFields": 0,
+  "height": 800
+}

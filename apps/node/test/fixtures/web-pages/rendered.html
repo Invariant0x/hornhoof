@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Loading</title></head>
+<body>
+<div id="app">Loading the catalogue...</div>
+<script>
+fetch('/api/items.json').then(r => r.json()).then(items => {
+  document.title = 'Spring catalogue';
+  const app = document.getElementById('app');
+  app.innerHTML = '<h1>Spring catalogue</h1><ul>' + items.map(i => '<li><a href="/items/' + i.id + '">' + i.name + '</a> costs ' + i.price + '</li>').join('') + '</ul>';
+});
+</script>
+</body></html>

@@ -1,0 +1,33 @@
+{
+  "title": "Garden tools for small balconies",
+  "text": "Home Shop About us Write to us\nGarden tools for small balconies\n\nA small balcony needs only three tools: a hand trowel, a pruner and a watering can with a long spout.\n\nRead our pruning guide before spring, and see the shop for sets.\n\nPrivacy",
+  "textLength": 241,
+  "links": [
+    {
+      "text": "Home",
+      "url": "https://shop.example/"
+    },
+    {
+      "text": "Shop",
+      "url": "https://shop.example/shop"
+    },
+    {
+      "text": "About us",
+      "url": "https://example.org/about"
+    },
+    {
+      "text": "our pruning guide",
+      "url": "https://shop.example/guides/pruning"
+    },
+    {
+      "text": "Privacy",
+      "url": "https://shop.example/privacy"
+    }
+  ],
+  "linkCount": 5,
+  "frames": [],
+  "scripts": [],
+  "markers": [],
+  "passwordFields": 0,
+  "height": 800
+}

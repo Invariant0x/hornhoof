@@ -1,0 +1,18 @@
+{
+  "title": "Just a moment...",
+  "text": "shop.example\nVerifying you are human. This may take a few seconds.\n\nshop.example needs to review the security of your connection before proceeding.",
+  "textLength": 147,
+  "links": [],
+  "linkCount": 0,
+  "frames": [],
+  "scripts": [
+    "https://challenges.cloudflare.com/turnstile/v0/api.js"
+  ],
+  "markers": [
+    ".cf-turnstile",
+    "#challenge-running",
+    "[data-sitekey]"
+  ],
+  "passwordFields": 0,
+  "height": 800
+}

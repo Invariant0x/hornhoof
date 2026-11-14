@@ -1,0 +1,17 @@
+{
+  "title": "Security check",
+  "text": "Please confirm you are not a robot\n\nWe have detected unusual traffic from your computer network.",
+  "textLength": 96,
+  "links": [],
+  "linkCount": 0,
+  "frames": [
+    "https://www.google.com/recaptcha/api2/anchor?k=6Lc_aCMTAAAAABx7u2W0WPXnVbI_v6ZdbM6rYf16"
+  ],
+  "scripts": [],
+  "markers": [
+    ".g-recaptcha",
+    "[data-sitekey]"
+  ],
+  "passwordFields": 0,
+  "height": 800
+}

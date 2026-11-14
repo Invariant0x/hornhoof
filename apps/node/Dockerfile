@@ -160,6 +160,9 @@ COPY --chmod=755 apps/node/git-askpass /app/git-askpass
 # node gives each turn its address and token.
 COPY --chmod=755 apps/node/hh-attach.cjs /usr/local/bin/hh-attach
 COPY --chmod=755 apps/node/hh-fetch.cjs /usr/local/bin/hh-fetch
+# Agents of every department read pages that scripts build with hh-browse, in the image's own Playwright and Chromium,
+# through a proxy of each call that opens only public addresses.
+COPY --chmod=755 apps/node/hh-browse.cjs /usr/local/bin/hh-browse
 # Agents run in tmux sessions; their hooks and status line tell the node how a turn goes through hh-hook.
 COPY --chmod=755 apps/node/hh-hook.cjs /usr/local/bin/hh-hook
 COPY apps/node/hh-hook-send.cjs /usr/local/bin/hh-hook-send.cjs
