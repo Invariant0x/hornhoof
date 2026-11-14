@@ -34,6 +34,7 @@ async function releaseFixture() {
   let fastForward = true;
   let compareProblem: string | null = null;
   const branchHeads = new Map<string, string>();
+  const nonMainBases = new Map<string, Set<string>>();
 
   ctx.readCommit = async (_repo, ref) => {
     const branch = 'branch' in ref ? ref.branch : `task-${ref.task}`;
@@ -43,6 +44,9 @@ async function releaseFixture() {
   };
   ctx.readCompare = async (_repo, want) => {
     if (compareProblem) return { complete: false, reason: compareProblem };
+    if (nonMainBases.has(want.base) && want.head !== want.base && !nonMainBases.get(want.base)!.has(want.head)) {
+      return { complete: false, reason: 'not-an-ancestor' };
+    }
     if (want.base === mainCommit && !fastForward) return { complete: false, reason: 'Branch diverged from main.' };
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' };
   };
@@ -308,6 +312,9 @@ async function releaseFixture() {
     },
     setCompareProblem: (problem: string | null) => {
       compareProblem = problem;
+    },
+    markNonMainBase: (baseSha: string, descendants: string[] = []) => {
+      nonMainBases.set(baseSha, new Set(descendants));
     },
   };
 }
@@ -971,5 +978,294 @@ describe('autonomous release for exact commits to main', () => {
       commitSha: REL_SHA,
       baseCommitSha: MAIN_BASE,
     });
+  });
+
+  it('C1 (wrong turn): refuses auto-approval when the PASS verdict comes from another turn', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    const outCoord = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Outside turn coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+
+    const turn1 = await f.openEchelonsTurn();
+    const TURN1_SHA = '8'.repeat(40);
+    f.setBranchHead('release-0.24.0', TURN1_SHA);
+    const relTask1 = (await f.create({ small: true, title: 'Turn 1 release', paths: ['logic/totals.ts'] })).task;
+    await submit(f.ctx, f.author.id, relTask1.id, {
+      summary: 'Turn 1 release candidate.',
+      evidence: 'Checks.',
+      review: { baseCommit: MAIN_BASE, branch: 'release-0.24.0' },
+    });
+    await verdict(f.ctx, f.reviewer.id, relTask1.id, {
+      pass: true,
+      comment: 'Turn 1 verified.',
+      reviewedCommit: TURN1_SHA,
+    });
+    await f.runProductSuite({ commit: TURN1_SHA, branch: 'release-0.24.0', profile: 'full' });
+    f.setBranchHead('release-0.24.0', TURN1_SHA);
+
+    const { call: headCall } = await f.openTools(f.head);
+    /* Out-of-turn task (turnId = null) asking while Turn 1 is open is refused. */
+    const outAsked = await headCall('ask_person', { task: outCoord.number, question: 'Out-of-turn ask for Turn 1 SHA?', commit: TURN1_SHA });
+    expect(outAsked.text).toContain('waits for a person');
+
+    /* Close Turn 1 and open Turn 2: Turn 2 coordination task (turn2.id != turn1.id) asking for Turn 1 SHA is refused. */
+    await f.db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turn1.id));
+    const turn2 = await f.openEchelonsTurn();
+    expect(turn2.id).not.toBe(turn1.id);
+    const turn2Coord = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Turn 2 coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+    const turn2Asked = await headCall('ask_person', { task: turn2Coord.number, question: 'Turn 2 ask for Turn 1 SHA?', commit: TURN1_SHA });
+    expect(turn2Asked.text).toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([]);
+  });
+
+  it('C1 (PASS on another SHA): refuses auto-approval when PASS was given on an ancestor or another commit rather than the asked SHA', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    await f.openEchelonsTurn();
+
+    /* 1. PASS was recorded on ANCESTOR_SHA; candidate then advances via takeMainAtTests to DESCENDANT_SHA with green full run_tests on DESCENDANT_SHA.
+       Asking for DESCENDANT_SHA must open a human card because reviewedCommit != DESCENDANT_SHA. */
+    const ANCESTOR_SHA = 'c'.repeat(40);
+    const DESCENDANT_SHA = 'd'.repeat(40);
+    f.setBranchHead('release-0.24.1', ANCESTOR_SHA);
+    const relTask = (await f.create({ small: true, title: 'Release 0.24.1', paths: ['logic/totals.ts'] })).task;
+    await submit(f.ctx, f.author.id, relTask.id, {
+      summary: 'Initial release candidate.',
+      evidence: 'Checks.',
+      review: { baseCommit: BASE, branch: 'release-0.24.1' },
+    });
+    await verdict(f.ctx, f.reviewer.id, relTask.id, {
+      pass: true,
+      comment: 'Verified ancestor commit.',
+      reviewedCommit: ANCESTOR_SHA,
+    });
+
+    f.setBranchHead('release-0.24.1', DESCENDANT_SHA);
+    await submit(f.ctx, f.tester.id, relTask.id, {
+      summary: 'Took main into release-0.24.1.',
+      evidence: 'Checks.',
+      review: { baseCommit: MAIN_BASE, branch: 'release-0.24.1' },
+    });
+    await f.runProductSuite({ commit: DESCENDANT_SHA, branch: 'release-0.24.1', profile: 'full' });
+    f.setBranchHead('release-0.24.1', DESCENDANT_SHA);
+
+    const { call: testerCall } = await f.openTools(f.tester);
+    const onDescendantSelf = await testerCall('ask_person', {
+      task: relTask.number,
+      question: 'Ship descendant after PASS on ancestor?',
+      commit: DESCENDANT_SHA,
+    });
+    expect(onDescendantSelf.text).toContain('waits for a person');
+
+    const { call: headCall } = await f.openTools(f.head);
+    const turnCoord = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Coord ask on descendant', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+    const onDescendantCoord = await headCall('ask_person', {
+      task: turnCoord.number,
+      question: 'Coord ship descendant after PASS on ancestor?',
+      commit: DESCENDANT_SHA,
+    });
+    expect(onDescendantCoord.text).toContain('waits for a person');
+
+    /* 2. Even if an earlier verdict on a candidate had reviewedCommit = EXACT_SHA, a newer verdict on that candidate with another SHA or pass=false invalidates it. */
+    const EXACT_SHA = 'e'.repeat(40);
+    f.setBranchHead('release-0.24.2', EXACT_SHA);
+    const relTask2 = (await f.create({ small: true, title: 'Release 0.24.2', paths: ['logic/totals.ts'] })).task;
+    await submit(f.ctx, f.author.id, relTask2.id, {
+      summary: 'Candidate 0.24.2.',
+      evidence: 'Checks.',
+      review: { baseCommit: MAIN_BASE, branch: 'release-0.24.2' },
+    });
+    await verdict(f.ctx, f.reviewer.id, relTask2.id, {
+      pass: true,
+      comment: 'Initial PASS.',
+      reviewedCommit: EXACT_SHA,
+    });
+    const candId = (await f.detail(relTask2.id)).echelons.candidateId!;
+    await f.db.insert(taskEvents).values({
+      companyId: f.head.companyId,
+      taskId: relTask2.id,
+      agentId: f.reviewer.id,
+      kind: 'verdict',
+      text: 'Superseded by FAIL referencing ancestor.',
+      data: { pass: false, stage: 'review', candidateId: candId, reviewedCommit: ANCESTOR_SHA },
+    });
+    await f.runProductSuite({ commit: EXACT_SHA, branch: 'release-0.24.2', profile: 'full' });
+    f.setBranchHead('release-0.24.2', EXACT_SHA);
+
+    const turnCoord2 = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Coord ask after superseded verdict', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+    const supersededAsk = await headCall('ask_person', {
+      task: turnCoord2.number,
+      question: 'Ship after superseded verdict?',
+      commit: EXACT_SHA,
+    });
+    expect(supersededAsk.text).toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([]);
+  });
+
+  it('C1 (base from network-1): refuses auto-approval in the same turn when review.baseCommit is not an ancestor of origin/main', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    const turn = await f.openEchelonsTurn();
+
+    /* Graph: MAIN_BASE -> NETWORK_BASE (network-1, ahead of origin/main) -> NET_TURN_SHA.
+       NET_TURN_SHA is a fast-forward descendant of MAIN_BASE and is in the same open turn, with PASS on NET_TURN_SHA
+       and a green full run, yet review.baseCommit = NETWORK_BASE is NOT an ancestor of origin/main (MAIN_BASE). */
+    const NETWORK_BASE = 'c'.repeat(40);
+    const NET_TURN_SHA = 'd'.repeat(40);
+    f.markNonMainBase(NETWORK_BASE, [NET_TURN_SHA]);
+    f.setBranchHead('release-0.24.0', NET_TURN_SHA);
+
+    const netTurnTask = (await f.create({ small: true, title: 'Branch from network-1 in same turn', paths: ['logic/totals.ts'] })).task;
+    expect(netTurnTask.turnId).toBe(turn.id);
+    await submit(f.ctx, f.author.id, netTurnTask.id, {
+      summary: 'Built on network-1 base.',
+      evidence: 'Checks.',
+      review: { baseCommit: NETWORK_BASE, branch: 'release-0.24.0' },
+    });
+    await verdict(f.ctx, f.reviewer.id, netTurnTask.id, {
+      pass: true,
+      comment: 'Reviewed diff from network-1 only.',
+      reviewedCommit: NET_TURN_SHA,
+    });
+    await f.runProductSuite({ commit: NET_TURN_SHA, branch: 'release-0.24.0', profile: 'full' });
+    f.setBranchHead('release-0.24.0', NET_TURN_SHA);
+
+    const turnCoord = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Same-turn release coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+    expect(turnCoord.turnId).toBe(turn.id);
+
+    const { call: headCall } = await f.openTools(f.head);
+    const coordAsked = await headCall('ask_person', {
+      task: turnCoord.number,
+      question: 'Ship branch based on network-1 in same turn?',
+      commit: NET_TURN_SHA,
+    });
+    expect(coordAsked.text).toContain('waits for a person');
+
+    const { call: testerCall } = await f.openTools(f.tester);
+    const selfAsked = await testerCall('ask_person', {
+      task: netTurnTask.number,
+      question: 'Ship own task based on network-1?',
+      commit: NET_TURN_SHA,
+    });
+    expect(selfAsked.text).toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([]);
+  });
+
+  it('C1 (both outside a turn): refuses auto-approval when both turnIds are null unless PASS is on the asked SHA and review.baseCommit is an ancestor of origin/main', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+
+    /* 1. Both outVerdictTask and outRelTask have turnId === null, PASS is on NET_OUT_SHA and full run_tests is green on NET_OUT_SHA,
+       and NET_OUT_SHA is fast-forward from MAIN_BASE, while review.baseCommit = NETWORK_BASE (from network-1) is NOT an ancestor of origin/main. */
+    const NETWORK_BASE = '3'.repeat(40);
+    const NET_OUT_SHA = '5'.repeat(40);
+    f.markNonMainBase(NETWORK_BASE, [NET_OUT_SHA]);
+    f.setBranch(NET_OUT_SHA);
+
+    const outVerdictTask = await f.createMainCodeTask({ title: 'Out-of-turn task started from network-1', paths: ['logic/totals.ts'] });
+    expect(outVerdictTask.turnId).toBeNull();
+    await submit(f.ctx, f.author.id, outVerdictTask.id, {
+      summary: 'Network work outside a turn: do not merge to main.',
+      evidence: 'Checks.',
+      review: { baseCommit: NETWORK_BASE },
+    });
+    await verdict(f.ctx, f.reviewer.id, outVerdictTask.id, {
+      pass: true,
+      comment: 'Reviewed only against network-1.',
+      reviewedCommit: NET_OUT_SHA,
+    });
+    await f.runProductSuite({ commit: NET_OUT_SHA, branch: `task-${outVerdictTask.number}`, profile: 'full' });
+
+    const outRelTask = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Out-of-turn release coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+    expect(outRelTask.turnId).toBeNull();
+
+    const { call: headCall } = await f.openTools(f.head);
+    const coordAsked = await headCall('ask_person', {
+      task: outRelTask.number,
+      question: 'Ship out-of-turn network-based commit from coord?',
+      commit: NET_OUT_SHA,
+    });
+    expect(coordAsked.text).toContain('waits for a person');
+
+    const { call: testerCall } = await f.openTools(f.tester);
+    const selfAsked = await testerCall('ask_person', {
+      task: outVerdictTask.number,
+      question: 'Ship out-of-turn network-based commit from task?',
+      commit: NET_OUT_SHA,
+    });
+    expect(selfAsked.text).toContain('waits for a person');
+
+    /* 2. Both turnIds are null and review.baseCommit IS on main, while PASS was only on ANCESTOR_SHA before takeMainAtTests to DESCENDANT_SHA: refused. */
+    const ANCESTOR_SHA = 'e'.repeat(40);
+    const DESCENDANT_SHA = 'f'.repeat(40);
+    f.setBranch(ANCESTOR_SHA);
+    const outMainTask = await f.createMainCodeTask({ title: 'Out-of-turn main task', paths: ['logic/totals.ts'] });
+    await submit(f.ctx, f.author.id, outMainTask.id, {
+      summary: 'Main-line work.',
+      evidence: 'Checks.',
+      review: { baseCommit: BASE },
+    });
+    await verdict(f.ctx, f.reviewer.id, outMainTask.id, {
+      pass: true,
+      comment: 'PASS on ancestor.',
+      reviewedCommit: ANCESTOR_SHA,
+    });
+    f.setBranch(DESCENDANT_SHA);
+    await submit(f.ctx, f.tester.id, outMainTask.id, {
+      summary: 'Merged main at Tests.',
+      evidence: 'Checks.',
+      review: { baseCommit: MAIN_BASE },
+    });
+    await f.runProductSuite({ commit: DESCENDANT_SHA, branch: `task-${outMainTask.number}`, profile: 'full' });
+
+    const outRelTask2 = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Out-of-turn release coord 2', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+    const ancestorAsked = await headCall('ask_person', {
+      task: outRelTask2.number,
+      question: 'Ship descendant when PASS was on ancestor?',
+      commit: DESCENDANT_SHA,
+    });
+    expect(ancestorAsked.text).toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([]);
   });
 });
