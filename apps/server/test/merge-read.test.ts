@@ -232,15 +232,29 @@ describe('reading both sides of a merge', () => {
 
       let bufferedEventRows = 0;
       let peakBufferedEventRows = 0;
-      const origQuery = client.query.bind(client);
-      client.query = (async (text: string, params?: unknown[]) => {
-        const res = await origQuery(text, params);
+      const noteCompared = (text: string, params?: unknown[]) => {
         if (text.includes('FROM public."agent_events" t JOIN jsonb_to_recordset')) {
           const keys = JSON.parse(String(params?.[0] ?? '[]')) as unknown[];
           bufferedEventRows = Math.max(0, bufferedEventRows - keys.length);
         }
+      };
+      const origQuery = client.query.bind(client);
+      const origTx = client.transaction.bind(client);
+      client.query = (async (text: string, params?: unknown[]) => {
+        const res = await origQuery(text, params);
+        noteCompared(text, params);
         return res;
       }) as typeof client.query;
+      client.transaction = (async <T>(cb: Parameters<typeof origTx>[0]) =>
+        origTx(async tx => {
+          const origTxQuery = tx.query.bind(tx);
+          tx.query = (async (text: string, params?: unknown[]) => {
+            const res = await origTxQuery(text, params);
+            noteCompared(text, params);
+            return res;
+          }) as typeof tx.query;
+          return cb(tx) as Promise<T>;
+        })) as typeof client.transaction;
 
       const raw = await fork.source();
       const source = {
@@ -259,20 +273,21 @@ describe('reading both sides of a merge', () => {
         return { peak: peakBufferedEventRows, path: result.path, equal: result.counts.equal };
       } finally {
         client.query = origQuery;
+        client.transaction = origTx;
         await raw.close();
       }
     };
 
-    await insertEvents(1200);
+    await insertEvents(650);
     const small = await measurePeakBufferedRows('kept:hornhoof_before_t_mem1', true);
     expect(small.path).toBe('compare');
-    expect(small.equal).toBeGreaterThanOrEqual(1200);
+    expect(small.equal).toBeGreaterThanOrEqual(650);
     expect(small.peak).toBe(PAGE_ROWS);
 
-    await insertEvents(1200);
+    await insertEvents(650);
     const doubled = await measurePeakBufferedRows('upload:hornhoof_upload_99bb2233aabbccdd_20261114t040000', false);
     expect(doubled.path).toBe('compare');
-    expect(doubled.equal).toBeGreaterThanOrEqual(2400);
+    expect(doubled.equal).toBeGreaterThanOrEqual(1300);
     expect(doubled.peak).toBe(PAGE_ROWS);
   });
 

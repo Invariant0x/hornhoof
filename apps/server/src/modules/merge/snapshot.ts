@@ -11,6 +11,26 @@ export type CodeLine = { task: string; number: number; branch: string; machines:
 
 export type NameKeys = (q: Query, rows: (Row | null)[]) => Promise<void>;
 
+/* Common source interface for Merge: streaming page-by-page for a kept or uploaded database in the leader's own
+   Postgres, and a pre-read snapshot for a peer machine over the network so no network read holds a leader transaction. */
+export type MergeReader = {
+  facts(): Promise<Facts>;
+  companyId(): Promise<string | null>;
+  horizon(): Promise<Date | null>;
+  restores(): Promise<string[]>;
+  journalIds(cutoff: Date | null): Promise<Map<string, Date>>;
+  journalRows(ids: string[]): Promise<JournalRow[]>;
+  rowsForJournal(t: TableFacts, keys: Record<string, unknown>[], rows: JournalRow[]): Promise<Map<string, Row>>;
+  pagesOf(t: TableFacts): AsyncIterable<Row[]>;
+  wholeOf(t: TableFacts, key: Record<string, unknown>): Promise<Row | null>;
+  parked(): Promise<Row[]>;
+  conflicts(): Promise<Row[]>;
+  backups(): Promise<Row[]>;
+  handovers(): Promise<Row[]>;
+  codeFor(taskId: string): Promise<CodeLine | null>;
+  lastChange(): Promise<Date | null>;
+};
+
 export type SourceRequest = {
   compare: boolean;
   files: Map<string, Map<string, Record<string, unknown>>>;
@@ -19,20 +39,39 @@ export type SourceRequest = {
 /* Raised inside the leader's transaction when the leader changed between pre-reading the source and taking the table
    locks, so the merge rolls back at once, opens the gate, reads what more it needs from the source, and runs again. */
 export class NeedMoreFromSource extends Error {
-  constructor(readonly extra: { compare?: boolean; files?: { table: string; key: Record<string, unknown> }[] }) {
+  constructor(
+    readonly extra: {
+      compare?: boolean;
+      journal?: boolean;
+      cutoff?: Date | null;
+      files?: { table: string; key: Record<string, unknown> }[];
+    },
+  ) {
     super('More rows are needed from the merge source.');
   }
 }
 
-function rememberFileKey(files: Map<string, Map<string, Record<string, unknown>>>, table: string, key: Record<string, unknown>): void {
+function rememberFileKey(files: Map<string, Map<string, Record<string, unknown>>>, table: string, key: Record<string, unknown>): boolean {
   const known = files.get(table) ?? new Map<string, Record<string, unknown>>();
-  known.set(keyText(key), key);
+  const text = keyText(key);
+  if (known.has(text)) return false;
+  known.set(text, key);
   files.set(table, known);
+  return true;
 }
 
-export function noteMoreNeeded(request: SourceRequest, err: NeedMoreFromSource): void {
-  if (err.extra.compare) request.compare = true;
-  for (const item of err.extra.files ?? []) rememberFileKey(request.files, item.table, item.key);
+export function noteMoreNeeded(request: SourceRequest, snapshot: SourceSnapshot, err: NeedMoreFromSource): boolean {
+  let progressed = false;
+  if (err.extra.compare && !snapshot.hasCompare()) {
+    request.compare = true;
+    progressed = true;
+  }
+  if (err.extra.journal && !snapshot.hasJournalRows()) progressed = true;
+  if (err.extra.cutoff !== undefined && snapshot.cutoffMovedBack(err.extra.cutoff)) progressed = true;
+  for (const item of err.extra.files ?? []) {
+    if (rememberFileKey(request.files, item.table, item.key)) progressed = true;
+  }
+  return progressed;
 }
 
 type LoadedJournal = {
@@ -44,6 +83,7 @@ type LoadedJournal = {
   byTable: Map<string, Map<string, Row>>;
 };
 
+const FILE_BATCH = 16;
 const keyOf = (t: TableFacts, row: Row): Record<string, unknown> => Object.fromEntries(t.key.map(name => [name, row[name]]));
 
 function keysByTable(rows: JournalRow[]): Map<string, Record<string, unknown>[]> {
@@ -102,12 +142,16 @@ const isComparedTable = (name: string): boolean => {
   return rule.kind !== 'skip' && rule.afterRestore !== 'skip';
 };
 
-async function readTablePages(src: Query, t: TableFacts, nameKeys: NameKeys): Promise<Row[][]> {
-  const pages: Row[][] = [];
+async function* streamTablePages(src: Query, t: TableFacts, nameKeys: NameKeys): AsyncGenerator<Row[]> {
   for await (const page of rowsOf(src, t)) {
     if (t.name === 'map_returns') await nameKeys(src, page);
-    pages.push(page);
+    yield page;
   }
+}
+
+async function readTablePages(src: Query, t: TableFacts, nameKeys: NameKeys): Promise<Row[][]> {
+  const pages: Row[][] = [];
+  for await (const page of streamTablePages(src, t, nameKeys)) pages.push(page);
   return pages;
 }
 
@@ -158,8 +202,14 @@ function wantedFileKeys(t: TableFacts, withHashes: Row[], onLeader: Map<string, 
 
 async function loadWholeRows(src: Query, t: TableFacts, wanted: Map<string, Record<string, unknown>>): Promise<Map<string, Row | null>> {
   if (wanted.size === 0) return new Map();
-  const loaded = await rowsByKeys(src, t, [...wanted.values()], undefined, true);
-  return new Map([...wanted.keys()].map(text => [text, loaded.get(text) ?? null]));
+  const entries = [...wanted.entries()];
+  const result = new Map<string, Row | null>();
+  for (let from = 0; from < entries.length; from += FILE_BATCH) {
+    const slice = entries.slice(from, from + FILE_BATCH);
+    const loaded = await rowsByKeys(src, t, slice.map(([, key]) => key), undefined, true);
+    for (const [text] of slice) result.set(text, loaded.get(text) ?? null);
+  }
+  return result;
 }
 
 async function loadTableFiles(leader: Query, src: Query, t: TableFacts, rows: Row[], extra: Map<string, Record<string, unknown>>): Promise<Map<string, Row | null>> {
@@ -206,9 +256,46 @@ async function readSourceCode(src: Query): Promise<Map<string, CodeLine>> {
   return code;
 }
 
+async function readTaskCodeLine(src: Query, taskId: string): Promise<CodeLine | null> {
+  const [there] = await src<{ number: number }>('SELECT number FROM public.tasks WHERE id = $1::uuid', [taskId]);
+  if (!there) return null;
+  const machines = await src<{ name: string; at: Date }>(
+    `SELECT COALESCE(NULLIF(m.hostname, ''), 'the server') AS name, max(COALESCE(j.finished_at, j.started_at)) AS at
+     FROM public.jobs j LEFT JOIN public.nodes n ON n.id = j.node_id LEFT JOIN public.machines m ON m.id = n.machine_id
+     WHERE j.task_id = $1::uuid GROUP BY 1 HAVING max(COALESCE(j.finished_at, j.started_at)) IS NOT NULL ORDER BY 1`,
+    [taskId],
+  );
+  return machines.length > 0
+    ? { task: taskId, number: there.number, branch: `task-${there.number}`, machines: machines.map(m => ({ name: m.name, at: new Date(m.at).toISOString() })) }
+    : null;
+}
+
+/* Streaming reader for kept and uploaded databases in the leader's own Postgres: reads 500-row pages and individual
+   file rows on demand inside the transaction without holding equal rows in memory. */
+export function liveMergeReader(src: Query, nameKeys: NameKeys): MergeReader {
+  let parkedCache: Promise<Row[]> | undefined;
+  return {
+    facts: () => factsOf(src),
+    companyId: async () => (await src<{ id: string }>('SELECT id FROM public.companies LIMIT 1'))[0]?.id ?? null,
+    horizon: () => horizonOf(src),
+    restores: () => restoresOf(src),
+    journalIds: cutoff => journalIds(src, cutoff),
+    journalRows: ids => journalRows(src, ids),
+    rowsForJournal: (t, keys, rows) => loadJournalTable(src, t, keys, rows, nameKeys),
+    pagesOf: t => streamTablePages(src, t, nameKeys),
+    wholeOf: async (t, key) => (await rowsByKeys(src, t, [key], undefined, true)).values().next().value ?? null,
+    parked: () => (parkedCache ??= parkedOf(src)),
+    conflicts: () => openConflicts(src),
+    backups: () => backupsOf(src),
+    handovers: () => handoversOf(src),
+    codeFor: taskId => readTaskCodeLine(src, taskId),
+    lastChange: () => lastChange(src),
+  };
+}
+
 const cutoffMs = (at: Date | null): number => (at ? at.getTime() : -Infinity);
 
-const cutoffMovedBack = (loaded: Date | null, asked: Date | null): boolean =>
+const isCutoffEarlier = (loaded: Date | null, asked: Date | null): boolean =>
   loaded !== null && cutoffMs(asked) < cutoffMs(loaded);
 
 function filterIdsFrom(ids: Map<string, Date>, cutoff: Date | null): Map<string, Date> {
@@ -236,54 +323,102 @@ async function checkSourceReady(
   return { facts, companyId };
 }
 
-/* Everything a merge reads from its source, gathered before the gate of the app's writes closes and before the leader
-   opens its write transaction, so no network read ever holds a transaction or delays a company write. */
-export class SourceSnapshot {
+/* Everything a peer merge reads from its remote source, gathered before the gate of the app's writes closes and before
+   the leader opens its write transaction, so no network read ever holds a transaction or delays a company write. */
+export class SourceSnapshot implements MergeReader {
   constructor(
-    readonly facts: Facts,
-    readonly companyId: string | null,
-    readonly horizon: Date | null,
-    readonly restores: string[],
-    readonly parked: Row[],
-    readonly conflicts: Row[],
-    readonly backups: Row[],
-    readonly handovers: Row[],
-    readonly lastChange: Date | null,
+    private readonly sourceFacts: Facts,
+    private readonly sourceCompanyId: string | null,
+    private readonly sourceHorizon: Date | null,
+    private readonly sourceRestores: string[],
+    private readonly sourceParked: Row[],
+    private readonly sourceConflicts: Row[],
+    private readonly sourceBackups: Row[],
+    private readonly sourceHandovers: Row[],
+    private readonly sourceLastChange: Date | null,
     private readonly journal: LoadedJournal | null,
     private readonly compared: Map<string, Row[][]> | null,
     private readonly files: Map<string, Map<string, Row | null>>,
     private readonly code: Map<string, CodeLine>,
   ) {}
 
-  journalIdsAt(cutoff: Date | null): Map<string, Date> {
-    if (!this.journal || cutoffMovedBack(this.journal.cutoff, cutoff)) throw new NeedMoreFromSource({});
-    return filterIdsFrom(this.journal.ids, cutoff);
+  hasCompare(): boolean {
+    return this.compared !== null;
   }
 
-  journalRowsFor(ids: string[]): JournalRow[] {
-    if (!this.journal?.rowsLoaded || ids.some(id => !this.journal!.rowsById.has(id))) throw new NeedMoreFromSource({});
+  hasJournalRows(): boolean {
+    return Boolean(this.journal?.rowsLoaded);
+  }
+
+  cutoffMovedBack(cutoff: Date | null): boolean {
+    return !this.journal || isCutoffEarlier(this.journal.cutoff, cutoff);
+  }
+
+  facts(): Promise<Facts> {
+    return Promise.resolve(this.sourceFacts);
+  }
+
+  companyId(): Promise<string | null> {
+    return Promise.resolve(this.sourceCompanyId);
+  }
+
+  horizon(): Promise<Date | null> {
+    return Promise.resolve(this.sourceHorizon);
+  }
+
+  restores(): Promise<string[]> {
+    return Promise.resolve(this.sourceRestores);
+  }
+
+  journalIds(cutoff: Date | null): Promise<Map<string, Date>> {
+    if (!this.journal || isCutoffEarlier(this.journal.cutoff, cutoff)) throw new NeedMoreFromSource({ cutoff });
+    return Promise.resolve(filterIdsFrom(this.journal.ids, cutoff));
+  }
+
+  journalRows(ids: string[]): Promise<JournalRow[]> {
+    if (!this.journal?.rowsLoaded || ids.some(id => !this.journal!.rowsById.has(id))) throw new NeedMoreFromSource({ journal: true });
     const wanted = new Set(ids);
-    return this.journal.rows.filter(row => wanted.has(row.id));
+    return Promise.resolve(this.journal.rows.filter(row => wanted.has(row.id)));
   }
 
-  rowsOfJournal(table: string): Map<string, Row> {
-    return this.journal?.byTable.get(table) ?? new Map();
+  rowsForJournal(t: TableFacts): Promise<Map<string, Row>> {
+    return Promise.resolve(this.journal?.byTable.get(t.name) ?? new Map());
   }
 
-  pagesOf(table: string): Row[][] {
+  async *pagesOf(t: TableFacts): AsyncGenerator<Row[]> {
     if (!this.compared) throw new NeedMoreFromSource({ compare: true });
-    return this.compared.get(table) ?? [];
+    for (const page of this.compared.get(t.name) ?? []) yield page;
   }
 
-  wholeOf(table: string, key: Record<string, unknown>): Row | null {
-    const tableFiles = this.files.get(table);
+  wholeOf(t: TableFacts, key: Record<string, unknown>): Promise<Row | null> {
+    const tableFiles = this.files.get(t.name);
     const text = keyText(key);
-    if (!tableFiles?.has(text)) throw new NeedMoreFromSource({ files: [{ table, key }] });
-    return tableFiles.get(text)!;
+    if (!tableFiles?.has(text)) throw new NeedMoreFromSource({ files: [{ table: t.name, key }] });
+    return Promise.resolve(tableFiles.get(text)!);
   }
 
-  codeFor(taskId: string): CodeLine | null {
-    return this.code.get(taskId) ?? null;
+  parked(): Promise<Row[]> {
+    return Promise.resolve(this.sourceParked);
+  }
+
+  conflicts(): Promise<Row[]> {
+    return Promise.resolve(this.sourceConflicts);
+  }
+
+  backups(): Promise<Row[]> {
+    return Promise.resolve(this.sourceBackups);
+  }
+
+  handovers(): Promise<Row[]> {
+    return Promise.resolve(this.sourceHandovers);
+  }
+
+  codeFor(taskId: string): Promise<CodeLine | null> {
+    return Promise.resolve(this.code.get(taskId) ?? null);
+  }
+
+  lastChange(): Promise<Date | null> {
+    return Promise.resolve(this.sourceLastChange);
   }
 }
 
@@ -296,8 +431,10 @@ export async function prepareSource(
   anotherCompany: string,
   refuse: (reason: string) => never,
 ): Promise<SourceSnapshot> {
+  const forceCompare = request.compare;
+  request.compare = false;
   const { facts, companyId } = await checkSourceReady(leader, src, merge, anotherCompany, refuse);
-  const side = await readJournalSide(leader, src, facts, merge.kept, request.compare, nameKeys);
+  const side = await readJournalSide(leader, src, facts, merge.kept, forceCompare, nameKeys);
   const { compared, last } = await readCompareSide(src, facts, side.needsCompare, nameKeys);
   const [parked, conflicts, backups, handovers] = [await parkedOf(src), await openConflicts(src), await backupsOf(src), await handoversOf(src)];
   const files = await readSourceFiles(leader, src, facts, side.journal, compared, request.files);
