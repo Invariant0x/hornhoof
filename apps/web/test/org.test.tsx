@@ -60,6 +60,23 @@ describe('the company every screen shows', () => {
     expect(quick.result.current.org).toEqual(working(2));
   });
 
+  it('stays on every screen when an answer comes cut off', async () => {
+    const stream = fakeStream();
+    let cut = false;
+    mockApi({ 'GET /api/org': () => (cut ? [200] : [200, working(1)]) });
+    const idle = renderHook(() => useOrg(false));
+    const asking = renderHook(() => useOrg());
+    await waitFor(() => expect(asking.result.current.org).toEqual(working(1)));
+    cut = true;
+    stream.send({ type: 'org' });
+    await act(async () => {
+      /* One turn of the event loop: the answer's promise chain has no timer in it, so it has run its course. */
+      await new Promise(r => setImmediate(r));
+    });
+    expect(asking.result.current).toEqual({ org: working(1), failure: null });
+    expect(idle.result.current.org).toEqual(working(1));
+  });
+
   it('is forgotten when the person signs out, with the answer still on its way for them', async () => {
     fakeStream();
     const letGo = serve(working(1), null, working(2), null);

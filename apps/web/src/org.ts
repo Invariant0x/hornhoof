@@ -97,6 +97,14 @@ function share(org: Org): void {
   for (const watch of watchers) watch(org);
 }
 
+/* The answer to request n. A cut-off answer is no company, and one older than the company shown is no news: the company on
+   the screens stays until the next whole answer. */
+function answered(n: number, data: Org | null | undefined): void {
+  if (!data || n < shown) return;
+  shown = n;
+  share(data);
+}
+
 /* Signing out forgets the company, with the answers still on their way for it. */
 export function forgetOrg(): void {
   known = null;
@@ -126,11 +134,7 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
   const load = useCallback(() => {
     const n = ++asked;
     api.get<Org>('/api/org').then(
-      data => {
-        if (n < shown) return;
-        shown = n;
-        share(data);
-      },
+      data => answered(n, data),
       err => mounted.current && n >= shown && setFailure(err),
     );
   }, []);
