@@ -433,7 +433,16 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
 
   /* A switch shows at once and holds until the company says the same; a refusal puts it back and says why. */
   const [switched, setSwitched] = useState<Record<string, boolean>>({});
-  useEffect(() => setSwitched(x => Object.fromEntries(Object.entries(x).filter(([id, on]) => d.employees.find(e => e.id === id)?.on !== on))), [d.employees]);
+  useEffect(
+    () =>
+      setSwitched(x => {
+        const entries = Object.entries(x);
+        if (!entries.length) return x;
+        const kept = entries.filter(([id, on]) => d.employees.find(e => e.id === id)?.on !== on);
+        return kept.length === entries.length ? x : Object.fromEntries(kept);
+      }),
+    [d.employees],
+  );
   const shown = (e: Employee): Employee => (e.id in switched ? { ...e, on: switched[e.id]! } : e);
   const flip = (e: Employee) => (on: boolean) => {
     setSwitched(x => ({ ...x, [e.id]: on }));

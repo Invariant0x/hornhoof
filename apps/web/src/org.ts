@@ -11,11 +11,23 @@ const SETTLE_MS = 400;
    the computer changed, since who decides and what waits for the CEO change the counts on the people's cards. */
 const FETCH_AT_ONCE: ReadonlySet<string> = new Set(['org', 'reconnected', 'computer']);
 
+/* Stream counter ticks keep the roster snapshot they came from, so access checks do not storm on context bars. */
+const rosterSnapshots = new WeakMap<Org, Org>();
+
+export const rosterOf = (org: Org): Org => rosterSnapshots.get(org) ?? org;
+
+function keepRoster(from: Org, next: Org): Org {
+  rosterSnapshots.set(next, rosterOf(from));
+  return next;
+}
+
 /* An agent's context moves with every step it takes; only its bar changes. */
 function withContext(org: Org, agentId: string, used: number): Org {
+  const current = agentIn(org, agentId);
+  if (!current || current.context === used) return org;
   const departments = org.departments.map(d => (d.employees.some(e => e.id === agentId) ? { ...d, employees: d.employees.map(e => (e.id === agentId ? { ...e, context: used } : e)) } : d));
   const orchestrator = org.orchestrator?.id === agentId ? { ...org.orchestrator, context: used } : org.orchestrator;
-  return { ...org, orchestrator, departments };
+  return keepRoster(org, { ...org, orchestrator, departments });
 }
 
 /* What an agent's program does and the server's alarm, as the map read them, with the server's clock then. The orchestrator
@@ -25,7 +37,7 @@ export function liveOf(org: Org | null, agentId: string): { live?: AgentLive; se
   return live ? { live, serverNow: org!.serverNow } : {};
 }
 
-function agentIn(org: Org, agentId: string): AgentLive | undefined {
+function agentIn(org: Org, agentId: string): (AgentLive & { context: number | null }) | undefined {
   const orchestrator = org.orchestrator;
   if (orchestrator && (agentId === 'orchestrator' || agentId === orchestrator.id)) return orchestrator;
   return org.departments.flatMap(d => d.employees).find(e => e.id === agentId);
@@ -103,8 +115,13 @@ function share(org: Org | null, answer: boolean): void {
 
 function hear(m: LiveMessage): void {
   if (!known) return;
-  if (m.type === 'context') share(withContext(known, m.agentId, m.used), false);
-  if (m.type === 'working') share({ ...known, agents: { ...known.agents, working: m.working } }, false);
+  if (m.type === 'context') {
+    const next = withContext(known, m.agentId, m.used);
+    if (next !== known) share(next, false);
+  }
+  if (m.type === 'working' && known.agents.working !== m.working) {
+    share(keepRoster(known, { ...known, agents: { ...known.agents, working: m.working } }), false);
+  }
 }
 
 function watchOrg(watch: Watch): () => void {

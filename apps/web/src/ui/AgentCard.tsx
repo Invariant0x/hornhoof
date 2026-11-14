@@ -173,7 +173,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
   useEffect(() => {
     let live = true;
     api.get<AgentCardView>(base).then(
-      c => live && setCard(c),
+      c => live && c && setCard(c),
       err => live && setFailure(err),
     );
     return () => {

@@ -55,9 +55,12 @@ function Screens() {
     const route = parseRoute(window.location.pathname);
     if (route.kind === 'invite') return show({ kind: 'invite', token: route.token });
     try {
-      const { needed, linkDomain } = await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup');
-      if (needed) return show({ kind: 'setup', linkDomain });
-      show({ kind: 'shell', me: await api.get<Me>('/api/me'), welcome });
+      const setup = await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup');
+      if (!setup || typeof setup.needed !== 'boolean') throw new ApiFailure(502, 'internal', '');
+      if (setup.needed) return show({ kind: 'setup', linkDomain: setup.linkDomain });
+      const me = await api.get<Me>('/api/me');
+      if (!me?.person?.id || !me?.company?.id) throw new ApiFailure(502, 'internal', '');
+      show({ kind: 'shell', me, welcome });
     } catch (err) {
       if (err instanceof ApiFailure && err.status === 401) return show({ kind: 'login' });
       show({ kind: 'error', failure: err });

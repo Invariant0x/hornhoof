@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, ApiFailure } from '../api';
 import { errorText, useT } from '../i18n';
 import { useStream } from '../live';
-import { notOpened } from '../org';
+import { notOpened, rosterOf } from '../org';
 import { RouteUnavailable } from '../screens/RouteUnavailable';
 import type { Org } from '../types';
 
 type Status = 'checking' | 'allowed' | 'denied' | 'failure';
+type AccessState = { status: Status; org: Org; failure: unknown; verified: string | null };
 const RECHECK_MS = 5_000;
 
 function listed(org: Org, agentId: string): boolean {
@@ -25,26 +26,45 @@ function contentOf(status: Status, t: ReturnType<typeof useT>, failure: unknown,
   return status === 'allowed' ? children : null;
 }
 
+function keepsVerified(prev: AccessState, path: string, org: Org, agentId: string): boolean {
+  return prev.verified === path && !(!listed(org, agentId) && listed(prev.org, agentId));
+}
+
 export function AgentAccess({ agentId, org, onClose, children }: { agentId: string; org: Org; onClose(): void; children: ReactNode }) {
   const t = useT();
   const path = `/api/agents/${agentId}`;
+  const snapshot = rosterOf(org);
   const sequence = useRef(0);
   /* An agent the company shows this person but does not open to them has no window: it closes without asking the server. */
   const closed = notOpened(org, agentId);
-  const [access, setAccess] = useState<{ status: Status; org: Org; failure: unknown }>(() => ({ status: listed(org, agentId) ? 'allowed' : 'checking', org, failure: null }));
+  const [access, setAccess] = useState<AccessState>(() => ({
+    status: listed(org, agentId) ? 'allowed' : 'checking',
+    org: snapshot,
+    failure: null,
+    verified: null,
+  }));
   const check = useCallback(async () => {
     if (closed) return;
     const own = ++sequence.current;
     try {
-      await api.get(path);
-      if (sequence.current === own) {
-        setAccess({ status: 'allowed', org, failure: null });
+      const card = await api.get(path);
+      if (sequence.current !== own) return;
+      if (card === null) {
+        const cutOff = new ApiFailure(502, 'internal', '');
+        setAccess(prev => (keepsVerified(prev, path, snapshot, agentId) ? { status: 'allowed', org: snapshot, failure: null, verified: path } : { status: 'failure', org: snapshot, failure: cutOff, verified: null }));
+        return;
       }
+      setAccess({ status: 'allowed', org: snapshot, failure: null, verified: path });
     } catch (err) {
       if (sequence.current !== own) return;
-      setAccess({ status: statusOf(err), org, failure: err });
+      const next = statusOf(err);
+      if (next === 'denied') {
+        setAccess({ status: 'denied', org: snapshot, failure: err, verified: null });
+        return;
+      }
+      setAccess(prev => (keepsVerified(prev, path, snapshot, agentId) ? { status: 'allowed', org: snapshot, failure: null, verified: path } : { status: 'failure', org: snapshot, failure: err, verified: null }));
     }
-  }, [path, org, closed]);
+  }, [path, snapshot, agentId, closed]);
 
   useEffect(() => {
     if (closed) onClose();
@@ -68,6 +88,6 @@ export function AgentAccess({ agentId, org, onClose, children }: { agentId: stri
   /* An organization refresh can revoke access. Hide content the new snapshot drops from the roster until it is checked.
      A product's employee or a person's own assistant is on no department roster and still has an authorized card on the
      server: a refresh says nothing new of it, and hiding it would close and build its window again on every one. */
-  if (!listed(org, agentId) && access.org !== org && listed(access.org, agentId)) return null;
+  if (!listed(org, agentId) && access.org !== snapshot && listed(access.org, agentId)) return null;
   return contentOf(access.status, t, access.failure, children);
 }

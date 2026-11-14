@@ -528,6 +528,22 @@ function Bend({ label, at, k, align, onMove, onPut, onRemove }: { label: string;
 /* Where a block's grip stands: at its top left corner, and for the round hub on its rim, up and to the left. */
 const gripCorner = (key: string, r: Rect): Point => (key === HUB_KEY ? [r.x + HUB - Math.round(HUB * Math.SQRT1_2), r.y + HUB - Math.round(HUB * Math.SQRT1_2)] : [r.x, r.y]);
 
+function pauseSvg(svg: SVGSVGElement): () => void {
+  svg.pauseAnimations?.();
+  return () => svg.unpauseAnimations?.();
+}
+
+/* While a department covers the map, its hidden SVG clocks pause so twelve departments of signals do not rasterize behind it. */
+function usePauseHiddenMap(box: { current: HTMLDivElement | null }, inside: boolean, shown: boolean) {
+  useEffect(() => {
+    if (!inside || !shown || !box.current) return;
+    const resume = [...box.current.querySelectorAll('svg')].map(pauseSvg);
+    return () => {
+      for (const fn of resume) fn();
+    };
+  }, [box, inside, shown]);
+}
+
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
 type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
 
@@ -665,6 +681,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
      is put back, and as the screen changes size. Live changes of the company, the orchestrator's window, the left panel and
      moving a block leave the view alone. */
   const shown = !!arr;
+  usePauseHiddenMap(box, inside, shown);
   useEffect(() => {
     if (!shown || inside) return;
     const auto = () => {

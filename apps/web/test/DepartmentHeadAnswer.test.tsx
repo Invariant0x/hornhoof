@@ -341,4 +341,63 @@ describe('department owner answering head on a large company', () => {
     expect(await screen.findByRole('heading', { name: 'Hornhoof is not responding' }, { timeout: 1000 })).toBeInTheDocument();
     expect(container.childElementCount).toBeGreaterThan(0);
   });
+
+  it('pauses hidden map SVG animations while a department workspace covers the map and resumes them on return', async () => {
+    let paused = 0;
+    let unpaused = 0;
+    const proto = SVGSVGElement.prototype as SVGSVGElement & {
+      pauseAnimations?: () => void;
+      unpauseAnimations?: () => void;
+    };
+    const prevPause = proto.pauseAnimations;
+    const prevUnpause = proto.unpauseAnimations;
+    proto.pauseAnimations = () => {
+      paused++;
+    };
+    proto.unpauseAnimations = () => {
+      unpaused++;
+    };
+    try {
+      const deptOrg: Org = {
+        ...DEV_ORG,
+        departments: DEV_ORG.departments.map(d => ({
+          ...d,
+          ownerPersonId: DEPT_OWNER_ME.person.id,
+          people: [{
+            id: DEPT_OWNER_ME.person.id,
+            name: DEPT_OWNER_ME.person.name,
+            email: DEPT_OWNER_ME.person.email,
+            title: DEPT_OWNER_ME.person.title,
+            status: 'active',
+            isOwner: false,
+            access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] },
+          }],
+        })),
+      };
+      mockApi({
+        'GET /api/org': [200, deptOrg],
+        'GET /api/requests': [200, decisions([])],
+        'GET /api/turns': [200, { turns: [TURN] }],
+        'GET /api/map/layout': [200, { blocks: {} }],
+        'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }],
+      });
+
+      window.history.replaceState(null, '', '/departments/d2');
+      render(
+        <LanguageProvider>
+          <Shell me={DEPT_OWNER_ME} onSignOut={() => {}} />
+        </LanguageProvider>,
+      );
+
+      expect(await screen.findByRole('region', { name: 'Department schema' })).toBeInTheDocument();
+      expect(paused).toBeGreaterThan(0);
+      expect(unpaused).toBe(0);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back to the map' }));
+      await waitFor(() => expect(unpaused).toBe(paused));
+    } finally {
+      proto.pauseAnimations = prevPause;
+      proto.unpauseAnimations = prevUnpause;
+    }
+  });
 });

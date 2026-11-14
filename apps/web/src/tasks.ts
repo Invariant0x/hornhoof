@@ -27,7 +27,7 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, refres
     };
     api.get<never>(path).then(
       body => {
-        if (!fresh()) return;
+        if (body === null || body === undefined || !fresh()) return;
         setData(pickRef.current(body));
         setFailure(null);
       },

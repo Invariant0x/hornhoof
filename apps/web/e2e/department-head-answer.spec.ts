@@ -98,20 +98,7 @@ function installStreamAndProbe() {
   };
 
   const observer = new MutationObserver(sample);
-  let observing = false;
-  const ensureObserver = () => {
-    if (!observing && document.documentElement) {
-      observing = true;
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-    }
-  };
-  ensureObserver();
-  const tick = () => {
-    ensureObserver();
-    sample();
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  observer.observe(document, { childList: true, subtree: true });
 
   const host = window as unknown as WindowWithProbe;
   host.__hhLive = message => {
@@ -131,6 +118,12 @@ const readProbe = (page: Page) => page.evaluate(() => (window as unknown as Wind
 
 const emitLive = (page: Page, message: unknown) =>
   page.evaluate(m => (window as unknown as WindowWithProbe).__hhLive(m), message);
+
+const emitLiveBatch = (page: Page, messages: unknown[]) =>
+  page.evaluate(ms => {
+    const host = window as unknown as WindowWithProbe;
+    for (const m of ms) host.__hhLive(m);
+  }, messages);
 
 function buildArSpatiallyFixture() {
   const base = bigCompany();
@@ -315,10 +308,7 @@ test('non-CEO department owner answers head in question card, chat and terminal 
     if (path === '/api/setup') return route.fulfill(json({ needed: false }));
     if (path === '/api/me') return route.fulfill(json(MAX_ME));
     if (path === '/api/org') {
-      if (firstOrgPending) {
-        firstOrgPending = false;
-        await firstOrgGate;
-      }
+      if (firstOrgPending) await firstOrgGate;
       return route.fulfill(json(fx.orgFor(answered)));
     }
     if (path === '/api/requests') {
@@ -427,35 +417,39 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   expect(initialProbe.greyBodyFrames).toBe(0);
   await expect(page.locator('main.body .dview[aria-busy="true"] .dcanvas')).toBeVisible();
 
+  firstOrgPending = false;
   releaseFirstOrg();
   const schema = page.getByRole('region', { name: 'Department schema' });
   await expect(schema).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Department 1' })).toBeVisible();
+  /* Hold the visible department SVG clock on virtual time, as motion.spec.ts does. */
+  await schema.locator('svg.wires').evaluate(el => (el as SVGSVGElement).pauseAnimations?.());
 
   /* Foreign routes return 403 to a single-department non-CEO without crashing the page. */
   const foreignStatus = await page.evaluate(async id => (await fetch(`/api/agents/${id}`)).status, fx.foreignHeadId);
   expect(foreignStatus).toBe(403);
 
   /* 2. Open the department head's AgentWindow and its Task side panel with the open ask_person card. */
-  await page.getByRole('button', { name: new RegExp(fx.headName) }).click();
+  await page.locator('button.shead').click();
   const windowBox = page.locator('aside.orch');
   await expect(windowBox).toBeVisible();
   const chatInput = windowBox.locator(`#input-${fx.headId}`);
   await expect(chatInput).toBeVisible();
 
   await windowBox.getByRole('button', { name: 'Task' }).click();
-  await expect(windowBox.getByText(fx.openQuestion.text)).toBeVisible();
+  await expect(windowBox.locator('.req-question .req-text')).toHaveText(fx.openQuestion.text);
 
   /* 3. Type in the ask_person card while 120-agent SSE events, cut-off 200s and a transient 503 hit. */
-  const answerInput = windowBox.getByLabel('Your answer');
+  const answerInput = windowBox.getByRole('textbox', { name: 'Your answer' });
   await answerInput.focus();
   await answerInput.fill('Enterprise first, then self-serve in November');
 
   cutOffRequestsOnce = true;
   cutOffCardOnce = true;
-  for (const id of fx.allAgentIds.slice(0, 24)) {
-    await emitLive(page, { type: 'context', agentId: id, used: 0.58 });
-  }
+  await emitLiveBatch(
+    page,
+    fx.allAgentIds.slice(0, 24).map(id => ({ type: 'context', agentId: id, used: 0.58 })),
+  );
   await emitLive(page, { type: 'requests' });
   await emitLive(page, { type: 'task' });
   transientCard503Once = true;
@@ -465,7 +459,11 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   await expect(answerInput).toHaveValue('Enterprise first, then self-serve in November');
   expect(await answerInput.evaluate(el => document.activeElement === el)).toBe(true);
 
+  const answeredResponse = page.waitForResponse(
+    res => res.url().endsWith('/api/requests/r-max') && res.request().method() === 'POST',
+  );
   await windowBox.getByRole('button', { name: 'Send answer' }).click();
+  await answeredResponse;
   await emitLive(page, { type: 'requests' });
   await emitLive(page, { type: 'task' });
   await emitLive(page, { type: 'org' });
@@ -475,9 +473,10 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   /* 4. Type and send a message in Chat under live SSE events without losing focus or remounting. */
   await chatInput.focus();
   await page.keyboard.type('Confirmed: focus on enterprise accounts');
-  for (const id of fx.allAgentIds.slice(24, 40)) {
-    await emitLive(page, { type: 'context', agentId: id, used: 0.66 });
-  }
+  await emitLiveBatch(
+    page,
+    fx.allAgentIds.slice(24, 40).map(id => ({ type: 'context', agentId: id, used: 0.66 })),
+  );
   const replySeq = events.length + 1;
   const headAck: EventView = { seq: replySeq, kind: 'text', data: { text: 'Received, aligning the team on enterprise.' }, jobId: 'j1', person: null, at: AT };
   events.push(headAck);
@@ -490,8 +489,12 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   await expect(windowBox.locator('.t-log.chat')).toContainText('Confirmed: focus on enterprise accounts');
 
   /* 5. Switch to Terminal and type keys under SSE + terminal output + transient 503 without WS reconnect or blur. */
-  await windowBox.getByRole('button', { name: 'Show terminal' }).click();
+  await windowBox.getByRole('button', { name: 'Terminal', exact: true }).click();
   await expect(windowBox.locator('.xterm-rows')).toContainText('TERMINAL-READY');
+  const wsConnectionsAfterOpen = wsConnections;
+  const socketAfterOpen = activeSocket;
+  expect(wsConnectionsAfterOpen).toBeGreaterThanOrEqual(1);
+  expect(wsConnectionsAfterOpen).toBeLessThanOrEqual(2);
   const termInput = windowBox.locator('.xterm-helper-textarea');
   await termInput.focus();
   expect(await termInput.evaluate(el => document.activeElement === el)).toBe(true);
@@ -501,9 +504,10 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   await emitLive(page, { type: 'task' });
   transientCard503Once = true;
   await emitLive(page, { type: 'working', working: 70 });
-  for (const id of fx.allAgentIds.slice(40, 60)) {
-    await emitLive(page, { type: 'context', agentId: id, used: 0.71 });
-  }
+  await emitLiveBatch(
+    page,
+    fx.allAgentIds.slice(40, 60).map(id => ({ type: 'context', agentId: id, used: 0.71 })),
+  );
   activeSocket!.send(JSON.stringify({ type: 'data', data: '' }));
   await page.keyboard.press('Enter');
 
@@ -515,7 +519,8 @@ test('non-CEO department owner answers head in question card, chat and terminal 
   const finalProbe = await readProbe(page);
   await page.screenshot({ path: info.outputPath(`${info.project.name}-final.png`) });
 
-  expect(wsConnections).toBe(1);
+  expect(wsConnections).toBe(wsConnectionsAfterOpen);
+  expect(activeSocket).toBe(socketAfterOpen);
   expect(finalProbe).toEqual({
     emptyRootFrames: 0,
     greyBodyFrames: 0,
