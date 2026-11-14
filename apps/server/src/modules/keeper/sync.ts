@@ -236,24 +236,21 @@ export class SyncController {
   /* Resets pace tracking when a silent or slow named copy is dropped so PACE_FOR_MS is required again, and logs the
      drop reason once without addresses or keys. */
   private noteDrop(sample: SyncSample, action: SyncAction): void {
-    const named = sample.setting === null ? undefined : sample.others.find(copy => copy.name === sample.setting);
+    const named = sample.setting === null ? null : (sample.others.find(copy => copy.name === sample.setting) ?? null);
     const reason = named ? dropReason(named, sample) : null;
     if (named && reason) {
       this.paceSince.delete(named.name);
-      if (this.dropped?.name !== named.name || this.dropped.reason !== reason) {
-        const label = /^[a-z0-9_]{1,63}$/.test(named.name) ? named.name : 'the named copy';
-        const detail =
-          reason === 'slow'
-            ? `commits waited over ${SLOW_WAIT_MS} ms for ${SLOW_FOR_MS} ms with under 1 MiB sent`
-            : `no replication reply for over ${SILENT_REPLY_MS} ms`;
-        this.opts.log(`Stopping synchronous wait on ${label}: ${detail}.`);
+      if (!sameDrop(this.dropped, named.name, reason)) {
+        this.opts.log(dropLine(named.name, reason));
         this.dropped = { name: named.name, reason };
       }
     }
-    if (reason === null || action.do === 'clear') {
-      if (this.dropped) this.paceSince.delete(this.dropped.name);
-      this.dropped = null;
-    }
+    if (!reason || action.do === 'clear') this.clearDrop();
+  }
+
+  private clearDrop(): void {
+    if (this.dropped) this.paceSince.delete(this.dropped.name);
+    this.dropped = null;
   }
 
   /* The relay is asked now and again while a copy exists or something of one is left to undo; a company of one
@@ -403,6 +400,19 @@ export class SyncController {
     if (line && line !== this.postLine) this.opts.log(line);
     this.postLine = line;
   }
+}
+
+function sameDrop(last: { name: string; reason: DropReason } | null, name: string, reason: DropReason): boolean {
+  return last !== null && last.name === name && last.reason === reason;
+}
+
+function dropLine(name: string, reason: DropReason): string {
+  const label = /^[a-z0-9_]{1,63}$/.test(name) ? name : 'the named copy';
+  const detail =
+    reason === 'slow'
+      ? `commits waited over ${SLOW_WAIT_MS} ms for ${SLOW_FOR_MS} ms with under 1 MiB sent`
+      : `no replication reply for over ${SILENT_REPLY_MS} ms`;
+  return `Stopping synchronous wait on ${label}: ${detail}.`;
 }
 
 function syncReason(failed: SyncFailure): string {
