@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { Shell } from '../src/screens/Shell';
 import { CARD, DEV_ORG, MACHINES, ME, ORG, RUNNING_AGENTS, SUBS, decisions, mockApi } from './api-mock';
+import { fakeStream } from './fake-stream';
 
 function company(busy: boolean) {
   const agents = [{ ...RUNNING_AGENTS[0]!, busy }];
@@ -23,6 +24,35 @@ async function openList(user: ReturnType<typeof userEvent.setup>, name: string) 
   await user.click(tab(name));
   await user.click(await screen.findByRole('button', { name: name === 'Subscriptions' ? 'Open the card of Claude' : 'Open the card of ivan-mbp' }));
 }
+
+describe("an employee's inbox in its window", () => {
+  it('counts the unread letters on its icon, says so in its name, and opens the letters', async () => {
+    const view = { unread: 3, letters: [], mode: { own: null, inherited: 'inbox', effective: 'inbox' }, canChange: true };
+    const stream = fakeStream();
+    const calls = mockApi({
+      'GET /api/org': [200, DEV_ORG],
+      'GET /api/requests': [200, decisions([])],
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents: [{ ...RUNNING_AGENTS[0]!, busy: false }] }] }],
+      'GET /api/agents/b1': [200, { ...CARD, inboxUnread: 3 }],
+      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'GET /api/agents/b1/inbox?limit=1': [200, { ...view, unread: 4 }],
+      'GET /api/agents/b1/inbox': [200, { ...view, letters: [{ id: 'l1', sender: { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null }, kind: 'notification', source: 'tests', task: null, at: '2030-01-01T08:00:00Z', text: 'The run ended.', status: 'unread' }] }],
+    });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await openList(user, 'Subscriptions');
+    await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
+    const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
+    const icon = await within(window).findByRole('button', { name: 'Inbox, 3 unread' });
+    expect(icon).toHaveTextContent('3');
+    expect(calls.filter(c => c.path === '/api/agents/b1/inbox?limit=1')).toEqual([]);
+    stream.send({ type: 'inbox', agentId: 'b1' });
+    expect(await within(window).findByRole('button', { name: 'Inbox, 4 unread' })).toHaveTextContent('4');
+    await user.click(within(window).getByRole('button', { name: 'Inbox, 4 unread' }));
+    expect(await within(window).findByText('The run ended.')).toBeInTheDocument();
+    expect(calls.filter(c => c.path.startsWith('/api/agents/b1/inbox') && c.method !== 'GET')).toEqual([]);
+  });
+});
 
 describe('one agent window', () => {
   it.each(['Subscriptions', 'Machines'])('shows an error when opening from %s while the company cannot load', async name => {

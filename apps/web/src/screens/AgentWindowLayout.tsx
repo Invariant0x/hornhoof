@@ -35,8 +35,11 @@ function TaskToggle({ currentId, open, onToggle, panelsId }: { currentId: string
   return <button className="btn small ghost agent-task-toggle" data-other={other} type="button" disabled={!currentId} aria-disabled={!currentId} aria-expanded={open} aria-controls={panelsId} title={label} onClick={e => onToggle(e.currentTarget)}>{label}</button>;
 }
 
+/* A panel's icon in the bar; one that counts what waits in it shows the number on the icon and says it in its name. */
 function PanelToggle({ panel, open, onToggle, panelsId }: { panel: WindowPanel; open: boolean; onToggle(opener: HTMLElement): void; panelsId: string }) {
-  return <button type="button" aria-label={panel.label} title={panel.label} aria-expanded={open} aria-controls={panelsId} onClick={e => onToggle(e.currentTarget)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={panel.icon} /></svg></button>;
+  const n = panel.count?.n ?? 0;
+  const label = n ? panel.count!.label : panel.label;
+  return <button type="button" className={n ? 'has-count' : undefined} aria-label={label} title={label} aria-expanded={open} aria-controls={panelsId} onClick={e => onToggle(e.currentTarget)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={panel.icon} /></svg>{n ? <span className="nav-count panel-count" aria-hidden="true">{n}</span> : null}</button>;
 }
 
 const windowClasses = (terminal: boolean, withPanels: boolean, full: boolean): string => ['orch', terminal && 'term', withPanels && 'with-panels', full && 'fullscreen'].filter(Boolean).join(' ');

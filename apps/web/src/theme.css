@@ -776,6 +776,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .t-bar button:hover { color: var(--ink); }
 .acard > .t-bar button:focus-visible, .orch > .t-bar button:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
 .t-bar button.btn { width: auto; height: 26px; padding: 0 10px; display: inline-flex; }
+/* What waits in a panel shows as a number on its icon, on the corner where the line of the bar ends. */
+.t-bar button.has-count { position: relative; }
+.t-bar .panel-count { position: absolute; inset-block-start: 0; inset-inline-end: 0; margin: 0; pointer-events: none; }
 .t-bar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .t-log { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
 .t-log > * { animation: tin .45s ease-out; }
@@ -925,11 +928,19 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
   .t-access-more { width: 24px; }
   .t-access-count { padding: 0 2px; }
 }
-.notebook { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
-.notebook .entries { display: grid; list-style: none; min-width: 0; margin: 0; padding: 0; }
-.notebook .entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; padding-block: 16px; border-block-end: 1px solid var(--line); }
-.notebook .entry:first-child { padding-block-start: 0; }
-.notebook .entry:last-child { padding-block-end: 0; border-block-end: 0; }
+/* The inbox lays out as the notebook does: a scrolling column of entries, each with its actions under it. */
+.notebook, .inbox { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
+.notebook .entries, .inbox .entries { display: grid; list-style: none; min-width: 0; margin: 0; padding: 0; }
+.notebook .entry, .inbox .entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; padding-block: 16px; border-block-end: 1px solid var(--line); }
+.notebook .entry:first-child, .inbox .entry:first-child { padding-block-start: 0; }
+.notebook .entry:last-child, .inbox .entry:last-child { padding-block-end: 0; border-block-end: 0; }
+.inbox > p, .inbox-legend { margin: 0; }
+.inbox-legend { padding: 0; margin-block-end: 8px; font-weight: 600; color: var(--ink); }
+/* A letter keeps its own lines; a long word or path wraps inside the panel. */
+.inbox-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.inbox-unread { justify-self: start; color: var(--cyan-ink); }
+.inbox-foot { align-items: center; justify-content: space-between; }
+.inbox-count { min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
 .entry-main { min-width: 0; display: grid; gap: 4px; }
 .entry-main > * { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .entry-meta { font-size: 12px; color: var(--muted); }

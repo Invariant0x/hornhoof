@@ -323,6 +323,8 @@ export type AgentCardView = {
   canEdit: boolean;
   /* The whole company or the owner of its department removes it. */
   canRemove: boolean;
+  /* How many of its letters wait unread in its inbox; a card that does not say counts none. */
+  inboxUnread?: number;
   /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */
   /* forWork: it skips a round while every open task waits on purpose and nothing failed since the last one. */
   timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;
@@ -377,9 +379,17 @@ export type EventView = {
   message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number; channel?: 'telegram' | 'assistant'; assistant?: { id: string; name: string } };
 };
 
+/* An employee's inbox as its window shows it. A letter the employee dealt with is read to a person. */
+export type InboxMode = 'inbox' | 'direct';
+export type LetterKind = 'message' | 'report' | 'comment' | 'assignment' | 'notification';
+export type InboxLetter = { id: string; sender: MessageParty; kind: LetterKind; source: string | null; task: { number: number; title: string | null } | null; at: string; text: string; status: 'unread' | 'read' };
+export type InboxView = { unread: number; letters: InboxLetter[]; mode: { own: InboxMode | null; inherited: InboxMode; effective: InboxMode }; canChange: boolean };
+
 /* What the browser hears live from /api/stream. */
 export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView }
+  /* An employee's inbox changed; its window reads it again. */
+  | { type: 'inbox'; agentId: string }
   | { type: 'working'; working: number }
   | { type: 'org' }
   | { type: 'notebook'; spot: { departmentId: string | null } }

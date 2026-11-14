@@ -1,7 +1,7 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { BuiltinSkinId } from '../skins/registry';
 import type { SkinErrorCode } from '../skins/validate';
-import type { EmployeeStatus, FailureKind } from '../types';
+import type { EmployeeStatus, FailureKind, LetterKind } from '../types';
 import { plural } from './plural';
 
 const STATUS_ORDER: EmployeeStatus[] = ['working', 'waiting', 'queued', 'handed', 'idle', 'off'];
@@ -718,6 +718,35 @@ export const en = {
     note: (n: number) => `Note #${n}`,
     changeNote: (n: number) => `Change note #${n}`,
     removeNote: (n: number) => `Remove note #${n}`,
+  },
+  inbox: {
+    title: 'Inbox',
+    titleWithCount: (n: number) => (n ? `Inbox, ${n} unread` : 'Inbox'),
+    intro: 'Letters to this employee from other employees, the orchestrator and Hornhoof. Through the inbox, letters that come while it works wait here and reach it together in one turn. A person\'s words never wait here.',
+    loading: 'Reading the inbox',
+    unreadLoad: 'Could not read the inbox.',
+    empty: 'No letters yet.',
+    unreadCount: (n: number) => `${n} unread`,
+    unread: 'Unread',
+    markRead: 'Mark as read',
+    markReadOf: (who: string) => `Mark the letter from ${who} as read`,
+    markAllRead: 'Mark all as read',
+    marking: 'Marking',
+    openingKeeps: 'Opening a letter here does not mark it: the employee still gets it.',
+    kinds: { message: 'Message', report: 'Report', comment: 'Comment', assignment: 'Assignment', notification: 'Notification' } satisfies Record<LetterKind, string>,
+    letter: (kind: string, who: string) => `${kind} from ${who}`,
+    onTask: (n: number, title: string | null) => (title ? `#${n} ${title}` : `#${n}`),
+    mode: {
+      title: 'How letters come',
+      byDepartment: "By the department's rule",
+      byCompany: "By the company's rule",
+      inbox: 'Through the inbox',
+      direct: 'Direct delivery',
+      byRuleHint: (now: string) => `Now: ${now.toLocaleLowerCase('en')}.`,
+      inboxHint: 'Letters wait in the inbox while the employee works and come in one turn after it.',
+      directHint: 'Each letter comes at once, into the running turn or in a turn of its own.',
+      is: (mode: string) => `Letters come: ${mode.toLocaleLowerCase('en')}.`,
+    },
   },
   window: {
     task: 'Task',

@@ -16,6 +16,7 @@ import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { ComputerStrip } from '../ui/ComputerStrip';
 import { Markdown } from '../ui/Markdown';
+import { Inbox, useInboxCount } from '../ui/Inbox';
 import { Notebook } from '../ui/Notebook';
 import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
@@ -35,6 +36,7 @@ const TERMINAL_ICON = 'M5 7l5 5-5 5M12 17h7';
 const CHAT_ICON = 'M4 5h16v11H10l-5 4v-4H4z';
 const SEND_ICON = 'M5 12h13M13 6l6 6-6 6';
 const CARD_ICON = 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6';
+const INBOX_ICON = 'M4 13l3-8h10l3 8v6H4zM4 13h5l1 2h4l1-2h5';
 const STOP_ICON = 'M7 7h10v10H7z';
 
 type Applied = {
@@ -330,6 +332,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const liveId = orchestrator ? org.orchestrator?.id : agentId;
   /* The department whose notebook a head keeps. */
   const headOf = card?.kind === 'head' ? (card.department?.id ?? null) : null;
+  const keepsInbox = card !== null && card.kind !== 'assistant';
+  const unreadLetters = useInboxCount(agentId, liveId, keepsInbox ? card.inboxUnread : undefined);
   const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
   const model = orchestrator ? org.orchestrator?.model : card?.model;
   const machine = orchestrator ? org.orchestrator?.machine : card?.machine;
@@ -665,8 +669,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     }
   }
 
-  /* The orchestrator's notebook is the company's, a head's its department's. */
+  /* The orchestrator's notebook is the company's, a head's its department's. Every employee but a person's assistant, which
+     answers its owner alone, keeps an inbox. */
+  const inbox: WindowPanel = { ...framedPanel('inbox', t.inbox.title, INBOX_ICON, <Inbox agentId={agentId} liveId={liveId} hasDepartment={Boolean(card?.department)} />), count: { n: unreadLetters, label: t.inbox.titleWithCount(unreadLetters) } };
   const sidePanels: WindowPanel[] = [
+    ...(keepsInbox ? [inbox] : []),
     ...(orchestrator || headOf ? [framedPanel('notebook', t.window.notebook, NOTEBOOK_ICON, <Notebook departmentId={orchestrator ? null : headOf} />)] : []),
     { id: 'card', label: t.window.card, icon: CARD_ICON, render: close => <AgentCard agentId={agentId} {...liveOf(org, agentId)} onClose={close} onRemoved={onClose} /> },
   ];

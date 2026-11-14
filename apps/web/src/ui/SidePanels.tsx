@@ -8,7 +8,7 @@ import { takeEscape } from './escape';
    goes back to what opened it. A new panel is one line, framedPanel(id, label, icon, content), in the window's list. */
 export type SidePanel = { id: string; render(close: () => void): ReactNode };
 /* One the window's bar opens with its icon. */
-export type WindowPanel = SidePanel & { label: string; icon: string };
+export type WindowPanel = SidePanel & { label: string; icon: string; count?: { n: number; label: string } };
 
 type Opened = { id: string; back: HTMLElement | null };
 

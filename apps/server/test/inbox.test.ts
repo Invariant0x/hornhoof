@@ -240,21 +240,21 @@ describe('the delivery mode', () => {
     expect((await put(c, '/api/company/inbox-mode', 'direct')).statusCode).toBe(200);
     expect((await put(c, `/api/departments/${c.dev.id}/inbox-mode`, 'inbox')).statusCode).toBe(200);
     expect((await put(c, `/api/agents/${c.hana.id}/inbox-mode`, null)).statusCode).toBe(200);
-    const view = (await c.app.inject({ url: `/api/agents/${c.hana.id}/inbox`, ...as(c.ceoToken) })).json() as { mode: { own: string | null; effective: string } };
-    expect(view.mode).toEqual({ own: null, effective: 'inbox' });
+    const view = (await c.app.inject({ url: `/api/agents/${c.hana.id}/inbox`, ...as(c.ceoToken) })).json() as { mode: { own: string | null; inherited: string; effective: string } };
+    expect(view.mode).toEqual({ own: null, inherited: 'inbox', effective: 'inbox' });
     const again = await c.ivanWrites(c.hana.id, 'And now?');
     expect((await c.job(again)).status).toBe('running');
     const wake = await c.letter(c.bruno, c.hana.id, 'Into the inbox.');
     expect(await c.job(wake)).toMatchObject({ status: 'queued', inboxWake: true });
     expect((await c.inboxOf(c.hana.id)).at(-1)).toMatchObject({ text: 'Into the inbox.', status: 'unread' });
     const sam = (await c.app.inject({ url: `/api/agents/${c.sam.id}/inbox`, ...as(c.ceoToken) })).json() as typeof view;
-    expect(sam.mode).toEqual({ own: null, effective: 'direct' });
+    expect(sam.mode).toEqual({ own: null, inherited: 'direct', effective: 'direct' });
   });
 
   it('is for the CEO alone to set for the orchestrator, which has no department', async () => {
     const c = await company();
     expect((await put(c, `/api/agents/${c.orchestrator.id}/inbox-mode`, 'direct')).statusCode).toBe(200);
-    expect((await c.app.inject({ url: `/api/agents/${c.orchestrator.id}/inbox`, ...as(c.ceoToken) })).json()).toMatchObject({ mode: { own: 'direct', effective: 'direct' } });
+    expect((await c.app.inject({ url: `/api/agents/${c.orchestrator.id}/inbox`, ...as(c.ceoToken) })).json()).toMatchObject({ mode: { own: 'direct', inherited: 'inbox', effective: 'direct' } });
   });
 
   it('opens an employee\'s inbox to the CEO and to the owner of its department only', async () => {
@@ -279,7 +279,7 @@ describe('the delivery mode', () => {
 });
 
 type Letter = { id: string; sender: { kind: string; id: string | null; name: string; role: { en: string; ru: string } | null; department: { id: string; name: { en: string; ru: string } } | null }; kind: string; task: { number: number; title: string | null } | null; at: string; text: string; status: string };
-type Inbox = { unread: number; letters: Letter[]; mode: { own: string | null; effective: string } };
+type Inbox = { unread: number; letters: Letter[]; mode: { own: string | null; inherited: string; effective: string }; canChange: boolean };
 
 describe('the inbox a person opens', () => {
   const open = async (c: Company, agentId: string, token = c.ceoToken) => (await c.app.inject({ url: `/api/agents/${agentId}/inbox`, ...as(token) })).json() as Inbox;
@@ -347,6 +347,7 @@ describe('the inbox a person opens', () => {
     await open(c, c.hana.id);
     const opened = await open(c, c.hana.id);
     expect(opened.unread).toBe(3);
+    expect((await c.app.inject({ url: `/api/agents/${c.hana.id}`, ...as(c.ceoToken) })).json()).toMatchObject({ inboxUnread: 3 });
     expect((await c.inboxOf(c.hana.id)).map(m => m.status)).toEqual(['unread', 'unread', 'unread']);
 
     const tools = await c.toolsOf(c.hana.id);
@@ -371,6 +372,8 @@ describe('the inbox a person opens', () => {
     const [hanas] = await c.inboxOf(c.hana.id);
     const [saras] = await c.inboxOf(c.sara.id);
 
+    expect((await open(c, c.sara.id, pia)).canChange).toBe(true);
+    expect((await open(c, c.hana.id)).canChange).toBe(true);
     expect((await markRead(c, c.hana.id, { all: true }, pia)).statusCode).toBe(403);
     expect((await markRead(c, c.sara.id, { ids: [hanas!.id] }, pia)).statusCode).toBe(404);
     expect((await c.inboxOf(c.hana.id))[0]!.status).toBe('unread');

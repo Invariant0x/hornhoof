@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -9,17 +9,18 @@ type Writer = Pick<Db, 'update' | 'insert' | 'select'>;
 export type InboxStatus = (typeof agentInbox.$inferSelect)['status'];
 export type InboxRow = typeof agentInbox.$inferSelect;
 
-/* How the employee takes mail: its own mode, else its department's, else the company's. A person's assistant answers its
+/* How the employee takes mail: its own mode, else what it inherits, its department's or else the company's. A person's assistant answers its
    owner alone and takes everything as it comes. */
-export async function inboxModeOf(db: Reader, agentId: string): Promise<{ own: InboxMode | null; effective: InboxMode }> {
+export async function inboxModeOf(db: Reader, agentId: string): Promise<{ own: InboxMode | null; inherited: InboxMode; effective: InboxMode }> {
   const [row] = await db
     .select({ kind: agents.kind, own: agents.inboxMode, department: departments.inboxMode, company: companies.inboxMode })
     .from(agents)
     .innerJoin(companies, eq(companies.id, agents.companyId))
     .leftJoin(departments, eq(departments.id, agents.departmentId))
     .where(eq(agents.id, agentId));
-  if (!row) return { own: null, effective: 'direct' };
-  return { own: row.own, effective: row.kind === 'assistant' ? 'direct' : (row.own ?? row.department ?? row.company) };
+  if (!row) return { own: null, inherited: 'direct', effective: 'direct' };
+  const inherited = row.department ?? row.company;
+  return { own: row.own, inherited, effective: row.kind === 'assistant' ? 'direct' : (row.own ?? inherited) };
 }
 
 /* What a turn's message says of where it came from, as the queue keeps it. */
@@ -173,8 +174,13 @@ export async function inboxView(db: Reader, agentId: string, filter: InboxFilter
     if (cursor) where.push(lt(agentInbox.seq, cursor.seq));
   }
   const rows = await db.select().from(agentInbox).where(and(...where)).orderBy(desc(agentInbox.seq)).limit(Math.min(filter.limit ?? 50, 200));
-  const unread = (await db.select({ id: agentInbox.id }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.status, 'unread')))).length;
-  return { unread, letters: rows.reverse() };
+  return { unread: await unreadCount(db, agentId), letters: rows.reverse() };
+}
+
+/* How many of the employee's letters nobody marked yet. */
+export async function unreadCount(db: Reader, agentId: string): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.status, 'unread')));
+  return row?.n ?? 0;
 }
 
 /* A person marks the employee's own letters read, these or all of them; a letter it dealt with stays so, and any other id
@@ -187,7 +193,7 @@ export async function readByPerson(db: Pick<Db, 'select' | 'update'>, agentId: s
   }
   const picked = which === 'all' ? mine : and(mine, inArray(agentInbox.id, which));
   await db.update(agentInbox).set({ status: 'read', readAt: new Date() }).where(and(picked, eq(agentInbox.status, 'unread')));
-  return (await db.select({ id: agentInbox.id }).from(agentInbox).where(and(mine, eq(agentInbox.status, 'unread')))).length;
+  return unreadCount(db, agentId);
 }
 
 /* Marks the employee's own letters; any other id is refused whole. */
