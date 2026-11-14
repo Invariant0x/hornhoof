@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { afterEach, expect, vi } from 'vitest';
 import { forgetOrg } from '../src/org';
+import { clearRequestDraftsForTests } from '../src/ui/Requests';
 
 /* Waits for a state look until it comes, however long a loaded machine takes to render it; only the runner's limit for a
    test ends a state that never comes. 2_147_483_647 ms is the longest delay a timer takes. Testing Library's findBy* and
@@ -14,8 +15,9 @@ vi.waitFor = ((callback, options) => waitFor(callback, { ...(typeof options === 
 
 afterEach(() => {
   cleanup();
-  /* Each test starts with no company known from the one before. */
+  /* Each test starts with no company known from the one before, and no answer typed in it. */
   forgetOrg();
+  clearRequestDraftsForTests();
   /* Timer tests keep their fake clock until cleanup has checked the resources they owned. */
   const timers = vi.isFakeTimers() ? vi.getTimerCount() : 0;
   vi.unstubAllGlobals();
