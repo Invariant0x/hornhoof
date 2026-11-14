@@ -109,6 +109,9 @@ function shownLog(viewer: AgentViewer, log: LogLine[]): LogLine[] {
     .map(l => (l.by?.kind === 'agent' && !seesAgentId(viewer, l.by.id) ? { ...l, text: '', data: {} } : { ...l, data: scrubbed(viewer, l.data) }));
 }
 
+/* Which machine of the holder is offline goes only to who may open the holder, as its card. */
+const shownOffline = (viewer: AgentViewer, detail: TaskDetail) => (seesAgentId(viewer, detail.assignee?.id) ? detail.assigneeOffline : null);
+
 function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
   const sees = (id: string | undefined) => seesAgentId(viewer, id);
   return {
@@ -120,11 +123,12 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
     log: shownLog(viewer, detail.log),
     requests: detail.requests.filter(r => sees(r.agent?.id)),
     files: detail.files.filter(f => f.fromPerson || sees(f.by?.id)),
+    assigneeOffline: shownOffline(viewer, detail),
   };
 }
 
 /* One task as this person reads it. */
-export async function detailFor(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'>, viewer: AgentViewer, task: Task): Promise<TaskDetail> {
+export async function detailFor(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'> & Partial<Pick<Ctx, 'hub'>>, viewer: AgentViewer, task: Task): Promise<TaskDetail> {
   const detail = await taskDetail(ctx, task, t => seesTask(viewer, t));
   return viewer.full ? detail : maskDetail(viewer, detail);
 }

@@ -405,6 +405,7 @@ export const en = {
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',
     unknown: (at: string | null) => at ? `Unknown, last data from ${at}` : 'Unknown, no limit data received yet',
+    offlineLimit: (at: string | null) => at ? `Machine offline, last data from ${at}` : 'Machine offline, no limit data yet',
     noPlanLimits: 'Pay as you go, no plan limits',
     share: 'Tasks may use',
     shareLabel: (name: string) => `Share of ${name} for tasks`,
@@ -525,6 +526,7 @@ export const en = {
     notes: {
       limit: (at: string, duration: string) => `Until ${at}, in ${duration}. Its agents wait until then.`,
       limitUnknown: 'Its agents wait until the limit resets.',
+      offline: (host: string) => host ? `On ${host}. Its agents wait until the machine is back online.` : 'Its agents wait until a machine is back online.',
       login: (host: string, owner: string) => `On ${host}. Only ${owner} can sign in.`,
       loginOffline: (host: string) => `It needs a sign-in on ${host}, and the machine is offline.`,
       setup: (host: string, owner: string, program: string) => `On ${host}, ${program} asks its owner to accept its terms. Only ${owner} can do it, by running the install command on that machine again.`,
@@ -845,6 +847,16 @@ export const en = {
     withPeople: 'Hire the people of each template with its department. One no subscription serves yet waits for it.',
   },
   dept: {
+    branches: {
+      title: 'Branches not in main yet',
+      hint: 'Accepted and handed-in tasks of the department whose work is on a branch main does not have yet. Whoever goes on with it starts from the branch.',
+      none: 'Every accepted branch of the department is in main.',
+      loading: 'Reading the branches of the repository…',
+      state: {
+        done: { notIn: 'Accepted, not in main yet', unknown: 'Accepted, not known whether it is in main' },
+        review: { notIn: 'Handed in, not in main yet', unknown: 'Handed in, not known whether it is in main' },
+      },
+    },
     /* Whether a department works in turns of its own, which count its tasks on the map, or all the time. */
     workMode: {
       title: 'How it works',
@@ -1133,6 +1145,10 @@ export const en = {
     noOutput: 'No output.',
     runsOn: 'Runs on',
     onMachine: (host: string) => `Works on the machine ${host}`,
+    offlineSince: (host: string, at: string | null) => (at ? `Machine ${host} is offline since ${at}.` : `Machine ${host} is offline.`),
+    moveTo: (plan: string) => `Move to ${plan}`,
+    movesLabel: 'Move to a plan of this department that is online',
+    noPlanOnline: 'No other plan of this department is online now.',
     model: 'Model',
     default: 'Default',
     subUnit: 'Sub-unit',

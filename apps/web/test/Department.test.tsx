@@ -1,7 +1,7 @@
 import { taskRoute } from './task-route';
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
@@ -1512,5 +1512,66 @@ describe("what an agent's program does, and the server's alarms about its turn",
     const head = (await screen.findByRole('heading', { level: 3, name: 'Bruno' })).parentElement!;
     expect(stateOf(head)).toHaveTextContent(text);
     expect(stateOf(head)).toHaveClass('alarm');
+  });
+});
+
+describe("a department's branches not in main yet", () => {
+  const BRANCHES = {
+    branches: [
+      { task: 41, title: 'Lead scoring', status: 'review', branch: 'task-41-scoring', commit: 'b'.repeat(40), merged: false },
+      { task: 37, title: 'Collect leads', status: 'done', branch: 'task-37', commit: 'a'.repeat(40), merged: null },
+    ],
+    problem: null,
+  };
+  const withRepo = () => {
+    const [dev] = DEV_ORG.departments;
+    return { ...DEV_ORG, departments: [{ ...dev!, repository: REPO }] };
+  };
+  afterEach(() => localStorage.removeItem('hh-lang'));
+
+  it.each([
+    ['en', 'Branches not in main yet', ['#41 Lead scoring', 'task-41-scoring', 'Handed in, not in main yet'], ['#37 Collect leads', 'task-37', 'Accepted, not known whether it is in main']],
+    ['ru', 'Ветки, еще не влитые в main', ['#41 Lead scoring', 'task-41-scoring', 'Сдана, еще не в main'], ['#37 Collect leads', 'task-37', 'Принята, неизвестно, есть ли она в main']],
+  ])('lists to the people who run it in %s which accepted and handed-in task branches are not in main', async (language, heading, first, second) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, BRANCHES] }, withRepo());
+    await user.click(await screen.findByRole('button', { name: language === 'en' ? /^Development/ : /^Разработка/ }));
+    await user.click(await screen.findByRole('button', { name: language === 'en' ? 'About the department' : ru.dept.about }));
+    const region = await screen.findByRole('region', { name: heading });
+    const items = (await within(region).findAllByRole('listitem')).map(li => li.textContent!);
+    expect(items).toHaveLength(2);
+    for (const said of first) expect(items[0]).toContain(said);
+    for (const said of second) expect(items[1]).toContain(said);
+  });
+
+  it('says when every accepted branch is in main, and why the branches could not be read', async () => {
+    const user = userEvent.setup();
+    shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, { branches: [], problem: null }] }, withRepo());
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    expect(await screen.findByText('Every accepted branch of the department is in main.')).toBeInTheDocument();
+    cleanup();
+    const again = userEvent.setup();
+    shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, { branches: [], problem: 'Hornhoof could not read the branches of https://github.com/acme/app.git: it answered 404.' }] }, withRepo());
+    await flyIn(again);
+    await drawer(again, 'About the department');
+    expect(await screen.findByText('Hornhoof could not read the branches of https://github.com/acme/app.git: it answered 404.')).toBeInTheDocument();
+  });
+
+  it('is neither shown nor asked for where the department has no repository or the reader does not run it', async () => {
+    const user = userEvent.setup();
+    const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, BRANCHES] }, withRepo(), listed('p7', 'Kira'));
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    expect(screen.queryByRole('region', { name: 'Branches not in main yet' })).not.toBeInTheDocument();
+    expect(calls.some(c => c.path.endsWith('/branches'))).toBe(false);
+    cleanup();
+    const ceo = userEvent.setup();
+    const noRepo = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'GET /api/departments/d2/branches': [200, BRANCHES] });
+    await flyIn(ceo);
+    await drawer(ceo, 'About the department');
+    expect(screen.queryByRole('region', { name: 'Branches not in main yet' })).not.toBeInTheDocument();
+    expect(noRepo.some(c => c.path.endsWith('/branches'))).toBe(false);
   });
 });

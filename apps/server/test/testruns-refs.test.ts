@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { readCommit, REFS_MAX_BYTES } from '../src/modules/testruns/refs.js';
+import { readBranches, readCommit, REFS_MAX_BYTES } from '../src/modules/testruns/refs.js';
 import { listenIn, testPort } from '../../../test-support/ports.mjs';
 import { until } from './helpers-basic.js';
 
@@ -220,5 +220,21 @@ describe('reading a commit from a repository', () => {
     const port = await testPort();
     expect(url).not.toContain(String(port));
     expect(await readCommit({ url: `http://127.0.0.1:${port}/r.git`, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('could not be reached') });
+  });
+});
+
+describe('reading every branch of a repository', () => {
+  it('names each branch with the commit it is at, and no tag', async () => {
+    const dir = repository();
+    const main = git(dir, 'rev-parse', 'HEAD');
+    const leads = commitOn(dir, 'task-37');
+    const scoring = commitOn(dir, 'task-41-scoring');
+    git(dir, 'tag', 'v1');
+    expect(await readBranches({ url: await host(dir), token: '' })).toEqual({ heads: { main, 'task-37': leads, 'task-41-scoring': scoring } });
+  });
+
+  it('says why when the repository does not answer as one', async () => {
+    const url = await serve((_req, res) => { res.writeHead(404); res.end(); });
+    expect(await readBranches({ url, token: '' })).toEqual({ problem: `Hornhoof could not read the branches of ${url}: it answered 404.` });
   });
 });

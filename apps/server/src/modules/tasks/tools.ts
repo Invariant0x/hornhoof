@@ -1,3 +1,5 @@
+import { earlierWork } from '../departments/branches.js';
+import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
@@ -13,7 +15,7 @@ import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, r
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
-import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
+import { agentSeesTask as sees, taskByRef, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows, type Scope } from './turns.js';
 import { topDepartment } from './turn-department.js';
 import { setUrgent } from './urgency.js';
@@ -352,7 +354,7 @@ class TaskTools {
       },
       async ({ task: ref }) =>
         this.find(ref).then(
-          async ({ agent, task }) => say(fitted({ ...await taskDetail(this.ctx, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id) })),
+          async ({ agent, task }) => say(fitted({ ...await agentTaskDetail(this.ctx, agent, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id), ...await earlierWork(this.ctx, agent, task) })),
           (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
         ),
     );

@@ -1,3 +1,4 @@
+import { OfflinePlan } from './OfflineMachine';
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
@@ -311,6 +312,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
           <LastFailure failure={card.failure} when={when} />
           <LastObsolete obsolete={card.obsolete} />
         </header>
+        <OfflinePlan card={card} editable={editable} onMove={subscription => change({ subscription })} />
         {!editable && <p className="muted">{t.agent.viewOnly}</p>}
 
         <div className="ac-pick">

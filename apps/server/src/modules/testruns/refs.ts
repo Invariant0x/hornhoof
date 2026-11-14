@@ -1,4 +1,5 @@
 import { COMMIT_SHA, ownBranch } from '@hornhoof/protocol';
+import { bodyWithin } from './bounded.js';
 
 /* How long a repository may take to say where its branches are. */
 const READ_MS = 30_000;
@@ -12,6 +13,9 @@ export type RepoAddress = { url: string; token: string };
 export type CommitWanted = { branch: string } | { task: number };
 export type CommitAt = { branch: string; commitSha: string } | { problem: string };
 export type CommitReader = (repo: RepoAddress, want: CommitWanted, timeoutMs?: number) => Promise<CommitAt>;
+/* Every branch of a repository with the commit it is at now, by name. */
+export type BranchesAt = { heads: Record<string, string> } | { problem: string };
+export type BranchReader = (repo: RepoAddress, timeoutMs?: number) => Promise<BranchesAt>;
 
 /* The refs in git's smart HTTP answer: lines that start with their length in bytes, in four hex digits, each an object
    name and a ref, the first with what the server can do after a NUL. A flush has a length and no line. */
@@ -54,30 +58,34 @@ const headersFor = (token: string): Record<string, string> => ({
   ...(token ? { authorization: `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}` } : {}),
 });
 
-/* An answer up to REFS_MAX_BYTES, read no further than that. */
-async function within(res: Response): Promise<Buffer | null> {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const chunk of res.body ?? []) {
-    size += chunk.length;
-    if (size > REFS_MAX_BYTES) return null;
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-/* The commit a repository's branch is at now, asked of the repository itself. Git's own protocol over HTTP, as the
-   server's image has no git. It says what went wrong rather than throw, and never with the token. */
-export const readCommit = async (repo: RepoAddress, want: CommitWanted, timeoutMs = READ_MS): Promise<CommitAt> => {
+/* The refs of a repository, asked of the repository itself. Git's own protocol over HTTP, as the server's image has no git.
+   It says what went wrong rather than throw, and never with the token. */
+async function refsOf(repo: RepoAddress, timeoutMs: number): Promise<Map<string, string> | { problem: string }> {
   const cannot = (why: string) => ({ problem: `Hornhoof could not read the branches of ${repo.url}: ${why}.` });
   const signal = AbortSignal.timeout(timeoutMs);
   try {
     const res = await fetch(refsAddress(repo.url), { headers: headersFor(repo.token), signal });
     if (!res.ok) return cannot(`it answered ${res.status}`);
     if (!res.headers.get('content-type')?.startsWith(ADVERTISEMENT)) return cannot('the address is not a git repository');
-    const body = await within(res);
-    return body ? commitIn(advertisedRefs(body), want) : cannot('its answer is too long');
+    const body = await bodyWithin(res, REFS_MAX_BYTES);
+    return body ? advertisedRefs(body) : cannot('its answer is too long');
   } catch {
     return cannot(signal.aborted ? `it did not answer within ${timeoutMs} ms` : 'it could not be reached');
   }
+}
+
+/* The commit a repository's branch is at now. */
+export const readCommit = async (repo: RepoAddress, want: CommitWanted, timeoutMs = READ_MS): Promise<CommitAt> => {
+  const refs = await refsOf(repo, timeoutMs);
+  return refs instanceof Map ? commitIn(refs, want) : refs;
+};
+
+/* The branches in a repository's refs, by name; tags are no branches. */
+export const headsIn = (refs: Map<string, string>): Record<string, string> =>
+  Object.fromEntries([...refs].filter(([ref]) => ref.startsWith(HEADS)).map(([ref, sha]) => [ref.slice(HEADS.length), sha]));
+
+/* Every branch a repository has now, with its commit. */
+export const readBranches: BranchReader = async (repo, timeoutMs = READ_MS) => {
+  const refs = await refsOf(repo, timeoutMs);
+  return refs instanceof Map ? { heads: headsIn(refs) } : refs;
 };

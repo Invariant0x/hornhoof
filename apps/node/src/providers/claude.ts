@@ -36,13 +36,13 @@ type RateInfo = {
 
 export function limitsFrom(info: RateInfo): Limits {
   const status = info.status === 'rejected' ? 'rejected' : info.status === 'allowed_warning' ? 'warning' : 'allowed';
-  const windows = Object.entries(info.unifiedWindows ?? {}).map(([name, w]) => ({
+  const unified = Object.entries(info.unifiedWindows ?? {}).map(([name, w]) => ({
     name,
     utilization: typeof w.utilization === 'number' ? Math.min(1, Math.max(0, w.utilization)) : null,
     resetsAt: isoFrom(w.resetsAt),
   }));
-  if (!windows.length && info.rateLimitType) windows.push({ name: info.rateLimitType, utilization: null, resetsAt: isoFrom(info.resetsAt) });
-  return { status, windows: windows.slice(0, 8) };
+  const windows = unified.length ? unified : info.rateLimitType ? [{ name: info.rateLimitType, utilization: null, resetsAt: isoFrom(info.resetsAt) }] : [];
+  return { status, windows: windows.slice(0, 8), ...(unified.length ? { complete: true } : {}) };
 }
 
 type Outcome = { text: string; isError: boolean; sessionId: string | null };
