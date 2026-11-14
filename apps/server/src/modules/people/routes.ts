@@ -9,13 +9,14 @@ import { changedBy, personColumns, requireCompanyScope, requirePerson, startSess
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions } from '../../db/schema.js';
+import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions, personKeys } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { releaseAssistantAgent } from '../assistants/setup.js';
 import { onAgent } from '../conversation/queue.js';
+import { afterLeave, cutReplication, leaveData, leavingData } from '../copies/scope.js';
 import { publicUrl } from '../link/link.js';
-import { disconnectMachines } from '../nodes/disconnect.js';
+import { disconnectMachines, refuseLeader } from '../nodes/disconnect.js';
 import { personView, personViews } from './views.js';
 
 const INVITE_DAYS = 7;
@@ -139,6 +140,9 @@ export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' |
     if (!row) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
     await tx.delete(sessions).where(eq(sessions.personId, personId));
+    /* The person's key was wrapped with the password that ends here, so it goes too: they make a new one, and their
+       machines take it from the next command they run there. */
+    await tx.delete(personKeys).where(eq(personKeys.personId, personId));
     await tx.insert(invites).values(inviteFor(token, by, personId));
     return row!;
   });
@@ -171,6 +175,23 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
     });
   }
   if (freed) ctx.bus.publish(owner.companyId, { type: 'org' });
+}
+
+/* A person's account ends: their sessions go, their machines leave the company, and their plans stop serving it. by:
+   who did it; the company's owner when nobody acts, as when a restore carries over that the person was disabled. */
+export async function disablePerson(ctx: Ctx, personId: string, by?: Person): Promise<void> {
+  const { db } = ctx;
+  const person = await db.transaction(async tx => {
+    await tx.update(people).set({ status: 'disabled', isCeoDelegate: false }).where(eq(people.id, personId));
+    await tx.delete(sessions).where(eq(sessions.personId, personId));
+    const [row] = await tx.select(personColumns).from(people).where(eq(people.id, personId));
+    return row;
+  });
+  if (!person) return;
+  const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, personId), isNull(machines.revokedAt)));
+  await disconnectMachines(ctx, theirs.map(m => m.id));
+  const [owner] = by ? [by] : await db.select(personColumns).from(people).where(and(eq(people.companyId, person.companyId), eq(people.isOwner, true)));
+  if (owner) await releasePlansOf(ctx, person, owner);
 }
 
 export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -305,28 +326,41 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* A person who never set a password goes back to waiting for their invite; an assistant never has one. */
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash && !target.isAgent ? 'invited' : body.status;
     Object.assign(changes, markAfter(changes.status, body), telegramChange(telegram, target));
+    const { status } = changes;
+    /* Disabling has steps of its own, taken after whatever else this request changes. A person whose machine runs the
+       company server is not disabled: the server moves first. */
+    if (status === 'disabled') {
+      delete changes.status;
+      const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
+      await refuseLeader(db, config, theirs.map(m => m.id));
+    }
 
-    const person = await db.transaction(async tx => {
+    /* A person who no longer sees the whole company holds none of its data: their machines that hold a copy are cut from
+       the server's changes first, before anything new is written, and give the data up in the same transaction. */
+    const losesAll = target.scopeKind === 'company' && body.access !== undefined && !('whole' in body.access);
+    const leaving = losesAll ? await leavingData(db, config, id) : [];
+    await cutReplication(ctx.replication, leaving);
+
+    const changed = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
       if (body.name !== undefined && body.name !== target.name) {
         await tx.insert(personChanges).values({ companyId: me.companyId, personId: id, actorId: me.id, field: 'name', before: target.name, after: body.name });
       }
       if (body.access) await saveAccess(tx, target, body.access);
-      if (changes.status === 'disabled') await tx.delete(sessions).where(eq(sessions.personId, id));
+      await leaveData(ctx, tx, leaving.map(machine => machine.id), new Date());
       const [row] = await tx.select(personColumns).from(people).where(eq(people.id, id));
       return row!;
     }).catch((err: unknown) => {
       if (isUniqueViolation(err)) throw new ApiError(409, 'conflict', 'Another person of the company has this Telegram already.', 'telegram_person_taken');
       throw err;
     });
+    if (leaving.length > 0) void afterLeave(ctx);
     /* A disabled person's plans stop serving the company: their machines disconnect and the orchestrator lets go. */
-    if (changes.status === 'disabled') {
-      const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
-      await disconnectMachines(ctx, theirs.map(m => m.id));
-    }
-    if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
-    if (changes.status === 'disabled' && target.isAgent) await releaseAssistantAgent(ctx, id, me);
-    tellOfChange(ctx, me.companyId, Boolean(changes.status || body.access), person.name !== target.name);
+    if (status === 'disabled') await disablePerson(ctx, id, me);
+    else if (body.access) await releasePlansOf(ctx, changed, me);
+    if (status === 'disabled' && target.isAgent) await releaseAssistantAgent(ctx, id, me);
+    const person = status === 'disabled' ? (await db.select(personColumns).from(people).where(eq(people.id, id)))[0]! : changed;
+    tellOfChange(ctx, me.companyId, Boolean(status || body.access), person.name !== target.name);
     return { person: await personView(db, person) };
   });
 

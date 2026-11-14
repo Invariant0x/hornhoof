@@ -8,7 +8,7 @@ import { agentHidden, requireAgentView } from '../../auth/agent-view.js';
 import { namedAgent } from '../agents/find.js';
 import { enterPressed } from '../conversation/decision-context.js';
 import { windowNode } from '../conversation/queue.js';
-import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { programAccess } from './access.js';
 import { readKeys } from './keys.js';
 import { cols, followFrames, keepLooking, rows, type BrowserFrame } from './look.js';
@@ -35,7 +35,7 @@ async function programFor(ctx: Ctx, req: FastifyRequest) {
    shows, for the node to hear that. */
 async function whyEnd(ctx: Ctx, req: FastifyRequest, { node, personId, write }: Open) {
   const { plan } = await programFor(ctx, req);
-  const at = plan && identityOf(plan, plan.nodeId);
+  const at = plan && identityOf(plan, plan.nodeId, plan.builtinMachine, ownBuiltin(ctx.config));
   return !at || !sameNode(at, node) || (plan.ownerPersonId === personId) !== write ? CLOSE.nodeOffline : null;
 }
 

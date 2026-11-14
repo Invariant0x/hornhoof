@@ -21,6 +21,23 @@ describe('limiter', () => {
     expect(attempts.windowMs).toBe(60 * MINUTE);
   });
 
+  it('takes an attempt back, and keeps no key with nothing left', () => {
+    const attempts = limiter({ max: 2 });
+    attempts('a', 0);
+    attempts('a', 1);
+    expect(attempts('a', 2).allowed).toBe(false);
+    /* The newest one was no failure: there is room for one more. */
+    attempts.forget('a');
+    expect(attempts('a', 3).allowed).toBe(true);
+    /* Made-up keys that were counted and taken back do not fill the memory. */
+    for (let i = 0; i < 3000; i++) {
+      attempts(`made-up-${i}`, 4);
+      attempts.forget(`made-up-${i}`);
+    }
+    attempts.forget('nobody');
+    expect(attempts.size()).toBe(1);
+  });
+
   it('forgets keys whose window has passed', () => {
     const attempts = limiter();
     for (let i = 0; i < 2000; i++) attempts(`person-${i}@acme.com`, 0);

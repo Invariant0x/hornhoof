@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { APP, ask, at, DIGESTS, JQ, NODE_DIGESTS, refs, runOnce, stand, UPDATER_DIGESTS } from './updater-fixture.js';
+import { APP, ask, at, DIGESTS, JQ, keeperSays, NODE_DIGESTS, refs, runOnce, stand, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
 describe('updater', () => {
   beforeAll(() => {
@@ -317,6 +317,129 @@ describe('updater', () => {
     /* 0.4.1 went in on the first run; the second one only puts 0.4.0 in. */
     expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1', '0.4.0']);
     expect(r.status.log).toContain('The database was saved before it.');
+  });
+
+  /* What the keeper does while the updater waits a second: it writes down the step the updater is in, and answers the
+     question of that step. */
+  const answering = (id: string, more = '') =>
+    `step=$(jq -r .step "$HORNHOOF_CONTROL_DIR/status.json"); echo "$step" >> "$STUB_STATE/steps"; ` +
+    `case "$step" in promise) echo '{"id":"${id}","ok":true}' > "$HORNHOOF_CONTROL_DIR/promised.json" ;; ` +
+    `backup) echo '{"id":"${id}","ok":true}' > "$HORNHOOF_CONTROL_DIR/settled.json"; echo 'keeper settled' >> "$STUB_LOG" ;; ${more}esac`;
+  const stepsOf = (s: Stand) => (existsSync(join(s.dir, 'steps')) ? readFileSync(join(s.dir, 'steps'), 'utf8').trim().split('\n') : []);
+
+  it('asks the copies before it saves the database', async () => {
+    const s = stand();
+    const r = await runOnce(s, ask('u1'), { STUB_MIGRATIONS: '0.4.0=20 0.4.1=22', STUB_DURING_SLEEP: answering('u1') }, { keeper: false });
+    expect(r.status).toMatchObject({ id: 'u1', state: 'done', step: 'finished', migrations: 2, restore: false });
+    /* It waited in the step promise first, then in backup, each until its answer was there. */
+    expect(stepsOf(s).filter((step, n, all) => step !== all[n - 1]).slice(0, 2)).toEqual(['promise', 'backup']);
+    expect(r.status.log).toContain('Asking the copies to wait for the update.');
+    /* The journal of the new build came with its installer. */
+    expect(r.calls.some(c => c.startsWith('docker cp cid-0.4.1:/app/apps/server/drizzle/meta/_journal.json '))).toBe(true);
+    /* The dump is taken only once the keeper said the copies hold every change, and the app stops only then. */
+    const settled = r.calls.indexOf('keeper settled');
+    expect(settled).toBeGreaterThanOrEqual(0);
+    expect(at(r.calls, 'docker exec dbcid pg_dump')).toBeGreaterThan(settled);
+    expect(r.calls.indexOf('docker compose stop app')).toBeGreaterThan(settled);
+    /* A build that brings no migration says so. */
+    const same = stand();
+    expect((await runOnce(same, ask('u2'))).status).toMatchObject({ state: 'done', migrations: 0, restore: false });
+  });
+
+  it('ends when a copy does not promise', async () => {
+    const s = stand();
+    keeperSays(s, 'u1', { promised: { ok: false, why: 'Mac did not answer' } });
+    const r = await runOnce(s, ask('u1'), {}, { keeper: false });
+    expect(r.status).toMatchObject({ state: 'failed', step: 'promise' });
+    expect(r.status.log).toContain('Mac did not answer, so nothing changed.');
+    expect(r.calls.some(c => c.includes('pg_dump') || c.startsWith('installer') || c === 'docker compose stop app')).toBe(false);
+  });
+
+  it('ends when no keeper answers', async () => {
+    const s = stand();
+    const r = await runOnce(s, ask('u1'), { HORNHOOF_PROMISE_WAIT: '1' }, { keeper: false });
+    expect(r.status).toMatchObject({ state: 'failed', step: 'promise' });
+    expect(r.status.log).toContain('The keeper did not answer, so nothing changed.');
+    expect(r.calls.some(c => c.includes('pg_dump') || c.startsWith('installer'))).toBe(false);
+    /* An answer about another update is none. */
+    const other = stand();
+    keeperSays(other, 'u0');
+    const again = await runOnce(other, ask('u1'), { HORNHOOF_PROMISE_WAIT: '1' }, { keeper: false });
+    expect(again.status.log).toContain('The keeper did not answer, so nothing changed.');
+  });
+
+  it('ends when the copies do not confirm', async () => {
+    const s = stand();
+    keeperSays(s, 'u1', { settled: { ok: false, why: 'The copies did not confirm the last changes' } });
+    const r = await runOnce(s, ask('u1'), {}, { keeper: false });
+    expect(r.status).toMatchObject({ state: 'failed', step: 'backup' });
+    expect(r.status.log).toContain('The copies did not confirm the last changes, so nothing changed.');
+    expect(r.calls.some(c => c.includes('pg_dump') || c.startsWith('installer') || c === 'docker compose stop app')).toBe(false);
+    /* The same when the keeper says nothing of the dump in time. */
+    const silent = stand();
+    keeperSays(silent, 'u1', { settled: null });
+    const late = await runOnce(silent, ask('u1'), { HORNHOOF_SETTLE_WAIT: '1' }, { keeper: false });
+    expect(late.status.log).toContain('The copies did not confirm the last changes, so nothing changed.');
+    expect(late.calls.some(c => c.includes('pg_dump'))).toBe(false);
+  });
+
+  it('waits for the slots before it restores', async () => {
+    const env = { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' };
+    const restored = (calls: string[]) => calls.findIndex(c => c.includes('CREATE DATABASE hornhoof_restore'));
+    const asked = (calls: string[]) => calls.findIndex(c => c.includes('count(*) FROM pg_replication_slots'));
+    /* The keeper says the slots went: the updater looks itself, and puts the database back. */
+    const s = stand();
+    writeFileSync(join(s.dir, 'slots'), '');
+    const r = await runOnce(s, ask('u1'), env);
+    expect(r.status).toMatchObject({ state: 'rolled_back', migrations: 1, restore: true });
+    expect(asked(r.calls)).toBeGreaterThanOrEqual(0);
+    expect(restored(r.calls)).toBeGreaterThan(asked(r.calls));
+    /* No word of the keeper's in time: the updater ends the readers and drops the slots itself, then restores. */
+    const alone = stand();
+    writeFileSync(join(alone.dir, 'slots'), 'copy_c0c0c0c0c0c0c0c0_1\n');
+    keeperSays(alone, 'u1', { dropped: null });
+    const own = await runOnce(alone, ask('u1'), { ...env, HORNHOOF_DROP_WAIT: '1' }, { keeper: false });
+    expect(own.status).toMatchObject({ state: 'rolled_back', restore: true });
+    const dropped = own.calls.findIndex(c => c.includes('pg_drop_replication_slot'));
+    expect(own.calls.findIndex(c => c.includes('pg_terminate_backend(active_pid)'))).toBeLessThan(dropped);
+    expect(restored(own.calls)).toBeGreaterThan(dropped);
+    /* A slot that will not go: the database is not put back, and the build from before is not started on it. */
+    const stuck = stand();
+    writeFileSync(join(stuck.dir, 'slots'), 'copy_c0c0c0c0c0c0c0c0_1\n');
+    const kept = await runOnce(stuck, ask('u1'), { ...env, HORNHOOF_DROP_WAIT: '1', STUB_SLOTS_STAY: '1' });
+    expect(kept.status).toMatchObject({ state: 'failed', step: 'finished' });
+    expect(kept.status.log).toContain("Could not drop the copies' slots, so the database was not put back.");
+    expect(restored(kept.calls)).toBe(-1);
+    expect(kept.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1']);
+  });
+
+  it('starts over when stopped while asking', async () => {
+    const s = stand();
+    const stopped = await runOnce(s, ask('p1'), { STUB_STOP_IN: 'promise', HORNHOOF_PROMISE_WAIT: '5' }, { keeper: false });
+    expect(stopped.status).toMatchObject({ id: 'p1', state: 'running', step: 'promise' });
+    keeperSays(s, 'p1');
+    const r = await runOnce(s, null);
+    expect(r.status).toMatchObject({ id: 'p1', state: 'done', step: 'finished' });
+    /* From the beginning: the build is downloaded again, and the database saved once. */
+    expect(r.calls.filter(c => c === `docker pull ghcr.io/invariant0x/hornhoof@${DIGESTS['0.4.1']}`)).toHaveLength(2);
+    expect(r.calls.filter(c => c.startsWith('docker exec dbcid pg_dump'))).toHaveLength(1);
+    expect(r.calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
+  });
+
+  it('goes on from the dump when stopped there', async () => {
+    const s = stand();
+    const stopped = await runOnce(s, ask('b1'), { STUB_STOP_IN: 'backup', STUB_MIGRATIONS: '0.4.0=20 0.4.1=22' });
+    expect(stopped.status).toMatchObject({ id: 'b1', state: 'running', step: 'backup', migrations: 2 });
+    const before = stopped.calls.length;
+    const r = await runOnce(s, null, { STUB_MIGRATIONS: '0.4.0=20 0.4.1=22', STUB_DURING_SLEEP: 'jq -r .step "$HORNHOOF_CONTROL_DIR/status.json" >> "$STUB_STATE/steps"' });
+    expect(r.status).toMatchObject({ id: 'b1', state: 'done', step: 'finished', migrations: 2 });
+    /* Nothing is downloaded or asked again: the keeper's word about the dump stands, since the step never left backup.
+       The installer is taken out of the image that is here already. */
+    const fresh = r.calls.slice(before);
+    expect(fresh.filter(c => c.startsWith('docker pull') || c.endsWith(' pull'))).toEqual([]);
+    expect(stepsOf(s).some(step => step === 'pull' || step === 'promise')).toBe(false);
+    expect(fresh.filter(c => c.startsWith('docker exec dbcid pg_dump'))).toHaveLength(1);
+    expect(fresh.filter(c => c.startsWith('installer'))).toHaveLength(1);
   });
 
   it('marks an update it was stopped in as failed when it kept no note of it', async () => {

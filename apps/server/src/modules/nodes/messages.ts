@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type NodeStatus } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
+import { ON_NODE } from '../jobs/dispatch.js';
 import { keepLeftInput } from '../conversation/left-input.js';
 import { unheard } from '../conversation/unheard.js';
 import { clearNodeWords, holdForWords, limitUntil, nodeOfAgent, onAgent, pump, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
@@ -17,13 +18,14 @@ import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
-import { sameNode, type NodeIdentity } from './hub.js';
+import { ownMachine, sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type Hello, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
+import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
@@ -51,15 +53,14 @@ async function touchNodeSeen(ctx: Ctx, id: NodeIdentity, now: Date): Promise<voi
 
 const completionValue = (value: unknown, stopped: string | null): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
-/* A node may only touch the jobs sent to it; the built-in node those of API keys. */
+/* A node may only touch the jobs sent to it; a machine's built-in node those of API keys that went out to it. A job
+   from before machines' built-in nodes were told apart names none, and is the one of this server's own. */
 export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
-  return inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const ofKeys = inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const here = id.machine === ownMachine(ctx.config) ? or(eq(jobs.builtinMachine, id.machine), isNull(jobs.builtinMachine)) : eq(jobs.builtinMachine, id.machine);
+  return and(ofKeys, here)!;
 }
-
-/* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
-   A queued conversation turn still waits in Hornhoof and goes out later. */
-const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
 type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };
 
@@ -163,7 +164,7 @@ const helloRow = (msg: Hello, now: Date) => ({
 
 /* Why the built-in node's turns are gone. A personal node's comes from its row, once the hello is known to be its own. */
 const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
-  id.kind === 'builtin' ? builtinInterruption(ctx, msg, now) : undefined;
+  id.kind === 'builtin' ? builtinInterruption(ctx, id.machine, msg, now) : undefined;
 
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
@@ -233,8 +234,69 @@ async function wordMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now: Da
   if (msg.type === 'agent.input_left') await keepLeftInput(ctx, id, msg);
 }
 
+/* What a node says of one job that may be kept until the job's row is there, and as which kind it is kept. A word that
+   the agent did not hear names a job too, but needs only the agent and its node, so it is never kept. */
+const PARKED_AS: Partial<Record<NodeMessage['type'], ParkedKind>> = { 'job.started': 'started', 'job.event': 'event', 'job.done': 'done', 'agent.restarted': 'event' };
+
+/* While the database of a machine the server was taken from waits to be merged, what a node says of a job this
+   Hornhoof has no row of is kept, and the node is answered as if it was handled: the job runs on, and its row comes
+   with the merge. True when the message was kept. */
+async function parkUnknown(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
+  const kind = PARKED_AS[msg.type];
+  const jobId = msg.type === 'job.started' || msg.type === 'job.event' || msg.type === 'job.done' || msg.type === 'agent.restarted' ? msg.jobId : null;
+  if (!kind || !jobId || !z.uuid().safeParse(jobId).success || !(await mergePending(ctx.db))) return false;
+  const [known] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, jobId));
+  if (known) return false;
+  await park(ctx.db, { jobId, node: id, kind, body: msg });
+  if (msg.type === 'job.done') ctx.hub.send(id, { type: 'job.ack', jobId });
+  return true;
+}
+
+/* What was kept of jobs whose rows are there now is applied as if the node said it now. */
+export const applyParkedMessages = (ctx: Ctx): Promise<number> => applyParked(ctx, (scoped, id, msg) => handleNodeMessage(scoped, id, msg));
+
+/* A turn waits in the queue with no node until it is sent out. One the machine that led sent out after its last
+   change reached this copy still waits here, and the node that says it runs it is where it went: it is that node's
+   from now. Only a turn of the node's own plan, or of an API key for a machine's built-in node, is taken so; a turn
+   that names another node stays that one's. */
+async function placeWaiting(ctx: Ctx, id: NodeIdentity, ids: string[]): Promise<void> {
+  const { db } = ctx;
+  const waits = and(inArray(jobs.id, ids), eq(jobs.status, 'queued'), isNull(jobs.nodeId), isNull(jobs.builtinMachine));
+  if (id.kind === 'node') {
+    const ofPlan = eq(jobs.subscriptionId, sql`(select ${nodes.subscriptionId} from ${nodes} where ${nodes.id} = ${id.nodeId})`);
+    await db.update(jobs).set({ nodeId: id.nodeId }).where(and(waits, ofPlan));
+    return;
+  }
+  /* The server's own built-in node runs the turns that name no machine: those need no place. */
+  if (id.machine === ownMachine(ctx.config)) return;
+  const ofKeys = inArray(jobs.subscriptionId, db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  await db.update(jobs).set({ builtinMachine: id.machine }).where(and(waits, ofKeys));
+}
+
+/* The jobs a node says it runs, once its own open jobs were settled. Hornhoof ended some while the node was away, with
+   a stop or a removed subscription: the node stops those now. While a merge is pending, a job this Hornhoof has no row
+   of is left running and that the node lists it is kept; and one that waits here in the queue runs on that node from
+   now, so it is never sent out again. */
+async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: Date): Promise<void> {
+  if (!running.length) return;
+  const { db } = ctx;
+  const pending = await mergePending(db);
+  const ids = pending ? running.filter(jobId => z.uuid().safeParse(jobId).success) : [];
+  if (ids.length) await placeWaiting(ctx, id, ids);
+  const open = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(and(inArray(jobs.id, running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
+  const keep = new Set(open.map(j => j.id));
+  const known = new Set(ids.length ? (await db.select({ id: jobs.id }).from(jobs).where(inArray(jobs.id, ids))).map(j => j.id) : []);
+  for (const jobId of running) {
+    if (keep.has(jobId)) continue;
+    if (pending && ids.includes(jobId) && !known.has(jobId)) await park(db, { jobId, node: id, kind: 'listed', body: {} });
+    else ctx.hub.send(id, { type: 'job.cancel', jobId });
+  }
+  if (pending) for (const job of open) if (job.status === 'queued') await jobStarted(ctx, id, job.id, now);
+}
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
+  if (await parkUnknown(ctx, id, msg)) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
   if (await testNodeMessage(ctx, id, msg)) return;
@@ -275,12 +337,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       programsLive(ctx, id, msg.live);
       await testsHello(ctx, id, msg.tests);
       await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));
-      /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
-      if (msg.running.length) {
-        const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
-        const keep = new Set(open.map(j => j.id));
-        for (const jobId of msg.running) if (!keep.has(jobId)) ctx.hub.send(id, { type: 'job.cancel', jobId });
-      }
+      await settleListed(ctx, id, msg.running, now);
       /* The plan's sign-in sealed to this node, or a word to a node that holds it to seal it for this one. */
       if (id.kind === 'node') await pushCredentials(ctx, id.nodeId, msg.loggedIn);
       await pumpWaiting(ctx);

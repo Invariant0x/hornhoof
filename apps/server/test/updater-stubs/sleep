@@ -4,6 +4,14 @@
 # command is under way, as the docker stub runs it: still running, or ended and seen to end by the updater, which marks
 # that in a file of its own in TMPDIR. No clock decides what the watch sees; /bin/sleep yields the processor between
 # checks, and the stub exits once its folders or its parent are gone.
+# STUB_DURING_SLEEP: what happens elsewhere while the updater waits a second, as a command; it runs on each wait.
+# STUB_STOP_IN=promise: the updater is stopped, once, while it waits for the copies' promise, as a restart of its
+# container would.
+[ -z "${STUB_DURING_SLEEP:-}" ] || sh -c "$STUB_DURING_SLEEP"
+if [ "${STUB_STOP_IN:-}" = promise ] && [ ! -f "$STUB_STATE/stopped" ] && grep -q '"step": *"promise"' "$HORNHOOF_CONTROL_DIR/status.json" 2> /dev/null; then
+  touch "$STUB_STATE/stopped"
+  kill -9 "$PPID"
+fi
 [ -n "${STUB_WATCH:-}" ] || exit 0
 if [ -z "${STUB_STATE:-}" ] || [ ! -d "$STUB_STATE" ] || [ -z "${TMPDIR:-}" ] || [ ! -d "$TMPDIR" ]; then
   exit 1

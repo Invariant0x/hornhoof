@@ -195,7 +195,9 @@ describe('migration 0052', () => {
     db = drizzle(copy);
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect((await db.execute(sql`select to_jsonb(c) - 'dismissed_subscription_ids' as data from node_codes c order by code_hash`)).rows).toEqual(before);
+    /* Without the columns later migrations added: an older command is one for no core. */
+    expect((await db.execute(sql`select to_jsonb(c) - 'dismissed_subscription_ids' - 'core' as data from node_codes c order by code_hash`)).rows).toEqual(before);
+    expect((await db.execute(sql`select core from node_codes`)).rows).toEqual(Array.from({ length: 3 }, () => ({ core: false })));
     expect((await db.execute(sql`select dismissed_subscription_ids from node_codes`)).rows).toEqual(Array.from({ length: 3 }, () => ({ dismissed_subscription_ids: [] })));
   });
 });

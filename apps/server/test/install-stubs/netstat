@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+[ -z "${STUB_NETSTAT:-}" ] || printf '%s\n' "$STUB_NETSTAT"
+exit 0

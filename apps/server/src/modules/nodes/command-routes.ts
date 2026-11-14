@@ -22,14 +22,15 @@ async function activeCommands(db: Db, personId: string, secret: Buffer) {
   const rows = await db.select({
     id: nodeCodes.codeHash, commandEnc: nodeCodes.commandEnc, subscriptionIds: nodeCodes.subscriptionIds,
     dismissedSubscriptionIds: nodeCodes.dismissedSubscriptionIds, machineId: nodeCodes.machineId,
-    machine: machines.hostname, expiresAt: nodeCodes.expiresAt,
+    machine: machines.hostname, expiresAt: nodeCodes.expiresAt, core: nodeCodes.core,
   }).from(nodeCodes).leftJoin(machines, eq(machines.id, nodeCodes.machineId))
     .where(and(eq(nodeCodes.personId, personId), isNotNull(nodeCodes.commandEnc), isNull(nodeCodes.usedAt), gt(nodeCodes.expiresAt, new Date())))
     .orderBy(asc(nodeCodes.createdAt));
   const ids = rows.flatMap(r => r.subscriptionIds);
   const plans = ids.length ? await db.select({ id: subscriptions.id, label: subscriptions.label }).from(subscriptions).where(inArray(subscriptions.id, ids)) : [];
   return rows.map(r => ({
-    id: r.id, kind: r.machineId ? 'add' : r.subscriptionIds.length ? 'plans' : 'machine',
+    /* core: the command brings the company's core to its machine, and no plan. */
+    id: r.id, kind: r.core ? 'core' : r.machineId ? 'add' : r.subscriptionIds.length ? 'plans' : 'machine',
     subscriptionIds: r.subscriptionIds, dismissedSubscriptionIds: r.dismissedSubscriptionIds,
     plans: r.subscriptionIds.flatMap(id => plans.filter(p => p.id === id).map(p => p.label)),
     machineId: r.machineId, machine: r.machine, command: decryptSecret(r.commandEnc!, secret), expiresAt: r.expiresAt.toISOString(),

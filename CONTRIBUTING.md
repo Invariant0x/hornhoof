@@ -58,9 +58,13 @@ npx tsc -p apps/web/tsconfig.json --noEmit
 npx tsc -p apps/node/tsconfig.json --noEmit
 ```
 
-`npm run lint` gives each part its own eslint process. To lint one part, run `npm run build -w @hornhoof/protocol` and `npm run lint:part -w apps/server`. Avoid `npx eslint` over the whole repository: eslint keeps the types of every part in memory until it exits, and together they need more than the 2 GB node allows by default on a machine with less than 15 GB of memory.
+`npm run lint` gives each part its own eslint process. To lint one part, run `npm run build -w @hornhoof/protocol` and `npm run lint:part -w apps/server`. The server is linted in five runs, one after another, since its sources and tests together need more memory than one run has; the runs stop at the first that finds something, and an option added after `--` reaches only the last of them, so to fix or filter name the files to `npx eslint` yourself. Avoid `npx eslint` over the whole repository: eslint keeps the types of every part in memory until it exits, and together they need more than the 2 GB node allows by default on a machine with less than 15 GB of memory.
 
 Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
+
+`npm run test:real` needs Docker and runs the tests against Pebble and against Postgres 17.11, the image compose's `db` runs.
+
+`npm run test:lab` needs a Docker that may run privileged containers and about 20 GB of free disk. It builds the app, node and updater images from the checkout, starts two computers with a Docker of their own, installs a server on one with `install.sh`, joins the other with the command from Machines and disconnects it. `HH_LAB_BUILT=1` reuses the images of a run before, and `HH_LAB_KEEP=1` leaves the machines to look at; everything the lab makes carries the label `hornhoof.lab`.
 
 Coverage for crapper is `npx vitest run --coverage` in the part's folder, on the dependencies its harness put there or after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
 

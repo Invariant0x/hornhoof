@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance } from 'fastify';
@@ -13,33 +13,69 @@ import type { CommitMarker } from '../src/modules/testruns/github-status.js';
 import type { RepositoryCreator } from '../src/modules/departments/repo-hosts.js';
 import type { CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
-import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
+import { agentRole, gated, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
+import type { LeaseKind, LeaseSync } from '../src/db/net.js';
+import type { Sql } from '../src/modules/keeper/lease-store.js';
+import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
 import * as schema from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { openTestDb, timed } from './helpers-db.js';
 import { TEST_SECRET } from './helpers-basic.js';
 import { templatesFor } from './templates-once.js';
 import { listenAt } from '../../../test-support/ports.mjs';
+import { recordSources } from '../src/db/sources.js';
 export { createTestDb, fixture, ownDatabases, statements } from './helpers-db.js';
 export { as, sessionFrom, TEST_SECRET, until } from './helpers-basic.js';
 
 export { TEST_API_KEY, SETUP, appFixture, withoutOperations, setUpCompany, invitePerson } from './helpers-company.js';
 
+type LeaseChange = { until?: string; kind?: LeaseKind; sync?: LeaseSync | null; termNumber?: number };
+const LEASE_COLUMNS: Record<keyof LeaseChange, string> = { until: 'until', kind: 'kind', sync: 'sync', termNumber: 'term_number' };
+
+/* Changes what the test database's lease says. The until is a timestamptz as text: '-infinity' or an ISO time. */
+export async function setLease(db: Db, change: LeaseChange): Promise<void> {
+  const columns = (Object.keys(change) as (keyof LeaseChange)[]).map(name => sql`${sql.identifier(LEASE_COLUMNS[name])} = ${change[name] ?? null}`);
+  await db.execute(sql`UPDATE net_local.lease SET ${sql.join(columns, sql`, `)}`);
+}
+
+/* One test database seen both ways: as the app's code reads it, and as the keeper's plain statements do. */
+export async function createTestSql(): Promise<{ db: Db; sql: Sql }> {
+  const { client, db } = await timed('setupMs', openTestDb);
+  onTestFinished(() => timed('teardownMs', () => client.close()));
+  const sql: Sql = { query: async <R>(text: string, params?: unknown[]) => ({ rows: (params ? (await client.query<R>(text, params)).rows : ((await client.exec(text)).at(-1)?.rows ?? [])) as R[] }) };
+  return { db, sql };
+}
+
+/* The tunnel container's address in tests: start the app with testApp({ TUNNEL_HOST: TUNNEL }). */
+export const TUNNEL = '192.0.2.10';
+
+/* A request that came over https through the tunnel container, as a visitor of the public link sends it. */
+export const viaLink = (token?: string) => ({
+  remoteAddress: TUNNEL,
+  headers: { 'x-forwarded-proto': 'https' },
+  cookies: (token ? { [LINK_SESSION_COOKIE]: token } : {}) as Record<string, string>,
+});
+
 /* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
    hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
-function agentSqlOn(client: PGlite): AgentSql {
+export function agentSqlOn(client: PGlite): AgentSql {
   const roles = { write: agentRole('postgres'), read: readerRole('postgres') };
   let granted: Promise<unknown> | null = null;
   return {
-    run: async (text, mode) => {
-      granted ??= client.exec(`${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
+    run: async (text, mode, call) => {
+      granted ??= client.exec(`${PUBLIC_REVOKES};\n${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
       await granted;
-      return client.transaction(async tx => {
+      return gated(mode, () => client.transaction(async tx => {
         if (mode === 'read') await tx.query('SET TRANSACTION READ ONLY');
         await tx.query(`SET LOCAL ROLE "${roles[mode]}"`);
-        return (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
-      });
+        const answers = (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
+        if (mode === 'write' && call) {
+          await tx.exec(PRE_COMMIT_SETTINGS);
+          await tx.query(RECORD_CALL, [call.invocation, call.jobId, JSON.stringify(call.answer(answers))]);
+        } else if (mode === 'write') await tx.exec(PRE_COMMIT);
+        return answers;
+      }));
     },
     close: async () => {},
   };
@@ -62,9 +98,9 @@ const noGitHost: RepositoryCreator = async () => ({ problem: 'Tests reach no git
 /* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
    still write to it. */
 export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
-  const db = drizzle(client, { schema }) as unknown as Db;
-  /* Tests never reach the real registry unless they ask. */
-  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
+  const db = recordSources(drizzle(client, { schema }) as unknown as Db);
+  /* Tests never reach the real registry or a real CA unless they ask. */
+  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
   const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), readMerged: async () => null }));
   onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
@@ -115,6 +151,8 @@ export type FakeNode = {
   /* The next message other than a confirmation of a finished job, which lands in acks. */
   next(): Promise<ServerMessage>;
   acks: string[];
+  /* Up to which number each confirmation of numbered messages went, in the order they came. */
+  upto: number[];
   /* Messages that arrived and nobody took yet. */
   queued(): number;
   closed: Promise<number>;
@@ -140,9 +178,11 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
     const queue: ServerMessage[] = [];
     const waiters: ((m: ServerMessage) => void)[] = [];
     const acks: string[] = [];
+    const upto: number[] = [];
     ws.on('message', data => {
       const msg = JSON.parse(String(data)) as ServerMessage;
       if (msg.type === 'job.ack') return void acks.push(msg.jobId);
+      if (msg.type === 'ack') return void upto.push(msg.upto);
       const waiter = waiters.shift();
       if (waiter) waiter(msg);
       else queue.push(msg);
@@ -156,6 +196,7 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
         send: msg => ws.send(JSON.stringify(withSkillFiles(msg))),
         next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise(done => waiters.push(done))),
         acks,
+        upto,
         queued: () => queue.length,
         closed,
         close: () => ws.close(),

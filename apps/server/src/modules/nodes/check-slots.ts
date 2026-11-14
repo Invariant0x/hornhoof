@@ -1,8 +1,8 @@
 import type { CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
-import { and, desc, eq, like, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNull, like, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, nodes, machines, testParts } from '../../db/schema.js';
-import { BUILTIN, keyOf, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { identityOfKey, keyOf, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
 import { CheckCoordinator } from './check-slots-queue.js';
@@ -12,7 +12,7 @@ const queues = new WeakMap<Ctx, CheckCoordinator>();
 function queueFor(ctx: Ctx): CheckCoordinator {
   let queue = queues.get(ctx);
   if (!queue) {
-    queue = new CheckCoordinator({ send: (key, reply) => { ctx.hub.send(key === 'builtin' ? BUILTIN : nodeIdentity(key), reply); } });
+    queue = new CheckCoordinator({ send: (key, reply) => { ctx.hub.send(identityOfKey(key, ownBuiltin(ctx.config)), reply); } });
     queues.set(ctx, queue);
   }
   return queue;
@@ -27,8 +27,10 @@ export async function checkQueueLoad(ctx: Ctx, id: NodeIdentity): Promise<void> 
   queueFor(ctx).node(keyOf(id), host, { cpus: load.cpus, load: load.hostLoad ?? load.load, at: load.at });
 }
 
+/* The computer a node's checks share their slots on. A built-in node of another machine than this server's is on that
+   machine, whose id its keeper and its node go by. */
 async function machineKey(ctx: Ctx, id: NodeIdentity): Promise<string | null> {
-  if (id.kind === 'builtin') return `host:${ctx.config.hostId ?? 'builtin'}`;
+  if (id.kind === 'builtin') return id.machine === ownMachine(ctx.config) ? `host:${ctx.config.hostId ?? 'builtin'}` : `host:${id.machine}`;
   const [row] = await ctx.db.select({ key: machines.machineKey }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, id.nodeId));
   return row ? `host:${hashToken(`hornhoof-host:${row.key}`)}` : null;
 }
@@ -60,7 +62,9 @@ export async function recordPartQueueWait(ctx: Ctx, id: NodeIdentity, frame: Ext
 
 async function updateCheckPart(ctx: Ctx, id: NodeIdentity, partId: string, values: { tail: string; startedAt?: null }, waitingOnly = false): Promise<void> {
   if (!z.uuid().safeParse(partId).success) return;
-  const owner = id.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, id.nodeId);
+  /* A part with no machine named is of this server's own built-in node, as all were before machines had theirs. */
+  const onBuiltin = (machine: string) => (machine === ownMachine(ctx.config) ? or(eq(testParts.builtinMachine, machine), isNull(testParts.builtinMachine)) : eq(testParts.builtinMachine, machine));
+  const owner = id.kind === 'builtin' ? and(eq(testParts.builtin, true), onBuiltin(id.machine)) : eq(testParts.nodeId, id.nodeId);
   await ctx.db.update(testParts).set(values).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), owner,
     waitingOnly ? like(testParts.tail, 'Waiting for a machine check slot.%') : undefined));
 }

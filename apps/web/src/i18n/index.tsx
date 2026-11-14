@@ -67,15 +67,26 @@ export function useLanguage(): { language: Language; setLanguage: (l: Language) 
   return { language, setLanguage };
 }
 
-/* A known reason reads in the chosen language. Otherwise English shows the server's own words when it gave any, and the
-   rest say what kind of error it was. */
+/* A known reason reads in the chosen language; one whose words name a machine takes its name from what the server gave
+   with the reason. Otherwise English shows the server's own words when it gave any, and the rest say what kind of
+   error it was. */
 export function errorText(t: Messages, err: unknown): string {
   if (!(err instanceof ApiFailure)) return t.errors.codes.internal;
   const reasons: Record<string, unknown> = t.errors;
-  if (err.reason && err.reason !== 'codes' && typeof reasons[err.reason] === 'string') return reasons[err.reason] as string;
+  const known = err.reason && err.reason !== 'codes' ? reasons[err.reason] : undefined;
+  if (typeof known === 'string') return known;
+  const host = err.details?.host;
+  if (typeof known === 'function' && typeof host === 'string' && host) return (known as (host: string) => string)(host);
   if (t === en && err.message) return err.message;
   const codes: Record<string, string> = t.errors.codes;
   return codes[err.code] ?? t.errors.codes.internal;
+}
+
+/* How a restore ended. The server writes its own line in English, so that is shown in English alone, as with a failure
+   it names no reason for; any other language says what the last step tells. */
+export function restoreEnded(t: Messages, status: { state: 'running' | 'done' | 'failed'; step: keyof Messages['backups']['steps']; line: string }): string {
+  if (t === en && status.line) return status.line;
+  return status.state === 'done' ? t.backups.done : t.backups.failedAt(t.backups.steps[status.step]);
 }
 
 /* A typed name as typed; a template department without one by its template's name in the person's language. */

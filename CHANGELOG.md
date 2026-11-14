@@ -12,7 +12,7 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
 
 ### Before you update
 
-- Migration 0106 adds an empty table `google_sheets` for a company's Google key. Nothing is moved, and 0.23.5 runs on
+- Migration 0120 adds an empty table `google_sheets` for a company's Google key. Nothing is moved, and 0.23.5 runs on
   the database with it, so going back stays safe.
 - The node image now carries `hh-browse`, `hh-xlsx`, zip, PyYAML, pip and pytest, so it is larger.
 
@@ -57,7 +57,7 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
 Агенты отдают людям таблицы настоящими файлами и читают страницы, которые строят скрипты; незавершенные ветки отдела и
 выключенные машины больше не останавливают его работу, а зависшие и остановленные узлы поднимаются снова.
 
-- Перед обновлением: миграция 0106 добавляет пустую таблицу `google_sheets` для ключа Google компании. Ничего не
+- Перед обновлением: миграция 0120 добавляет пустую таблицу `google_sheets` для ключа Google компании. Ничего не
   переносится, 0.23.5 работает с этой базой, так что откат безопасен. Образ узла теперь содержит `hh-browse`, `hh-xlsx`,
   zip, PyYAML, pip и pytest и поэтому больше.
 - Любой агент отдает человеку таблицу файлом `.xlsx` или `.csv` в карточке задачи или в чате, отправляет ее в Telegram

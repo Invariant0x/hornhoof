@@ -7,6 +7,7 @@ import { appendEvent } from '../src/modules/events/store.js';
 import { ask, comment } from '../src/modules/tasks/engine.js';
 import { as, openStream, until } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
+import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
@@ -161,19 +162,18 @@ describe('what waits for people', () => {
   });
 
   it("keeps the orchestrator's cards and his ask for the computer from anyone who does not see him", async () => {
-    const c = await aclCompany();
+    const c = await aclCompany(SERVER_MACHINE_ENV);
     await c.db.insert(proposals).values({ companyId: c.companyId, agentId: c.orchestrator.id, kind: 'staff', brief: 'Hire Zed', items: [], departmentId: c.dev.id });
-    const view = c.app.ctx.computer.view;
-    c.app.ctx.computer.view = () => ({ ...view.call(c.app.ctx.computer), asked: { reason: 'Fix the disk', at: new Date().toISOString() } });
+    await c.app.ctx.computer.ask(c.companyId, await serverMachine(c.app), 'Fix the disk');
     const wes = await c.get('/api/requests', c.tokens.wes);
     expect(wes.json().proposals).toEqual([]);
-    expect(wes.json().computerAccess).toBeNull();
+    expect(wes.json().machineAccess).toEqual([]);
     expect(leaks(wes, [c.orchestrator])).toEqual([]);
     expect(wes.body).not.toMatch(/Hire Zed|Fix the disk/);
     for (const viewer of ['ceo', 'lisa'] as const) {
       const full = (await c.get('/api/requests', c.tokens[viewer])).json();
       expect(full.proposals).toHaveLength(1);
-      expect(full.computerAccess.view.asked.reason).toBe('Fix the disk');
+      expect(full.machineAccess[0].view.asked.reason).toBe('Fix the disk');
     }
   });
 });
@@ -472,9 +472,8 @@ describe('the events of a seen agent', () => {
 
 describe('the computer', () => {
   it("shows its state and keeps the orchestrator's ask from whoever does not see him", async () => {
-    const c = await aclCompany();
-    const view = c.app.ctx.computer.view;
-    c.app.ctx.computer.view = () => ({ ...view.call(c.app.ctx.computer), asked: { reason: 'Fix the disk', at: new Date().toISOString() } });
+    const c = await aclCompany(SERVER_MACHINE_ENV);
+    await c.app.ctx.computer.ask(c.companyId, await serverMachine(c.app), 'Fix the disk');
     const wes = await c.get('/api/computer', c.tokens.wes);
     expect(wes.statusCode).toBe(200);
     expect(wes.json().asked).toBeNull();

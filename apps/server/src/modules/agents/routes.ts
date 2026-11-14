@@ -12,7 +12,7 @@ import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, p
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
-import { keyEndFor, subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
+import { keyEndFor, onlineIn, subViews, type SubView } from '../subscriptions/views.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
@@ -234,7 +234,7 @@ function cardState(agent: AgentRow, running: boolean): AgentCard['state'] {
 /* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
 async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const { db, hub } = ctx;
-  const online: IsOnline = node => hub.isOnline(node);
+  const online = onlineIn(hub, ctx.config);
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   const named = await cardPlaces(db, agent);
   const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));

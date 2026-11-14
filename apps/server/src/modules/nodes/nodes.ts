@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, notLike, or, sql } from 'drizzle-orm';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions, SUBSCRIPTION_STATUSES, type NodeStatus } from '../../db/schema.js';
@@ -19,7 +19,8 @@ export async function hasCurrentKey(ctx: { db: Db; hub: NodeHub }, id: NodeIdent
 export const NODE_STALE_MS = 24 * 60 * 60 * 1000;
 
 /* Clears the sign-in of nodes that have not been heard from for more than 24 hours, ready or waiting for their program's
-   first setup, and settles their plans. */
+   first setup, and settles their plans. A write, so only the leader's minute round calls it: the screens show what it
+   last found, a minute late at worst. */
 export async function expireStaleNodes(db: Db, now = new Date()): Promise<void> {
   const cutoff = new Date(now.getTime() - NODE_STALE_MS);
   const stale = await db
@@ -64,16 +65,29 @@ export async function planNodes(db: Db, subscriptionIds: string[]): Promise<Node
     .orderBy(asc(nodes.createdAt), asc(nodes.id));
 }
 
+/* How the key of the row of the machine the server itself runs on begins. */
+export const SERVER_KEY = 'server:';
+
+/* A machine people see and act on: a computer someone joined, and a machine the company was installed on while the
+   server runs elsewhere. The row of the machine this app itself runs on, when it is the row its install made, which
+   its key says, is none of those. An install with no machine id tells none of them apart and shows none. */
+export const shownMachine = (config: { machineId: string | null }) =>
+  config.machineId ? or(notLike(machines.machineKey, `${SERVER_KEY}%`), sql<boolean>`${machines.networkId} IS DISTINCT FROM ${config.machineId}`) : notLike(machines.machineKey, `${SERVER_KEY}%`);
+
+/* Whether a row is one a company's install made for its own machine, and no computer someone joined. */
+export const isServerInstall = (machineKey: string): boolean => machineKey.startsWith(SERVER_KEY);
+
 /* The company's machine the server and its built-in node run on: the one whose key hashes to what install.sh gave the
-   server. The pool counts that computer once. None for a server installed before, or on a computer that never joined. */
-export async function builtinMachine(db: Db, hostId: string | null, companyId: string): Promise<{ id: string; hostname: string } | null> {
-  if (!hostId) return null;
+   server as its host, or as the id its keeper runs under, which is the same hash on an install of today. The pool counts
+   that computer once. None for a server installed before, or on a computer that never joined. */
+export async function builtinMachine(db: Db, hostId: string | null, companyId: string, networkId: string | null = null): Promise<{ id: string; hostname: string } | null> {
+  if (!hostId && !networkId) return null;
   const rows = await db
     .select({ id: machines.id, hostname: machines.hostname, key: machines.machineKey })
     .from(machines)
     .where(and(eq(machines.companyId, companyId), isNull(machines.revokedAt)))
     .orderBy(asc(machines.createdAt));
-  const same = rows.find(m => hashToken(`hornhoof-host:${m.key}`) === hostId);
+  const same = rows.find(m => [hostId, networkId].includes(hashToken(`hornhoof-host:${m.key}`)));
   return same ? { id: same.id, hostname: same.hostname } : null;
 }
 

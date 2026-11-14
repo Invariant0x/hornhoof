@@ -242,6 +242,10 @@ select:disabled { opacity: .55; }
 }
 .update-banner > span { font-size: 13px; }
 .update-error { flex-basis: 100%; color: var(--pink-ink); font-size: 13px; }
+/* The question of which copy to go on from: its text, then its answers as one group below it. */
+.question-banner { flex-direction: column; align-items: stretch; box-sizing: border-box; inline-size: min(640px, calc(100% - 32px)); padding: 12px 14px; }
+.question-banner > p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.question-banner > .question-note { color: var(--muted); }
 .dialog-back { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: var(--scrim); }
 .dialog {
   display: grid; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; scrollbar-gutter: stable; padding: 18px;
@@ -1754,8 +1758,25 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .plist li > .pm { margin-top: 3px; }
 .plist li > .mc { margin-top: 2px; color: var(--muted); }
 .part-note { font-size: 12.5px; color: var(--muted); }
-.server-priority { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; }
-.server-priority b { display: inline-grid; place-items: center; flex: none; min-width: 24px; height: 22px; padding: 0 6px; border: 1px solid var(--btn); font-family: var(--f-display); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--on-btn); background: var(--btn); }
+/* A machine's place in the server order: the number in a box, the server's filled, or a dash for a machine with none.
+   In the table's Priority column and in the Priority part of the card, where the CEO's choice stands under it. */
+.k-prio { width: 1%; }
+th.k-prio .sorth { white-space: nowrap; }
+.k-prio .pn, .prio .pn { display: inline-grid; place-items: center; min-width: 24px; height: 22px; padding: 0 6px; border: 1px solid var(--line2); font-family: var(--f-display); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+.k-prio .pn.one, .prio .pn.one { background: var(--btn); border-color: var(--btn); color: var(--on-btn); }
+.pdash { display: inline-block; width: 12px; height: 2px; margin-block: 10px 0; margin-inline: 6px; background: var(--line2); }
+.prio { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; justify-items: start; font-size: 13.5px; }
+.prio > * { min-width: 0; }
+.prio > small { font-size: 12.5px; color: var(--muted); }
+.prio-n { display: flex; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
+.prio-n > .pn { flex: none; }
+.prio-n > .pdash { flex: none; margin-block: 8px 0; margin-inline: 0 6px; }
+.pmode { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.pm-opt { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.pm-opt input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--cyan-ink); }
+.pm-opt input:disabled, .pm-opt:has(input:disabled) { cursor: not-allowed; }
+/* The question about moving the server takes the part's whole width, its answers under the words when they do not fit. */
+.prio > .ask, .prio > .alert, .prio > .machine-note { justify-self: stretch; }
 
 /* A block in parts: a small heading with a rule, then its meters, facts or list. Both cards use them. */
 .part { display: grid; gap: 8px; min-width: 0; }
@@ -1917,6 +1938,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
   .dt td[data-label] { grid-column: 1 / -1; display: flex; align-items: baseline; }
   .dt td[data-label]::before { content: attr(data-label); flex: 0 0 7em; margin-right: 10px; font-size: 12px; color: var(--muted); }
   .dt td[data-label] > * { min-width: 0; }
+  .dt td.k-prio .pdash { margin: 0; align-self: center; }
   .dt > tbody > tr.det { border-bottom: 1px solid var(--line); background: var(--surface2); }
   .dt > tbody > tr.det > td { padding: 0 10px 12px; }
   .dt td[data-label] > .cell-lim { flex: 1; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px; }

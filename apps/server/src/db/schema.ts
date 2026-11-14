@@ -232,8 +232,22 @@ export const sessions = pgTable(
     personId: uuid('person_id').notNull().references(() => people.id),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: createdAt(),
+    /* True only on rows made before the __Host- cookie existed: the migration's default marks them, startSession never does. */
+    beforeHostCookie: boolean('before_host_cookie').notNull().default(true),
   },
   t => [index('sessions_person_id').on(t.personId)],
+);
+
+/* One row per sign-in try that was let through, kept an hour. Only SHA-256 hashes of the email and the address are stored. */
+export const signInAttempts = pgTable(
+  'sign_in_attempts',
+  {
+    id: id(),
+    emailHash: text('email_hash').notNull(),
+    addressHash: text('address_hash').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('sign_in_attempts_email').on(t.emailHash, t.at), index('sign_in_attempts_address').on(t.addressHash, t.at), index('sign_in_attempts_at').on(t.at)],
 );
 
 export const invites = pgTable(
@@ -369,6 +383,27 @@ export type Provider = (typeof PROVIDERS)[number];
 export const TARGET_KINDS = ['orchestrator', 'department', 'team', 'any'] as const;
 
 /* A computer a person ran the installer on. One per person and machine key, so running it again reuses the row. */
+/* A data machine keeps the company's database and may lead; a worker runs agents and keeps none of it. */
+export const MACHINE_ROLES = ['data', 'worker'] as const;
+export type MachineRole = (typeof MACHINE_ROLES)[number];
+
+/* How a worker reaches the company's server: on the local network, or through hornhoof.org. */
+export const LINK_PATHS = ['direct', 'relay'] as const;
+export type LinkPath = (typeof LINK_PATHS)[number];
+/* Where a worker stands with the server's build: it has it downloaded, it installs it, or its install failed. */
+export const UPDATE_STATES = ['ready', 'installing', 'failed'] as const;
+export type UpdateState = (typeof UPDATE_STATES)[number];
+/* A copy of the company's database on a machine: being made, being made again beside the old one, following, or stopped
+   with a reason: its disk is full, a change did not fit, its database once led the company, or the company's settings
+   could not be written there. */
+export const COPY_STATES = ['making', 'remaking', 'ready', 'stopped', 'saving'] as const;
+export type CopyState = (typeof COPY_STATES)[number];
+export const COPY_ERRORS = ['disk_full', 'apply', 'led', 'setup'] as const;
+export type CopyError = (typeof COPY_ERRORS)[number];
+/* What a machine that stopped holding the company's data still owes: its upload, then its wipe. */
+export const UPLOAD_STATES = ['waiting', 'received', 'kept'] as const;
+export type UploadState = (typeof UPLOAD_STATES)[number];
+
 export const machines = pgTable(
   'machines',
   {
@@ -385,8 +420,88 @@ export const machines = pgTable(
     lendsTests: boolean('lends_tests').notNull().default(true),
     createdAt: createdAt(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    /* What the machine is in the company's network. networkId: the id its keeper runs under; none without a keeper.
+       role: none while no keeper of the company runs there. signKey: the Ed25519 public key its certificates name. */
+    networkId: text('network_id').unique(),
+    role: text('role', { enum: MACHINE_ROLES }),
+    signKey: text('sign_key'),
+    /* What its keeper last reported: the ports it publishes, its build, and how the machine does. */
+    webPort: integer('web_port'),
+    peerPort: integer('peer_port'),
+    commit: text('commit'),
+    uptimeS: integer('uptime_s'),
+    fsyncP99Ms: real('fsync_p99_ms'),
+    diskFree: bigint('disk_free', { mode: 'number' }),
+    reportAt: timestamp('report_at', { withTimezone: true }),
+    /* The private addresses its keeper reported, and how the machine reaches the server now: none when it does not.
+       directFails: an address on a network it shares with the server did not take its connection. */
+    addresses: text('addresses').array().notNull().default(sql`'{}'::text[]`),
+    path: text('path', { enum: LINK_PATHS }),
+    directFails: boolean('direct_fails').notNull().default(false),
+    /* When its last signed request for a new certificate was made, so the same one is taken once. */
+    renewAt: timestamp('renew_at', { withTimezone: true }),
+    /* Following the server's build: the commit it downloaded or installs, the commit the server last let it install and
+       when, and the last commit whose install failed or ran out there. */
+    updateCommit: text('update_commit'),
+    updateState: text('update_state', { enum: UPDATE_STATES }),
+    goCommit: text('go_commit'),
+    goAt: timestamp('go_at', { withTimezone: true }),
+    failedCommit: text('failed_commit'),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+    /* The print of its owner's key as its keeper pinned it from the command the owner ran there. */
+    ownerPin: text('owner_pin'),
+    /* Backups: the public half of the age key its keeper made, whether its owner lets it keep the company's bundles,
+       and the bundles its keeper last said it holds. */
+    ageKey: text('age_key'),
+    keepsBackups: boolean('keeps_backups').notNull().default(true),
+    heldBackups: uuid('held_backups').array().notNull().default(sql`'{}'::uuid[]`),
+    /* Its place in taking the company server: 1 leads, none for a machine that may not hold the company's data.
+       serverPin: the place the CEO pinned, from 2, or 'none' for a machine that never takes the server. serverWhy: a
+       key the card turns into words. */
+    serverOrder: integer('server_order'),
+    serverPin: text('server_pin'),
+    serverWhy: text('server_why'),
+    /* What Docker gives the machine, from its keeper's report. */
+    memory: bigint('memory', { mode: 'number' }),
+    cores: integer('cores'),
+    /* Its copy of the company's database, as its keeper last reported it. copyAt: the server's pulse the copy holds.
+       copyName: the name of its subscription, its slot and its connection. copyOld: the attempt whose old database
+       waits for the server to merge it. */
+    copyState: text('copy_state', { enum: COPY_STATES }),
+    copyProgress: integer('copy_progress'),
+    copyError: text('copy_error', { enum: COPY_ERRORS }),
+    copyAt: timestamp('copy_at', { withTimezone: true }),
+    copyName: text('copy_name'),
+    copyOld: integer('copy_old'),
+    /* The term under which the old database that waits for its merge led the company; null for one that never led. */
+    copyOldLed: bigint('copy_old_led', { mode: 'number' }),
+    /* When it stopped holding the company's data, and how far the upload of what it held has come. */
+    dataLeftAt: timestamp('data_left_at', { withTimezone: true }),
+    uploadState: text('upload_state', { enum: UPLOAD_STATES }),
+    /* What the server order is scored on besides: the median round trip of its hellos to the leader over a day, the
+       best rate of the leader's sending to it over a day, which stays when a day brings none, the median round trip
+       to github.com over a day, and the rate of its last daily download from there. */
+    linkRttMs: integer('link_rtt_ms'),
+    linkMbps: integer('link_mbps'),
+    internetRttMs: integer('internet_rtt_ms'),
+    internetMbps: integer('internet_mbps'),
   },
-  t => [unique('machines_person_key').on(t.personId, t.machineKey)],
+  t => [
+    unique('machines_person_key').on(t.personId, t.machineKey),
+    check('machines_role', sql`role IS NULL OR role IN ('data', 'worker')`),
+    check('machines_path', sql`path IS NULL OR path IN ('direct', 'relay')`),
+    check('machines_update_state', sql`update_state IS NULL OR update_state IN ('ready', 'installing', 'failed')`),
+    uniqueIndex('machines_server_order').on(t.serverOrder),
+    uniqueIndex('machines_server_pin').on(t.serverPin).where(sql`server_pin <> 'none'`),
+    check('machines_server_order_range', sql`server_order >= 1`),
+    /* The CASE, so a pin that is no number fails the check and not the cast. */
+    check('machines_server_pin_value', sql`server_pin = 'none' OR CASE WHEN server_pin ~ '^[1-9][0-9]{0,2}$' THEN server_pin::int >= 2 ELSE false END`),
+    check('machines_copy_progress_range', sql`copy_progress BETWEEN 0 AND 99`),
+    check('machines_copy_state', sql`copy_state IS NULL OR copy_state IN ('making', 'remaking', 'ready', 'stopped', 'saving')`),
+    check('machines_copy_error', sql`copy_error IS NULL OR copy_error IN ('disk_full', 'apply', 'led', 'setup')`),
+    check('machines_upload_state', sql`upload_state IS NULL OR upload_state IN ('waiting', 'received', 'kept')`),
+    check('machines_measures_range', sql`link_rtt_ms >= 0 AND link_mbps >= 0 AND internet_rtt_ms >= 0 AND internet_mbps >= 0`),
+  ],
 );
 
 /* A one-time code inside an install command. Only its hash is stored. No subscriptions: the machine joins alone. A code
@@ -404,6 +519,8 @@ export const nodeCodes = pgTable('node_codes', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   usedAt: timestamp('used_at', { withTimezone: true }),
   createdAt: createdAt(),
+  /* A command that brings the company's core to its machine. */
+  core: boolean('core').notNull().default(false),
 }, t => [index('node_codes_active_owner').on(t.personId).where(sql`${t.usedAt} is null`)]);
 
 /* needs_setup: signed in, but its program waits for a first setup only the plan's owner may pass on the machine. */
@@ -529,6 +646,9 @@ export const agents = pgTable(
     /* The node of its plan its program lives on, with its folder, session and terminal; it stays there while that node is
        ready. None on a company key, which runs on the built-in node, and before its first turn. */
     nodeId: uuid('node_id').references((): AnyPgColumn => nodes.id),
+    /* The machine whose built-in node its program lives on, by its network id, for one on a company key; none on a
+       plan's node, and before its first turn. */
+    builtinMachine: text('builtin_machine'),
     /* The role template it was hired from, its enabled skills, its own text over the template's, and the template
        hashes it was hired with, so the card can say a template moved on. */
     roleKey: text('role_key'),
@@ -557,6 +677,7 @@ export const agents = pgTable(
   t => [
     uniqueIndex('agents_one_head').on(t.departmentId).where(sql`kind = 'head' AND removed_at IS NULL`),
     uniqueIndex('agents_one_orchestrator').on(t.companyId).where(sql`kind = 'orchestrator' AND removed_at IS NULL`),
+    check('agents_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
 
@@ -633,6 +754,8 @@ export const jobs = pgTable(
     subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
     /* The node it went out to; none for the built-in node's jobs, and while it waits. */
     nodeId: uuid('node_id').references(() => nodes.id),
+    /* The machine whose built-in node it went out to, by its network id; none for a job of a plan's node. */
+    builtinMachine: text('builtin_machine'),
     agentId: uuid('agent_id').references(() => agents.id),
     prompt: text('prompt').notNull(),
     /* What the turn was asked before the queue composed its sent prompt. Null for turns from before this was kept. */
@@ -672,6 +795,7 @@ export const jobs = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+    check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
   ],
 );
 
@@ -921,7 +1045,7 @@ export const taskRoutes = pgTable('task_routes', {
   check('task_routes_paths', sql`jsonb_typeof(${t.paths}) = 'array'`),
 ]);
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -929,6 +1053,8 @@ export const taskEvents = pgTable(
   'task_events',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /* What names this event across machines, where the serial id of each differs. */
+    uuid: uuid('uuid').notNull().defaultRandom().unique(),
     companyId: companyId(),
     taskId: uuid('task_id').notNull().references(() => tasks.id),
     kind: text('kind', { enum: TASK_EVENT_KINDS }).notNull(),
@@ -1186,6 +1312,9 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
 export type TestEnvironmentRequest = {
   version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
   requestId: string | null; nodeId: string | null; builtin: boolean;
+  /* The machine whose built-in node was asked, when one was; a request from before machines had theirs names none,
+     and was this server's own. */
+  builtinMachine?: string | null;
   sentAt: string | null; attempts: number; problem: EnvironmentProblem | null;
 };
 /* computer: the machine a part was laid out for by its pace; it goes there while that machine is online and may take it. */
@@ -1314,6 +1443,8 @@ export const testParts = pgTable(
     status: text('status', { enum: TEST_PART_STATUSES }).notNull().default('queued'),
     nodeId: uuid('node_id').references(() => nodes.id),
     builtin: boolean('builtin').notNull().default(false),
+    /* The machine whose built-in node runs it, by its network id; none for a part on a plan's node. */
+    builtinMachine: text('builtin_machine'),
     machineId: uuid('machine_id').references(() => machines.id),
     /* The machine's name as it ran, for the result. */
     machineName: text('machine_name'),
@@ -1333,7 +1464,7 @@ export const testParts = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [unique('test_parts_run_part').on(t.runId, t.part), index('test_parts_status').on(t.status)],
+  t => [unique('test_parts_run_part').on(t.runId, t.part), index('test_parts_status').on(t.status), check('test_parts_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`)],
 );
 
 /* What a part's log said of its test files, read once from the log on the task: empty when it said nothing. */
@@ -1483,6 +1614,11 @@ export const publicLinks = pgTable('public_links', {
   url: text('url').notNull(),
   keyEnc: text('key_enc').notNull(),
   tunnelEnc: text('tunnel_enc').notNull(),
+  /* The key a change is under way to, sealed as keyEnc is. */
+  nextKeyEnc: text('next_key_enc'),
+  /* A name the company never asked for: Hornhoof took it so that the company's machines can hold copies, and nobody is
+     shown it or served through it. */
+  hidden: boolean('hidden').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -2190,3 +2326,212 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
   check('model_check_certificates_end', sql`(${t.status} = 'invalidated') = (${t.invalidatedReason} IS NOT NULL) AND (${t.status} = 'invalidated') = (${t.invalidatedAt} IS NOT NULL)`),
   isDigest('model_check_certificates_binding', t.bindingDigest),
 ]);
+
+/* The certificate of the company's public link, which ends TLS on this machine, and the ACME account it comes from. The
+   private keys are kept only as encryptSecret gives them, like the link's own key. The mode is kept here so a restart
+   writes the same tunnel settings and the link does not blink. */
+export const linkTls = pgTable('link_tls', {
+  companyId: uuid('company_id')
+    .primaryKey()
+    .references(() => companies.id),
+  /* The CA the account is at. */
+  directory: text('directory').notNull(),
+  accountKeyEnc: text('account_key_enc').notNull(),
+  accountUrl: text('account_url'),
+  /* The link name the certificate is for. */
+  name: text('name'),
+  /* The chain. */
+  certPem: text('cert_pem'),
+  /* The CA the certificate came from. */
+  certDirectory: text('cert_directory'),
+  certKeyEnc: text('cert_key_enc'),
+  notAfter: timestamp('not_after', { withTimezone: true }),
+  renewAt: timestamp('renew_at', { withTimezone: true }),
+  /* When to ask the CA's renewal information again. */
+  askAt: timestamp('ask_at', { withTimezone: true }),
+  /* No order before this, after a failure. */
+  nextTryAt: timestamp('next_try_at', { withTimezone: true }),
+  /* The last failure's AcmeError type, else its kind; null after a success. */
+  failure: text('failure'),
+  failedAt: timestamp('failed_at', { withTimezone: true }),
+  mode: text('mode', { enum: ['http', 'https'] }).notNull().default('http'),
+  /* No switch to https before this. */
+  httpsBlockedUntil: timestamp('https_blocked_until', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* Where a change came from: a step of a node message, of a page's request or of a tool call, written in the change's own
+   transaction, so a retry finds its source listed. The base is the source without its step. */
+export const applied = pgTable(
+  'applied',
+  {
+    source: text('source').primaryKey(),
+    base: text('base'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('applied_base').on(t.base), index('applied_at').on(t.at)],
+);
+
+/* A tool call by its invocation id, with the answer it gave, so a call sent again after a lost answer gets that answer
+   and never a second run. */
+export const toolCalls = pgTable(
+  'tool_calls',
+  {
+    id: uuid('id').primaryKey(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id),
+    answer: jsonb('answer'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('tool_calls_at').on(t.at)],
+);
+
+/* The company's own certificate authority, made once by the app that leads. Its key is kept sealed with the server's
+   secret, as the link's key is, and only the leading app signs with it. The three tables below keep their rows to their
+   owner, whatever a role is granted. */
+export const authority = pgTable('authority', {
+  singleton: boolean('singleton').primaryKey().default(true),
+  certPem: text('cert_pem').notNull(),
+  keyEnc: text('key_enc').notNull(),
+  createdAt: createdAt(),
+}).enableRLS();
+
+/* Every certificate the authority issued, until it expires, so that all of a machine's can be revoked. */
+export const certificates = pgTable('certificates', {
+  /* Lowercase hex. */
+  serial: text('serial').primaryKey(),
+  machineId: uuid('machine_id')
+    .notNull()
+    .references(() => machines.id),
+  until: timestamp('until', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}).enableRLS();
+
+/* visit: the relay's key for a visitor of the link, with the link's name, as JSON. */
+export const PEER_SECRET_KINDS = ['data', 'app', 'visit'] as const;
+
+/* The secrets of the two services a machine offers its peers through the relay, sealed with the server's secret. */
+export const peerSecrets = pgTable(
+  'peer_secrets',
+  {
+    kind: text('kind', { enum: PEER_SECRET_KINDS }).primaryKey(),
+    secretEnc: text('secret_enc').notNull(),
+    createdAt: createdAt(),
+  },
+  () => [check('peer_secrets_kind', sql`kind IN ('data', 'app', 'visit')`)],
+).enableRLS();
+
+/* A ticket a joining machine's keeper redeems once for its first certificate. Only its hash is kept. */
+export const machineTickets = pgTable('machine_tickets', {
+  ticketHash: text('ticket_hash').primaryKey(),
+  machineId: uuid('machine_id')
+    .notNull()
+    .references(() => machines.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}).enableRLS();
+
+/* How long a machine was online on each day, in UTC, by its keeper's reports. */
+export const machineOnline = pgTable(
+  'machine_online',
+  {
+    machineId: uuid('machine_id')
+      .notNull()
+      .references(() => machines.id),
+    day: date('day', { mode: 'string' }).notNull(),
+    seconds: integer('seconds').notNull().default(0),
+  },
+  t => [primaryKey({ columns: [t.machineId, t.day] }), check('machine_online_seconds', sql`seconds BETWEEN 0 AND 86400`)],
+).enableRLS();
+
+/* Each person's own key, made in their browser. The server keeps the public half, and the private half only wrapped by a
+   key made from the person's password, which the server never keeps. */
+export const personKeys = pgTable(
+  'person_keys',
+  {
+    personId: uuid('person_id')
+      .primaryKey()
+      .references(() => people.id),
+    companyId: companyId(),
+    /* SPKI DER, base64url. */
+    publicKey: text('public_key').notNull(),
+    wrapped: text('wrapped').notNull(),
+    salt: text('salt').notNull(),
+    iv: text('iv').notNull(),
+    iterations: integer('iterations').notNull(),
+    createdAt: createdAt(),
+  },
+  () => [check('person_keys_iterations', sql`iterations >= 600000`)],
+).enableRLS();
+
+/* Computer access to one machine of the company: open while `until` is ahead, what the orchestrator asked it for, who
+   opened it, and the grant its owner signed, which the machine's keeper checks against the key it holds. */
+export const machineAccess = pgTable(
+  'machine_access',
+  {
+    machineId: uuid('machine_id')
+      .primaryKey()
+      .references(() => machines.id),
+    companyId: companyId(),
+    until: timestamp('until', { withTimezone: true }),
+    askedReason: text('asked_reason'),
+    askedAt: timestamp('asked_at', { withTimezone: true }),
+    openedBy: uuid('opened_by').references(() => people.id),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
+    grant: jsonb('grant').$type<{ payload: string; signature: string }>(),
+  },
+  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`)],
+).enableRLS();
+
+/* The public halves of the recovery keys the CEO saved, newest last. The private half exists only in the file the CEO
+   keeps. linkPrint, linkName, linkUrl: the public link it was saved with, which a bundle names so a machine that
+   survived a total loss finds the new server by it; none when saved without a link. */
+export const recoveryKeys = pgTable('recovery_keys', {
+  id: id(),
+  companyId: companyId(),
+  recipient: text('recipient').notNull().unique(),
+  linkPrint: text('link_print'),
+  linkName: text('link_name'),
+  linkUrl: text('link_url'),
+  madeBy: uuid('made_by')
+    .notNull()
+    .references(() => people.id),
+  madeAt: createdAt(),
+  retiredAt: timestamp('retired_at', { withTimezone: true }),
+}).enableRLS();
+
+/* waiting: its machine's keeper has not taken it; sent: the keeper took it; lost: the keeper no longer holds it and gave
+   no answer, so what it did is not known. */
+export const RUN_STATES = ['waiting', 'sent', 'done', 'lost'] as const;
+export type RunState = (typeof RUN_STATES)[number];
+
+/* The commands the orchestrator runs on a machine while its access is open, and their answers. */
+export const computerRuns = pgTable(
+  'computer_runs',
+  {
+    id: id(),
+    companyId: companyId(),
+    machineId: uuid('machine_id')
+      .notNull()
+      .references(() => machines.id),
+    jobId: uuid('job_id').references(() => jobs.id),
+    agentId: uuid('agent_id').references(() => agents.id),
+    command: text('command').notNull(),
+    timeoutS: integer('timeout_s').notNull(),
+    state: text('state', { enum: RUN_STATES }).notNull().default('waiting'),
+    exit: integer('exit'),
+    /* The end of what it printed. */
+    output: text('output'),
+    createdAt: createdAt(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    doneAt: timestamp('done_at', { withTimezone: true }),
+  },
+  t => [
+    index('computer_runs_machine_state').on(t.machineId, t.state),
+    check('computer_runs_state', sql`state IN ('waiting', 'sent', 'done', 'lost')`),
+    check('computer_runs_timeout', sql`timeout_s BETWEEN 1 AND 1800`),
+  ],
+).enableRLS();

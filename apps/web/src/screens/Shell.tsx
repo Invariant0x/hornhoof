@@ -2,9 +2,13 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { api } from '../api';
 import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import { notOpened, useOrg } from '../org';
-import type { Me, Org } from '../types';
+import { forgetOwnerKey } from '../owner-key';
+import type { ComputerAccessView, Me, Org } from '../types';
+import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
 import { LogoMark } from '../ui/icons';
 import { Outbound } from '../ui/Outbound';
+import { RecoveryBanner } from '../ui/RecoveryBanner';
+import { SwitchBanner } from '../ui/SwitchBanner';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -62,6 +66,38 @@ function AccountDialog({ active, me, updates, onRenamed, onSection, onClose, onH
   }[active];
 }
 
+/* For a person who sits at a machine of the company that is theirs to open and closed: one line of the menu that gives
+   the orchestrator access to it for a day. Opened, the menu closes. Elsewhere, or on a machine they cannot open now,
+   nothing shows. */
+function AccessHere({ onDone }: { onDone: () => void }) {
+  const t = useT();
+  const [view, setView] = useState<ComputerAccessView | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
+  const { answer, prompt } = useAccess(onDone, setFailure);
+  useEffect(() => {
+    let live = true;
+    /* A server from before machines had access of their own knows no such route: then there is nothing to offer. */
+    api.get<{ view: ComputerAccessView | null }>('/api/machines/here').then(
+      res => live && setView(res.view),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!view || !view.canOpen || isOpen(view) || cannotOpen(t, view)) return null;
+  return (
+    <>
+      {prompt ?? (
+        <button className="btn small ghost" type="button" onClick={() => void answer(view, 'open')}>
+          {t.window.computerHere(machineName(t, view.machine))}
+        </button>
+      )}
+      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    </>
+  );
+}
+
 /* onImprovements, onVersions and onSettings: only for people who see the whole company. */
 function AccountMenu({
   me,
@@ -110,6 +146,7 @@ function AccountMenu({
         </div>
       </div>
       {version && <p className="menu-version">{t.shell.version(versionText(version))}</p>}
+      <AccessHere onDone={onClose} />
       <button
         className="btn small ghost"
         type="button"
@@ -360,10 +397,12 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     };
   }, [menu]);
 
+  /* The person's key leaves this device with their session, whatever the server answered. */
   async function signOut() {
     try {
       await api.post('/api/auth/logout');
     } finally {
+      await forgetOwnerKey();
       onSignOut();
     }
   }
@@ -379,7 +418,10 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} />
         <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} toDecide={toDecide} account={account} accountButton={accountButton} />
       </header>
-      {company && <UpdateBanner updates={updates} onDetails={() => openAccount('versions')} />}
+      <SwitchBanner>
+        {company && <UpdateBanner updates={updates} onDetails={() => openAccount('versions')} />}
+        <RecoveryBanner me={currentMe} again={accountDialog} onOpen={() => openAccount('settings')} />
+      </SwitchBanner>
       <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}`}>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}

@@ -7,6 +7,7 @@ import { answer, ask, createTask, submit, type Task } from '../src/modules/tasks
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { commitProof, proofLine } from '../src/modules/testruns/commit-proof.js';
 import { as, connectNode, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const NEW_COMMIT = 'b'.repeat(40);
 const OLD_COMMIT = 'c'.repeat(40);
@@ -106,7 +107,7 @@ describe('the test runs a task shows', () => {
     const c = await company();
     const node = await connectNode(c.url, NODE_KEY);
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: { cpus: 8, load: 0.5, memFree: 12 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 0, jobs: 0 }, tests: [] });
-    await until(() => c.ctx.hub.loadOf({ kind: 'builtin' }) !== null);
+    await until(() => c.ctx.hub.loadOf(BUILTIN) !== null);
     const { call } = await c.turn(c.bruno);
     const runOn = async () => {
       expect((await call('run_tests', { command: 'make test', branch: BRANCH })).error).toBe(false);

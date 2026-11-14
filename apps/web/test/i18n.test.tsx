@@ -62,6 +62,22 @@ describe('The agent in the center', () => {
 describe('errorText', () => {
   it('shows a known reason in the chosen language', () => {
     expect(errorText(ru, new ApiFailure(401, 'unauthorized', 'Wrong email or password.', 'wrong_password'))).toBe(ru.errors.wrong_password);
+    const notConfirmed = new ApiFailure(503, 'unavailable', 'x', 'not_confirmed');
+    expect(errorText(en, notConfirmed)).toBe('Hornhoof could not confirm this change. It may be saved; look before you try again.');
+    expect(errorText(ru, notConfirmed)).toBe('Hornhoof не смог подтвердить это изменение. Возможно, оно сохранено: проверьте, прежде чем повторять.');
+    const alreadyDone = new ApiFailure(409, 'conflict', 'x', 'already_done');
+    expect(errorText(en, alreadyDone)).toBe('This change was already sent, and Hornhoof made it or began to make it, but its answer was lost. Reload the page to see what is there.');
+    expect(errorText(ru, alreadyDone)).toBe('Это изменение уже было отправлено, и Hornhoof его сделал или начал делать, но ответ потерялся. Обновите страницу, чтобы увидеть, что получилось.');
+  });
+
+  it('words the reasons of maintenance, read-only and starting in both languages', () => {
+    const answer = (reason: string) => new ApiFailure(503, 'unavailable', 'x', reason);
+    expect(errorText(en, answer('maintenance'))).toBe('Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.');
+    expect(errorText(ru, answer('maintenance'))).toBe('Hornhoof ставит обновление и не принимает изменений, пока оно не закончится. Попробуйте через несколько минут.');
+    expect(errorText(en, answer('read_only'))).toBe('Hornhoof only reads on this machine now, so nothing was changed.');
+    expect(errorText(ru, answer('read_only'))).toBe('Сейчас Hornhoof на этой машине только читает, поэтому ничего не изменилось.');
+    expect(errorText(en, answer('starting'))).toBe('Hornhoof is starting. Try again in a few seconds.');
+    expect(errorText(ru, answer('starting'))).toBe('Hornhoof запускается. Попробуйте еще раз через несколько секунд.');
   });
 
   it('tells a person who tried too often to wait, in both languages', () => {
@@ -242,5 +258,107 @@ describe('work tree words', () => {
       expect(dict.updates.result({ state: 'failed', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
       expect(dict.window.noticeSource('task', '', '', 'Agent')).toContain('Agent');
     }
+  });
+});
+
+describe("the words of a copy's question to the CEO", () => {
+  it('words the question in both languages', () => {
+    const said = (dict: typeof en): Record<string, string> =>
+      Object.fromEntries(Object.entries(dict.question).map(([key, value]) => [key, typeof value === 'function' ? (value as (...words: string[]) => string)('a', 'b', 'c', 'd') : value]));
+    const [english, russian] = [said(en), said(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['oneCopy', 'moreCopies', 'goOn', 'goOnAt', 'wait', 'warning', 'waiting', 'ceoOnly']));
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    /* A time that is not known is left out, in both. */
+    expect(en.question.oneCopy('deb', null, 'mac', null)).toBe('deb stopped answering. This mac may not have what deb did last. That comes back when deb does.');
+    expect(ru.question.oneCopy('deb', null, 'mac', null)).toBe('Машина deb перестала отвечать. У mac может не быть последнего, что сделала машина deb. Это вернется вместе с deb.');
+    expect([en.errors.question_changed, ru.errors.question_changed]).toEqual(['The question changed. Look again.', 'Вопрос изменился. Посмотрите еще раз.']);
+  });
+});
+
+describe('the words of a move of the server', () => {
+  it('words the move and what follows it in both languages', () => {
+    const said = (part: object): Record<string, string> =>
+      Object.fromEntries(Object.entries(part).map(([key, value]) => [key, typeof value === 'function' ? (value as (...words: string[]) => string)('a', 'b', 'c') : (value as string)]));
+    for (const [english, russian] of [[said(en.switch), said(ru.switch)], [said(en.switched), said(ru.switched)]] as const) {
+      expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+      for (const [key, text] of Object.entries(russian)) {
+        expect(text.length, key).toBeGreaterThan(0);
+        expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+        expect(text, key).not.toBe(english[key]);
+      }
+      for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    }
+    expect(Object.keys(en.switch)).toEqual(expect.arrayContaining(['moving', 'movingSomewhere', 'lost', 'lostLeader', 'cut']));
+    expect(Object.keys(en.switched)).toEqual(expect.arrayContaining(['takeover', 'ceo', 'planned', 'diskFull', 'close']));
+    /* A time nobody wrote down is left out. */
+    expect([en.switched.takeover('mac', 'deb', null), ru.switched.takeover('mac', 'deb', null)]).toEqual(['Hornhoof runs on mac now. deb stopped answering.', 'Hornhoof теперь работает на mac. Машина deb перестала отвечать.']);
+    expect([en.switched.ceo('mac', null), ru.switched.ceo('mac', null)]).toEqual(['Hornhoof runs on mac now, as you chose.', 'Hornhoof теперь работает на mac, как вы выбрали.']);
+  });
+});
+
+describe('the words of copies', () => {
+  /* Every string of a copy's part, each function called with words of its own. */
+  const said = (dict: typeof en): Record<string, string> =>
+    Object.fromEntries(Object.entries(dict.machines.copy).map(([key, value]) => [key, typeof value === 'function' ? (value as (...words: string[]) => string)('a', 'b', 'c') : value]));
+
+  it('words copies in both languages', () => {
+    const [english, russian] = [said(en), said(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    expect([english.saving, russian.saving]).toEqual(['Copy: saving what it did while it led', 'Копия: сохраняет то, что сделано, пока она держала сервер']);
+  });
+
+  /* Every string of the server order, with the groups inside it, each function called with words of its own. */
+  const flat = (part: object, under = ''): [string, string][] =>
+    Object.entries(part).flatMap(([key, value]): [string, string][] =>
+      typeof value === 'function' ? [[under + key, (value as (...words: unknown[]) => string)('a', 2, 'c')]] : typeof value === 'string' ? [[under + key, value]] : flat(value as object, `${under}${key}.`));
+
+  it('words the move of the server in both languages', () => {
+    const REASONS = ['already_leader', 'no_number', 'updating', 'switching', 'moving', 'leader', 'server_install'] as const;
+    const words = (dict: typeof en) =>
+      Object.fromEntries([...flat(dict.machines.move), ...REASONS.map((reason): [string, string] => [`errors.${reason}`, typeof dict.errors[reason] === 'function' ? (dict.errors[reason] as (host: string) => string)('a') : (dict.errors[reason] as string)])]);
+    const [english, russian] = [words(en), words(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['here', 'ask', 'yes', 'cancel', 'stop', 'waiting', 'switching', 'failed', 'reason.no_answer', 'reason.not_ready', 'reason.behind', 'reason.no_link', 'reason.expired', 'reason.left', 'led', ...REASONS.map(reason => `errors.${reason}`)]));
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    expect([en.machines.move.led('d', '14:02'), ru.machines.move.led('d', '14:02')]).toEqual(['d ran the server until 14:02 and is up to date again.', 'Машина d держала сервер до 14:02, ее копия снова актуальна.']);
+    /* The share is said only while there is one. */
+    expect([en.machines.move.waiting('d', 40), en.machines.move.waiting('d', null)]).toEqual(['d takes the server once its copy is up to date (40%)', 'd takes the server once its copy is up to date.']);
+    expect([ru.machines.move.waiting('d', 40), ru.machines.move.waiting('d', null)]).toEqual(['d возьмет сервер, как только ее копия станет актуальной (40%)', 'd возьмет сервер, как только ее копия станет актуальной.']);
+    expect([en.errors.leader('d'), ru.errors.leader('d')]).toEqual(['d runs the company server. Move the server to another machine first.', 'На d работает сервер компании. Сначала перенесите сервер на другую машину.']);
+  });
+
+  it('words the server order in both languages', () => {
+    const order = (dict: typeof en) => Object.fromEntries([...flat(dict.machines.priority), ['errors.leader_pin', dict.errors.leader_pin], ['errors.unfit', dict.errors.unfit]]);
+    const [english, russian] = [order(en), order(ru)];
+    expect(Object.keys(russian).sort()).toEqual(Object.keys(english).sort());
+    expect(Object.keys(english)).toEqual(expect.arrayContaining(['why.pinned', 'online.often_off', 'part.few_cores', 'unfit.scope', 'onlyCopy', 'errors.unfit']));
+    for (const [key, text] of Object.entries(russian)) {
+      expect(text.length, key).toBeGreaterThan(0);
+      expect(text, key).not.toMatch(/[ёЁ—]|компьютер|узел|узл/i);
+      /* Two parts joined by a comma read the same in both. */
+      if (key !== 'both') expect(text, key).not.toBe(english[key]);
+    }
+    for (const [key, text] of Object.entries(english)) expect(text, key).not.toMatch(/—/);
+    /* How many departments a person sees, in the Russian forms. */
+    expect([0, 1, 2, 5, 21].map(n => ru.machines.priority.unfit.scope('Анна', n).split(', а ')[1])).toEqual([
+      'Анна не видит ни одного отдела.', 'Анна видит один отдел.', 'Анна видит 2 отдела.', 'Анна видит 5 отделов.', 'Анна видит 21 отдел.',
+    ]);
   });
 });

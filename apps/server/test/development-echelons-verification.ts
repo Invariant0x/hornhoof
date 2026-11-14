@@ -3,7 +3,7 @@ import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { hashTestEnvironment } from '@hornhoof/protocol';
 import { and, desc, eq } from 'drizzle-orm';
 import { jobs, testParts, testRuns } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { acceptDescription, noteTestCapabilities } from '../src/modules/testruns/describe.js';
 import { partDone, pumpTests, startRun } from '../src/modules/testruns/runs.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';

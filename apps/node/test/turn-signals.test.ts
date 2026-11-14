@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TurnEnds, hookCalls, claudeEnd } from '../src/terminal/turn-signals.js';
+import { TurnEnds, hookCalls, claudeEnd, stopIsLate } from '../src/terminal/turn-signals.js';
 import { kimiWire } from '../src/terminal/transcripts.js';
 import { ProgramWatch, programState } from '../src/terminal/program-state.js';
 import hooks from './fixtures/turn-hooks.json' with { type: 'json' };
@@ -28,6 +28,22 @@ describe('one end from two channels', () => {
     const error = { kind: 'auth' as const, text: 'Invalid API key', retryable: false };
     expect(claudeEnd({ type: 'system', subtype: 'turn_duration' }, 'Invalid API key', error)).toEqual({ status: 'failed', message: '', failure: error });
     expect(claudeEnd({ type: 'user' }, '', null)).toBeNull();
+  });
+});
+
+describe('whose a stop hook is', () => {
+  const left = new Set(['old']);
+  it.each([
+    ['before the running turn took its prompt, from any session', { promptIn: false, from: 'new', session: 'new', left }, true],
+    ['before the running turn took its prompt, from no session', { promptIn: false, from: undefined, session: null, left }, true],
+    ['from a session the agent left', { promptIn: true, from: 'old', session: 'new', left }, true],
+    ['from the session the agent is in', { promptIn: true, from: 'new', session: 'new', left }, false],
+    ['from a session the agent left and went back to', { promptIn: true, from: 'old', session: 'old', left }, false],
+    ['from a session the host has not heard of, as a cleared conversation goes on in', { promptIn: true, from: 'unknown', session: 'new', left }, false],
+    ['from a program that names no session', { promptIn: true, from: undefined, session: 'new', left }, false],
+    ["that answers a person's own words, sent while the prompt waited", { promptIn: false, answersPerson: true, from: 'new', session: 'new', left }, false],
+  ])('%s', (_, stop, late) => {
+    expect(stopIsLate(stop)).toBe(late);
   });
 });
 

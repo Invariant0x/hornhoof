@@ -40,10 +40,22 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 ```
 
 - It goes into `~/hornhoof-acme`, as its own compose project.
-- It takes the first free port from 8080 and keeps it in `.env` as `HORNHOOF_PORT`.
+- It takes the first free web port from 8080 and peer port from 8180, and keeps them in `.env` as `HORNHOOF_PORT` and `HORNHOOF_PEER_PORT`.
+- It also picks two non-overlapping `/24` Docker subnets outside this computer's own addresses, routes and existing Docker networks, keeps them in `.env` as `HORNHOOF_SUBNET` and `HORNHOOF_INTERNAL_SUBNET`, and records them alongside the ports in the Docker volume `hornhoof-ports`. No two Hornhoof projects on this computer get overlapping ports or subnets, even while one is stopped.
 - Run the same command again to update that company.
 
-Machines can carry nodes for several companies too. Each node remembers the address of its Hornhoof. So an update or `--uninstall` from one Hornhoof touches only that company's nodes.
+Machines can carry nodes and cores for several companies too. Each joined core takes its own folder, Compose project, ports and Docker subnets, and each node remembers the address of its Hornhoof. So an update or `--uninstall` from one Hornhoof touches only that company's core and nodes.
+
+## What if machines on the same home network reach each other only through hornhoof.org?
+
+Check whether an older Docker network on one of the computers covers your home network range (for example `192.168.0.0/20` over `192.168.1.0/24`):
+
+```sh
+docker network ls
+docker network inspect <network>
+```
+
+If an older Hornhoof project holds that overlapping network, run the Hornhoof install command again on that computer: the installer picks free subnets outside the home network and recreates the project's network cleanly. If an unused network from another Docker project holds that range, remove it with `docker network rm <network>` after stopping what uses it.
 
 ## Run it from source with Docker
 
@@ -57,6 +69,8 @@ echo "NODE_KEY=$(openssl rand -base64 32)" >> .env
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
 docker compose up -d --build
 ```
+
+Without `HORNHOOF_SUBNET` and `HORNHOOF_INTERNAL_SUBNET` in `.env`, `compose.yaml` falls back to `10.200.0.0/24` and `10.200.1.0/24` (set distinct `/24` ranges in `.env` if your network uses `10.200.0.x` or you run a second source checkout here); on an existing install whose network configuration hash changes when explicit subnets are added, older Compose 2.20+ releases may ask for one `install.sh` run by hand.
 
 Hornhoof writes a setup link to its log, like `http://localhost:8080/setup?code=...`. Find it with `docker compose logs app`, or print it with:
 

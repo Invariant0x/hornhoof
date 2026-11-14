@@ -15,13 +15,13 @@ import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
 import { endRemovedPlanCommands, lockCommandOwner } from '../nodes/codes.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { createInstallCommand } from '../nodes/command.js';
-import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
+import { builtinOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { liveNode, planNodes } from '../nodes/nodes.js';
 import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
-import { subView, subViews, type IsOnline } from './views.js';
+import { onlineIn, subView, subViews } from './views.js';
 import { tryPlaceWaiting } from './waiting.js';
 
 const Target = z.discriminatedUnion('kind', [
@@ -137,7 +137,7 @@ async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promi
 
 export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config, hub } = ctx;
-  const online: IsOnline = node => hub.isOnline(node);
+  const online = onlineIn(hub, ctx.config);
 
   async function liveSubscription(id: string) {
     const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), isNull(subscriptions.removedAt)));
@@ -307,7 +307,11 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (gone.length) await loseParts(ctx, inArray(testParts.nodeId, gone), 'subscription_removed');
     /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
     if (sub.kind === 'personal') for (const id of gone) hub.send(nodeIdentity(id), { type: 'remove' });
-    else for (const jobId of ended) hub.send(BUILTIN, { type: 'job.cancel', jobId });
+    else if (ended.length) {
+      /* Each to the built-in node it went out to. */
+      const sent = await db.select({ id: jobs.id, builtinMachine: jobs.builtinMachine }).from(jobs).where(inArray(jobs.id, ended));
+      for (const job of sent) hub.send(job.builtinMachine ? builtinOf(job.builtinMachine) : ownBuiltin(ctx.config), { type: 'job.cancel', jobId: job.id });
+    }
     await tryPlaceOperator(ctx, sub.companyId);
     /* Who sees the agents that ran on it changed with it. */
     ctx.bus.accessChanged(sub.companyId);

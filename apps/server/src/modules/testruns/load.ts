@@ -6,7 +6,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { nodes, subscriptions, testRuns } from '../../db/schema.js';
 import { nodeIdentity, type NodeHub, type NodeIdentity, type SaidLoad } from '../nodes/hub.js';
-import { expireStaleNodes, liveNode } from '../nodes/nodes.js';
+import { liveNode } from '../nodes/nodes.js';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the timestamp from the public load
 const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
@@ -30,7 +30,6 @@ export function forRun(own: SaidLoad | null, loads: (SaidLoad | null)[]): NodeLo
    its machine, though it keeps its key until it hears so. Plans that joined with one command came at the same moment, so
    they go by name. */
 export async function machineNodes(db: Db, companyId: string) {
-  await expireStaleNodes(db);
   return db
     .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, provider: subscriptions.provider, status: nodes.status, lastSeenAt: nodes.lastSeenAt })
     .from(nodes)
@@ -80,7 +79,8 @@ export async function harnessPlaces(ctx: Ctx, open: RunPlace[]): Promise<RunPlac
 
 type Capability = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[]; testHarness?: 1 };
 const capabilities = new WeakMap<Ctx, Map<string, Capability>>();
-const nodeKey = (id: NodeIdentity): string => id.kind === 'builtin' ? 'builtin' : id.nodeId;
+/* Each machine's built-in node under its own machine, so one's word never takes the place of another's. */
+const nodeKey = (id: NodeIdentity): string => id.kind === 'builtin' ? `builtin:${id.machine}` : id.nodeId;
 export function noteTestCapabilities(ctx: Ctx, id: NodeIdentity, value: Capability): void {
   const known = capabilities.get(ctx) ?? new Map<string, Capability>(); capabilities.set(ctx, known);
   known.set(nodeKey(id), value);

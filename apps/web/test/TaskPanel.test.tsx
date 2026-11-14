@@ -269,6 +269,41 @@ describe('a task', () => {
     }
   });
 
+  it('says in its log, in each language, that the machine of a turn is out of reach, and that it is back', async () => {
+    const bruno = { kind: 'agent' as const, id: 'b1', name: 'Bruno' };
+    const job = 'aaaaaaaa-0000-4000-8000-000000000001';
+    const away = {
+      ...TASK_DETAIL,
+      log: [
+        ...TASK_DETAIL.log,
+        { kind: 'away', text: "Bruno's turn runs on ivan-mbp, which Hornhoof cannot reach since 2026-11-03 00:11 UTC. The work there is kept.", data: { job, stage: 'away', holder: 'b1', host: 'ivan-mbp', since: '2026-11-03T00:11:00.000Z' }, by: bruno, at: '2026-11-03T00:16:00.000Z' },
+        { kind: 'away', text: "The server's own machine is in reach again; Bruno's turn goes on there.", data: { job, stage: 'back', holder: 'b1', host: null, since: '2026-11-03T01:00:00.000Z' }, by: bruno, at: '2026-11-03T01:00:00.000Z' },
+        { kind: 'away', text: 'The turn that ran on ivan-mbp is over.', data: { job, stage: 'ended', holder: 'b1', host: 'ivan-mbp', since: '2026-11-03T02:00:00.000Z' }, by: bruno, at: '2026-11-03T02:00:00.000Z' },
+      ],
+    };
+    for (const [lang, words] of [
+      ['en', { title: 'A turn and its machine', ended: 'The turn that ran on ivan-mbp is over.', gone: ['The turn runs on ivan-mbp, which Hornhoof cannot reach since ', 'The work there is kept, and the turn goes on when the machine is back.'], back: 'The machine is in reach again, and the turn goes on there.' }],
+      ['ru', { title: 'Ход и его машина', ended: 'Ход, который шел на машине ivan-mbp, закончился.', gone: ['Ход идет на машине ivan-mbp, с которой Hornhoof не может связаться с ', 'Работа там сохранена, и ход продолжится, когда машина вернется.'], back: 'Машина снова на связи, и ход продолжается там.' }],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      const user = userEvent.setup();
+      shell({ 'GET /api/tasks/t12': [200, { task: away }] });
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await openFromTable(user, /#12/);
+      const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+      await within(panel).findAllByRole('listitem');
+      const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
+      expect(lines).toHaveLength(3);
+      for (const said of words.gone) expect(lines[0]).toContain(said);
+      expect(lines[1]).toContain(words.back);
+      expect(lines[2]).toContain(words.ended);
+      /* The English lines kept for the agents are not what a person reads. */
+      expect(panel).not.toHaveTextContent('The work there is kept.');
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('says in its log, in each language, why a node restart cut a turn off, the retry, and who was called when it happened again', async () => {
     const bruno = { kind: 'agent' as const, id: 'b1', name: 'Bruno' };
     const first = 'aaaaaaaa-0000-4000-8000-000000000001';

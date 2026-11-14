@@ -14,10 +14,15 @@ it('reads a turn history without scanning thirty thousand unrelated event bodies
   const inserted = await db.execute<{ id: string }>(sql`insert into jobs (company_id, subscription_id, agent_id, kind, prompt, timeout_ms)
     select ${companyId}, ${sub!.id}, ${agent!.id}, 'conversation', 'Work ' || n, 60000 from generate_series(1,857) n returning id`);
   const ids = inserted.rows.map(r => r.id);
-  await db.execute(sql`with numbered as (select id, row_number() over (order by id) as n from jobs)
-    insert into agent_events (company_id, agent_id, job_id, kind, data)
-    select ${companyId}, ${agent!.id}, j.id, 'text', jsonb_build_object('text', repeat('step ',120))
-    from generate_series(1,30161) as steps(step) join numbered j on j.n = 1 + steps.step % 857`);
+  /* These thirty thousand rows are the scenery of the query under test. They go in past the journal, which would write
+     as many rows again and has no part in what is measured. */
+  await db.transaction(async tx => {
+    await tx.execute(sql`set local session_replication_role = replica`);
+    await tx.execute(sql`with numbered as (select id, row_number() over (order by id) as n from jobs)
+      insert into agent_events (company_id, agent_id, job_id, kind, data)
+      select ${companyId}, ${agent!.id}, j.id, 'text', jsonb_build_object('text', repeat('step ',120))
+      from generate_series(1,30161) as steps(step) join numbered j on j.n = 1 + steps.step % 857`);
+  });
   await db.insert(agentEvents).values([
     { companyId, agentId: agent!.id, jobId: ids[0]!, kind: 'program', data: { program: { state: 'thinking', since: 1, tool: null }, alarm: null } },
     { companyId, agentId: agent!.id, kind: 'message', data: { silentJob: ids[1]!, silentReason: 'node_silent', text: 'Last change: 2026-11-03 06:11 UTC (2026-11-03T06:11:06.000Z). Reason: node_silent.' } },

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NodeLoad } from '@hornhoof/protocol';
-import { api } from '../api';
+import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, MachineView, Me, SubView } from '../types';
+import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -13,7 +13,8 @@ import { ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
-import { planStateOnMachine, subName } from '../ui/subscription';
+import { clock, planStateOnMachine, subName } from '../ui/subscription';
+import { cannotOpen, givesLines, isOpen, machineName, useAccess } from '../ui/access';
 import { useNow } from '../ui/reset';
 import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
@@ -26,11 +27,46 @@ const GIB = 1024 ** 3;
 /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
 const SMALLER = 1.1;
 
+/* The link's certificate is warned about this long before it ends. */
+const CERT_WARNING_MS = 14 * 24 * 3600_000;
+
 const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
 
 const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
+
+/* The date the link's certificate ends, when that is near and the machine has not renewed it. */
+function endingSoon(tls: TlsView | null, now: number): string | null {
+  if (!tls?.expiresAt) return null;
+  const ends = Date.parse(tls.expiresAt);
+  return ends - now < CERT_WARNING_MS ? tls.expiresAt : null;
+}
+
+/* The link's certificate runs out soon: people who see the whole company are told above the list. */
+function CertificateWarning({ ends }: { ends: string }) {
+  const t = useT();
+  const { language } = useLanguage();
+  return <p className="alert" role="status">{t.machines.certEnds(new Date(ends).toLocaleDateString(language))}</p>;
+}
+
+/* The link's encryption as the server says, only for people who see the whole company; an answer that fails says nothing. */
+function useLinkTls(me: Me): TlsView | null {
+  const [tls, setTls] = useState<TlsView | null>(null);
+  const whole = me.person.scopeKind === 'company';
+  useEffect(() => {
+    if (!whole) return;
+    let live = true;
+    api
+      .get<{ tls?: TlsView | null }>('/api/link')
+      .then(found => live && setTls(found.tls ?? null))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [whole]);
+  return tls;
+}
 
 function lastSeen(t: Messages, language: Language, iso: string | null): string {
   if (!iso) return t.machines.notSeen;
@@ -113,9 +149,11 @@ function PlansOnMachine({ row, subs }: { row: MachineRow; subs: SubView[] }) {
   return <ul className="plist" aria-label={t.cards.plansOn}>{row.plans.map(plan => <MachinePlan key={plan.id} plan={plan} sub={subs.find(s => s.id === plan.id)} online={row.online} now={now} />)}</ul>;
 }
 
-function machineColumns(t: Messages, language: Language): TableColumn<MachineRow>[] {
+function machineColumns(t: Messages, language: Language, priority: boolean): TableColumn<MachineRow>[] {
   const load = (m: MachineRow) => m.online && m.load ? busyShare(m.load.load, m.load.cpus) : null;
+  const place: TableColumn<MachineRow>[] = priority ? [{ key: 'priority', label: t.cards.priority, direction: 1, className: 'k-prio', lead: true, value: placeOf, cell: m => <PriorityCell row={m} /> }] : [];
   return [
+    ...place,
     { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OtherBuild row={m} /><BrowserIssue row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
@@ -138,6 +176,19 @@ function machineFilters(t: Messages): FilterGroup<MachineRow>[] {
 function machineSearch(t: Messages, language: Language, subs: SubView[], row: MachineRow): string {
   const plans = row.plans.map(p => { const s = subs.find(s => s.id === p.id); return s ? subName(t, s) : PROVIDER_NAMES[p.provider]; });
   return [row.hostname, row.owner?.name, ...plans, ...row.running.agents.flatMap(a => [a.name, a.title?.[language], a.department?.name])].join(' ');
+}
+
+/* A machine's place in the order the server passes on in: 1 where the server runs, whatever that machine's own row
+   says, and none for a machine that takes no part. */
+const placeOf = (row: MachineRow): number | null => (row.server ? 1 : row.data?.number ?? null);
+
+/* The number in its box, the server's filled; or a dash that says why there is none. */
+function PriorityCell({ row }: { row: MachineRow }) {
+  const p = useT().machines.priority;
+  const number = placeOf(row);
+  if (number !== null) return <span className={number === 1 ? 'pn one' : 'pn'} title={!row.server && typeof row.data?.pin === 'number' ? p.why.pinned : undefined}>{number}</span>;
+  const why = row.data?.pin === 'none' ? p.out : p.cannot;
+  return <><span className="pdash" title={why} aria-hidden="true" /><span className="sr">{why}</span></>;
 }
 
 /* The machine the company's server runs on now. */
@@ -177,25 +228,42 @@ function BrowserNote({ row }: { row: MachineRow }) {
 type MachineControls = {
   picking: string | null;
   addCommands: Record<string, ActiveCommand>;
+  coreCommands: Record<string, ActiveCommand>;
+  makeCore: (machine: MachineView) => unknown;
+  cancelCore: (machineId: string, id: string) => unknown;
   confirm: string | null;
   setPicking: (machineId: string | null) => void;
   setConfirm: (id: string | null) => void;
   addPlan: (machine: MachineView, sub: SubView) => unknown;
   cancelAdd: (machineId: string, id: string) => unknown;
   lend: (machine: MachineView, value: boolean) => unknown;
+  keepBackups: (machine: MachineView, value: boolean) => unknown;
   disconnect: (machine: MachineView) => unknown;
   refresh: () => Promise<void>;
+  fail: (err: unknown) => void;
 };
 
-function LendSetting({ machine, editable, onChange }: { machine: MachineView; editable: boolean; onChange: (value: boolean) => void }) {
+/* What the machine's owner lets the company use it for: its test runs, and, on a machine with the company's core,
+   keeping its backups. The owner, or someone who sees the whole company, ticks them; anyone else reads them. */
+function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: MachineView; editable: boolean; onLend: (value: boolean) => void; onKeep: (value: boolean) => void }) {
   const t = useT();
-  const value = editable ? (
+  const lends = editable ? (
     <label className="lend">
-      <input type="checkbox" aria-label={t.machines.lendLabel(machine.hostname)} checked={machine.lendsTests} onChange={e => onChange(e.target.checked)} />
+      <input type="checkbox" aria-label={t.machines.lendLabel(machine.hostname)} checked={machine.lendsTests} onChange={e => onLend(e.target.checked)} />
       <span aria-hidden="true">{t.machines.lend}</span>
     </label>
   ) : <span className="muted">{machine.lendsTests ? t.machines.lent : t.machines.notLent}</span>;
-  return <Part title={t.tables.settings}><Facts items={[[t.tables.tests, value]]} /></Part>;
+  const items: [string, React.ReactNode][] = [[t.tables.tests, lends]];
+  if (typeof machine.keepsBackups === 'boolean') {
+    const keeps = editable ? (
+      <label className="lend">
+        <input type="checkbox" aria-label={t.machines.keepBackupsLabel(machine.hostname)} checked={machine.keepsBackups} onChange={e => onKeep(e.target.checked)} />
+        <span aria-hidden="true">{t.machines.keepBackups}</span>
+      </label>
+    ) : <span className="muted">{machine.keepsBackups ? t.machines.keepsBackups : t.machines.keepsNoBackups}</span>;
+    items.push([t.backups.title, <>{keeps}{(machine.heldBackups ?? 0) > 0 && <> <span className="muted">{t.machines.backupsHeld(machine.heldBackups ?? 0)}</span></>}</>]);
+  }
+  return <Part title={t.tables.settings}><Facts items={items} /></Part>;
 }
 
 function PlanPicker({ machine, addable, shown, picking, controls }: { machine: MachineView; addable: SubView[]; shown: ActiveCommand | null; picking: boolean; controls: MachineControls }) {
@@ -218,19 +286,282 @@ function PlanPicker({ machine, addable, shown, picking, controls }: { machine: M
   );
 }
 
+/* The command that brings the company's core to a machine joined before machines had one. */
+function CoreCommand({ machine, shown, controls }: { machine: MachineView; shown: ActiveCommand; controls: MachineControls }) {
+  const t = useT();
+  return (
+    <div className="add-plan">
+      <p className="muted">{t.machines.coreRun(machine.hostname)}</p>
+      <CommandBox command={shown.command} trust={t.machines.trust} />
+      <CommandLifetime expiresAt={shown.expiresAt} />
+      <div className="actions"><button className="btn small ghost" type="button" onClick={() => controls.cancelCore(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
+    </div>
+  );
+}
+
+/* A machine that ran Claude keeps a sign-in of Claude's own, which a Disconnect here cannot end. */
+const disconnectQuestion = (t: Messages, m: MachineView): string =>
+  m.plans.some(plan => plan.provider === 'claude') ? `${t.machines.disconnectAsk(m.hostname)} ${t.machines.disconnectClaude}` : t.machines.disconnectAsk(m.hostname);
+
 function MachineSettings({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
   const t = useT();
   return <>
-    <LendSetting machine={m} editable={editable} onChange={value => controls.lend(m, value)} />
+    <OwnerSettings machine={m} editable={editable} onLend={value => controls.lend(m, value)} onKeep={value => controls.keepBackups(m, value)} />
     <div className="machine-actions">
       {addable.length > 0 && !busy && <button className="act" type="button" aria-label={t.machines.addPlanLabel(m.hostname)} onClick={() => controls.setPicking(m.id)}>{t.machines.addPlan}</button>}
-      {editable && <button className="act danger" type="button" aria-label={t.machines.disconnectLabel(m.hostname)} onClick={() => controls.setConfirm(m.id)}>{t.machines.disconnect}</button>}
+      {m.needsCore && !busy && <button className="act" type="button" onClick={() => controls.makeCore(m)}>{t.machines.makeCore(m.hostname)}</button>}
+      {/* The machine the company was installed on is no computer someone joined: it is not disconnected. */}
+      {editable && !m.serverInstall && <button className="act danger" type="button" aria-label={t.machines.disconnectLabel(m.hostname)} onClick={() => controls.setConfirm(m.id)}>{t.machines.disconnect}</button>}
     </div>
-    {controls.confirm === m.id && <Ask text={t.machines.disconnectAsk(m.hostname)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
+    {controls.confirm === m.id && <Ask text={disconnectQuestion(t, m)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
   </>;
 }
 
-function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; controls: MachineControls }) {
+/* Where the company opens on the machine itself, and on the server's card whom the server could not take. */
+function NetworkPlace({ row }: { row: MachineRow }) {
+  const t = useT();
+  return <>
+    {row.refusedBy.map(name => <p key={name} className="machine-note">{t.machines.refuses(row.hostname, name)}</p>)}
+  </>;
+}
+
+const tenths = (language: Language, n: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round(n * 10) / 10);
+
+/* Why a machine cannot take the server, in the words of its card. */
+function unfitText(t: Messages, language: Language, unfit: Unfit, host: string): string {
+  const u = t.machines.priority.unfit;
+  switch (unfit.why) {
+    case 'phone': return u.phone;
+    case 'no_core': return u.noCore(host);
+    case 'scope': return u.scope(unfit.person, unfit.departments);
+    case 'no_link': return u.noLink;
+    case 'measuring': return u.measuring;
+    case 'memory': return u.memory;
+    case 'disk': return u.disk(gigabytes(language, unfit.free), gigabytes(language, unfit.need));
+    case 'fsync': return u.fsync(tenths(language, unfit.p99));
+  }
+}
+
+/* The words for why a machine stands where it does, from the key the ranking stored: a line of its own, or how often
+   the machine is online with its strongest or weakest part. A key of a newer server says nothing. */
+function whyText(t: Messages, why: string | null): string | null {
+  const p = t.machines.priority;
+  if (why === null) return null;
+  if (why === 'server') return t.cards.serverHere;
+  const lines: Record<string, string> = p.why;
+  if (lines[why]) return lines[why];
+  const [online, part] = why.split('.');
+  const often = (p.online as Record<string, string>)[online ?? ''];
+  const what = (p.part as Record<string, string>)[part ?? ''];
+  return often && what ? p.both(often, what) : often ?? null;
+}
+
+function copyText(t: Messages, language: Language, copy: NonNullable<DataView['copy']>): string {
+  const c = t.machines.copy;
+  switch (copy.line) {
+    case 'making': return c.making(copy.progress);
+    case 'remaking': return c.remaking(copy.progress);
+    case 'saving': return c.saving;
+    case 'ready': return c.ready;
+    case 'catching_up': return c.catchingUp;
+    case 'behind': return c.behind(copy.minutes);
+    case 'asleep': return c.asleep(clock(language, copy.since));
+    case 'stopped': return copy.why === 'disk_full' ? c.stoppedDiskFull : copy.why === 'setup' ? c.stoppedSetup : c.stopped;
+  }
+}
+
+type Mode = 'auto' | 'manual' | 'out';
+
+/* The CEO's choice for one machine: left to Hornhoof, a place by hand, or kept from the server. By hand keeps the
+   machine at its number, or after the last one when it comes back from out; the list under it gives the places there
+   are. While a choice is sent nothing else can be pressed, and a refusal is said under the choices. */
+function PriorityChoice({ row, data, last, refresh }: { row: MachineRow; data: DataView; last: number; refresh: () => Promise<void> }) {
+  const t = useT();
+  const p = t.machines.priority;
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const mode: Mode = data.pin === 'none' ? 'out' : data.pin !== null ? 'manual' : 'auto';
+  const send = async (pin: DataView['pin']) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.put(`/api/machines/${row.id}/priority`, { pin });
+      await refresh();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pins: Record<Mode, DataView['pin']> = { auto: null, manual: data.number ?? last + 1, out: 'none' };
+  const modes: [Mode, string][] = [['auto', p.auto], ['manual', p.manual], ['out', p.out]];
+  const places = Array.from({ length: Math.max(last, data.number ?? 0) - 1 }, (_, at) => at + 2);
+  return <>
+    <span className="pmode" role="radiogroup" aria-label={t.cards.priority}>
+      {modes.map(([value, text]) => (
+        <label key={value} className="pm-opt">
+          <input type="radio" name={`pmode-${row.id}`} checked={mode === value} disabled={busy} onChange={() => void send(pins[value])} />
+          <span>{text}</span>
+        </label>
+      ))}
+      {mode === 'manual' && data.number !== null && (
+        <select className="sel" aria-label={p.pinLabel(row.hostname)} value={data.number} disabled={busy} onChange={e => void send(Number(e.target.value))}>
+          {places.map(place => <option key={place} value={place}>{place}</option>)}
+        </select>
+      )}
+    </span>
+    {failure !== null && <p className="alert" role="alert">{failure instanceof ApiFailure && failure.reason === 'only_copy' ? p.onlyCopy(row.hostname) : errorText(t, failure)}</p>}
+  </>;
+}
+
+/* What the server says of moving it to another machine, and whether this person may ask for that. */
+type Moving = { move: MoveView | null; canMove: boolean };
+
+/* The move of the server, on a machine's card. On the machine asked to take it, everyone who sees the part reads how
+   far the move is: its copy being made, the server moving, or why it stayed. The CEO may call a move off while the
+   copy is made, and may ask a machine that has a number to take the server: the question stands in the button's
+   place, the focus on its first answer, and Cancel gives the focus back to the button. While an answer is sent nothing
+   can be pressed, and a refusal is said under the buttons. */
+function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataView; moving: Moving; refresh: () => Promise<void> }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const words = t.machines.move;
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const hereButton = useRef<HTMLButtonElement>(null);
+  const yesButton = useRef<HTMLButtonElement>(null);
+  const backToButton = useRef(false);
+  useEffect(() => {
+    if (asking) yesButton.current?.focus();
+    else if (backToButton.current) hereButton.current?.focus();
+    backToButton.current = false;
+  }, [asking]);
+  const { move, canMove } = moving;
+  const target = move?.machine === row.id ? move : null;
+  const mayTake = data.number !== null && data.number >= 2 && data.pin !== 'none';
+  const offered = canMove && mayTake && move?.state !== 'switching' && (!target || target.state === 'failed');
+  const send = async (call: () => Promise<unknown>) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await call();
+      setAsking(false);
+      await refresh();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const said = target
+    ? target.state === 'preparing' ? words.waiting(row.hostname, target.progress)
+      : target.state === 'switching' ? words.switching(row.hostname)
+        : words.failed(target.leader, words.reason[target.reason ?? 'no_answer'](row.hostname))
+    : null;
+  /* The machine the server last moved from says so once its copy is up to date again, whoever reads the card. */
+  const until = data.led ? clock(language, data.led.until) : null;
+  const led = until ? words.led(row.hostname, until) : null;
+  if (!said && !offered && !led) return null;
+  const question = words.ask(row.hostname);
+  return <>
+    {led && <p className="machine-note">{led}</p>}
+    {said && <p className="machine-note">{said}</p>}
+    {target?.state === 'preparing' && canMove && <button className="act" type="button" disabled={busy} onClick={() => void send(() => api.del(`/api/machines/${row.id}/move`))}>{words.stop}</button>}
+    {offered && !asking && <button ref={hereButton} className="act" type="button" onClick={() => setAsking(true)}>{words.here}</button>}
+    {offered && asking && (
+      <div className="ask">
+        <span className="entry-main">{question}</span>
+        <div className="entry-actions" role="group" aria-label={question}>
+          <button ref={yesButton} className="btn" type="button" disabled={busy} onClick={() => void send(() => api.post(`/api/machines/${row.id}/move`))}>{words.yes}</button>
+          <button className="btn ghost" type="button" disabled={busy} onClick={() => { backToButton.current = true; setFailure(null); setAsking(false); }}>{words.cancel}</button>
+        </div>
+      </div>
+    )}
+    {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+  </>;
+}
+
+/* The Priority part of a card: the machine's number and why it has it, or a dash and why it has none; for the CEO, on
+   every machine that may take the server but the one it runs on, the choice of its place and the move of the server;
+   then how its copy does and when it stopped holding the data. last: the highest number there is. */
+function PriorityPart({ row, me, last, moving, refresh }: { row: MachineRow; me: Me; last: number; moving: Moving; refresh: () => Promise<void> }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const p = t.machines.priority;
+  const c = t.machines.copy;
+  const data = row.data ?? null;
+  const notes = [
+    data?.copy && placeOf(row) !== 1 ? copyText(t, language, data.copy) : null,
+    data?.leftAt ? c.left(new Date(data.leftAt).toLocaleDateString(language)) : null,
+  ].filter((line): line is string => line !== null);
+  const below = notes.map(line => <p key={line} className="machine-note">{line}</p>);
+  /* Number 1 is wherever the server runs, and moves only with the server: nothing to choose there. */
+  if (placeOf(row) === 1) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span><small>{p.line}</small></div>{below}</Part>;
+  if (!data) return null;
+  const moved = <MovePart row={row} data={data} moving={moving} refresh={refresh} />;
+  if (data.unfit) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pdash" aria-hidden="true" /><span>{p.unfit.lead(unfitText(t, language, data.unfit, row.hostname))}</span></span>{moved}</div>{below}</Part>;
+  const out = data.pin === 'none';
+  /* A machine with no place says nothing here, unless the server was asked to move to it and stayed. */
+  const asked = moving.move?.machine === row.id;
+  if (data.number === null && !out) return notes.length || asked ? <Part title={t.cards.priority}>{asked && <div className="prio">{moved}</div>}{below}</Part> : null;
+  const why = out ? p.why.out : whyText(t, data.why);
+  return (
+    <Part title={t.cards.priority}>
+      <div className="prio">
+        <span className="prio-n">{out ? <span className="pdash" aria-hidden="true" /> : <span className="pn">{data.number}</span>}<span>{why}</span></span>
+        {me.person.isOwner && <PriorityChoice row={row} data={data} last={last} refresh={refresh} />}
+        <small>{p.line}</small>
+        {moved}
+      </div>
+      {below}
+    </Part>
+  );
+}
+
+/* Who holds the company, under the tab's intro: the leader, the machines that keep a copy and the one that takes over,
+   and since when only the leader holds the changes. */
+function CopiesLine({ copies }: { copies: CopiesView }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const c = t.machines.copy;
+  const names = copies.copies.map(copy => copy.hostname);
+  const next = copies.copies.find(copy => copy.sync)?.hostname ?? names[0];
+  if (next === undefined) return null;
+  const since = clock(language, copies.onlySince);
+  return <>
+    <p className="muted">{names.length === 1 ? c.one(copies.leader, next) : c.many(copies.leader, new Intl.ListFormat(language, { type: 'conjunction' }).format(names), next)}</p>
+    {since && <p className="muted">{c.onlySince(copies.leader, since)}</p>}
+  </>;
+}
+
+/* Computer access to the machine: that it is open, for everyone who sees the card, and the buttons for who may press
+   them. Its owner opens it for a day, with what their key signs where the machine holds that key; closed, it says
+   nothing to anyone else. */
+function MachineAccess({ view, controls }: { view: ComputerAccessView; controls: MachineControls }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const { answer, prompt } = useAccess(() => void controls.refresh(), controls.fail);
+  const machine = machineName(t, view.machine);
+  if (isOpen(view)) {
+    return (
+      <Part title={t.machines.access}>
+        <p className="machine-note">{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
+        {view.canClose && <button className="act" type="button" onClick={() => void answer(view, 'close')}>{t.window.computerClose}</button>}
+      </Part>
+    );
+  }
+  if (!view.canOpen) return null;
+  const blocked = cannotOpen(t, view);
+  return (
+    <Part title={t.machines.access}>
+      {prompt ?? (blocked ? <p className="machine-note">{blocked}</p> : <button className="act" type="button" onClick={() => void answer(view, 'open')}>{t.window.computerOpenFor(machine)}</button>)}
+      {!blocked && givesLines(t, view).map(line => <p key={line} className="machine-note">{line}</p>)}
+    </Part>
+  );
+}
+
+function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; order: { shown: boolean; last: number; moving: Moving }; controls: MachineControls }) {
   const t = useT();
   const { language } = useLanguage();
   const m = row.source;
@@ -238,11 +569,13 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   const editable = me.person.scopeKind === 'company' || mine;
   const addable = addablePlans(m, subs, me.person.id);
   const shown = liveCommand(controls.addCommands[row.id], now);
+  const core = liveCommand(controls.coreCommands[row.id], now);
   const picking = controls.picking === row.id;
+  const openHere: [string, string][] = row.openAt ? [[t.machines.openHere, `localhost:${row.openAt}`]] : [];
   return (
     <CardFrame label={row.hostname} accent={row.server}
       head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
-      extra={m && <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />}>
+      extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
         <Part title={t.cards.resources}>
@@ -250,16 +583,19 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
           {row.server && <p className="machine-note">{m ? t.machines.builtinHere : t.machines.builtinAbout}</p>}
           <BuildNote row={row} />
           <BrowserNote row={row} />
+          <NetworkPlace row={row} />
         </Part>
-        {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`]]} /></Part>}
-        {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
+        {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere]} /></Part>}
+        {!m && openHere.length > 0 && <Part title={t.cards.ownerSystem}><Facts items={openHere} /></Part>}
+        {order.shown ? <PriorityPart row={row} me={me} last={order.last} moving={order.moving} refresh={controls.refresh} /> : m && row.server && <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span></div></Part>}
+        {row.access && <MachineAccess view={row.access} controls={controls} />}
         <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">
         <h4>{t.cards.plansOn}</h4>
         <PlansOnMachine row={row} subs={subs} />
-        {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking)} controls={controls} />}
+        {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
       </section>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
@@ -270,11 +606,17 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
+  const certificateEnds = endingSoon(useLinkTls(me), now);
   const [machines, setMachines] = useState<MachineView[] | null>(null);
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
+  const [copies, setCopies] = useState<CopiesView | null>(null);
+  /* Whether this person sees the order the server passes on in. */
+  const [priority, setPriority] = useState(false);
+  const [moving, setMoving] = useState<Moving>({ move: null, canMove: false });
   const [subs, setSubs] = useState<SubView[]>([]);
   const [command, setCommand] = useState<ActiveCommand | null>(null);
   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
+  const [coreCommands, setCoreCommands] = useState<Record<string, ActiveCommand>>({});
   const [confirm, setConfirm] = useState<string | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -290,13 +632,16 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const load = useCallback(async () => {
     try {
       const [hosts, list] = await Promise.all([
-        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null }>('/api/machines'),
+        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean; move?: MoveView | null; canMove?: boolean }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
-        loadMachineCommands(live, setCommand, setAddCommands),
+        loadMachineCommands(live, setCommand, setAddCommands, setCoreCommands),
       ]);
       if (!live.current) return;
       setMachines(hosts.machines);
       setBuiltin(hosts.builtin ?? null);
+      setCopies(hosts.copies ?? null);
+      setPriority(hosts.priority === true);
+      setMoving({ move: hosts.move ?? null, canMove: hosts.canMove === true });
       setSubs(list.subscriptions);
     } catch (err) {
       setFailure(err);
@@ -338,6 +683,23 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
     });
 
+  /* The owner puts the company's core on a machine of theirs that joined before machines had one. */
+  const makeCore = (m: MachineView) =>
+    run(async () => {
+      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/core`);
+      setCoreCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
+    });
+
+  const cancelCore = (machineId: string, id: string) =>
+    run(async () => {
+      await hideShownCommand(id);
+      setCoreCommands(all => {
+        const next = { ...all };
+        delete next[machineId];
+        return next;
+      });
+    });
+
   const cancelAdd = (machineId: string, id: string) =>
     run(async () => {
       await hideShownCommand(id);
@@ -354,6 +716,12 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setMachines(list => list?.map(x => (x.id === m.id ? { ...x, lendsTests } : x)) ?? null);
     });
 
+  const keepBackups = (m: MachineView, keepsBackups: boolean) =>
+    run(async () => {
+      await api.patch(`/api/machines/${m.id}`, { keepsBackups });
+      setMachines(list => list?.map(x => (x.id === m.id ? { ...x, keepsBackups } : x)) ?? null);
+    });
+
   const disconnect = (m: MachineView) =>
     run(async () => {
       setConfirm(null);
@@ -363,7 +731,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
 
   const pool = machinePool(machines ?? [], builtin);
   const activeCommand = liveCommand(command, now);
-  const openIds = openCommandIds(addCommands, now);
+  const openIds = openCommandIds({ ...addCommands, ...coreCommands }, now);
   const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
   if (unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
@@ -373,6 +741,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
         <div>
           <h1>{t.machines.heading}</h1>
           <p className="muted">{t.machines.intro}</p>
+          {copies && <CopiesLine copies={copies} />}
         </div>
         {!activeCommand && (
           <div className="head-actions">
@@ -385,12 +754,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
         <ActiveCommandPanel
           heading={t.machines.connectHeading}
           run={t.machines.runThis}
+          note={t.machines.firewallNote}
           trust={t.machines.trust}
           shown={activeCommand}
           onCancel={() => void cancelMachine(activeCommand.id)}
         />
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {certificateEnds && <CertificateWarning ends={certificateEnds} />}
 
       {machines && <Pool {...pool} />}
       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
@@ -399,14 +770,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           rows={rows}
           selectedId={selected}
           onSelect={onSelect}
-          columns={machineColumns(t, language)}
+          columns={machineColumns(t, language, priority)}
           name={row => row.hostname}
           openIds={openIds}
-          initialSort={{ key: 'status', direction: 1 }}
+          initialSort={{ key: priority ? 'priority' : 'status', direction: 1 }}
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
-          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
-            picking, addCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, lend, disconnect, refresh: load,
+          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
+            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,
           }} />}
         />
       )}

@@ -3,7 +3,9 @@ import noDdlOnSharedDatabase from './scripts/no-ddl-on-shared-database.mjs';
 
 /* The tsconfig that checks the files of each workspace. A file reaches only its own: eslint keeps every TypeScript
    program it builds until it exits, and the four together need more than the 2 GB node allows by default on a machine
-   with less than 15 GB of memory. That is also why `npm run lint` runs one eslint for each workspace. */
+   with less than 15 GB of memory. That is also why `npm run lint` runs one eslint for each workspace, and several for
+   the server: its program takes about half of that before a file is linted, and the types eslint asks of its files the
+   rest. Each part of the server leaves out exactly what the other parts name, so a new file is in one of them. */
 const tsconfigs = {
   'packages/protocol': 'tsconfig.eslint.json',
   'apps/node': 'tsconfig.eslint.json',

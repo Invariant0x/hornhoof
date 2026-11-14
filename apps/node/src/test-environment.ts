@@ -298,7 +298,9 @@ export function isNodeTestMessage(message: { type: string }): message is TestMes
 }
 type TestMessageOptions = {
   dir: string; describe?: typeof readTestEnvironment; capabilities: TestCapabilities; stopped: () => boolean;
-  testing: Map<string, ActiveTest>; unconfirmed: Map<string, NodeMessage>;
+  testing: Map<string, ActiveTest>;
+  /* The parts whose end Hornhoof has not confirmed yet: none of them runs again. */
+  unconfirmed: { has(partId: string): boolean };
   run: (message: TestRunMessage, signal: AbortSignal) => Promise<void>;
   harness?: (message: HarnessMessage, signal: AbortSignal) => Promise<NodeMessage>;
   emit: (message: NodeMessage) => void;

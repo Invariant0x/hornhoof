@@ -2,7 +2,7 @@ import { hashTestEnvironment, type NodeMessage, type TestsDescribed } from '@hor
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testParts, testRuns } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { acceptDescription, newEnvironmentRequest, repositoryScope, setProductPlanningPorts, testCapabilities } from '../src/modules/testruns/describe.js';
 import { partDone, pumpTests } from '../src/modules/testruns/runs.js';
 import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';

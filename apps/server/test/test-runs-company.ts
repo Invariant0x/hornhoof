@@ -9,12 +9,13 @@ import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { pumpTests } from '../src/modules/testruns/runs.js';
 import type { Ctx } from '../src/app.js';
 import { appFixture, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 export const GIB = 1024 ** 3;
 
 export { nextOf as nextOf } from './helpers.js';
 
-const NODE_KEY = 'builtin-node-key-0123456789abcdef';
+export const NODE_KEY = 'builtin-node-key-0123456789abcdef';
 
 export const idle = (over: object = {}) => ({ cpus: 8, load: 0.5, memFree: 12 * GIB, memTotal: 16 * GIB, tests: 0, jobs: 0, ...over });
 
@@ -107,7 +108,7 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
   const builtin = async (load: object = idle()) => {
     const node = await connectNode(url, NODE_KEY);
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
-    await until(() => app.ctx.hub.loadOf({ kind: 'builtin' }) !== null);
+    await until(() => app.ctx.hub.loadOf(BUILTIN) !== null);
     return node;
   };
   return { app, db, url, ceo, ann, bob, builtin, dev, sales, head, bruno, sam, task, turn, machine, planless, reconnect, putFile, wokeWith, filesOn };
@@ -138,5 +139,5 @@ export const done = (run: TestsRun, over: object = {}) => ({ type: 'tests.done' 
 /* The scheduler consumes optional physical resources at the hub boundary. */
 export const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | null, host: string, over: object = {}) => {
   const load = { ...idle(), host, hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB, ...over };
-  c.app.ctx.hub.report(nodeId ? nodeIdentity(nodeId) : { kind: 'builtin' }, load);
+  c.app.ctx.hub.report(nodeId ? nodeIdentity(nodeId) : BUILTIN, load);
 };

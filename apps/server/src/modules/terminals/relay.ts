@@ -15,7 +15,8 @@ const MAX_PRESSED = 8;
 type Pressed = { jobId: string; personId: string; node: NodeIdentity; at: number };
 
 /* Why Hornhoof opened no turn for what a program took: another turn ran, or the words are tied to nobody. */
-export type TurnRefusal = 'busy' | 'unknown_words';
+/* machine_updating: the machine the program runs on installs a build now, so no turn opens there until it is done. */
+export type TurnRefusal = 'busy' | 'unknown_words' | 'machine_updating';
 
 /* How a view ends, as the browser hears it. */
 export const CLOSE = {

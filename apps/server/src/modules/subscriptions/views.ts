@@ -4,8 +4,8 @@ import type { Db } from '../../db/client.js';
 import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
-import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
-import { expireStaleNodes, planNodes, type NodeRow } from '../nodes/nodes.js';
+import { nodeIdentity, ownBuiltin, type NodeIdentity, type NodeHub } from '../nodes/hub.js';
+import { planNodes, type NodeRow } from '../nodes/nodes.js';
 
 /* listed: a personal plan whose owner has several departments; the name lists them. */
 export type Place = { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
@@ -49,7 +49,12 @@ export function agreed(accounts: Account[]): { tier: string | null; differ: bool
   return { tier: tiers.size === 1 ? [...tiers][0]! : null, differ };
 }
 
-export type IsOnline = (node: NodeIdentity) => boolean;
+/* Whether a node is connected; asked of 'builtin', whether any machine's built-in node is, which is where an API key's
+   work runs. */
+export type IsOnline = (node: NodeIdentity | 'builtin') => boolean;
+
+export const onlineIn = (hub: Pick<NodeHub, 'isOnline' | 'builtins'>, config: { machineId: string | null }): IsOnline => node =>
+  node === 'builtin' ? hub.isOnline(ownBuiltin(config)) || hub.builtins().length > 0 : hub.isOnline(node);
 
 /* Never selects secret_enc, so it cannot leak into a response. */
 const columns = {
@@ -119,7 +124,6 @@ function accountViews(mine: NodeRow[], accountOf: Map<string, Account | null>, v
 const shownNode = <T extends { status: string }>(up: T[]): T | undefined => up.find(n => n.status === 'ready') ?? up.find(n => n.status === 'needs_setup') ?? up[0];
 
 export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: Viewer | null = null): Promise<SubView[]> {
-  await expireStaleNodes(db);
   const live = isNull(subscriptions.removedAt);
   const companyId = viewer?.companyId;
   const rows = await db
@@ -154,7 +158,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       kind: r.kind,
       label: r.label,
       status: shown?.status ?? r.status,
-      online: r.kind === 'api_key' ? isOnline(BUILTIN) : Boolean(shown),
+      online: r.kind === 'api_key' ? isOnline('builtin') : Boolean(shown),
       last4: r.last4,
       owner: { id: r.ownerId, name: r.ownerName },
       place: subscriptionPlace(r, ownerDepartments(r.ownerId, access, orderedDepts, teamDept), depts, teamDept),

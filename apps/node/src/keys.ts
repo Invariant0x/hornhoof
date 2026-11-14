@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { armor, Decrypter, Encrypter, generateX25519Identity, identityToRecipient } from 'age-encryption';
@@ -27,4 +28,12 @@ export async function unseal(sealed: string, identity: string): Promise<Uint8Arr
   const d = new Decrypter();
   d.addIdentity(identity);
   return d.decrypt(armor.decode(sealed), 'uint8array');
+}
+
+/* What the built-in node signs in with. With a machine id it is a key of that machine, made from the company's node key,
+   so the node key itself never travels and each machine's built-in node is told apart. A machine set up before ids has
+   none, and signs in with the node key as it always did. */
+export function builtinKey(nodeKey: string, machineId: string | null): string {
+  if (!machineId) return nodeKey;
+  return `builtin.${machineId}.${createHmac('sha256', nodeKey).update(`hornhoof builtin node ${machineId}`).digest('hex')}`;
 }

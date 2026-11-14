@@ -57,6 +57,7 @@ const agent = (over: Partial<AgentRow> = {}): AgentRow => ({
   teamId: null,
   subscriptionId: null,
   nodeId: null,
+  builtinMachine: null,
   roleKey: 'DEV-BE',
   skills: ['hh-report-to-head', 'dev-tdd'],
   overrides: {},

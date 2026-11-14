@@ -1,12 +1,15 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { ComputerView } from '../src/types';
+import type { ComputerAccessView } from '../src/types';
 import { AGENT_HIDDEN, box, chooseTerminal } from './api';
 import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 import { checkPage, open, ORCHESTRATOR, ORCHESTRATOR_CARD, shot, VIEWERS, watchErrors, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
-const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-04T14:30:00.000Z' }, machine: 'a-host', canAnswer: true };
+const ASKED: ComputerAccessView = {
+  machine: { id: 'a-host', networkId: 'n-a-host', name: 'a-host', hostname: 'a-host', personId: 'p1', role: 'worker', os: 'linux', data: false },
+  reachable: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-04T14:30:00.000Z' }, canOpen: true, canClose: true, key: 'not_needed',
+};
 
 /* What reached the server from this person, and the keys that reached the terminal. */
 type Sent = { messages: { agent: string; text: string }[]; keys: string[] };
@@ -31,7 +34,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     }
     if (url.pathname.startsWith('/api/agents/s1')) return route.fulfill({ status: 403, json: AGENT_HIDDEN });
     if (url.pathname === '/api/me') return route.fulfill({ json: me });
-    if (url.pathname === '/api/computer') return route.fulfill({ json: { available: false, until: null, asked: null } });
+    if (url.pathname === '/api/machines/access') return route.fulfill({ json: { views: [] } });
     if (url.pathname === '/api/agents/orchestrator') return route.fulfill({ json: ORCHESTRATOR_CARD });
     if (url.pathname === '/api/agents/orchestrator/start') return route.fulfill({ json: { started: false } });
     if (url.pathname === '/api/agents/orchestrator/events') return route.fulfill({ json: { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: true, canType: types } } });
@@ -102,9 +105,9 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     test('the strip of a machine the orchestrator asks for stands under the terminal, inside the window', async ({ page }, info) => {
       const errors = watchErrors(page);
       const sent = await serve(page, 'delegate', settings);
-      await page.route('**/api/computer', route => route.fulfill({ json: ASKED }));
+      await page.route('**/api/machines/access', route => route.fulfill({ json: { views: [ASKED] } }));
       const window = await open(page, 'orchestrator', lang);
-      const strip = window.getByRole('region', { name: t.window.computerAsks(ASKED.machine!) });
+      const strip = window.getByRole('region', { name: t.window.computerAsks(ASKED.machine.hostname) });
       await expect(strip).toBeVisible();
       const below = await box(strip);
       const terminal = await box(window.locator('.t-term'));
