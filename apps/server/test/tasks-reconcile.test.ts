@@ -263,13 +263,14 @@ describe('turns on a machine that went away', () => {
     ]));
   });
 
-  it('leaves a running personal-plan job without a node alone', async () => {
+  /* As a plan's machines set up again leave its turns: no machine can run such a turn or end it, and none is away. */
+  it('ends a running personal-plan job without a node as lost, not as one of a machine that went away', async () => {
     const c = await company();
     const { plan } = await personalMachines(c);
     const job = await c.job({ subscriptionId: plan.id, nodeId: null, status: 'running', startedAt: c.at });
     const away = vi.spyOn(c.ctx.hub, 'awaySince').mockReturnValue(c.at.getTime());
     await c.round();
-    expect(await c.turnsOf(c.bruno.id)).toEqual([expect.objectContaining({ id: job.id, status: 'running' })]);
+    expect(await c.turnsOf(c.bruno.id)).toEqual([expect.objectContaining({ id: job.id, status: 'failed', error: 'machine_restarted' })]);
     expect(away).not.toHaveBeenCalled();
   });
 

@@ -42,6 +42,7 @@ import { macOwner, type Command } from './terminal/mac-peer.js';
 import { ProgramUpdates, readInstalledVersion } from './program-updates.js';
 import { nodeLifecycle, stopNode } from './lifecycle.js';
 import { lifecycleCommand } from './lifecycle-command.js';
+import { heldJobs } from './held-jobs.js';
 import { nodeLog } from './node-log.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -370,6 +371,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* The node stops once Hornhoof has heard of its removal, not before. */
   const removal = removalWatch(() => outbox.owes('removed'), () => stop());
 
+  /* The turns this node holds. Finished jobs whose end Hornhoof has not confirmed still count as running, so the server does
+     not give up on them. */
+  const holds = () => [...new Set([...running.keys(), ...(host?.typedJobs() ?? []), ...outbox.doneJobs()])];
+
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
@@ -428,6 +433,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (acknowledged(m, outbox)) return removal.settle();
     if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
+    if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       await host?.cancel(m.jobId);

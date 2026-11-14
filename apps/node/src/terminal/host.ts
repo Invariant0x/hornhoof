@@ -868,7 +868,7 @@ export class TerminalHost {
 
   /* The program that goes takes its input with it, so it goes only once that holds nothing of anyone's. */
   private async startAnew(a: Agent, job: TermJob, { spec, hash, urls }: TurnLaunch): Promise<RunResult | null> {
-    const free = !typedSinceStart(a) || !(await this.opts.tmux.alive(a.name)) || (await this.freeForStart(a, job));
+    const free = !typedSinceStart(a) || !(await this.opts.tmux.alive(a.name)) || (await this.freeOfPerson(a, job));
     return free ? this.startProgram(a, job, spec, hash, urls) : this.inputNotFree(a, job);
   }
 
@@ -884,8 +884,9 @@ export class TerminalHost {
   }
 
   /* Its input holds nothing of anyone's, and what a person sent while this turn waited got its answer from the program it
-     went to. Another word may then be there. */
-  private freeForStart(a: Agent, job: TermJob): Promise<boolean> {
+     went to. Another word may then be there. A prompt typed before that answer would wait in the program's queue, and the
+     program would take it when the person's words seem answered and no turn runs: as words of a person's own. */
+  private freeOfPerson(a: Agent, job: TermJob): Promise<boolean> {
     return this.whilePromptWaits(a, async () => {
       for (;;) {
         if (!(await this.inputFree(a, job))) return false;
@@ -1006,7 +1007,7 @@ export class TerminalHost {
     a.fresh = false;
     a.took = false;
     a.typing = prompt;
-    if (typedSinceStart(a) && !(await this.freeInput(a, job))) return this.inputNotFree(a, job);
+    if (typedSinceStart(a) && !(await this.freeOfPerson(a, job))) return this.inputNotFree(a, job);
     a.ownerTyped = false;
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
@@ -1308,12 +1309,14 @@ export class TerminalHost {
     a.took = false;
   }
 
-  private endsNoTurn(a: Agent, end: TurnEnd): boolean {
-    return a.restarting || this.personWordsAnswered(a, end);
+  private endsNoTurn(a: Agent): boolean {
+    return a.restarting || this.personWordsAnswered(a);
   }
 
-  private personWordsAnswered(a: Agent, end: TurnEnd): boolean {
-    if (end.status !== 'done' || !a.personWords || a.took) return false;
+  /* However the answer to a person's words ends, a stop of their own or a failure too, it is theirs: the turn's prompt goes
+     in after it. */
+  private personWordsAnswered(a: Agent): boolean {
+    if (!a.personWords || a.took) return false;
     a.personWords = false;
     a.unanswered = null;
     a.busy = false;
@@ -1667,6 +1670,11 @@ export class TerminalHost {
     return Boolean(a.turn?.ending);
   }
 
+  /* An interruption in the log ends the running turn, or the answer to a person's words sent while its prompt waited. */
+  private stopCounts(a: Agent): boolean {
+    return this.stoppable(a) || Boolean(a.personWords && !a.took);
+  }
+
   /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
   private stoppable(a: Agent): boolean {
     return Boolean(a.turn && (a.turn.typed || (a.busy && a.took)));
@@ -1698,7 +1706,7 @@ export class TerminalHost {
   }
 
   private endTurn(a: Agent, end: TurnEnd, id?: string, blocked = false): void {
-    if (this.endsNoTurn(a, end)) return;
+    if (this.endsNoTurn(a)) return;
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
     if (decision.conflict) this.logDisagreement(a);
     if (!decision.accept) return;
@@ -1931,7 +1939,7 @@ export class TerminalHost {
       if (a.program?.kind === 'claude') {
         if (wentOn(raw)) a.unanswered = null;
         this.dequeuedPrompt(a, raw);
-        if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
+        if (claudeInterrupted(data) && this.stopCounts(a)) this.interrupted(a);
         if (this.stoppable(a) && raw.type === 'assistant' && raw.isApiErrorMessage === true) {
           const text = isRecord(raw.message) ? contentText(raw.message.content) : '';
           a.apiError = FAILURE.claude({ error: raw.error, last_assistant_message: text });

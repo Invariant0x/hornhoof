@@ -208,7 +208,7 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   return silent;
 }
 
-async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> {
+export async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> {
   const seen = alertedSet(ctx);
   if (seen.has(jobId)) return true;
   const [row] = await ctx.db
@@ -330,15 +330,15 @@ async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<s
     if (to && to.id !== s.agent.id) await dispatchAlarm(ctx, s, to, now, `${s.job.id}:after_restart`);
     return;
   }
-  const to = await screenReader(ctx, s, unavailable);
+  const to = await screenReader(ctx, s.job.companyId, s.agent.id, unavailable);
   if (to) await dispatchAlarm(ctx, s, to, now, quietCase(s, now));
 }
 
 /* Whoever hears of a quiet program must see its screen: a free program operator, or else the head of Operations, or else
-   an operator at work. */
-async function screenReader(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<string>): Promise<Agent | null> {
+   an operator at work. Never the employee whose program it is. */
+export async function screenReader(ctx: Ctx, companyId: string, of: string, unavailable: ReadonlySet<string>): Promise<Agent | null> {
   const staff: Agent[] = [];
-  for (const a of await operationsStaff(ctx, s.job.companyId)) if (a.id !== s.agent.id && await liveSubscription(ctx, a.id)) staff.push(a);
+  for (const a of await operationsStaff(ctx, companyId)) if (a.id !== of && await liveSubscription(ctx, a.id)) staff.push(a);
   const operators = staff.filter(a => a.kind === 'worker');
   return operators.find(a => !unavailable.has(a.id)) ?? staff.find(a => a.kind === 'head') ?? operators[0] ?? null;
 }

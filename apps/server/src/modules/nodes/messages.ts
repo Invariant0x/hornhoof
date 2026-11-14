@@ -12,6 +12,7 @@ import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
 import { programRestarted } from '../tasks/program-restarts.js';
 import { recordJobProgram } from '../tasks/silent.js';
+import { turnsHeld } from '../tasks/orphan-turns.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { staleOutput } from '../tasks/wake-state.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
@@ -376,6 +377,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'job.started':
       await jobStarted(ctx, id, msg.jobId, now);
+      return;
+    case 'jobs.held':
+      await turnsHeld(ctx, id, msg, now);
       return;
     case 'job.program':
       await recordJobProgram(ctx, msg, now, jobsOf(id, ctx));
