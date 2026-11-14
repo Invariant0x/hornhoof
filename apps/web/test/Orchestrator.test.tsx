@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { ComputerView, EventView, Me, Org, ShownCommand } from '../src/types';
@@ -360,9 +360,19 @@ describe('AgentWindow', () => {
   });
 
   describe('access to the computer', () => {
+    const NOW = new Date('2026-11-02T12:00:00Z');
     const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' } };
-    const OPEN: ComputerView = { available: true, until: new Date(Date.now() + 86_400_000).toISOString(), asked: null };
+    const OPEN: ComputerView = { available: true, until: new Date(NOW.getTime() + 86_400_000).toISOString(), asked: null };
     const CLOSED: ComputerView = { available: true, until: null, asked: null };
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(NOW);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
     it("shows the CEO the orchestrator's request next to his terminal and opens access for a day with one click", async () => {
       const user = userEvent.setup();

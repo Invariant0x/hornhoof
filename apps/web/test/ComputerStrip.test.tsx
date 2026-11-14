@@ -1,15 +1,25 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { ComputerView } from '../src/types';
 import { ComputerStrip } from '../src/ui/ComputerStrip';
 import { mockApi } from './api-mock';
 
-const UNTIL = new Date(Date.now() + 86_400_000).toISOString();
+const NOW = new Date(2026, 10, 4, 12, 0);
+const UNTIL = new Date(NOW.getTime() + 86_400_000).toISOString();
 const open = (machine: string): ComputerView => ({ available: true, until: UNTIL, asked: null, machine, canAnswer: true });
 const asks = (machine: string, reason = 'Clean Docker images.'): ComputerView => ({ available: true, until: null, asked: { reason, at: '2026-11-04T10:00:00Z' }, machine, canAnswer: true });
 const closed = (machine: string): ComputerView => ({ available: true, until: null, asked: null, machine, canAnswer: true });
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 type Answer = (action: 'open' | 'close' | 'decline', machine: string | null | undefined) => Promise<ComputerView>;
 
