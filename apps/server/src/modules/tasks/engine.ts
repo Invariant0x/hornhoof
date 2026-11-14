@@ -256,7 +256,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
        is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
-    if (n.data?.turnCleanup) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+    if (n.data?.turnCleanup || n.data?.independentPart) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
     if (set.after?.length) await lockMovePrerequisites(tx, task, set.after);
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
@@ -381,6 +381,7 @@ async function checkIndependentExecutor(db: Db, departmentId: string | null, par
 }
 
 async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor, plan: StageRoute): Promise<{ child: Task; wake: Wake }> {
+  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, parent.companyId)).for('no key update');
   const last = await lastTaskNumber(tx, parent.companyId);
   const [child] = await tx.insert(tasks).values({
     companyId: parent.companyId,
