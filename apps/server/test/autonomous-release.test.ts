@@ -1268,4 +1268,85 @@ describe('autonomous release for exact commits to main', () => {
     expect(ancestorAsked.text).toContain('waits for a person');
     expect((await f.journal()).json().entries).toEqual([]);
   });
+
+  it('M3: runs readCommit and readCompare before the transaction so CEO turn-off never waits on a network request', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    const { acceptance } = await f.verifyThroughEchelons();
+    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+
+    let txDepth = 0;
+    const realTransaction = f.ctx.db.transaction.bind(f.ctx.db);
+    f.ctx.db.transaction = (async <T>(
+      fn: Parameters<typeof f.ctx.db.transaction>[0],
+      config?: Parameters<typeof f.ctx.db.transaction>[1],
+    ): Promise<T> => {
+      txDepth += 1;
+      try {
+        return (await realTransaction(fn, config)) as T;
+      } finally {
+        txDepth -= 1;
+      }
+    }) as typeof f.ctx.db.transaction;
+
+    const callsInsideTx: string[] = [];
+    const realReadCommit = f.ctx.readCommit;
+    const realReadCompare = f.ctx.readCompare;
+    f.ctx.readCommit = async (repo, ref, ms) => {
+      if (txDepth > 0) callsInsideTx.push('readCommit');
+      return realReadCommit(repo, ref, ms);
+    };
+    f.ctx.readCompare = async (repo, want, ms) => {
+      if (txDepth > 0) callsInsideTx.push(`readCompare:${want.base.slice(0, 6)}..${want.head.slice(0, 6)}`);
+      return realReadCompare(repo, want, ms);
+    };
+
+    const { call: headCall } = await f.openTools(f.head);
+    const approved = await headCall('ask_person', { task: f.task.number, question: 'Publish verified commit.', commit: CANDIDATE });
+    expect(approved.isError).toBe(false);
+    expect(approved.text).not.toContain('waits for a person');
+    expect(callsInsideTx).toEqual([]);
+
+    f.setMain(CANDIDATE);
+    const closed = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Integrated.', acceptance });
+    expect(closed.task.status).toBe('done');
+    expect(callsInsideTx).toEqual([]);
+
+    /* Behavioral check: while readCompare is suspended mid-flight, CEO turning autonomous release off completes without waiting. */
+    const f2 = await releaseFixture();
+    expect((await f2.setAutonomous(f2.ceoToken, true)).statusCode).toBe(200);
+    await f2.verifyThroughEchelons();
+    await f2.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+
+    let notifyCompareStarted: (() => void) | null = null;
+    const compareStarted = new Promise<void>(resolve => {
+      notifyCompareStarted = resolve;
+    });
+    let releaseCompare: (() => void) | null = null;
+    const compareGate = new Promise<void>(resolve => {
+      releaseCompare = resolve;
+    });
+    let compareResolved = false;
+    const baseReadCompare = f2.ctx.readCompare;
+    f2.ctx.readCompare = async (repo, want, ms) => {
+      notifyCompareStarted?.();
+      await compareGate;
+      compareResolved = true;
+      return baseReadCompare(repo, want, ms);
+    };
+
+    const { call: headCall2 } = await f2.openTools(f2.head);
+    const pendingAsk = headCall2('ask_person', { task: f2.task.number, question: 'Ship while CEO disables?', commit: CANDIDATE });
+    await compareStarted;
+
+    const offWhileComparing = await f2.setAutonomous(f2.ceoToken, false);
+    expect(compareResolved).toBe(false);
+    expect(offWhileComparing.statusCode).toBe(200);
+    expect(offWhileComparing.json().autonomousRelease).toBe(false);
+
+    releaseCompare!();
+    const askedAfterOff = await pendingAsk;
+    expect(askedAfterOff.text).toContain('waits for a person');
+    expect((await f2.journal()).json().entries).toEqual([]);
+  });
 });
