@@ -3,9 +3,10 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, requests, subscriptions } from '../src/db/schema.js';
 import { insertTurn, pump, TURN_TIMEOUT_MS } from '../src/modules/conversation/queue.js';
-import { BUILTIN, keyOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
+import { keyOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
+import { BUILTIN } from './builtin.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 const MIN = 60_000;
@@ -85,7 +86,7 @@ describe('a running turn that no live program holds', () => {
     c.later(2 * MIN);
 
     await reconcile(c.ctx, new Date());
-    expect(c.checks()).toEqual([{ to: c.node.kind === 'node' ? c.node.nodeId : 'builtin', jobIds: [turn] }]);
+    expect(c.checks()).toEqual([{ to: c.node.kind === 'node' ? c.node.nodeId : keyOf(BUILTIN), jobIds: [turn] }]);
     await c.answer(c.node, [turn], []);
 
     expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
@@ -120,7 +121,7 @@ describe('a running turn that no live program holds', () => {
     expect((await c.running(c.orchestrator.id)).map(j => j.id)).toEqual([left!.id]);
 
     await reconcile(c.ctx, new Date());
-    expect(c.checks()).toEqual([{ to: 'builtin', jobIds: [left!.id] }]);
+    expect(c.checks()).toEqual([{ to: keyOf(BUILTIN), jobIds: [left!.id] }]);
     await c.answer(BUILTIN, [left!.id], []);
 
     expect((await c.job(left!.id)).status).toBe('failed');
@@ -170,8 +171,8 @@ describe('a running turn with a live program', () => {
       await reconcile(c.ctx, new Date());
       const asked = c.checks().at(-1);
       /* A node that holds the turn says so; one that would say otherwise of a program it reports thinking is not believed. */
-      if (asked?.to === 'builtin') await c.answer(BUILTIN, asked.jobIds, asked.jobIds);
-      if (asked && asked.to !== 'builtin') await c.answer(c.node, asked.jobIds, []);
+      if (asked?.to === keyOf(BUILTIN)) await c.answer(BUILTIN, asked.jobIds, asked.jobIds);
+      if (asked && asked.to !== keyOf(BUILTIN)) await c.answer(c.node, asked.jobIds, []);
     }
     expect((await c.job(hers)).status).toBe('running');
     expect((await c.job(his)).status).toBe('running');

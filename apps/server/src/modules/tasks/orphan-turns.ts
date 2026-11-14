@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { enqueueTurn } from '../conversation/queue.js';
 import { publishWorking } from '../events/store.js';
-import { identityOf, keyOf, type NodeIdentity } from '../nodes/hub.js';
+import { identityOf, keyOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { failOpenJobs, jobsOf } from '../nodes/messages.js';
 import { agentProgramState, alreadyAlerted, screenReader } from './silent.js';
 import { logTurnFact } from './turn-log.js';
@@ -44,7 +44,7 @@ const runningTurns = (ctx: Ctx, before?: Date) =>
 export async function askOfRunningTurns(ctx: Ctx, now: Date): Promise<void> {
   const asks = new Map<string, { node: NodeIdentity; jobIds: string[] }>();
   for (const { job, plan } of await runningTurns(ctx, new Date(now.getTime() - ASK_AFTER_MS))) {
-    const node = identityOf({ kind: plan }, job.nodeId);
+    const node = identityOf({ kind: plan }, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
     if (!node) await endLost(ctx, job, NO_MACHINE);
     else if (ctx.hub.isReady(node)) {
       const ask = asks.get(keyOf(node)) ?? { node, jobIds: [] };
@@ -142,7 +142,7 @@ export async function moveStalledQueues(ctx: Ctx, now: Date): Promise<void> {
   const busy = new Set(turns.flatMap(t => (t.job.agentId ? [t.job.agentId] : [])));
   for (const { job, plan } of turns) {
     const idle = idleFor(ctx, job, now.getTime());
-    const node = identityOf({ kind: plan }, job.nodeId);
+    const node = identityOf({ kind: plan }, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
     if (!job.agentId || !node || idle === null || idle < IDLE_END_MS) continue;
     const waiting = await waitingBehind(ctx, job.agentId, now.getTime() - IDLE_END_MS);
     if (!waiting) continue;
