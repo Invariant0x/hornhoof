@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type http from 'node:http';
 import { join } from 'node:path';
 import type { Config } from '../../config.js';
@@ -312,6 +312,7 @@ export class Keeper {
   private linkHeld = false;
   /* The link's settings as last read, for the controller, and until when the link's frpc stays stopped. */
   private settingsNow: TunnelSettings | null | undefined = undefined;
+  private emptyLinkWhy = 'Stopping the public link: the database holds no public link.';
   /* Whether hornhoof.org answered this keeper's last look at it, which it takes only while it holds no lease; null
      before the first, and again once it leads. */
   private relayUp: boolean | null = null;
@@ -592,18 +593,7 @@ export class Keeper {
   async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
     const { host = '0.0.0.0', ports, frontHost, everyMs = EVERY_MS, linkEveryMs = LINK_EVERY_MS, db } = this.opts;
     const at = { ...DOOR_PORTS, ...ports };
-    /* One reader of the link's settings for both frpc children and the sync controller, so an outage of the database
-       is said once. */
-    const settings = db ? keepingOnFailure(() => this.linkSettings(db), () => this.opts.log(SETTINGS_KEPT)) : null;
-    const read = settings
-      ? async () => {
-          const now = await settings();
-          this.settingsNow = now;
-          /* A read that failed says nothing: the door of a hidden name stays shut on what was last known. */
-          if (now !== undefined) this.hiddenName = now?.hidden === true;
-          return now;
-        }
-      : null;
+    const read = db ? this.settingsReader(db) : null;
     /* A switch of the server to this machine that is on its way: until its part leads, the link's frpc runs only once
        that part starts it. */
     if (this.taker) {
@@ -786,18 +776,53 @@ export class Keeper {
     return row?.networkId ?? '';
   }
 
+  /* One reader of the link's settings for both frpc children, the data links and the sync controller: concurrent asks
+     share the read in flight, an outage is said once, and a failed read never clears the last known settings. */
+  private settingsReader(db: Db): () => Promise<TunnelSettings | null | undefined> {
+    const settings = keepingOnFailure(() => this.linkSettings(db), () => this.opts.log(SETTINGS_KEPT));
+    let reading: Promise<TunnelSettings | null | undefined> | null = null;
+    return () => {
+      reading ??= settings()
+        .then(now => {
+          if (now !== undefined) {
+            this.settingsNow = now;
+            /* A read that failed says nothing: the door of a hidden name stays shut on what was last known. */
+            this.hiddenName = now?.hidden === true;
+          }
+          return now;
+        })
+        .finally(() => { reading = null; });
+      return reading;
+    };
+  }
+
+  private recoverySettings(): TunnelSettings | null {
+    const file = join(this.opts.config.controlDir, RECOVERY_LINK);
+    if (!existsSync(file)) {
+      this.emptyLinkWhy = 'Stopping the public link: the database holds no public link.';
+      return null;
+    }
+    try {
+      const said = Settings.safeParse({ ...(JSON.parse(readFileSync(file, 'utf8')) as object), mode: 'http' });
+      if (said.success) return said.data;
+    } catch {
+      /* Unreadable or malformed recovery-link.json falls through without quoting its contents. */
+    }
+    this.emptyLinkWhy = 'Stopping the public link: the database holds no public link, and recovery-link.json has no valid link settings.';
+    return null;
+  }
+
   /* The link's settings: the database's own; and while it has none, on a server that is being restored from a recovery
      file, the link of that file, so the machines that survived find this server under the company's name. In http: the
      link's certificate comes back with the restored database. */
   private async linkSettings(db: Db): Promise<TunnelSettings | null> {
-    const own = await tunnelSettings(db, this.opts.config);
-    if (own) return own;
-    try {
-      const said = Settings.safeParse({ ...(JSON.parse(readFileSync(join(this.opts.config.controlDir, RECOVERY_LINK), 'utf8')) as object), mode: 'http' });
-      return said.success ? said.data : null;
-    } catch {
-      return null;
-    }
+    return (await tunnelSettings(db, this.opts.config)) ?? this.recoverySettings();
+  }
+
+  private whyLinkStopped(): string {
+    if (this.settingsNow === null) return this.emptyLinkWhy;
+    if (this.linkHeld) return 'Stopping the public link while a server switch holds the company name.';
+    return 'Stopping the public link while this keeper holds no lease or waits after a lease ended.';
   }
 
   /* The backups wait for the machine's key and for its key for backups, both kept in the keeper's folder. A folder
@@ -966,7 +991,7 @@ export class Keeper {
     this.certificateTimer = setInterval(() => void follow(), everyMs);
     void follow();
     if (!config.machineId) return log(NO_MACHINE_ID);
-    this.tunnel = new TunnelKeeper({ read, everyMs, restartMs: FRPC_RESTART_MS, clientFor: settings => this.frpc(settings, local), log });
+    this.tunnel = new TunnelKeeper({ read, everyMs, restartMs: FRPC_RESTART_MS, clientFor: settings => this.frpc(settings, local), why: () => this.whyLinkStopped(), log });
     this.tunnel.start();
   }
 

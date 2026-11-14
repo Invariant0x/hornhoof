@@ -26,6 +26,8 @@ type Options<T> = {
   clientFor: (settings: T) => Client;
   /* What it says when a client starts and when there is nothing to run; the public link's own words when not given. */
   says?: { carrying: (settings: T) => string; waiting: string };
+  /* Why the settings came back empty, said once before a running client is stopped. */
+  why?: () => string | null;
   log: (line: string) => void;
 };
 
@@ -45,6 +47,7 @@ export class TunnelKeeper<T = TunnelSettings> {
   private pause: number;
   /* A read may outlast the pause between reads, and an older answer must not land after a newer one. */
   private reading = false;
+  private sawEmpty = false;
 
   constructor(private readonly opts: Options<T>) {
     this.pause = opts.restartMs;
@@ -59,6 +62,7 @@ export class TunnelKeeper<T = TunnelSettings> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.text = null;
+    this.sawEmpty = false;
     await this.end();
   }
 
@@ -71,9 +75,29 @@ export class TunnelKeeper<T = TunnelSettings> {
     if (settings !== undefined && this.timer) this.follow(settings);
   }
 
+  /* A single empty read must not tear down a running tunnel: stopping and starting frpc again can cost up to 40 s at
+     the relay and drops every open peer stream, while a one-second hiccup on the path through hornhoof.org, in the
+     leader's mode, or in a stale view can leave a single read empty before the next read finds the same link standing.
+     Only two empty reads in a row confirm that the link is gone and stop the running client. */
+  private holdThroughOneEmptyRead(settings: T | null): boolean {
+    if (settings !== null || this.text === null) {
+      this.sawEmpty = false;
+      return false;
+    }
+    this.sawEmpty = !this.sawEmpty;
+    return this.sawEmpty;
+  }
+
+  private sayWhyStopped(): void {
+    const why = this.opts.why?.();
+    if (why) this.opts.log(why);
+  }
+
   private follow(settings: T | null): void {
+    if (this.holdThroughOneEmptyRead(settings)) return;
     const text = settings && JSON.stringify(settings);
     if (text === this.text) return;
+    if (!settings) this.sayWhyStopped();
     this.text = text;
     this.pause = this.opts.restartMs;
     void this.end().then(() => {

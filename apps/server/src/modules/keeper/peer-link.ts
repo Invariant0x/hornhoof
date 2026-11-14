@@ -97,6 +97,7 @@ export class PeerLink {
   private tunnel: TunnelKeeper<PeerServices> | null = null;
   private crl: HeldCrl | null;
   private answer: Answer | null = null;
+  private lastSettings: TunnelSettings | null = null;
   private timer: NodeJS.Timeout | null = null;
   private reading: Promise<void> | null = null;
   private opened = false;
@@ -246,8 +247,7 @@ export class PeerLink {
     return { machine: held.machine, role: held.role, lead: this.opts.mode() === 'lead', commit: this.opts.commit, ...this.opts.helloMore?.() };
   }
 
-  /* A second frpc of the keeper offers the two doors through hornhoof.org, while the app leads and the company has a
-     link with both secrets. */
+  /* A second frpc of the keeper offers the two doors through hornhoof.org while the company has a link with both secrets. */
   private offer(ports: PeerPorts): void {
     const local = { data: ports.peer, app: ports.peerApp };
     const { machineId } = this.opts;
@@ -257,19 +257,32 @@ export class PeerLink {
       restartMs: FRPC_RESTART_MS,
       clientFor: services => (this.opts.peerClientFor ? this.opts.peerClientFor(services, peerClientId(services.settings.name, machineId), local) : peerClientFor(services, { machineId, local })),
       says: { carrying: services => `Offering this machine to its peers through ${services.settings.url}.`, waiting: 'No public link: this machine is not offered to its peers through it.' },
+      why: () => this.whyNoServices(),
       log: this.opts.log,
     });
     this.tunnel.start();
   }
 
-  /* Null: no link or no secrets, and the client stops. Undefined: not known now, and the client it runs stays. */
+  /* Null: no link or no secrets, and the client stops. Undefined: not known now, and the client it runs stays.
+     PeerServer listens in every mode and reports whether this machine leads in its hello, so a brief dip out of
+     leading must not tear down the peer tunnel. */
   private async services(): Promise<PeerServices | null | undefined> {
     if (!this.answer) return undefined;
-    if (this.opts.mode() !== 'lead') return null;
-    const settings = await this.opts.settings();
+    const settings = await this.opts.settings().catch(() => undefined);
     if (settings === undefined) return undefined;
-    const link = this.answer.link;
-    if (!settings || !link?.dataSecret) return null;
+    this.lastSettings = settings;
+    return this.servicesFrom(settings, this.answer.link);
+  }
+
+  private servicesFrom(settings: TunnelSettings | null, link: Answer['link']): PeerServices | null | undefined {
+    if (!settings) return null;
+    if (!link?.dataSecret) return this.opts.mode() === 'lead' ? null : undefined;
     return { settings, secrets: { data: link.dataSecret, app: link.appSecret } };
+  }
+
+  private whyNoServices(): string {
+    return this.lastSettings
+      ? 'Stopping the peer tunnel: the app reported no public link or peer secrets.'
+      : 'Stopping the peer tunnel: the database holds no public link.';
   }
 }

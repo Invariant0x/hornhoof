@@ -432,6 +432,7 @@ export class FollowKeeper {
       restartMs: FRPC_RESTART_MS,
       clientFor: services => (this.opts.peerClientFor ? this.opts.peerClientFor(services, peerClientId(services.settings.name, machineId), local) : peerClientFor(services, { machineId, local, dir })),
       says: { carrying: services => `Offering this machine to its peers through ${services.settings.url}.`, waiting: 'No public link: this machine is not offered to its peers through it.' },
+      why: () => this.whyNoServices(),
       log: this.opts.log,
     });
     this.tunnel.start();
@@ -453,9 +454,14 @@ export class FollowKeeper {
     if (!this.view) return undefined;
     const link = this.view.link;
     if (!link?.dataSecret) return null;
-    const settings = await this.opts.settings();
+    const settings = await this.opts.settings().catch(() => undefined);
     if (settings === undefined) return undefined;
     return settings ? { settings, secrets: { data: link.dataSecret, app: link.appSecret } } : null;
+  }
+
+  private whyNoServices(): string {
+    if (!this.view?.link?.dataSecret) return 'Stopping the peer tunnel: the company server reported no public link or data secret.';
+    return "Stopping the peer tunnel: this machine's database holds no public link.";
   }
 
   /* One look at a time, each second: the copy's next step, the word to the app, and the role a merge reads with. */
