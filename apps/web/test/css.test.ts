@@ -100,3 +100,23 @@ it('lets a finger take a line of the company map and a bend on it as easily as a
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p))).toEqual(['28px', '28px', '-14px 0 0 -14px']);
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p, '(pointer: coarse)'))).toEqual(['44px', '44px', '-22px 0 0 -22px']);
 });
+
+it('sizes the map scale label by its content from tokens without clipping and keeps 44 px zoom buttons', () => {
+  expect(decl('.zoom', 'max-inline-size')).toBe('calc(100% - 32px)');
+  expect(decl('.zbtn', 'flex')).toBe('none');
+  expect(decl('.zbtn', 'width')).toBe('44px');
+  expect(decl('.zbtn', 'height')).toBe('44px');
+  expect(decl('.zv', 'flex')).toBe('none');
+  expect(decl('.zv', 'box-sizing')).toBe('border-box');
+  expect(decl('.zv', 'min-inline-size')).toBe('52px');
+  expect(decl('.zv', 'min-width')).toBeUndefined();
+  expect(decl('.zv', 'padding-inline')).toBe('8px');
+  expect(decl('.zv', 'white-space')).toBe('nowrap');
+  expect(decl('.zv', 'font-family')).toBe('var(--f-body)');
+  expect(decl('.zv', 'font-size')).toBe('13px');
+  expect(decl('.zv', 'font-weight')).toBe('500');
+  expect(decl('.zv', 'line-height')).toBe('1.45');
+  expect(decl('.zv', 'font-variant-numeric')).toBe('tabular-nums');
+  expect(decl('.zv', 'overflow')).toBeUndefined();
+  expect(decl('.zv', 'text-overflow')).toBeUndefined();
+});

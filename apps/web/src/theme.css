@@ -639,7 +639,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cnt b { color: var(--ink); font-weight: 600; }
 /* Zoom bottom left and the orchestrator's line bottom middle. */
-.zoom { position: absolute; left: 16px; bottom: 16px; display: flex; align-items: center; }
+.zoom { position: absolute; left: 16px; bottom: 16px; max-inline-size: calc(100% - 32px); display: flex; align-items: center; }
 /* A block's grip over its top left corner, 44 px to touch at any zoom: nothing drawn, only the pointer shows it, and the ring of
    the keyboard's focus; the map's corners are not mirrored. */
 .grip { box-sizing: border-box; margin: 0; padding: 0; border: 0; background: none; cursor: move; touch-action: none; transform-origin: 50% 50%; }
@@ -664,10 +664,10 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .map-arrange { position: absolute; left: 16px; bottom: 76px; display: grid; justify-items: start; gap: 8px; max-width: calc(100% - 32px); }
 .map-arrange .alert { margin: 0; }
 .map-arrange .btn { min-height: 44px; background: var(--hud); }
-.zbtn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
+.zbtn { flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
 .zbtn:hover { color: var(--cyan-ink); }
 .zbtn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.zv { min-width: 52px; text-align: center; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.zv { flex: none; box-sizing: border-box; min-inline-size: 52px; padding-inline: 8px; white-space: nowrap; text-align: center; font-family: var(--f-body); font-size: 13px; font-weight: 500; line-height: 1.45; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ticker { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; min-height: 44px; max-width: calc(100% - 2 * 240px); padding: 0 16px; font-size: 13px; white-space: nowrap; overflow: hidden; }
 .ticker .live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); animation: blink 1.6s ease-in-out infinite; }
 .ticker .live.off { background: var(--amber); animation: none; }
