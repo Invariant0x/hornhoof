@@ -38,7 +38,7 @@ const headOf = (dir: string, branch: string) => {
 
 /* What a git host does with a push over HTTP, by git's own receive-pack. Each push waits at hold first, so a test can
    have two in flight at once. */
-async function host(dir: string, options: { hold?: () => Promise<void>; status?: number } = {}): Promise<{ url: string; pushes: IncomingMessage[] }> {
+async function host(dir: string, options: { hold?: () => Promise<void>; status?: number; push?: (res: ServerResponse) => void } = {}): Promise<{ url: string; pushes: IncomingMessage[] }> {
   const pushes: IncomingMessage[] = [];
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     if (options.status) { res.writeHead(options.status); res.end(); return; }
@@ -49,6 +49,7 @@ async function host(dir: string, options: { hold?: () => Promise<void>; status?:
       return;
     }
     pushes.push(req);
+    if (options.push) { options.push(res); return; }
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
@@ -125,6 +126,43 @@ describe('making a branch in a repository', () => {
     const { url } = await host(dir);
     expect(await createBranch({ url, token: '' }, 'turn-30', '7'.repeat(40))).toEqual({ problem: expect.stringContaining('turn-30') as unknown });
     expect(headOf(dir, 'turn-30')).toBeNull();
+  });
+
+  it('says the repository moved when the push is sent on, and follows it nowhere', async () => {
+    const { dir, main } = origin();
+    const { url, pushes } = await host(dir, { push: res => { res.writeHead(307, { location: 'http://127.0.0.1:9/elsewhere.git/git-receive-pack' }); res.end(); } });
+    expect(await createBranch({ url, token: 'secret-token-0123456789' }, 'turn-30', main)).toEqual({ problem: expect.stringContaining('moved') as unknown });
+    expect(pushes).toHaveLength(1);
+    expect(headOf(dir, 'turn-30')).toBeNull();
+  });
+
+  it('says what the repository answered to the push, and when its answer is no answer to a push', async () => {
+    const { dir, main } = origin();
+    const failing = await host(dir, { push: res => { res.writeHead(500); res.end(); } });
+    expect(await createBranch({ url: failing.url, token: '' }, 'turn-30', main)).toEqual({ problem: expect.stringContaining('it answered 500') as unknown });
+    const page = await host(dir, { push: res => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html></html>'); } });
+    expect(await createBranch({ url: page.url, token: '' }, 'turn-30', main)).toEqual({ problem: expect.stringContaining('not a git repository') as unknown });
+    const endless = await host(dir, { push: res => { res.writeHead(200, { 'content-type': RESULT }); res.end(Buffer.alloc(70 * 1024, 0x30)); } });
+    expect(await createBranch({ url: endless.url, token: '' }, 'turn-30', main)).toEqual({ problem: expect.stringContaining('too long') as unknown });
+    expect(headOf(dir, 'turn-30')).toBeNull();
+  });
+
+  it('says what git said when it took no pack, and when its answer names no branch', async () => {
+    const { dir, main } = origin();
+    const line = (text: string) => `${(text.length + 5).toString(16).padStart(4, '0')}${text}\n`;
+    const unpacked = await host(dir, { push: res => { res.writeHead(200, { 'content-type': RESULT }); res.end(`${line('unpack index-pack abnormal exit')}0000`); } });
+    expect(await createBranch({ url: unpacked.url, token: '' }, 'turn-30', main)).toEqual({ problem: expect.stringContaining('it refused: unpack index-pack abnormal exit') as unknown });
+    const silent = await host(dir, { push: res => { res.writeHead(200, { 'content-type': RESULT }); res.end(`${line('unpack ok')}0000`); } });
+    expect(await createBranch({ url: silent.url, token: '' }, 'turn-30', main)).toEqual({ problem: expect.stringContaining('says nothing of the branch') as unknown });
+  });
+
+  it('takes no branch name or commit git would not take as one', async () => {
+    const { dir, main } = origin();
+    const { url, pushes } = await host(dir);
+    for (const [branch, commit] of [['turn 30', main], ['turn-30\nrefs/heads/main', main], ['../main', main], ['turn-30', 'not-a-commit']] as const) {
+      expect(await createBranch({ url, token: '' }, branch, commit)).toEqual({ problem: expect.stringContaining('not one git takes') as unknown });
+    }
+    expect(pushes).toHaveLength(0);
   });
 
   it('says it could not reach a repository that does not answer', async () => {

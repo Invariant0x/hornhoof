@@ -564,11 +564,17 @@ async function closeTurn(ctx: Reader, repo: Repo, turn: Turn, record: Release, v
   if (typeof closed === 'string') return closed;
   ctx.bus.publish(turn.companyId, { type: 'org' });
   ctx.log?.info({ companyId: turn.companyId, turn: turn.number, version, next: closed.next.number, startCommit: head }, `Turn ${turn.number} was released as ${version}; turn-${closed.next.number} starts from ${head}.`);
-  /* A branch that could not be made now is made before the first result joins the next turn. */
-  const branch = await ensureTurnBranch(ctx, repo, closed.next);
-  if ('problem' in branch) ctx.log?.warn({ companyId: turn.companyId, turn: closed.next.number }, `turn-${closed.next.number} was not made: ${branch.problem}`);
-  else ctx.log?.info({ companyId: turn.companyId, turn: closed.next.number, head: branch.head, made: branch.made }, branch.made ? `turn-${closed.next.number} was made from ${branch.head}.` : `turn-${closed.next.number} was there already, at ${branch.head}.`);
+  await makeBranchOf(ctx, repo, closed.next);
   return 'closed';
+}
+
+/* The branch of the turn just opened, from where it starts. One that could not be made now is made before the first result
+   joins the turn. */
+async function makeBranchOf(ctx: Reader, repo: Repo, turn: Turn): Promise<void> {
+  const branch = await ensureTurnBranch(ctx, repo, turn);
+  const at = { companyId: turn.companyId, turn: turn.number };
+  if ('problem' in branch) ctx.log?.warn(at, `turn-${turn.number} was not made: ${branch.problem}`);
+  else ctx.log?.info({ ...at, head: branch.head, made: branch.made }, branch.made ? `turn-${turn.number} was made from ${branch.head}.` : `turn-${turn.number} was there already, at ${branch.head}.`);
 }
 
 /* Every minute: each department that keeps a repository, on its tags. One department's trouble keeps no other from it. */
