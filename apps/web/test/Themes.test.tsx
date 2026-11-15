@@ -110,6 +110,13 @@ describe('the Themes section of the settings', () => {
     expect(within(cyberpunk).getByText('A night console with a cyan accent.')).toBeInTheDocument();
     expect(within(light).getByText('Built-in')).toBeInTheDocument();
     expect(labels(cyberpunk)).toEqual(['Download: Cyberpunk']);
+    /* The card on keeps the room of Apply, unseen and out of reach, so its buttons stand where every card has them. */
+    const room = cyberpunk.querySelector('.skin-actions > .skin-apply-room')!;
+    expect(room).toHaveAttribute('aria-hidden', 'true');
+    expect(room.tagName).toBe('SPAN');
+    expect(room.textContent).toBe('Apply');
+    expect(light.querySelector('.skin-apply-room')).toBeNull();
+    expect(decl('.skin-apply-room', 'visibility')).toBe('hidden');
     expect(labels(light)).toEqual(['Apply: Light', 'Download: Light']);
     expect(within(dialog).queryAllByRole('button', { pressed: true })).toEqual([]);
     /* No button on a card is filled: Apply is as quiet as Download. */

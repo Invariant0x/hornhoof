@@ -97,7 +97,13 @@ function SkinCard({ card, on, onApply, onDownload, onRemove }: CardProps) {
         <p className="skin-meta">{card.desc}</p>
       </div>
       <div className="entry-actions skin-actions">
-        {!on && (
+        {on ? (
+          /* Apply's room, unseen and out of reach: the other buttons stand where every card has them, and the card keeps
+             its height when its skin is turned on. */
+          <span className="btn small ghost skin-apply-room" aria-hidden="true">
+            {words.apply}
+          </span>
+        ) : (
           <button className="btn small ghost" type="button" aria-label={`${words.apply}: ${card.name}`} data-focus-skin={card.id} onClick={onApply}>
             {words.apply}
           </button>

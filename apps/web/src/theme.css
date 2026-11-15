@@ -462,6 +462,7 @@ select:disabled { opacity: .55; }
 .skin-state { border: 1px solid var(--ok); color: var(--ok); }
 .skin-state::before { background: currentColor; }
 .skin-state:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.skin-apply-room { visibility: hidden; }
 .skin-meta { color: var(--muted); }
 .skin-actions { justify-content: flex-end; align-self: end; }
 /* The same small task card in each skin's own tokens: no action, hidden from a screen reader, the card names it all. */
