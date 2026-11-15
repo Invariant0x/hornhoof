@@ -39,7 +39,7 @@ type Party = NonNullable<EventView['message']>['from'];
 const LISA: Party = { kind: 'person', id: 'p2', name: 'Lisa', role: null, department: null };
 const ORCH: Party = { kind: 'agent', id: 'a1', name: 'Orchestrator', role: null, department: null, agentKind: 'orchestrator' };
 
-function open(routes: Record<string, unknown> = {}) {
+function open(routes: Record<string, unknown> = {}, org = ORG) {
   const calls = mockApi({
     'GET /api/agents/orchestrator': [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
     [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }],
@@ -48,7 +48,7 @@ function open(routes: Record<string, unknown> = {}) {
   });
   const view = render(
     <LanguageProvider>
-      <AgentWindow me={ME} org={ORG} agentId="orchestrator" onClose={() => {}} />
+      <AgentWindow me={ME} org={org} agentId="orchestrator" onClose={() => {}} />
     </LanguageProvider>,
   );
   return { calls, ...view };
@@ -105,6 +105,14 @@ describe("an agent's window opens as a chat", () => {
     expect(toChat).toHaveTextContent('Chat');
     await user.click(toChat);
     expect(screen.getByRole('log', { name: 'Conversation' })).toBeInTheDocument();
+  });
+
+  it('names the program an API runs in by its protocol: Codex for an API in the OpenAI protocol', async () => {
+    const user = userEvent.setup();
+    const sub = { ...ORG.orchestrator!.subscription!, provider: 'custom_api' as const, label: 'Acme LLM', api: { baseUrl: 'https://llm.acme.example/v1', protocol: 'openai' as const } };
+    open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: sub } });
+    await user.click(await screen.findByRole('button', { name: 'Terminal' }));
+    expect(screen.getByRole('status', { name: 'Terminal' })).toHaveTextContent(/^The Codex program of this agent is asleep now\./);
   });
 
   it('opens the terminal the person chose last even when the agent has none live, and says why in Russian', async () => {

@@ -70,6 +70,16 @@ describe('Subscriptions & API', () => {
     },
   );
 
+  it('marks each API with the program it runs in: Claude Code in the Anthropic protocol, Codex in the OpenAI one', async () => {
+    const acme: SubView = { ...ROUTER, id: 's-acme', provider: 'custom_api', label: 'Acme LLM', last4: 'M3N4', api: { baseUrl: 'https://llm.acme.example/v1', protocol: 'openai' } };
+    const codexRouter: SubView = { ...ROUTER, id: 's-router-codex', last4: 'QRST', api: { baseUrl: 'https://openrouter.ai/api/v1', protocol: 'openai' } };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [ROUTER, acme, codexRouter] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    const mark = (last4: string) => within(screen.getAllByRole('row').find(r => r.textContent!.includes(last4))!).getByRole('img').getAttribute('aria-label');
+    expect([mark('WXYZ'), mark('M3N4'), mark('QRST')]).toEqual(['Claude', 'Codex', 'Codex']);
+  });
+
   it('connects OpenRouter with the models it lists, the key going only to the server', async () => {
     const calls = lists({
       'POST /api/subscriptions/models': [200, { models: [{ id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic: Claude Sonnet 4.5' }, { id: 'meta-llama/llama-4-maverick', name: 'Meta: Llama 4 Maverick' }] }],
