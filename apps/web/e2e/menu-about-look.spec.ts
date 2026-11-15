@@ -337,10 +337,10 @@ for (const skin of SKINS) for (const width of WIDTHS) {
     await page.goto('/settings/integrations');
     const dialog = page.getByRole('dialog', { name: t.settings.title, exact: true });
     await expect(dialog.getByRole('article', { name: t.googleSheets.title, exact: true })).toBeVisible();
-    const item = dialog.getByRole('navigation', { name: t.settings.groupsLabel, exact: true }).getByRole('button', { name: t.settings.groups.appearance, exact: true });
-    /* From Done, the keyboard reaches Profile, then Appearance & language. */
-    await dialog.getByRole('button', { name: t.common.done, exact: true }).focus();
-    await page.keyboard.press('Tab');
+    const nav = dialog.getByRole('navigation', { name: t.settings.groupsLabel, exact: true });
+    const item = nav.getByRole('button', { name: t.settings.groups.appearance, exact: true });
+    /* From Profile the keyboard reaches Appearance & language. Firefox stops on a body that scrolls on its way from Done. */
+    await nav.getByRole('button', { name: t.settings.groups.profile, exact: true }).focus();
     await page.keyboard.press('Tab');
     await expect(item).toBeFocused();
     expect(await ring(item), `${name}: an item of the list`).toBe('true solid 2px 2px');
