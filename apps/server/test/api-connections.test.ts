@@ -273,7 +273,7 @@ describe("a turn's tokens", () => {
     const older = await c.job();
     const test = await c.job({ agentId: null, kind: 'test' });
     const now = new Date('2026-11-15T02:30:00Z');
-    await c.end(told.id, TOKENS, now);
+    await c.end(told.id, { ...TOKENS, model: 'claude-opus-5-5' }, now);
     await c.end(silent.id, null, now);
     await c.end(older.id, undefined, now);
     await c.end(test.id, { input: 12, output: 3, cacheRead: null, cacheWrite: null, total: null }, now);
@@ -283,8 +283,8 @@ describe("a turn's tokens", () => {
     const rows = await c.db.select().from(turnTokens);
     const of = (jobId: string) => rows.find(r => r.jobId === jobId);
     expect(rows).toHaveLength(4);
-    expect(of(told.id)).toEqual({ jobId: told.id, companyId: c.companyId, agentId: c.orchestrator.id, subscriptionId: c.orchestrator.subscriptionId, inputTokens: 1200, outputTokens: 340, cacheReadTokens: 9000, cacheWriteTokens: 150, totalTokens: 10_690, at: now });
-    for (const id of [silent.id, older.id]) expect(of(id)).toMatchObject({ inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, totalTokens: null });
+    expect(of(told.id)).toEqual({ jobId: told.id, companyId: c.companyId, agentId: c.orchestrator.id, subscriptionId: c.orchestrator.subscriptionId, inputTokens: 1200, outputTokens: 340, cacheReadTokens: 9000, cacheWriteTokens: 150, totalTokens: 10_690, model: 'claude-opus-5-5', at: now });
+    for (const id of [silent.id, older.id]) expect(of(id)).toMatchObject({ inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, totalTokens: null, model: null });
     /* A program that tells some of the counts gets its total from them. */
     expect(of(test.id)).toMatchObject({ agentId: null, inputTokens: 12, outputTokens: 3, cacheReadTokens: null, totalTokens: 15 });
   });
@@ -327,6 +327,28 @@ describe("a turn's tokens", () => {
     const whole = (await c.app.inject({ url: '/api/tokens?zone=UTC', ...as(c.ceo) })).json().tokens;
     expect(whole.today).toEqual(sum([1000, 500], 1));
     expect(whole.all).toEqual(sum([1000, 100, 2000, 3000, 4000, 500], 1));
+  });
+
+  it("splits a connection's 30 days by the model each turn ran on, the most used first, without turns that told no tokens", async () => {
+    const c = await onKey();
+    const now = new Date('2026-11-15T02:30:00Z');
+    c.app.ctx.clock = () => now.getTime();
+    const sub = c.orchestrator.subscriptionId!;
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000);
+    const at = async (when: Date, totalTokens: number | null, model: string | null) => {
+      const job = await c.job({ status: 'done', finishedAt: when });
+      await c.db.insert(turnTokens).values({ jobId: job.id, companyId: c.companyId, agentId: c.orchestrator.id, subscriptionId: sub, at: when, totalTokens, model });
+    };
+    await at(daysAgo(1), 1000, 'claude-sonnet-5-5');
+    await at(daysAgo(2), 4000, 'claude-opus-5-5');
+    await at(daysAgo(3), 500, 'claude-sonnet-5-5');
+    await at(daysAgo(4), 700, null);
+    await at(daysAgo(5), null, 'claude-haiku-5-5');
+    await at(daysAgo(40), 9000, 'claude-haiku-5-5');
+    const answer = (await c.app.inject({ url: `/api/subscriptions/${sub}/tokens?zone=UTC`, ...as(c.ceo) })).json();
+    expect(answer.models).toEqual([{ model: 'claude-opus-5-5', total: 4000 }, { model: 'claude-sonnet-5-5', total: 1500 }, { model: null, total: 700 }]);
+    const empty = (await addKey(c.app, c.ceo, custom())).json().subscription.id;
+    expect((await c.app.inject({ url: `/api/subscriptions/${empty}/tokens?zone=UTC`, ...as(c.ceo) })).json().models).toEqual([]);
   });
 
   it('shows each person only the tokens of the connections they see', async () => {

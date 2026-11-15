@@ -56,7 +56,7 @@ describe("the tokens of a turn in a live terminal", () => {
     for (const line of lines.slice(0, 2)) tally.claudeLine(line);
     tally.begin();
     for (const line of lines.slice(2)) tally.claudeLine(line);
-    expect(tally.tokens()).toEqual({ input: 4, output: 506, cacheRead: 70873, cacheWrite: 17299, total: 88682 });
+    expect(tally.tokens()).toEqual({ input: 4, output: 506, cacheRead: 70873, cacheWrite: 17299, total: 88682, model: 'claude-opus-5-5' });
     tally.begin();
     expect(tally.tokens()).toBeNull();
   });

@@ -61,5 +61,9 @@ describe("a turn's tokens", () => {
   it('may lack a part the program does not tell, but never all of them', () => {
     expect(TurnTokens.safeParse({ input: 10, output: 2, cacheRead: null, cacheWrite: null, total: 12 }).success).toBe(true);
     expect(TurnTokens.safeParse({ input: null, output: null, cacheRead: null, cacheWrite: null, total: null }).success).toBe(false);
+    /* The model the turn ran on goes with its counts, and is no count of its own. */
+    expect(TurnTokens.safeParse({ input: 10, output: 2, cacheRead: null, cacheWrite: null, total: 12, model: 'claude-opus-5-5' }).success).toBe(true);
+    expect(TurnTokens.safeParse({ input: null, output: null, cacheRead: null, cacheWrite: null, total: null, model: 'claude-opus-5-5' }).success).toBe(false);
+    for (const model of ['', 'm'.repeat(201)]) expect(TurnTokens.safeParse({ input: 10, output: 2, cacheRead: null, cacheWrite: null, total: 12, model }).success).toBe(false);
   });
 });

@@ -1236,10 +1236,19 @@ describe('an API by the token at an address', () => {
 
 describe("a turn's tokens", () => {
   it('come from what each program reported, and are no data where it reports none', async () => {
-    expect((await adapter('claude').run(input())).tokens).toEqual({ input: 2, output: 4, cacheRead: null, cacheWrite: null, total: 6 });
-    expect((await adapter('glm').run(input())).tokens).toEqual({ input: 2, output: 4, cacheRead: null, cacheWrite: null, total: 6 });
+    expect((await adapter('claude').run(input())).tokens).toEqual({ input: 2, output: 4, cacheRead: null, cacheWrite: null, total: 6, model: 'claude-opus-5-5' });
+    expect((await adapter('glm').run(input())).tokens).toEqual({ input: 2, output: 4, cacheRead: null, cacheWrite: null, total: 6, model: 'claude-opus-5-5' });
     expect((await adapter('codex').run(input())).tokens).toEqual({ input: 3316, output: 5, cacheRead: 12288, cacheWrite: 0, total: 15609 });
     expect((await adapter('antigravity').run(input())).tokens).toEqual({ input: 2305, output: 589, cacheRead: 8113, cacheWrite: null, total: 11007 });
     expect((await adapter('kimi').run(input())).tokens ?? null).toBeNull();
+  });
+
+  it('name the model the turn ran on: the one its program told, else the one the turn asked for, else none', async () => {
+    const turn = (provider: 'claude' | 'codex', model: string | null): Extract<ServerMessage, { type: 'job.run' }> => ({
+      type: 'job.run', jobId: `model-${provider}-${model ?? 'default'}`, subscriptionId: 'test', provider, prompt: 'hi', sessionId: null, model, timeoutMs: NEVER_JOB_MS, secret: null, instructions: null, toolToken: null,
+    });
+    expect((await runJob(adapter('claude'), turn('claude', 'claude-sonnet-5-5'), dir)).tokens).toMatchObject({ total: 6, model: 'claude-opus-5-5' });
+    expect((await runJob(adapter('codex'), turn('codex', 'gpt-6.1-sol'), dir)).tokens).toMatchObject({ total: 15609, model: 'gpt-6.1-sol' });
+    expect((await runJob(adapter('codex'), turn('codex', null), dir)).tokens).toEqual({ input: 3316, output: 5, cacheRead: 12288, cacheWrite: 0, total: 15609 });
   });
 });
