@@ -9,6 +9,7 @@ import { ask, answerDirectly, createTask } from '../src/modules/tasks/engine.js'
 import { waitFor } from '../src/modules/tasks/external-wait.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const WORDS = ('Полный текст 🌿.\n' + 'Finding: keep every word and its author.\n'.repeat(400)).slice(0, 11999) + '!';
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -29,7 +30,7 @@ async function fixture() {
   const [company] = await db.select().from(companies);
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null, null, BUILTIN)!));
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) => (await db.insert(agents).values({ companyId: company!.id, departmentId: dev!.id, subscriptionId: sub!.id, name, kind, roleKey, model: '' }).returning())[0]!;

@@ -1,8 +1,9 @@
+import { createHmac } from 'node:crypto';
 import { mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { nodeIdentity, seal, unseal } from '../src/keys.js';
+import { builtinKey, nodeIdentity, seal, unseal } from '../src/keys.js';
 
 const dir = () => mkdtempSync(join(tmpdir(), 'hh-keys-'));
 const bytes = new TextEncoder().encode('sk-ant-oat01-secret');
@@ -33,5 +34,21 @@ describe("a node's key", () => {
     const sealed = await seal(bytes, [one.recipient, two.recipient]);
     expect(await unseal(sealed, one.identity)).toEqual(bytes);
     expect(await unseal(sealed, two.identity)).toEqual(bytes);
+  });
+});
+
+describe("the built-in node's key", () => {
+  const NODE_KEY = 'built-in-node-key-0123456789abcdef0123';
+  const MACHINE = 'a1b2c3d4'.repeat(4);
+
+  it('is derived from its machine, so the key of the company itself never travels', () => {
+    const mac = createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${MACHINE}`).digest('hex');
+    expect(builtinKey(NODE_KEY, MACHINE)).toBe(`builtin.${MACHINE}.${mac}`);
+    expect(builtinKey(NODE_KEY, MACHINE)).not.toContain(NODE_KEY);
+    expect(builtinKey(NODE_KEY, 'f'.repeat(32))).not.toBe(builtinKey(NODE_KEY, MACHINE));
+  });
+
+  it('is the bare key for a machine that has no id', () => {
+    expect(builtinKey(NODE_KEY, null)).toBe(NODE_KEY);
   });
 });

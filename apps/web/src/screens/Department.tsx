@@ -27,6 +27,7 @@ import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CY, FT, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
 import { takeEscape } from '../ui/escape';
+import { guardedResizeObserver, useRenderGuard } from '../guard';
 
 export { employeeGroups };
 
@@ -255,7 +256,7 @@ function useDepartmentSpace(language: string, panel: Props['panel']) {
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    const observer = guardedResizeObserver(measure, 'department-actions');
     observer.observe(el);
     observer.observe(acts);
     return () => observer.disconnect();
@@ -266,7 +267,15 @@ function useDepartmentSpace(language: string, panel: Props['panel']) {
 
 /* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
    people open in a drawer at the left. */
+export function pruneSwitched(switched: Record<string, boolean>, employees: Employee[]): Record<string, boolean> {
+  const entries = Object.entries(switched);
+  if (!entries.length) return switched;
+  const kept = entries.filter(([id, on]) => employees.find(e => e.id === id)?.on !== on);
+  return kept.length === entries.length ? switched : Object.fromEntries(kept);
+}
+
 export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions }: Props) {
+  useRenderGuard('department');
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
@@ -326,7 +335,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     place(false);
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => place(false));
+    const ro = guardedResizeObserver(() => place(false), 'department');
     ro.observe(el);
     return () => ro.disconnect();
   }, [place, tree]);
@@ -419,7 +428,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
 
   /* A switch shows at once and holds until the company says the same; a refusal puts it back and says why. */
   const [switched, setSwitched] = useState<Record<string, boolean>>({});
-  useEffect(() => setSwitched(x => Object.fromEntries(Object.entries(x).filter(([id, on]) => d.employees.find(e => e.id === id)?.on !== on))), [d.employees]);
+  useEffect(() => setSwitched(x => pruneSwitched(x, d.employees)), [d.employees]);
   const shown = (e: Employee): Employee => (e.id in switched ? { ...e, on: switched[e.id]! } : e);
   const flip = (e: Employee) => (on: boolean) => {
     setSwitched(x => ({ ...x, [e.id]: on }));
@@ -531,7 +540,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           </section>
           {reach.map((p, k) => (
             <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
-              <PersonButton person={p} onOpen={() => openDecisions(p.id)}>
+              <PersonButton person={p} frame={{ w: PW, h: PH, cut: 8 }} onOpen={() => openDecisions(p.id)}>
                 <Edge cut={8}>
                   <PersonIcon />
                   <span className="pn">

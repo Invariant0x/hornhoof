@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import { listen, useStream, type LiveMessage } from './live';
+import { listen, type LiveMessage } from './live';
+import { refetcher } from './refetch';
 import type { Department, Org, PersonView } from './types';
 import type { AgentLive } from './ui/AgentState';
 
@@ -11,11 +12,23 @@ const SETTLE_MS = 400;
    the computer changed, since who decides and what waits for the CEO change the counts on the people's cards. */
 const FETCH_AT_ONCE: ReadonlySet<string> = new Set(['org', 'reconnected', 'computer']);
 
+/* Stream counter ticks keep the roster snapshot they came from, so access checks do not storm on context bars. */
+const rosterSnapshots = new WeakMap<Org, Org>();
+
+export const rosterOf = (org: Org): Org => rosterSnapshots.get(org) ?? org;
+
+function keepRoster(from: Org, next: Org): Org {
+  rosterSnapshots.set(next, rosterOf(from));
+  return next;
+}
+
 /* An agent's context moves with every step it takes; only its bar changes. */
 function withContext(org: Org, agentId: string, used: number): Org {
+  const current = agentIn(org, agentId);
+  if (!current || current.context === used) return org;
   const departments = org.departments.map(d => (d.employees.some(e => e.id === agentId) ? { ...d, employees: d.employees.map(e => (e.id === agentId ? { ...e, context: used } : e)) } : d));
   const orchestrator = org.orchestrator?.id === agentId ? { ...org.orchestrator, context: used } : org.orchestrator;
-  return { ...org, orchestrator, departments };
+  return keepRoster(org, { ...org, orchestrator, departments });
 }
 
 /* What an agent's program does and the server's alarm, as the map read them, with the server's clock then. The orchestrator
@@ -25,7 +38,7 @@ export function liveOf(org: Org | null, agentId: string): { live?: AgentLive; se
   return live ? { live, serverNow: org!.serverNow } : {};
 }
 
-function agentIn(org: Org, agentId: string): AgentLive | undefined {
+function agentIn(org: Org, agentId: string): (AgentLive & { context: number | null }) | undefined {
   const orchestrator = org.orchestrator;
   if (orchestrator && (agentId === 'orchestrator' || agentId === orchestrator.id)) return orchestrator;
   return org.departments.flatMap(d => d.employees).find(e => e.id === agentId);
@@ -102,9 +115,58 @@ function share(org: Org | null, answer: boolean): void {
 }
 
 function hear(m: LiveMessage): void {
+  askAgain(m);
   if (!known) return;
-  if (m.type === 'context') share(withContext(known, m.agentId, m.used), false);
-  if (m.type === 'working') share({ ...known, agents: { ...known.agents, working: m.working } }, false);
+  if (m.type === 'context') {
+    const next = withContext(known, m.agentId, m.used);
+    if (next !== known) share(next, false);
+  }
+  if (m.type === 'working' && known.agents.working !== m.working) {
+    share(keepRoster(known, { ...known, agents: { ...known.agents, working: m.working } }), false);
+  }
+}
+
+/* The screens that ask for the company again when the stream says it changed, each with where its failure goes. The
+   stream makes its requests for all of them, however many there are, and a burst of it costs a few requests, not one a
+   message on each screen. */
+const askers = new Set<(failure: unknown) => void>();
+let soon: ReturnType<typeof setTimeout> | null = null;
+
+function failed(n: number, err: unknown): void {
+  if (n < shown) return;
+  for (const fail of [...askers]) fail(err);
+}
+
+const shared = refetcher(() => {
+  if (!askers.size) return Promise.resolve();
+  /* Task and question changes that wait to settle are in this answer too. */
+  if (soon) clearTimeout(soon);
+  soon = null;
+  const n = ++asked;
+  return api.get<Org>('/api/org').then(data => answered(n, data), err => failed(n, err));
+});
+
+function askAgain(m: LiveMessage): void {
+  if (!askers.size) return;
+  /* Frequent task and question changes settle first, without letting a continuous stream postpone the refresh forever. */
+  if ((m.type === 'task' || m.type === 'requests') && !soon && !shared.inAnswer()) {
+    soon = setTimeout(() => {
+      soon = null;
+      if (askers.size) shared.run();
+    }, SETTLE_MS);
+  }
+  /* Employees move between working and sleeping too, so the company is fetched again for their states. */
+  if (FETCH_AT_ONCE.has(m.type) || m.type === 'working') shared.run();
+}
+
+function askWith(fail: (failure: unknown) => void): () => void {
+  askers.add(fail);
+  return () => {
+    askers.delete(fail);
+    if (askers.size || !soon) return;
+    clearTimeout(soon);
+    soon = null;
+  };
 }
 
 function watchOrg(watch: Watch): () => void {
@@ -129,6 +191,7 @@ function answered(n: number, data: Org | null | undefined): void {
 /* A person leaving the tab takes the company off every screen at once, with the answers still on their way for it. */
 export function forgetOrg(): void {
   shown = ++asked;
+  shared.forget();
   share(null, true);
 }
 
@@ -168,26 +231,11 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
   /* The lines and the counts moved while the tab was away. */
   useFetchOnReturn(enabled, load);
 
-  /* Batch frequent task and question changes without letting a continuous stream postpone the refresh forever. */
-  const soon = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (soon.current) clearTimeout(soon.current);
-    },
-    [],
-  );
-
-  useStream(m => {
+  /* While it asks, the screen hears of the stream's changes through the one request all screens share. */
+  useEffect(() => {
     if (!enabled) return;
-    if ((m.type === 'task' || m.type === 'requests') && !soon.current) {
-      soon.current = setTimeout(() => {
-        soon.current = null;
-        load();
-      }, SETTLE_MS);
-    }
-    /* Employees move between working and sleeping too, so the company is fetched again for their states. */
-    if (FETCH_AT_ONCE.has(m.type) || m.type === 'working') load();
-  });
+    return askWith(err => mounted.current && setFailure(err));
+  }, [enabled]);
 
   return { org, failure };
 }

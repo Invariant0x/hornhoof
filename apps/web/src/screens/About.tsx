@@ -17,7 +17,7 @@ function keepFocus(event: ReactKeyboardEvent<HTMLDivElement>): void {
   target?.focus();
 }
 
-export function About({ onClose }: { onClose: () => void }) {
+export function About({ onClose, onFeedback }: { onClose: () => void; onFeedback: () => void }) {
   const t = useT();
   const { version, failed } = useVersionState('/api/updates/current');
   const box = useRef<HTMLDivElement>(null);
@@ -48,7 +48,7 @@ export function About({ onClose }: { onClose: () => void }) {
           <dd aria-live="polite">{version ? versionText(version) : failed ? t.about.versionFailed : t.common.loading}</dd>
           <dt>{t.about.license}</dt><dd><a href="https://github.com/Invariant0x/hornhoof/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT</a></dd>
           <dt>{t.about.code}</dt><dd><a href="https://github.com/Invariant0x/hornhoof" target="_blank" rel="noopener noreferrer">{t.about.code}</a></dd>
-          <dt>{t.about.contact}</dt><dd><a href="https://github.com/Invariant0x/hornhoof/issues" target="_blank" rel="noopener noreferrer">{t.about.issues}</a></dd>
+          <dt>{t.about.contact}</dt><dd><button className="t-link" type="button" onClick={onFeedback}>{t.about.issues}</button></dd>
           <dt>{t.about.website}</dt><dd><a href="https://hornhoof.org" target="_blank" rel="noopener noreferrer">hornhoof.org</a></dd>
         </dl>
         <p className="about-author muted">{t.about.author}</p>

@@ -1,6 +1,6 @@
 import type { ApprovalChannel, ApprovalRule } from '@hornhoof/protocol';
 import { approvalNeeded } from '@hornhoof/protocol';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, lte } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { outboundApprovals, requests } from '../../db/schema.js';
@@ -8,7 +8,7 @@ import { departmentRules } from '../departments/approval-policy.js';
 import { personParty } from '../events/parties.js';
 import { appendOutgoing } from '../events/store.js';
 import { decisionPerson } from '../tasks/decisions.js';
-import { ask, taskSpot } from '../tasks/engine.js';
+import { ask, taskSpot, type Tx } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { digestOf, moneyWithinLimit, type Money } from './checks.js';
 
@@ -61,18 +61,34 @@ const approachIs = (b: ExactApproach) => [eq(outboundApprovals.channelId, b.chan
 
 export type ApprovalState = 'approved' | 'waiting' | 'declined' | 'missing';
 
-/* What people said of exactly this. One yes is enough; a later change is another tuple and finds nothing. */
-export async function approvalState(db: Pick<Db, 'select'>, companyId: string, bound: Bound): Promise<ApprovalState> {
-  const exact = bound.kind === 'message' ? messageIs(bound) : approachIs(bound);
+const exactly = (companyId: string, bound: Bound) => [
+  eq(outboundApprovals.companyId, companyId), eq(outboundApprovals.kind, bound.kind), eq(outboundApprovals.policyDigest, bound.policyDigest), eq(outboundApprovals.sourceRevisionsDigest, bound.sourceRevisionsDigest),
+  eq(outboundApprovals.authorityFingerprint, bound.authorityFingerprint), ...(bound.kind === 'message' ? messageIs(bound) : approachIs(bound)),
+];
+
+/* What people said of exactly this. One yes is enough; a later change is another tuple and finds nothing. since: for a
+   message that came back with a restored database only what was asked after this moment counts, open or answered with
+   a yes: a question from before it shows the words of before, and its yes may be the one the restore lost. A no ends
+   the message whenever it was said. */
+export async function approvalState(db: Pick<Db, 'select'>, companyId: string, bound: Bound, since: Date | null = null): Promise<ApprovalState> {
   const rows = await db
-    .select({ status: requests.status })
+    .select({ status: requests.status, createdAt: requests.createdAt })
     .from(outboundApprovals)
     .innerJoin(requests, eq(requests.id, outboundApprovals.requestId))
-    .where(and(eq(outboundApprovals.companyId, companyId), eq(outboundApprovals.kind, bound.kind), eq(outboundApprovals.policyDigest, bound.policyDigest), eq(outboundApprovals.sourceRevisionsDigest, bound.sourceRevisionsDigest), eq(outboundApprovals.authorityFingerprint, bound.authorityFingerprint), ...exact));
-  const said = rows.map(r => r.status);
+    .where(and(...exactly(companyId, bound)));
+  const said = rows.filter(r => r.status === 'declined' || !since || r.createdAt > since).map(r => r.status);
   if (said.includes('approved')) return 'approved';
   if (said.includes('open')) return 'waiting';
   return said.includes('declined') ? 'declined' : 'missing';
+}
+
+export const ASKED_BEFORE_RESTORE = 'Hornhoof was restored from a backup after this was asked, so it is asked again.';
+
+/* The questions about exactly this that were asked before the restore and still wait: closed, saying why, so nobody
+   answers the words of before. The gate asks anew with what the person needs to know. */
+export async function withdrawAskedBefore(tx: Tx, companyId: string, bound: Bound, since: Date, now: Date): Promise<void> {
+  const asked = tx.select({ id: outboundApprovals.requestId }).from(outboundApprovals).where(and(...exactly(companyId, bound)));
+  await tx.update(requests).set({ status: 'withdrawn', answer: ASKED_BEFORE_RESTORE, answeredAt: now }).where(and(eq(requests.status, 'open'), lte(requests.createdAt, since), inArray(requests.id, asked)));
 }
 
 export type Asking = { companyId: string; taskId: string; authorAgentId: string; authorJobId: string | null; channel: ApprovalChannel; kindName: string; text: string; bound: Bound };

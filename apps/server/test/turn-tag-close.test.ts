@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
+import { agents, companies, tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { loadTask } from '../src/modules/tasks/engine.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
@@ -15,14 +15,16 @@ const LATER = '4'.repeat(40);
 const OTHER = '3'.repeat(40);
 
 /* A turn whose start the server has seen, its release recorded before main moved, then main moved and tagged. */
-async function released(options: { record?: boolean; tag?: string; at?: string } = {}) {
+async function released(options: { record?: boolean; tag?: string; at?: string; autonomous?: boolean } = {}) {
   const f = await releasing();
   const errors: string[] = [];
   const round = () => minuteRound(f.ctx, new Date(), what => () => { errors.push(what); });
   f.repo.tags['v1.6.0'] = BASE;
   await round();
   const run = await f.fullRun();
-  await f.approve();
+  /* With autonomous release on, a release every commit of which was checked is approved by the log, by no person. */
+  if (options.autonomous) await f.db.update(companies).set({ autonomousRelease: true }).where(eq(companies.id, f.task.companyId));
+  else await f.approve();
   if (options.record !== false) expect((await f.recordRelease({ runId: run.id })).isError).toBe(false);
   f.repo.heads.main = f.R;
   f.repo.tags[options.tag ?? 'v1.7.0'] = options.at ?? f.R;
@@ -148,6 +150,26 @@ describe('the server closes a turn by the tag of its release', () => {
     const told = await toldOfTag(f);
     expect(told).toHaveLength(2);
     expect(told.find(n => n.agentId)!.message.text).toContain('no longer stands');
+    expect(told.find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: f.R, why: 'stale' });
+  });
+
+  it('closes the turn on the tag of a release the autonomous release log approved', async () => {
+    const f = await released({ autonomous: true });
+    await f.round();
+    expect((await f.departmentTurns()).find(row => row.id === f.turn.id)).toMatchObject({ status: 'closed', version: 'v1.7.0', commit: f.R });
+    expect(await toldOfTag(f)).toEqual([]);
+  });
+
+  it.each([
+    ['the CEO turned autonomous release off', async (f: Awaited<ReturnType<typeof released>>) => { await f.db.update(companies).set({ autonomousRelease: false }).where(eq(companies.id, f.task.companyId)); }],
+    ['a checker it relied on was switched off', async (f: Awaited<ReturnType<typeof released>>) => { await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id)); }],
+  ])('keeps the turn of an autonomously approved release open, and tells them, when %s before the tag', async (_what, change) => {
+    const f = await released({ autonomous: true });
+    await change(f);
+    await f.round();
+    expect(await f.open()).toMatchObject({ id: f.turn.id, status: 'open' });
+    const told = await toldOfTag(f);
+    expect(told).toHaveLength(2);
     expect(told.find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: f.R, why: 'stale' });
   });
 

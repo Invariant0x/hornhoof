@@ -7,6 +7,9 @@ import { NODE_STALE_MS, expireStaleNodes } from '../src/modules/nodes/nodes.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { agentProgramState } from '../src/modules/tasks/silent.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
+import { createHmac } from 'node:crypto';
+import { builtinOf } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 
 /* No round of pings comes during a test unless it says so: the longest wait a timer takes. */
 async function liveCompany(pingMs = '2147483647') {
@@ -34,6 +37,31 @@ describe('node socket', () => {
   it('refuses a wrong key', async () => {
     const { url } = await liveCompany();
     await expect(connectNode(url, 'not-a-key')).rejects.toThrow(/401/);
+  });
+
+  it('names a built-in node by its machine, and one with the bare key of a node from before as its own', async () => {
+    const NODE_KEY = 'k'.repeat(40);
+    const { app } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' });
+    const url = await listen(app);
+    const machine = 'a1b2c3d4'.repeat(4);
+    const signed = (id: string, key = NODE_KEY) => createHmac('sha256', key).update(`hornhoof builtin node ${id}`).digest('hex');
+    const online = () => [app.ctx.hub.isOnline(builtinOf(machine)), app.ctx.hub.isOnline(BUILTIN)];
+
+    /* Each machine's built-in node signs in with a key made for its machine, and is that machine's. */
+    const byMachine = await connectNode(url, `builtin.${machine}.${signed(machine)}`);
+    expect(online()).toEqual([true, false]);
+    /* A node of a build before sends the key bare: it is the one of the machine this server runs on. */
+    const bare = await connectNode(url, NODE_KEY);
+    expect(online()).toEqual([true, true]);
+    byMachine.close();
+    await byMachine.closed;
+    expect(online()).toEqual([false, true]);
+    bare.close();
+
+    const other = 'f'.repeat(32);
+    const flipped = signed(machine).replace(/^./, first => (first === '0' ? '1' : '0'));
+    for (const key of [`builtin.${machine}.${flipped}`, `builtin.${other}.${signed(machine)}`, `builtin.${machine}.${signed(machine, 'another-key')}`, `builtin.short.${signed('short')}`])
+      await expect(connectNode(url, key), key).rejects.toThrow(/401/);
   });
 
   it('follows the login state and shows the node online while connected', async () => {
@@ -316,11 +344,13 @@ describe('node socket', () => {
 
     await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
+    await expireStaleNodes(db, now);
     const machinesRes = (await app.inject({ url: '/api/machines', ...as(ceo) })).json();
     expect(machinesRes.machines[0].plans[0].status).toBe('needs_login');
 
     await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
+    await expireStaleNodes(db, now);
     const staleSub = await subOf(app, ceo, subId);
     expect(staleSub.status).toBe('needs_login');
     expect(staleSub.machines[0].status).toBe('needs_login');

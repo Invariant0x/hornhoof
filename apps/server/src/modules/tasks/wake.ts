@@ -3,12 +3,13 @@ import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, 
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
+import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
+import { inboxChanged, mailBack } from '../conversation/inbox.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { waitedForReturn } from '../nodes/connections.js';
-import { identityOf, type NodeIdentity } from '../nodes/hub.js';
+import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
 import { answerDirectly, brokeDown, CLOSED, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, resumeWaitingRoutes, silentTurn, taskSpot, uncountedSinceMove, wentOn, wentOnAfterReturn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
@@ -27,7 +28,7 @@ type RouteKind = ReturnType<typeof routeSnapshot>['resultKind'];
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: string; stuck: string } {
   if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
-    finish: 'carry it end to end alone, as the task says: code, checks, tests, merge and release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
+    finish: 'carry its task scope end to end alone on its task branch, checking named test files of the changed area, build, types and lint locally in your workspace without calling run_tests unless this task itself assembles the final release to main; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
     stuck: 'use blocked',
   };
   if (task.assigneeAgentId === agentId && kind === 'document') return {
@@ -35,7 +36,7 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   if (task.assigneeAgentId === agentId) return {
-    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; report verified final-candidate runs in Tests; integrate only with the head authorization',
+    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; verify local affected checks in Tests without calling run_tests on non-main task branches (naming runIds only for direct main integration); integrate only with the head authorization',
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   return { finish: 'assign an eligible current owner with update_task, or report the checked coordination result', stuck: 'report what is missing to the head' };
@@ -268,7 +269,9 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
   const into = await deliverLive(ctx, w.agentId, text, { source: { data: message } }, (jobId, kept) =>
     appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: message }, kept).then(() => {}),
   );
-  if (!into) await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message });
+  const turn = { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message };
+  if (into) await keepLetter(ctx, turn, into, 'read');
+  else await insertTurn(ctx, turn);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
 }
@@ -356,7 +359,10 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
     const into = await deliverLive(ctx, agent.id, data.text, { taskId: task.id, source: { data } }, (jobId, kept) =>
       appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data }, kept).then(() => {}),
     );
-    if (into) return false;
+    if (into) {
+      await keepLetter(ctx, wakeTurn(agent, task, data), into, 'read');
+      return false;
+    }
   }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
@@ -372,12 +378,17 @@ async function keepTaskWake(ctx: Ctx, agent: typeof agents.$inferSelect, task: T
     if (LIVE_WAKES.includes(w.why) || w.cause?.actor) {
       await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${data.text}`}` }).where(eq(jobs.id, waiting.id));
       await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data });
+      await keepLetter(ctx, wakeTurn(agent, task, data), waiting.id, 'unread');
     }
     return true;
   }
-  await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: data.text, createdBy: null, taskId: task.id, message: { personId: null, ...data } });
+  await insertTurn(ctx, wakeTurn(agent, task, data));
   return true;
 }
+
+/* The turn a wake's words make on its task, and the letter they are in the inbox wherever they went. */
+const wakeTurn = (agent: typeof agents.$inferSelect, task: Task, data: Omit<TurnMessage, 'personId'>) =>
+  ({ companyId: agent.companyId, agentId: agent.id, prompt: data.text, createdBy: null, taskId: task.id, message: { personId: null, ...data } });
 
 /* The open task the agent holds after a turn about this one: the task itself, or the task it gave this one out from. */
 async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task | null> {
@@ -686,11 +697,13 @@ async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): P
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   const program = clearTurnProgram(ctx, jobId);
   const [job] = await ctx.db
-    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure })
+    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
     .from(jobs)
     .where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
+  /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
+  if (job.status === 'failed' && job.inboxWake && (await mailBack(ctx.db, job.agentId, jobId))) await inboxChanged(ctx, job.agentId);
   const handled = await afterFailure(ctx, jobId);
   if (job.taskId) {
     const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
@@ -737,7 +750,7 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const job = await requestCancellation(ctx, jobId);
   if (!job) return;
-  const node = identityOf(job.sub, job.job.nodeId);
+  const node = identityOf(job.sub, job.job.nodeId, job.job.builtinMachine, ownBuiltin(ctx.config));
   if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db
     .update(jobs)

@@ -26,6 +26,8 @@ it.each([
   'test_suite_memory',
   'harness_builds',
   'harness_products',
+  'autonomous_releases',
+  'agent_inbox',
 ])('keeps %s writes behind the service API for both SQL roles', async table => {
   const run = await roles();
   const column = { program_operator_signals: 'agent_id', turn_snapshots: 'turn_id', test_part_timings: 'part_id', test_file_results: 'file', test_suite_memory: 'suite_id', harness_products: 'department_id' }[table] ?? 'id';
@@ -113,5 +115,13 @@ it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model
     for (const statement of statements) {
       await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
     }
+  }
+});
+
+it('keeps companies.autonomous_release readable and not writable by either SQL role', async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    expect((await run(mode, 'SELECT autonomous_release FROM companies'))[0]!.rows).toEqual([]);
+    await expect(run(mode, 'UPDATE companies SET autonomous_release = true WHERE false'), mode).rejects.toThrow(/permission denied/);
   }
 });

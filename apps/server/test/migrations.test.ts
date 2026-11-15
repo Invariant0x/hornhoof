@@ -1,9 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/pglite';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import type { Db } from '../src/db/client.js';
+import { AFTER_MIGRATIONS } from '../src/db/net.js';
+import { tlsOf } from '../src/modules/tls/store.js';
 import { freshPglite, ownDatabases } from './helpers-db.js';
 import { freshInstall, migrate, migrationsUpTo } from './migrations-fixture.js';
 
@@ -344,7 +348,8 @@ describe('migration 0086 composable skills', () => {
       (${C}, 'worker', 'Existing developer', 'DEV-ENG', '', null, '["dev-tdd"]', '{"base":"Existing assignment."}', '{"DEV-ENG":"existing-hash"}', null),
       (${C}, 'worker', 'Other role', 'DEV-BE', '', null, '["dev-tdd"]', '{}', '{}', null),
       (${C}, 'worker', 'No role', null, '', null, '["retired-kept"]', '{"base":"Roleless assignment."}', '{}', null)`);
-    const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key')::text as data from agents a order by name`)).rows;
+    /* Later migrations add the machine of an employee's built-in node and each card's own inbox mode, empty on every row. */
+    const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key' - 'builtin_machine' - 'inbox_mode')::text as data from agents a order by name`)).rows;
     const plans = async () => (await db.execute<{ data: string }>(sql`select to_jsonb(s)::text as data from subscriptions s order by id`)).rows;
     const before = { cards: await cards(), plans: await plans() };
 
@@ -393,7 +398,8 @@ describe('migration 0086 composable skills', () => {
         values (${C}, ${card.kind}, ${card.name}, 'custom-model', ${JSON.stringify(card.skills)}::jsonb, ${JSON.stringify(overrides)}::jsonb,
         ${JSON.stringify(hashes)}::jsonb, 'high', 23, 'Keep the custom timer.', '2026-11-06T10:00:00Z', true)`);
     }
-    const unchanged = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'skills')::text as data from agents a order by name`)).rows;
+    /* Later migrations add the machine of an employee's built-in node and each card's own inbox mode, empty on every row. */
+    const unchanged = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'skills' - 'builtin_machine' - 'inbox_mode')::text as data from agents a order by name`)).rows;
     const before = await unchanged();
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -402,5 +408,568 @@ describe('migration 0086 composable skills', () => {
     expect(await unchanged()).toEqual(before);
     const selected = (await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents order by name`)).rows;
     expect(Object.fromEntries(selected.map(row => [row.name, row.skills]))).toEqual(Object.fromEntries(cards.map(card => [card.name, card.after])));
+  });
+});
+
+describe('migration 0106, the tables of the network', () => {
+  it('marks the sessions of an older install as made before the __Host- cookie', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0097_route_abilities') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into sessions (token_hash, person_id, expires_at) values ('older', ${person}, now() + interval '1 day')`);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select before_host_cookie from sessions`)).rows).toEqual([{ before_host_cookie: true }]);
+  });
+});
+
+describe('a database from before the link had a certificate', () => {
+  it('reads as having none, as the keeper meets it before an update migrates', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0097_route_abilities') });
+    expect(await tlsOf(db as unknown as Db, '00000000-0000-4000-8000-000000000001')).toBeNull();
+  });
+});
+
+describe('migration 0107, the fences and the journal', () => {
+  const tablesOfPublic = sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by 1`;
+  const journaledTables = sql`select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+    where t.tgname = 'net_journal' and n.nspname = 'public' order by 1`;
+
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    return { client, db };
+  }
+
+  it('adds the fences, and the journal once migrated', async () => {
+    const { client, db } = await fullyMigrated();
+    const schemas = await db.execute(sql`select nspname from pg_namespace where nspname in ('net', 'net_local') order by 1`);
+    expect(schemas.rows).toEqual([{ nspname: 'net' }, { nspname: 'net_local' }]);
+    expect((await db.execute(journaledTables)).rows).toEqual([]);
+
+    await client.exec(AFTER_MIGRATIONS);
+
+    expect((await db.execute(journaledTables)).rows).toEqual((await db.execute(tablesOfPublic)).rows);
+    const fence = await db.execute(sql`select t.tgdeferrable, t.tginitdeferred from pg_trigger t where t.tgname = 'net_fence' and t.tgrelid = 'net.journal'::regclass`);
+    expect(fence.rows).toEqual([{ tgdeferrable: true, tginitdeferred: true }]);
+    const keys = await db.execute(sql`select distinct c.condeferrable, c.condeferred from pg_constraint c join pg_namespace n on n.oid = c.connamespace where c.contype = 'f' and n.nspname = 'public'`);
+    expect(keys.rows).toEqual([{ condeferrable: true, condeferred: false }]);
+    const withoutKey = await db.execute(sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind = 'r' and not exists (select 1 from pg_constraint k where k.conrelid = c.oid and k.contype = 'p')`);
+    expect(withoutKey.rows).toEqual([]);
+
+    const runnableByPublic = sql`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'net' and has_function_privilege('public', p.oid, 'EXECUTE')`;
+    expect((await db.execute(runnableByPublic)).rows).toEqual([]);
+    await client.exec(`CREATE FUNCTION net.later() RETURNS integer LANGUAGE sql AS 'SELECT 1'`);
+    await client.exec(AFTER_MIGRATIONS);
+    expect((await db.execute(runnableByPublic)).rows).toEqual([]);
+
+    await client.exec('SELECT net.detach_journal()');
+    expect((await db.execute(journaledTables)).rows).toEqual((await db.execute(tablesOfPublic)).rows);
+  });
+
+  it('refuses a table it could not journal, rather than leave it out', async () => {
+    const { client } = await fullyMigrated();
+    await client.exec('CREATE TABLE no_key (a integer)');
+    await expect(client.exec(AFTER_MIGRATIONS)).rejects.toThrow(/no_key/);
+    await client.exec(`DROP TABLE no_key; CREATE TABLE "${'n'.repeat(56)}" (a integer PRIMARY KEY)`);
+    await expect(client.exec(AFTER_MIGRATIONS)).rejects.toThrow(/too long/);
+  });
+});
+
+describe('migrations 0108 and 0109, where each change came from', () => {
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    return { client, db };
+  }
+
+  it('keeps the base of each step, with the indexes pruning reads by', async () => {
+    const { db } = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'applied' order by 1`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(['at', 'base', 'source']);
+    const indexes = await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where schemaname = 'public' and indexname in ('applied_base', 'applied_at', 'tool_calls_at') order by 1`);
+    expect(indexes.rows.map(row => row.indexname)).toEqual(['applied_at', 'applied_base', 'tool_calls_at']);
+  });
+
+  it('gives every event of a task a name that holds across machines', async () => {
+    const { db } = await fullyMigrated();
+    const column = await db.execute(sql`select is_nullable, column_default from information_schema.columns where table_name = 'task_events' and column_name = 'uuid'`);
+    expect(column.rows).toEqual([{ is_nullable: 'NO', column_default: 'gen_random_uuid()' }]);
+  });
+
+  it('records a database call in the lease check, and nothing for a check without a call', async () => {
+    const { client, db } = await fullyMigrated();
+    const lease = `'net.assert_lease(interval, uuid, uuid, jsonb)'::regprocedure`;
+    expect((await db.execute(sql.raw(`select has_function_privilege('public', ${lease}, 'EXECUTE') as may`))).rows).toEqual([{ may: false }]);
+    const INVOCATION = '00000000-0000-4000-8000-0000000000aa';
+    const JOB = '00000000-0000-4000-8000-0000000000bb';
+    /* No job stands behind this call, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    await client.exec(`SELECT net.assert_lease('2 s', NULL, '${JOB}', '{"ok":true}')`);
+    expect((await db.execute(sql`select 1 from tool_calls`)).rows).toEqual([]);
+    expect((await db.execute(sql`select 1 from applied`)).rows).toEqual([]);
+
+    await client.exec(`SELECT net.assert_lease('2 s', '${INVOCATION}', '${JOB}', '{"ok":true}')`);
+    expect((await db.execute(sql`select id, job_id, answer from tool_calls`)).rows).toEqual([{ id: INVOCATION, job_id: JOB, answer: { ok: true } }]);
+    expect((await db.execute(sql`select source, base from applied`)).rows).toEqual([{ source: `tool:${INVOCATION}:0`, base: `tool:${INVOCATION}` }]);
+  });
+});
+
+describe("migration 0110, the tables of the company's network", () => {
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    return { client, db };
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds what a machine is in the network, and the authority's tables, journaled and closed", async () => {
+    const { db } = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'machines'`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(expect.arrayContaining(['network_id', 'role', 'sign_key', 'web_port', 'peer_port', 'commit', 'uptime_s', 'fsync_p99_ms', 'disk_free', 'report_at']));
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname in ('authority', 'certificates', 'peer_secrets') order by 1`);
+    expect(tables.rows).toEqual(['authority', 'certificates', 'peer_secrets'].map(relname => ({ relname, closed: true, journaled: true })));
+  });
+
+  it('keeps one row to a network id, and only the roles and kinds there are', async () => {
+    const { client, db } = await fullyMigrated();
+    /* No company or person stands behind these machines, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    const machine = (key: string, more: string, values: string) =>
+      db.execute(sql.raw(`insert into machines (company_id, person_id, machine_key${more}) values (gen_random_uuid(), gen_random_uuid(), '${key}'${values})`));
+    await machine('a', ', network_id, role', `, 'n1', 'data'`);
+    await machine('b', ', role', `, 'worker'`);
+    await machine('c', '', '');
+    expect(await codeOf(machine('d', ', network_id', `, 'n1'`))).toBe('23505');
+    expect(await codeOf(machine('e', ', role', `, 'copy'`))).toBe('23514');
+    expect(await codeOf(db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('x', 's')`))).toBe('23514');
+    await db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('app', 's'), ('data', 's')`);
+  });
+});
+
+describe('migration 0111, what joined machines need', () => {
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return { client, db };
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it('adds its tables, journaled and closed, and what a machine says of its link and its update', async () => {
+    const { db } = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'machines'`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(
+      expect.arrayContaining(['addresses', 'path', 'direct_fails', 'renew_at', 'update_commit', 'update_state', 'go_commit', 'go_at', 'failed_commit', 'failed_at', 'owner_pin']),
+    );
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname in ('machine_tickets', 'machine_online', 'person_keys') order by 1`);
+    expect(tables.rows).toEqual(['machine_online', 'machine_tickets', 'person_keys'].map(relname => ({ relname, closed: true, journaled: true })));
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key) values (gen_random_uuid(), gen_random_uuid(), 'a')`);
+    expect((await db.execute(sql`select addresses, direct_fails, path from machines`)).rows).toEqual([{ addresses: [], direct_fails: false, path: null }]);
+    await db.execute(sql`insert into node_codes (code_hash, company_id, person_id, subscription_ids, expires_at) values ('h', gen_random_uuid(), gen_random_uuid(), '{}', now())`);
+    expect((await db.execute(sql`select core from node_codes`)).rows).toEqual([{ core: false }]);
+  });
+
+  it('takes only the paths, update states, kinds and amounts there are', async () => {
+    const { db } = await fullyMigrated();
+    const machine = (key: string, column: string, value: string | null) =>
+      db.execute(sql.raw(`insert into machines (company_id, person_id, machine_key, ${column}) values (gen_random_uuid(), gen_random_uuid(), '${key}', ${value === null ? 'null' : `'${value}'`})`));
+    for (const [key, path] of [['a', 'direct'], ['b', 'relay'], ['c', null]] as const) await machine(key, 'path', path);
+    expect(await codeOf(machine('d', 'path', 'lan'))).toBe('23514');
+    for (const [key, state] of [['e', 'ready'], ['f', 'installing'], ['g', 'failed']] as const) await machine(key, 'update_state', state);
+    expect(await codeOf(machine('h', 'update_state', 'done'))).toBe('23514');
+
+    const id = (await db.execute<{ id: string }>(sql`select id from machines limit 1`)).rows[0]!.id;
+    await db.execute(sql`insert into machine_online (machine_id, day, seconds) values (${id}, '2026-11-10', 86400)`);
+    expect(await codeOf(db.execute(sql`insert into machine_online (machine_id, day, seconds) values (${id}, '2026-11-11', 86401)`))).toBe('23514');
+    expect(await codeOf(db.execute(sql`insert into machine_online (machine_id, day, seconds) values (${id}, '2026-11-10', 5)`))).toBe('23505');
+
+    const key = (iterations: number) => db.execute(sql`insert into person_keys (person_id, company_id, public_key, wrapped, salt, iv, iterations) values (gen_random_uuid(), gen_random_uuid(), 'p', 'w', 's', 'i', ${iterations})`);
+    await key(600000);
+    expect(await codeOf(key(599999))).toBe('23514');
+
+    await db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('visit', 's')`);
+    expect(await codeOf(db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('x', 's')`))).toBe('23514');
+  });
+});
+
+describe('migration 0112, computer access per machine', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it('adds access per machine and its commands, journaled and closed', async () => {
+    const db = await fullyMigrated();
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname in ('machine_access', 'computer_runs') order by 1`);
+    expect(tables.rows).toEqual(['computer_runs', 'machine_access'].map(relname => ({ relname, closed: true, journaled: true })));
+  });
+
+  it('takes only the states and times of a command there are, and a request only whole', async () => {
+    const db = await fullyMigrated();
+    const run = (state: string, timeout: number) =>
+      db.execute(sql`insert into computer_runs (company_id, machine_id, command, timeout_s, state) values (gen_random_uuid(), gen_random_uuid(), 'true', ${timeout}, ${state})`);
+    for (const state of ['waiting', 'sent', 'done', 'lost']) await run(state, 300);
+    await run('waiting', 1);
+    await run('waiting', 1800);
+    expect(await codeOf(run('queued', 300))).toBe('23514');
+    expect(await codeOf(run('waiting', 0))).toBe('23514');
+    expect(await codeOf(run('waiting', 1801))).toBe('23514');
+
+    await db.execute(sql`insert into machine_access (machine_id, company_id) values (gen_random_uuid(), gen_random_uuid())`);
+    await db.execute(sql`insert into machine_access (machine_id, company_id, asked_reason, asked_at) values (gen_random_uuid(), gen_random_uuid(), 'look', now())`);
+    expect(await codeOf(db.execute(sql`insert into machine_access (machine_id, company_id, asked_reason) values (gen_random_uuid(), gen_random_uuid(), 'look')`))).toBe('23514');
+  });
+});
+
+describe('migrations 0113 and 0114, the backups', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds each machine's age key and holdings, and the recovery keys, journaled and closed", async () => {
+    const db = await fullyMigrated();
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key) values (gen_random_uuid(), gen_random_uuid(), 'a')`);
+    expect((await db.execute(sql`select age_key, keeps_backups, held_backups from machines`)).rows).toEqual([{ age_key: null, keeps_backups: true, held_backups: [] }]);
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname = 'recovery_keys'`);
+    expect(tables.rows).toEqual([{ relname: 'recovery_keys', closed: true, journaled: true }]);
+    const key = (recipient: string) => db.execute(sql`insert into recovery_keys (company_id, recipient, link_name, link_url, made_by) values (gen_random_uuid(), ${recipient}, 'acme', 'https://acme.hornhoof.org', gen_random_uuid())`);
+    await key('age1first');
+    expect(await codeOf(key('age1first'))).toBe('23505');
+  });
+
+  it('adds net.backups, fenced, with only the reasons, sizes and hashes there are', async () => {
+    const db = await fullyMigrated();
+    const fence = await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred from pg_trigger t
+      where t.tgrelid = 'net.backups'::regclass and t.tgname = 'net_fence'`);
+    expect(fence.rows).toEqual([{ deferrable: true, deferred: true }]);
+    const backup = (over: { reason?: string; size?: number; sha256?: string } = {}) =>
+      db.execute(sql`insert into net.backups (id, company_id, dumped_at, made_at, reason, size, sha256, signer, serial, recipients, migrations, head)
+        values (gen_random_uuid(), gen_random_uuid(), now(), now(), ${over.reason ?? 'timer'}, ${over.size ?? 10}, ${over.sha256 ?? 'a'.repeat(64)}, gen_random_uuid(), 'ab', '{}', 106, '{}')`);
+    await backup();
+    await backup({ reason: 'update' });
+    expect(await codeOf(backup({ reason: 'other' }))).toBe('23514');
+    expect(await codeOf(backup({ size: 0 }))).toBe('23514');
+    expect(await codeOf(backup({ sha256: 'XYZ' }))).toBe('23514');
+    expect((await db.execute(sql`select holders from net.backups limit 1`)).rows).toEqual([{ holders: [] }]);
+  });
+});
+
+describe('migration 0115, the merge records', () => {
+  const RECORDS = ['merges', 'merge_rows', 'merge_conflicts', 'merge_consumed', 'restores', 'horizon'];
+
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it('adds the merge records, fenced', async () => {
+    const db = await fullyMigrated();
+    const fenced = await db.execute<{ name: string; deferrable: boolean; deferred: boolean }>(sql`select c.relname as name, t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence'
+      where c.relnamespace = 'net'::regnamespace and c.relname = any(${sql.raw(`'{${RECORDS.join(',')}}'`)}::text[]) order by c.relname`);
+    expect(fenced.rows).toEqual([...RECORDS].sort().map(name => ({ name, deferrable: true, deferred: true })));
+  });
+
+  it('takes a fork among the reasons of a backup', async () => {
+    const db = await fullyMigrated();
+    const backup = (reason: string) =>
+      db.execute(sql`insert into net.backups (id, company_id, dumped_at, made_at, reason, size, sha256, signer, serial, recipients, migrations, head)
+        values (gen_random_uuid(), gen_random_uuid(), now(), now(), ${reason}, 10, ${'a'.repeat(64)}, gen_random_uuid(), 'ab', '{}', 107, '{}')`);
+    for (const reason of ['timer', 'update', 'fork']) await backup(reason);
+    expect(await codeOf(backup('other'))).toBe('23514');
+  });
+
+  it('takes only the merges, conflicts and rows there are', async () => {
+    const db = await fullyMigrated();
+    const merge = (source: string, status = 'pending') => db.execute<{ id: string }>(sql`insert into net.merges (source, label, status) values (${source}, 'a database', ${status}) returning id`);
+    const id = (await merge('kept:hornhoof_before_20261110_090000')).rows[0]!.id;
+    await merge('machine:0f0f');
+    expect(await codeOf(merge('other:x'))).toBe('23514');
+    expect(await codeOf(merge('kept:other', 'other'))).toBe('23514');
+    expect(await codeOf(merge('kept:hornhoof_before_20261110_090000'))).toBe('23505');
+    const conflict = (over: { kind?: string; op?: string; key?: string; carried?: string | null } = {}) =>
+      db.execute(sql`insert into net.merge_conflicts (merge, carried, tbl, key, op, kind, topic, why)
+        values (${id}, ${over.carried ?? null}, 'tasks', ${over.key ?? '{"id": "1"}'}::jsonb, ${over.op ?? 'update'}, ${over.kind ?? 'differs'}, 'work', 'Both changed it.')`);
+    await conflict();
+    expect(await codeOf(conflict({ kind: 'other' }))).toBe('23514');
+    expect(await codeOf(conflict({ op: 'other' }))).toBe('23514');
+    /* One conflict of a merge for a row, but for those carried from other databases, each by the id it had there. */
+    expect(await codeOf(conflict())).toBe('23505');
+    await conflict({ carried: '0f0f0f0f-0000-4000-8000-00000000000a' });
+    await conflict({ carried: '0f0f0f0f-0000-4000-8000-00000000000b' });
+    const row = (how: string) => db.execute(sql`insert into net.merge_rows (merge, tbl, key, how) values (${id}, 'tasks', '{"id": "1"}'::jsonb, ${how})`);
+    await row('rewritten');
+    expect(await codeOf(row('other'))).toBe('23514');
+    /* The horizon is there from the start, a week back: whatever a build before pruned is older than that. */
+    expect((await db.execute(sql`select below < now() - interval '6 days' and below > now() - interval '8 days' as a_week_back from net.horizon`)).rows).toEqual([{ a_week_back: true }]);
+    expect(await codeOf(db.execute(sql`insert into net.horizon (id, below) values (false, now())`))).toBe('23514');
+    expect(await codeOf(db.execute(sql`insert into net.horizon (below) values (now())`))).toBe('23505');
+  });
+});
+
+describe('migration 0116, the server order and the copies', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds the server order and the copy's columns", async () => {
+    const db = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'machines'`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(
+      expect.arrayContaining(['server_order', 'server_pin', 'server_why', 'memory', 'cores', 'copy_state', 'copy_progress', 'copy_error', 'copy_at', 'copy_name', 'copy_old', 'data_left_at', 'upload_state']),
+    );
+    expect((await db.execute(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'public_links' and column_name = 'next_key_enc'`)).rows).toHaveLength(1);
+    let made = 0;
+    const machine = (column: string, value: string | number) =>
+      db.execute(sql.raw(`insert into machines (company_id, person_id, machine_key, ${column}) values (gen_random_uuid(), gen_random_uuid(), 'm${made++}', ${typeof value === 'number' ? value : `'${value}'`})`));
+    /* One machine to a place, and a place is 1 or more. */
+    await machine('server_order', 2);
+    expect(await codeOf(machine('server_order', 2))).toBe('23505');
+    expect(await codeOf(machine('server_order', 0))).toBe('23514');
+    /* Any number of machines never take the server, one machine to a pinned place, and a pinned place is 2 or more. */
+    await machine('server_pin', 'none');
+    await machine('server_pin', 'none');
+    await machine('server_pin', '2');
+    expect(await codeOf(machine('server_pin', '2'))).toBe('23505');
+    expect(await codeOf(machine('server_pin', '1'))).toBe('23514');
+    expect(await codeOf(machine('server_pin', 'x'))).toBe('23514');
+    for (const state of ['making', 'remaking', 'ready', 'stopped']) await machine('copy_state', state);
+    for (const error of ['disk_full', 'apply', 'led', 'setup']) await machine('copy_error', error);
+    for (const state of ['waiting', 'received', 'kept']) await machine('upload_state', state);
+    await machine('copy_progress', 0);
+    await machine('copy_progress', 99);
+    expect(await codeOf(machine('copy_state', 'other'))).toBe('23514');
+    expect(await codeOf(machine('copy_error', 'other'))).toBe('23514');
+    expect(await codeOf(machine('upload_state', 'other'))).toBe('23514');
+    expect(await codeOf(machine('copy_progress', 100))).toBe('23514');
+  });
+
+  it('adds the pulse, fenced, and the sources of a merge a machine gives', async () => {
+    const db = await fullyMigrated();
+    const fenced = await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = 'pulse'`);
+    expect(fenced.rows).toEqual([{ deferrable: true, deferred: true }]);
+    await db.execute(sql`insert into net.pulse (at) values (now())`);
+    expect(await codeOf(db.execute(sql`insert into net.pulse (at) values (now())`))).toBe('23505');
+    expect(await codeOf(db.execute(sql`insert into net.pulse (id, at) values (false, now())`))).toBe('23514');
+    const merge = (source: string, machine: string | null = null) => db.execute(sql`insert into net.merges (source, label, machine) values (${source}, 'a database', ${machine})`);
+    await merge('upload:hornhoof_upload_0f0f0f0f0f0f0f0f_20261111t090000', '0f0f0f0f-0000-4000-8000-00000000000a');
+    await merge('machine:0f0f0f0f-0000-4000-8000-00000000000a:1', '0f0f0f0f-0000-4000-8000-00000000000a');
+    await merge('kept:hornhoof_before_20261110_090000');
+    expect(await codeOf(merge('other:x'))).toBe('23514');
+  });
+});
+
+describe('migration 0117, the measures of the server order', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it("adds the measures and the ranking's row", async () => {
+    const db = await fullyMigrated();
+    const MEASURES = ['link_rtt_ms', 'link_mbps', 'internet_rtt_ms', 'internet_mbps'];
+    const machine = (column: string, value: number | null) =>
+      db.execute(sql`insert into machines (company_id, person_id, machine_key, ${sql.raw(column)}) values (gen_random_uuid(), gen_random_uuid(), ${`m-${column}-${String(value)}`}, ${value})`);
+    for (const column of MEASURES) {
+      /* A machine that has measured nothing yet has none, and nothing is less than nothing. */
+      await machine(column, null);
+      await machine(column, 0);
+      expect(await codeOf(machine(column, -1)), column).toBe('23514');
+    }
+    const fenced = await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = 'ranking'`);
+    expect(fenced.rows).toEqual([{ deferrable: true, deferred: true }]);
+    await db.execute(sql`insert into net.ranking (rescored_at) values (now())`);
+    expect(await codeOf(db.execute(sql`insert into net.ranking (rescored_at) values (now())`))).toBe('23505');
+    expect(await codeOf(db.execute(sql`insert into net.ranking (id) values (false)`))).toBe('23514');
+  });
+});
+
+describe('migration 0118, the tables of a server move', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company, person or machine stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+  const fencedOf = async (db: PgliteDatabase, table: string) =>
+    (await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = ${table}`)).rows;
+  const A = '0f0f0f0f-0000-4000-8000-00000000000a';
+  const B = '0f0f0f0f-0000-4000-8000-00000000000b';
+
+  it('holds one move', async () => {
+    const db = await fullyMigrated();
+    expect(await fencedOf(db, 'move')).toEqual([{ deferrable: true, deferred: true }]);
+    const move = (state: string, reason: string | null, ended: boolean) =>
+      db.execute(sql`insert into net.move (machine_id, from_machine_id, asked_by, asked_at, state, reason, ended_at) values (${A}, ${B}, ${A}, now(), ${state}, ${reason}, ${ended ? sql`now()` : sql`null`})`);
+    /* A move that failed says why and when; one that goes on says neither. */
+    for (const [state, reason, ended] of [['failed', 'behind', false], ['failed', null, true], ['preparing', 'behind', false], ['switching', null, true], ['preparing', 'behind', true], ['failed', 'late', true], ['done', null, false]] as const) {
+      expect(await codeOf(move(state, reason, ended)), `${state} ${reason} ${ended}`).toBe('23514');
+    }
+    await move('preparing', null, false);
+    const [made] = (await db.execute<{ request: string }>(sql`select request::text as request from net.move`)).rows;
+    expect(made!.request).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await codeOf(move('preparing', null, false))).toBe('23505');
+    await db.execute(sql`update net.move set state = 'failed', reason = 'no_answer', ended_at = now()`);
+  });
+
+  it('records a handover', async () => {
+    const db = await fullyMigrated();
+    expect(await fencedOf(db, 'handovers')).toEqual([{ deferrable: true, deferred: true }]);
+    const slots = { ['0f'.repeat(16)]: 'copy_0f0f0f0f0f0f0f0f_2' };
+    await db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at, slots)
+      values (gen_random_uuid(), ${A}, 4, ${'0f'.repeat(16)}, '0/3000000', ${B}, now(), ${JSON.stringify(slots)}::jsonb)`);
+    expect((await db.execute<{ slots: object }>(sql`select slots from net.handovers`)).rows).toEqual([{ slots }]);
+    expect(await codeOf(db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, to_machine_id, at) values (gen_random_uuid(), ${A}, 4, 'm', ${B}, now())`))).toBe('23502');
+    /* One with no slot to say holds none. */
+    await db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at) values (gen_random_uuid(), ${A}, 5, 'm', '0/4000000', ${B}, now())`);
+    expect((await db.execute(sql`select 1 from net.handovers where slots = '{}'::jsonb`)).rows).toHaveLength(1);
+  });
+
+  it("names a built-in node's machine", async () => {
+    const db = await fullyMigrated();
+    for (const table of ['jobs', 'agents', 'test_parts']) {
+      const [{ n }] = (await db.execute<{ n: number }>(sql`select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name = ${table} and column_name = 'builtin_machine' and data_type = 'text' and is_nullable = 'YES'`)).rows as [{ n: number }];
+      expect(n, table).toBe(1);
+      const [check] = (await db.execute<{ def: string }>(sql`select pg_get_constraintdef(c.oid) as def from pg_constraint c join pg_class t on t.oid = c.conrelid where t.relname = ${table} and c.contype = 'c' and pg_get_constraintdef(c.oid) like '%builtin_machine%'`)).rows;
+      expect(check?.def, table).toContain('^[0-9a-f]{32}([0-9a-f]{32})?$');
+    }
+    /* A network id of either length, in lowercase hex, and nothing else. */
+    const said = async (value: string) => (await db.execute<{ ok: boolean }>(sql`select ${value} ~ '^[0-9a-f]{32}([0-9a-f]{32})?$' as ok`)).rows[0]!.ok;
+    expect([await said('0f'.repeat(16)), await said('0f'.repeat(32)), await said('ABC'), await said('0'.repeat(33))]).toEqual([true, true, false, false]);
+  });
+
+  it('records the handover a state ended with', async () => {
+    const db = await fullyMigrated();
+    await db.execute(sql`insert into net_local.state (term_number, term_machine, machine, cluster) values (1, 'm', 'm', 'c')`);
+    await db.execute(sql`update net_local.state set handed_to = ${'0f'.repeat(16)}, handed_lsn = '0/3000000', handed_at = now()`);
+    for (const one of ['handed_to', 'handed_lsn', 'handed_at']) expect(await codeOf(db.execute(sql`update net_local.state set ${sql.raw(one)} = null`)), one).toBe('23514');
+    await db.execute(sql`update net_local.state set handed_to = null, handed_lsn = null, handed_at = null`);
+  });
+});
+
+
+describe('migration 0119, the tables of takeovers, parked job results and the hidden link', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company, person or machine stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+  const A = '0f0f0f0f-0000-4000-8000-00000000000a';
+  const B = '0f0f0f0f-0000-4000-8000-00000000000b';
+
+  it('records the kind of each handover', async () => {
+    const db = await fullyMigrated();
+    const handover = (more = sql``, values = sql``) =>
+      db.execute(sql`insert into net.handovers (id, from_machine_id, term_number, term_machine, applied, to_machine_id, at${more}) values (gen_random_uuid(), ${A}, 4, 'm', '0/3000000', ${B}, now()${values})`);
+    /* One that says nothing of its kind was planned. */
+    await handover();
+    expect((await db.execute(sql`select kind, heard_at, reach, noted_at, reason from net.handovers`)).rows).toEqual([{ kind: 'planned', heard_at: null, reach: null, noted_at: null, reason: null }]);
+    await handover(sql`, kind, heard_at, reach, reason`, sql`, 'takeover', now(), now(), 'disk_full'`);
+    await handover(sql`, kind, noted_at`, sql`, 'ceo', now()`);
+    expect(await codeOf(handover(sql`, kind`, sql`, 'other'`))).toBe('23514');
+    expect(await codeOf(handover(sql`, reason`, sql`, 'other'`))).toBe('23514');
+  });
+
+  it("parks a job's messages", async () => {
+    const db = await fullyMigrated();
+    const fenced = (await db.execute<{ deferrable: boolean; deferred: boolean }>(sql`select t.tgdeferrable as deferrable, t.tginitdeferred as deferred
+      from pg_class c join pg_trigger t on t.tgrelid = c.oid and t.tgname = 'net_fence' where c.relnamespace = 'net'::regnamespace and c.relname = 'parked'`)).rows;
+    expect(fenced).toEqual([{ deferrable: true, deferred: true }]);
+    const node = { kind: 'machine', id: A };
+    const park = (kind: string) => db.execute(sql`insert into net.parked (job_id, node, kind, body) values (${B}, ${JSON.stringify(node)}::jsonb, ${kind}, '{"n":1}'::jsonb)`);
+    for (const kind of ['listed', 'started', 'event', 'done']) await park(kind);
+    expect(await codeOf(park('other'))).toBe('23514');
+    const rows = (await db.execute<{ node: object; body: object; applied_at: Date | null; at: Date | string }>(sql`select node, body, applied_at, at from net.parked where kind = 'event'`)).rows;
+    expect(rows).toHaveLength(1);
+    expect([rows[0]!.node, rows[0]!.body, rows[0]!.applied_at, rows[0]!.at === null]).toEqual([node, { n: 1 }, null, false]);
+    /* The messages of one job are found by it. */
+    expect((await db.execute(sql`select 1 from pg_indexes where schemaname = 'net' and tablename = 'parked' and indexname = 'parked_job'`)).rows).toHaveLength(1);
+  });
+
+  it('keeps the led term of an old database, hides a link, and knows a copy that saves what it led', async () => {
+    const db = await fullyMigrated();
+    const column = async (table: string, name: string) =>
+      (await db.execute<{ type: string; nullable: string; def: string | null }>(sql`select data_type as type, is_nullable as nullable, column_default as def from information_schema.columns
+        where table_schema = 'public' and table_name = ${table} and column_name = ${name}`)).rows[0];
+    expect(await column('machines', 'copy_old_led')).toEqual({ type: 'bigint', nullable: 'YES', def: null });
+    expect(await column('public_links', 'hidden')).toEqual({ type: 'boolean', nullable: 'NO', def: 'false' });
+    const [check] = (await db.execute<{ def: string }>(sql`select pg_get_constraintdef(c.oid) as def from pg_constraint c join pg_class t on t.oid = c.conrelid where t.relname = 'machines' and c.conname = 'machines_copy_state'`)).rows;
+    for (const state of ['making', 'remaking', 'ready', 'stopped', 'saving']) expect(check?.def, state).toContain(`'${state}'`);
+    expect(check?.def).not.toContain('other');
   });
 });

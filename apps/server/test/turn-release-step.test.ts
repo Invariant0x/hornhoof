@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, tasks } from '../src/db/schema.js';
+import { agents, companies, tasks } from '../src/db/schema.js';
 import { BASE } from './development-echelons-fixture.js';
+import { as } from './helpers.js';
 import { releasing } from './turn-release-fixture.js';
 
 const EXTRA = '7'.repeat(40);
@@ -113,5 +114,56 @@ describe('whether everything a release brings was checked', () => {
 
   it('does not cover a candidate whose checker was switched off since', async () => {
     expect(await coverage(async f => { await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id)); })).toMatchObject({ covered: false });
+  });
+});
+
+/* Autonomous release, by the human CEO's switch: a release whose every commit was checked needs no person to approve it,
+   and its approval is the entry of the autonomous release log, with the full run and the checkers that passed it. */
+describe('the release step with autonomous release on', () => {
+  const autonomous = async (f: Awaited<ReturnType<typeof releasing>>, on = true) => {
+    await f.db.update(companies).set({ autonomousRelease: on }).where(eq(companies.id, f.task.companyId));
+  };
+  const journal = async (f: Awaited<ReturnType<typeof releasing>>) =>
+    (await f.app.inject({ method: 'GET', url: '/api/autonomous-releases', ...as(f.ceoToken) })).json().entries as Record<string, unknown>[];
+
+  it('approves a release every commit of which was checked by itself, and logs it with the full run and its checkers', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const run = await f.fullRun();
+    const result = await f.recordRelease({ runId: run.id });
+    expect(result.isError).toBe(false);
+    const record = recorded(result.text);
+    expect(record).toMatchObject({ turn: f.turn.number, commit: f.R, baseCommit: BASE, runId: run.id, approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true });
+    expect(await journal(f)).toEqual([expect.objectContaining({
+      id: record.autonomousReleaseId, taskNumber: f.release.number, agentName: f.head.name, commitSha: f.R, baseCommitSha: BASE,
+      testRunId: run.id, testRunNumber: run.number, reviewerName: f.reviewer.name, verdictStage: 'review',
+    })]);
+  });
+
+  it('still asks a person for a release that brings a commit nobody checked, and logs nothing', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const run = await f.fullRun();
+    f.repo.cut.add(`${BASE}..${f.R}`);
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(await journal(f)).toEqual([]);
+  });
+
+  it('still asks a person while autonomous release is off', async () => {
+    const f = await releasing();
+    await autonomous(f, false);
+    const run = await f.fullRun();
+    expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
+    expect(await journal(f)).toEqual([]);
+  });
+
+  it("takes a person's approval of the commit where there is one, and logs nothing", async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const run = await f.fullRun();
+    const approval = await f.approve();
+    const result = await f.recordRelease({ runId: run.id });
+    expect(recorded(result.text)).toMatchObject({ approvalRequestId: approval.id, autonomousReleaseId: null });
+    expect(await journal(f)).toEqual([]);
   });
 });

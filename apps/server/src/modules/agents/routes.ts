@@ -8,11 +8,12 @@ import { requireDepartmentChanger, runsDepartment } from '../../auth/departments
 import { actorOf, changedBy, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, telegramBots, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
+import { unreadCount } from '../conversation/inbox.js';
 import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
-import { keyEndFor, subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
+import { keyEndFor, onlineIn, subViews, type SubView } from '../subscriptions/views.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
@@ -63,6 +64,8 @@ export type AgentCard = FailureState & {
   /* The whole company or the agent's department may change it; the whole company or the department's owner removes it. */
   canEdit: boolean;
   canRemove: boolean;
+  /* How many of its letters wait unread in its inbox, for the counter on its window. */
+  inboxUnread: number;
   /* Off for now: it takes no task turns. */
   on: boolean;
   /* Wakes every so many minutes to do its order, and with forWork only while there is work to look at; lastAt is when the
@@ -234,7 +237,7 @@ function cardState(agent: AgentRow, running: boolean): AgentCard['state'] {
 /* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
 async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const { db, hub } = ctx;
-  const online: IsOnline = node => hub.isOnline(node);
+  const online = onlineIn(hub, ctx.config);
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   const named = await cardPlaces(db, agent);
   const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
@@ -285,6 +288,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     interrupted: interrupted.map(interruptedView),
     canEdit: await mayEdit(ctx, me, agent),
     canRemove: me.scopeKind === 'company' || (await runsDepartment(db, me, agent.departmentId)),
+    inboxUnread: await unreadCount(db, agent.id),
     on: !agent.switchedOffAt,
     timer: timerOf(agent),
     telegram: await telegramOf(db, agent.id),

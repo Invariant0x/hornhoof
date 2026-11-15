@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useT } from '../i18n';
 import { takeEscape } from './escape';
+import { guardedResizeObserver } from '../guard';
 
 /* The panels that slide out of an agent's window, all alike. They stand in a row left of the window, in the order they were
    opened, and the terminal never moves for them. A row the free space cannot hold reaches over the window as far as it must;
@@ -8,7 +9,7 @@ import { takeEscape } from './escape';
    goes back to what opened it. A new panel is one line, framedPanel(id, label, icon, content), in the window's list. */
 export type SidePanel = { id: string; render(close: () => void): ReactNode };
 /* One the window's bar opens with its icon. */
-export type WindowPanel = SidePanel & { label: string; icon: string };
+export type WindowPanel = SidePanel & { label: string; icon: string; count?: { n: number; label: string } };
 
 type Opened = { id: string; back: HTMLElement | null };
 
@@ -53,9 +54,11 @@ export function useSidePanels(panels: SidePanel[], box: RefObject<HTMLElement | 
     },
     [opened, box],
   );
+  /* Opens it, or brings it to the end of the row with the focus going back to this opener. */
+  const open = (id: string, opener: HTMLElement | null) => setOpened(list => [...list.filter(o => o.id !== id), { id, back: opener }]);
   const toggle = (id: string, opener: HTMLElement | null) => {
     if (isOpen(id)) close(id);
-    else setOpened(list => [...list.filter(o => o.id !== id), { id, back: opener }]);
+    else open(id, opener);
   };
   const newest = shown.at(-1)?.id;
 
@@ -74,7 +77,7 @@ export function useSidePanels(panels: SidePanel[], box: RefObject<HTMLElement | 
     };
   }, [active, newest, close, box]);
 
-  return { shown, isOpen, toggle, close, row };
+  return { shown, isOpen, open, toggle, close, row };
 }
 
 /* The row reaches over what stands under it, or that has made way for it altogether. */
@@ -93,7 +96,7 @@ export function usePanelsCover(row: RefObject<HTMLElement | null>, under: RefObj
     const measure = () => setCovered(liesOver(panels, shown));
     measure();
     window.addEventListener('resize', measure);
-    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    const resized = typeof ResizeObserver === 'undefined' ? null : guardedResizeObserver(measure, 'side-panels');
     resized?.observe(panels);
     resized?.observe(shown);
     return () => {
@@ -122,11 +125,12 @@ export function SidePanelRow({ stack, id }: { stack: ReturnType<typeof useSidePa
   );
 }
 
-/* A panel's frame: its name, the button that closes it, and a body that scrolls. heading: what its bar says, when not its name. */
-export function PanelFrame({ label, heading = label, busy, onClose, children }: { label?: string; heading?: string; busy?: boolean; onClose(): void; children: ReactNode }) {
+/* A panel's frame: its name, the button that closes it, and a body that scrolls. heading: what its bar says, when not its name.
+   kind: a class that styles what this panel holds. */
+export function PanelFrame({ label, heading = label, busy, kind, onClose, children }: { label?: string; heading?: string; busy?: boolean; kind?: string; onClose(): void; children: ReactNode }) {
   const t = useT();
   return (
-    <aside className="acard" aria-label={label} aria-busy={busy}>
+    <aside className={kind ? `acard ${kind}` : 'acard'} aria-label={label} aria-busy={busy}>
       <div className="t-bar">
         <span className="lights" aria-hidden="true">
           <i />

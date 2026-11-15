@@ -1,7 +1,7 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from './task-route';
 import { onTestFinished, vi } from 'vitest';
-import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
+import type { AccessMachine, AgentCardView, AgentTime, ComputerAccessView, Decisions, DepartmentTree, IdleStretch, MachineView, Me, Org, PersonView, Roster, RunningAgent, SegmentKind, Serving, SubView, TaskDetail, TaskLine, TreeAgent, TreeLine, TreeSegment, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply | Promise<Reply>);
@@ -19,13 +19,20 @@ function taskDepartments(routes: Record<string, Route>): Route {
   };
 }
 
+/* The key the server holds for the person in most tests, so a join command shows at once. A test that wants none gives
+   'GET /api/me/key': [200, { key: null }]. */
+export const TEST_KEY = { publicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE'.padEnd(122, 'k'), wrapped: 'd3JhcHBlZA', salt: 'c2FsdA', iv: 'aXY', iterations: 600_000 };
+/* A join command as the screens show it: with the viewer's key on it. */
+export const withKey = (command: string): string => `${command} --owner-key ${TEST_KEY.publicKey}`;
+const KEY_ROUTES: Record<string, Route> = { 'GET /api/me/key': [200, { key: TEST_KEY }], 'PUT /api/me/key': [204] };
+
 export function mockApi(routes: Record<string, Route>): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
     const method = init.method ?? 'GET';
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     calls.push({ method, path, body });
-    const route = routes[`${method} ${path}`] ?? (path === '/api/task-departments' ? taskDepartments(routes) : undefined);
+    const route = routes[`${method} ${path}`] ?? KEY_ROUTES[`${method} ${path}`] ?? (path === '/api/task-departments' ? taskDepartments(routes) : undefined);
     const [status, data] = typeof route === 'function' ? await route(body) : route ?? [404, { error: { code: 'not_found', message: 'Not found.' } }];
     return new Response(data === undefined ? null : JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
   }));
@@ -268,18 +275,30 @@ export const REQUESTS: WaitingRequest[] = [
   { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV }, ownerPersonId: 'p1', canAnswer: true },
 ];
 
-/* What GET /api/requests answers: the requests, the orchestrator's cards and his request for the computer, counted per
+/* Computer access to a machine as the server shows it to its owner: with its core answering, and opened on the server's
+   word unless the test says the machine holds a key. Its id is m-<name>, its network id n-<name>. */
+export function accessView(name: string, over: Partial<Omit<ComputerAccessView, 'machine'>> & { machine?: Partial<AccessMachine> } = {}): ComputerAccessView {
+  const { machine, ...rest } = over;
+  return {
+    machine: { id: `m-${name}`, networkId: `n-${name}`, name, hostname: name, personId: 'p1', role: 'worker', os: 'linux', data: false, ...machine },
+    reachable: true, until: null, asked: null, canOpen: true, canClose: true, key: 'not_needed',
+    ...rest,
+  };
+}
+
+/* What GET /api/requests answers: the requests, the orchestrator's cards and his requests for machines, counted per
    owner and per asking agent as the server counts them. */
-export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'computerAccess'>> = {}): Decisions {
-  const all = { proposals: [], computerAccess: null, ...more };
-  const items = [...requests, ...all.proposals, ...(all.computerAccess ? [all.computerAccess] : [])];
+export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'machineAccess' | 'merges'>> = {}): Decisions {
+  const { merges = [], ...given } = more;
+  const all = { proposals: [], machineAccess: [], ...given };
+  const items = [...requests, ...all.proposals, ...all.machineAccess];
   const byPerson: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
   for (const i of items) {
     byPerson[i.ownerPersonId] = (byPerson[i.ownerPersonId] ?? 0) + 1;
     byAgent[i.agent.id] = (byAgent[i.agent.id] ?? 0) + 1;
   }
-  return { requests, ...all, counts: { byPerson, byAgent, total: items.length } };
+  return { requests, ...all, merges, counts: { byPerson, byAgent, total: items.length + merges.length } };
 }
 
 export const TURN: TurnView = {

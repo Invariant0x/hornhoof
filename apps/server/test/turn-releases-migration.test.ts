@@ -136,7 +136,20 @@ describe('turns become releases', () => {
     expect(of('turns')).not.toContain('mode');
     expect(of('departments')).not.toContain('work_mode');
     expect(of('turns')).toEqual(expect.arrayContaining(['version', 'commit', 'base_version', 'base_commit', 'start_commit']));
-    expect(of('turn_releases')).toEqual(expect.arrayContaining(['turn_id', 'commit', 'base_commit_sha', 'run_id', 'tasks', 'approval_request_id']));
+    expect(of('turn_releases')).toEqual(expect.arrayContaining(['turn_id', 'commit', 'base_commit_sha', 'run_id', 'tasks', 'approval_request_id', 'autonomous_release_id']));
     await expect(client.query(`INSERT INTO tasks(company_id, number, title, status) VALUES ('${ACME}', 99, 'Planned again', 'planned')`)).rejects.toThrow();
+  });
+
+  it('keeps no release that nothing approved, or that a person and the autonomous log both approved', async () => {
+    const client = await migrated();
+    const [{ id: request }] = await rows<{ id: string }>(client, `INSERT INTO requests(company_id, task_id, agent_id, kind, text, status, commit) VALUES ('${ACME}', '${K(2)}', '${DEV_HEAD}', 'approval', 'Release?', 'approved', '${'c'.repeat(40)}') RETURNING id`) as [{ id: string }];
+    const [{ id: logged }] = await rows<{ id: string }>(client, `INSERT INTO autonomous_releases(company_id, task_number, agent_name, commit_sha, base_commit_sha, test_run_number, reviewer_name, verdict_stage)
+      VALUES ('${ACME}', 2, 'Oracle', '${'c'.repeat(40)}', '${'a'.repeat(40)}', 1, 'Rho', 'review') RETURNING id`) as [{ id: string }];
+    const release = (approval: string, autonomous: string) => client.query(`INSERT INTO turn_releases(company_id, turn_id, commit, base_commit_sha, covered, approval_request_id, autonomous_release_id)
+      VALUES ('${ACME}', '${T(24)}', '${'c'.repeat(40)}', '${'a'.repeat(40)}', true, ${approval}, ${autonomous})`);
+    await expect(release('null', 'null')).rejects.toThrow(/turn_releases_approved_once/);
+    await expect(release(`'${request}'`, `'${logged}'`)).rejects.toThrow(/turn_releases_approved_once/);
+    await release(`'${request}'`, 'null');
+    await release('null', `'${logged}'`);
   });
 });

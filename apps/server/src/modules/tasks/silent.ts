@@ -10,6 +10,7 @@ import { sameProgram } from './program-history.js';
 import { programRestartStatus } from './program-restarts.js';
 import { logTurnFact } from './turn-log.js';
 import { jobCheckQueued, jobCheckLastEnd } from '../nodes/check-slots.js';
+import { builtinOf, nodeIdentity } from '../nodes/hub.js';
 import { stopStaleProgram } from './stale-program.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
@@ -197,14 +198,17 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   const silent: SilentTurn[] = [];
   for (const { job, agent, task } of rows) {
     const program = programs.get(job.id)?.program ?? null;
-    const alarm = alarmWithCheckQueue(ctx, job, program, task, nowMs);
+    /* A program on a machine Hornhoof cannot reach is silent for that reason, and nobody can look at its screen: no
+       alarm is raised for it until the machine is back. */
+    const node = job.nodeId ? nodeIdentity(job.nodeId) : job.builtinMachine ? builtinOf(job.builtinMachine) : null;
+    const alarm = node && ctx.hub.awaySince(node) !== null ? null : alarmWithCheckQueue(ctx, job, program, task, nowMs);
     await updateTurnAlarm(ctx, job, alarm, now);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
   }
   return silent;
 }
 
-async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> {
+export async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> {
   const seen = alertedSet(ctx);
   if (seen.has(jobId)) return true;
   const [row] = await ctx.db
@@ -291,11 +295,12 @@ async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<stri
   const restart = await programRestartStatus(ctx, s.job.companyId, s.agent.id, +now);
   const restartLine = restart.allowed ? 'restart_program is allowed now, for a wait the screen shows dead.' : `restart_program is not allowed now: ${restart.reason}`;
   const action = `Read program_screen for employee ${s.agent.id} and do at its screen what it needs to go on. ${restartLine} When nothing you may do helps, tell your head what the screen shows.`;
+  const reason = program?.signAt != null && s.alarm.reason === 'program_stalled' ? 'program_stalled (program gave no sign of life)' : reasonLabel(s.alarm.reason);
+  /* The reason and who come first: an inbox turn shows each letter cut at 300 characters. */
   return (
-    `Hornhoof: ${who} triggered a turn alarm in turn ${s.job.id} (${where}). ` +
+    `Hornhoof: turn alarm, reason ${reason}: ${who}, in turn ${s.job.id} (${where}). ` +
     `Program state: ${programLabel(program)}, since ${stateSince}. Last change: ${when(iso)} (${iso}). ` +
-    `Last sign: ${sign}. Program retry: ${retry}. ` +
-    `Reason: ${program?.signAt != null && s.alarm.reason === 'program_stalled' ? 'program_stalled (program gave no sign of life)' : reasonLabel(s.alarm.reason)}. ${action}`
+    `Last sign: ${sign}. Program retry: ${retry}. ${action}`
   );
 }
 
@@ -326,15 +331,15 @@ async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<s
     if (to && to.id !== s.agent.id) await dispatchAlarm(ctx, s, to, now, `${s.job.id}:after_restart`);
     return;
   }
-  const to = await screenReader(ctx, s, unavailable);
+  const to = await screenReader(ctx, s.job.companyId, s.agent.id, unavailable);
   if (to) await dispatchAlarm(ctx, s, to, now, quietCase(s, now));
 }
 
 /* Whoever hears of a quiet program must see its screen: a free program operator, or else the head of Operations, or else
-   an operator at work. */
-async function screenReader(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<string>): Promise<Agent | null> {
+   an operator at work. Never the employee whose program it is. */
+export async function screenReader(ctx: Ctx, companyId: string, of: string, unavailable: ReadonlySet<string>): Promise<Agent | null> {
   const staff: Agent[] = [];
-  for (const a of await operationsStaff(ctx, s.job.companyId)) if (a.id !== s.agent.id && await liveSubscription(ctx, a.id)) staff.push(a);
+  for (const a of await operationsStaff(ctx, companyId)) if (a.id !== of && await liveSubscription(ctx, a.id)) staff.push(a);
   const operators = staff.filter(a => a.kind === 'worker');
   return operators.find(a => !unavailable.has(a.id)) ?? staff.find(a => a.kind === 'head') ?? operators[0] ?? null;
 }

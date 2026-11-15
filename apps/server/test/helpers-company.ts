@@ -1,6 +1,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import type { Pool } from 'pg';
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
@@ -38,16 +39,21 @@ export async function appFixture<T>(app: FastifyInstance, key: string, make: () 
   /* Browser support processes own their app without Vitest's lifecycle or fixture cache. */
   if (!process.env.VITEST) return make();
   const { fixture } = await import('./helpers-db.js');
-  const { $client } = app.ctx.db as unknown as { $client: PGlite };
+  const { $client } = app.ctx.db as unknown as { $client: PGlite | Pool };
+  /* A real Postgres of test/real is a database of one file, made and dropped by it: nothing is kept for it. */
+  if ('totalCount' in $client) return make();
   return fixture($client, `${key} ${JSON.stringify(app.ctx.config)}`, make);
 }
 
 /* A company with its orchestrator and nothing else, for a test about something other than Operations, and the CEO's
-   session token. First-run setup runs once in a file; a test about what people really get calls /api/setup itself. */
+   session token. First-run setup runs once in a file; a test about what people really get calls /api/setup itself. Its
+   mail goes each as a turn of its own, as a test about something other than the inbox expects; inbox.test.ts takes the
+   inbox every company starts with. */
 export async function setUpCompany(app: FastifyInstance): Promise<string> {
   return appFixture(app, 'setUpCompany', async () => {
     const token = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
     await withoutOperations(app.ctx.db);
+    await app.ctx.db.update(schema.companies).set({ inboxMode: 'direct' });
     return token;
   });
 }

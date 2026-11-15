@@ -4,7 +4,8 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { agentEvents, agents, companies, departments, jobs, nodes, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { BUILTIN, identityOf } from '../src/modules/nodes/hub.js';
+import { identityOf } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { restartCause } from '../src/modules/nodes/restarts.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -45,7 +46,7 @@ async function company() {
   let node = await connectNode(url, NODE_KEY);
   node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: boot('2026-11-03T00:00:00.000Z') });
   await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null, null, BUILTIN)!));
   const dept = async (templateKey: 'development' | 'operations', roleCode: string) => (await db.insert(departments).values({ companyId, templateKey, roleCode }).returning())[0]!;
   const [dev, ops] = [await dept('development', 'DEV'), await dept('operations', 'OPS')];
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId: string) =>

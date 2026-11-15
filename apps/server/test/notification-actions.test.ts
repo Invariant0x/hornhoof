@@ -3,7 +3,7 @@ import { agentEvents, agents, companies, departments, jobs, people, subscription
 import { answer, ask, comment, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wordsForTurn } from '../src/modules/conversation/turn-words.js';
 import { said } from '../src/modules/conversation/live.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { eq } from 'drizzle-orm';
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';

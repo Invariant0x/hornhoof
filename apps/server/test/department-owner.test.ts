@@ -55,7 +55,6 @@ describe('decisionOwner with a department owner', () => {
   it('keeps what only the CEO decides with the CEO, whoever owns the department', () => {
     for (const topic of ['people', 'access', 'subscriptions', 'machines', 'public_link', 'updates', null]) expect(decisionOwner(question(dev, topic), [ceo, dana])).toBe('ceo');
     expect(decisionOwner({ source: 'proposal' }, [ceo, dana])).toBe('ceo');
-    expect(decisionOwner({ source: 'computer_access' }, [ceo, dana])).toBe('ceo');
   });
 
   it('gives it back to the CEO when the owner is not active any more', () => {
@@ -82,7 +81,6 @@ describe('canDecide with a department owner', () => {
     expect(canDecide(question(dev, 'people'), owner.who, owner.access, C)).toBe(false);
     expect(canDecide(question(dev, null), owner.who, owner.access, C)).toBe(false);
     expect(canDecide({ source: 'proposal' }, owner.who, owner.access, C)).toBe(false);
-    expect(canDecide({ source: 'computer_access' }, owner.who, owner.access, C)).toBe(false);
   });
 
   it('does not let someone with access who is not the owner take an approval', () => {

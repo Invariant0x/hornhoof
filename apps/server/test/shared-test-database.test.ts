@@ -65,6 +65,20 @@ describe('the tests of one file', { shuffle: false }, () => {
     expect(await rowsOfEachTable(emptied)).toEqual(await rowsOfEachTable(copy));
   });
 
+  /* A new copy holds rows its migrations wrote outside public too, as the horizon of merges in net. */
+  let horizon: unknown[] = [];
+  it('can change the rows a new copy holds', async () => {
+    const db = await createTestDb();
+    horizon = (await db.execute(sql`select below from net.horizon`)).rows;
+    expect(horizon).toHaveLength(1);
+    await db.execute(sql`update net.horizon set below = below + interval '1 day'`);
+  });
+
+  it('find those rows again as a new copy holds them', async () => {
+    const db = await createTestDb();
+    expect((await db.execute(sql`select below from net.horizon`)).rows).toEqual(horizon);
+  });
+
   it('can ask for a second database in one test, and it is another one', async () => {
     const first = await createTestDb();
     const second = await createTestDb();

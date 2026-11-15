@@ -13,7 +13,6 @@ import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
-import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
@@ -149,17 +148,18 @@ function proposalView({ proposal: p, ownerPersonId, canAnswer, decidedBy }: Deci
   };
 }
 
-/* What the computer card shows, with the orchestrator's request; open and decline stay on /api/computer. */
-async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<Decisions['computer']>, names: Map<string, string>) {
+/* What a machine's access card shows, with the orchestrator's request for it; its id is the machine's, and open and
+   decline go to that machine's routes. */
+function computerView(computer: Decisions['computers'][number], names: Map<string, string>) {
   return {
     kind: 'computer_access' as const,
-    id: 'server' as const,
+    id: computer.view.machine.id,
     agent: { id: computer.agentId, name: names.get(computer.agentId) ?? '' },
     ownerPersonId: computer.ownerPersonId,
     canAnswer: computer.canAnswer,
     decidedBy: decidedByView(computer.decidedBy, new Map()),
     at: computer.asked.at,
-    view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, companyId), canAnswer: computer.canAnswer },
+    view: computer.view,
   };
 }
 
@@ -410,8 +410,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const mine = shown.filter(r => r.known);
     const lines = await linesFor(ctx, viewer, mine.map(r => r.task));
     const cards = decisions.proposals.filter(p => picked(p.ownerPersonId));
-    const computer = decisions.computer && picked(decisions.computer.ownerPersonId) ? decisions.computer : null;
-    const names = await agentNames(db, [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId), ...(computer ? [computer.agentId] : [])]);
+    const computers = decisions.computers.filter(c => picked(c.ownerPersonId));
+    const names = await agentNames(db, [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId), ...computers.map(c => c.agentId)]);
     const places = await departmentNames(ctx, placesOf(cards, shown));
     const pictures = await picturesOf(db, shown.map(r => r.request));
     const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
@@ -420,7 +420,10 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       requests: requestViews(mine, lines, commits, pictures, names, explaining, places),
       addressed: shown.filter(r => !r.known).map(r => addressedView(r, pictures.get(r.request.id) ?? [], places)),
       proposals: cards.map(c => proposalView(c, names, places)),
-      computerAccess: computer && (await computerView(ctx, me.companyId, computer, names)),
+      /* A page loaded before machines had access of their own reads the old key, which held one request or none. */
+      computerAccess: null,
+      machineAccess: computers.map(c => computerView(c, names)),
+      merges: decisions.merges.filter(merge => picked(merge.ownerPersonId)).map(({ id, label, after, open, ownerPersonId }) => ({ id, label, after, open, ownerPersonId })),
       machinesAway: machineCards(me, person, decisions.machines),
       counts: decisions.counts,
     };

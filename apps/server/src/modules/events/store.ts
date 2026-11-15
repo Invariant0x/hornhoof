@@ -1,5 +1,5 @@
 import type { AgentEvent } from '@hornhoof/protocol';
-import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
@@ -59,7 +59,7 @@ export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e:
 export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<void> {
   const stored = await ctx.db.transaction(async tx => {
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
-      .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('update');
+      .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('no key update');
     if (!job?.agentId) return null;
     const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: hideCodes(event), personId: null }).returning({ id: agentEvents.id });
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
@@ -113,6 +113,19 @@ export async function listEvents(db: Db, agentId: string, after: number, limit =
     .orderBy(asc(agentEvents.seq))
     .limit(limit);
   return rows.map(view);
+}
+
+/* An agent's newest events, or the newest before seq, oldest first: a window keeps only its last ones and reads further back
+   when asked. */
+export async function lastEvents(db: Db, agentId: string, last: number, before?: number): Promise<EventView[]> {
+  const rows = await db
+    .select(columns)
+    .from(agentEvents)
+    .leftJoin(people, eq(people.id, agentEvents.personId))
+    .where(and(eq(agentEvents.agentId, agentId), before === undefined ? undefined : lt(agentEvents.seq, before), sql`${agentEvents.data}->>'operatorEvidenceId' is null`))
+    .orderBy(desc(agentEvents.seq))
+    .limit(last);
+  return rows.reverse().map(view);
 }
 
 /* A queued turn's sender snapshot, with trusted legacy ids for turns queued before message envelopes existed. */

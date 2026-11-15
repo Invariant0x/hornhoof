@@ -23,9 +23,9 @@ describe('setup code', () => {
 describe('GET /api/setup', () => {
   it('says setup is needed until a company exists, and where public links live', async () => {
     const { app } = await testApp();
-    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: true, linkDomain: 'hornhoof.org' });
+    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: true, linkDomain: 'hornhoof.org', recovering: false });
     await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
-    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: false, linkDomain: 'hornhoof.org' });
+    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: false, linkDomain: 'hornhoof.org', recovering: false });
   });
 });
 

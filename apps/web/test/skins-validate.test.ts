@@ -48,7 +48,8 @@ describe('a skin file of version 2', () => {
 
   it('takes colours as #RRGGBB or rgba(), see-through only where Design allows it, and the cut from 0 to 1.5', () => {
     for (const value of ['#ffffff', '#FFF4DA', 'rgba(255,244,218,1)', 'rgba(255, 244, 218, 1.0)']) expect(refused(file(raw => (colors(raw).ink = value))), value).toBeNull();
-    for (const role of SEE_THROUGH) expect(refused(file(raw => (colors(raw)[role] = 'rgba(0, 0, 0, .25)'))), role).toBeNull();
+    /* Glass as thin as a quarter would fade muted text over a white page, so it is see-through as densely as Design sets it. */
+    for (const role of SEE_THROUGH) expect(refused(file(raw => (colors(raw)[role] = role === 'hud' ? 'rgba(0, 0, 0, .94)' : 'rgba(0, 0, 0, .25)'))), role).toBeNull();
     expect(SEE_THROUGH).toEqual(['dot', 'glow', 'hud', 'shadow', 'scrim']);
     /* No repeats, so a list is never longer than its role allows: at most the six names Design set. */
     for (const role of FONT_ROLES) expect(FILE_FONTS[role].length, role).toBeLessThanOrEqual(6);
@@ -185,6 +186,12 @@ describe('the safety check of a skin file', () => {
     expect(refused(file(raw => (colors(raw).muted = '#55556A')))).toEqual({ code: 'low_contrast', key: 'muted', value: 'bg' });
     expect(refused(file(raw => (colors(raw).on_button = '#FFFFFF')))).toEqual({ code: 'low_contrast', key: 'on_button', value: 'button' });
     expect(refused(file(raw => (colors(raw).line2 = '#42425C')))).toEqual({ code: 'faint_line', key: 'line2', value: 'bg' });
+  });
+
+  it('refuses glass so thin that muted text on it fades over a white or a black page under it', () => {
+    expect(refused(file(raw => (colors(raw).hud = 'rgba(26, 26, 43, .3)')))).toEqual({ code: 'low_contrast', key: 'muted', value: 'hud' });
+    expect(refused(file(raw => (colors(raw).hud = 'rgba(255, 255, 255, .9)')))).toEqual({ code: 'low_contrast', key: 'muted', value: 'hud' });
+    expect(refused(file(raw => (colors(raw).hud = 'rgba(26, 26, 43, .94)')))).toBeNull();
   });
 
   it('says what to fix in plain words in English and Russian for every refusal', () => {

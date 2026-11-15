@@ -41,6 +41,9 @@ export async function runningAgents(ctx: Ctx, viewer: Person) {
       subscriptionId: s.id,
       nodeId: a.nodeId,
       builtin: s.kind === 'api_key',
+      /* The machine of the built-in node its program is on; none before its first turn, or from before those were told
+         apart, when it is the server's own. */
+      builtinMachine: a.builtinMachine,
       view: {
         id: a.id, name: a.name, canOpen: true,
         title: (a.roleKey && templates.roles.get(a.roleKey)?.title) || null,

@@ -14,6 +14,7 @@ import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -29,7 +30,7 @@ async function company() {
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null, null, BUILTIN)!));
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
     (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(s => s.on).map(s => s.id) ?? [] }).returning())[0]!;

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { adapterFor } from './providers/index.js';
 import type { ProviderAdapter } from './runner.js';
+import { OUTBOX_FILE } from './outbox.js';
 
 /* The built-in node runs every company key's jobs under a Linux user of its own, so one key's agent never reads another's folders or the node's env. */
 
@@ -101,7 +102,7 @@ export const asAgent = (argv: string[], user: JobUser): string[] => ['setpriv', 
 export function secureNode(dir: string, user: JobUser, ops: FolderOps = REAL_OPS): void {
   if (ops.owner(dir) !== 0) ops.chown(dir, 0, 0);
   ops.chmod(dir, 0o755);
-  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', 'browser-error', 'browsers']) {
+  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', 'browser-error', 'browsers', OUTBOX_FILE]) {
     const path = join(dir, file);
     if (ops.exists(path) && ops.owner(path) !== 0) ops.chown(path, 0, 0);
   }

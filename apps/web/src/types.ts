@@ -201,11 +201,31 @@ export type { ApprovalChannel, ApprovalMode };
 /* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
 export type ApprovalRule = { channel: ApprovalChannel } & ChannelRule;
 /* A department's owner and rules as this person may see them; no owner means the CEO. */
+export type AutonomousReleaseEntry = {
+  id: string;
+  departmentId?: string | null;
+  taskId: string | null;
+  taskNumber: number;
+  agentId: string | null;
+  agentName: string;
+  commitSha: string;
+  baseCommitSha?: string;
+  testRunId: string | null;
+  testRunNumber: number;
+  reviewerAgentId: string | null;
+  reviewerName: string;
+  verdictStage: string;
+  createdAt: string;
+};
+
 export type ApprovalPolicyView = {
   departmentId: string;
   owner: { id: string; name: string } | null;
   canSetOwner: boolean;
   canChangePolicy: boolean;
+  autonomousRelease?: boolean;
+  canSetAutonomousRelease?: boolean;
+  hasAutonomousReleases?: boolean;
   /* Who the CEO may name: active people with access to the department. */
   candidates: { id: string; name: string; title: string }[];
   rules: ApprovalRule[];
@@ -319,6 +339,8 @@ export type AgentCardView = {
   canEdit: boolean;
   /* The whole company or the owner of its department removes it. */
   canRemove: boolean;
+  /* How many of its letters wait unread in its inbox; a card that does not say counts none. */
+  inboxUnread?: number;
   /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */
   /* forWork: it skips a round while every open task waits on purpose and nothing failed since the last one. */
   timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;
@@ -349,7 +371,7 @@ export type StructureItem = NewItem | ChangeItem;
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
 
 export type AgentEventKind = 'program' | 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer' | 'typed' | 'turn_refused' | 'input_left';
-export type TurnRefusal = 'busy' | 'unknown_words';
+export type TurnRefusal = 'busy' | 'unknown_words' | 'machine_updating';
 
 /* Who wrote or got a message: a person (id null: the company's people at large), an agent, or Hornhoof itself. */
 export type MessageParty = {
@@ -373,9 +395,18 @@ export type EventView = {
   message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number; channel?: 'telegram' | 'assistant'; assistant?: { id: string; name: string } };
 };
 
+/* An employee's inbox as its window shows it. A letter the employee dealt with is read to a person. */
+export type InboxMode = 'inbox' | 'direct';
+export type LetterKind = 'message' | 'report' | 'comment' | 'assignment' | 'notification';
+export type InboxLetter = { id: string; sender: MessageParty; kind: LetterKind; source: string | null; task: { id: string | null; number: number; title: string | null } | null; receivedAt: string; text: string; unread: boolean };
+/* mode: the employee's own choice, or null for its department's rule (the company's for one with none). */
+export type InboxView = { unreadCount: number; total: number; letters: InboxLetter[]; more: boolean; mode: InboxMode | null; inheritedMode: InboxMode; effectiveMode: InboxMode; canChangeMode: boolean; canMarkRead: boolean };
+
 /* What the browser hears live from /api/stream. */
 export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView }
+  /* An employee's inbox changed; its window reads it again. */
+  | { type: 'inbox'; agentId: string }
   | { type: 'working'; working: number }
   | { type: 'org' }
   | { type: 'notebook'; spot: { departmentId: string | null } }
@@ -385,6 +416,8 @@ export type StreamMessage =
   /* The orchestrator's request for the computer changed; only the CEO's screen hears it. */
   | { type: 'computer' }
   | { type: 'improvements' }
+  /* The feedback inbox of Hornhoof's own installation changed. */
+  | { type: 'feedback' }
   /* A department's list of work kept for later turns changed. */
   | { type: 'backlog'; spot: { departmentId: string | null } }
   | { type: 'context'; agentId: string; used: number }
@@ -465,14 +498,17 @@ export type ImprovementParts = {
   gain: string | null;
 };
 
-/* Something an employee found to improve in how the company works. open waits for the CEO, taken is with the
-   orchestrator, done is done, dismissed was set aside. result: the orchestrator's word on what came of it. */
+/* Something an employee found to improve. open waits for the CEO, taken is with the orchestrator, done is done, dismissed
+   was set aside, sent went to Hornhoof's developers. scope: company for how the company works, platform for Hornhoof
+   itself, with the error code Hornhoof gave if any. result: the orchestrator's word on what came of it. */
 export type Improvement = {
   id: string;
   title: string;
   text: string;
   seen: number;
-  status: 'open' | 'taken' | 'done' | 'dismissed';
+  status: 'open' | 'taken' | 'done' | 'dismissed' | 'sent';
+  scope: 'company' | 'platform';
+  code: string | null;
   result: string | null;
   at: string;
   updatedAt: string;
@@ -482,6 +518,39 @@ export type Improvement = {
   tasks?: { id: string; number: number; title: string }[];
   /* null for one filed as one text; an older server sends none. */
   parts?: ImprovementParts | null;
+  /* What became of one sent to Hornhoof's developers, null for any other; an older server sends none. */
+  sent?: SentFate | null;
+};
+
+/* When it went, its number in the inbox of Hornhoof's developers once it gave one, its issue there, the version that fixed
+   it once this Hornhoof runs it, and how many more rounds found it since they last heard of it. */
+export type SentFate = { at: string; number: number | null; issue: { number: number; url: string } | null; fixedIn: string | null; repeats: number };
+
+export type FeedbackKind = 'bug' | 'improvement' | 'idea';
+/* What goes to Hornhoof's developers, as the server cleaned it, with the technical data beside it, how much it hid of each
+   kind and the digest that ties a press of Send to exactly this. */
+export type FeedbackShown = {
+  report: { kind: FeedbackKind; title: string; text: string; facts: { version: string; platform: string[]; errorCode: string | null } };
+  hidden: { secret: number; email: number; address: number; path: number };
+  digest: string;
+};
+/* A card of the inbox on Hornhoof's own installation: one report and its repeats, from how many installations. */
+export type InboxCard = {
+  id: string;
+  /* What an installation calls the report by. */
+  number: number;
+  kind: FeedbackKind;
+  title: string;
+  text: string;
+  errorCode: string | null;
+  versions: string[];
+  platforms: string[];
+  signals: number;
+  installations: number;
+  priority: 'high' | 'normal' | 'low';
+  firstAt: string;
+  lastAt: string;
+  issue: { number: number; url: string } | null;
 };
 
 export type MaterialStampView = {
@@ -517,7 +586,7 @@ export type WaitingRequest = MaterialStampView & {
 };
 
 /* Who takes a decision: the CEO and the CEO delegate, and also the people of its department or its owner. */
-export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo'; department: { id: string; name: string } | null };
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo' | 'machine_owner'; department: { id: string; name: string } | null };
 
 /* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
 export type ProposalDecision = MaterialStampView & {
@@ -531,9 +600,8 @@ export type ProposalDecision = MaterialStampView & {
   decidedBy?: DecidedBy;
 } & ({ kind: 'structure'; items: StructureItem[] } | { kind: 'staff'; items: StaffLine[] });
 
-/* The orchestrator's request for the computer the server runs on, which people of the whole company see and the CEO and
-   the delegate answer. */
-export type ComputerAccessDecision = { kind: 'computer_access'; id: 'server'; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerView };
+/* The orchestrator's request for a machine of the company, which its owner answers; id is the machine's. */
+export type ComputerAccessDecision = { kind: 'computer_access'; id: string; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerAccessView };
 
 /* A card Hornhoof kept for this person until they say they saw it: a wait past its date that came up to them, a goal at
    risk, a turn that is over, or a version marked in the code that released nothing of its turn. Seeing it decides nothing.
@@ -567,7 +635,10 @@ export type MachineAwayCard = {
 export type Decisions = {
   requests: WaitingRequest[];
   proposals: ProposalDecision[];
-  computerAccess: ComputerAccessDecision | null;
+  /* The orchestrator's requests for machines. A server from before machines had access of their own sends none. */
+  machineAccess?: ComputerAccessDecision[];
+  /* What merges left for the CEO alone. A server from before merges sends none. */
+  merges?: MergeDecision[];
   machinesAway?: MachineAwayCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
@@ -628,9 +699,66 @@ export type MachineDrop = { at: string; back: string | null; offlineMs: number |
 /* What GET /api/machines/:id/connections answers: the last day in short, and the latest drops, newest first. */
 export type ConnectionHistory = { summary: { drops: number; averageMs: number | null; cause: DropCause | null }; events: MachineDrop[] };
 
+/* A restore of the company from a backup, as its keeper and its updater say it. */
+export type RestoreStep = 'fetch' | 'check' | 'open' | 'load' | 'swap' | 'start';
+export type RestoreStatus = { attempt: string; id: string; state: 'running' | 'done' | 'failed'; step: RestoreStep; line: string; at: string; kept: string | null };
+/* A backup of the company. recovery: whether the recovery file saved now opens it, an older one does, or none.
+   restorable with why null: it can be restored as it is; with needs_recovery_file: once that file is added. */
+export type BackupBundle = {
+  id: string;
+  dumpedAt: string;
+  reason: 'timer' | 'update' | 'fork';
+  size: number;
+  recovery: 'none' | 'current' | 'older';
+  where: { machine: string | null; name: string; online: boolean }[];
+  restorable: boolean;
+  why: 'newer_build' | 'not_held' | 'needs_recovery_file' | null;
+};
+export type KeptMerge = { id: string; status: 'pending' | 'applied' | 'merged' | 'removing' | 'done'; added: number; conflicts: number; error: string | null };
+
+/* A merge that left the CEO something to settle. after: the time of the backup a restore went back to, when the merge
+   is of the database that restore set aside. */
+export type MergeDecision = { id: string; label: string; after: string | null; open: number; ownerPersonId: string };
+export type MergeTopic = 'people' | 'access' | 'plans' | 'machines' | 'protected' | 'work';
+/* What a merge could not prove of one row, with both values in plain words; a secret is never among them. */
+export type MergeConflict = {
+  id: string; merge: string; label: string; table: string; topic: MergeTopic; what: string; kind: string; cols: string[];
+  here: Record<string, string> | null; there: Record<string, string> | null; at: string | null;
+  task: { id: string; number: number; title: string } | null; whose: 'orchestrator' | 'ceo'; picked: 'here' | 'there' | 'value' | null;
+};
+export type MergePicked = { settled: number; here: number; there: number; refused: { id: string; why: string }[]; tasks: { id: string; number: number }[] };
+
+export type BackupsView = {
+  last: string | null;
+  recovery: { madeAt: string; madeBy: string } | null;
+  recoveryNeeded: boolean;
+  linkChanged: boolean;
+  restore: RestoreStatus | null;
+  /* The databases restores replaced and kept on the server, each with how far the bringing back of what it holds got. */
+  kept: { name: string; at: string; merge?: KeptMerge | null }[];
+  bundles: BackupBundle[];
+};
+/* What a restore to a backup's time undoes. */
+export type RestoreWarning = { machines: { name: string; owner: string }[]; people: string[] };
+/* A server set up anew that was given a recovery file: the backups sent to it so far. */
+export type RecoveryView = { company: string; link: string | null; bundles: { id: string; dumpedAt: string; reason: string; size: number; from: string }[]; restore: RestoreStatus | null };
+
+/* The CEO's request to move the server to another machine, and how far it is. machine: the machine asked to take it;
+   leader: the name of the machine that led when it was asked; progress: how far that machine's copy is, while it is
+   not up to date. */
+export type MoveView = {
+  machine: string;
+  state: 'preparing' | 'switching' | 'failed';
+  reason: 'no_answer' | 'not_ready' | 'behind' | 'no_link' | 'expired' | 'left' | null;
+  leader: string;
+  progress: number | null;
+};
+
 export type MachineView = {
   id: string;
   hostname: string;
+  /* The machine the company was installed on, while the server runs on another: no computer someone joined. */
+  serverInstall?: boolean;
   os: string;
   arch: string;
   owner: { id: string; name: string };
@@ -652,7 +780,67 @@ export type MachineView = {
   browserError?: string | null;
   /* Older servers omit it; null while no update waits on the machine. */
   drain?: MachineDrain | null;
+  /* The company's core on it: where the company opens on that machine, and how the machine reaches the server; null
+     without the core. Older servers omit it. */
+  core?: { webPort: number | null; path: 'direct' | 'relay' | null } | null;
+  /* Its owner may put the company's core on it: it joined before machines had one, and its nodes are about. */
+  needsCore?: boolean;
+  /* Its computer access as this person sees it; null without the core, or when it is not theirs to see. */
+  access?: ComputerAccessView | null;
+  /* Whether its owner lets it keep the company's backups, and how many it holds; null without the core. Older servers
+     omit them. */
+  keepsBackups?: boolean | null;
+  heldBackups?: number | null;
+  /* Its part in holding the company's data, for those who see the whole company. Older servers omit it. */
+  data?: DataView | null;
 };
+
+/* Why a machine holds no copy of the company's data. */
+export type Unfit =
+  | { why: 'phone' | 'no_core' | 'no_link' | 'measuring' }
+  | { why: 'scope'; person: string; departments?: number }
+  | { why: 'memory'; memory: number }
+  | { why: 'disk'; free: number; need: number }
+  | { why: 'fsync'; p99: number };
+
+/* How a machine's copy of the company's data does. */
+export type CopyLine =
+  | { line: 'making' | 'remaking'; progress: number }
+  | { line: 'ready' | 'catching_up' | 'saving' }
+  | { line: 'behind'; minutes: number }
+  | { line: 'asleep'; since: string | null }
+  | { line: 'stopped'; why: 'disk_full' | 'setup' | null };
+
+/* A machine's place in the order of who holds the company's data, why it holds no copy, how its copy does, when it
+   stopped holding the data, and, for the machine the server last moved from, until when it ran the server, once its
+   copy is up to date again. Older servers omit that last one. */
+export type DataView = {
+  number: number | null; why: string | null; pin: 'none' | number | null; unfit: Unfit | null; copy: CopyLine | null; leftAt: string | null; led?: { until: string } | null;
+};
+
+/* The question a machine that keeps a copy puts to the CEO when the machine that led stopped answering and the copies
+   may lack changes. leader.heard: when it was last heard. copies: each copy that is up, with how far its changes
+   reach. waiting: until when the CEO chose to wait. */
+export type Question = {
+  since: string;
+  leader: { networkId: string; host: string; heard: string | null };
+  copies: { networkId: string; host: string; number: number | null; reach: string | null; self: boolean }[];
+  waiting: string | null;
+};
+export type QuestionView = { question: Question | null; canAnswer: boolean };
+
+/* What the keeper of the machine the page came from says of where the company's server is going. self: that machine.
+   from, to: the machine the server moves from and to; while cut, from is the server this machine's copy cannot reach.
+   All are machine ids. */
+export type SwitchWord = { self: string | null; moving: boolean; from: string | null; to: string | null; since: string | null; cut: boolean; question: boolean };
+
+/* The newest move of the server, for a day after it: its machines by their names, when the machine that led was last
+   heard, and how far the changes of the one that took the server reached. */
+export type Switched = { id: string; kind: 'planned' | 'takeover' | 'ceo'; reason: string | null; from: string; to: string; heard: string | null; reach: string | null; at: string };
+
+/* Who holds the company: the machine that leads, those that keep a copy, the one commits wait for marked, and since
+   when only the leader holds the changes. */
+export type CopiesView = { leader: string; copies: { hostname: string; sync: boolean }[]; onlySince: string | null };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
    runs it takes, of tests or of other work. */
@@ -676,15 +864,29 @@ export type Running = {
 
 /* A machine command the orchestrator asked Hornhoof for, which only the CEO's screen gets: to connect a machine alone,
    to connect plans, or to add a plan to a machine. */
-/* Access to the computer the server runs on: whether Hornhoof reaches it, until when it is open, what the orchestrator asked it for. */
-/* machine: the hostname of the machine the server runs on, when that computer joined as a machine. */
-/* canAnswer: this person opens, closes or declines it; an older server sends none, as only the CEO saw it. */
-export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null; machine?: string | null; canAnswer?: boolean };
-export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
+/* A machine of the company that has its core. hostname: the name its computer told, or none. data: it keeps the company's
+   data. */
+export type AccessMachine = { id: string; networkId: string; name: string; hostname: string; personId: string; role: 'data' | 'worker' | null; os: 'linux' | 'darwin' | null; data: boolean };
+/* Computer access to one machine as this person sees it: whether Hornhoof reaches it, until when it is open, what the
+   orchestrator asked it for, and whether they may open or close it. key: not_needed for the server's own machine
+   while it holds no key; held when the machine holds its owner's key, so what the owner signs opens it; not_held when
+   it holds none or another, so nothing opens it until its owner runs a new command there. */
+export type ComputerAccessView = {
+  machine: AccessMachine;
+  reachable: boolean;
+  until: string | null;
+  asked: { reason: string; at: string } | null;
+  canOpen: boolean;
+  canClose: boolean;
+  key: 'not_needed' | 'held' | 'not_held';
+};
+export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'core'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null };
+/* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
+   connections it did not take. Older servers omit both. */
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
 
 export type JobView = {
   id: string;
@@ -700,7 +902,7 @@ export type JobView = {
 
 /* A published build of Hornhoof, from the registry. */
 export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
-export type UpdateStep = 'backup' | 'pull' | 'install' | 'health' | 'rollback' | 'finished';
+export type UpdateStep = 'backup' | 'pull' | 'promise' | 'install' | 'health' | 'rollback' | 'finished';
 export type UpdaterStatus = { id: string; version: string; commit?: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };
@@ -756,3 +958,7 @@ export type DepartmentTree = {
   time: AgentTime[];
   idle: IdleStretch[];
 };
+
+/* Where the public link's encryption ends, as GET /api/link says: the tunnel's mode, whether the company's machine holds
+   the link's own certificate, when it ends, and when the last try to get one failed. */
+export type TlsView = { mode: 'http' | 'https'; certificate: boolean; expiresAt: string | null; failedAt: string | null };

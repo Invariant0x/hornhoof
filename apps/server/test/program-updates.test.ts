@@ -4,7 +4,8 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { companies, departments, people } from '../src/db/schema.js';
-import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'builtin-program-key-0123456789abcdef';

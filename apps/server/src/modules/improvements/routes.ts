@@ -9,7 +9,7 @@ import { improvements, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, liveSubscription, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { seesTask } from '../tasks/sight.js';
-import { listImprovements, moveImprovement } from './store.js';
+import { listImprovements, moveImprovement, requireOwnWork } from './store.js';
 
 const Params = z.object({ id: z.uuid() });
 
@@ -44,9 +44,10 @@ export function improvementRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   /* An improvement stays the business of whoever sees the agent who found it. */
-  async function requireSeen(me: Person, id: string): Promise<void> {
-    const [found] = await db.select({ agentId: improvements.agentId }).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, me.companyId)));
+  async function requireSeen(me: Person, id: string) {
+    const [found] = await db.select({ agentId: improvements.agentId, scope: improvements.scope }).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, me.companyId)));
     if (found && !seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
+    return found;
   }
 
   app.get('/api/improvements', async req => ({ improvements: await seenImprovements(await person(req)) }));
@@ -54,7 +55,8 @@ export function improvementRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/improvements/:id/take', async req => {
     const me = await person(req);
     const { id } = Params.parse(req.params);
-    await requireSeen(me, id);
+    const found = await requireSeen(me, id);
+    if (found) requireOwnWork(found, ctx.config.feedbackInbox);
     /* Taken means the orchestrator has it, so it stays waiting while the orchestrator has nothing to run on. */
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const unable = () => new ApiError(409, 'conflict', 'The orchestrator has no subscription to run on. Pick one on its card first.', 'no_subscription');

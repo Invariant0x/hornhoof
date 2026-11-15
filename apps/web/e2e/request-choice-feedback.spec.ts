@@ -228,7 +228,7 @@ async function fulfillShellRequestsRoute(route: Route, getRequests: () => Waitin
       json: {
         requests,
         proposals: [],
-        computerAccess: null,
+        machineAccess: [],
         counts: { byPerson: {}, byAgent: {}, total: requests.length },
       } satisfies Decisions,
     });

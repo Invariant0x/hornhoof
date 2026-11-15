@@ -43,7 +43,7 @@ async function serveAgent(page: Page, live: { state: (typeof STATES)[number] }) 
     '/api/updates': { current: { version: '0.5.0', commit: 'task-124' }, available: false, latest: null, updater: { status: null, waiting: null } },
     '/api/tasks?status=open&department=d2': { tasks: [] },
     '/api/agents/b1': CARD,
-    '/api/agents/b1/events?after=0': { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'j1', queued: 0, terminal: false } },
+    '/api/agents/b1/events?last=300': { events: [], state: { ready: true, reason: null, busy: true, runningJobId: 'j1', queued: 0, terminal: false } },
   };
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());

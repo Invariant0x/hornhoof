@@ -10,7 +10,7 @@ type RequestStatus = (typeof REQUEST_STATUSES)[number];
 const TEXT_MAX = 160;
 
 /* Hornhoof's own reminders on a quiet task are neither moves nor signs of life. */
-export const NUDGES: ReadonlySet<TaskEventKind> = new Set(['reminded', 'continued', 'stuck', 'wait_due', 'wait_card']);
+export const NUDGES: ReadonlySet<TaskEventKind> = new Set(['reminded', 'continued', 'stuck', 'wait_due', 'wait_card', 'away']);
 
 export type SegmentKind = 'work' | 'after' | 'person' | 'stall' | 'lost' | 'alarm' | 'queued' | 'unknown';
 /* to is null while it still goes on at `now`. */

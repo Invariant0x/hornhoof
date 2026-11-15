@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { agentEvents, jobs } from '../src/db/schema.js';
 import { failOpenJobs, handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -27,7 +27,7 @@ it('keeps a reply only under the queued letter, ignoring the old stream as soon 
   const c = await atWork();
   const queries = statements();
   await c.receive({ type: 'job.event', jobId: c.run.jobId, seq: 0, event: { kind: 'text', text: 'Work before Stop.' } });
-  expect(queries.some(query => query.sql.includes('from "jobs"') && query.sql.includes('for update'))).toBe(true);
+  expect(queries.some(query => query.sql.includes('from "jobs"') && query.sql.includes('for no key update'))).toBe(true);
   await c.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'The queued letter.' }, ...as(c.ceo) });
   expect((await c.stop()).statusCode).toBe(202);
   expect(await c.node.next()).toEqual({ type: 'job.cancel', jobId: c.run.jobId });

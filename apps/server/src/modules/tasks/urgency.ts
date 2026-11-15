@@ -79,7 +79,7 @@ export async function setUrgent(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task
   if (task.parentId) throw refuse(409, 'urgent_follows_parent', `#${task.number} is as urgent as the task above it. Change the top of its tree.`);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_invalid', `#${task.number} is closed.`);
   const row = await ctx.db.transaction(async tx => {
-    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
+    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
     await tx.execute(sql`
       WITH RECURSIVE tree AS (
         SELECT id FROM tasks WHERE id = ${task.id}

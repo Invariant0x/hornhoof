@@ -311,6 +311,14 @@ describe('templates', () => {
     expect(hornhoof).not.toMatch(/Answer in your reply or with/);
   });
 
+  it('tells everyone that letters may wait in the inbox, how to read and mark them, and that a person\'s words never wait there', () => {
+    const hornhoof = body('hh-hornhoof');
+    expect(hornhoof).toMatch(/inbox/);
+    expect(hornhoof).toMatch(/"inbox"[^.]*"inbox_mark"/);
+    expect(hornhoof).toMatch(/A person's words never wait there\./);
+    expect(hornhoof).not.toMatch(/\u2014/);
+  });
+
   it('asks for reports to people and heads in ordinary words with spaces', () => {
     for (const id of ['hh-report-to-head', 'hh-hornhoof']) expect(body(id), id).toMatch(/ordinary words[^.]*with spaces/);
   });
@@ -320,6 +328,9 @@ describe('templates', () => {
     for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
     expect(release).toMatch(/profile[^.]*full run[^.]*every suite and every test file anew[^.]*no earlier result/i);
     expect(release).toMatch(/narrower profile, one suite or results kept from earlier runs is no release check/i);
+    expect(release).toMatch(/ask with commit before pushing[\s\S]*push only after the answer says no card is needed, or after the person's yes/i);
+    expect(release).toMatch(/autonomous release[\s\S]*without sending a human (?:approval )?card/i);
+    expect(body('dev-task-flow')).toMatch(/autonomous release[\s\S]*auto-approval/i);
     expect(release).not.toMatch(/live (?:node |program )?checks?|one idle node at a time|actual program's request receipt/i);
     expect(readFileSync(join(DIR, 'SOURCES.md'), 'utf8')).not.toMatch(/dryer and live checks/);
     expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
@@ -579,6 +590,13 @@ describe('templates', () => {
       for (const part of ['program_recovery_release', 'case', 'reason', 'only way']) expect(hold, part).toContain(part);
     });
 
+    it('ends a turn that stands itself, the orchestrator\'s and any head\'s too: a stop, a look at the queue, a safe restart, one line inside', () => {
+      const stands = body.slice(body.indexOf('7. A turn that stands'), body.indexOf('\n8. '));
+      for (const part of ['any employee', 'the orchestrator and the head of any department', "with no person's message", 'Never ask a person to stop a turn', 'press Stop turn or write done', 'never put this work in a wait for a person']) expect(stands, part).toContain(part);
+      expect(stands).toMatch(/stop_employee and your reason[\s\S]*queue moved[\s\S]*restart_program[\s\S]*same session[\s\S]*role, skills, memory and tasks stay[\s\S]*one line inside the company/);
+      expect(stands).toMatch(/program operator sends it to its head with message_employee; the head of Operations sends it to the orchestrator with tell_orchestrator/);
+    });
+
     it('signals at once, saying which screen and why it stands, when it is unclear or nothing moves', () => {
       const stuck = step('You do not understand');
       expect(stuck).toContain('tell_orchestrator');
@@ -638,7 +656,12 @@ describe('templates', () => {
     for (const part of ['any employee', 'program_screen', 'program_keys', 'any keys', 'any question', 'subscription owner', 'values of secrets', 'program_recovery_release']) expect(text, part).toContain(part);
   });
 
-  /* An employee keeps the skills it was hired with, but reads its role's line from the template every turn. */
+  it('locks the program skill on for the head of Operations and the program operator, so each one hired before has it too', () => {
+    for (const id of ['OPS-HEAD', 'OPS-PROGRAM']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'ops-program-operator'), id).toEqual({ id: 'ops-program-operator', on: true, locked: true });
+    for (const id of ['ops-intake', 'hh-questions']) expect(templates.skills.get(id)!.body, id).toMatch(/never ask a person to stop a turn or write done/i);
+  });
+
+  /* An employee reads its role's line from the template every turn. */
   it('tells a head of Operations hired before it got the operator skill, in its own line, that it lifts a hold with program_recovery_release', () => {
     expect(templates.roles.get('OPS-HEAD')!.body).toContain('program_recovery_release');
   });
@@ -1282,7 +1305,7 @@ const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] 
   { id: 'quality-stages-in-own-workspace', holds: text => matchesAll(text, [/locally[\s\S]*builds[\s\S]*types[\s\S]*lint\/format[\s\S]*coverage[\s\S]*crapper[\s\S]*dryer[\s\S]*mutation/i, /whole suite[\s\S]*"run_tests"[\s\S]*groups[\s\S]*free compatible machines/i]) },
   { id: 'local-lockfile-installs', holds: text => /Install dependencies from the lockfile in your workspace once[\s\S]*lockfile changes/i.test(text) && !/Never install dependencies locally/i.test(text) },
   { id: 'prepared-dependencies-install-only-when-needed', holds: text => /manifest names its dependencies[^.]*already in place[^.]*install only when they are missing or after the lockfile changes/i.test(text) },
-  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*"run_tests"/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
+  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*whole suite[\s\S]*"run_tests"[\s\S]*only on the release candidate/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
   { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => matchesAll(text, [/"blocked"/, /Never fall back to a local whole suite/i, /command refusal is not PASS/]) && forbidsAll(text, [/\bfall back to running the whole suite locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
   { id: 'final-stage-full-suite-and-light-screenshot', holds: text => matchesAll(text, [/assignment identifies the check scope[\s\S]*do not start a duplicate full run/i, /lightweight single-page screenshot capture is not a browser suite/i, /browser test files[\s\S]*workspace[\s\S]*browser installation is allowed/i]) },
   { id: 'abstract-english-no-incident-facts', holds: text => text.length > 200 && !INCIDENT_OR_BRAND_LEAK_RE.test(text) },
@@ -1728,7 +1751,7 @@ describe('identity, defaults and shared instruction delivery', () => {
   it('delivers every locked ability once even when optional selections are empty', () => {
     for (const role of roles) {
       const rendered = render(role, []);
-      const required = [...CORE_SKILLS, ...(role.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS)];
+      const required = [...CORE_SKILLS, ...(role.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS), ...role.skills.filter(skill => skill.locked).map(skill => skill.id)];
       for (const id of required) expect(rendered.parts.filter(part => part.kind === 'skill' && part.id === id), `${role.id} ${id}`).toHaveLength(1);
       expect(rendered.parts.find(part => part.kind === 'base')?.text, role.id).toBe(role.body);
     }
@@ -1780,5 +1803,107 @@ describe('identity, defaults and shared instruction delivery', () => {
       expect(rendered.whole.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     }
     expect(orchestratorSteady(templates).whole).toContain('<!-- hh:skill hh-tables -->');
+  });
+});
+
+type SingleReleaseRunSkills = {
+  leadTasks: string;
+  runChecks: string;
+  devLead: string;
+  devTaskFlow: string;
+  devGates: string;
+  devCiRelease: string;
+  devTdd: string;
+  devTestEnv: string;
+  devImplement: string;
+  devPolicy: string;
+  briefMembers: string;
+  orchPlanTurn: string;
+  orchCompany: string;
+};
+
+const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills) => boolean }[] = [
+  {
+    id: 'no-turnkey-merge-and-release-ambiguity',
+    holds: s =>
+      forbidsAll(Object.values(s).join('\n'), [
+        /from code and checks to merge and release/i,
+        /tests,\s*merge and release/i,
+        /\brun_tests\b[^.!?\n]*\bevery\s+(?:task|turnkey)\s+branch\b/i,
+        /use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it/i,
+        /\bstrictly once\b/i,
+      ]),
+  },
+  {
+    id: 'local-branch-checks-and-no-per-task-run-tests',
+    holds: s =>
+      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devTdd, s.devTestEnv, s.devImplement, s.briefMembers], text =>
+        matchesAll(text, [
+          /\b(?:individual|turnkey|task)\b[\s\S]*\b(?:named|affected|area)\b[\s\S]*\brun_tests\b|\brun_tests\b[\s\S]*\b(?:individual|turnkey|task)\b/i,
+        ]),
+      ) &&
+      forEvery([s.leadTasks, s.devLead, s.devTaskFlow], text =>
+        matchesAll(text, [/\bbuild\b[\s\S]*\btypes\b[\s\S]*\blint\b/i, /\bhand\w*\s+in\b[\s\S]*\bbranch\b|\bbranch\b[\s\S]*\bhand\w*\s+in\b/i]),
+      ) &&
+      matchesAll(s.devTaskFlow, [/no per-task run_tests \(unless this task itself assembles the final release to main\)/i]),
+  },
+  {
+    id: 'single-full-run-on-combined-release-branch-before-main',
+    holds: s =>
+      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devCiRelease, s.devPolicy, s.devTestEnv, s.devImplement, s.briefMembers, s.orchPlanTurn, s.orchCompany], text =>
+        matchesAll(text, [/\bonce per release candidate\b[\s\S]*\bcombined release (?:branch|candidate)\b[\s\S]*\bmain\b/i]),
+      ),
+  },
+  {
+    id: 'lead-tasks-preserves-coordination-and-hold-meaning',
+    holds: s =>
+      matchesAll(s.leadTasks, [
+        /When small work arrives, the orchestrator passes it to the head immediately\./,
+        /Builders build and reviewers review[^.!?\n]*nobody approves their own independent gate/i,
+        /Do not start a new chain merely to find a free member\./,
+        /A report that claims success without evidence is treated as not done\./,
+        /this ability imposes no default downstream chain/i,
+        /letters, texts, layouts and tables as well as code, as files in its repository/,
+        /`pause_task` with the reason/,
+      ]),
+  },
+];
+
+describe('full test suite once per release candidate before release', () => {
+  const bundle = (): SingleReleaseRunSkills => ({
+    leadTasks: templates.skills.get('hh-lead-tasks')!.body,
+    runChecks: templates.skills.get('hh-run-checks')!.body,
+    devLead: templates.skills.get('dev-lead')!.body,
+    devTaskFlow: templates.skills.get('dev-task-flow')!.body,
+    devGates: templates.skills.get('dev-gates')!.body,
+    devCiRelease: templates.skills.get('dev-ci-release')!.body,
+    devTdd: templates.skills.get('dev-tdd')!.body,
+    devTestEnv: templates.skills.get('dev-test-environment')!.body,
+    devImplement: templates.skills.get('dev-implement')!.body,
+    devPolicy: templates.skills.get('dev-testing-policy')!.body,
+    briefMembers: templates.skills.get('hh-brief-members')!.body,
+    orchPlanTurn: templates.skills.get('orch-plan-turn')!.body,
+    orchCompany: templates.skills.get('orch-company')!.body,
+  });
+
+  it('requires local changed-area checks on task and turnkey branches and one run_tests run per release candidate on the combined release branch before main', () => {
+    expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, bundle())).toEqual([]);
+  });
+
+  it('rejects re-introducing turnkey merge-and-release ambiguity, workspace-fallback run_tests or strictly-once wording', () => {
+    const base = bundle();
+    expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, base)).toEqual([]);
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, devLead: `${base.devLead}\nThat member does it from code and checks to merge and release.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, runChecks: `${base.runChecks}\nCall run_tests on every turnkey branch before review.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, runChecks: `${base.runChecks}\nUse "run_tests" for one only when your own workspace cannot run it.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
+    expect(
+      failedRuleIds(SINGLE_RELEASE_RUN_RULES, { ...base, leadTasks: `${base.leadTasks}\nRun run_tests strictly once ever.` }),
+    ).toContain('no-turnkey-merge-and-release-ambiguity');
   });
 });

@@ -37,6 +37,16 @@ export class TurnEnds {
   }
 }
 
+/* Whether a stop hook arriving now tells of a turn that is over. The host answers a turn once the program's log says it
+   ended, so the stop of that same end can still be on its way, or be sent again, when the next turn begins. A stop from
+   before the running turn took its prompt cannot be that turn's, nor can one from a session the agent has left. A session
+   the agent came back to counts as its own, and one the host never heard of is where a cleared conversation went on.
+   The stop that answers words a person sent while the prompt waited is of now too: it frees the program for the prompt. */
+export function stopIsLate({ promptIn, answersPerson = false, from, session, left }: { promptIn: boolean; answersPerson?: boolean; from: unknown; session: string | null; left: ReadonlySet<string> }): boolean {
+  if (!promptIn && !answersPerson) return true;
+  return typeof from === 'string' && from !== session && left.has(from);
+}
+
 export function hookCalls(event: string, data: Record<string, unknown>): Calls {
   const rawId = data.tool_use_id ?? data.tool_call_id;
   const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId) : '';

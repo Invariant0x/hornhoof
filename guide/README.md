@@ -13,3 +13,4 @@ Each workspace screen has its own address. Copy the address to share a departmen
 - [Repositories](repositories.md): why every department keeps its work in a git repository, how it gets one or has Hornhoof create it, and where its token goes.
 - [Tests and heavy work on free machines](free-machines.md): where tests run, which machines take them, and what happens when a machine goes away.
 - [Updates](updates.md): how a new version arrives, how to go back, and how to take back a public link after an update went back.
+- [Backups](backups.md): what is saved and where, the recovery file, and how to restore the company, also after losing its server.

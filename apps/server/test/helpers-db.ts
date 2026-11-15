@@ -4,9 +4,12 @@ import { PGlite, types } from '@electric-sql/pglite';
 import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { afterAll, inject, onTestFailed, onTestFinished, TestRunner, vi } from 'vitest';
 import * as schema from '../src/db/schema.js';
+import { FENCED } from '../src/db/net.js';
+import { recordSources } from '../src/db/sources.js';
 
 type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
-type Shared = { client: PGlite; shape: string; planner: string; pointedAtBy: ReadonlyMap<string, readonly string[]> };
+/* seeded: the rows a new copy holds, as the horizon of merges its migrations wrote in net. */
+type Shared = { client: PGlite; shape: string; planner: string; pointedAtBy: ReadonlyMap<string, readonly string[]>; seeded: Rows };
 
 /* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
 let migrated: Blob | undefined;
@@ -97,10 +100,11 @@ export async function shapeOf(client: PGlite): Promise<string> {
 /* What the planner knows of each table and index of the database: how many pages and rows it has, and how many of its
    pages hold only rows every transaction sees. */
 const PLANNER_VIEW = `select coalesce(json_agg(json_build_object('oid', c.oid, 'relpages', c.relpages, 'reltuples', c.reltuples, 'relallvisible', c.relallvisible)), '[]')::text as view
-  from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'i')`;
+  from pg_class c where c.relnamespace in ('public'::regnamespace, 'net'::regnamespace) and c.relkind in ('r', 'i')`;
 
-/* Each table, with the tables whose foreign keys point at it. */
-const POINTED_AT_BY = `select format('public.%I', t.relname) as table, format('public.%I', f.relname) as by
+/* Each table, with the tables whose foreign keys point at it, each by its schema: the records of merges in net point at
+   each other too. */
+const POINTED_AT_BY = `select format('%I.%I', t.relnamespace::regnamespace, t.relname) as table, format('%I.%I', f.relnamespace::regnamespace, f.relname) as by
   from pg_constraint c join pg_class t on t.oid = c.confrelid join pg_class f on f.oid = c.conrelid where c.contype = 'f'`;
 
 async function openShared(): Promise<Shared> {
@@ -108,7 +112,7 @@ async function openShared(): Promise<Shared> {
   const { rows } = await client.query<{ view: string }>(PLANNER_VIEW);
   const pointedAtBy = new Map<string, string[]>();
   for (const { table, by } of (await client.query<{ table: string; by: string }>(POINTED_AT_BY)).rows) pointedAtBy.set(table, [...(pointedAtBy.get(table) ?? []), by]);
-  return { client, shape: await shapeOf(client), planner: rows[0]!.view, pointedAtBy };
+  return { client, shape: await shapeOf(client), planner: rows[0]!.view, pointedAtBy, seeded: await rowsOf(client) };
 }
 
 /* Those of the tables a truncate may empty with them: it must name every table whose foreign keys point at one it
@@ -126,15 +130,16 @@ export function truncatable(tables: readonly string[], pointedAtBy: ReadonlyMap<
   return tables.filter(table => kept.has(table));
 }
 
-/* Only a table with pages can hold rows. */
-const WITH_PAGES = `select format('public.%I', c.relname) as name from pg_class c
-  where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and pg_relation_size(c.oid) > 0`;
+/* Only a table with pages can hold rows. The journal of changes, in the schema net, is emptied with the tables it tells of.
+   By name, as the order pg_class is read in changes once a truncate rewrites a table, and rows made once are found by it. */
+const WITH_PAGES = `select format('%I.%I', c.relnamespace::regnamespace, c.relname) as name from pg_class c
+  where c.relnamespace in ('public'::regnamespace, 'net'::regnamespace) and c.relkind = 'r' and pg_relation_size(c.oid) > 0 order by 1`;
 /* What the planner knew as the copy opened, and none of the statistics an analyze made since: the next test is planned as
    on a new copy, and the order a query reads rows in does not depend on the tests before. */
 const PLANNER_AS_OPENED = `update pg_class c set relpages = s.relpages, reltuples = s.reltuples, relallvisible = s.relallvisible
   from json_to_recordset($1::json) as s(oid oid, relpages integer, reltuples real, relallvisible integer)
   where c.oid = s.oid and (c.relpages, c.reltuples, c.relallvisible) is distinct from (s.relpages, s.reltuples, s.relallvisible)`;
-const NO_STATISTICS = `delete from pg_statistic s using pg_class c where c.oid = s.starelid and c.relnamespace = 'public'::regnamespace`;
+const NO_STATISTICS = `delete from pg_statistic s using pg_class c where c.oid = s.starelid and c.relnamespace in ('public'::regnamespace, 'net'::regnamespace)`;
 const RESTART_NUMBERS = `select setval(format('%I.%I', schemaname, sequencename), start_value, false) from pg_sequences
   where schemaname = 'public' and last_value is not null`;
 
@@ -146,9 +151,10 @@ const pagedTables = async (client: PGlite) => (await client.query<{ name: string
    lose their rows to a delete, their pages to a vacuum and the pages their indexes grew to a reindex, which together cost
    less than the rewrite of a vacuum full. Discarding first clears what the connection holds: role, settings, temporary
    tables, prepared statements and locks, and waits for any transaction the last test left running. */
-async function emptyRows({ client, planner, pointedAtBy }: Shared): Promise<void> {
+async function emptyRows({ client, planner, pointedAtBy, seeded }: Shared): Promise<void> {
   await client.exec('discard all');
-  const tables = await pagedTables(client);
+  const kept = await unchangedSeeds(client, seeded);
+  const tables = (await pagedTables(client)).filter(name => !kept.includes(name));
   if (tables.length) {
     const truncated = truncatable(tables, pointedAtBy);
     const deleted = tables.filter(name => !truncated.includes(name));
@@ -164,9 +170,31 @@ async function emptyRows({ client, planner, pointedAtBy }: Shared): Promise<void
       await client.exec(deleted.map(name => `reindex table ${name}`).join(';\n'));
     }
   }
+  await putSeedsBack(client, seeded, kept);
   await client.query(NO_STATISTICS);
   await client.query(PLANNER_AS_OPENED, [planner]);
   await client.query(RESTART_NUMBERS);
+  for (const { name, value } of seeded.numbers) await client.query('select setval($1::regclass, $2::bigint, true)', [name, value]);
+}
+
+/* The tables that hold just the rows a new copy holds, which an emptying leaves alone. */
+async function unchangedSeeds(client: PGlite, seeded: Rows): Promise<string[]> {
+  const kept: string[] = [];
+  for (const { name, rows } of seeded.tables) {
+    const now = (await client.query(`copy ${name} to '/dev/blob' with (format binary)`)).blob!;
+    if (Buffer.from(await now.arrayBuffer()).equals(Buffer.from(await rows.arrayBuffer()))) kept.push(name);
+  }
+  return kept;
+}
+
+/* The rows a new copy holds, back in the tables an emptying emptied, as the migrations wrote them. */
+async function putSeedsBack(client: PGlite, seeded: Rows, kept: readonly string[]): Promise<void> {
+  const back = seeded.tables.filter(({ name }) => !kept.includes(name));
+  if (!back.length) return;
+  await client.transaction(async tx => {
+    await tx.exec('set local session_replication_role = replica');
+    for (const { name, rows } of back) await tx.query(`copy ${name} from '/dev/blob' with (format binary)`, [], { blob: rows });
+  });
 }
 
 /* Whether it is ready for the next test. Failing is an answer too: a test can leave a database that will not empty.
@@ -306,8 +334,19 @@ async function sharedForThisTest(): Promise<PGlite> {
 
 export async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
   const client = ownEach || held ? await withOwnParsers(copyOfMigrated()) : await sharedForThisTest();
-  const db = drizzle(client, { schema });
+  /* Every test database holds an endless lease (prepare-environment.ts) and says it is fenced, so the whole suite runs
+     under the first fence. PGlite applies no ALTER DATABASE or ALTER ROLE setting when it loads a dump, and the discard
+     that empties a shared one forgets it, so each test says it for itself. */
+  await client.exec(`SET ${FENCED} = 'on'`);
+  const db = recordSources(drizzle(client, { schema }));
   return { client, db };
+}
+
+/* A database a test made from another one's files, as a test database: with its own parsers, fenced and wrapped. */
+export async function asTestDb(client: PGlite): Promise<{ client: PGlite; db: TestDb }> {
+  await withOwnParsers(client);
+  await client.exec(`SET ${FENCED} = 'on'`);
+  return { client, db: recordSources(drizzle(client, { schema })) };
 }
 
 /* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves

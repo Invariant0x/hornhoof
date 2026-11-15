@@ -44,6 +44,25 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   ...SURFACES.map((on): ContrastPair => ({ text: 'line2', on, least: 3, kind: 'line' })),
 ];
 
+/* Glass is see-through: muted text on it stands on the glass over whatever the page shows under it, held here over a white
+   page and over a black one (Design, #874). */
+export const GLASS_PAIR: ContrastPair = { text: 'muted', on: 'hud', least: 4.5, kind: 'text' };
+const UNDER_GLASS: readonly Rgba[] = [{ r: 255, g: 255, b: 255, a: 1 }, { r: 0, g: 0, b: 0, a: 1 }];
+
+/* A see-through colour as it shows over an opaque one. */
+const over = (top: Rgba, under: Rgba): Rgba => ({
+  r: top.r * top.a + under.r * (1 - top.a),
+  g: top.g * top.a + under.g * (1 - top.a),
+  b: top.b * top.a + under.b * (1 - top.a),
+  a: 1,
+});
+
+function glassHolds(colors: SkinColors): boolean {
+  const text = readColor(colors[GLASS_PAIR.text]);
+  const glass = readColor(colors[GLASS_PAIR.on]);
+  return !!text && !!glass && UNDER_GLASS.every(under => contrast(text, over(glass, under)) >= GLASS_PAIR.least);
+}
+
 /* The first pair of these colours under its bar, compared exactly, before any rounding; null when all hold. Colours
    that cannot be read count as failing, so nothing passes unchecked. */
 export function weakPair(colors: SkinColors): ContrastPair | null {
@@ -52,5 +71,5 @@ export function weakPair(colors: SkinColors): ContrastPair | null {
     const on = readColor(colors[pair.on]);
     if (!text || !on || contrast(text, on) < pair.least) return pair;
   }
-  return null;
+  return glassHolds(colors) ? null : GLASS_PAIR;
 }

@@ -9,6 +9,7 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { connectNode, listen, setUpCompany, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
+import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -27,7 +28,7 @@ async function company() {
   const node: FakeNode = await connectNode(url, NODE_KEY);
   node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
   await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null, null, BUILTIN)!));
   const dept = async (templateKey: 'development' | 'operations', roleCode: string) => (await db.insert(departments).values({ companyId, templateKey, roleCode }).returning())[0]!;
   const [dev, ops] = [await dept('development', 'DEV'), await dept('operations', 'OPS')];
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId: string) =>

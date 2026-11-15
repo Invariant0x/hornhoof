@@ -16,7 +16,7 @@ import { restoreOperatorNode } from '../program-operator/health.js';
 async function stopping(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'node.stopping' }>): Promise<void> {
   if (msg.exit.kind !== 'planned' || msg.exit.startedAt !== msg.startedAt) return;
   if (!(await hasCurrentKey(ctx, id))) return;
-  if (id.kind === 'builtin') return rememberBuiltinStop(ctx, msg.startedAt, msg.exit);
+  if (id.kind === 'builtin') return rememberBuiltinStop(ctx, id.machine, msg.startedAt, msg.exit);
   await ctx.db.update(nodes).set({ boot: sql`${nodes.boot} || jsonb_build_object('stopped', ${JSON.stringify(msg.exit)}::jsonb)` })
     .where(and(eq(nodes.id, id.nodeId), liveNode, sql`${nodes.boot}->>'startedAt' = ${msg.startedAt}`, sql`${nodes.boot}->'stopped' is null`));
 }

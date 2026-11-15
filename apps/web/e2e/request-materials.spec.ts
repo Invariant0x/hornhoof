@@ -230,6 +230,11 @@ async function mountFixtureRoutes(page: Page) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
       return;
     }
+    /* A set-up company, as a server says: the app takes no other answer for it. */
+    if (url.pathname === '/api/setup') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ needed: false }) });
+      return;
+    }
     if (url.pathname === '/api/me') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ME_CEO) });
       return;
@@ -250,7 +255,7 @@ async function mountFixtureRoutes(page: Page) {
       const payload: Decisions = {
         requests: [legacyChoice, manifestQuestion],
         proposals: [],
-        computerAccess: null,
+        machineAccess: [],
         counts: { byPerson: { 'p-ceo': 2 }, byAgent: { 'a-dsn': 2 }, total: 2 },
       };
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
@@ -693,6 +698,7 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
       posts.push({ url: url.pathname, body: req.postDataJSON() });
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
     }
+    if (url.pathname === '/api/setup') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ needed: false }) });
     if (url.pathname === '/api/me') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ME_CEO) });
     if (url.pathname === '/api/org') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ORG_FIXTURE) });
     if (url.pathname === '/api/task-departments') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(TASK_DEPARTMENTS) });
@@ -734,7 +740,7 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
           ownerPersonId: 'p-ceo',
           canAnswer: true,
         }],
-        computerAccess: null,
+        machineAccess: [],
         counts: { byPerson: { 'p-ceo': 2 }, byAgent: { 'a-dsn': 1, 'a-orch': 1 }, total: 2 },
       };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });

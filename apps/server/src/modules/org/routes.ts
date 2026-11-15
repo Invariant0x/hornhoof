@@ -24,7 +24,7 @@ import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
-import { keyEndFor, subView } from '../subscriptions/views.js';
+import { keyEndFor, onlineIn, subView } from '../subscriptions/views.js';
 
 /* Show the level sent to the program, or its own default when Hornhoof knows it. */
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }, roleEffort?: string): string | null {
@@ -222,7 +222,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         held: holds.get(orchestrator.id)!,
         /* Whether he has a plan to work on, which everyone may know; which plan it is goes only to those who open him. */
         planned: Boolean(orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId)),
-        subscription: orchestrator.subscriptionId && seesAgentId(viewer, orchestrator.id) ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,
+        subscription: orchestrator.subscriptionId && seesAgentId(viewer, orchestrator.id) ? await subView(db, onlineIn(hub, ctx.config), orchestrator.subscriptionId, me).then(v => v && keyEndFor(me, v)) : null,
         machine: seesAgentId(viewer, orchestrator.id) ? await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null) : null,
       },
       agents: { total: employees.length, working: await workingSeen(db, me.companyId) },

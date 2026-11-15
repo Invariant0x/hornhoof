@@ -37,10 +37,14 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 /* New defaults and the operation id of an open wait, while retaining every preexisting field. */
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
-  /* Every head and member gets the speed skill its role lists. */
-  if (table === 'agents') return rows.map(({ row }) => ({ row: ['head', 'worker'].includes(row.kind as string) ? { ...row, skills: [...(row.skills as string[]), 'hh-work-fast'] } : row }));
-  /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. */
-  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0 } }));
+  /* Every head and member gets the speed skill its role lists, and everyone the machine of a built-in node, empty.
+     Migration 0124 gives every card an empty inbox mode of its own, every company the inbox and every turn no inbox wake. */
+  if (table === 'agents') return rows.map(({ row }) => ({ row: { ...row, builtin_machine: null, inbox_mode: null, ...(['head', 'worker'].includes(row.kind as string) ? { skills: [...(row.skills as string[]), 'hh-work-fast'] } : {}) } }));
+  /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. Migration 0121 leaves autonomous release off. */
+  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0, autonomous_release: false, inbox_mode: 'inbox' } }));
+  if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, builtin_machine: null, inbox_wake: false } }));
+  /* The same for a part of a test run: none ran on a machine's built-in node before there were any. */
+  if (table === 'test_parts') return rows.map(row => ({ row: { ...row.row, builtin_machine: null } }));
   /* Migration 0098 gives every person an empty Telegram, and 0100 makes every one a person and no assistant. */
   if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null } }));
   /* Migration 0100: nobody's assistant answered a request before. */
@@ -90,8 +94,8 @@ describe('migration histories merged in turn 5', () => {
         update node_codes set dismissed_subscription_ids = array['00000000-0000-4000-8000-000000000003']::uuid[];`);
     }
     const newColumns = branch === 'main'
-      ? { jobs: ['requested_prompt'], tasks: ['external_wait', 'work_kind', 'risk_class', 'urgent', 'small'], node_codes: ['dismissed_subscription_ids'] }
-      : { jobs: ['failure', 'not_before', 'restarted_at'], tasks: ['work_kind', 'risk_class', 'urgent', 'small'], node_codes: [] };
+      ? { jobs: ['requested_prompt'], tasks: ['external_wait', 'work_kind', 'risk_class', 'urgent', 'small'], node_codes: ['dismissed_subscription_ids', 'core'] }
+      : { jobs: ['failure', 'not_before', 'restarted_at'], tasks: ['work_kind', 'risk_class', 'urgent', 'small'], node_codes: ['core'] };
     const tables = ['companies', 'people', 'subscriptions', 'agents', 'tasks', 'jobs', 'agent_events', 'node_codes'] as const;
     const before = await Promise.all(tables.map(table => source.query<SnapshotRow>(`select to_jsonb(r) as row from ${table} r`)));
     const recordedBefore = (await oldDb.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;

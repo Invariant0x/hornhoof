@@ -3,7 +3,7 @@ import { desc, eq } from 'drizzle-orm';
 import { hashTestEnvironment } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { jobs, testParts, testRuns } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { acceptDescription } from '../src/modules/testruns/describe.js';
 import { pumpTests, startRun } from '../src/modules/testruns/runs.js';
 import { report } from '../src/modules/tasks/engine.js';

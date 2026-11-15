@@ -233,7 +233,8 @@ for (const lang of ['en', 'ru'] as const) {
         const dialog = page.getByRole('dialog', { name: m.settings.title, exact: true });
         await expect(dialog).toBeVisible();
         await dialog.getByRole('button', { name: m.settings.remove, exact: true }).click();
-        const actions = dialog.locator('.settings-actions');
+        /* The actions that hold the question: the settings show other actions beside the link's. */
+        const actions = dialog.locator('.settings-actions').filter({ has: page.locator('.entry-main') });
         const question = actions.locator('.entry-main');
         const group = actions.locator('.entry-actions');
         await expect(group).toHaveAttribute('role', 'group');

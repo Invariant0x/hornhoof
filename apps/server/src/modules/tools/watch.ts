@@ -19,8 +19,8 @@ import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { agentSeesTask } from '../tasks/views.js';
-import { OPERATIONS_ROLES } from '../program-operator/access.js';
-import { registerOperatorTools, registerProgramAccessTools } from '../program-operator/tools.js';
+import { authorizeAccess, OPERATIONS_ROLES } from '../program-operator/access.js';
+import { registerOperatorTools, registerProgramAccessTools, registerStopTool } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
@@ -165,11 +165,23 @@ function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
 
 const seesPrograms = (job: ToolJob) => Boolean(job.roleKey) && OPERATIONS_ROLES[job.roleKey!] === job.agentKind;
 
-/* Operations see and type into any employee's program and release its recovery hold, along with what their skills grant; the
-   program operator also reports the case it was given. Each call checks the role again. */
+/* The watchdog restarts by its skill; Operations by their role, checked again as for the screen and named in the turn's log. */
+async function restartAsked(ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>, employee: string): Promise<{ ok: boolean; text: string }> {
+  try {
+    const by = grants.has('restart_program') ? undefined : (await authorizeAccess(ctx, job)).name;
+    return await restartProgram(ctx, job.companyId, employee, by);
+  } catch (error) {
+    if (error instanceof ApiError) return { ok: false, text: error.message };
+    throw error;
+  }
+}
+
+/* Operations see and type into any employee's program, stop its turn and release its recovery hold, along with what their
+   skills grant; the program operator also reports the case it was given. Each call checks the role again. */
 function registerRoleTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   if (seesPrograms(job)) {
     registerProgramAccessTools(server, ctx, job);
+    registerStopTool(server, ctx, job);
     registerReleaseTool(server, ctx, job);
   }
   if (job.roleKey === PROGRAM_OPERATOR_ROLE) registerOperatorTools(server, ctx, job);
@@ -191,13 +203,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
   const deptNames = async () => new Map((await db.select().from(departments).where(eq(departments.companyId, job.companyId))).map(d => [d.id, deptName(d)]));
   const roleTitle = (roleKey: string | null) => (roleKey && ctx.templates.roles.get(roleKey)?.title.en) || null;
 
-  /* The watchdog has it by its skill, and whoever Hornhoof calls to a quiet program by its role. */
+  /* The watchdog has it by its skill, and Operations by their role, which each call checks again as it does for the screen. */
   if (grants.has('restart_program') || seesPrograms(job)) {
     server.registerTool('restart_program', {
-      description: 'Restart a program that has stopped giving signs of life, in the same session. Hornhoof checks its state, the time without a sign, its node and session, and allows only one restart per turn. Read agents or program_screen first.',
+      description: 'Restart a program that has stopped giving signs of life, in the same session: its role, skills, memory and tasks stay. Hornhoof checks its state, the time without a sign, its node and session, and allows only one restart per turn. Read agents or program_screen first.',
       inputSchema: { employee: z.uuid().describe("The agent's id from agents.") },
     }, async ({ employee }) => {
-      const result = await restartProgram(ctx, job.companyId, employee);
+      const result = await restartAsked(ctx, job, grants, employee);
       return say(result.text, !result.ok);
     });
   }

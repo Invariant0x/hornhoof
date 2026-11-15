@@ -75,7 +75,7 @@ describe('the Versions screen', () => {
     updater: { present: true, status: null, waiting: null },
   };
   const updates = (next: UpdatesView): Updates => ({
-    view: next, busy: false, starting: false, target: null, offline: false, asking: false, cut: null,
+    view: next, busy: false, starting: false, target: null, offline: false, maintenance: false, asking: false, cut: null,
     check: async () => {}, update: async () => {}, callOff: async () => {}, confirmCut: async () => {}, dropCut: () => {},
   });
   const dialog = (next: UpdatesView) => render(<LanguageProvider><Versions updates={updates(next)} onClose={() => {}} /></LanguageProvider>);

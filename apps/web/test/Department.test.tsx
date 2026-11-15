@@ -19,7 +19,7 @@ import { fakeStream } from './fake-stream';
 const runningDots = (tone: 'c' | 'a', d: string) =>
   [...document.querySelectorAll(`.dview circle.pt.${tone} animateMotion`)].filter(m => m.getAttribute('path') === d && m.getAttribute('repeatCount') === 'indefinite');
 
-const EVENTS = '/api/agents/orchestrator/events?after=0';
+const EVENTS = '/api/agents/orchestrator/events?last=300';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const DEV_TASKS = 'GET /api/tasks?status=open&department=d2';
 const REPO = { url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: '1234' };
@@ -421,7 +421,7 @@ describe('Department view', () => {
 
   it("opens an employee's window from the department, with its card one click away", async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] });
+    shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?last=300': [200, { events: [], state: READY }] });
     await flyIn(user);
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
     expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
@@ -432,7 +432,7 @@ describe('Department view', () => {
 
   it("closes an employee's card back to its window, which stood there all along", async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] });
+    shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?last=300': [200, { events: [], state: READY }] });
     await flyIn(user);
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
     const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
@@ -450,7 +450,7 @@ describe('Department view', () => {
     const DANA_CARD = { ...CARD, id: 'b0', name: 'Dana', kind: 'head' };
     const calls = shell({
       'GET /api/agents/b0': [200, DANA_CARD],
-      'GET /api/agents/b0/events?after=0': [200, { events: [], state: READY }],
+      'GET /api/agents/b0/events?last=300': [200, { events: [], state: READY }],
       'GET /api/departments/d2/notebook': [200, { notes: [{ number: 2, text: 'Review every merge.', by: { kind: 'agent', id: 'b0', name: 'Dana' }, updatedAt: '2026-10-31T02:00:00Z' }] }],
     });
     await flyIn(user);
@@ -683,7 +683,7 @@ describe('Department view', () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
     const org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, opens: false })) }] };
-    const calls = shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] }, org, listed('p7', 'Kira'));
+    const calls = shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?last=300': [200, { events: [], state: READY }] }, org, listed('p7', 'Kira'));
     await flyIn(user);
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
     expect(await screen.findAllByText('Bruno: everyone sees the work, and only the people of this department open the window.')).not.toHaveLength(0);
@@ -943,7 +943,7 @@ const TREE_PATH = '/api/departments/d2/tree';
 function treeRoute(tree = DEV_TREE): Record<string, [number, unknown]> {
   const agents = TREE_ORG.departments.flatMap(d => d.employees.flatMap(e => [
     [`GET /api/agents/${e.id}`, [200, { ...CARD, id: e.id, name: e.name, kind: e.kind, state: e.state, role: { ...CARD.role!, title: e.title } }]],
-    [`GET /api/agents/${e.id}/events?after=0`, [200, { events: [], state: READY }]],
+    [`GET /api/agents/${e.id}/events?last=300`, [200, { events: [], state: READY }]],
   ]));
   return { ...Object.fromEntries(agents), [`GET ${TREE_PATH}`]: [200, { tree }] };
 }
@@ -976,7 +976,7 @@ describe('Department work tree', () => {
     } : e) })) };
     const calls = shell({ ...treeRoute(),
       'GET /api/agents/b1': [200, CARD],
-      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ...READY, busy, runningJobId: busy ? 'j1' : null } }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ...READY, busy, runningJobId: busy ? 'j1' : null } }],
       'POST /api/agents/b1/messages': [200, { queued: true }],
     }, org);
     const graph = await showTree(user);
@@ -1480,7 +1480,7 @@ describe("what an agent's program does, and the server's alarms about its turn",
     });
     const user = userEvent.setup();
     const now = Date.now();
-    const routes = { 'GET /api/agents/b1': [200, { ...CARD, state: 'working' }], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] };
+    const routes = { 'GET /api/agents/b1': [200, { ...CARD, state: 'working' }], 'GET /api/agents/b1/events?last=300': [200, { events: [], state: READY }] };
     shell(routes, live(now, { program: program(now, 'thinking', 50), alarm: { reason: 'program_stalled', since: ago(now, 34) } }, DEV_ORG));
     await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Development/ : /^Разработка/ }));
     await user.click(screen.getByRole('button', { name: /Bruno/ }));

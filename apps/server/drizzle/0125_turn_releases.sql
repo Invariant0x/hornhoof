@@ -2,6 +2,8 @@
 -- result is accepted into the turn branch, and the tag of a recorded release closes it. Planned turns go: their work goes
 -- to the head of its department now, with what its turn was for kept in its log. Of the open turns only what was accepted
 -- into their branch, or done turnkey, stays in them; the rest goes on as it was, outside every turn until it is accepted.
+-- A release is approved by a person or, with autonomous release on and every commit of it checked, by an entry of the
+-- autonomous release log: one of the two.
 CREATE TABLE "turn_releases" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"company_id" uuid NOT NULL,
@@ -12,11 +14,13 @@ CREATE TABLE "turn_releases" (
 	"tasks" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"task_id" uuid,
 	"approval_request_id" uuid,
+	"autonomous_release_id" uuid,
 	"requested_by_agent_id" uuid,
 	"covered" boolean NOT NULL,
 	"uncovered" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "turn_releases_commit" CHECK ("turn_releases"."commit" ~ '^[0-9a-f]{40}$' AND "turn_releases"."base_commit_sha" ~ '^[0-9a-f]{40}$')
+	CONSTRAINT "turn_releases_commit" CHECK ("turn_releases"."commit" ~ '^[0-9a-f]{40}$' AND "turn_releases"."base_commit_sha" ~ '^[0-9a-f]{40}$'),
+	CONSTRAINT "turn_releases_approved_once" CHECK (("turn_releases"."approval_request_id" IS NULL) <> ("turn_releases"."autonomous_release_id" IS NULL))
 );
 --> statement-breakpoint
 ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -24,6 +28,7 @@ ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_turn_id_turns_id_fk" F
 ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_run_id_test_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."test_runs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_approval_request_id_requests_id_fk" FOREIGN KEY ("approval_request_id") REFERENCES "public"."requests"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_autonomous_release_id_autonomous_releases_id_fk" FOREIGN KEY ("autonomous_release_id") REFERENCES "public"."autonomous_releases"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_requested_by_agent_id_agents_id_fk" FOREIGN KEY ("requested_by_agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "turn_releases_turn_id" ON "turn_releases" USING btree ("turn_id");--> statement-breakpoint
 ALTER TABLE "turns" ADD COLUMN "version" text;--> statement-breakpoint

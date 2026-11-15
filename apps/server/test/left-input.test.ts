@@ -5,7 +5,8 @@ import { agentEvents, agents, departments, jobs, people, subscriptions } from '.
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { appendEvent } from '../src/modules/events/store.js';
-import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { BUILTIN } from './builtin.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { TerminalRelay } from '../src/modules/terminals/relay.js';
 import { failureCompany } from './failure-company.js';

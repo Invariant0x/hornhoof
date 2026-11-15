@@ -9,7 +9,8 @@ export type Build = { tag: string; digest: string; version: string; commit: stri
    from before the updater. */
 export type Siblings = { node: string; updater: string };
 
-export type Registry = { latest(): Promise<Build | null>; versions(): Promise<Build[]>; siblings(tag: string): Promise<Siblings> };
+/* find: the build of that tag, null when the registry has none. */
+export type Registry = { latest(): Promise<Build | null>; versions(): Promise<Build[]>; siblings(tag: string): Promise<Siblings>; find(tag: string): Promise<Build | null> };
 
 const INDEX_TYPES = ['application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json'];
 const MANIFEST_TYPES = ['application/vnd.oci.image.manifest.v1+json', 'application/vnd.docker.distribution.manifest.v2+json'];
@@ -65,8 +66,12 @@ export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?:
     return all;
   }
 
-  async function build(auth: string, tag: string): Promise<Build> {
-    const raw = Buffer.from(await (await call(`/v2/${path}/manifests/${tag}`, auth, [...INDEX_TYPES, ...MANIFEST_TYPES])).arrayBuffer());
+  async function build(auth: string, tag: string): Promise<Build>;
+  async function build(auth: string, tag: string, mayLack: true): Promise<Build | null>;
+  async function build(auth: string, tag: string, mayLack = false): Promise<Build | null> {
+    const index = await call(`/v2/${path}/manifests/${tag}`, auth, [...INDEX_TYPES, ...MANIFEST_TYPES], mayLack);
+    if (index.status === 404) return null;
+    const raw = Buffer.from(await index.arrayBuffer());
     const digest = digestOf(raw);
     let manifest = JSON.parse(raw.toString('utf8')) as Manifest;
     if (manifest.manifests) {
@@ -97,6 +102,9 @@ export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?:
       const auth = await token();
       const published = (await tags(auth)).filter(t => SEMVER.test(t)).sort(compareVersions).slice(0, MAX_VERSIONS);
       return Promise.all(published.map(t => build(auth, t)));
+    },
+    async find(tag) {
+      return build(await token(), tag, true);
     },
     async siblings(tag) {
       const [node, updater] = await Promise.all(

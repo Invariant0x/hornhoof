@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import type { ConnectionHistory, MachineDrop } from '../types';
 import { dropFacts, lengthOf, sawOf } from './connection-details';
+import { everyVisible } from '../guard';
 
 /* A history kept for days changes little: half a minute, and at once when the machine goes or comes. */
 const REFRESH_MS = 30_000;
@@ -72,10 +73,10 @@ export function MachineConnections({ id, hostname, online }: { id: string; hostn
       }
     };
     void load();
-    const timer = setInterval(() => void load(), REFRESH_MS);
+    const stop = everyVisible(() => void load(), REFRESH_MS);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, [id, online]);
 

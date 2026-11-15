@@ -37,7 +37,7 @@ async function serveAccess(page: Page, me: Me, shown: Tree, options: { agentStat
   await page.route('**/api/tasks?status=all', route => route.fulfill({ json: { tasks: [OWN_TASK] } }));
   if (options.agentStatus === 403) {
     await page.route('**/api/agents/a1', route => route.fulfill(DENIED));
-    await page.route('**/api/agents/a1/events?after=0', route => route.fulfill(DENIED));
+    await page.route('**/api/agents/a1/events?last=300', route => route.fulfill(DENIED));
   }
   if (options.taskStatus === 403) await page.route('**/api/tasks/secret', route => route.fulfill(DENIED));
 }

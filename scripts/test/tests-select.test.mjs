@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { LOOK_BACK, provedBase } from '../github-tests/base.mjs';
 import { changesSince } from '../github-tests/changes.mjs';
-import { FILES_PER_PART, PARTS, invocationsOf, lintCommands, outputsOf, partsOf, planOf, runAll } from '../github-tests/parts.mjs';
+import { FILES_PER_PART, LINT_FILES, PARTS, invocationsOf, lintCommands, outputsOf, partsOf, planOf, runAll } from '../github-tests/parts.mjs';
 import { setAside } from '../release/workspace-versions.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -154,6 +154,13 @@ test('the plan lints the files the change left, one eslint for each workspace', 
   const suites = [{ id: 'server', root: 'apps/server' }, { id: 'web', root: 'apps/web' }, { id: 'release-scripts', root: 'scripts' }];
   const plan = planOf(base, changes, { packages: [pick('server', 'related', ['apps/server/test/a.test.ts'])], notes: [] }, suites);
   assert.deepEqual(plan, { base, lint: [['apps/server/src/a.ts', 'apps/server/test/a.test.ts'], ['apps/web/src/New.tsx'], ['scripts/tests-mark.mjs'], ['tool.config.mjs']], parts: [{ server: ['apps/server/test/a.test.ts'] }] });
+});
+
+test('a wide change is linted in several runs of one workspace, each small enough for the memory a run has', () => {
+  const changes = Array.from({ length: 2 * LINT_FILES + 50 }, (_, i) => ({ kind: 'modified', path: `apps/server/src/f${i}.ts` }));
+  const plan = planOf('b'.repeat(40), [...changes, { kind: 'modified', path: 'apps/web/src/a.tsx' }], { packages: [], notes: [] }, [{ id: 'server', root: 'apps/server' }, { id: 'web', root: 'apps/web' }]);
+  assert.deepEqual(plan.lint.map(files => files.length), [LINT_FILES, LINT_FILES, 50, 1]);
+  assert.deepEqual(plan.lint.flat(), [...changes.map(change => change.path), 'apps/web/src/a.tsx']);
 });
 
 test('the outputs give the parts to run, the selection and its base, or the whole suite in four parts', () => {

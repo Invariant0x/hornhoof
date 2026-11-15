@@ -7,17 +7,50 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.23.6] - 2026-11-14
 
-Agents give people tables as real files and read pages that scripts build, a department's unfinished branches and
-offline machines no longer stop its work, and nodes that hang or stop are brought back.
+A company runs on several machines of its own with encrypted backups and a link of its own, employees' letters wait in
+an inbox, agents give people tables as real files and read pages that scripts build, and a person sends a finding to
+Hornhoof's developers with one button.
 
 ### Before you update
 
-- Migration 0106 adds an empty table `google_sheets` for a company's Google key. Nothing is moved, and 0.23.5 runs on
-  the database with it, so going back stays safe.
-- The node image now carries `hh-browse`, `hh-xlsx`, zip, PyYAML, pip and pytest, so it is larger.
+- Migrations 0106 to 0124 come with this release. 0106 to 0119 add what keeps copies of the company's data on other
+  machines, its backups and the lease of the machine that leads, and every write then goes through that lease. 0120
+  adds an empty table `google_sheets` for a company's Google key, 0121 the autonomous release switch and its log, 0122
+  and 0123 the feedback inbox and what became of sent findings, 0124 employees' inboxes. Going back to 0.23.5 means the
+  database goes back to the copy made before the update, so changes made after the update are lost.
+- The app image now carries the packages for certificates and the network, and the node image `hh-browse`, `hh-xlsx`,
+  zip, PyYAML, pip and pytest, so both are larger.
+- A server on a Mac that was updated with the Update button: run the install line once on that Mac. Until then other
+  machines reach it only through its hornhoof.org link; after it they also find it on your own network. A server on
+  Linux does this by itself.
+- If the hornhoof.org link stops opening after the update, put `ACME_DIRECTORY=off` in the `.env` file in the
+  `~/hornhoof` folder and run `docker compose up -d app` there. The link opens again within a minute.
 
 ### Added
 
+- Letters from employees and Hornhoof wait in an employee's inbox, and a free employee takes all its unread letters in one
+  turn instead of a turn for each. The agent window shows the inbox with its unread count; the CEO or the head of the
+  department picks whether an employee, a department or the company gets letters through the inbox or each as its own
+  turn. A person's words never wait there. The agent window keeps the newest 300 lines.
+- A company keeps copies of its data on other machines of its own. One machine leads; Machines shows each machine's
+  copy and its place in line, and "Move the server here" moves the server with the work kept. When the machine that
+  leads stops answering, a copy that holds every change takes over; when a copy may lack changes, the CEO decides
+  whether to go on from it or wait, and what both sides did is merged later, with real conflicts asked of a person.
+- Encrypted backups every 6 hours and before each update, held on the machines chosen for them. The recovery file
+  saved in Company settings restores the company on a new server if this one is lost, and what came after the backup
+  can be brought back.
+- The company's link at hornhoof.org gets a Let's Encrypt certificate of its own, so the connection is encrypted to the
+  company's own machine.
+- The owner of a machine opens the orchestrator's access to it for a day with a key only that owner holds. A turn whose
+  machine goes out of reach keeps its work and goes on when the machine is back, and while an update installs Hornhoof
+  takes no changes and says so.
+- A person sends a bug, an improvement or an idea to Hornhoof's developers with one button. The window shows exactly
+  what goes, with keys, addresses, email and private paths cleaned out. Findings about Hornhoof itself stay apart from
+  the company's own, and the card of a sent finding shows when it went, its number, its GitHub issue and the version
+  that fixed it.
+- The CEO can turn on autonomous release: an exact commit for main then goes in without a card when it has a green full
+  test run, an independent PASS from another employee and a fast-forward path from main. Each such commit is in the
+  autonomous release log.
 - Any agent hands a person a table as an `.xlsx` or `.csv` file in the task card or the chat, sends it to a person's
   Telegram, or makes a Google Sheet once a person who may change the whole company saved a Google key in Company
   settings. Without a key the agent says what to connect and attaches the `.xlsx`. A file goes only to an active person
@@ -32,9 +65,12 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
 
 ### Changed
 
+- Operations stop and start any employee's turn again themselves, without asking a person. A person's own assistant's
+  program is looked at, typed into and recovered only by its owner.
 - Shared skills and tool descriptions say what to do about a missing command, a write answered with 502, 503 or 504, a
-  message that ends a wait, and full compact windows. The company view says which employees have text of their own over
-  their role's.
+  message that ends a wait, and full compact windows. A release runs the full test suite once on its final commit, and
+  the checks of a change run in the author's own workspace. The company view says which employees have text of their
+  own over their role's.
 - `failures` and `agents` show another department's blocked and failed work without its credentials or private paths.
 - The orchestrator and heads hire, build and run their department in any turn of theirs for the last person who wrote
   to them, with that person's rights as they are now, so an answer that comes in a later turn no longer makes them ask
@@ -44,8 +80,17 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
 
 ### Fixed
 
-- The map of a company of about 120 agents stays on screen while the server is slow, and a tab another person comes to
-  no longer shows the company or the unsent answers of the one before.
+- A company of about 120 agents no longer sends its tab into endless redraws, leaks or stalled frames, and its map stays
+  on screen while the server is slow. A part of the page that redraws without end or breaks is stopped with a button to
+  start it again, and while the page slows down animations and effects are turned off, with a button to turn them back
+  on. In Safari the map moves smoothly, and a hidden map pauses.
+- Answering a department head no longer makes the screen blink or turn grey.
+- A turn whose program finished at its prompt is closed and the queue goes on in the same session, a running turn no
+  live program holds is ended and Operations hear of a stalled queue, and words a person sent while a turn waited no
+  longer cut that turn short.
+- Task numbers and planned turns no longer collide when tasks are made at the same time, and the map's report and task
+  moves no longer lock each other.
+- A tab another person comes to no longer shows the company or the unsent answers of the one before.
 - A node that is silent or stuck is updated without waiting forever, a stopped node is started again, and the updater
   ends the processes it left behind.
 - Claude plans show their full limits again.
@@ -54,12 +99,44 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
 
 ### Russian
 
-Агенты отдают людям таблицы настоящими файлами и читают страницы, которые строят скрипты; незавершенные ветки отдела и
-выключенные машины больше не останавливают его работу, а зависшие и остановленные узлы поднимаются снова.
+Компания работает на нескольких своих машинах, с зашифрованными резервными копиями и своей ссылкой, письма сотрудникам
+ждут во входящих, агенты отдают людям таблицы настоящими файлами и читают страницы, которые строят скрипты, а человек
+одной кнопкой отправляет находку разработчикам Hornhoof.
 
-- Перед обновлением: миграция 0106 добавляет пустую таблицу `google_sheets` для ключа Google компании. Ничего не
-  переносится, 0.23.5 работает с этой базой, так что откат безопасен. Образ узла теперь содержит `hh-browse`, `hh-xlsx`,
-  zip, PyYAML, pip и pytest и поэтому больше.
+- Перед обновлением: в выпуске миграции с 0106 по 0124. Миграции 0106-0119 добавляют то, что держит копии данных
+  компании на других машинах, резервные копии и аренду ведущей машины, и дальше каждая запись идет через эту аренду.
+  0120 добавляет пустую таблицу `google_sheets` для ключа Google компании, 0121 переключатель самостоятельного выпуска и
+  его журнал, 0122 и 0123 входящие отзывы и судьбу отправленных находок, 0124 входящие сотрудников. Откат на 0.23.5
+  возвращает базу к копии, сделанной перед обновлением, поэтому изменения после обновления пропадут. Образ сервера
+  теперь содержит пакеты для сертификатов и сети, а образ узла `hh-browse`, `hh-xlsx`, zip, PyYAML, pip и pytest,
+  поэтому оба больше.
+- Сервер на Mac, обновленный кнопкой «Обновить»: один раз выполните на этом Mac строку установки. До этого другие
+  машины находят его только по ссылке hornhoof.org, после этого и в вашей собственной сети. Сервер на Linux делает это
+  сам. Если после обновления ссылка hornhoof.org перестала открываться, впишите `ACME_DIRECTORY=off` в файл `.env` в
+  папке `~/hornhoof` и выполните там `docker compose up -d app`: ссылка снова откроется в течение минуты.
+- Письма от сотрудников и Hornhoof ждут во входящих сотрудника, и свободный сотрудник берет все непрочитанные письма
+  одним ходом, а не ходом на каждое. Окно агента показывает входящие с числом непрочитанных; CEO или глава отдела
+  выбирает, получает ли сотрудник, отдел или компания письма через входящие или каждое отдельным ходом. Слова человека
+  туда никогда не попадают. Окно агента хранит последние 300 строк.
+- Компания держит копии своих данных на других своих машинах. Одна машина ведет; экран «Машины» показывает копию каждой
+  машины и ее место в очереди, а «Перенести сервер сюда» переносит сервер с сохранением работы. Если ведущая машина
+  перестала отвечать, ее место занимает копия, в которой есть все изменения; если в копии может не хватать изменений,
+  CEO решает, продолжить с нее или ждать, а сделанное обеими сторонами потом сливается, и настоящие расхождения решает
+  человек.
+- Зашифрованные резервные копии каждые 6 часов и перед каждым обновлением хранятся на выбранных для них машинах. Файл
+  восстановления, сохраненный в настройках компании, восстанавливает компанию на новом сервере, если этот потерян, а
+  сделанное после копии можно вернуть.
+- Ссылка компании на hornhoof.org получает свой сертификат Let's Encrypt, и соединение шифруется до машины самой
+  компании.
+- Владелец машины открывает оркестратору доступ к ней на сутки ключом, который есть только у него. Ход, машина которого
+  пропала из сети, сохраняет работу и продолжается, когда машина вернулась, а пока ставится обновление, Hornhoof не
+  принимает изменений и говорит об этом.
+- Человек одной кнопкой отправляет разработчикам Hornhoof ошибку, улучшение или идею. Окно показывает ровно то, что
+  уйдет, без ключей, адресов, почты и личных путей. Находки о самом Hornhoof отделены от находок компании, а карточка
+  отправленной находки показывает, когда она ушла, ее номер, задачу на GitHub и версию, которая ее исправила.
+- CEO может включить самостоятельный выпуск: точный коммит для main тогда проходит без карточки, если у него зеленый
+  полный прогон тестов, независимый PASS другого сотрудника и путь перемотки от main. Каждый такой коммит записан в
+  журнал самостоятельного выпуска.
 - Любой агент отдает человеку таблицу файлом `.xlsx` или `.csv` в карточке задачи или в чате, отправляет ее в Telegram
   человека или создает Google-таблицу, когда человек с правом на всю компанию сохранил ключ Google в настройках компании.
   Без ключа агент говорит, что подключить, и прикладывает `.xlsx`. Файл получает только активный человек той же
@@ -70,16 +147,28 @@ offline machines no longer stop its work, and nodes that hang or stop are brough
 - Карточки агента и задачи называют выключенную машину сотрудника, а перевод на работающую подписку отдела делается
   одним нажатием.
 - Файл, брошенный в окно агента, прикладывается к чату, а не открывается во вкладке.
+- Operations сами останавливают и снова запускают ход любого сотрудника, не спрашивая человека. Программу личного
+  помощника человека смотрит, в нее пишет и ее восстанавливает только ее владелец.
 - Общие навыки и описания инструментов говорят, что делать при отсутствующей команде, записи с ответом 502, 503 или
-  504, сообщении, которое завершает ожидание. Вид компании показывает, у каких сотрудников свой текст поверх роли.
+  504, сообщении, которое завершает ожидание. Выпуск проходит полный прогон тестов один раз на своем итоговом коммите,
+  а проверки изменения идут в рабочей папке автора. Вид компании показывает, у каких сотрудников свой текст поверх роли.
 - `failures` и `agents` показывают заблокированную и упавшую работу другого отдела без ключей и личных путей.
 - Оркестратор и главы нанимают, строят и ведут свой отдел в любом своем ходе для последнего человека, который им
   написал, с его нынешними правами, так что ответ, пришедший в следующем ходе, больше не заставляет просить человека
   написать снова. Оркестратор ставит версию Hornhoof, о которой просил CEO или его делегат, и в следующем ходе. Решения
   самого человека (люди, доступы, ключи, подписки, бюджеты, правила одобрения) по-прежнему требуют хода, который
   отвечает этому человеку.
-- Карта компании примерно из 120 агентов держится на экране при медленном сервере, а вкладка, на которую пришел другой
-  человек, больше не показывает компанию и неотправленные ответы предыдущего.
+- Вкладка компании примерно из 120 агентов больше не уходит в бесконечную перерисовку, утечки и замершие кадры, а карта
+  держится на экране при медленном сервере. Часть страницы, которая перерисовывается без конца или ломается,
+  останавливается с кнопкой запустить ее снова, а пока страница тормозит, анимации и эффекты выключаются, с кнопкой
+  включить их обратно. В Safari карта движется плавно, а скрытая карта стоит на паузе.
+- Ответ главе отдела больше не заставляет экран моргать или сереть.
+- Ход, программа которого закончила у своего приглашения, закрывается, и очередь идет дальше в той же сессии; ход,
+  которого не держит ни одна живая программа, завершается, и Operations узнают о вставшей очереди; слова человека,
+  отправленные, пока ход ждал, больше не обрывают этот ход.
+- Номера задач и запланированные ходы больше не сталкиваются, когда задачи создаются одновременно, а отчет карты и
+  перенос задач больше не блокируют друг друга.
+- Вкладка, на которую пришел другой человек, больше не показывает компанию и неотправленные ответы предыдущего.
 - Зависший или молчащий узел обновляется без бесконечного ожидания, остановленный запускается снова, а обновлятор
   завершает оставленные им процессы. Подписки Claude снова показывают полные лимиты. Терминал сохраняет место чтения,
   когда программа выходит из альтернативного экрана.

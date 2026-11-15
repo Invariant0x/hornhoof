@@ -11,16 +11,18 @@ import type { Person } from '../../auth/session.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
-import { listEvents } from '../events/store.js';
+import { lastEvents, listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing } from './prompt.js';
+import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing, type WrittenFrom } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
+import { STARTS_FIRST } from '../sources/requests.js';
 
-const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0) });
+/* after: what came since seq, a page at a time; last: only the newest so many, before seq when given. */
+const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), last: z.coerce.number().int().min(1).max(500).optional(), before: z.coerce.number().int().min(1).optional() });
 const MessageBody = z
   .object({ text: Text.trim().default(''), task: TaskReference.optional(), pictures: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
   .refine(m => m.text || m.pictures.length, 'Write something or add a picture.');
@@ -40,9 +42,10 @@ function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> 
   return { actor: { personId: me.id }, turn: { prompt, createdBy: me.id, ...(origin.own && origin.fresh ? { fresh: origin.fresh } : {}), message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
 }
 
-type Origins = { telegram?: TelegramOrigin; assistant?: AssistantOrigin; standing?: Standing };
+/* from: the machine of the company the person sits at as they write in the window; none through Telegram or an assistant. */
+type Origins = { telegram?: TelegramOrigin; assistant?: AssistantOrigin; standing?: Standing; from?: WrittenFrom };
 
-function writtenBy(me: Person, text: string, pictures: MessagePicture[], { telegram, assistant, standing }: Origins = {}) {
+function writtenBy(me: Person, text: string, pictures: MessagePicture[], { telegram, assistant, standing, from }: Origins = {}) {
   if (me.via) return {
     actor: { agentId: me.via },
     turn: { prompt: `${turnPrompt({ name: 'Orchestrator', title: '' }, text)}\n\n${answerBy({ id: me.via, name: 'Orchestrator' })}`, createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
@@ -56,10 +59,11 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
   }
   /* An employee is told what the person is to it, as its company tool does not show everyone who runs its department. */
   const who = standing && standing.department !== null ? `\n\n${whoIs(me, standing)}` : '';
-  return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, withPictures(text, pictures))}${who}`, createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
+  return { actor: { personId: me.id }, turn: { prompt: `${turnPrompt(me, withPictures(text, pictures), from)}${who}`, createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
 }
 
-type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin };
+/* from: the machine of the company the person sits at as they write in the window; none through Telegram. */
+type Written = { text: string; task?: z.infer<typeof TaskReference>; pictures: string[]; telegram?: TelegramOrigin; assistant?: AssistantOrigin; from?: WrittenFrom };
 
 /* What the person is to this agent: the company's owner, the CEO's delegate, and whether they run its department, as
    everyone given it does. */
@@ -82,7 +86,7 @@ export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input:
   /* Pictures alone read as their names wherever the words of a message show. */
   const words = input.text || pictures.map(p => p.name).join(', ');
   const standing = me.via ? undefined : await standingOf(ctx, me, agent);
-  const { actor, turn } = writtenBy(me, words, pictures, { telegram: input.telegram, assistant: input.assistant, standing });
+  const { actor, turn } = writtenBy(me, words, pictures, { telegram: input.telegram, assistant: input.assistant, standing, from: input.from });
   const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: input.task, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
   ctx.bus.publish(me.companyId, {
     type: 'pulse',
@@ -104,16 +108,20 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
-    const { after } = EventsQuery.parse(req.query);
+    const { after, last, before } = EventsQuery.parse(req.query);
     const viewer = await viewerOf(db, me);
     const state = await agentState(ctx, agent.id);
-    return { events: (await listEvents(db, agent.id, after)).map(e => maskEvent(viewer, e)), state: { ...state, ...(await terminalRights(ctx, me, agent, state.terminal)) } };
+    const found = last === undefined ? await listEvents(db, agent.id, after) : await lastEvents(db, agent.id, last, before);
+    return { events: found.map(e => maskEvent(viewer, e)), state: { ...state, ...(await terminalRights(ctx, me, agent, state.terminal)) } };
   });
 
   app.post('/api/agents/:id/messages', async (req, reply) => {
     const { me, agent } = await agentFor(ctx, req);
     const { text, task, pictures } = MessageBody.parse(req.body);
-    const jobId = await writeToAgent(ctx, me, agent, { text, task, pictures });
+    /* The orchestrator is told which machine of the company a person writes from, when they sit at one. */
+    const here = !me.via && agent.kind === 'orchestrator' ? await ctx.computer.here(req, me.companyId) : null;
+    const from = here ? { machine: here.name, until: await ctx.computer.openUntil(here.id) } : undefined;
+    const jobId = await writeToAgent(ctx, me, agent, { text, task, pictures, from });
     reply.code(202);
     return { jobId };
   });
@@ -148,7 +156,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { started };
   });
 
-  app.post('/api/agents/:id/stop', async (req, reply) => {
+  app.post('/api/agents/:id/stop', STARTS_FIRST, async (req, reply) => {
     const { agent } = await agentFor(ctx, req);
     const { runningJobId } = await agentState(ctx, agent.id);
     if (!runningJobId) throw new ApiError(409, 'conflict', 'Nothing is running.', 'nothing_running');

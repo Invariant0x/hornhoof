@@ -65,7 +65,7 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     ];
     mockApi({
       'GET /api/agents/orchestrator': [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
-      'GET /api/agents/orchestrator/events?after=0': [200, { events, state: READY }],
+      'GET /api/agents/orchestrator/events?last=300': [200, { events, state: READY }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(

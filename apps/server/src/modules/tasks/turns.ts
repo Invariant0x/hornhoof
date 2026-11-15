@@ -166,7 +166,7 @@ export async function giveTasks(ctx: Ctx, by: By, items: PlanItem[], improvement
     await lockCompany(tx, companyId);
     const taken = await takeBacklog(tx, companyId, backlog);
     const given = await insertGiven(tx, companyId, { agentId }, placed, improvement);
-    if (improvement) await takeForPlanning(tx, companyId, improvement, await decidingPerson(tx, by));
+    if (improvement) await takeForPlanning(tx, companyId, improvement, await decidingPerson(tx, by), ctx.config.feedbackInbox);
     return { given, taken };
   });
   ctx.bus.publish(companyId, { type: 'org' });

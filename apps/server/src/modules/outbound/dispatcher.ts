@@ -252,6 +252,9 @@ export async function outboundReviewRound(ctx: Ctx, now: Date, ports: Pick<Model
 }
 
 export async function outboundRound(ctx: Ctx, now: Date, senders: Senders = LIVE): Promise<void> {
+  /* A restored database that has not taken over yet serves nobody, and sends nothing either: until its restore is
+     marked in it, nothing tells a message that came back with it from one written since. */
+  if (!ctx.restores.ready()) return;
   if (rounds.has(ctx)) return;
   rounds.add(ctx);
   try {

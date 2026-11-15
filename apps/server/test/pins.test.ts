@@ -26,6 +26,13 @@ describe('what the build runs', () => {
     for (const line of from) expect(line).toMatch(/ [\w.-]+:[\w.-]+@sha256:[0-9a-f]{64}( AS \w+)?$/);
   });
 
+  /* The lab's machines are computers with a Docker of their own: the one every run starts from. */
+  it("builds the lab's machine from a Docker pinned by digest", () => {
+    const from = read('apps/server/test/lab/machine.Dockerfile').split('\n').filter(l => l.startsWith('FROM '));
+    expect(from).toHaveLength(1);
+    expect(from[0]).toMatch(/^FROM docker:28\.\d+\.\d+-dind@sha256:[0-9a-f]{64}$/);
+  });
+
   it('takes the tunnel client from an image pinned by digest', () => {
     const copies = read('Dockerfile').split('\n').filter(l => /^COPY --from=[\w.-]+[/:]/.test(l));
     expect(copies.some(l => l.includes(' /usr/bin/frpc '))).toBe(true);
@@ -39,12 +46,15 @@ describe('what the build runs', () => {
   /* install.sh writes them into .env: by digest from the updater, which checked them, or by the build's tag. */
   it("runs Hornhoof's own images as .env names them", () => {
     const images = read('compose.yaml').split('\n').filter(l => /^ {4}image: /.test(l)).map(l => l.trim());
+    const app = 'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}';
+    /* Front, the keeper and migrate run the app's own image, so they move with the app. */
     expect(images).toEqual([
-      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
+      app,
+      app,
+      app,
+      app,
       expect.stringMatching(/^image: postgres:/),
       'image: ${HORNHOOF_NODE_REF:-ghcr.io/invariant0x/hornhoof-node:latest}',
-      /* The tunnel runs the app's own image, so it moves with the app. */
-      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
       'image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}',
     ]);
   });

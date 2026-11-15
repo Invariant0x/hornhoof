@@ -38,10 +38,13 @@ const STATES: [string, SubView | null, string, string][] = [
 /* The dots that run once, one per message; the signal to a person decisions wait for keeps running and is not counted. */
 /* The dots that keep running along one way, by where each starts on it: null at the start, a negative begin further on. */
 const runningDots = (container: HTMLElement, tone: 'c' | 'a', d: string) =>
-  [...container.querySelectorAll(`circle.pt.${tone} animateMotion`)].filter(m => m.getAttribute('path') === d && m.getAttribute('repeatCount') === 'indefinite' && m.getAttribute('keyPoints') === null).map(m => m.getAttribute('begin'));
+  [...container.querySelectorAll<SVGSVGElement>('.pt-box')]
+    .filter(b => b.querySelector(`circle.pt.${tone}`) && b.dataset.path === d && !b.dataset.once && !b.dataset.bounce)
+    .map(b => b.dataset.phase ?? null);
 /* The same SVG path, drawn from its last point to its first. */
 const backwards = (d: string) => `M ${d.slice(2).split(' L ').reverse().join(' L ')}`;
-const shots = (container: HTMLElement, tone: 'c' | 'a') => [...container.querySelectorAll(`circle.pt.${tone}`)].filter(c => c.querySelector('animateMotion')?.getAttribute('repeatCount') === '1');
+const shots = (container: HTMLElement, tone: 'c' | 'a') =>
+  [...container.querySelectorAll<SVGCircleElement>(`circle.pt.${tone}`)].filter(c => c.closest<SVGSVGElement>('.pt-box')?.dataset.once === '1');
 describe('orchestratorStatus', () => {
   it.each(STATES)('says where the orchestrator runs: %s', (_, sub, english, russian) => {
     expect(orchestratorStatus(en, sub)).toBe(english);
@@ -561,7 +564,7 @@ describe('Map', () => {
     expect(trace()).toBe('M 600 420 L 470 420 L 470 200 L 390 200');
     await waitFor(() => expect(calls).toContainEqual({ method: 'PATCH', path: '/api/map/layout', body: { anchors: { 'dept:d1': [[470, 300]] } } }));
     stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
-    expect(shots(container, 'c').map(s => s.querySelector('animateMotion')!.getAttribute('path'))).toEqual(['M 600 420 L 470 420 L 470 200 L 390 200']);
+    expect(shots(container, 'c').map(s => s.closest<SVGSVGElement>('.pt-box')!.dataset.path)).toEqual(['M 600 420 L 470 420 L 470 200 L 390 200']);
   });
 
   it('lines a bend up with the next stop of its line as the hand brings it near', async () => {
@@ -648,14 +651,15 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Marketing');
-    expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
+    expect(container.querySelectorAll('.pt-box, animateMotion')).toHaveLength(0);
   });
 
   it('moves the dot along the gauge while an agent works', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 1, working: 1 } }] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByTitle('agents working');
-    expect(container.querySelector('.hub animateMotion')).toBeInTheDocument();
+    expect(container.querySelector('.hub .pt-box[data-bounce="1"] > circle.pt.k')).toBeInTheDocument();
+    expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
   });
 
   it('keeps a slower work dot on the gauge under reduced motion', async () => {
@@ -666,7 +670,7 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 1, working: 1 } }] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByTitle('agents working');
-    expect(container.querySelector('.hub circle.pt animateMotion')).toBeInTheDocument();
+    expect(container.querySelector('.hub .pt-box[data-bounce="1"] > circle.pt.k')).toBeInTheDocument();
   });
 
   it('opens the orchestrator from the empty map and from the hub', async () => {
@@ -727,7 +731,8 @@ describe('Map', () => {
     const { container } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByRole('button', { name: 'Dan: 3 decisions wait' })).toHaveClass('attn');
     expect(container.querySelectorAll('.wires path[data-ask]')).toHaveLength(1);
-    expect(container.querySelectorAll('.wires circle.pt.a animateMotion')).toHaveLength(2);
+    expect(container.querySelectorAll('.map-live .pt-box > circle.pt.a')).toHaveLength(2);
+    expect(container.querySelectorAll('.map-live .way-seg')).toHaveLength(0);
   });
 
   it("lets a department's person open their decisions, but not the orchestrator, and shows no count they cannot see", async () => {
@@ -960,9 +965,9 @@ describe('Map', () => {
     stream.send({ type: 'pulse', from: { kind: 'person', id: 'p1' }, to: { kind: 'orchestrator' } });
     const dot = container.querySelector('circle.pt')!;
     expect(dot).toBeInTheDocument();
-    const motion = dot.querySelector('animateMotion')!;
-    expect(motion).toHaveAttribute('repeatCount', '1');
-    const duration = parseFloat(motion.getAttribute('dur')!) * 1000;
+    const box = dot.closest<SVGSVGElement>('.pt-box')!;
+    expect(box).toHaveAttribute('data-once', '1');
+    const duration = parseFloat(box.dataset.dur!) * 1000;
     act(() => { vi.advanceTimersByTime(duration / 2); });
     expect(dot).toBeInTheDocument();
     act(() => { vi.advanceTimersByTime(duration / 2 + 20); });
@@ -1258,10 +1263,10 @@ describe('Map', () => {
     try {
       stream.send({ type: 'pulse', from: { kind: 'person', id: 'p4' }, to: { kind: 'department', id: 'd1' } });
       expect(shots(container, 'c')).toHaveLength(1);
-      expect(shots(container, 'c')[0]!.querySelector('animateMotion')!.getAttribute('path')).toBe('M 70 200 L 110 200');
+      expect(shots(container, 'c')[0]!.closest<SVGSVGElement>('.pt-box')!.dataset.path).toBe('M 70 200 L 110 200');
       stream.send({ type: 'pulse', from: { kind: 'department', id: 'd1' }, to: { kind: 'person', id: 'p4' } });
       expect(shots(container, 'a')).toHaveLength(1);
-      expect(shots(container, 'a')[0]!.querySelector('animateMotion')!.getAttribute('path')).toBe('M 110 200 L 70 200');
+      expect(shots(container, 'a')[0]!.closest<SVGSVGElement>('.pt-box')!.dataset.path).toBe('M 110 200 L 70 200');
     } finally {
       vi.useRealTimers();
     }
@@ -1349,7 +1354,8 @@ describe('Map', () => {
     const id = mask!.slice(5, -1);
     expect(container.querySelector(`[id="${id}"] path[stroke="black"]`)).not.toBeNull();
     stream.send({ type: 'pulse', from: { kind: 'department', id: 'd1' }, to: { kind: 'person', id: 'strip' } });
-    expect(shots(container, 'a')[0]!.closest('g[mask]')).toHaveAttribute('mask', mask);
+    expect(shots(container, 'a')[0]!.closest('[data-mask]')).toHaveAttribute('data-mask', mask);
+    expect(container.querySelectorAll('.map-live .way-seg').length).toBeGreaterThan(3);
   });
 });
 

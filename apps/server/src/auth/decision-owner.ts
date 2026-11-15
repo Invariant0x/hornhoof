@@ -5,12 +5,13 @@ import type { Access, Spot } from './access.js';
 
 export type Candidate = { id: string; status: 'active' | 'invited' | 'disabled'; isOwner: boolean; access: Access };
 
-/* A request of an agent on a task, a card of the orchestrator, or its request for the computer the server runs on. A card
-   that names departments changes only their staff, sub-units and products. */
+/* A request of an agent on a task, or a card of the orchestrator. His request for a machine is its owner's, and no
+   decision of this kind. A card that names departments changes only their staff, sub-units and products. */
 export type DecisionSubject =
   | { source: 'request'; kind: (typeof REQUEST_KINDS)[number]; topic: DecisionTopic | null; spot: Spot }
   | { source: 'proposal'; departments?: readonly string[] }
-  | { source: 'computer_access' };
+  /* What a merge could not prove about people, access, plans, machines or protected records: the CEO's alone. */
+  | { source: 'merge' };
 
 /* The topics a department's own person decides; every other one, and one not given, is the CEO's. */
 export const DEPARTMENTAL: readonly DecisionTopic[] = ['task', 'employee'];
@@ -31,7 +32,7 @@ export const listsPlace = (access: Access, spot: Spot) =>
 
 /* The department or product whose people a decision belongs to: a question, a choice or a stuck task, on a task or an
    employee of a department. Approvals, which only a named owner takes besides the CEO, the CEO's topics, unknown topics, the
-   orchestrator's own tasks, its cards and its request for the computer belong to no department's people. */
+   orchestrator's own tasks and its cards belong to no department's people. */
 export function decisionPlace(d: DecisionSubject): Spot | null {
   if (d.source !== 'request' || d.kind === 'approval' || !d.topic || !DEPARTMENTAL.includes(d.topic) || !d.spot.departmentId) return null;
   return d.spot;

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { SubView } from '../src/types';
-import { ME, MACHINE, mockApi, SUBS } from './api-mock';
+import { ME, MACHINE, mockApi, SUBS, withKey } from './api-mock';
 import { decl } from './css';
 import { fakeStream } from './fake-stream';
 
@@ -66,7 +66,8 @@ describe('the steps to connect a personal plan', () => {
     view([waiting], { commands: [shown(waiting)] });
     const block = await screen.findByRole('region', { name: 'Install Claude' });
     expect(read(within(block).getByRole('list', { name: EN.label })).current).toBe(0);
-    expect(within(block).getByText(COMMAND)).toBeVisible();
+    /* The command comes with the key this browser made for its owner, a moment after the block. */
+    expect(await within(block).findByText(withKey(COMMAND))).toBeVisible();
   });
 
   it('asks for a new command when the plan has none that still works', async () => {

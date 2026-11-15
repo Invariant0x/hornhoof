@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
-import type { ComputerView, EventView, Me, Org, ShownCommand } from '../src/types';
-import { CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS } from './api-mock';
+import type { ComputerAccessView, EventView, Me, Org, ShownCommand } from '../src/types';
+import { accessView, CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS, withKey } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
@@ -17,12 +17,18 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 }));
 
 const EVENTS = '/api/agents/orchestrator/events';
+
+/* Computer access to the machine the server runs on, which told no name, as the CEO sees it. */
+const ofServer = (over: Parameters<typeof accessView>[1] = {}): ComputerAccessView => accessView('the company server', { ...over, machine: { id: 'm-server', hostname: '', role: 'data', data: true, ...over.machine } });
+const named = (view: ComputerAccessView, hostname: string): ComputerAccessView => ({ ...view, machine: { ...view.machine, hostname } });
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const BUSY = { ...READY, busy: true, runningJobId: 'j1' };
 /* A person who last chose the terminal in this browser: the window opens with it. */
 const chooseTerminal = () => localStorage.setItem('hh-agent-view', 'terminal');
 
 const ev = (seq: number, kind: EventView['kind'], data: unknown, extra: Partial<EventView> = {}): EventView => ({ seq, kind, data, jobId: 'j1', person: null, at: '2026-10-29T10:00:00Z', ...extra });
+const line = (seq: number) => ev(seq, 'text', { kind: 'text', text: `Line ${seq}` });
+const lines = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => line(from + i));
 const IVAN = { id: 'p1', name: 'Ivan' };
 
 const LOG: EventView[] = [
@@ -40,7 +46,7 @@ const LOG: EventView[] = [
 function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
   const calls = mockApi({
     'GET /api/agents/orchestrator': [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
-    [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }],
+    [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
     ...(routes as Record<string, [number, unknown]>),
   });
@@ -58,7 +64,7 @@ describe('AgentWindow', () => {
     const user = userEvent.setup();
     chooseTerminal();
     const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: { ...READY, terminal: true, canType: true } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [card], state: { ...READY, terminal: true, canType: true } }] });
     await user.click(await screen.findByRole('button', { name: 'Correct in words' }));
     expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
   });
@@ -66,7 +72,7 @@ describe('AgentWindow', () => {
   it('leaves typing to the live terminal the person chose, and keeps the line in the chat', async () => {
     const user = userEvent.setup();
     chooseTerminal();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
     expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
@@ -76,7 +82,7 @@ describe('AgentWindow', () => {
   });
 
   it('keeps program state history out of the conversation without blank lines', async () => {
-    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: [200, { events: [
       ev(1, 'text', { text: 'Starting checkout.' }),
       ev(2, 'program', { program: { state: 'thinking', since: Date.parse('2026-11-03T10:00:00Z'), tool: null }, alarm: null }),
       ev(3, 'text', { text: 'Checkout is ready.' }),
@@ -87,7 +93,7 @@ describe('AgentWindow', () => {
   });
 
   it('shows each kind of line in the chat, the steps of work folded into one', async () => {
-    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: READY }] });
+    const { container } = open({ [`GET ${EVENTS}?last=300`]: [200, { events: LOG, state: READY }] });
     expect(await screen.findByText('What matters most right now?')).toBeInTheDocument();
     expect(within(screen.getByText('We make characters for schools').closest('article')!).getByText('You')).toBeInTheDocument();
     expect(screen.queryByText('hornhoof.company')).not.toBeInTheDocument();
@@ -105,32 +111,32 @@ describe('AgentWindow', () => {
   });
 
   it('says plainly when a turn did not go out because the instructions are too long', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'failed', { error: 'instructions_too_long' }), ev(2, 'failed', { error: 'node_too_old' })], state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'failed', { error: 'instructions_too_long' }), ev(2, 'failed', { error: 'node_too_old' })], state: READY }] });
     expect(await screen.findByText('The instructions are longer than one turn can carry. Shorten the role or a skill on the card.')).toBeInTheDocument();
     expect(screen.getByText("This machine's node is too old for these instructions; update it.")).toBeInTheDocument();
   });
 
   it("names Hornhoof for the turns it starts on a task", async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: '#4 "Payments" is yours.', task: { id: 't4', number: 4 } })], state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'message', { text: '#4 "Payments" is yours.', task: { id: 't4', number: 4 } })], state: READY }] });
     const line = (await screen.findByText('#4 "Payments" is yours.')).closest('article')!;
     expect(within(line).getByText('Hornhoof')).toBeInTheDocument();
   });
 
   it('names the orchestrator for what it wrote to an employee', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Look at checkout first.', from: 'orchestrator' })], state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'message', { text: 'Look at checkout first.', from: 'orchestrator' })], state: READY }] });
     const line = (await screen.findByText('Look at checkout first.')).closest('article')!;
     expect(within(line).getByText('Orchestrator')).toBeInTheDocument();
   });
 
   it('names the employee who wrote, as one does on a timer round', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Report on #4, please.', from: 'agent', name: 'Wendy' })], state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'message', { text: 'Report on #4, please.', from: 'agent', name: 'Wendy' })], state: READY }] });
     const line = (await screen.findByText('Report on #4, please.')).closest('article')!;
     expect(within(line).getByText('Wendy')).toBeInTheDocument();
   });
 
   it('shows his answers with bold and lists, and hides how Claude loads its tools', async () => {
     const { container } = open({
-      [`GET ${EVENTS}?after=0`]: [
+      [`GET ${EVENTS}?last=300`]: [
         200,
         {
           events: [
@@ -155,7 +161,7 @@ describe('AgentWindow', () => {
   it('speaks Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     try {
-      open({ [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: READY }] });
+      open({ [`GET ${EVENTS}?last=300`]: [200, { events: LOG, state: READY }] });
       expect(await screen.findByText('Создан отдел: Разработка, 2 продукта')).toBeInTheDocument();
       expect(screen.getByText('Убран отдел: Финансы')).toBeInTheDocument();
       expect(screen.getByText('Остановлен')).toBeInTheDocument();
@@ -168,7 +174,7 @@ describe('AgentWindow', () => {
   it('greets on the first open by asking the server to start', async () => {
     const { calls } = open();
     await vi.waitFor(() => expect(calls.map(c => `${c.method} ${c.path}`)).toContain('POST /api/agents/orchestrator/start'));
-    expect(calls[0]).toMatchObject({ method: 'GET', path: `${EVENTS}?after=0` });
+    expect(calls[0]).toMatchObject({ method: 'GET', path: `${EVENTS}?last=300` });
   });
 
   it('sends on Enter and keeps Shift+Enter for a new line', async () => {
@@ -207,7 +213,7 @@ describe('AgentWindow', () => {
   });
 
   it('shows that he works and stops him on Esc', async () => {
-    const { calls } = await act(async () => open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
+    const { calls } = await act(async () => open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
     expect(screen.getByRole('status', { name: 'Agent state' })).toHaveTextContent('Working on it');
     expect(screen.getByText('2 more messages wait their turn')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -215,7 +221,7 @@ describe('AgentWindow', () => {
   });
 
   it('says why he cannot answer and offers the card by hand', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_login' } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_login' } }] });
     expect(await screen.findByText('Waiting for the Anthropic login')).toBeInTheDocument();
     expect(screen.getByLabelText('Write to the orchestrator')).toBeDisabled();
     expect(screen.getByText('Company structure')).toBeInTheDocument();
@@ -227,74 +233,74 @@ describe('AgentWindow', () => {
     [{ state: 'waiting', turnsLeft: 2, partsLeft: 0, until: '2026-11-04T21:30:00.000Z' }],
     [{ state: 'restarting', since: '2026-11-04T21:00:00.000Z' }],
   ])('says that turns wait while the machine gets ready for an update, and he can still be written to (%j)', async machineDrain => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, machineDrain } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, machineDrain } }] });
     expect(await screen.findByText('The machine is finishing its work before an update. New turns wait and go on by themselves after it.')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
   it('says that turns wait while the machine is low on free memory, and he can still be written to', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, memoryWait: true } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, memoryWait: true } }] });
     expect(await screen.findByText('The machine is low on free memory. Turns wait to start and go on by themselves once memory frees up. Nothing that already runs there is stopped.')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
   it('says nothing of the memory while the machine has enough', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, memoryWait: false } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, memoryWait: false } }] });
     await screen.findByRole('textbox');
     expect(screen.queryByText(/free memory/)).not.toBeInTheDocument();
   });
 
   it('says nothing of the machine when its update was put off, since turns go out then', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, machineDrain: { state: 'postponed', turnsLeft: 1, partsLeft: 0, retryAt: '2026-11-04T22:05:00.000Z' } } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, machineDrain: { state: 'postponed', turnsLeft: 1, partsLeft: 0, retryAt: '2026-11-04T22:05:00.000Z' } } }] });
     await screen.findByRole('textbox');
     expect(screen.queryByText(/before an update/)).not.toBeInTheDocument();
   });
 
   it('says that his plan is at its limit and that his turns wait until it starts over', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, limitUntil: '2026-10-31T19:20:00Z' } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, limitUntil: '2026-10-31T19:20:00Z' } }] });
     expect(await screen.findByText(/^The plan is at its limit\. Turns wait until .+ and go on by themselves then\.$/)).toBeInTheDocument();
     expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
   });
 
   it("says that the plan used its share for tasks, and that only task turns wait", async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, budgetUntil: '2026-10-31T19:20:00Z' } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, budgetUntil: '2026-10-31T19:20:00Z' } }] });
     expect(await screen.findByText(/^The plan used the share set for tasks\. Task turns wait until .+; messages from people still go\.$/)).toBeInTheDocument();
   });
 
   it('says he waits for the first setup of the program on his plan', async () => {
     const plan = { ...SUBS[0]!, provider: 'antigravity' as const, owner: { id: 'p1', name: 'Ivan' } };
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_setup' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan } });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_setup' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan } });
     expect(await screen.findByText('Waiting for the first setup of Antigravity')).toBeInTheDocument();
   });
 
   it('says he needs a plan when his plan is gone while his state still names its wait', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_setup' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_setup' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
     expect(await screen.findByText('Needs a subscription to start')).toBeInTheDocument();
   });
 
   it('tells to update Hornhoof on a machine too old to run his turns', async () => {
     const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'node_outdated' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, ready: false, reason: 'node_outdated' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
     expect(await screen.findByText("Hornhoof on Ivan's machine is out of date. Run the install command there again.")).toBeInTheDocument();
   });
 
   it('warns that browser checks cannot run on a personal or built-in machine while keeping the message input open', async () => {
     const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
-    const view = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+    const view = open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
     expect(await screen.findByText("Browser checks cannot run on Ivan's machine right now (libnss3.so missing).")).toBeInTheDocument();
     expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
     view.unmount();
     const key = { ...SUBS[0]!, kind: 'api_key' as const };
-    const builtin = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
+    const builtin = open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
     expect(await screen.findByText('Browser checks cannot run on the built-in machine right now (libnss3.so missing).')).toBeInTheDocument();
     expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
     builtin.unmount();
     localStorage.setItem('hh-lang', 'ru');
     try {
-      const ruPersonal = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+      const ruPersonal = open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
       expect(await screen.findByText('Браузерные проверки на машине (владелец Ivan) сейчас не пойдут (libnss3.so missing).')).toBeInTheDocument();
       ruPersonal.unmount();
-      open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
+      open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
       expect(await screen.findByText('Браузерные проверки на встроенной машине сейчас не пойдут (libnss3.so missing).')).toBeInTheDocument();
     } finally {
       localStorage.removeItem('hh-lang');
@@ -312,12 +318,12 @@ describe('AgentWindow', () => {
     const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
     const shown: ShownCommand = { id: 'a'.repeat(64), kind: 'add', plans: ['Claude'], machine: 'ivan-laptop', command, expiresAt: '2026-11-02T10:00:00Z' };
     const { calls } = open({
-      [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
+      [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
       'GET /api/nodes/commands': [200, { commands: [shown] }],
       [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
     });
     const card = await screen.findByRole('region', { name: 'Command to add Claude to ivan-laptop' });
-    expect(within(card).getByText(command)).toBeInTheDocument();
+    expect(await within(card).findByText(withKey(command))).toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on ivan-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Done' }));
@@ -340,8 +346,8 @@ describe('AgentWindow', () => {
   });
 
   it('asks for no machine commands for someone who is not the CEO, and shows them the request for the computer without its buttons', async () => {
-    const asked: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' }, canAnswer: false };
-    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'GET /api/computer': [200, asked] });
+    const asked = ofServer({ asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' }, canOpen: false, canClose: false });
+    const calls = mockApi({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'GET /api/machines/access': [200, { views: [asked] }] });
     const zed: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false }, canDecideCompany: false };
     render(<AgentWindow me={zed} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
     const card = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
@@ -351,19 +357,21 @@ describe('AgentWindow', () => {
     expect(calls.some(c => c.path === '/api/nodes/commands')).toBe(false);
   });
 
-  it('asks for no computer access for someone who sees only part of the company', async () => {
-    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
+  it("asks the server which machines' access is theirs to see, whoever opens the window, and never for the CEO's commands", async () => {
+    const calls = mockApi({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'GET /api/machines/access': [200, { views: [] }] });
     const dana: Me = { ...ME, person: { ...ME.person, id: 'p3', isOwner: false, scopeKind: 'listed' }, canDecideCompany: false };
     render(<AgentWindow me={dana} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
     expect(await screen.findByRole('textbox')).toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/nodes/commands' || c.path === '/api/computer')).toBe(false);
+    expect(calls.some(c => c.path === '/api/machines/access')).toBe(true);
+    expect(screen.queryByRole('region', { name: /access to/i })).not.toBeInTheDocument();
   });
 
   describe('access to the computer', () => {
     const NOW = new Date('2026-11-02T12:00:00Z');
-    const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' } };
-    const OPEN: ComputerView = { available: true, until: new Date(NOW.getTime() + 86_400_000).toISOString(), asked: null };
-    const CLOSED: ComputerView = { available: true, until: null, asked: null };
+    const ASKED = ofServer({ asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' } });
+    const OPEN = ofServer({ until: new Date(NOW.getTime() + 86_400_000).toISOString() });
+    const CLOSED = ofServer();
 
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['Date'] });
@@ -377,9 +385,9 @@ describe('AgentWindow', () => {
     it("shows the CEO the orchestrator's request next to his terminal and opens access for a day with one click", async () => {
       const user = userEvent.setup();
       const { calls } = open({
-        [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
-        'GET /api/computer': [200, ASKED],
-        'POST /api/computer/open': [200, OPEN],
+        [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
+        'GET /api/machines/access': [200, { views: [ASKED] }],
+        'POST /api/machines/m-server/access/open': [200, OPEN],
       });
       const card = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
       expect(within(card).getByText('Restart the nodes outside AppArmor.')).toBeInTheDocument();
@@ -387,39 +395,39 @@ describe('AgentWindow', () => {
       await user.click(within(card).getByRole('button', { name: "More about access to the server's computer" }));
       expect(within(card).getByText(/as root on the server's computer/)).toBeInTheDocument();
       await user.click(within(card).getByRole('button', { name: 'Open for a day' }));
-      expect(calls).toContainEqual({ method: 'POST', path: '/api/computer/open', body: undefined });
+      expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} });
       const opened = await screen.findByRole('region', { name: "Access to the server's computer" });
       await user.click(within(opened).getByRole('button', { name: "More about access to the server's computer" }));
-      expect(within(opened).getByText(/^The orchestrator can run commands on the server's computer until .+\. The company server runs there, so this shows wherever you open Hornhoof\.$/)).toBeInTheDocument();
+      expect(within(opened).getByText(/^Access to the server's computer is open until .+\.$/)).toBeInTheDocument();
       expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument();
     });
 
     it('closes access when the CEO takes it back', async () => {
       const user = userEvent.setup();
-      const { calls } = open({ 'GET /api/computer': [200, OPEN], 'POST /api/computer/close': [200, CLOSED] });
+      const { calls } = open({ 'GET /api/machines/access': [200, { views: [OPEN] }], 'POST /api/machines/m-server/access/close': [200, CLOSED] });
       await user.click(within(await screen.findByRole('region', { name: "Access to the server's computer" })).getByRole('button', { name: 'Close access' }));
-      expect(calls).toContainEqual({ method: 'POST', path: '/api/computer/close', body: undefined });
+      expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/close', body: undefined });
       await vi.waitFor(() => expect(screen.queryByRole('region', { name: "Access to the server's computer" })).not.toBeInTheDocument());
     });
 
     it('shows no open access once its day is over', async () => {
-      open({ 'GET /api/computer': [200, { ...OPEN, until: new Date(Date.now() - 60_000).toISOString() }], 'GET /api/nodes/commands': [200, { commands: [] }] });
+      open({ 'GET /api/machines/access': [200, { views: [{ ...OPEN, until: new Date(Date.now() - 60_000).toISOString() }] }], 'GET /api/nodes/commands': [200, { commands: [] }] });
       expect(await screen.findByRole('textbox')).toBeInTheDocument();
       await vi.waitFor(() => expect(screen.queryByRole('region', { name: "Access to the server's computer" })).not.toBeInTheDocument());
     });
 
     it('says no to a request', async () => {
       const user = userEvent.setup();
-      const { calls } = open({ 'GET /api/computer': [200, ASKED], 'POST /api/computer/decline': [200, CLOSED] });
+      const { calls } = open({ 'GET /api/machines/access': [200, { views: [ASKED] }], 'POST /api/machines/m-server/access/decline': [200, CLOSED] });
       await user.click(within(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).getByRole('button', { name: 'Not now' }));
-      expect(calls).toContainEqual({ method: 'POST', path: '/api/computer/decline', body: undefined });
+      expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/decline', body: undefined });
       await vi.waitFor(() => expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument());
     });
 
     it('follows a request the CEO answered on another screen, or a new one, without waiting for the log', async () => {
       const stream = fakeStream();
-      let view: ComputerView = ASKED;
-      open({ 'GET /api/computer': () => [200, view], 'GET /api/nodes/commands': [200, { commands: [] }] });
+      let view: ComputerAccessView = ASKED;
+      open({ 'GET /api/machines/access': () => [200, { views: [view] }], 'GET /api/nodes/commands': [200, { commands: [] }] });
       expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
       view = CLOSED;
       stream.send({ type: 'computer' });
@@ -430,14 +438,14 @@ describe('AgentWindow', () => {
     });
 
     it('keeps the line below the conversation, not in it, when the window shows the log', async () => {
-      open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }], 'GET /api/computer': [200, ASKED] });
+      open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }], 'GET /api/machines/access': [200, { views: [ASKED] }] });
       const line = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
       expect(screen.getByRole('log')).not.toContainElement(line);
     });
 
     it('writes each step in the log', async () => {
       open({
-        [`GET ${EVENTS}?after=0`]: [
+        [`GET ${EVENTS}?last=300`]: [
           200,
           {
             events: [
@@ -445,6 +453,7 @@ describe('AgentWindow', () => {
               ev(2, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN }),
               ev(3, 'computer', { state: 'closed' }, { person: IVAN }),
               ev(4, 'computer', { state: 'declined' }, { person: IVAN }),
+              ev(5, 'computer', { state: 'refused', machine: 'marat-mac' }),
             ],
             state: READY,
           },
@@ -454,15 +463,16 @@ describe('AgentWindow', () => {
       expect(screen.getByText(/^Ivan opened access to the server's computer until .+$/)).toBeInTheDocument();
       expect(screen.getByText("Ivan closed access to the server's computer")).toBeInTheDocument();
       expect(screen.getByText("Ivan did not open access to the server's computer")).toBeInTheDocument();
+      expect(screen.getByText('marat-mac did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
     });
 
     /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its line names it. */
     it('names the machine the access is to, in its line and in the log', async () => {
       const user = userEvent.setup();
       open({
-        [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until, machine: 'debian-box' }, { person: IVAN })], state: READY }],
-        'GET /api/computer': [200, { ...ASKED, machine: 'debian-box' }],
-        'POST /api/computer/open': [200, { ...OPEN, machine: 'debian-box' }],
+        [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until, machine: 'debian-box' }, { person: IVAN })], state: READY }],
+        'GET /api/machines/access': [200, { views: [named(ASKED, 'debian-box')] }],
+        'POST /api/machines/m-server/access/open': [200, named(OPEN, 'debian-box')],
       });
       const card = await screen.findByRole('region', { name: 'The orchestrator asks for access to debian-box' });
       await user.click(within(card).getByRole('button', { name: 'More about access to debian-box' }));
@@ -471,15 +481,15 @@ describe('AgentWindow', () => {
       await user.click(within(card).getByRole('button', { name: 'Open for a day' }));
       const opened = await screen.findByRole('region', { name: 'Access to debian-box' });
       await user.click(within(opened).getByRole('button', { name: 'More about access to debian-box' }));
-      expect(within(opened).getByText(/^The orchestrator can run commands on debian-box until .+\. The company server runs there, so this shows wherever you open Hornhoof\.$/)).toBeInTheDocument();
+      expect(within(opened).getByText(/^Access to debian-box is open until .+\.$/)).toBeInTheDocument();
     });
 
     it('asks and answers in Russian', async () => {
       localStorage.setItem('hh-lang', 'ru');
       try {
         open({
-          [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN })], state: READY }],
-          'GET /api/computer': [200, ASKED],
+          [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN })], state: READY }],
+          'GET /api/machines/access': [200, { views: [ASKED] }],
         });
         const card = await screen.findByRole('region', { name: 'Оркестратор просит доступ к машине сервера' });
         expect(within(card).getByRole('button', { name: 'Открыть на сутки' })).toBeInTheDocument();
@@ -494,7 +504,7 @@ describe('AgentWindow', () => {
   it('shows a line once when the stream and a catch-up both bring it', async () => {
     const stream = fakeStream();
     open({
-      [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }],
+      [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }],
       /* The live line does not move where history is fetched from, so nothing between is skipped. */
       [`GET ${EVENTS}?after=1`]: [200, { events: [ev(2, 'text', { kind: 'text', text: 'Second' }), ev(3, 'text', { kind: 'text', text: 'Third' })], state: READY }],
     });
@@ -507,20 +517,63 @@ describe('AgentWindow', () => {
     expect(screen.queryByText('Not his')).not.toBeInTheDocument();
   });
 
-  it('loads a long conversation page by page up to the newest line', async () => {
-    const page = Array.from({ length: 500 }, (_, i) => ev(i + 1, 'text', { kind: 'text', text: `Line ${i + 1}` }));
+  it('loads what came while it was away page by page up to the newest line, and keeps the newest 300', async () => {
+    const stream = fakeStream();
+    const page = Array.from({ length: 500 }, (_, i) => line(i + 2));
     open({
-      [`GET ${EVENTS}?after=0`]: [200, { events: page, state: READY }],
-      [`GET ${EVENTS}?after=500`]: [200, { events: [ev(501, 'text', { kind: 'text', text: 'Newest' })], state: READY }],
+      [`GET ${EVENTS}?last=300`]: [200, { events: [line(1)], state: READY }],
+      [`GET ${EVENTS}?after=1`]: [200, { events: page, state: READY }],
+      [`GET ${EVENTS}?after=501`]: [200, { events: [ev(502, 'text', { kind: 'text', text: 'Newest' })], state: READY }],
     });
+    expect(await screen.findByText('Line 1')).toBeInTheDocument();
+    stream.send({ type: 'reconnected' });
     expect(await screen.findByText('Newest')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Line 202')).toBeNull());
+    expect(screen.getByText('Line 203')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show earlier' })).toBeInTheDocument();
+  });
+
+  it('opens on the newest 300 lines of a long conversation, and shows earlier ones when asked', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({
+      [`GET ${EVENTS}?last=300`]: [200, { events: lines(101, 400), state: READY }],
+      [`GET ${EVENTS}?last=200&before=101`]: [200, { events: lines(1, 100), state: READY }],
+    });
+    expect(await screen.findByText('Line 400')).toBeInTheDocument();
+    expect(screen.getByText('Line 101')).toBeInTheDocument();
+    expect(screen.queryByText('Line 100')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Show earlier' }));
+    expect(await screen.findByText('Line 1')).toBeInTheDocument();
+    expect(screen.getByText('Line 400')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show earlier' })).toBeNull();
+    expect(calls.filter(c => c.path.startsWith(EVENTS)).map(c => c.path)).toEqual([`${EVENTS}?last=300`, `${EVENTS}?last=200&before=101`]);
+  });
+
+  it('lets the oldest line go once more than 300 came while it is open, and shows it again when asked', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    open({
+      [`GET ${EVENTS}?last=300`]: [200, { events: lines(1, 299), state: READY }],
+      [`GET ${EVENTS}?last=200&before=2`]: [200, { events: [line(1)], state: READY }],
+    });
+    expect(await screen.findByText('Line 1')).toBeInTheDocument();
+    stream.send({ type: 'agent_event', agentId: ORG.orchestrator!.id, event: line(300) });
+    expect(await screen.findByText('Line 300')).toBeInTheDocument();
+    expect(screen.getByText('Line 1')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show earlier' })).toBeNull();
+    stream.send({ type: 'agent_event', agentId: ORG.orchestrator!.id, event: line(301) });
+    expect(await screen.findByText('Line 301')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Line 1')).toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Show earlier' }));
+    expect(await screen.findByText('Line 1')).toBeInTheDocument();
+    expect(screen.getByText('Line 301')).toBeInTheDocument();
   });
 
   it('greets once he can answer, when the window was open before that', async () => {
     const stream = fakeStream();
     let ready = false;
     const { calls } = open({
-      [`GET ${EVENTS}?after=0`]: () => [200, { events: [], state: ready ? READY : { ...READY, ready: false, reason: 'waiting_machine' } }],
+      [`GET ${EVENTS}?last=300`]: () => [200, { events: [], state: ready ? READY : { ...READY, ready: false, reason: 'waiting_machine' } }],
     });
     const starts = () => calls.filter(c => c.path === '/api/agents/orchestrator/start').length;
     await vi.waitFor(() => expect(starts()).toBe(1));
@@ -535,7 +588,7 @@ describe('AgentWindow', () => {
     let hold = false;
     let late = () => {};
     open({
-      [`GET ${EVENTS}?after=0`]: () => {
+      [`GET ${EVENTS}?last=300`]: () => {
         const reply: [number, unknown] = [200, { events: [], state: ready ? READY : { ...READY, ready: false, reason: 'waiting_machine' } }];
         if (!hold) return reply;
         hold = false;
@@ -557,7 +610,7 @@ describe('AgentWindow', () => {
 
   it('keeps one card that changes with the newest proposal, under his latest line', async () => {
     const { container } = open({
-      [`GET ${EVENTS}?after=0`]: [
+      [`GET ${EVENTS}?last=300`]: [
         200,
         {
           events: [
@@ -579,7 +632,7 @@ describe('AgentWindow', () => {
   });
 
   it('hides the hand-made card and offers it again', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'machine_offline' } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, ready: false, reason: 'machine_offline' } }] });
     fireEvent.click(await screen.findByRole('button', { name: 'Hide' }));
     expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Pick departments by hand' }));
@@ -610,7 +663,7 @@ describe('AgentWindow', () => {
 
   it('offers no structure card on a company that already has departments, only a line to connect a subscription', async () => {
     const withDepts = { ...ORG, departments: [{ id: 'd1', name: null, templateKey: 'home_devices' as const, roleCode: 'HOM', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }] };
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_login' } }] }, withDepts);
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_login' } }] }, withDepts);
     expect(await screen.findByText('Connect a subscription, and the orchestrator offers employees for these departments.')).toBeInTheDocument();
     expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Pick departments by hand' })).not.toBeInTheDocument();
@@ -621,7 +674,7 @@ describe('AgentWindow', () => {
     const stream = fakeStream();
     const calls = mockApi({
       'GET /api/agents/b1': [200, CARD],
-      'GET /api/agents/b1/events?after=0': [200, { events: [ev(1, 'text', { kind: 'text', text: 'I build the API.' })], state: READY }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [ev(1, 'text', { kind: 'text', text: 'I build the API.' })], state: READY }],
       'POST /api/agents/b1/messages': [202, { jobId: 'j3' }],
     });
     render(
@@ -647,7 +700,7 @@ describe('AgentWindow', () => {
     chooseTerminal();
     mockApi({
       'GET /api/agents/b1': [200, CARD],
-      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
     });
     render(
       <LanguageProvider>
@@ -665,7 +718,7 @@ describe('AgentWindow', () => {
     let giveCard!: (reply: [number, unknown]) => void;
     const calls = mockApi({
       'GET /api/agents/b1': () => new Promise(resolve => (giveCard = resolve)),
-      'GET /api/agents/b1/events?after=0': [200, { events: [ev(1, 'text', { kind: 'text', text: 'I build the API.' })], state: READY }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [ev(1, 'text', { kind: 'text', text: 'I build the API.' })], state: READY }],
     });
     const tall = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(480);
     render(
@@ -673,7 +726,7 @@ describe('AgentWindow', () => {
         <AgentWindow me={ME} org={DEV_ORG} agentId="b1" onClose={() => {}} />
       </LanguageProvider>,
     );
-    await vi.waitFor(() => expect(calls.some(c => c.path === '/api/agents/b1/events?after=0')).toBe(true));
+    await vi.waitFor(() => expect(calls.some(c => c.path === '/api/agents/b1/events?last=300')).toBe(true));
     await act(async () => {});
     await act(async () => giveCard([200, CARD]));
     expect((await screen.findByRole('log')).scrollTop).toBe(480);
@@ -683,7 +736,7 @@ describe('AgentWindow', () => {
   it('titles an employee by its name alone when it is called after its role', async () => {
     mockApi({
       'GET /api/agents/b1': [200, { ...CARD, name: 'Backend engineer' }],
-      'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }],
+      'GET /api/agents/b1/events?last=300': [200, { events: [], state: READY }],
     });
     render(
       <LanguageProvider>
@@ -695,7 +748,7 @@ describe('AgentWindow', () => {
 
   it('shows his staff proposal as a hiring card and the hired line after it', async () => {
     const staff = ev(1, 'proposal', { proposalId: 'pr5', kind: 'staff', department: 'd2', brief: 'The API first.', people: [{ role: 'DEV-BE', name: 'Bruno', checked: true }] });
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [staff], state: READY }], 'GET /api/departments/d2/roster': [200, ROSTER] }, DEV_ORG);
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [staff], state: READY }], 'GET /api/departments/d2/roster': [200, ROSTER] }, DEV_ORG);
     expect(await screen.findByText('Hiring for Development')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Hire (1)' })).toBeInTheDocument();
     expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
@@ -706,7 +759,7 @@ describe('AgentWindow', () => {
       ev(1, 'proposal', { proposalId: 'pr5', kind: 'staff', department: 'd2', brief: '', people: [{ role: 'DEV-BE', name: 'Bruno', checked: true }] }),
       ev(2, 'applied', { proposalId: 'pr5', kind: 'staff', department: 'd2', hired: [{ id: 'b1', name: 'Bruno', role: 'DEV-BE' }] }, { person: IVAN }),
     ];
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events, state: READY }] }, DEV_ORG);
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events, state: READY }] }, DEV_ORG);
     expect(await screen.findByText('Hired: Bruno')).toBeInTheDocument();
     expect(screen.queryByText('Hiring for Development')).not.toBeInTheDocument();
   });
@@ -744,7 +797,7 @@ describe('messages between agents and people', () => {
   function employee(agentId: string, events: EventView[], state: object = READY) {
     mockApi({
       [`GET /api/agents/${agentId}`]: [200, agentId === 'b0' ? { ...CARD, id: 'b0', kind: 'head', name: 'Dana', role: { ...CARD.role!, id: 'DEV-HEAD', title: { en: 'Head of development', ru: 'Руководитель разработки' } } } : CARD],
-      [`GET /api/agents/${agentId}/events?after=0`]: [200, { events, state }],
+      [`GET /api/agents/${agentId}/events?last=300`]: [200, { events, state }],
     });
     render(
       <LanguageProvider>
@@ -762,7 +815,7 @@ describe('messages between agents and people', () => {
   ];
 
   it("shows a person's words to the orchestrator whole, and every other message as one line naming who wrote to whom, the text folded and opened by a click", async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     /* Nothing is hidden: the service lines are in the person's words too. */
     const david = (await screen.findByText(/Take #78 into work\.\s+Service: answer in Russian\./)).closest('article')!;
     expect(within(david).getByText('David AI (CEO assistant)')).toBeInTheDocument();
@@ -783,7 +836,7 @@ describe('messages between agents and people', () => {
   });
 
   it('opens every folded message with Ctrl+O and folds them again with it', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     ctrlO();
     for (const text of [/Take #78 into work/, /David AI took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
@@ -793,7 +846,7 @@ describe('messages between agents and people', () => {
   });
 
   it('takes Ctrl+O while the focus is still on the map that opened the window, but not while one types elsewhere', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     const chip = document.body.appendChild(document.createElement('button'));
     const field = document.body.appendChild(document.createElement('input'));
@@ -830,7 +883,7 @@ describe('messages between agents and people', () => {
 
   it('leaves the whole window and Ctrl+O to the live terminal, even with messages that name who wrote to whom', async () => {
     chooseTerminal();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true, canType: true } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Messages' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
@@ -842,13 +895,13 @@ describe('messages between agents and people', () => {
 
 describe("who takes the orchestrator's card", () => {
   const card = (seq: number, id: string) => ev(seq, 'proposal', { proposalId: id, brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
-  const listed = (proposals: { id: string; canAnswer: boolean }[]) => [200, { requests: [], proposals, computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } }];
+  const listed = (proposals: { id: string; canAnswer: boolean }[]) => [200, { requests: [], proposals, machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } }];
   const DANA: Me = { ...ME, person: { ...ME.person, id: 'p3', isOwner: false }, canDecideCompany: false };
   const LOCKED = 'Decided by the CEO or the CEO delegate.';
 
   function show(me: Me, requests: unknown, events: EventView[] = [card(1, 'pr1')]) {
     const calls = mockApi({
-      [`GET ${EVENTS}?after=0`]: [200, { events, state: READY }],
+      [`GET ${EVENTS}?last=300`]: [200, { events, state: READY }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
       'GET /api/requests': requests as [number, unknown],
     });
@@ -910,20 +963,20 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
   };
 
   it('has the CEO delegate write in the terminal, with no second line under it', async () => {
-    mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
+    mockApi({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
     render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     noSecondLine('Write to the orchestrator');
   });
 
   it('has a person with the department write in the terminal of an employee, with no second line under it', async () => {
-    employee(MARIA, { 'GET /api/agents/b1/events?after=0': [200, { events: [], state: WATCHING }] });
+    employee(MARIA, { 'GET /api/agents/b1/events?last=300': [200, { events: [], state: WATCHING }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     noSecondLine('Write to Bruno');
   });
 
   it('shows why while the agent cannot answer, and the terminal with it', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...WATCHING, ready: false, reason: 'machine_offline' } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...WATCHING, ready: false, reason: 'machine_offline' } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.getByText('The built-in machine is offline')).toBeInTheDocument();
     noSecondLine('Write to the orchestrator');
@@ -931,7 +984,7 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
 
   it('writes from the line of the chat, which keeps the words and says why when the server turns the message down', async () => {
     const user = userEvent.setup();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/messages': [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/messages': [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }] });
     await screen.findByTestId('live-terminal');
     await user.click(screen.getByRole('button', { name: 'Chat' }));
     const line = screen.getByRole('textbox', { name: 'Write to the orchestrator' });
@@ -943,13 +996,13 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
   it("sends a correction of the orchestrator's card to the terminal, where they write", async () => {
     const user = userEvent.setup();
     const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: WATCHING }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [card], state: WATCHING }] });
     await user.click(await screen.findByRole('button', { name: 'Correct in words' }));
     expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
   });
 
   it('leaves the owner of the plan with the terminal alone, and focus stays in it', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
+    open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     noSecondLine('Write to the orchestrator');
   });
@@ -958,7 +1011,7 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
     const stream = fakeStream();
     let allowed = true;
     mockApi({
-      [`GET ${EVENTS}?after=0`]: () => (allowed ? [200, { events: [], state: WATCHING }] : [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }]),
+      [`GET ${EVENTS}?last=300`]: () => (allowed ? [200, { events: [], state: WATCHING }] : [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }]),
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
@@ -974,7 +1027,7 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
     const stream = fakeStream();
     let down = false;
     mockApi({
-      [`GET ${EVENTS}?after=0`]: () => (down ? [503, { error: { code: 'internal', message: 'Down.' } }] : [200, { events: [], state: WATCHING }]),
+      [`GET ${EVENTS}?last=300`]: () => (down ? [503, { error: { code: 'internal', message: 'Down.' } }] : [200, { events: [], state: WATCHING }]),
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
@@ -990,7 +1043,7 @@ describe('writing to an agent whose live terminal runs on the plan of someone el
     ['b1', 'not_your_department', 'This employee works in a department you do not have access to.'],
   ])('shows no line and no terminal to someone the server turns away from %s', async (agentId, reason, words) => {
     const refused: [number, unknown] = [403, { error: { code: 'forbidden', message: 'No.', reason } }];
-    mockApi({ [`GET /api/agents/${agentId}/events?after=0`]: refused, [`GET /api/agents/${agentId}`]: refused, 'POST /api/agents/orchestrator/start': refused });
+    mockApi({ [`GET /api/agents/${agentId}/events?last=300`]: refused, [`GET /api/agents/${agentId}`]: refused, 'POST /api/agents/orchestrator/start': refused });
     render(<LanguageProvider><AgentWindow me={MARIA} org={agentId === 'b1' ? DEV_ORG : ORG} agentId={agentId} onClose={() => {}} /></LanguageProvider>);
     expect(await screen.findByRole('alert')).toHaveTextContent(words);
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();

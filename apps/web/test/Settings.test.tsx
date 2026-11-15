@@ -1,6 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Settings } from '../src/screens/Settings';
 import { Profile } from '../src/screens/Profile';
@@ -8,7 +8,12 @@ import { Shell } from '../src/screens/Shell';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
 
+vi.mock('@hornhoof/protocol/link', async importOriginal => ({ ...(await importOriginal<typeof import('@hornhoof/protocol/link')>()), randomLinkName: () => 'r4nd0mr4nd0mr4nd0m' }));
+
 const ACME = { name: 'acme', url: 'https://acme.hornhoof.org' };
+const RANDOM = 'r4nd0mr4nd0mr4nd0m';
+const AGREEMENT = 'Let\'s Encrypt Subscriber Agreement';
+const tls = (mode: 'http' | 'https') => ({ mode, certificate: mode === 'https', expiresAt: null, failedAt: null });
 
 describe('Company settings', () => {
   it('shows the public link with a copy button', async () => {
@@ -56,6 +61,33 @@ describe('Company settings', () => {
     expect(decl('.link-name > span', 'overflow-wrap')).toBe('anywhere');
   });
 
+  it('says the link is encrypted to this machine in https mode, and to hornhoof.org otherwise', async () => {
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org', tls: tls('https') }] });
+    const first = render(<Settings me={ME} onClose={() => {}} />);
+    expect(await screen.findByText('Encrypted to this machine')).toBeInTheDocument();
+    expect(screen.queryByText(/Encrypted to hornhoof.org for now/)).not.toBeInTheDocument();
+    first.unmount();
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org', tls: tls('http') }] });
+    render(<Settings me={ME} onClose={() => {}} />);
+    expect(await screen.findByText('Encrypted to hornhoof.org for now. Hornhoof moves the encryption to this machine on its own.')).toBeInTheDocument();
+    expect(screen.queryByText('Encrypted to this machine')).not.toBeInTheDocument();
+  });
+
+  it('names the Let\'s Encrypt Subscriber Agreement with a link to it', async () => {
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org', tls: tls('https') }] });
+    const first = render(<Settings me={ME} onClose={() => {}} />);
+    const agreement = await screen.findByRole('link', { name: AGREEMENT });
+    expect(agreement).toHaveAttribute('href', 'https://letsencrypt.org/repository/');
+    expect(agreement).toHaveAttribute('target', '_blank');
+    expect(agreement).toHaveAttribute('rel', 'noreferrer');
+    expect(agreement.parentElement).toHaveTextContent(`The link's certificate comes from Let's Encrypt. Getting it accepts the ${AGREEMENT} for your company.`);
+    first.unmount();
+    mockApi({ 'GET /api/link': [200, { link: null, domain: 'hornhoof.org', tls: null }] });
+    render(<Settings me={ME} onClose={() => {}} />);
+    await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.');
+    expect(screen.queryByRole('link', { name: AGREEMENT })).not.toBeInTheDocument();
+  });
+
   it('removes the link after asking', async () => {
     const calls = mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'DELETE /api/link': [204] });
     const user = userEvent.setup();
@@ -78,21 +110,31 @@ describe('Company settings', () => {
     expect(decl('.settings-actions > span', 'overflow-wrap')).toBe('anywhere');
   });
 
-  it('opens Hornhoof on the internet at a name made from the company name', async () => {
+  it('starts a company with no link on a long random name', async () => {
     const calls = mockApi({
       'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
-      'GET /api/link/names/acme': [200, { name: 'acme', free: true }],
-      'PUT /api/link': [200, { link: ACME }],
+      [`GET /api/link/names/${RANDOM}`]: [200, { name: RANDOM, free: true }],
+      'PUT /api/link': [200, { link: { name: RANDOM, url: `https://${RANDOM}.hornhoof.org` } }],
     });
     const user = userEvent.setup();
     render(<Settings me={ME} onClose={() => {}} />);
     expect(await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Link')).toHaveValue('acme');
-    expect(screen.getByText(/A name like this is easy to guess/)).toBeInTheDocument();
-    await screen.findByText('acme.hornhoof.org is free.');
+    /* The field takes its random name as it mounts, which is one render after the words above. */
+    expect(await screen.findByDisplayValue(RANDOM)).toBe(screen.getByLabelText('Link'));
+    expect(screen.getByText(/A random name does not say whose company it is/)).toBeInTheDocument();
+    await screen.findByText(`${RANDOM}.hornhoof.org is free.`);
     await user.click(screen.getByRole('button', { name: 'Open on the internet' }));
-    expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
-    expect(calls.find(c => c.method === 'PUT')!.body).toEqual({ name: 'acme' });
+    expect(await screen.findByRole('link', { name: `https://${RANDOM}.hornhoof.org` })).toBeInTheDocument();
+    expect(calls.find(c => c.method === 'PUT')!.body).toEqual({ name: RANDOM });
+  });
+
+  it('starts a new random name after the link is removed', async () => {
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'DELETE /api/link': [204] });
+    const user = userEvent.setup();
+    render(<Settings me={ME} onClose={() => {}} />);
+    await user.click(await screen.findByRole('button', { name: 'Remove link' }));
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByLabelText('Link')).toHaveValue(RANDOM);
   });
 
   it('says why a name was refused', async () => {
@@ -102,7 +144,10 @@ describe('Company settings', () => {
     });
     const user = userEvent.setup();
     render(<Settings me={ME} onClose={() => {}} />);
-    await user.click(await screen.findByRole('button', { name: 'Open on the internet' }));
+    /* The button is there before the field has its random name: only then may a person go on. */
+    const open = await screen.findByRole('button', { name: 'Open on the internet' });
+    await waitFor(() => expect(open).toBeEnabled());
+    await user.click(open);
     expect(await screen.findByText('This link is taken already. Pick another name.')).toBeInTheDocument();
   });
 });
@@ -133,6 +178,37 @@ describe('your own name', () => {
     await user.type(field, 'Lisa');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(await within(form).findByText('You cannot change this name.')).toBeInTheDocument();
+  });
+});
+
+describe('Backups in Settings', () => {
+  const BACKUPS = { last: null, recovery: null, recoveryNeeded: true, linkChanged: false, restore: null, kept: [], bundles: [] };
+
+  it('shows the backups to the CEO, under the link', async () => {
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/backups': [200, BACKUPS] });
+    render(<Settings me={ME} onClose={() => {}} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
+    expect(await within(dialog).findByRole('heading', { name: 'Backups' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Save the recovery file' })).toBeInTheDocument();
+    const headings = within(dialog).getAllByRole('heading').map(heading => heading.textContent);
+    expect(headings.indexOf('Link on the internet')).toBeLessThan(headings.indexOf('Backups'));
+  });
+
+  it('shows no backups to anyone else, and asks the server for none', async () => {
+    const calls = mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/backups': [200, BACKUPS] });
+    render(<Settings me={{ ...ME, person: { ...ME.person, isOwner: false } }} onClose={() => {}} />);
+    expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Backups' })).not.toBeInTheDocument();
+    /* The link and the key of the git host are asked for, the backups never. */
+    expect(calls.map(call => call.path).sort()).toEqual(['/api/google-sheets', '/api/link', '/api/repo-host']);
+  });
+
+  it('shows nothing of them on a server that knows none yet', async () => {
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/repo-host': [200, { host: null }], 'GET /api/google-sheets': [200, { google: null }] });
+    render(<Settings me={ME} onClose={() => {}} />);
+    expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Backups' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
 

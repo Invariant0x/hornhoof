@@ -3,6 +3,7 @@ import { api, ApiFailure } from './api';
 import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 import { answeredUpdate } from './update-state';
+import { everyVisible } from './guard';
 
 /* A seam for tests: the page reloads once the server runs another build. */
 export const page = { reload: () => window.location.reload() };
@@ -30,6 +31,8 @@ export type Updates = {
   target: Version | null;
   /* The server stopped answering while an update runs: it is restarting. */
   offline: boolean;
+  /* The server answered that it is installing the update and takes no changes. */
+  maintenance: boolean;
   /* An update is being asked for and the server has not answered yet. */
   asking: boolean;
   cut: UpdateCut | null;
@@ -65,12 +68,20 @@ function requestedBuild(view: UpdatesView | null, tag: string): Version {
   return { version: build.version || build.tag, commit: build.commit };
 }
 
+type Outage = 'none' | 'maintenance' | 'offline';
+
+/* Why a poll failed: the server said it is in maintenance, or it is silent while an update runs, which is a restart. */
+function outageOf(err: unknown, updating: boolean): Outage {
+  if (err instanceof ApiFailure && err.reason === 'maintenance') return 'maintenance';
+  return updating ? 'offline' : 'none';
+}
+
 /* What Hornhoof knows about newer builds and the updater, for people who see the whole company. */
 export function useUpdates(enabled: boolean): Updates {
   const [failure, setFailure] = useState<unknown>(null);
   const [view, setView] = useState<UpdatesView | null>(null);
   const [sent, setSent] = useState<(Version & { id: string }) | null>(null);
-  const [offline, setOffline] = useState(false);
+  const [outage, setOutage] = useState<Outage>('none');
   const [asking, setAsking] = useState(false);
   const [cut, setCut] = useState<UpdateCut | null>(null);
   const boot = useRef<string | null>(null);
@@ -87,11 +98,11 @@ export function useUpdates(enabled: boolean): Updates {
     try {
       take(await api.get<UpdatesView>('/api/updates'));
       setFailure(null);
-      setOffline(false);
+      setOutage('none');
     } catch (err) {
       setFailure(err);
       /* The server restarts during an update; the next poll asks again. */
-      if (busyNow.current) setOffline(true);
+      setOutage(outageOf(err, busyNow.current));
     }
   }, [take]);
 
@@ -110,8 +121,7 @@ export function useUpdates(enabled: boolean): Updates {
   useEffect(() => {
     if (!enabled) return;
     void load();
-    const timer = setInterval(() => void load(), pollMs);
-    return () => clearInterval(timer);
+    return everyVisible(() => void load(), pollMs);
   }, [enabled, pollMs, load]);
 
   const dropCut = useCallback(() => setCut(null), []);
@@ -140,7 +150,8 @@ export function useUpdates(enabled: boolean): Updates {
     busy,
     starting,
     target: sent,
-    offline,
+    offline: outage === 'offline',
+    maintenance: outage === 'maintenance',
     asking,
     cut,
     check: async () => take(await api.post<UpdatesView>('/api/updates/check')),

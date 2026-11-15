@@ -1,31 +1,49 @@
 import { and, eq, gt, gte, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, pendingWakes, requests, subscriptions, tasks, testRuns } from '../../db/schema.js';
-import { agentState, liveSubscription } from '../conversation/queue.js';
-import { identityOf } from '../nodes/hub.js';
+import { agentState, goesElsewhere, liveSubscription } from '../conversation/queue.js';
+import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
+import { mergePending } from '../nodes/parked.js';
+import { settleAwayNotes, turnAway, turnBack } from './away.js';
 import { expireStaleNodes } from '../nodes/nodes.js';
 import { CLOSED, giver, lastMove, openAfter, type Task, type Wake } from './engine.js';
 import { checkSignInFailures, sendWaitingFailureAlarms } from './failures.js';
+import { askOfRunningTurns, moveStalledQueues } from './orphan-turns.js';
 import { checkSilentTurns } from './silent.js';
 import { wakeAll } from './wake.js';
 
 const MACHINE_AWAY_MS = 5 * 60_000;
 const LOST_WAKE_MS = 2 * 60_000;
 
-/* A turn on a machine that stayed away too long ends just as one the machine reported failed. */
+/* A turn on a machine that stayed away too long ends just as one the machine reported failed, and goes on by the
+   failed-turn path: a turn of no task, a turn on a task of someone who does not hold it, and one the queue would run
+   on another machine now. The turn of the task's holder that can go on nowhere else is not failed: the work on its
+   machine is kept, whoever gave the task out hears of it once, and the turn goes on when the machine is back. While the database of a machine the server was taken from waits to be
+   merged, no turn ends for a machine that is away: that machine's turns and their rows are on their way here. */
 async function failAwayTurns(ctx: Ctx, now: Date): Promise<void> {
+  if (await mergePending(ctx.db)) return;
   const running = await ctx.db
     .select({ job: jobs, sub: subscriptions })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')));
   for (const { job, sub } of running) {
-    const node = identityOf(sub, job.nodeId);
+    const node = identityOf(sub, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
     if (!node) continue;
     const away = ctx.hub.awaySince(node);
-    if (away !== null && away + MACHINE_AWAY_MS < now.getTime()) await failOpenJobs(ctx, eq(jobs.id, job.id), 'machine_offline');
+    if (away === null) {
+      /* Told only once the node said hello again: its hello may still end a turn its machine no longer runs. */
+      if (job.taskId && ctx.hub.isReady(node)) await turnBack(ctx, job, node, now);
+      continue;
+    }
+    if (away + MACHINE_AWAY_MS >= now.getTime()) continue;
+    /* Kept: the turn of whoever holds the task, when the queue would not run its next turn on another machine now.
+       Any other turn ends here and goes on by the failed-turn path, as ever. */
+    if (job.taskId && job.agentId && (await turnAway(ctx, job, node, away, () => goesElsewhere(ctx, job.agentId!, node)))) continue;
+    await failOpenJobs(ctx, eq(jobs.id, job.id), 'machine_offline');
   }
+  await settleAwayNotes(ctx);
 }
 
 type Move = Awaited<ReturnType<typeof lastMove>>;
@@ -80,13 +98,16 @@ async function wakeMissing(ctx: Ctx, now: Date): Promise<void> {
 
 const reconciling = new WeakSet<Ctx>();
 
-/* Recover turns lost when a machine went away or a task move did not wake its holder. */
+/* Recover turns lost when a machine went away, no longer runs them or a task move did not wake its holder, and tell Operations
+   of a program its queue waits behind. */
 export async function reconcile(ctx: Ctx, now = new Date()): Promise<void> {
   if (reconciling.has(ctx)) return;
   reconciling.add(ctx);
   try {
     await expireStaleNodes(ctx.db, now);
     await failAwayTurns(ctx, now);
+    await askOfRunningTurns(ctx, now);
+    await moveStalledQueues(ctx, now);
     await wakeMissing(ctx, now);
     await checkSilentTurns(ctx, now);
     await checkSignInFailures(ctx, now);

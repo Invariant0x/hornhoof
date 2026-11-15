@@ -11,6 +11,7 @@ import { wakeAll } from './wake.js';
 import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
+import { dropMail, inboxChanged } from '../conversation/inbox.js';
 import { recordRequestedNotice, requestedWaitNotice } from './wait-notices.js';
 import { checkWaitHealth } from './wait-monitor.js';
 import { bindSource } from './wait-producers.js';
@@ -206,11 +207,16 @@ async function waitsItsLine(ctx: Ctx, agentId: string, id: string): Promise<bool
   return Boolean(ahead);
 }
 
+/* A turn that cannot go out fails, its sender hears so, and its letter waits for nobody. A letter in the inbox waits there for
+   the turn that takes it, which other letters wait for too, whatever holds that turn back. */
 async function confirmMessage(ctx: Ctx, agentId: string, id: string): Promise<void> {
-  if (await waitsItsLine(ctx, agentId, id)) return;
+  const [kept] = await ctx.db.select({ inboxWake: jobs.inboxWake }).from(jobs).where(eq(jobs.id, id));
+  if (kept?.inboxWake || (await waitsItsLine(ctx, agentId, id))) return;
   await ctx.db.update(jobs).set({ status: 'failed', error: 'message_not_delivered', finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
   const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id));
-  if (!job || job.status === 'failed') throw messageNotDelivered();
+  if (job && job.status !== 'failed') return;
+  if (await dropMail(ctx.db, agentId, id)) await inboxChanged(ctx, agentId);
+  throw messageNotDelivered();
 }
 
 /* A failed send preserves the previous wait unless another task action has already replaced it. */

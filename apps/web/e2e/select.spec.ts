@@ -194,7 +194,7 @@ async function serveSelectScreens(page: Page) {
             items: [{ role: 'DEV-BE', name: 'Backend engineer', product: null, model: '', subscription: 's-claude', skills: [] }],
           },
         ],
-        computerAccess: null,
+        machineAccess: [],
         counts: { byPerson: { p1: 1 }, byAgent: {}, total: 1 },
       }),
     }),
