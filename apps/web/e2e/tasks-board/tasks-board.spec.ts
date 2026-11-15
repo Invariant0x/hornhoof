@@ -38,7 +38,8 @@ const board = (page: Page, t: Messages) => page.getByRole('region', { name: t.ta
 const goals = (page: Page) => page.locator('article.goal');
 const related = (page: Page) => page.locator('.goal-subs > .goal-row');
 const row = (page: Page, number: number) => page.getByRole('listitem', { name: `#${number} ${TASKS.find(x => x.number === number)!.title}`, exact: true });
-const card = (page: Page, number: number) => page.getByRole('article', { name: `#${number} ${TASKS.find(x => x.number === number)!.title}`, exact: true });
+/* A goal's card on the board, not the card of a question about the same task in what waits for the person. */
+const card = (page: Page, number: number) => page.locator('article.goal').and(page.getByRole('article', { name: `#${number} ${TASKS.find(x => x.number === number)!.title}`, exact: true }));
 const sideways = (page: Page) => page.getByRole('main').evaluate(el => el.scrollWidth - el.clientWidth);
 const goalOf = (title: string) => TASKS.find(x => x.title === title)!;
 
@@ -84,6 +85,8 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     expect(await badge.evaluate(el => getComputedStyle(el).color)).toBe(await page.locator('.goal-no').first().evaluate(el => getComputedStyle(el).color));
     await expect(page.getByRole('combobox', { name: t.tasks.department })).toHaveCount(0);
     await capture(page, info, `active-${lang}`);
+    await signIn.evaluate(el => el.scrollIntoView({ block: 'center' }));
+    await capture(page, info, `active-goal-${lang}`);
 
     /* One click opens the related tasks of a goal as short lines; the work under one of them is not unfolded here, a link
        opens its task. Another click folds them again. */
@@ -98,6 +101,7 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await expect(build.getByRole('progressbar')).toHaveCount(0);
     await expect(build.getByRole('button', { name: /^Related tasks|^Сопутствующие/ })).toHaveCount(0);
     await expect(build.getByRole('button', { name: t.tasks.board.openTask })).toBeVisible();
+    await payments.locator('.goal-subs').evaluate(el => el.scrollIntoView({ block: 'center' }));
     await capture(page, info, `unfolded-${lang}`);
     await fold.click();
     await expect(related(page)).toHaveCount(0);
@@ -140,11 +144,11 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await capture(page, info, `releases-${lang}`);
     await department.selectOption({ label: t.tasks.board.allDepartments });
     const show = board(page, t).getByRole('group', { name: t.tasks.board.show });
-    await show.getByRole('radio', { name: t.tasks.board.showOutside }).check({ force: true });
+    await show.getByRole('radio', { name: t.tasks.board.showOutside, exact: true }).check({ force: true });
     await expect(goals(page)).toHaveCount(2);
     await expect(card(page, goalOf('Call the shop owners back').number)).toBeVisible();
     await expect(next).toHaveCount(0);
-    await show.getByRole('radio', { name: t.tasks.board.showReleases }).check({ force: true });
+    await show.getByRole('radio', { name: t.tasks.board.showReleases, exact: true }).check({ force: true });
     await expect(next).toBeVisible();
 
     /* A search looks through every task, the related ones too, by number or words. */
@@ -169,13 +173,17 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await expect(goals(page).first()).toHaveAttribute('aria-label', `#${goalOf('Fix the sign-in page').number} Fix the sign-in page`);
     const tabs = await page.getByRole('group', { name: t.tasks.board.view }).locator('label').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ y: r.y, width: r.width })));
     expect(tabs).toHaveLength(3);
-    for (const tab of tabs) {
+    /* Each tab after the first reaches 1 px back over its neighbour, so they share one border line. */
+    for (const [i, tab] of tabs.entries()) {
       expect(Math.abs(tab.y - tabs[0]!.y)).toBeLessThanOrEqual(0.5);
-      expect(Math.abs(tab.width - tabs[0]!.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(tab.width - (i ? 1 : 0) - tabs[0]!.width)).toBeLessThanOrEqual(0.5);
     }
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     await inside(page, t);
     await capture(page, info, `active-${lang}-375`);
+    /* Clear of the header, which stays over the top of the page. */
+    await goals(page).first().evaluate(el => { el.style.scrollMarginTop = '80px'; el.scrollIntoView({ block: 'start' }); });
+    await capture(page, info, `active-goal-${lang}-375`);
   });
 }
 
