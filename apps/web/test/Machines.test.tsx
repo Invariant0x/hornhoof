@@ -2,11 +2,14 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { Machines } from '../src/screens/Machines';
 import type { BuiltinView, Me } from '../src/types';
 import { makeKey } from '../src/owner-key';
 import { keyDefaults } from '../src/owner-key-store';
 import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
+import { decl } from './css';
 import { clock } from '../src/ui/subscription';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
@@ -999,10 +1002,10 @@ describe('Machines', () => {
     await screen.findByRole('table');
     expect(screen.queryByRole('group', { name: 'Status' })).not.toBeInTheDocument();
     await userEvent.type(screen.getByRole('searchbox'), 'Bruno');
-    await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button'));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button', { name: /^Lent to test runs/ }));
     await act(() => vi.advanceTimersByTimeAsync(5000));
     expect(screen.getByRole('searchbox')).toHaveValue('Bruno');
-    expect(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button', { name: /^Lent to test runs/ })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('Showing 1 of 1')).toBeInTheDocument();
   });
 
@@ -1254,5 +1257,77 @@ describe("computer access on a machine's card", () => {
     expect(within(own).getByRole('button', { name: 'Открыть доступ к машине debian на сутки' })).toBeInTheDocument();
     expect(within(own).getByText('Открытый доступ позволяет оркестратору изменить на машине debian что угодно, включая данные компании.')).toBeInTheDocument();
     expect(within(own).getByText('Если на машине debian стоит macOS, этот доступ открывает только Linux внутри Docker, а не саму macOS.')).toBeInTheDocument();
+  });
+});
+
+describe('the filter groups and search of Machines (#1020)', () => {
+  const showIn = (language: 'en' | 'ru') => {
+    localStorage.setItem('hh-lang', language);
+    lists();
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+  };
+
+  it.each(['en', 'ru'] as const)('in %s starts Provider, Status and Tests with All N (44px, pressed by default) and resets only its own group', async language => {
+    showIn(language);
+    await screen.findByRole('table');
+    const t = { en, ru }[language];
+    const cases = [
+      [t.tables.provider, /^Codex/, 1],
+      [t.tables.status, new RegExp(`^${t.cards.offline}`), 1],
+      [t.tables.testFilters, new RegExp(`^${t.tables.lentFilter}`), 1],
+    ] as const;
+
+    for (const [label, option, shown] of cases) {
+      const group = screen.getByRole('group', { name: label });
+      const buttons = within(group).getAllByRole('button');
+      expect(group).toHaveClass('whole');
+      expect(buttons[0]).toHaveTextContent(`${t.tables.all}3`);
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(within(group).getByRole('button', { name: option }));
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getAllByRole('row').slice(1)).toHaveLength(shown);
+      fireEvent.click(buttons[0]!);
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getAllByRole('row').slice(1)).toHaveLength(3);
+    }
+
+    fireEvent.click(within(screen.getByRole('group', { name: t.tables.provider })).getByRole('button', { name: /^Claude/ }));
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(2);
+    const testsGroup = screen.getByRole('group', { name: t.tables.testFilters });
+    fireEvent.click(within(testsGroup).getByRole('button', { name: new RegExp(`^${t.tables.lentFilter}`) }));
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(1);
+    fireEvent.click(within(testsGroup).getAllByRole('button')[0]!);
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(2);
+  });
+
+  it('sizes whole filter chips from 44x44px, frames chosen and focused ones by tokens, and uses logical RTL properties', () => {
+    expect(decl('.fgroup.whole .chipf', 'min-block-size')).toBe('44px');
+    expect(decl('.fgroup.whole .chipf', 'min-inline-size')).toBe('44px');
+    expect(decl('.fgroup.whole .chipf', 'max-inline-size')).toBe('100%');
+    expect(decl('.fgroup.whole .chipf', 'padding-block')).toBe('8px');
+    expect(decl('.fgroup.whole .chipf', 'padding-inline')).toBe('12px');
+    expect(decl('.fgroup.whole .chipf', 'text-align')).toBe('start');
+    expect(decl('.fgroup.whole .chipf', 'overflow-wrap')).toBe('break-word');
+    expect(decl('.fgroup.whole .chipf[aria-pressed="true"]', 'border-color')).toBe('var(--cyan-ink)');
+    expect(decl('.chipf[aria-pressed="true"]', 'background')).toBe('var(--glow)');
+    expect(decl('.chipf[aria-pressed="true"]', 'color')).toBe('var(--cyan-ink)');
+    expect(decl('.chipf:focus-visible', 'outline')).toBe('2px solid var(--cyan-ink)');
+    expect(decl('.chipf:focus-visible', 'outline-offset')).toBe('2px');
+    expect(decl('.fgroup > .lbl', 'margin-inline-end')).toBe('4px');
+    expect(decl('.fgroup > .lbl', 'margin-right')).toBeUndefined();
+    expect(decl('.chipf', 'padding-inline')).toBe('9px');
+    expect(decl('.chipf', 'padding')).toBeUndefined();
+    expect(decl('.people.machines', 'padding-inline', '(min-width: 1200px)')).toBe('32px');
+  });
+
+  it.each([
+    ['en', true, 'Search machines'],
+    ['ru', true, 'Поиск машин'],
+    ['en', false, 'Search by machine, owner, agent or role'],
+  ] as const)('in %s (narrow=%s) uses the phone or wide search hint', async (language, narrow, placeholder) => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: narrow, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+    onTestFinished(() => { vi.unstubAllGlobals(); });
+    showIn(language);
+    expect(await screen.findByRole('searchbox')).toHaveAttribute('placeholder', placeholder);
   });
 });

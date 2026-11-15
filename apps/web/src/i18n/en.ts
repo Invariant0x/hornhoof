@@ -664,7 +664,7 @@ export const en = {
     },
   },
   tables: {
-    search: 'Search', searchMachines: 'Search by machine, owner, agent or role', searchSubscriptions: 'Search by plan, owner, agent or machine', searchSubscriptionsShort: 'Search connections',
+    search: 'Search', searchMachines: 'Search by machine, owner, agent or role', searchMachinesShort: 'Search machines', searchSubscriptions: 'Search by plan, owner, agent or machine', searchSubscriptionsShort: 'Search connections',
     provider: 'Provider', testFilters: 'Tests', all: 'All',
     lentFilter: 'Lent to test runs',
     machineCount: (n: number) => `${n} ${plural('en', n, { one: 'machine', other: 'machines' })}`,

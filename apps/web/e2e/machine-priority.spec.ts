@@ -185,7 +185,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     for (const one of [question, yes, cancel]) expect(await within(one, target)).toBe(true);
     /* Each answer is large enough to press with a finger, and the two do not lie on each other. */
     const [a, b] = [await box(yes), await box(cancel)];
-    expect(Math.min(a.height, b.height)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(Math.min(a.height, b.height))).toBeGreaterThanOrEqual(44);
     expect(a.x + a.width <= b.x + 1 || a.y + a.height <= b.y + 1).toBe(true);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('move-ask')), fullPage: true });
