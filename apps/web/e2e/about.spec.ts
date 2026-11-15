@@ -100,7 +100,7 @@ test('About stays useful while its version loads and when it fails', async ({ pa
   await page.getByRole('button', { name: 'Account', exact: true }).click();
   await page.getByRole('button', { name: 'About', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'About Hornhoof' });
-  await expect(dialog.getByText('Loading…')).toBeVisible();
+  await expect(dialog.locator('dd').getByText('Loading…')).toBeVisible();
   await expect(dialog.getByRole('link', { name: 'MIT', exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath('about-loading.png') });
   release();
