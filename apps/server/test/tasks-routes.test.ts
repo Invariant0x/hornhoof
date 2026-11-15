@@ -241,7 +241,7 @@ describe('tasks for people', () => {
   it("names who the agents' commits are by, and keeps it until it is changed", async () => {
     const { dev, ceo, app, get } = await company();
     const put = (payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${dev.id}/repository`, payload, ...as(ceo) });
-    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const author = { name: 'Alex Rivera', email: 'alex@acme.example' };
     expect((await put({ url: 'https://github.com/acme/app.git', branch: 'main', author })).json().repository).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: null, author, testMemoryGb: 4, fullTestCommand: null });
     expect((await put({ url: 'https://github.com/acme/app.git', branch: 'dev' })).json().repository.author).toEqual(author);
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).repository.author).toEqual(author);

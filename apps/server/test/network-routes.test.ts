@@ -70,7 +70,7 @@ describe('the network routes the keeper calls', () => {
 
   it("keeps the leader's row apart from people's machines", async () => {
     const c = await company();
-    const [computer] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
+    const [computer] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
     await c.certificate(newKey());
     const [server] = await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID));
     expect(server!.id).not.toBe(computer!.id);

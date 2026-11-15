@@ -331,7 +331,7 @@ describe('live program metadata in the hub', () => {
       return sock;
     };
     const silent = { kind: 'node' as const, nodeId: 'marselle-node' };
-    const active = { kind: 'node' as const, nodeId: 'macbook-node' };
+    const active = { kind: 'node' as const, nodeId: 'laptop-node' };
     const silentSock = makeSocket();
     const activeSock = makeSocket();
     hub.attach(silent, silentSock as unknown as WebSocket);

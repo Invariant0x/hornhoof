@@ -921,7 +921,7 @@ describe('templates', () => {
       expect(skill!.body).toMatch(/attach[\s\S]*materials[\s\S]*question tool[\s\S]*rather than[\s\S]*(?:local )?file paths/i);
       expect(skill!.body).toMatch(/inspect[\s\S]*in full[\s\S]*before answering/i);
       const materialsLine = skill!.body.split('\n').find(line => line.startsWith('- **Materials**:')) ?? '';
-      expect(materialsLine).not.toMatch(/hornhoof|david|ivan|#\d+|202\d-/i);
+      expect(materialsLine).not.toMatch(/hornhoof|alice|ivan|#\d+|202\d-/i);
     });
   });
 
@@ -963,7 +963,7 @@ describe('templates', () => {
       expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nCount a run_work dependency step as T2 check evidence.`)).toContain('noncheck-run-work-separate-from-mixed-checks');
       expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nWhen run_tests is unavailable, fall back to running the whole suite locally.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
       expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nTreat a command refusal as PASS once logged.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
-      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nPatch Hornhoof task #530 for David on 2026-11-06.`)).toContain('abstract-english-no-incident-facts');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nPatch Hornhoof task #42 for Alice on 2026-01-15.`)).toContain('abstract-english-no-incident-facts');
     });
 
     it('reconciles the development skills that run checks with run_tests while preserving project commands and screenshot rules', () => {
@@ -1010,7 +1010,7 @@ describe('templates', () => {
       expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nHold orchestrator-level decisions in your own queue until the end of the turn.`)).toContain(
         'local-error-isolated-and-orchestrator-decisions-forwarded',
       );
-      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nRemember the GitHub push outage from David on #551 on 2026-11-06.`)).toContain(
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nRemember the GitHub push outage from Alice on #42 on 2026-01-15.`)).toContain(
         'abstract-head-rule-preserves-gates-and-dependencies',
       );
     });
@@ -1047,7 +1047,7 @@ describe('templates', () => {
       expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('Require permission before any ordinary retry, allow at most one attempt with no retries, and do not declare recovery.'))).toContain(
         'ordinary-retry-needs-no-permission-or-diagnosis-chain',
       );
-      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('Remember the GitHub outage from Ivan on #551 on 05.11.'))).toContain(
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('Remember the GitHub outage from Alice on #42 on 15.01.'))).toContain(
         'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
       );
       expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('The server automatically retries git push in the background and blocks task creation in SQL.'))).toContain(
@@ -1074,7 +1074,7 @@ describe('templates', () => {
         ['lead', 'Members standing free while work waits is a normal wait, and the head only orders tasks.', 'free-members-with-runnable-work-is-fault-and-head-owns-load'],
         ['breakDown', 'Leave after tasks without independentPart or independentNone, and send independentNone tasks out early.', 'after-chains-require-independent-part-or-none-preserving-boundaries'],
         ['lead', 'Assign ordinary non-urgent work to an urgentOnly team whenever peers are busy.', 'urgent-only-team-refuses-non-urgent-and-names-free-peers'],
-        ['lead', 'Never give Tiger Team or Simon ordinary work on #348 after 2026-11-06.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
+        ['lead', 'Never give Rapid Squad or Robin ordinary work on #42 after 2026-01-15.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
         ['breakDown', 'Hornhoof wakes you automatically whenever two members stand free.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
       ];
       for (const [key, badLine, ruleId] of cases) {
@@ -1115,7 +1115,7 @@ describe('templates', () => {
         ['verdict', 'Set Wake.mechanical on mixed verdicts whenever one issue is mechanical.', 'same-owner-repair-without-effort-or-return'],
         ['diff', 'Switch effort inside a running turn once a mechanical issue appears.', 'same-owner-repair-without-effort-or-return'],
         ['verdict', "Open a second review for 'mechanical' findings after submission.", 'same-owner-repair-without-effort-or-return'],
-        ['diff', 'Added for Hornhoof task #311 by David on 2026-11-06.', 'abstract-english-no-incident-or-company-leaks'],
+        ['diff', 'Added for Hornhoof task #42 by Alice on 2026-01-15.', 'abstract-english-no-incident-or-company-leaks'],
       ];
       for (const [target, extra, expectedRule] of violations) {
         expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
@@ -1294,7 +1294,7 @@ type ReconciledCheckSkills = {
   ciRelease: string;
 };
 
-const INCIDENT_OR_BRAND_LEAK_RE = /\b(?:hornhoof|github|david|ivan|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b/i;
+const INCIDENT_OR_BRAND_LEAK_RE = /\b(?:hornhoof|github|alice|ivan|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b/i;
 
 const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => re.test(text));
 
@@ -1350,7 +1350,7 @@ const UNSHIPPED_EXTERNAL_AUTOMATION_RE = /\b(?:automatically retries|intercepts 
 
 type HeadLoadSkills = { lead: string; breakDown: string };
 
-const HEAD_LOAD_LEAK_RE = /\b(?:tiger team|simon|david|ivan|github|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b/i;
+const HEAD_LOAD_LEAK_RE = /\b(?:rapid squad|robin|alice|ivan|github|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b/i;
 const UNSHIPPED_IDLE_WAKE_RE = /\bhornhoof\s+(?:automatically\s+)?wakes\s+you[^.!?]*\b(?:free|idle)\b/i;
 
 const HEAD_DEPARTMENT_LOAD_RULES: { id: string; holds: (s: HeadLoadSkills) => boolean }[] = [
@@ -1514,7 +1514,7 @@ const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => b
   },
   {
     id: 'abstract-english-no-incident-or-company-leaks',
-    holds: s => !/\b(?:hornhoof|github|david|ivan|Russian|English)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(`${s.diff}\n${s.verdict}`),
+    holds: s => !/\b(?:hornhoof|github|alice|ivan|Russian|English)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(`${s.diff}\n${s.verdict}`),
   },
 ];
 
@@ -1645,7 +1645,7 @@ const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) =>
     id: 'abstract-english-no-dates-names-or-numbers',
     holds: s => {
       const t2 = s.policy.split('\n').find(line => line.startsWith('- **T2:')) ?? '';
-      return !/\b(?:david|ivan|simon|Russian|English)\b|\bturn\s+7\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|scripts\/test|[\u2014\u0451\u0401]/i.test(`${s.implement}\n${t2}`);
+      return !/\b(?:alice|ivan|robin|Russian|English)\b|\bturn\s+\d+\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|scripts\/test|[\u2014\u0451\u0401]/i.test(`${s.implement}\n${t2}`);
     },
   },
 ];
@@ -1669,7 +1669,7 @@ describe('T2 impact-selection rules across dev-implement, dev-testing-policy and
       ['policy', 'Treat an unavailable adapter as an empty selection and run migrations up only without reporting.', 'outside-graph-uncertain-whole-package-and-migrations-up-down'],
       ['policy', 'Today run_tests automatically selects impact tests from the test environment.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
       ['policy', 'Treat a collected graph as completed test execution and treat missing comparator evidence as zero misses.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
-      ['implement', 'Added by David on 2026-11-06 for #309 against turn 7.', 'abstract-english-no-dates-names-or-numbers'],
+      ['implement', 'Added by Alice on 2026-01-15 for #42 against turn 3.', 'abstract-english-no-dates-names-or-numbers'],
     ];
     for (const [target, extra, expectedRule] of cases) {
       expect(failedRuleIds(IMPACT_SELECTION_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
@@ -1740,7 +1740,7 @@ describe('skills compose around an assignment without a universal role', () => {
   });
 
   it('keeps private incident facts out of generic role and skill templates', () => {
-    const leak = /\b(?:david|ivan|simon|morpheus|trinity|lisa|liza)\b|(?:^|\s)#\d{2,}\b|\b202\d-\d{2}-\d{2}\b|\bturn\s+\d+\b|\bv\d+\.\d+\.\d+\b/i;
+    const leak = /\b(?:alice|carol|robin|ivan)\b|(?:^|\s)#\d{2,}\b|\b202\d-\d{2}-\d{2}\b|\bturn\s+\d+\b|\bv\d+\.\d+\.\d+\b/i;
     for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(leak);
   });
 });
@@ -1790,7 +1790,7 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(skill!.body).toContain('create_google_sheet');
     expect(skill!.body).toMatch(/error/i);
     expect(skill!.body).toMatch(/no such capability|cannot generate files/i);
-    expect(skill!.body).not.toMatch(/ArSpatially|Ivan|David/i);
+    expect(skill!.body).not.toMatch(/Acme|Globex|Ivan|Alice/i);
     expect(skill!.body).not.toContain('\u2014');
     expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u0451');
     expect(`${skill!.title.ru} ${skill!.description.ru}`).not.toContain('\u2014');

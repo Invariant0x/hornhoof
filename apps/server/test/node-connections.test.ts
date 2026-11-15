@@ -39,7 +39,7 @@ const REPORT: Extract<NodeMessage, { type: 'node.reconnect' }> = { type: 'node.r
 async function joinedMachine(app: FastifyInstance, ceo: string) {
   const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(ceo) });
   const code = connected.json().command.split('--join ')[1];
-  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
   const { machine, nodes: made } = joined.json();
   return { machineId: machine.id as string, keys: made.map((n: { key: string }) => n.key) as string[], ids: made.map((n: { nodeId: string }) => n.nodeId) as string[] };
 }
@@ -401,9 +401,9 @@ describe('the server log of node connections', () => {
     await until(() => lines.filter(l => l.includes('A node connected.')).length === 2);
     const parsed = lines.map(l => JSON.parse(l) as Record<string, unknown>);
     const [connected, back] = parsed.filter(l => l.msg === 'A node connected.');
-    expect(connected).toMatchObject({ level: 30, machine: 'ivan-mac', node: ids[0], offlineMs: null });
+    expect(connected).toMatchObject({ level: 30, machine: 'dev-mac', node: ids[0], offlineMs: null });
     expect(back!.offlineMs).toEqual(expect.any(Number));
-    expect(parsed.filter(l => l.msg === 'A node lost its connection.')).toEqual([expect.objectContaining({ level: 30, machine: 'ivan-mac', node: ids[0], cause: 'node_closed', code: 1000, reason: 'Going.' })]);
+    expect(parsed.filter(l => l.msg === 'A node lost its connection.')).toEqual([expect.objectContaining({ level: 30, machine: 'dev-mac', node: ids[0], cause: 'node_closed', code: 1000, reason: 'Going.' })]);
     const all = lines.join('\n');
     for (const key of keys) expect(all).not.toContain(key);
     const hashes = (await db.select({ keyHash: nodes.keyHash }).from(nodes)).map(n => n.keyHash!);

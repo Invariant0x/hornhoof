@@ -26,7 +26,7 @@ describe('release benchmark report', () => {
     expect(compareSnapshots(current, { ...previous, environment: { ...previous.environment, database: 'postgres' } }, 20).status).toBe('incomparable');
   });
 
-  it('reads file/phase measurements from #308 timing lines and ranks parts by summed file time', () => {
+  it('reads file/phase measurements from structured timing lines and ranks parts by summed file time', () => {
     const file = (name: string, totalMs: number) => timingLine({ kind: 'file', package: 'apps/server', file: name, totalMs, setupMs: 10, testsMs: totalMs - 12, teardownMs: 2, slowest: [] });
     const tests = testTimings([{ name: 'part-1', log: [file('a.test.ts', 40), file('b.test.ts', 90)].join('\n') }, { name: 'part-2', log: file('c.test.ts', 200) }]);
     expect(tests.status).toBe('measured');
@@ -37,7 +37,7 @@ describe('release benchmark report', () => {
   });
 
   it('creates a nonblocking next-turn task with before and target-after numbers, retaining unknown acceptance time', () => {
-    const card = improvementCard({ turn: 7, source: '#308 retrospective, approximate', wait: 'test waits', beforeSeconds: 21600, events: 11, acceptanceSeconds: null }, 30);
+    const card = improvementCard({ turn: 7, source: 'baseline measurement, approximate', wait: 'test waits', beforeSeconds: 21600, events: 11, acceptanceSeconds: null }, 30);
     expect(card).toMatchObject({ blocking: false, before: { seconds: 21600, percentOfBaseline: 100 }, targetAfter: { percentOfBaseline: 70, reductionPercent: 30 }, acceptance: { beforeSeconds: null, targetReductionPercent: 30 } });
     expect(card.measurementBecomesTest).toBe(true);
     expect(card.text).toContain('issue-to-acceptance');
@@ -67,7 +67,7 @@ describe('release benchmark report', () => {
   expect(report.comparison.status).toBe('baseline-missing');
  }, 40_000);
 
-it('uses #308 legacy runner logs when structured lines are absent and sums a file seen in two parts', () => {
+it('uses legacy runner logs when structured lines are absent and sums a file seen in two parts', () => {
   const a = ' RUN v5.0.5 /data/tests/one/repo/apps/server\n ✓ test/a.test.ts (1 test) 100ms';
   const b = ' RUN v5.0.5 /data/tests/one/repo/apps/server\n ✓ test/a.test.ts (1 test) 200ms';
   const timings = testTimings([{ name: 'part-1', log: a }, { name: 'part-2', log: b }]);

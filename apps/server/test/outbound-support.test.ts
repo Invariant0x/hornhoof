@@ -169,7 +169,7 @@ describe('a ticket of another place', () => {
   });
 });
 
-describe('outbound support classification and reply gates (#447 T8-10, T8-15)', () => {
+describe('outbound support classification and reply gates', () => {
   it('classifies a ticket separately from drafting, deduplicates idempotently, and refuses key reuse across tickets', async () => {
     const w = await seedSupportWorld();
     const ticketA = await w.addTicket('How do I reset my password in settings?');
@@ -333,7 +333,7 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
       },
       NOW,
     );
-    /* On the #445 kernel, support replies forbid price blocks (money = []) and target a ticket (segmentId = null),
+    /* On the outbound kernel, support replies forbid price blocks (money = []) and target a ticket (segmentId = null),
        so approvals.ts requires an exact bound message approval from the department owner before dispatch. */
     expect(enSent).toMatchObject({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
     expect(await reserveDispatch(w.c.app.ctx, enSent.messageId, 1, NOW)).toEqual({
@@ -797,7 +797,7 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     expect(channelAfter).toMatchObject({ status: 'stopped', stoppedReason: 'review_failed' });
   });
 
-  it('routes requiresHuman tickets and uncertain/unavailable reviews to the department owner (#316) with CEO fallback instead of auto-sending', async () => {
+  it('routes requiresHuman tickets and uncertain/unavailable reviews to the department owner with CEO fallback instead of auto-sending', async () => {
     const w = await seedSupportWorld();
     const refundTicket = await w.addTicket('Please cancel my subscription and refund last month.');
     const model = fakeModelRunner({

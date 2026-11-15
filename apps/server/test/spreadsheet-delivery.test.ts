@@ -16,7 +16,7 @@ const NODE_KEY = 'k'.repeat(40);
 const BOT_TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
 const ORCHESTRATOR_BOT_TOKEN = '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
 const CEO_TG: TelegramUser = { id: 7770001, first_name: 'Ivan', username: 'ivan_ceo', language_code: 'ru' };
-const MKT_TG: TelegramUser = { id: 7770002, first_name: 'Luiza', username: 'luiza_mkt', language_code: 'ru' };
+const MKT_TG: TelegramUser = { id: 7770002, first_name: 'Clara', username: 'clara_mkt', language_code: 'ru' };
 const SALES_TG: TelegramUser = { id: 7770003, first_name: 'Sam', username: 'sam_sales', language_code: 'en' };
 
 type ToolReply = { content: { type: string; text: string }[]; isError?: boolean };
@@ -122,13 +122,13 @@ async function marketingCompany(extraEnv: NodeJS.ProcessEnv = {}) {
     ])
     .returning();
 
-  const luizaSession = await invitePerson(app, ceoSession, { name: 'Luiza', email: 'luiza@acme.test', access: { departments: [mkt!.id] } });
+  const claraSession = await invitePerson(app, ceoSession, { name: 'Clara', email: 'clara@acme.test', access: { departments: [mkt!.id] } });
   const samSession = await invitePerson(app, ceoSession, { name: 'Sam', email: 'sam@acme.test', access: { departments: [sales!.id] } });
-  const [luiza] = await db.select().from(people).where(eq(people.email, 'luiza@acme.test'));
+  const [clara] = await db.select().from(people).where(eq(people.email, 'clara@acme.test'));
   const [sam] = await db.select().from(people).where(eq(people.email, 'sam@acme.test'));
 
   await db.update(people).set({ telegramUsername: 'ivan_ceo', telegramUserId: CEO_TG.id }).where(eq(people.id, ceo!.id));
-  await db.update(people).set({ telegramUsername: 'luiza_mkt', telegramUserId: MKT_TG.id }).where(eq(people.id, luiza!.id));
+  await db.update(people).set({ telegramUsername: 'clara_mkt', telegramUserId: MKT_TG.id }).where(eq(people.id, clara!.id));
   await db.update(people).set({ telegramUsername: 'sam_sales', telegramUserId: SALES_TG.id }).where(eq(people.id, sam!.id));
 
   expect((await app.inject({ method: 'PUT', url: `/api/agents/${mktHead!.id}/telegram`, payload: { token: BOT_TOKEN }, ...as(ceoSession) })).statusCode).toBe(200);
@@ -172,8 +172,8 @@ async function marketingCompany(extraEnv: NodeJS.ProcessEnv = {}) {
     companyId,
     ceo: ceo!,
     ceoSession,
-    luiza: luiza!,
-    luizaSession,
+    clara: clara!,
+    claraSession,
     sam: sam!,
     samSession,
     mkt: mkt!,
@@ -220,8 +220,8 @@ describe('1a. task and chat .xlsx/.csv attachments and strict download boundarie
       { id: csvId, name: 'leads.csv', file: true },
     ]);
 
-    /* Authorized viewers (CEO and Marketing member Luiza) download both files with Content-Disposition: attachment. */
-    for (const session of [c.ceoSession, c.luizaSession]) {
+    /* Authorized viewers (CEO and Marketing member Clara) download both files with Content-Disposition: attachment. */
+    for (const session of [c.ceoSession, c.claraSession]) {
       const gotXlsx = await c.app.inject({ url: `/api/attachments/${xlsxId}`, ...as(session) });
       expect(gotXlsx.statusCode).toBe(200);
       expect(gotXlsx.headers['content-disposition']).toContain("attachment; filename*=UTF-8''");
@@ -306,16 +306,16 @@ describe('1b. Telegram sendDocument delivery and recipient access boundaries', (
     c.node.send({ type: 'job.done', jobId: first.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => c.node.acks.includes(first.jobId));
 
-    /* Luiza writes to Marketing Head, then her Marketing access is revoked before the agent replies with a file: she gets nothing. */
+    /* Clara writes to Marketing Head, then her Marketing access is revoked before the agent replies with a file: she gets nothing. */
     c.tg.write(BOT_TOKEN, MKT_TG, 'Пришли и мне таблицу');
     const second = await nextOf(c.node, 'job.run');
     const secondToken = second.toolToken ?? '';
     c.node.send({ type: 'job.started', jobId: second.jobId });
     await until(async () => (await c.db.select().from(telegramReplies).where(eq(telegramReplies.chatId, MKT_TG.id))).length === 1);
 
-    /* Move Luiza's access from Marketing to Sales only before the agent sends the file. */
-    await c.db.delete(personAccess).where(and(eq(personAccess.personId, c.luiza.id), eq(personAccess.departmentId, c.mkt.id)));
-    await c.db.insert(personAccess).values({ companyId: c.companyId, personId: c.luiza.id, departmentId: c.sales.id });
+    /* Move Clara's access from Marketing to Sales only before the agent sends the file. */
+    await c.db.delete(personAccess).where(and(eq(personAccess.personId, c.clara.id), eq(personAccess.departmentId, c.mkt.id)));
+    await c.db.insert(personAccess).values({ companyId: c.companyId, personId: c.clara.id, departmentId: c.sales.id });
 
     await c.app.inject({
       method: 'POST',
@@ -423,14 +423,14 @@ describe('1c. Google Sheets integration and clear .xlsx fallback when Google is 
     expect(HIDDEN).toContain('google_sheets');
 
     /* Department-only people cannot read or change company Google Sheets settings. */
-    expect((await c.app.inject({ url: '/api/google-sheets', ...as(c.luizaSession) })).statusCode).toBe(403);
+    expect((await c.app.inject({ url: '/api/google-sheets', ...as(c.claraSession) })).statusCode).toBe(403);
     expect(
       (
         await c.app.inject({
           method: 'PUT',
           url: '/api/google-sheets',
           payload: { credentials: google.serviceAccountJson },
-          ...as(c.luizaSession),
+          ...as(c.claraSession),
         })
       ).statusCode,
     ).toBe(403);
@@ -619,7 +619,7 @@ describe('the edges of a table delivered to a person', () => {
       headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
     });
     const attachment = up.json().id as string;
-    /* A Sales agent's chat file: Luiza works in Marketing and may not see it, the CEO sees the whole company. */
+    /* A Sales agent's chat file: Clara works in Marketing and may not see it, the CEO sees the whole company. */
     const sales = await c.startTurn(c.salesWorker.id);
     const salesFile = await c.app.inject({
       method: 'POST',
@@ -631,19 +631,19 @@ describe('the edges of a table delivered to a person', () => {
     const send = async (args: Record<string, unknown>) => (await client.callTool({ name: 'send_telegram_file', arguments: args })) as ToolReply;
     const said = (reply: ToolReply) => ({ isError: reply.isError ?? false, text: reply.content[0]!.text });
 
-    expect(said(await send({ person: 'Luiza', attachment })).isError).toBe(false);
+    expect(said(await send({ person: 'Clara', attachment })).isError).toBe(false);
     expect(c.tg.sentDocuments.map(d => d.chat_id)).toEqual([MKT_TG.id]);
 
     expect(said(await send({ person: 'Nobody', attachment }))).toEqual({ isError: true, text: 'There is no active person named "Nobody" in this company.' });
     expect(said(await send({ person: randomUUID(), attachment }))).toEqual({ isError: true, text: 'There is no active person with that id in this company.' });
-    expect(said(await send({ person: c.luiza.id, attachment: randomUUID() }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
-    expect(said(await send({ person: c.luiza.id, attachment: salesFile.json().id }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
+    expect(said(await send({ person: c.clara.id, attachment: randomUUID() }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
+    expect(said(await send({ person: c.clara.id, attachment: salesFile.json().id }))).toEqual({ isError: true, text: 'That file does not exist or that person is not allowed to see it.' });
     expect(said(await send({ person: c.ceo.id, attachment: salesFile.json().id })).isError).toBe(false);
 
-    await invitePerson(c.app, c.ceoSession, { name: 'Luiza', email: 'luiza.two@acme.test', access: { departments: [c.mkt.id] } });
-    expect(said(await send({ person: 'Luiza', attachment })).text).toContain('More than one person is named "Luiza"');
-    await c.db.update(people).set({ telegramUserId: null }).where(eq(people.id, c.luiza.id));
-    expect(said(await send({ person: c.luiza.id, attachment })).text).toBe('Luiza has not connected Telegram yet. Attach the file to the task or chat with hh-attach instead.');
+    await invitePerson(c.app, c.ceoSession, { name: 'Clara', email: 'clara.two@acme.test', access: { departments: [c.mkt.id] } });
+    expect(said(await send({ person: 'Clara', attachment })).text).toContain('More than one person is named "Clara"');
+    await c.db.update(people).set({ telegramUserId: null }).where(eq(people.id, c.clara.id));
+    expect(said(await send({ person: c.clara.id, attachment })).text).toBe('Clara has not connected Telegram yet. Attach the file to the task or chat with hh-attach instead.');
     expect(c.tg.sentDocuments.map(d => d.chat_id)).toEqual([MKT_TG.id, CEO_TG.id]);
   });
 
@@ -657,14 +657,14 @@ describe('the edges of a table delivered to a person', () => {
       headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
     });
     const attachment = up.json().id as string;
-    /* Someone of another company who connected Telegram, someone of this one who no longer works in it, and Luiza's
+    /* Someone of another company who connected Telegram, someone of this one who no longer works in it, and Clara's
        assistant, which is no person: each has a Telegram number a bot could write to. */
     const [other] = await c.db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
     const [outsider] = await c.db.insert(people).values({ companyId: other!.id, name: 'Olaf', email: 'olaf@other.test', status: 'active', scopeKind: 'company', telegramUserId: 7770009 }).returning();
     const [gone] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Gina', email: 'gina@acme.test', status: 'disabled', scopeKind: 'company', telegramUserId: 7770010 }).returning();
-    const [assistant] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Luiza assistant', status: 'active', scopeKind: 'listed', isAgent: true, assistantOf: c.luiza.id, telegramUserId: 7770011 }).returning();
+    const [assistant] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Clara assistant', status: 'active', scopeKind: 'listed', isAgent: true, assistantOf: c.clara.id, telegramUserId: 7770011 }).returning();
     const client = await mcp(c.app, token);
-    const addressees = [String(MKT_TG.id), String(SALES_TG.id), '7770009', '+15550100', '@luiza_mkt', 'luiza_mkt', outsider!.id, 'Olaf', gone!.id, 'Gina', assistant!.id, 'Luiza assistant'];
+    const addressees = [String(MKT_TG.id), String(SALES_TG.id), '7770009', '+15550100', '@clara_mkt', 'clara_mkt', outsider!.id, 'Olaf', gone!.id, 'Gina', assistant!.id, 'Clara assistant'];
     for (const person of addressees) {
       const reply = (await client.callTool({ name: 'send_telegram_file', arguments: { person, attachment } })) as ToolReply;
       expect(reply.isError, person).toBe(true);
@@ -683,7 +683,7 @@ describe('the edges of a table delivered to a person', () => {
       payload: png,
       headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
     });
-    const got = await c.app.inject({ url: `/api/attachments/${up.json().id as string}`, ...as(c.luizaSession) });
+    const got = await c.app.inject({ url: `/api/attachments/${up.json().id as string}`, ...as(c.claraSession) });
     expect(got.statusCode).toBe(200);
     expect(got.headers['content-type']).toBe('image/png');
     expect(got.headers['content-disposition']).toBeUndefined();

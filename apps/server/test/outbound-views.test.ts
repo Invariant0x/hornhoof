@@ -444,7 +444,7 @@ async function seedOutboundViewWorld() {
   return { c, viewApp, msgReq: msgReq!, approachReq: approachReq!, waitingMsg: waitingMsg!, unknownMsg: unknownMsg!, ticketUuid, channel: channel!, account: account! };
 }
 
-describe('safe outbound & bound approval read views (#447 T8-17)', () => {
+describe('safe outbound & bound approval read views', () => {
   it('returns exact frozen content, catalog revisions, unknown recovery guidance, and escalations to the department owner with zero credential or PII leaks', async () => {
     const w = await seedOutboundViewWorld();
 

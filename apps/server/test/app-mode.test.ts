@@ -469,7 +469,7 @@ async function companyWithNode(app: FastifyInstance) {
   const ceo = await setUpCompany(app);
   const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
   const code = connected.json().command.split('--join ')[1];
-  const payload = { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+  const payload = { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
   const [node] = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload })).json().nodes;
   return { ceo, nodeId: node.nodeId as string, subId: node.subscriptionId as string, key: node.key as string };
 }

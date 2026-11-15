@@ -13,7 +13,7 @@ import { liveAgent } from '../src/modules/tasks/engine.js';
 import { checkedWaitTarget } from '../src/modules/tasks/wait-target.js';
 import { as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, type FakeNode, type StreamReader } from './helpers.js';
 
-const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 const hello = { type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [] };
 const codeOf = (command: string) => command.split('--join ')[1]!;
 

@@ -13,7 +13,7 @@ const ROLES: { viewer: Viewer; agent: Crew; canSetPolicy: boolean; canReplan: bo
   { viewer: 'bob', agent: 'other', canSetPolicy: false, canReplan: false },
   { viewer: 'olga', agent: 'owned', canSetPolicy: true, canReplan: true },
   { viewer: 'wes', agent: 'wide', canSetPolicy: false, canReplan: false },
-  { viewer: 'lisa', agent: 'far', canSetPolicy: true, canReplan: true },
+  { viewer: 'clara', agent: 'far', canSetPolicy: true, canReplan: true },
   { viewer: 'ceo', agent: 'far', canSetPolicy: true, canReplan: true },
 ];
 const DATES = { ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 3_600_000 };

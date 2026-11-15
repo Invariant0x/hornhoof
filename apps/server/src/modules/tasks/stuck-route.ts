@@ -24,7 +24,7 @@ async function anyHead(db: Db | Tx, companyId: string): Promise<Agent | null> {
   return head ?? null;
 }
 
-/* The one stuck-specific route until the general internal-question lifecycle lands. */
+/* Routes a stuck task to its department's active head first, then to the orchestrator or another active head. */
 export async function stuckRecipient(db: Db | Tx, agent: Agent, task: { departmentId: string | null }): Promise<Agent | null> {
   if (agent.kind === 'orchestrator') return (await departmentHead(db, { companyId: agent.companyId, departmentId: task.departmentId })) ?? anyHead(db, agent.companyId);
   return (await departmentHead(db, agent, agent.id)) ?? orchestrator(db, agent.companyId, agent.id);

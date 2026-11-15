@@ -8,14 +8,14 @@ import { as, connectNode, invitePerson, listen, nextOf, setUpCompany, testApp, u
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
 const MAX: TelegramUser = { id: 5550001, first_name: 'Max', username: 'max_k', language_code: 'ru' };
-const LUIZA: TelegramUser = { id: 5550002, first_name: 'Luiza', username: 'luiza_k', language_code: 'ru' };
+const CLARA: TelegramUser = { id: 5550002, first_name: 'Clara', username: 'clara_k', language_code: 'ru' };
 
 const state = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(token) })).json().state;
 const setTelegram = (app: FastifyInstance, session: string, personId: string, telegram: string) =>
   app.inject({ method: 'PATCH', url: `/api/people/${personId}`, payload: { telegram }, ...as(session) });
 
-/* Max (the CEO, named Ivan in Hornhoof) and Luiza, who has Marketing, both write to the bot of Marketing's head, on a node
-   whose turns take words while they run. */
+/* The CEO (Telegram name Max, named Ivan in the company) and Clara, who has Marketing, both write to the bot of Marketing's head,
+   on a node whose turns take words while they run. */
 async function company() {
   const tg = await fakeTelegram();
   tg.bots.set(TOKEN, { id: 123456789, username: 'acme_marketing_bot', first_name: 'Acme marketing' });
@@ -32,12 +32,12 @@ async function company() {
     .insert(agents)
     .values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, model: '', kind: 'head', name: 'Mira', roleKey: 'MKT-HEAD', departmentId: marketing!.id })
     .returning();
-  await invitePerson(app, ceo, { name: 'Luiza', email: 'luiza@acme.com', access: { departments: [marketing!.id] } });
-  const [luiza] = await db.select().from(people).where(eq(people.email, 'luiza@acme.com'));
+  await invitePerson(app, ceo, { name: 'Clara', email: 'clara@acme.com', access: { departments: [marketing!.id] } });
+  const [clara] = await db.select().from(people).where(eq(people.email, 'clara@acme.com'));
   await setTelegram(app, ceo, owner!.id, '@max_k');
-  await setTelegram(app, ceo, luiza!.id, '@luiza_k');
+  await setTelegram(app, ceo, clara!.id, '@clara_k');
   expect((await app.inject({ method: 'PUT', url: `/api/agents/${head!.id}/telegram`, payload: { token: TOKEN }, ...as(ceo) })).statusCode).toBe(200);
-  return { tg, app, db, ceo, builtin, owner: owner!, luiza: luiza! };
+  return { tg, app, db, ceo, builtin, owner: owner!, clara: clara! };
 }
 
 const say = (node: FakeNode, jobId: string, seq: number, text: string) => node.send({ type: 'job.event', jobId, seq, event: { kind: 'text', text } });
@@ -45,7 +45,7 @@ const sentTo = (tg: Awaited<ReturnType<typeof fakeTelegram>>, chat: number) => t
 
 describe('two people who write to one head in Telegram', () => {
   it('each get their own turn and only the answers to their own words, while the same person still adds to their turn', async () => {
-    const { tg, db, builtin, owner, luiza } = await company();
+    const { tg, db, builtin, owner, clara } = await company();
     tg.write(TOKEN, MAX, 'Сколько лидов за неделю?');
     const first = await nextOf(builtin, 'job.run');
     expect(first.prompt).toContain('Ivan wrote this in Telegram');
@@ -54,13 +54,13 @@ describe('two people who write to one head in Telegram', () => {
     await until(async () => (await db.select().from(jobs).where(eq(jobs.id, first.jobId)))[0]!.status === 'running');
     await until(async () => (await db.select().from(telegramReplies)).length === 1);
 
-    /* Luiza's question waits for a turn of its own instead of going into Max's. */
-    tg.write(TOKEN, LUIZA, 'Пришли бриф по запуску.');
+    /* Clara's question waits for a turn of its own instead of going into Max's. */
+    tg.write(TOKEN, CLARA, 'Пришли бриф по запуску.');
     await until(async () => (await db.select().from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')))).length === 1);
     const [queued] = await db.select().from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
-    expect(queued!.createdBy).toBe(luiza.id);
+    expect(queued!.createdBy).toBe(clara.id);
     expect(queued!.prompt).toContain('Пришли бриф по запуску.');
-    expect(queued!.prompt).toContain('Luiza wrote this in Telegram');
+    expect(queued!.prompt).toContain('Clara wrote this in Telegram');
 
     /* Max's own follow-up still goes into his running turn. */
     tg.write(TOKEN, MAX, 'И по каналам тоже.');
@@ -76,29 +76,29 @@ describe('two people who write to one head in Telegram', () => {
     expect(second.jobId).toBe(queued!.id);
     builtin.send({ type: 'job.started', jobId: second.jobId });
     say(builtin, second.jobId, 0, 'Бриф по запуску: в приложении.');
-    await until(() => sentTo(tg, LUIZA.id).length === 1);
+    await until(() => sentTo(tg, CLARA.id).length === 1);
     builtin.send({ type: 'job.done', jobId: second.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => builtin.acks.includes(second.jobId));
 
     expect(sentTo(tg, MAX.id)).toEqual(['Лидов за неделю: 42, по каналам ниже.']);
-    expect(sentTo(tg, LUIZA.id)).toEqual(['Бриф по запуску: в приложении.']);
-    expect(owner.id).not.toBe(luiza.id);
+    expect(sentTo(tg, CLARA.id)).toEqual(['Бриф по запуску: в приложении.']);
+    expect(owner.id).not.toBe(clara.id);
   });
 
   it('keeps another person\'s words, from the window or Telegram, out of a turn that answers someone in Telegram', async () => {
-    const { tg, db, builtin, luiza } = await company();
+    const { tg, db, builtin, clara } = await company();
     tg.write(TOKEN, MAX, 'Что с бюджетом?');
     const first = await nextOf(builtin, 'job.run');
     builtin.send({ type: 'job.started', jobId: first.jobId });
     await until(async () => (await db.select().from(telegramReplies)).length === 1);
     await until(async () => (await db.select().from(jobs).where(eq(jobs.id, first.jobId)))[0]!.status === 'running');
     const [row] = await db.select().from(jobs).where(eq(jobs.id, first.jobId));
-    expect(row!.createdBy).not.toBe(luiza.id);
+    expect(row!.createdBy).not.toBe(clara.id);
     const { answersSomeoneElse } = await import('../src/modules/conversation/live.js');
-    expect(await answersSomeoneElse({ db }, row!, { personId: luiza.id, data: { text: 'В окне' } })).toBe(true);
+    expect(await answersSomeoneElse({ db }, row!, { personId: clara.id, data: { text: 'В окне' } })).toBe(true);
     expect(await answersSomeoneElse({ db }, row!, { personId: row!.createdBy, data: { text: 'В окне' } })).toBe(false);
     expect(await answersSomeoneElse({ db }, row!, { personId: null, data: { text: 'Отчет' } })).toBe(false);
-    expect(await answersSomeoneElse({ db }, { id: '00000000-0000-4000-8000-000000000000', createdBy: luiza.id }, { personId: row!.createdBy, data: { text: 'В окне' } })).toBe(false);
-    expect(await answersSomeoneElse({ db }, { id: '00000000-0000-4000-8000-000000000000', createdBy: luiza.id }, { personId: row!.createdBy, data: { channel: 'telegram' } })).toBe(true);
+    expect(await answersSomeoneElse({ db }, { id: '00000000-0000-4000-8000-000000000000', createdBy: clara.id }, { personId: row!.createdBy, data: { text: 'В окне' } })).toBe(false);
+    expect(await answersSomeoneElse({ db }, { id: '00000000-0000-4000-8000-000000000000', createdBy: clara.id }, { personId: row!.createdBy, data: { channel: 'telegram' } })).toBe(true);
   });
 });

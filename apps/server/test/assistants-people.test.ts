@@ -141,17 +141,17 @@ describe('an assistant in People', () => {
     expect((await keyOf(c, 'wes', own.json().person.id)).statusCode).toBe(201);
 
     const ceos = (await addAssistant(c, 'ceo', c.ids.ceo)).json().person;
-    const lisas = (await addAssistant(c, 'lisa', c.ids.lisa)).json().person;
-    for (const viewer of ['wes', 'lisa'] as const) {
+    const claras = (await addAssistant(c, 'clara', c.ids.clara)).json().person;
+    for (const viewer of ['wes', 'clara'] as const) {
       const refused = await keyOf(c, viewer, ceos.id);
       expect(refused.statusCode, viewer).toBe(403);
       expect(refused.json().error.reason).toBe('owner_locked');
     }
     expect((await addAssistant(c, 'wes', c.ids.ceo)).statusCode).toBe(403);
-    expect((await addAssistant(c, 'wes', c.ids.lisa)).statusCode).toBe(403);
-    expect((await keyOf(c, 'wes', lisas.id)).statusCode).toBe(403);
-    expect((await keyOf(c, 'lisa', lisas.id)).statusCode).toBe(201);
-    expect((await keyOf(c, 'ceo', lisas.id)).statusCode).toBe(201);
+    expect((await addAssistant(c, 'wes', c.ids.clara)).statusCode).toBe(403);
+    expect((await keyOf(c, 'wes', claras.id)).statusCode).toBe(403);
+    expect((await keyOf(c, 'clara', claras.id)).statusCode).toBe(201);
+    expect((await keyOf(c, 'ceo', claras.id)).statusCode).toBe(201);
   });
 
   it('belongs to an active person of the company, never to another assistant', async () => {

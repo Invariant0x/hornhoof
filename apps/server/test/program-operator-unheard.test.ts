@@ -116,8 +116,8 @@ it('waits longer each time, twice as long after the fourth try and never more th
 
 it('a report on a task keeps its words: the retry says what the turn was woken for', async () => {
   const c = await stuckPrograms();
-  const task = await taskOf(c, c.head.id, 328);
-  const report = 'Developer reported on #328: the pinned commit is 0123abc and the evidence is attached.';
+  const task = await taskOf(c, c.head.id, 12);
+  const report = 'Developer reported on #12: the pinned commit is 0123abc and the evidence is attached.';
   await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: report, createdBy: null, taskId: task.id, message: { personId: null, text: report, from: 'agent', by: c.agent.id, name: c.agent.name, taskWake: await taskState(c, task) } });
   const first = await c.runningOf(c.head.id);
   await c.unrecorded(c.head.id, first!.id);

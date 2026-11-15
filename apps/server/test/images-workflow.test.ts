@@ -349,7 +349,7 @@ describe('.github/workflows/images.yml', () => {
     expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
-  it('runs the tests in the parts the first job chose, four without its answer, on GitHub’s machines unless the repository variable names other runners', () => {
+  it("runs the tests in the parts the first job chose, four without its answer, on GitHub's machines unless the repository variable names other runners", () => {
     expect(JOBS.test!['runs-on']).toBe(TESTS_RUNS_ON);
     expect(JOBS.test!.strategy!.matrix.part).toBe("${{ fromJSON(needs.mark.outputs.parts || '[1, 2, 3, 4]') }}");
     expect(JOBS.test!.env).toEqual({ PART: '${{ matrix.part }}/4', SELECTION: '${{ needs.mark.outputs.selection }}' });
@@ -357,16 +357,16 @@ describe('.github/workflows/images.yml', () => {
 
   it('sends the first job and the tests by one variable, and images, publishing and the release by another', () => {
     for (const name of ['mark', 'passed']) expect(JOBS[name]!['runs-on']).toBe(TESTS_RUNS_ON);
-    /* The tests against real Postgres and Pebble start their servers in Docker, which our own test runners lack: they
+    /* The tests against real Postgres and Pebble start their servers in Docker, which runners without Docker lack: they
        run only where a variable of their own names a runner that has a daemon, and are left out while it names none. */
     expect(JOBS['test-real']!['runs-on']).toBe("${{ vars.REAL_RUNS_ON && fromJSON(vars.REAL_RUNS_ON) || 'ubuntu-latest' }}");
     expect(JOBS['test-real']!.if).toBe("${{ vars.REAL_RUNS_ON != '' }}");
     for (const name of ['images', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
     expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'passed', 'publish', 'release', 'test', 'test-real']);
-    expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host|hornhoof-gh-buildkit/);
+    expect(WORKFLOW).not.toMatch(/\bself-hosted\b/);
   });
 
-  it('builds with the BuildKit the repository variable names, and with GitHub’s own and its emulator without one', () => {
+  it("builds with the BuildKit the repository variable names, and with GitHub's own and its emulator without one", () => {
     const buildx = (job: Job) => job.steps.filter(step => step.uses?.startsWith('docker/setup-buildx-action@'));
     for (const name of ['images', 'publish']) expect(buildx(JOBS[name]!).map(step => step.with)).toEqual([BUILDER]);
     const qemu = JOBS.images!.steps.filter(step => step.uses?.startsWith('docker/setup-qemu-action@'));

@@ -95,7 +95,7 @@ describe('whom an assistant may write to', () => {
 
   it("the CEO delegate's: the same as the CEO's", async () => {
     const c = await aclCompany();
-    expect(await reach(c, (await assistantOf(c, 'lisa')).key)).toEqual({ crew: (Object.keys(c.crew) as Crew[]).sort(), orchestrator: true });
+    expect(await reach(c, (await assistantOf(c, 'clara')).key)).toEqual({ crew: (Object.keys(c.crew) as Crew[]).sort(), orchestrator: true });
   });
 
   it("a department owner's: that department's head and employees, as the owner's window has it", async () => {

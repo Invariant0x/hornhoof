@@ -18,7 +18,7 @@ async function installation(env: NodeJS.ProcessEnv = {}) {
   const [ivan] = await db.select().from(people);
   /* Two machines of the company and one taken back, whose names stay at home. */
   await db.insert(machines).values([
-    { companyId: acme!.id, personId: ivan!.id, machineKey: 'm1', hostname: 'ivans-laptop.acme.lan', os: 'linux', arch: 'x64' },
+    { companyId: acme!.id, personId: ivan!.id, machineKey: 'm1', hostname: 'dev-laptop.acme.test', os: 'linux', arch: 'x64' },
     { companyId: acme!.id, personId: ivan!.id, machineKey: 'm2', hostname: 'build-mac', os: 'darwin', arch: 'arm64' },
     { companyId: acme!.id, personId: ivan!.id, machineKey: 'm3', hostname: 'old', os: 'windows', arch: 'x64', revokedAt: new Date('2026-11-01T00:00:00Z') },
   ]);

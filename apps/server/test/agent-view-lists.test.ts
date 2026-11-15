@@ -129,13 +129,13 @@ describe('what waits for people', () => {
   it('keeps the whole request for the CEO and the delegate', async () => {
     const c = await aclCompany();
     const { task, request, picture } = await approval(c);
-    for (const viewer of ['ceo', 'lisa'] as const) {
+    for (const viewer of ['ceo', 'clara'] as const) {
       const res = (await c.get('/api/requests', c.tokens[viewer])).json();
       expect(res.addressed).toEqual([]);
       expect(res.requests[0]).toMatchObject({ id: request.id, agent: { id: c.crew.other.id, name: 'Otto' }, task: { id: task.id, title: task.title }, link: 'https://x.test/task-secret' });
       expect((await c.get(`/api/attachments/${picture.id}`, c.tokens[viewer])).statusCode).toBe(200);
     }
-    expect((await answer(c, request.id, c.tokens.lisa, { approve: true })).statusCode).toBe(200);
+    expect((await answer(c, request.id, c.tokens.clara, { approve: true })).statusCode).toBe(200);
   });
 
   it('leaves the people of a department the decisions already theirs, by the same whitelist', async () => {
@@ -170,7 +170,7 @@ describe('what waits for people', () => {
     expect(wes.json().machineAccess).toEqual([]);
     expect(leaks(wes, [c.orchestrator])).toEqual([]);
     expect(wes.body).not.toMatch(/Hire Zed|Fix the disk/);
-    for (const viewer of ['ceo', 'lisa'] as const) {
+    for (const viewer of ['ceo', 'clara'] as const) {
       const full = (await c.get('/api/requests', c.tokens[viewer])).json();
       expect(full.proposals).toHaveLength(1);
       expect(full.machineAccess[0].view.asked.reason).toBe('Fix the disk');
@@ -197,7 +197,7 @@ describe('a long text kept as a file of its task', () => {
       expect(res.body).not.toContain('Private long words');
     }
     /* The owner of the department sees its every employee, and their work with them. */
-    for (const token of [c.tokens.ceo, c.tokens.lisa, c.tokens.olga]) expect((await c.get(url, token)).body).toBe(WORDS);
+    for (const token of [c.tokens.ceo, c.tokens.clara, c.tokens.olga]) expect((await c.get(url, token)).body).toBe(WORDS);
   });
 
   it('stays closed on a task the person sees when a hidden agent wrote it', async () => {
@@ -299,8 +299,8 @@ describe('turns', () => {
       expect(res.json().turn).toMatchObject({ messages: [], taskId: other.id, tasks: { total: 2, done: 0 } });
       expect((await c.get('/api/turns', c.tokens[viewer])).body).not.toContain('Secret plan');
     }
-    expect((await c.get('/api/turns/current', c.tokens.lisa)).json().turn).toMatchObject({ taskId: other.id, tasks: { total: 2, done: 0 } });
-    expect((await c.get('/api/turns/current', c.tokens.lisa)).body).toContain('Secret plan');
+    expect((await c.get('/api/turns/current', c.tokens.clara)).json().turn).toMatchObject({ taskId: other.id, tasks: { total: 2, done: 0 } });
+    expect((await c.get('/api/turns/current', c.tokens.clara)).body).toContain('Secret plan');
   });
 });
 
@@ -326,7 +326,7 @@ describe('plans, machines and the pool', () => {
     expect(leaks(res, [c.crew.away, c.crew.other, c.crew.far])).toEqual([]);
     const wide = await c.get('/api/subscriptions', c.tokens.wes);
     expect(wide.json().subscriptions.flatMap((s: { agents: { name: string }[] }) => s.agents.map(a => a.name))).toEqual(['Wanda']);
-    const full = (await c.get('/api/subscriptions', c.tokens.lisa)).json().subscriptions.flatMap((s: { agents: { canOpen: boolean }[] }) => s.agents);
+    const full = (await c.get('/api/subscriptions', c.tokens.clara)).json().subscriptions.flatMap((s: { agents: { canOpen: boolean }[] }) => s.agents);
     expect(full.length).toBeGreaterThan(8);
     expect(full.every((a: { canOpen: boolean }) => a.canOpen)).toBe(true);
   });
@@ -339,7 +339,7 @@ describe('plans, machines and the pool', () => {
     const box = res.json().machines.find((m: { hostname: string }) => m.hostname === 'wes-box');
     expect(box.running.parts.map((p: { agent: string }) => p.agent)).toEqual(['Wanda']);
     expect(res.body).not.toContain('Otto');
-    const full = (await c.get('/api/machines', c.tokens.lisa)).json().machines.find((m: { hostname: string }) => m.hostname === 'wes-box');
+    const full = (await c.get('/api/machines', c.tokens.clara)).json().machines.find((m: { hostname: string }) => m.hostname === 'wes-box');
     expect(full.running.parts.map((p: { agent: string }) => p.agent).sort()).toEqual(['Otto', 'Wanda']);
   });
 
@@ -351,7 +351,7 @@ describe('plans, machines and the pool', () => {
     const box = res.json().machines.find((m: { name: string }) => m.name === 'wes-box');
     expect(box.parts.map((p: { agent: string }) => p.agent)).toEqual(['Wanda']);
     expect(res.body).not.toContain('Otto');
-    const full = (await c.get('/api/pool', c.tokens.lisa)).json().machines.find((m: { name: string }) => m.name === 'wes-box');
+    const full = (await c.get('/api/pool', c.tokens.clara)).json().machines.find((m: { name: string }) => m.name === 'wes-box');
     expect(full.parts.map((p: { agent: string }) => p.agent).sort()).toEqual(['Otto', 'Wanda']);
   });
 });
@@ -368,7 +368,7 @@ describe('notebooks', () => {
     expect(leaks(dev, [c.crew.other])).toEqual([]);
     const company = await c.get('/api/notebook', c.tokens.wes);
     expect(company.json().notes.map((n: { by: unknown }) => n.by)).toEqual([{ kind: 'agent', id: c.crew.wide.id, name: 'Wanda' }, null]);
-    expect((await c.get(`/api/departments/${c.product.id}/notebook`, c.tokens.lisa)).json().notes[0].by).toMatchObject({ id: c.crew.other.id });
+    expect((await c.get(`/api/departments/${c.product.id}/notebook`, c.tokens.clara)).json().notes[0].by).toMatchObject({ id: c.crew.other.id });
   });
 });
 
@@ -383,7 +383,7 @@ describe('improvements', () => {
     expect(res.body).not.toContain('Otto idea');
     expect((await c.app.inject({ method: 'POST', url: `/api/improvements/${other!.id}/dismiss`, ...as(c.tokens.wes) })).statusCode).toBe(403);
     expect((await c.app.inject({ method: 'POST', url: `/api/improvements/${own!.id}/dismiss`, ...as(c.tokens.wes) })).statusCode).toBe(200);
-    expect((await c.get('/api/improvements', c.tokens.lisa)).json().improvements).toHaveLength(2);
+    expect((await c.get('/api/improvements', c.tokens.clara)).json().improvements).toHaveLength(2);
     expect((await c.get('/api/improvements', c.tokens.ann)).statusCode).toBe(403);
   });
 
@@ -412,7 +412,7 @@ describe('jobs', () => {
     expect(closed.body).not.toContain('secret');
     expect((await c.get(`/api/jobs/${other.id}`, c.tokens.ann)).statusCode).toBe(403);
     expect((await c.app.inject({ method: 'POST', url: `/api/jobs/${other.id}/cancel`, ...as(c.tokens.wes) })).statusCode).toBe(403);
-    expect((await c.get(`/api/jobs/${other.id}`, c.tokens.lisa)).statusCode).toBe(200);
+    expect((await c.get(`/api/jobs/${other.id}`, c.tokens.clara)).statusCode).toBe(200);
   });
 });
 
@@ -421,7 +421,7 @@ describe('pictures', () => {
     const c = await aclCompany();
     const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, personId: c.ids.bob, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.bob)).statusCode).toBe(200);
-    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.lisa)).statusCode).toBe(200);
+    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.clara)).statusCode).toBe(200);
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga)).statusCode).toBe(200);
     for (const viewer of ['ann', 'wes'] as const) expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens[viewer])).statusCode).toBe(404);
     expect((await c.get('/api/attachments/00000000-0000-4000-8000-000000000000', c.tokens.ann)).statusCode).toBe(404);
@@ -448,7 +448,7 @@ describe('a department\'s staff', () => {
     const role = REQUIRED_OPERATIONS_ROLES[1];
     await c.db.insert(agents).values({ companyId: c.companyId, kind: 'worker', name: 'Holder', roleKey: role, departmentId: ops!.id, model: '', subscriptionId: c.plans.bob.id });
     const held = async (token: string) => (await c.get(`/api/departments/${ops!.id}/roster`, token)).json().roles.find((r: { id: string }) => r.id === role).holder;
-    expect(await held(c.tokens.lisa)).toBe('Holder');
+    expect(await held(c.tokens.clara)).toBe('Holder');
     expect(await held(c.tokens.wes)).toBeNull();
     /* Hiring is the CEO's and the delegate's, who see every head anyway. */
     const refused = await c.app.inject({ method: 'POST', url: `/api/departments/${c.dev.id}/staff`, payload: { people: [{ role: 'DEV-HEAD', name: 'Second head', model: '', subscription: c.plans.wes.id, skills: [], product: null }] }, ...as(c.tokens.wes) });
@@ -466,7 +466,7 @@ describe('the events of a seen agent', () => {
     expect(res.statusCode).toBe(200);
     expect(leaks(res, [c.crew.other, c.crew.head])).toEqual([]);
     expect(res.json().events[0].message).toMatchObject({ from: { kind: 'agent', id: null, name: 'Employee' }, to: { id: c.crew.mine.id } });
-    expect((await c.get(`/api/agents/${c.crew.mine.id}/events`, c.tokens.lisa)).json().events[0].message.from.id).toBe(c.crew.other.id);
+    expect((await c.get(`/api/agents/${c.crew.mine.id}/events`, c.tokens.clara)).json().events[0].message.from.id).toBe(c.crew.other.id);
   });
 });
 
@@ -478,6 +478,6 @@ describe('the computer', () => {
     expect(wes.statusCode).toBe(200);
     expect(wes.json().asked).toBeNull();
     expect(wes.body).not.toContain('Fix the disk');
-    expect((await c.get('/api/computer', c.tokens.lisa)).json().asked.reason).toBe('Fix the disk');
+    expect((await c.get('/api/computer', c.tokens.clara)).json().asked.reason).toBe('Fix the disk');
   });
 });

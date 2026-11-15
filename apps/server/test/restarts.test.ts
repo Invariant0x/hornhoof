@@ -386,7 +386,7 @@ describe('a built-in turn cut off by a server restart', () => {
     const first = await c.brunoAtWork();
     const connected = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(c.ceo) });
     const code = connected.json().command.split('--join ')[1];
-    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     const personal = joined.json().nodes[0];
     await c.db.update(nodes).set({ version: '0.5.0', boot: before }).where(eq(nodes.id, personal.nodeId));
     const [machineJob] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: personal.subscriptionId, nodeId: personal.nodeId, kind: 'test', prompt: 'Check.', timeoutMs: 60_000, status: 'running' }).returning();
@@ -395,7 +395,7 @@ describe('a built-in turn cut off by a server restart', () => {
     machine.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: boot('2026-11-03T00:11:00.000Z') });
     await until(async () => (await c.jobOf(machineJob!.id)).status === 'failed');
 
-    expect((await c.jobOf(machineJob!.id)).interruption).toMatchObject({ cause, node: { id: personal.nodeId, name: 'ivan-mac' } });
+    expect((await c.jobOf(machineJob!.id)).interruption).toMatchObject({ cause, node: { id: personal.nodeId, name: 'dev-mac' } });
     expect((await c.jobOf(first.jobId)).status).toBe('running');
     const retry = await nextRun(await builtinHello(next.url));
     expect((await c.jobOf(first.jobId)).interruption).toMatchObject({ cause: 'server', task: c.task.number });

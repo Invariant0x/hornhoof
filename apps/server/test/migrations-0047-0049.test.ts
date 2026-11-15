@@ -9,7 +9,7 @@ import { migrate, migrationsUpTo } from './migrations-fixture.js';
 
 ownDatabases();
 
-// Each test runs every migration on a copy as big as a real company's, which takes as long as the machine needs, so
+// Each test runs every migration on a copy with tens of thousands of events, which takes as long as the machine needs, so
 // none of them has a time limit.
 describe('migration 0049', () => {
   it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', { timeout: 0 }, async name => {

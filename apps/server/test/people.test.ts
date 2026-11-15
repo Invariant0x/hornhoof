@@ -206,14 +206,14 @@ describe('PATCH /api/people/:id', () => {
     const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: 'Head of marketing', access: { departments: [departmentId] } });
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
 
-    const res = await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { name: '  Lisa  ' }, ...as(olga.token) });
+    const res = await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { name: '  Clara  ' }, ...as(olga.token) });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().person).toMatchObject({ name: 'Lisa', email: 'olga@acme.com', title: 'Head of marketing', access: { whole: false, departments: [{ id: departmentId }] } });
+    expect(res.json().person).toMatchObject({ name: 'Clara', email: 'olga@acme.com', title: 'Head of marketing', access: { whole: false, departments: [{ id: departmentId }] } });
     const audit = await db.execute(sql`select person_id, actor_id, field, before, after, created_at from person_changes`) as { rows: { person_id: string; actor_id: string; field: string; before: string; after: string; created_at: string }[] };
-    expect(audit.rows).toEqual([{ person_id: olga.id, actor_id: olga.id, field: 'name', before: 'Olga', after: 'Lisa', created_at: expect.any(String) }]);
-    expect((await app.inject({ url: '/api/me', ...as(olga.token) })).json().person.name).toBe('Lisa');
-    expect((await app.inject({ url: '/api/people', ...as(olga.token) })).json().people.find((p: { id: string }) => p.id === olga.id).name).toBe('Lisa');
+    expect(audit.rows).toEqual([{ person_id: olga.id, actor_id: olga.id, field: 'name', before: 'Olga', after: 'Clara', created_at: expect.any(String) }]);
+    expect((await app.inject({ url: '/api/me', ...as(olga.token) })).json().person.name).toBe('Clara');
+    expect((await app.inject({ url: '/api/people', ...as(olga.token) })).json().people.find((p: { id: string }) => p.id === olga.id).name).toBe('Clara');
     expect((await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { name: 'Changed by Olga' }, ...as(olga.token) })).statusCode).toBe(403);
     for (const name of ['   ', 'x'.repeat(81)]) {
       expect((await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { name }, ...as(olga.token) })).statusCode).toBe(400);
@@ -225,7 +225,7 @@ describe('PATCH /api/people/:id', () => {
     const from = await personParty(app.ctx, owner!.companyId, olga.id);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const to = await agentParty(app.ctx, owner!.companyId, orchestrator!.id);
-    expect(messageHeading({ direction: 'in', from, to })).toBe('From Lisa (Head of marketing) to Orchestrator:');
+    expect(messageHeading({ direction: 'in', from, to })).toBe('From Clara (Head of marketing) to Orchestrator:');
   });
 
   it('scopes person changes and invites to the session company', async () => {

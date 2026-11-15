@@ -17,7 +17,7 @@ async function liveCompany(env: NodeJS.ProcessEnv = {}) {
 async function joinedClaude(app: Awaited<ReturnType<typeof liveCompany>>['app'], ceo: string) {
   const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
   const code = connected.json().command.split('--join ')[1];
-  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
   return joined.json().nodes[0] as { subscriptionId: string; key: string };
 }
 
@@ -37,7 +37,7 @@ describe('POST /api/subscriptions/:id/test', () => {
     const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${subscriptionId}/test`, ...as(ceo) });
     expect(res.statusCode).toBe(201);
     const { job } = res.json();
-    expect(job).toMatchObject({ status: 'queued', result: null, machine: 'ivan-mac' });
+    expect(job).toMatchObject({ status: 'queued', result: null, machine: 'dev-mac' });
     const run = await node.next();
     expect(run).toMatchObject({ type: 'job.run', jobId: job.id, subscriptionId, provider: 'claude', prompt: 'Reply with one word: ready', timeoutMs: 120000, secret: null, sessionId: null });
 
@@ -45,7 +45,7 @@ describe('POST /api/subscriptions/:id/test', () => {
     node.send({ type: 'job.done', jobId: job.id, ok: true, sessionId: 's-1', result: 'ready', tail: '', error: null });
     await until(async () => (await getJob(app, ceo, job.id)).json().job.status === 'done');
     const done = (await getJob(app, ceo, job.id)).json().job;
-    expect(done).toMatchObject({ status: 'done', result: 'ready', error: null, machine: 'ivan-mac' });
+    expect(done).toMatchObject({ status: 'done', result: 'ready', error: null, machine: 'dev-mac' });
     expect(done.startedAt).not.toBeNull();
     expect(done.finishedAt).not.toBeNull();
     node.close();

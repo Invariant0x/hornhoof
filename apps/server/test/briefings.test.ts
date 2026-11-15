@@ -39,7 +39,7 @@ const repo = (url: string, rules = '', author: { name: string; email: string } |
 describe('what a department and its products keep for their agents', () => {
   it('gives an agent its department and its product, with every repository of the product and the cloned one first, and nothing of any other', async () => {
     const { app, ceo, dev, shop, billing, marketing, agent, write } = await company();
-    expect((await app.inject({ method: 'PUT', url: `/api/departments/${shop.id}/repository`, payload: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } }, ...as(ceo) })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'PUT', url: `/api/departments/${shop.id}/repository`, payload: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: { name: 'Alex Rivera', email: 'alex@acme.example' } }, ...as(ceo) })).statusCode).toBe(200);
     expect((await write(dev.id, { text: 'We work by gates: review, security, tests.', repositories: [] })).statusCode).toBe(200);
     expect((await write(shop.id, {
       text: 'The shop sells shoes.',
@@ -58,7 +58,7 @@ describe('what a department and its products keep for their agents', () => {
       name: 'Shop',
       text: 'The shop sells shoes.',
       repositories: [
-        { url: 'https://github.com/acme/shop.git', branch: 'release', cloned: './shop', author: { name: 'Ivan Korol', email: 'ivan@acme.dev' }, rules: 'Run npm test before you hand in.' },
+        { url: 'https://github.com/acme/shop.git', branch: 'release', cloned: './shop', author: { name: 'Alex Rivera', email: 'alex@acme.example' }, rules: 'Run npm test before you hand in.' },
         repo('https://github.com/acme/shop-design.git', 'Design files only.', { name: 'Ada', email: 'ada@acme.dev' }),
         repo('https://github.com/acme/shop-docs.git', 'Plain English.', null, 'docs'),
       ],

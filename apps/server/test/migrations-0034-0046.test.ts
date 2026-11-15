@@ -34,7 +34,7 @@ describe('migrations 0034 to 0037', () => {
     await db.execute(sql`insert into tasks (id, company_id, number, title) values (${T}, ${C}, 1, 'Checkout')`);
     await db.execute(sql`insert into test_runs (id, company_id, number, task_id, agent_id, job_id, command, timeout_ms) values (${R}, ${C}, 1, ${T}, ${A}, ${job!.id}, 'npm test', 60000)`);
     await db.execute(sql`insert into test_parts (company_id, run_id, part, created_at) values (${C}, ${R}, 1, '2026-10-30T10:00:00Z')`);
-    await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'dev-mac')`);
 
     await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
     await migrate(db, { migrationsFolder: await migrationsUpTo('0040_decision_topic') });
@@ -61,7 +61,7 @@ describe('migration 0038', () => {
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
     await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id) values (${S}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P})`);
-    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${S}, ${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${S}, ${C}, ${P}, 'mac-0001-abcd', 'dev-mac')`);
     await db.execute(sql`insert into nodes (id, company_id, machine_id, subscription_id, status) values (${S}, ${C}, ${S}, ${S}, 'ready')`);
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -139,7 +139,7 @@ describe('migration 0044', () => {
     const person = async (name: string, status: string, scope: string, owner: boolean) =>
       (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${C}, ${name}, ${`${name.toLowerCase()}@acme.com`}, ${status}, ${scope}, ${owner}) returning id`)).rows[0]!.id;
     const ivan = await person('Ivan', 'active', 'company', true);
-    const david = await person('David', 'active', 'company', false);
+    const daniel = await person('Daniel', 'active', 'company', false);
     const zoe = await person('Zoe', 'active', 'company', false);
     await person('Dana', 'active', 'listed', false);
     await person('Ilya', 'invited', 'company', false);
@@ -149,7 +149,7 @@ describe('migration 0044', () => {
 
     expect.soft((await db.execute(sql`select name, is_owner, is_ceo_delegate from people order by name`)).rows).toEqual([
       { name: 'Dana', is_owner: false, is_ceo_delegate: false },
-      { name: 'David', is_owner: false, is_ceo_delegate: false },
+      { name: 'Daniel', is_owner: false, is_ceo_delegate: false },
       { name: 'Ilya', is_owner: false, is_ceo_delegate: false },
       { name: 'Ivan', is_owner: true, is_ceo_delegate: false },
       { name: 'Olga', is_owner: false, is_ceo_delegate: false },
@@ -171,7 +171,7 @@ describe('migration 0044', () => {
       return token;
     };
     const approve = async (personId: string) => app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { approve: true }, ...as(await signedIn(personId)) });
-    for (const id of [david, zoe]) {
+    for (const id of [daniel, zoe]) {
       const refused = await approve(id);
       expect(refused.statusCode).toBe(403);
       expect(refused.json().error.reason).toBe('decision_not_allowed');
@@ -241,7 +241,6 @@ describe('migration 0045', () => {
       where company_id = ${C} and department_id = ${D} and product_id in (${PRODUCT})`);
     const turnPlan = turn.rows.map(r => r['QUERY PLAN']).join('\n');
     const productPlan = product.rows.map(r => r['QUERY PLAN']).join('\n');
-    console.info(`Turn tasks:\n${turnPlan}\nProduct tasks:\n${productPlan}`);
     expect(turnPlan).toContain('Index Scan on tasks_turn_id');
     expect(productPlan).toContain('Index Scan on tasks_product_id');
     expect((await db.execute(sql`select count(*)::int as n from tasks where turn_id = ${TURN}`)).rows).toEqual([{ n: 200 }]);

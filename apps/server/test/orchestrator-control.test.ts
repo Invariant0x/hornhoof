@@ -130,7 +130,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const { app, db } = await company();
     const [acme] = await db.select().from(companies);
     const [ivan] = await db.select().from(people);
-    const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: ivan!.id, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
+    const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: ivan!.id, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
     const client = await mcp(app, TOKEN);
     expect(text(await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false }))).toContain('"lendsTests":false');
     expect((await db.select().from(machines))[0]!.lendsTests).toBe(false);
@@ -150,7 +150,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const SHOWN = 'The command is shown to the CEO in this window; it works once, for 24 hours.';
     const commands = async () => (await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands as { id: string; command: string }[];
     const code = (command: string) => command.split('--join ')[1]!;
-    const machine = { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop', os: 'linux', arch: 'x86_64' };
+    const machine = { machineId: 'laptop-0002-abcd', hostname: 'dev-laptop', os: 'linux', arch: 'x86_64' };
 
     expect(text(await call(client, 'machine_command', {}))).toBe(SHOWN);
     const [alone] = await commands();
@@ -166,7 +166,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const made = await commands();
     expect(made).toMatchObject([
       { kind: 'plans', plans: ['Claude'], machine: null },
-      { kind: 'add', plans: ['Claude'], machine: 'ivan-laptop' },
+      { kind: 'add', plans: ['Claude'], machine: 'dev-laptop' },
     ]);
     const there = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(made[1]!.command), ...machine } })).json();
     expect(there.nodes).toMatchObject([{ subscriptionId: plan!.id, provider: 'claude' }]);
@@ -769,14 +769,14 @@ describe('what only the CEO may ask for', () => {
 
   /* Bruno asks the CEO about a machine in his task's card; the CEO answers there, not in the orchestrator's window. */
   async function askedInCard(c: Awaited<ReturnType<typeof quiet>>, topic: 'machines' | 'task', answer = true) {
-    const asked = await ask(c.app.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'May ivan-mac leave the test runs while #1 runs its tests?', topic });
+    const asked = await ask(c.app.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'May dev-mac leave the test runs while #1 runs its tests?', topic });
     if (answer) expect((await c.app.inject({ method: 'POST', url: `/api/requests/${asked.request.id}`, payload: { answer: 'Yes, take it out for this run.' }, ...as(c.ceo) })).statusCode).toBe(200);
     return asked.request.id;
   }
 
   it("changes a machine in a turn nobody's words opened, by the CEO's answer about machines in an open task's card", async () => {
     const c = await quiet();
-    const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
+    const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
     const permission = await askedInCard(c, 'machines');
     await c.running(c.orchestrator.id, 'tool-token-timer-0123456789abcdef012');
     const client = await mcp(c.app, 'tool-token-timer-0123456789abcdef012');
@@ -793,7 +793,7 @@ describe('what only the CEO may ask for', () => {
 
   it('takes no answer as a permission to change machines but the CEO\'s own one about machines, in the card of a task still open', async () => {
     const c = await quiet();
-    const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
+    const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
     await c.running(c.orchestrator.id, 'tool-token-timer-0123456789abcdef012');
     const client = await mcp(c.app, 'tool-token-timer-0123456789abcdef012');
     const lend = (permission: string) => call(client, 'lend_machine', { machine: machine!.id, lendsTests: false, permission });

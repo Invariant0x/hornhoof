@@ -252,7 +252,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     mkdirSync(machine.folder(), { recursive: true });
     writeFileSync(join(machine.folder(), '.env'), 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n');
 
-    /* Simulate Machine B from network-real-run.md: an existing hornhoof_default network covers 192.168.0.0/20
+    /* Simulate an existing hornhoof_default network that covers 192.168.0.0/20
        with no daemon Pool overlaps error, so SUBNET_MOVED alone must trigger docker compose down before up. */
     const healed = machine.runServer([], {
       STUB_DOCKER_NETWORKS: 'oldnet000000001|hornhoof_default|hornhoof|192.168.0.0/20|false|',
@@ -494,18 +494,18 @@ describe('Docker subnet selection outside host networks and multi-project isolat
       '134: eth0    inet 10.200.2.2/24 brd 10.200.2.255 scope global eth0\\       valid_lft forever preferred_lft forever',
       '10.200.2.0/24 dev eth0 proto kernel scope link src 10.200.2.2',
     );
-    mkdirSync(containerView.folder('hornhoof-nr2'), { recursive: true });
+    mkdirSync(containerView.folder('hornhoof-two'), { recursive: true });
     writeFileSync(
-      join(containerView.folder('hornhoof-nr2'), '.env'),
-      'COMPOSE_PROJECT_NAME=hornhoof-nr2\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8081\nHORNHOOF_PEER_PORT=8181\nHORNHOOF_SUBNET=10.200.2.0/24\nHORNHOOF_INTERNAL_SUBNET=10.200.3.0/24\nHORNHOOF_ADDRESSES=192.168.15.8\n',
+      join(containerView.folder('hornhoof-two'), '.env'),
+      'COMPOSE_PROJECT_NAME=hornhoof-two\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8081\nHORNHOOF_PEER_PORT=8181\nHORNHOOF_SUBNET=10.200.2.0/24\nHORNHOOF_INTERNAL_SUBNET=10.200.3.0/24\nHORNHOOF_ADDRESSES=192.168.10.20\n',
     );
     const cleanFromContainer = containerView.runServer([], {
       STUB_OS: 'Linux',
       STUB_DOCKER_NETWORKS:
-        '091192985c054ce1|hornhoof-nr2_default|hornhoof-nr2|10.200.2.0/24,|false| 2ba1f8a529740306|hornhoof-nr2_internal|hornhoof-nr2|10.200.3.0/24,|true|',
+        '091192985c054ce1|hornhoof-two_default|hornhoof-two|10.200.2.0/24,|false| 2ba1f8a529740306|hornhoof-two_internal|hornhoof-two|10.200.3.0/24,|true|',
       HORNHOOF_FROM_UPDATER: '1',
       HORNHOOF_UPDATER_REV: '2',
-      HORNHOOF_SERVER_DIR: containerView.folder('hornhoof-nr2'),
+      HORNHOOF_SERVER_DIR: containerView.folder('hornhoof-two'),
       STUB_HOSTNAME: 'updater-cid',
     });
     expect(cleanFromContainer.code).toBe(0);
@@ -584,7 +584,7 @@ describe('Two companies on the same two computers lead, copy, and switch leader 
     }
 
     /* Simulated container routing check: a container on Machine B or Machine A reaches the peer host IP directly on LAN
-       only if NONE of the host's Docker networks shadows that peer IP (the exact failure from network-real-run.md). */
+       only if NONE of the host's Docker networks shadows that peer IP. */
     const canRouteOnLan = (fromMachine: ReturnType<typeof makeComputer>, targetHostIp: string): boolean =>
       fromMachine.networks().every(net => !ipInCidr(targetHostIp, net.subnet));
     expect(canRouteOnLan(machineB, '192.168.1.10')).toBe(true);

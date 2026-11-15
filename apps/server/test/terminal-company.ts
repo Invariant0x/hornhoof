@@ -36,7 +36,7 @@ export const opened = async (url: string, token: string, agentId: string): Promi
   return screen;
 };
 
-/* The company of #398 on the built-in node, whose API key plans let an agent move between plans on one machine. An open
+/* The visibility test company on the built-in node, whose API key plans let an agent move between plans on one machine. An open
    view looks again at its rights on its own only when a test asks for that pace. */
 export async function company(env: NodeJS.ProcessEnv = {}) {
   const c = await aclCompany({ NODE_KEY, STREAM_PING_MS: '2147483647', ...env });

@@ -102,11 +102,11 @@ describe('POST /api/subscriptions/connect', () => {
       app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], machineId, hostname, os: 'darwin', arch: 'arm64' } });
 
     const first = (await connect(app, ceo, ['codex'])).json();
-    expect((await joinNode(first.command, 'mac-0001-abcd', 'ivan-mac')).statusCode).toBe(200);
+    expect((await joinNode(first.command, 'mac-0001-abcd', 'dev-mac')).statusCode).toBe(200);
 
     const second = await connect(app, ceo, ['codex']);
     expect(second.statusCode).toBe(201);
-    expect((await joinNode(second.json().command, 'mac-0002-efgh', 'ivan-laptop')).statusCode).toBe(200);
+    expect((await joinNode(second.json().command, 'mac-0002-efgh', 'dev-laptop')).statusCode).toBe(200);
 
     expect(await db.select().from(subscriptions).where(eq(subscriptions.provider, 'codex'))).toHaveLength(1);
     expect(await db.select().from(nodes)).toHaveLength(1);
@@ -124,7 +124,7 @@ describe('POST /api/subscriptions/connect', () => {
     expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${subId}`, ...as(ceo) })).statusCode).toBe(204);
     const third = await connect(app, ceo, ['codex']);
     expect(third.statusCode).toBe(201);
-    expect((await joinNode(third.json().command, 'mac-0001-abcd', 'ivan-mac')).statusCode).toBe(200);
+    expect((await joinNode(third.json().command, 'mac-0001-abcd', 'dev-mac')).statusCode).toBe(200);
 
     expect(await db.select().from(subscriptions).where(eq(subscriptions.provider, 'codex'))).toHaveLength(1);
     expect(await db.select().from(nodes)).toHaveLength(1);
@@ -137,7 +137,7 @@ describe('POST /api/subscriptions/connect', () => {
     const first = (await connect(app, ceo, ['codex', 'claude'])).json();
     const subId = first.subscriptions[0].id as string;
     const otherSubId = first.subscriptions[1].id as string;
-    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: first.command.split('--join ')[1], machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: first.command.split('--join ')[1], machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     expect(joined.statusCode).toBe(200);
     const [oldNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, subId));
     const [otherNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, otherSubId));
@@ -165,7 +165,7 @@ describe('POST /api/subscriptions/connect', () => {
     const { app, db, ceo } = await companyWithMaria();
     const agy = (await connect(app, ceo, ['antigravity'])).json();
     const agyId = agy.subscriptions[0].id as string;
-    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: agy.command.split('--join ')[1], machineId: 'mac-0003-ijkl', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: agy.command.split('--join ')[1], machineId: 'mac-0003-ijkl', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     expect(joined.statusCode).toBe(200);
     await db.update(nodes).set({ status: 'needs_setup' }).where(eq(nodes.subscriptionId, agyId));
     await db.update(subscriptions).set({ status: 'needs_setup' }).where(eq(subscriptions.id, agyId));
@@ -180,7 +180,7 @@ describe('POST /api/subscriptions/connect', () => {
   it('refuses a ready plan or a plan with agents on a second connection and never touches its row or node', async () => {
     const { app, db, ceo, development } = await companyWithMaria();
     const joinNode = (command: string, machineId: string) =>
-      app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], machineId, hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+      app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], machineId, hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
 
     const claude = (await connect(app, ceo, ['claude'])).json();
     const claudeId = claude.subscriptions[0].id as string;

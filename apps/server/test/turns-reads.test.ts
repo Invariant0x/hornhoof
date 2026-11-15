@@ -174,7 +174,6 @@ describe('the people\'s words a turn keeps, over a long history', () => {
     const ran = statements();
     expect(await h.db.transaction(tx => newWords(tx, h.by(), TURN_MESSAGES))).toEqual([]);
     const measured = await rowsOf(h.db, ran, 'turns');
-    console.info({ total, gaps: false, ...measured });
     expect(measured.read).toBeLessThanOrEqual(total + 1);
   });
 
@@ -185,7 +184,6 @@ describe('the people\'s words a turn keeps, over a long history', () => {
     const ran = statements();
     expect(await h.db.transaction(tx => newWords(tx, h.by(), TURN_MESSAGES))).toEqual(before);
     const measured = await rowsOf(h.db, ran, 'turns');
-    console.info({ total, gaps: true, ...measured });
     expect(measured.read).toBeLessThanOrEqual(total + 1);
   });
 
@@ -212,7 +210,6 @@ describe('the people\'s words a turn keeps, over a long history', () => {
     })).toEqual([]);
     const measured = await explain(h.db, ran.find(s => s.sql.includes('from "turns"'))!);
     expect(readIn(measured.Plan, 'turns')).toBe(10000);
-    console.info('10,000 turns, all accounted:', JSON.stringify(measured));
     ran.splice(0);
     const message = await h.say('Fresh point', Date.now(), true);
     expect(await h.db.transaction(tx => newWords(tx, h.by(), 1))).toEqual([message]);
@@ -242,7 +239,6 @@ describe('the people\'s words a turn keeps, over a long history', () => {
     });
     expect(cases).toBe(504);
     expect(ran.length, 'comparison query budget').toBeLessThanOrEqual(1500);
-    console.info('Turn word comparisons:', { fixtureQueries, comparisonQueries: ran.length, cases });
   });
 
   it('reads turn membership once inside the database and only the newest events it needs', async () => {

@@ -7,7 +7,7 @@ import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { BUILTIN } from './builtin.js';
 
-const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 
 const codeOf = (command: string) => command.split('--join ')[1]!;
 const join = (app: FastifyInstance, code: string, extra: object = {}, headers: Record<string, string> = {}) =>
@@ -65,7 +65,7 @@ describe('POST /api/nodes/join', () => {
     }
     const list = await machinesOf(app, ceo);
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ id: machine.id, hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', owner: { name: 'Ivan' }, online: false, plans: [{ provider: 'claude' }, { provider: 'codex' }] });
+    expect(list[0]).toMatchObject({ id: machine.id, hostname: 'dev-mac', os: 'darwin', arch: 'arm64', owner: { name: 'Ivan' }, online: false, plans: [{ provider: 'claude' }, { provider: 'codex' }] });
     expect(JSON.stringify(await app.inject({ url: '/api/subscriptions', ...as(ceo) }).then(r => r.json()))).not.toContain(made[0].key);
   });
 
@@ -119,7 +119,7 @@ describe('POST /api/nodes/join', () => {
     const { app, db, code } = await connected(['claude']);
     const extra = await legacyCopy(db, code);
     await join(app, code);
-    const late = await join(app, extra, { machineId: 'other-machine-01', hostname: 'ivan-laptop' });
+    const late = await join(app, extra, { machineId: 'other-machine-01', hostname: 'dev-laptop' });
     expect(late.statusCode).toBe(410);
     expect(late.json().error.reason).toBe('code_used');
   });
@@ -127,7 +127,7 @@ describe('POST /api/nodes/join', () => {
   it('puts a plan on one machine only when two commands for it join at once', async () => {
     const { app, db, code, ids } = await connected(['claude']);
     const extra = await legacyCopy(db, code);
-    const both = await Promise.all([join(app, code), join(app, extra, { machineId: 'other-machine-01', hostname: 'ivan-laptop' })]);
+    const both = await Promise.all([join(app, code), join(app, extra, { machineId: 'other-machine-01', hostname: 'dev-laptop' })]);
     expect(both.map(r => r.statusCode).sort()).toEqual([200, 410]);
     expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, ids[0]!))).toHaveLength(1);
   });
@@ -226,7 +226,7 @@ describe('a machine without a plan', () => {
     expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const [node] = await db.select().from(nodes).where(eq(nodes.id, nodeId!));
     expect(node).toMatchObject({ subscriptionId: null });
-    expect(await machinesOf(app, ceo)).toMatchObject([{ id: node!.machineId, hostname: 'ivan-mac', owner: { name: 'Ivan' }, online: false, plans: [] }]);
+    expect(await machinesOf(app, ceo)).toMatchObject([{ id: node!.machineId, hostname: 'dev-mac', owner: { name: 'Ivan' }, online: false, plans: [] }]);
     expect(await db.select().from(subscriptions).where(eq(subscriptions.kind, 'personal'))).toEqual([]);
   });
 
@@ -278,7 +278,7 @@ describe('a machine without a plan', () => {
 });
 
 describe('one plan on several machines', () => {
-  const LAPTOP = { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
+  const LAPTOP = { machineId: 'laptop-0002-abcd', hostname: 'dev-laptop' };
   const machineCode = async (app: FastifyInstance, token: string) => codeOf((await app.inject({ method: 'POST', url: '/api/machines/command', ...as(token) })).json().command);
   const addPlan = (app: FastifyInstance, token: string, machineId: string, subscription: string) =>
     app.inject({ method: 'POST', url: `/api/machines/${machineId}/plans`, payload: { subscription }, ...as(token) });
@@ -304,15 +304,15 @@ describe('one plan on several machines', () => {
     expect(rows.map(n => n.machineId).sort()).toEqual([mac.machine.id, laptop.machine.id].sort());
     expect(new Set(rows.map(n => n.keyHash)).size).toBe(2);
     expect((await db.select().from(nodes).where(eq(nodes.id, nodeId!)))[0]).toMatchObject({ status: 'needs_login' });
-    expect(await machinesOf(app, ceo)).toMatchObject([{ hostname: 'ivan-mac', plans: [{ id: plan }] }, { hostname: 'ivan-laptop', plans: [{ id: plan }] }]);
+    expect(await machinesOf(app, ceo)).toMatchObject([{ hostname: 'dev-mac', plans: [{ id: plan }] }, { hostname: 'dev-laptop', plans: [{ id: plan }] }]);
   });
 
   it('works only on the machine it was made for, and stays unused there', async () => {
     const { app, ceo, plan, laptop } = await twoMachines();
     const code = codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command);
-    const elsewhere = await join(app, code, { machineId: 'tower-0003-abcd', hostname: 'ivan-tower' });
+    const elsewhere = await join(app, code, { machineId: 'tower-0003-abcd', hostname: 'dev-tower' });
     expect(elsewhere.statusCode).toBe(409);
-    expect(elsewhere.json().error).toMatchObject({ reason: 'other_machine', message: expect.stringContaining('ivan-laptop') });
+    expect(elsewhere.json().error).toMatchObject({ reason: 'other_machine', message: expect.stringContaining('dev-laptop') });
     expect((await join(app, code, LAPTOP)).statusCode).toBe(200);
   });
 
@@ -347,10 +347,10 @@ describe('one plan on several machines', () => {
     const sub = async () => (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === plan);
     await until(async () => (await sub()).status === 'ready');
     expect((await sub()).machines).toEqual([
-      { id: mac.machine.id, hostname: 'ivan-mac', status: 'needs_login', online: false },
-      { id: laptop.machine.id, hostname: 'ivan-laptop', status: 'ready', online: true },
+      { id: mac.machine.id, hostname: 'dev-mac', status: 'needs_login', online: false },
+      { id: laptop.machine.id, hostname: 'dev-laptop', status: 'ready', online: true },
     ]);
-    const tower = (await join(app, await machineCode(app, ceo), { machineId: 'tower-0003-abcd', hostname: 'ivan-tower' })).json();
+    const tower = (await join(app, await machineCode(app, ceo), { machineId: 'tower-0003-abcd', hostname: 'dev-tower' })).json();
     expect(await machinesOf(app, ceo)).toMatchObject([
       { id: mac.machine.id, plans: [{ id: plan, provider: 'claude', status: 'needs_login', online: false }] },
       { id: laptop.machine.id, plans: [{ id: plan, provider: 'claude', status: 'ready', online: true }] },
@@ -587,7 +587,7 @@ describe('active commands for the person who made them', () => {
     expect(active).toEqual([
       { id: planCmd.id, kind: 'plans', plans: ['Claude'], machineId: null, machine: null, command: planCmd.command, expiresAt: planCmd.expiresAt, subscriptionIds: [subId], dismissedSubscriptionIds: [] },
       { id: machineCmd.id, kind: 'machine', plans: [], machineId: null, machine: null, command: machineCmd.command, expiresAt: machineCmd.expiresAt, subscriptionIds: [], dismissedSubscriptionIds: [] },
-      { id: addCmd.id, kind: 'add', plans: ['Claude'], machineId: joined.machine.id, machine: 'ivan-mac', command: addCmd.command, expiresAt: addCmd.expiresAt, subscriptionIds: [subId], dismissedSubscriptionIds: [] },
+      { id: addCmd.id, kind: 'add', plans: ['Claude'], machineId: joined.machine.id, machine: 'dev-mac', command: addCmd.command, expiresAt: addCmd.expiresAt, subscriptionIds: [subId], dismissedSubscriptionIds: [] },
     ]);
 
     expect(await commandsOf(maria)).toEqual([]);
@@ -624,7 +624,7 @@ describe("each machine's place in the company's network", () => {
     const [acme] = await db.select().from(companies);
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const mac = (await join(app, await machineCommand(app, ceo))).json().machine.id as string;
-    const laptop = (await join(app, await machineCommand(app, ceo), { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' })).json().machine.id as string;
+    const laptop = (await join(app, await machineCommand(app, ceo), { machineId: 'laptop-0002-abcd', hostname: 'dev-laptop' })).json().machine.id as string;
     /* The Mac became a worker and reported through the relay, a while ago; the laptop has its node and no core. */
     await db.update(machines).set({ networkId: hashToken('mac'), role: 'worker', webPort: 8081, path: 'relay', directFails: true, reportAt: new Date(Date.now() - 2 * DAY) }).where(eq(machines.id, mac));
     await db.update(nodes).set({ lastSeenAt: new Date(Date.now() - 3_600_000) }).where(eq(nodes.machineId, laptop));
@@ -638,7 +638,7 @@ describe("each machine's place in the company's network", () => {
     /* What a machine said days ago of the way to the server is no news of today. */
     expect(mine.builtin).toMatchObject({ webPort: 8080, refusedBy: [] });
     await db.update(machines).set({ reportAt: new Date() }).where(eq(machines.id, mac));
-    expect((await listed(app, ceo)).builtin).toMatchObject({ webPort: 8080, refusedBy: ['ivan-mac'] });
+    expect((await listed(app, ceo)).builtin).toMatchObject({ webPort: 8080, refusedBy: ['dev-mac'] });
     /* Only the machine's owner is offered the core for it. */
     expect(byId(await listed(app, maria), laptop)).toMatchObject({ core: null, needsCore: false });
     /* A machine whose nodes were last seen days ago is not asked to do anything. */
@@ -672,7 +672,7 @@ describe("each machine's place in the company's network", () => {
     expect(of(mine, host).data).toMatchObject({ number: 1, why: 'server', unfit: null, copy: null });
     /* A machine of someone who does not see the whole company holds no copy, and its card says why. */
     expect(of(mine, hers).data).toMatchObject({ number: null, unfit: { why: 'scope', person: 'Anna' } });
-    expect(mine.copies).toEqual({ leader: 'server-box', copies: [{ hostname: 'ivan-mac', sync: false }], onlySince: null });
+    expect(mine.copies).toEqual({ leader: 'server-box', copies: [{ hostname: 'dev-mac', sync: false }], onlySince: null });
     /* She sees her own machine, and nothing of who holds the company's data. */
     const theirs = await held(anna);
     expect(theirs.machines.map(machine => machine.id)).toEqual([hers]);

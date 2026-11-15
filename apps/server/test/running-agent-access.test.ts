@@ -50,20 +50,20 @@ it("says an agent is with the CEO only for a turn that answers the CEO, not the 
   const ceo = await setUpCompany(app);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const companyId = orchestrator!.companyId;
-  await invitePerson(app, ceo, { name: 'Lisa', email: 'lisa@acme.com', access: { whole: true } });
-  const [lisa] = await db.select().from(people).where(eq(people.name, 'Lisa'));
-  await app.inject({ method: 'PUT', url: `/api/people/${lisa!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
+  await invitePerson(app, ceo, { name: 'Clara', email: 'clara@acme.com', access: { whole: true } });
+  const [clara] = await db.select().from(people).where(eq(people.name, 'Clara'));
+  await app.inject({ method: 'PUT', url: `/api/people/${clara!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   const connected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(ceo) })).json();
   const subscriptionId = connected.subscriptions[0].id as string;
-  const [withLisa, withIvan, afterIvan, working] = await db.insert(agents).values(['With Lisa', 'With Ivan', 'After Ivan', 'Working'].map(name => ({ companyId, kind: 'worker' as const, name, model: '', subscriptionId }))).returning();
+  const [withClara, withIvan, afterIvan, working] = await db.insert(agents).values(['With Clara', 'With Ivan', 'After Ivan', 'Working'].map(name => ({ companyId, kind: 'worker' as const, name, model: '', subscriptionId }))).returning();
   const running = { companyId, subscriptionId, prompt: 'work', status: 'running' as const, timeoutMs: 1000 };
   await db.insert(jobs).values([
-    { ...running, agentId: withLisa!.id, createdBy: lisa!.id, answersCeo: true },
+    { ...running, agentId: withClara!.id, createdBy: clara!.id, answersCeo: true },
     { ...running, agentId: withIvan!.id, createdBy: owner!.id, answersCeo: true },
     { ...running, agentId: afterIvan!.id, createdBy: null, answersCeo: true },
     { ...running, agentId: working!.id, createdBy: null, answersCeo: false },
   ]);
   const shown = (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === subscriptionId).agents as { name: string; withCeo: boolean }[];
-  expect(Object.fromEntries(shown.map(a => [a.name, a.withCeo]))).toMatchObject({ 'With Lisa': false, 'With Ivan': true, 'After Ivan': true, Working: false });
+  expect(Object.fromEntries(shown.map(a => [a.name, a.withCeo]))).toMatchObject({ 'With Clara': false, 'With Ivan': true, 'After Ivan': true, Working: false });
 });

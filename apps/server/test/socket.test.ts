@@ -22,7 +22,7 @@ async function liveCompany(pingMs = '2147483647') {
   const joined = await app.inject({
     method: 'POST',
     url: '/api/nodes/join',
-    payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' },
+    payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' },
   });
   const { machine, nodes } = joined.json();
   return { app, db, url, ceo, machineId: machine.id as string, subId: nodes[0].subscriptionId as string, nodeId: nodes[0].nodeId as string, key: nodes[0].key as string };
@@ -279,7 +279,7 @@ describe('node socket', () => {
     expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]).toMatchObject({ keyHash: null });
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
-    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     expect(joined.statusCode).toBe(200);
   });
 

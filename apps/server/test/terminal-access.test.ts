@@ -30,8 +30,8 @@ const CASES = [
   { who: "department owner, another's plan, other department", viewer: 'olga', agent: 'far', refused: true },
   { who: 'whole company, own plan', viewer: 'wes', agent: 'wide', write: true },
   { who: "whole company, another's plan", viewer: 'wes', agent: 'other', refused: true },
-  { who: "delegate, another's plan", viewer: 'lisa', agent: 'other', write: false },
-  { who: 'delegate, own plan', viewer: 'lisa', agent: 'deputy', write: true },
+  { who: "delegate, another's plan", viewer: 'clara', agent: 'other', write: false },
+  { who: 'delegate, own plan', viewer: 'clara', agent: 'deputy', write: true },
   { who: "CEO, another's plan", viewer: 'ceo', agent: 'other', write: false },
 ] as const;
 
@@ -173,8 +173,8 @@ describe('a terminal open when the right to it goes', () => {
 
   it('closes at once when a person stops being the delegate', async () => {
     const c = await company();
-    const { screen } = await watching(c, c.tokens.lisa, c.crew.other.id);
-    await c.app.inject({ method: 'PUT', url: `/api/people/${c.ids.lisa}/ceo-delegate`, payload: { isCeoDelegate: false }, ...as(c.tokens.ceo) });
+    const { screen } = await watching(c, c.tokens.clara, c.crew.other.id);
+    await c.app.inject({ method: 'PUT', url: `/api/people/${c.ids.clara}/ceo-delegate`, payload: { isCeoDelegate: false }, ...as(c.tokens.ceo) });
     expect(await screen.closed).toEqual(noAccess);
   });
 
@@ -209,14 +209,14 @@ describe('a terminal open when the right to it goes', () => {
 
   it('opens again with the rights of now when the person still sees it but is no longer the one who types', async () => {
     const c = await company({ STREAM_PING_MS: '100' });
-    const running = await turnOn(c, c.crew.deputy.id, c.plans.lisa.id);
+    const running = await turnOn(c, c.crew.deputy.id, c.plans.clara.id);
     await onPlan(c, c.crew.deputy.id, c.plans.wes.id);
-    const { screen } = await watching(c, c.tokens.lisa, c.crew.deputy.id);
+    const { screen } = await watching(c, c.tokens.clara, c.crew.deputy.id);
     expect(screen.frames[0]).toEqual({ type: 'ready', write: true, message: true });
     await turnOn(c, c.crew.deputy.id, c.plans.wes.id, 'done');
     await ended(c, running.id);
     expect(await screen.closed).toEqual({ code: 4410, reason: 'node_offline' });
-    expect(await rights(c, c.tokens.lisa, c.crew.deputy.id)).toEqual({ type: 'ready', write: false, message: true });
+    expect(await rights(c, c.tokens.clara, c.crew.deputy.id)).toEqual({ type: 'ready', write: false, message: true });
   });
 
   it('takes the keys of someone who may type right up to when the right goes', async () => {

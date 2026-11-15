@@ -277,7 +277,7 @@ describe('migration 0031', () => {
     await migrate(db, { migrationsFolder: await migrationsUpTo('0030_job_answers_ceo') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
-    await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'dev-mac')`);
     await db.execute(sql`insert into departments (company_id, role_code, repo_url) values (${C}, 'DEV', 'https://github.com/acme/shop.git')`);
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -308,7 +308,7 @@ describe('migration 0033', () => {
     await migrate(db, { migrationsFolder: await migrationsUpTo('0032_company_template') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
-    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${M}, ${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${M}, ${C}, ${P}, 'mac-0001-abcd', 'dev-mac')`);
     await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id, machine_id, node_key_hash, node_version, last_seen_at) values
       (${PLAN}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P}, ${M}, 'hash-of-key', '0.9.0', '2026-10-30T10:00:00Z'),
       (${WAITING}, ${C}, 'codex', 'personal', 'Codex', 'waiting_machine', ${P}, null, null, null, null),

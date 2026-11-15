@@ -32,7 +32,7 @@ describe('planned Vitest selection', () => {
 });
 
 async function selectionFile(bytes: string | Buffer): Promise<string> {
-  const base = join(process.cwd(), '.metrics/task-588/selection');
+  const base = join(process.cwd(), '.metrics/run-planning/selection');
   await mkdir(base, { recursive: true });
   const folder = await mkdtemp(join(base, 'case-'));
   onTestFinished(async () => { await rm(folder, { recursive: true, force: true }); });

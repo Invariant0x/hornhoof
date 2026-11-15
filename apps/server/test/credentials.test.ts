@@ -10,8 +10,8 @@ import { LEASE_MOVE_MS, moveLeases } from '../src/modules/subscriptions/lease.js
 import { companyView } from '../src/modules/tools/company.js';
 import { as, connectNode, invitePerson, listen, nextOf, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
-const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
-const LAPTOP = { ...MAC, machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
+const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
+const LAPTOP = { ...MAC, machineId: 'laptop-0002-abcd', hostname: 'dev-laptop' };
 const TOWER = { ...MAC, machineId: 'tower-0003-abcd', hostname: 'oleg-tower' };
 const KEY = (c: string) => 'age1' + c.repeat(58);
 const SEALED = (n: string) => `-----BEGIN AGE ENCRYPTED FILE-----\nSEALEDMARK${n}\n-----END AGE ENCRYPTED FILE-----\n`;
@@ -162,9 +162,9 @@ describe("a plan's sign-in sealed to its nodes", () => {
     first.close();
     await first.closed;
     /* B never said a key. A third node of the plan had one, and its machine was disconnected. */
-    const tower = (await join(app, await machineCode(app, ceo), { ...MAC, machineId: 'spare-0004-abcd', hostname: 'ivan-spare' })).json();
+    const tower = (await join(app, await machineCode(app, ceo), { ...MAC, machineId: 'spare-0004-abcd', hostname: 'dev-spare' })).json();
     const added = await app.inject({ method: 'POST', url: `/api/machines/${tower.machine.id}/plans`, payload: { subscription: plan }, ...as(ceo) });
-    const c = (await join(app, codeOf(added.json().command), { ...MAC, machineId: 'spare-0004-abcd', hostname: 'ivan-spare' })).json().nodes[0] as Joined;
+    const c = (await join(app, codeOf(added.json().command), { ...MAC, machineId: 'spare-0004-abcd', hostname: 'dev-spare' })).json().nodes[0] as Joined;
     const nc = await online(c, KEY('c'));
     nc.close();
     await nc.closed;
@@ -201,8 +201,8 @@ describe('the sealing routes', () => {
     expect(mine.json()).toEqual({
       version: 0,
       recipients: expect.arrayContaining([
-        { nodeId: a.nodeId, publicKey: KEY('a'), hostname: 'ivan-mac' },
-        { nodeId: b.nodeId, publicKey: KEY('b'), hostname: 'ivan-laptop' },
+        { nodeId: a.nodeId, publicKey: KEY('a'), hostname: 'dev-mac' },
+        { nodeId: b.nodeId, publicKey: KEY('b'), hostname: 'dev-laptop' },
       ]),
     });
     const theirs = await app.inject({ url: `/api/subscriptions/${plan}/recipients`, ...as(oleg) });
@@ -277,7 +277,7 @@ describe('signing a plan in from Hornhoof', () => {
     const nb = await online(b, KEY('b'), false);
     const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { nodeId: b.nodeId, fresh: true }, ...as(ceo) });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ nodeId: b.nodeId, hostname: 'ivan-laptop' });
+    expect(res.json()).toEqual({ nodeId: b.nodeId, hostname: 'dev-laptop' });
     expect(await nextOf(nb, 'login.start')).toEqual({ type: 'login.start', fresh: true });
     const theirs = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(oleg) });
     expect(theirs.statusCode).toBe(403);
@@ -295,7 +295,7 @@ describe('signing a plan in from Hornhoof', () => {
     await until(async () => (await db.select({ v: nodes.version }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.v === '0.8.0');
     const nb = await online(b, KEY('b'), false);
     const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(ceo) });
-    expect(res.json()).toEqual({ nodeId: b.nodeId, hostname: 'ivan-laptop' });
+    expect(res.json()).toEqual({ nodeId: b.nodeId, hostname: 'dev-laptop' });
     expect(await nextOf(nb, 'login.start')).toEqual({ type: 'login.start', fresh: false });
     const old = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { nodeId: a.nodeId, fresh: false }, ...as(ceo) });
     expect(old.statusCode).toBe(409);
@@ -327,9 +327,9 @@ describe('signing a plan in from Hornhoof', () => {
     const connect: string = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json().command;
     expect(res.json().error).toEqual({
       code: 'conflict',
-      message: expect.stringContaining('ivan-mac, ivan-laptop'),
+      message: expect.stringContaining('dev-mac, dev-laptop'),
       reason: 'signin_unsupported',
-      details: { machines: ['ivan-mac', 'ivan-laptop'], command: connect.split(' -s -- --join ')[0] },
+      details: { machines: ['dev-mac', 'dev-laptop'], command: connect.split(' -s -- --join ')[0] },
     });
     expect(res.json().error.details.command).toBe('curl -fsSL http://localhost:8080/install.sh | bash');
   });
@@ -348,9 +348,9 @@ describe('signing a plan in from Hornhoof', () => {
     updated.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true, publicKey: KEY('a'), build: 'c0ffee'.padEnd(40, '0') });
     await until(async () => (await db.select({ k: nodes.publicKey }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.k === KEY('a'));
     expect(await db.select().from(machines)).toEqual(before);
-    expect(await db.select({ id: nodes.id, status: nodes.status }).from(nodes).where(eq(nodes.machineId, (await db.select({ id: machines.id }).from(machines).where(eq(machines.hostname, 'ivan-mac')))[0]!.id))).toEqual([{ id: a.nodeId, status: 'ready' }]);
+    expect(await db.select({ id: nodes.id, status: nodes.status }).from(nodes).where(eq(nodes.machineId, (await db.select({ id: machines.id }).from(machines).where(eq(machines.hostname, 'dev-mac')))[0]!.id))).toEqual([{ id: a.nodeId, status: 'ready' }]);
     expect((await db.select({ status: subscriptions.status }).from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.status).toBe('ready');
-    expect((await signIn()).json()).toEqual({ nodeId: a.nodeId, hostname: 'ivan-mac' });
+    expect((await signIn()).json()).toEqual({ nodeId: a.nodeId, hostname: 'dev-mac' });
     expect(await nextOf(updated, 'login.start')).toEqual({ type: 'login.start', fresh: false });
   });
 
@@ -487,7 +487,7 @@ describe('which account a plan runs on', () => {
     const na = await connectNode(url, a.key);
     na.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true, account: IVAN });
     await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'max');
-    expect(await mine(app, ceo, plan)).toMatchObject({ accounts: [{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max', email: 'ivan.plans@example.com' }], tier: 'max', accountsDiffer: false, signedInOnce: false, leaseMachine: null });
+    expect(await mine(app, ceo, plan)).toMatchObject({ accounts: [{ nodeId: a.nodeId, hostname: 'dev-mac', tier: 'max', email: 'ivan.plans@example.com' }], tier: 'max', accountsDiffer: false, signedInOnce: false, leaseMachine: null });
 
     /* Dana works in Sales only. The map shows her the orchestrator's state, but neither his plan nor Ivan's address. */
     const [acme] = await db.select().from(companies);
@@ -507,7 +507,7 @@ describe('which account a plan runs on', () => {
     na.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true, account: IVAN });
     await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'max');
     expect((await mine(app, ceo, plan)).accounts).toEqual([expect.objectContaining({ email: IVAN.email })]);
-    expect((await mine(app, oleg, plan)).accounts).toEqual([{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max' }]);
+    expect((await mine(app, oleg, plan)).accounts).toEqual([{ nodeId: a.nodeId, hostname: 'dev-mac', tier: 'max' }]);
     const [owner] = await db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
     const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(eq(agents.kind, 'orchestrator'));
     const seen = await app.inject({ method: 'GET', url: '/api/subscriptions', headers: orchestratorHeaders(owner!.id, orchestrator!.id) });
@@ -570,7 +570,7 @@ describe("a Codex plan's lease", () => {
     expect(await holder()).toBe(b.nodeId);
     /* The Plans tab says the plan was signed in once and runs on the laptop now. */
     const listed = ((await app.inject({ method: 'GET', url: '/api/subscriptions', ...as(ceo) })).json().subscriptions as { id: string }[]).find(s => s.id === plan);
-    expect(listed).toMatchObject({ signedInOnce: true, leaseMachine: 'ivan-laptop' });
+    expect(listed).toMatchObject({ signedInOnce: true, leaseMachine: 'dev-laptop' });
     expect(await nextOf(nb, 'cred.lease')).toEqual({ type: 'cred.lease', hold: true });
     expect(await nextOf(nb, 'cred.put')).toEqual({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: SEALED('b') });
     /* The new holder learns whom to seal a renewed sign-in for. */

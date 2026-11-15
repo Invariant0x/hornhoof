@@ -13,12 +13,12 @@ const planned = { kind: 'planned' as const, reason: 'node_update' as const, star
 type Hello = Extract<NodeMessage, { type: 'hello' }>;
 
 async function personalNode(knownHost = true) {
-  const { app, db } = await testApp({ NODE_KEY: 'k'.repeat(40), ...(knownHost ? { HORNHOOF_HOST_ID: hashToken('hornhoof-host:a-host-machine') } : {}) });
+  const { app, db } = await testApp({ NODE_KEY: 'k'.repeat(40), ...(knownHost ? { HORNHOOF_HOST_ID: hashToken('hornhoof-host:host-a-machine') } : {}) });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
   const code = connected.json().command.split('--join ')[1];
-  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'a-host-machine', hostname: 'a-host', os: 'linux', arch: 'x86_64' } });
+  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'host-a-machine', hostname: 'host-a', os: 'linux', arch: 'x86_64' } });
   expect(joined.statusCode, joined.body).toBe(200);
   const identity = joined.json().nodes[0] as { nodeId: string; key: string; subscriptionId: string };
   let socket = await connectNode(url, identity.key);
@@ -51,7 +51,7 @@ describe('node restart evidence stored with a failure', () => {
     expect((await c.row()).boot).toMatchObject({ ...firstBoot, stopped: planned });
     expect((await c.failed()).status).toBe('running');
     const cut = await c.restart();
-    expect(cut).toMatchObject({ error: 'machine_restarted', tail: '', interruption: { cause: 'container', node: { id: c.identity.nodeId, name: 'a-host' }, machine: { id: (await c.row()).machineId, name: 'a-host' }, diagnosis: planned } });
+    expect(cut).toMatchObject({ error: 'machine_restarted', tail: '', interruption: { cause: 'container', node: { id: c.identity.nodeId, name: 'host-a' }, machine: { id: (await c.row()).machineId, name: 'host-a' }, diagnosis: planned } });
   });
 
   it('keeps the killed process report and its previous node log', async () => {
@@ -103,7 +103,7 @@ describe('node restart evidence stored with a failure', () => {
     socket.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: nextBoot, restart: planned, nodeLog: 'Current process reconnected.' });
     const failed = async () => (await c.db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!;
     await until(async () => (await failed()).status === 'failed');
-    expect((await failed()).interruption).toMatchObject({ machine: { id: (await c.row()).machineId, name: 'a-host' }, diagnosis: { kind: 'planned', reason, log: reason === 'server_restart' ? 'Current process reconnected.' : planned.log } });
+    expect((await failed()).interruption).toMatchObject({ machine: { id: (await c.row()).machineId, name: 'host-a' }, diagnosis: { kind: 'planned', reason, log: reason === 'server_restart' ? 'Current process reconnected.' : planned.log } });
   });
 
   it('keeps the first matching built-in stop and ignores missing, stale and inconsistent generations', async () => {

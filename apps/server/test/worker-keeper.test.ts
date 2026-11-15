@@ -619,9 +619,9 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await until(() => accessIn(config.controlDir)?.untilSec === untilSec);
     /* A command for it goes through the leader to its updater's folder, and the answer back. */
     const id = await command(c, machine, 'cat /host/etc/hostname');
-    expect(await updaterAnswers(config.controlDir, id, 'ivan-mac\n')).toMatchObject({ command: 'cat /host/etc/hostname' });
+    expect(await updaterAnswers(config.controlDir, id, 'dev-mac\n')).toMatchObject({ command: 'cat /host/etc/hostname' });
     await until(async () => (await runOf(c, id)).state === 'done');
-    expect(await runOf(c, id)).toMatchObject({ exit: 0, output: 'ivan-mac\n' });
+    expect(await runOf(c, id)).toMatchObject({ exit: 0, output: 'dev-mac\n' });
     /* Whoever comes to the worker's own web port is no keeper, whatever they write: nothing is taken through it. */
     const next = await command(c, machine, 'id');
     const through = await ask(w.front, { path: '/api/network/computer?updater=1', headers: { 'x-hornhoof-via': 'keeper', 'x-hornhoof-keeper': '1' } });
@@ -658,10 +658,10 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
   it("reports what its updater learned of the machine where the installer wrote neither name nor system", async () => {
     /* A server that came to this build by Update: its settings name no host, and its updater asked the engine. */
     const c = await company({ addresses: [], hostname: null, reportAs: undefined });
-    writeFileSync(join(c.control, 'host.json'), JSON.stringify({ os: 'linux', hostname: 'a-host' }));
+    writeFileSync(join(c.control, 'host.json'), JSON.stringify({ os: 'linux', hostname: 'host-a' }));
     writeFileSync(join(c.control, 'addresses.json'), JSON.stringify({ at: Math.floor(Date.now() / 1000), addresses: ['192.0.2.4'] }));
-    await until(async () => (await c.serverRow())?.hostname === 'a-host');
-    expect(await c.serverRow()).toMatchObject({ hostname: 'a-host', os: 'linux', addresses: ['192.0.2.4'] });
+    await until(async () => (await c.serverRow())?.hostname === 'host-a');
+    expect(await c.serverRow()).toMatchObject({ hostname: 'host-a', os: 'linux', addresses: ['192.0.2.4'] });
   });
   it('reports its round trip and the internet', async () => {
     const c = await company();

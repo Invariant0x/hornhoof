@@ -115,7 +115,7 @@ describe('a repository Hornhoof creates', () => {
     await c.db.update(departments).set({ name: 'Marketing' }).where(eq(departments.id, c.sales.id));
     expect((await saveCompanyKey(c, c.ceoToken, { owner: 'acme', token: COMPANY_KEY })).statusCode).toBe(200);
     const asked = github(c);
-    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const author = { name: 'Alex Rivera', email: 'alex@acme.example' };
 
     const res = await create(c, c.ceoToken, c.sales.id, { name: 'marketing', author });
     expect(res.statusCode, res.body).toBe(201);

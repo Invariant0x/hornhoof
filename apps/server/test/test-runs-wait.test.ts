@@ -56,7 +56,7 @@ describe('a run that ends while the one who started it waits', () => {
   describe.each(RUN_TOOLS)('$tool', run => {
     it('ends the wait and wakes the agent once with the result and where to read it, when it passes', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, run);
       await c.db.update(tasks).set({ silent: 2 }).where(eq(tasks.id, c.task.id));
       const before = await taskRow(c);
@@ -74,7 +74,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('ends the wait and wakes the agent once when its tests or command fail', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, run);
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run'), { ok: false, exitCode: 1, error: 'failed', log: 'FAIL cart.test.ts\n' }));
       const prompt = await endedOnce(c, new RegExp(`${run.name} 1 failed`));
@@ -83,7 +83,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('ends the wait and wakes the agent once when it runs out of time', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, run, { minutes: 5 });
       await nextOf(ivan.node, 'tests.run');
       await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
@@ -92,7 +92,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('ends the wait and wakes the agent once when someone else stops it', async () => {
       const c = await company();
-      await c.machine(c.ceo, 'ivan-mac');
+      await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, run);
       expect((await (await c.turn(c.head, null)).call(run.stop, { run: 1 })).error).toBe(false);
       const prompt = await endedOnce(c, new RegExp(`${run.name} 1 was stopped by Hana`));
@@ -101,7 +101,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('ends the wait and wakes the agent once when the agent stops it from another turn', async () => {
       const c = await company();
-      await c.machine(c.ceo, 'ivan-mac');
+      await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, run);
       expect((await (await c.turn(c.bruno, null)).call(run.stop, { run: 1 })).error).toBe(false);
       await endedOnce(c, new RegExp(`${run.name} 1 was stopped by you`));
@@ -109,7 +109,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('wakes the agent once, after the last part, when it has several', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       const ann = await c.machine(c.ann, 'ann-pc', idle({ load: 1 }));
       await waitingOn(c, run, { command: 'make check -- {part}', parts: 2 });
       const first = await nextOf(ivan.node, 'tests.run');
@@ -125,7 +125,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('wakes the agent once as before when it does not wait', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call(run.tool, { command: 'make check', ...run.args });
       await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));
@@ -139,7 +139,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('wakes nobody on a task cancelled meanwhile', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, run);
       const part = await nextOf(ivan.node, 'tests.run');
       expect((await (await c.turn(c.head, null)).call('cancel_task', { task: c.task.number, why: 'Not needed.' })).error).toBe(false);
@@ -154,7 +154,7 @@ describe('a run that ends while the one who started it waits', () => {
 
   it('wakes the agent when the machine is gone for good', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     await waitingOn(c, RUN_TOOLS[1]);
     await nextOf(ivan.node, 'tests.run');
     ivan.node.close();
@@ -165,7 +165,7 @@ describe('a run that ends while the one who started it waits', () => {
 
   it('wakes the agent when a test run was lost as often as it may be', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     await waitingOn(c, RUN_TOOLS[0]);
     for (const left of [2, 1, 0]) {
       await nextOf(ivan.node, 'tests.run');
@@ -177,7 +177,7 @@ describe('a run that ends while the one who started it waits', () => {
 
   it('tells the agent of each run that ends, also of one that ended after it waited again', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const t = await c.turn(c.bruno);
     await t.call('run_tests', { command: 'make one' });
@@ -206,7 +206,7 @@ describe('a run that ends while the one who started it waits', () => {
 
   it('keeps both results in the one turn that waits when two runs end before it starts', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const t = await c.turn(c.bruno);
     await t.call('run_tests', { command: 'make one' });
@@ -232,7 +232,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it.each(RUN_TOOLS)('leaves a wait of its starter alone when it names no run, and tells it of $tool all the same', async run => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call(run.tool, { command: 'make check', ...run.args });
       expect((await t.call('wait_for', { task: c.task.number, reason: 'A deployment', until: anHour() })).error).toBe(false);
@@ -249,7 +249,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('lets the agent end the wait it no longer needs as it reads the result, with no wake at its deadline', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call('run_tests', { command: 'make check' });
       await t.call('wait_for', { task: c.task.number, reason: 'The run, I forgot to name it', until: anHour() });
@@ -280,7 +280,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('leaves a wait for another run alone, and ends with the run it names', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
+      const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
       const ann = await c.machine(c.ann, 'ann-pc');
       const t = await c.turn(c.bruno);
       await t.call('run_tests', { command: 'make one' });
@@ -300,7 +300,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it.each(RUN_TOOLS)('gives no second wake at the deadline of a wait $tool ended', async run => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, run);
       const { until: deadline } = (await taskRow(c)).externalWait!;
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
@@ -311,7 +311,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('ends a wait that came back at its deadline when its run ends later, with no new wake for the wait', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await waitingOn(c, RUN_TOOLS[0]);
       const { until: deadline, operation } = (await taskRow(c)).externalWait!;
       expect(await checkExternalWaits(c.app.ctx, new Date(Date.parse(deadline) + 1))).toBe(1);
@@ -324,7 +324,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('refuses a wait for a run that ended, one of another task or one that never was', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call('run_tests', { command: 'make check' });
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
@@ -343,7 +343,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('takes no wait for the run of someone else', async () => {
       const c = await company();
-      await c.machine(c.ceo, 'ivan-mac');
+      await c.machine(c.ceo, 'dev-mac');
       const head = await c.turn(c.head, c.task.id);
       await head.call('run_tests', { command: 'make check' });
       const refused = await (await c.turn(c.bruno)).call('wait_for', { task: c.task.number, reason: 'The run', until: anHour(), run: 1 });
@@ -365,7 +365,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it.each(RUN_TOOLS)('$tool keeps who started it and makes up no date with no policy, not even from its limit', async run => {
       const c = await company();
-      await c.machine(c.ceo, 'ivan-mac');
+      await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call(run.tool, { command: 'make check', ...run.args, minutes: 5 });
       await until(async () => (await runWait(c)).sourceState.stage === 'execution');
@@ -383,7 +383,7 @@ describe('a run that ends while the one who started it waits', () => {
       expect(queued).toMatchObject({ state: 'active', generation: 1, ownerAgentId: c.bruno.id, sourceState: { stage: 'queue' } });
       expect(queued.ownerDueAt!.getTime()).toBeGreaterThanOrEqual(startedAt + 3_600_000);
       expect(queued.plan!.provenance).toMatchObject({ kind: 'department_policy', origin: 'run:queue', revision: 1 });
-      await c.machine(c.ceo, 'ivan-mac');
+      await c.machine(c.ceo, 'dev-mac');
       await pumpTests(c.app.ctx);
       await until(async () => (await runWait(c)).sourceState.stage === 'execution');
       const running = await runWait(c);
@@ -395,7 +395,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('goes to its retry clock when a machine loses a part, and back to executing', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await policy(c, 'queue', 3_600_000);
       await policy(c, 'retry', 60_000);
       const t = await c.turn(c.bruno);
@@ -434,7 +434,7 @@ describe('a run that ends while the one who started it waits', () => {
       ['it fails', 'resolved', 'failed', { ok: false, exitCode: 1, error: 'failed', log: 'FAIL\n' }],
     ] as const)('ends once with its result when %s', async (_name, state, status, over) => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run'), over));
       await nextOf(ivan.node, 'tests.ack');
@@ -445,7 +445,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('is cancelled when the run is stopped', async () => {
       const c = await company();
-      await c.machine(c.ceo, 'ivan-mac');
+      await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
       await t.call('run_tests', { command: 'make check' });
       await t.call('stop_tests', { run: 1 });
@@ -455,7 +455,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('ends with its task closed meanwhile, and the run ending later changes nothing', async () => {
       const c = await company();
-      const ivan = await c.machine(c.ceo, 'ivan-mac');
+      const ivan = await c.machine(c.ceo, 'dev-mac');
       await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
       const part = await nextOf(ivan.node, 'tests.run');
       expect((await (await c.turn(c.head, null)).call('cancel_task', { task: c.task.number, why: 'Not needed.' })).error).toBe(false);
@@ -489,7 +489,7 @@ describe('a run that ends while the one who started it waits', () => {
 
   it.each(RUN_TOOLS)("leaves another holder's wait alone when $tool ends and still tells its starter", async run => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const head = await c.turn(c.head, c.task.id);
     expect((await head.call(run.tool, { command: 'make check', ...run.args })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, head.job.id));
@@ -508,7 +508,7 @@ describe('a run that ends while the one who started it waits', () => {
 
   it.each(RUN_TOOLS)('refuses a wait while the result of $tool waits for the agent in a turn', async run => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const t = await c.turn(c.bruno);
     await t.call(run.tool, { command: 'make check', ...run.args });
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));

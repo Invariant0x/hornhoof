@@ -178,9 +178,9 @@ describe('the updater of a worker', () => {
     const hostOf = (control: string) => (existsSync(join(control, 'host.json')) ? (JSON.parse(readFileSync(join(control, 'host.json'), 'utf8')) as object) : null);
     /* A server that came to this build by Update: its .env names no system, and the engine is the computer's own. */
     const s = stand();
-    const r = await runOnce(s, null, { HORNHOOF_HOST_OS: '', STUB_INFO: 'Debian GNU/Linux 12 (bookworm)|a-host', STUB_IP: interfaces });
+    const r = await runOnce(s, null, { HORNHOOF_HOST_OS: '', STUB_INFO: 'Debian GNU/Linux 12 (bookworm)|host-a', STUB_IP: interfaces });
     expect(r.code).toBe(0);
-    expect(hostOf(s.control)).toEqual({ os: 'linux', hostname: 'a-host' });
+    expect(hostOf(s.control)).toEqual({ os: 'linux', hostname: 'host-a' });
     expect((JSON.parse(readFileSync(join(s.control, 'addresses.json'), 'utf8')) as { addresses: string[] }).addresses).toEqual(['192.0.2.4']);
     /* An engine in a machine of its own says nothing of the computer, and neither does one that does not answer. */
     for (const info of ['Docker Desktop|docker-desktop', 'OrbStack|orbstack', 'fail', '']) {
@@ -195,7 +195,7 @@ describe('the updater of a worker', () => {
     expect(hostOf(odd.control)).toEqual({ os: 'linux', hostname: '' });
     /* What the installer wrote stands, and the engine is not asked. */
     const told = stand();
-    const t = await runOnce(told, null, { HORNHOOF_HOST_OS: 'darwin', STUB_INFO: 'Ubuntu 24.04|a-host', STUB_IP: interfaces });
+    const t = await runOnce(told, null, { HORNHOOF_HOST_OS: 'darwin', STUB_INFO: 'Ubuntu 24.04|host-a', STUB_IP: interfaces });
     expect([hostOf(told.control), t.calls.some(c => c.startsWith('docker info'))]).toEqual([null, false]);
   });
 });

@@ -218,7 +218,7 @@ describe('the databases a restore set aside', () => {
     const [owner] = await s.db.select().from(people).where(eq(people.isOwner, true));
     const [machine] = await s.db
       .insert(machines)
-      .values({ companyId: s.acme.id, personId: owner!.id, machineKey: 'left-machine', hostname: 'ivan-mac', role: 'worker', networkId: `99bb2233aabbccdd${'2'.repeat(48)}`, uploadState: 'waiting', dataLeftAt: new Date() })
+      .values({ companyId: s.acme.id, personId: owner!.id, machineKey: 'left-machine', hostname: 'dev-mac', role: 'worker', networkId: `99bb2233aabbccdd${'2'.repeat(48)}`, uploadState: 'waiting', dataLeftAt: new Date() })
       .returning();
     const stateOf = async () => (await s.db.select().from(machines).where(eq(machines.id, machine!.id)))[0]!.uploadState;
     const name = 'hornhoof_upload_99bb2233aabbccdd_20261111t120005';
@@ -231,7 +231,7 @@ describe('the databases a restore set aside', () => {
     await s.merger.discover();
     const [found, ...others] = await s.merges();
     expect(others).toEqual([]);
-    expect(found).toMatchObject({ source: `upload:${name}`, status: 'pending', machine: machine!.id, label: "ivan-mac's copy, uploaded 11 Nov 12:00 UTC" });
+    expect(found).toMatchObject({ source: `upload:${name}`, status: 'pending', machine: machine!.id, label: "dev-mac's copy, uploaded 11 Nov 12:00 UTC" });
     expect(found!.fork).toMatch(/^[0-9a-f-]{36}$/);
     expect(await stateOf()).toBe('received');
     /* Its bundle is asked of the keeper as that of a database a restore kept. */
@@ -254,7 +254,7 @@ describe('the databases a restore set aside', () => {
     const [owner] = await s.db.select().from(people).where(eq(people.isOwner, true));
     const [machine] = await s.db
       .insert(machines)
-      .values({ companyId: s.acme.id, personId: owner!.id, machineKey: 'left-machine', hostname: 'ivan-mac', role: 'worker', networkId: `99bb2233aabbccdd${'2'.repeat(48)}`, uploadState: 'waiting', dataLeftAt: new Date() })
+      .values({ companyId: s.acme.id, personId: owner!.id, machineKey: 'left-machine', hostname: 'dev-mac', role: 'worker', networkId: `99bb2233aabbccdd${'2'.repeat(48)}`, uploadState: 'waiting', dataLeftAt: new Date() })
       .returning();
     const stateOf = async () => (await s.db.select().from(machines).where(eq(machines.id, machine!.id)))[0]!.uploadState;
     const name = 'hornhoof_upload_99bb2233aabbccdd_20261111t120005';

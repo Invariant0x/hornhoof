@@ -19,7 +19,7 @@ const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(
 /* A spreadsheet, as a zip archive starts. */
 const SHEET = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(64, 3)]);
 
-/* Acme: Bruno in Development and Sam in Sales run on one plan with the orchestrator. Maria has Development; Lisa is the CEO
+/* Acme: Bruno in Development and Sam in Sales run on one plan with the orchestrator. Maria has Development; Clara is the CEO
    delegate. */
 async function company() {
   const { app, db } = await testApp({ NODE_KEY });
@@ -36,11 +36,11 @@ async function company() {
   const [bruno] = await hire('Bruno', dev!.id);
   const [sam] = await hire('Sam', sales!.id);
   const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@example.com', access: { departments: [dev!.id] } });
-  const lisa = await invitePerson(app, ceo, { name: 'Lisa', email: 'lisa@example.com', access: { whole: true } });
+  const clara = await invitePerson(app, ceo, { name: 'Clara', email: 'clara@example.com', access: { whole: true } });
   const everyone = await db.select().from(people);
   const idOf = (name: string) => everyone.find(p => p.name === name)!.id;
-  await app.inject({ method: 'PUT', url: `/api/people/${idOf('Lisa')}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
-  return { app, db, url, ceo, builtin, maria, lisa, idOf, orchestrator: orchestrator!, bruno: bruno!, sam: sam! };
+  await app.inject({ method: 'PUT', url: `/api/people/${idOf('Clara')}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
+  return { app, db, url, ceo, builtin, maria, clara, idOf, orchestrator: orchestrator!, bruno: bruno!, sam: sam! };
 }
 
 const upload = (app: FastifyInstance, token: string, agent: string, bytes: Buffer, name = 'screen.png', type = 'application/octet-stream') =>
@@ -221,11 +221,11 @@ describe('a message with pictures', () => {
   });
 
   it("takes only the person's own pictures for this agent", async () => {
-    const { app, db, ceo, lisa, bruno, sam } = await company();
+    const { app, db, ceo, clara, bruno, sam } = await company();
     const jobsBefore = (await db.select().from(jobs)).length;
     const forSam = await uploaded(app, ceo, sam.id);
-    const lisas = await uploaded(app, lisa, bruno.id);
-    for (const id of [forSam.id, lisas.id, '00000000-0000-4000-8000-000000000000']) {
+    const claras = await uploaded(app, clara, bruno.id);
+    for (const id of [forSam.id, claras.id, '00000000-0000-4000-8000-000000000000']) {
       const res = await send(app, ceo, bruno.id, { text: 'Look', pictures: [id] });
       expect([res.statusCode, res.json().error.reason]).toEqual([404, 'attachment_unknown']);
     }
@@ -266,13 +266,13 @@ describe("getting a message's picture", () => {
   });
 
   it('shows to people who see the agent, and no one else', async () => {
-    const { app, db, ceo, maria, lisa, bruno } = await company();
+    const { app, db, ceo, maria, clara, bruno } = await company();
     await ownPlan(db, 'maria@example.com', bruno.id);
-    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Lisa'));
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Clara'));
     const shot = await uploaded(app, ceo, bruno.id);
     const toOrchestrator = await uploaded(app, ceo, 'orchestrator');
     const shown = (id: string, token: string) => app.inject({ url: `/api/attachments/${id}`, ...as(token) });
-    for (const token of [ceo, maria, lisa]) {
+    for (const token of [ceo, maria, clara]) {
       const res = await shown(shot.id, token);
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toBe('image/png');
@@ -280,7 +280,7 @@ describe("getting a message's picture", () => {
       expect(res.headers['x-content-type-options']).toBe('nosniff');
       expect(res.rawPayload).toEqual(PNG);
     }
-    expect((await shown(toOrchestrator.id, lisa)).statusCode).toBe(200);
+    expect((await shown(toOrchestrator.id, clara)).statusCode).toBe(200);
     expect((await shown(toOrchestrator.id, maria)).statusCode).toBe(404);
   });
 
