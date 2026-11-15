@@ -101,11 +101,14 @@ it('lets a finger take a line of the company map and a bend on it as easily as a
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p, '(pointer: coarse)'))).toEqual(['44px', '44px', '-22px 0 0 -22px']);
 });
 
-it("sets the Machines pool's and card's percentages in the text font at the size and weight of the figure beside them", () => {
+it("sets the percent sign of a share on the Machines pool and on a meter in the text font at the size and weight of its figure", () => {
   expect(decl('.pool-facts .pct', 'font-family')).toBe('var(--f-body)');
   expect(decl('.g-f .pct', 'font-family')).toBe('var(--f-body)');
-  expect(decl('.pool-facts .pct', 'font-variant-numeric')).toBe('tabular-nums');
-  expect(decl('.g-f .pct', 'font-variant-numeric')).toBe('tabular-nums');
+  /* The sign has no figures to line up; the figures beside it keep their line's font and its tabular figures. */
+  expect(decl('.pool-facts .pct', 'font-variant-numeric')).toBeUndefined();
+  expect(decl('.g-f .pct', 'font-variant-numeric')).toBeUndefined();
+  expect(decl('.pool-facts dd', 'font-variant-numeric')).toBe('tabular-nums');
+  expect(decl('.g-f b', 'font-variant-numeric')).toBe('tabular-nums');
   /* Its line is no taller than the figure's own, so the pool's tile and the meters keep their height. */
   expect(decl('.pool-facts .pct', 'line-height')).toBe('1');
   expect(decl('.g-f .pct', 'line-height')).toBe('1');

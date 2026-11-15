@@ -6,11 +6,11 @@ import type { MachineView, Org, SubView } from '../src/types';
 import type { BuiltinSkinId } from '../src/skins/registry';
 import { ME, serveApi } from './api';
 
-/* A share in percent on the Machines screen, on the pool's tile and on a machine's Load meter, is set in the text font of
-   the skin (--f-body) at the size and weight of the figures beside it, in every shipped language, left to right and right
-   to left, at desktop and phone width, and so is the used share of a plan's limit on the Subscriptions screen. The small
-   unit beside the figure of a meter, a machine's memory, disk and processor and a plan's limit, keeps its own size,
-   colour and font. */
+/* The percent sign of a share on the Machines screen, on the pool's tile and on a machine's Load meter, is set in the
+   text font of the skin (--f-body) at the size and weight of the figures beside it, which keep the display font, in
+   every shipped language, left to right and right to left, at desktop and phone width, and so is the sign of the used
+   share of a plan's limit on the Subscriptions screen. The small unit beside the figure of a meter, a machine's memory,
+   disk and processor and a plan's limit, keeps its own size, colour and font. */
 test.describe.configure({ timeout: 180_000 });
 
 const GIB = 1024 ** 3;
@@ -59,45 +59,61 @@ async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, w
 
 type Look = {
   text: string;
-  family: string;
-  size: string;
-  weight: string;
-  numeric: string;
-  besideSize: string;
-  besideWeight: string;
+  sign: string;
+  elements: number;
+  signFamily: string;
+  lineFamily: string;
+  signSize: string;
+  lineSize: string;
+  signWeight: string;
+  lineWeight: string;
+  lineNumeric: string;
   lines: number;
   inside: boolean;
+  body: string;
+  display: string;
 };
 
-/* What a browser makes of a percentage: its font against the skin's text and display fonts resolved by the same engine,
-   its size and weight against the figure it stands in, and whether it stays whole on one line inside its tile. */
-async function look(share: Locator, tile: Locator): Promise<Look & { body: string; display: string }> {
+/* What a browser makes of a share: the sign set apart against the line it stands in, whose own text holds the figures,
+   both against the skin's text and display fonts resolved by the same engine, and whether the share stays whole on one
+   line inside its tile. */
+async function look(sign: Locator, tile: Locator): Promise<Look> {
   const frame = await tile.elementHandle();
-  return share.evaluate((el, frame) => {
+  return sign.evaluate((el, frame) => {
+    const line = el.parentElement!;
     const probe = (token: string) => {
       const p = document.createElement('span');
       p.style.fontFamily = `var(${token})`;
-      el.parentElement!.append(p);
+      line.append(p);
       const family = getComputedStyle(p).fontFamily;
       p.remove();
       return family;
     };
-    const style = getComputedStyle(el);
-    const beside = getComputedStyle(el.parentElement!);
+    const own = getComputedStyle(el);
+    const its = getComputedStyle(line);
     const range = document.createRange();
-    range.selectNodeContents(el);
-    const rects = [...range.getClientRects()].filter(r => r.width > 0);
+    range.selectNodeContents(line);
+    /* Glyphs of two fonts on one line have boxes of their own heights: a box starts a new line only below the last. */
+    let lines = 0;
+    let bottom = -Infinity;
+    for (const r of [...range.getClientRects()].filter(r => r.width > 0).sort((a, b) => a.top - b.top)) {
+      if (r.top >= bottom - 1) lines++;
+      bottom = r.top >= bottom - 1 ? r.bottom : Math.max(bottom, r.bottom);
+    }
     const text = range.getBoundingClientRect();
     const box = (frame as Element).getBoundingClientRect();
     return {
-      text: el.textContent ?? '',
-      family: style.fontFamily,
-      size: style.fontSize,
-      weight: style.fontWeight,
-      numeric: style.fontVariantNumeric,
-      besideSize: beside.fontSize,
-      besideWeight: beside.fontWeight,
-      lines: new Set(rects.map(r => Math.round(r.top))).size,
+      text: line.textContent ?? '',
+      sign: el.textContent ?? '',
+      elements: line.children.length,
+      signFamily: own.fontFamily,
+      lineFamily: its.fontFamily,
+      signSize: own.fontSize,
+      lineSize: its.fontSize,
+      signWeight: own.fontWeight,
+      lineWeight: its.fontWeight,
+      lineNumeric: its.fontVariantNumeric,
+      lines,
       inside: text.left >= box.left - 0.5 && text.right <= box.right + 0.5 && text.top >= box.top - 0.5 && text.bottom <= box.bottom + 0.5,
       body: probe('--f-body'),
       display: probe('--f-display'),
@@ -105,13 +121,18 @@ async function look(share: Locator, tile: Locator): Promise<Look & { body: strin
   }, frame);
 }
 
-function expectTextFont(seen: Look & { body: string; display: string }, text: string) {
+/* The figures stay in their line's display font with its tabular figures, and only the sign takes the text font, at the
+   line's size and weight, with no space of its own. */
+function expectSignInTextFont(seen: Look, text: string) {
   expect(seen.text).toBe(text);
+  expect(seen.sign).toBe('%');
+  expect(seen.elements).toBe(1);
   expect(seen.body).not.toBe(seen.display);
-  expect(seen.family).toBe(seen.body);
-  expect(seen.size).toBe(seen.besideSize);
-  expect(seen.weight).toBe(seen.besideWeight);
-  expect(seen.numeric).toContain('tabular-nums');
+  expect(seen.lineFamily).toBe(seen.display);
+  expect(seen.signFamily).toBe(seen.body);
+  expect(seen.signSize).toBe(seen.lineSize);
+  expect(seen.signWeight).toBe(seen.lineWeight);
+  expect(seen.lineNumeric).toContain('tabular-nums');
   expect(seen.lines).toBe(1);
   expect(seen.inside).toBe(true);
 }
@@ -140,7 +161,7 @@ async function expectUnitAsBefore(meter: Locator, text: string) {
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
 for (const skin of SKINS) for (const language of LANGS) for (const [width, height] of WIDTHS) {
-  test(`sets the pool's and the cards' percentages in the text font, ${skin} ${language} ${width}`, async ({ page }, info) => {
+  test(`sets the percent sign of the pool's and the cards' shares in the text font, ${skin} ${language} ${width}`, async ({ page }, info) => {
     const t = WORDS[language];
     await openScreen(page, language, skin, width, height, 'machines');
     const pool = page.getByRole('region', { name: t.machines.pool, exact: true });
@@ -165,7 +186,7 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
         /* Counted at once: the card is drawn, so a share set apart is there or never comes. */
         expect(await meter(t.machines.load).locator('.g-f .pct').count()).toBe(1);
         const seen = await look(meter(t.machines.load).locator('.g-f .pct'), meter(t.machines.load));
-        expectTextFont(seen, share);
+        expectSignInTextFont(seen, share);
         /* The figures that are not shares keep the display font. */
         expect(await meter(t.machines.memory).locator('.g-f b').evaluate(el => getComputedStyle(el).fontFamily)).toBe(seen.display);
         /* A share's line stands as tall as a figure's line without one, so the meters keep their height. */
@@ -173,7 +194,7 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
         expect(Math.max(...figures) - Math.min(...figures)).toBeLessThan(0.01);
       }
       expect(await pool.locator('.pool-facts .pct').count()).toBe(1);
-      expectTextFont(await look(pool.locator('.pool-facts .pct'), busy), '42%');
+      expectSignInTextFont(await look(pool.locator('.pool-facts .pct'), busy), '42%');
       /* The pool's tile keeps its height: the share's figure, let take its own height, is as tall as the count of machines. */
       const own = await pool.locator('.pool-facts dd').evaluateAll(all => {
         for (const dd of all) (dd as HTMLElement).style.alignSelf = 'start';
@@ -186,7 +207,7 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
     }
   });
 
-  test(`sets a plan's used share in the text font and keeps its unit as it was, ${skin} ${language} ${width}`, async ({ page }, info) => {
+  test(`sets the percent sign of a plan's used share in the text font and keeps its unit as it was, ${skin} ${language} ${width}`, async ({ page }, info) => {
     const t = WORDS[language];
     await openScreen(page, language, skin, width, height, 'subscriptions');
     await page.locator('tr.rm').filter({ hasText: 'Max' }).locator('button.rowbtn').click();
@@ -204,7 +225,7 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
       await expectUnitAsBefore(limit, t.cards.used);
       /* Counted at once: the card is drawn, so a share set apart is there or never comes. */
       expect(await limit.locator('.g-f .pct').count()).toBe(1);
-      expectTextFont(await look(limit.locator('.g-f .pct'), limit), '40%');
+      expectSignInTextFont(await look(limit.locator('.g-f .pct'), limit), '40%');
       /* The figure's line is as tall as a figure's line without a share, so the meter keeps its height. */
       const [shared, plain] = await limit.locator('.g-f b').evaluate(b => {
         const alone = document.createElement('b');

@@ -183,16 +183,18 @@ describe('Machines', () => {
     expect(fact(mac, 'Test runs')).toContain('Lend to test runs');
   });
 
-  it("sets the pool's and the card's percentages apart, to take the text font", async () => {
+  it("sets apart only the percent sign of the pool's and the card's shares, to take the text font", async () => {
     lists();
     render(<Machines me={ME} />);
     const pool = await screen.findByRole('region', { name: 'All machines together' });
     const mac = await openCard('dev-laptop');
-    const share = (node: Element | null | undefined) => [...(node?.querySelectorAll('.pct') ?? [])].map(n => n.textContent);
-    expect(share(within(pool).getByText('Busy now', { selector: 'dt' }).nextElementSibling)).toEqual(['21%']);
-    expect(share(meter(mac, 'Load').querySelector('.g-f b'))).toEqual(['25%']);
-    expect(share(within(pool).getByText('Processor cores', { selector: 'dt' }).nextElementSibling)).toEqual([]);
-    expect(share(meter(mac, 'Memory'))).toEqual([]);
+    const signs = (node: Element | null | undefined) => [...(node?.querySelectorAll('.pct') ?? [])].map(n => n.textContent);
+    const busy = within(pool).getByText('Busy now', { selector: 'dt' }).nextElementSibling;
+    const load = meter(mac, 'Load').querySelector('.g-f b');
+    expect([busy?.textContent, signs(busy)]).toEqual(['21%', ['%']]);
+    expect([load?.textContent, signs(load)]).toEqual(['25%', ['%']]);
+    expect(signs(within(pool).getByText('Processor cores', { selector: 'dt' }).nextElementSibling)).toEqual([]);
+    expect(signs(meter(mac, 'Memory'))).toEqual([]);
   });
 
   it('does not draw an invalid resource bar when a node reports zero total memory or disk', async () => {

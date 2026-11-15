@@ -333,7 +333,7 @@ describe('Subscriptions', () => {
     expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
 
-  it("sets a plan's used share apart in its meter, to take the text font, with its unit beside the figure", async () => {
+  it("sets apart only the percent sign of a plan's used share in its meter, with its unit beside the figure", async () => {
     const limits = {
       status: 'allowed' as const,
       windows: [{ name: 'five_hour', utilization: null, resetsAt: null }, { name: 'seven_day', utilization: 0.4, resetsAt: '2099-11-04T00:00:00.000Z' }],
@@ -343,7 +343,8 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     await openAll();
     const [five, seven] = meterRows(rowOf('Claude'));
-    expect([...seven!.querySelectorAll('.g-f > b > .pct')].map(n => n.textContent)).toEqual(['40%']);
+    expect(seven!.querySelector('.g-f > b')?.textContent).toBe('40%');
+    expect([...seven!.querySelectorAll('.g-f > b > .pct')].map(n => n.textContent)).toEqual(['%']);
     expect([...seven!.querySelectorAll('.g-f > span')].map(n => n.textContent)).toEqual(['used']);
     expect(five!.querySelector('.pct')).toBeNull();
   });

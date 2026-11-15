@@ -427,6 +427,23 @@ describe('AgentCard', () => {
     expect(screen.queryByText(language === 'en' ? 'Limit reached' : 'Лимит исчерпан')).not.toBeInTheDocument();
   });
 
+  it("sets apart only the percent sign of a plan's used share in the agent card", async () => {
+    vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
+    const plan = {
+      ...TEAM_KEY,
+      kind: 'personal' as const,
+      provider: 'claude' as const,
+      label: 'Claude',
+      status: 'ready' as const,
+      limits: { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: '2026-11-05T02:00:00.000Z' }] },
+      limitsUpdatedAt: '2026-11-04T21:58:00.000Z',
+    };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, subscription: plan, runsOn: [{ subscription: plan, models: [] }] }] });
+    const figure = (await screen.findByRole('group', { name: 'Limits' })).querySelector('.g-f > b');
+    expect(figure?.textContent).toBe('40%');
+    expect([...figure!.querySelectorAll('.pct')].map(n => n.textContent)).toEqual(['%']);
+  });
+
   it('moves the employee to another subscription', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, { ...CARD, model: '', subscription: CARD.runsOn[1]!.subscription }] });
