@@ -371,6 +371,9 @@ select:disabled { opacity: .55; }
 .outbound-revision, .outbound-log > li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .outbound-revision small, .outbound-log small { color: var(--muted); font-size: 12px; }
 .outbound-revision .repo-actions { margin-block-start: 2px; }
+/* Its fields, lists and buttons are touch targets of 44px, as everywhere in the Settings window. */
+.outbound-setup .field :is(input, select) { height: 44px; }
+.outbound-setup .btn { min-height: 44px; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; text-align: center; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; }
