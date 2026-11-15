@@ -83,23 +83,26 @@ async function company() {
 }
 
 describe("an agent's tools with no turn of it running", () => {
-  it('answer its program as it connects, before any turn and with nothing kept on its node, as a turn answers it: with the tools of its role', async () => {
+  it.each(['agent', 'head', 'orchestrator'] as const)('answer the program of an %s as it connects, before any turn and with nothing kept on its node, as a turn answers it', async role => {
     const c = await company();
-    for (const agent of [c.agent, c.head, c.orchestrator]) {
-      const before = [];
-      for (const message of CONNECTING) before.push(await c.outside(agent.id, message));
-      /* Nothing it asked opened a turn, and no step of it is left open. */
-      expect(await c.turnsOf(agent.id)).toEqual([]);
-      expect((await c.stepsOf(agent.id)).filter(s => s.status === 'running')).toEqual([]);
+    const agent = c[role];
+    const before = [];
+    for (const message of CONNECTING) before.push(await c.outside(agent.id, message));
+    /* Nothing it asked opened a turn, and no step of it is left open. */
+    expect(await c.turnsOf(agent.id)).toEqual([]);
+    expect((await c.stepsOf(agent.id)).filter(s => s.status === 'running')).toEqual([]);
 
-      const { token } = await c.turn(agent.id);
-      for (const [i, message] of CONNECTING.entries()) {
-        expect(before[i], `${agent.name}: ${message.method}`).toEqual(await c.inTurn(token, message));
-        expect(before[i]!.body?.error?.code, `${agent.name}: ${message.method}`).not.toBe(-32001);
-      }
-      expect(before[3]!.body?.result).toEqual({});
-      expect(before[4]!.body?.result?.tools?.length).toBeGreaterThan(5);
+    const { token } = await c.turn(agent.id);
+    for (const [i, message] of CONNECTING.entries()) {
+      expect(before[i], `${agent.name}: ${message.method}`).toEqual(await c.inTurn(token, message));
+      expect(before[i]!.body?.error?.code, `${agent.name}: ${message.method}`).not.toBe(-32001);
     }
+    expect(before[3]!.body?.result).toEqual({});
+    expect(before[4]!.body?.result?.tools?.length).toBeGreaterThan(5);
+  });
+
+  it('list the tools of its role', async () => {
+    const c = await company();
     /* Each role has its own tools: a head's are not an employee's. */
     const names = async (agentId: string) => (await c.outside(agentId, rpc(9, 'tools/list'))).body?.result?.tools?.map(t => t.name);
     expect(await names(c.head.id)).toContain('set_employee_assignment');
