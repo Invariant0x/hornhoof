@@ -137,6 +137,7 @@ case "$1 $2" in
   # and STUB_STOPPED_NODES are containers that are not running now.
   'ps --filter')
     for w in ${STUB_PLAN_NODES:-}; do
+      [ ! -f "$STUB_STATE/gone-${w%%=*}" ] || continue
       case " ${STUB_STOPPED_NODES:-} " in *" ${w%%=*} "*) continue ;; esac
       case " $* " in *' label=hornhoof.server='*) case " ${STUB_FOREIGN_NODES:-} " in *" ${w%%=*} "*) continue ;; esac ;; esac
       rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"
@@ -150,6 +151,7 @@ case "$1 $2" in
       *com.docker.compose.project*) for w in ${STUB_PROJECT_CONTAINERS:-}; do printf '%s %s\n' "${w%%=*}" "${w#*=}"; done ;;
       *)
         for w in ${STUB_PLAN_NODES:-}; do
+          [ ! -f "$STUB_STATE/gone-${w%%=*}" ] || continue
           case " $* " in *' label=hornhoof.server='*) case " ${STUB_FOREIGN_NODES:-} " in *" ${w%%=*} "*) continue ;; esac ;; esac
           rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"
         done ;;
@@ -315,6 +317,18 @@ case "$1 $2" in
         esac ;;
       '{{.State.Running}}')
         case " ${STUB_STOPPED_NODES:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac ;;
+      '{{.State.Running}} {{.State.Restarting}}')
+        found=''
+        for w in ${STUB_PLAN_NODES:-}; do [ "${w%%=*}" = "${!#}" ] && [ ! -f "$STUB_STATE/gone-${!#}" ] && found=1; done
+        [ -n "$found" ] || exit 1
+        rstate=true; case " ${STUB_STOPPED_NODES:-} " in *" ${!#} "*) rstate=false ;; esac
+        restate=false; case " ${STUB_RESTARTING_NODES:-} " in *" ${!#} "*) restate=true ;; esac
+        echo "$rstate $restate" ;;
+      '{{.HostConfig.RestartPolicy.Name}}')
+        [ ! -f "$STUB_STATE/gone-${!#}" ] || exit 1
+        if [ -f "$STUB_STATE/restart-${!#}" ]; then cat "$STUB_STATE/restart-${!#}"
+        else pol=$(word "${!#}" ${STUB_RESTART_POLICIES:-}); printf '%s\n' "${pol:-unless-stopped}"
+        fi ;;
       # STUB_OWN_IMAGE: the image of the container the updater itself runs in, which goes by the name of its host.
       *.Config.Image*) if [ -n "${STUB_OWN_IMAGE:-}" ] && [ "${!#}" = "$(hostname)" ]; then printf '%s\n' "$STUB_OWN_IMAGE"; else printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}"; fi ;;
       *) case "${!#}" in appcid | keepercid) printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;; esac ;;
@@ -444,7 +458,18 @@ case "$1 $2" in
             done ;;
         esac ;;
       # The container goes, and a command that runs in it ends.
-      rm) [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed" ;;
+      rm)
+        for arg in "${@:2}"; do
+          case "$arg" in -*) continue ;; esac
+          touch "$STUB_STATE/gone-$arg"
+        done
+        [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed" ;;
+      update)
+        pol=''
+        for arg in "${@:2}"; do
+          case "$arg" in --restart=*) pol=${arg#--restart=} ;; esac
+        done
+        [ -z "$pol" ] || printf '%s\n' "$pol" > "$STUB_STATE/restart-${!#}" ;;
       cp)
         tag=${2%%:*}; tag=${tag#cid-}
         case "$2" in

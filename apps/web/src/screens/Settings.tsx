@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import type { SettingsGroup } from '../routes';
@@ -10,6 +10,7 @@ import { INTEGRATIONS, Integrations } from '../ui/Integrations';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { ExternalMessaging, OUTBOUND_PATH } from '../ui/Outbound';
+import { useScrollbarRoom } from '../ui/scrollbar-room';
 import { Themes } from '../ui/Themes';
 import { Backups } from './Backups';
 import { useSteady } from './Feedback';
@@ -195,7 +196,7 @@ function CompanyLink() {
                   >
                     {t.settings.change}
                   </button>
-                  <button className="btn small ghost" type="button" onClick={() => setMode('remove')}>{t.settings.remove}</button>
+                  <button className="btn small ghost danger" type="button" onClick={() => setMode('remove')}>{t.settings.remove}</button>
                 </div>
               )}
             </>
@@ -308,12 +309,8 @@ export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask =
   const close = useSteady(onClose);
   const reached = useReached();
 
-  /* The room this browser's scrollbar takes beside the body, so the body keeps the same 18 px for it in every browser:
-     a classic scrollbar fills part of it, an overlay one none. */
-  useLayoutEffect(() => {
-    const body = scroll.current;
-    if (body) body.style.setProperty('--sb', `${Math.max(0, body.offsetWidth - body.clientWidth)}px`);
-  }, []);
+  /* Only the body scrolls: it keeps the same 18 px for a scrollbar in every browser. */
+  useScrollbarRoom(scroll);
 
   useEffect(() => {
     /* A person starts at the heading of the open group. */

@@ -58,7 +58,8 @@ function fromUpdater(env: Record<string, string>) {
       ...env,
     },
   });
-  return { code: res.status, out: res.stdout + res.stderr, calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) };
+  const table = existsSync(join(dir, 'containers')) ? readFileSync(join(dir, 'containers'), 'utf8').trim().split('\n').filter(Boolean) : [];
+  return { code: res.status, out: res.stdout + res.stderr, calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean), containers: table };
 }
 
 const touched = (calls: string[], name: string) => calls.filter(c => c.includes(name) && !c.startsWith('docker ps'));
@@ -69,6 +70,8 @@ const ONLY_NODE = 'docker compose up -d --no-build --no-deps node';
 const APP_AND_NODE = 'docker compose up -d --no-build app node';
 const started = (calls: string[]) => calls.filter(c => c.startsWith('docker compose up'));
 
+const removedOld = (calls: string[], name: string) => calls.some(c => c.startsWith(`docker rm -f ${name}-old-`));
+
 describe('install.sh when the updater names the nodes that are free', () => {
   it('replaces only a plan node it names: the built-in node and the other plan node go on with what they run', () => {
     const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${CLAUDE}` });
@@ -76,7 +79,7 @@ describe('install.sh when the updater names the nodes that are free', () => {
     expect(started(r.calls)).toEqual([]);
     expect(r.calls).not.toContain(STOPS_BUILTIN);
     expect(r.calls).toContain(`docker exec ${CLAUDE} node /app/apps/node/dist/main.js prepare-stop hornhoof_update`);
-    expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
+    expect(removedOld(r.calls, CLAUDE)).toBe(true);
     expect(touched(r.calls, GOOGLE)).toEqual([]);
   });
 
@@ -92,27 +95,103 @@ describe('install.sh when the updater names the nodes that are free', () => {
   it('replaces all it names at once', () => {
     const r = fromUpdater({ HORNHOOF_NODES_ONLY: `builtin id-of-${CLAUDE} id-of-${GOOGLE}` });
     expect(started(r.calls)).toEqual([ONLY_NODE]);
-    expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
-    expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
+    expect(removedOld(r.calls, CLAUDE)).toBe(true);
+    expect(removedOld(r.calls, GOOGLE)).toBe(true);
   });
 
   it('takes a plan node it names on when the built-in node runs that image already', () => {
     const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${GOOGLE}`, STUB_NODE_RUNNING: NEW_NODE });
     expect(r.code).toBe(0);
-    expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
+    expect(removedOld(r.calls, GOOGLE)).toBe(true);
     expect(touched(r.calls, CLAUDE)).toEqual([]);
   });
 
   it('replaces them all, as before, when it names none', () => {
     const r = fromUpdater({});
     expect(r.calls).toContain(APP_AND_NODE);
-    expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
-    expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
+    expect(removedOld(r.calls, CLAUDE)).toBe(true);
+    expect(removedOld(r.calls, GOOGLE)).toBe(true);
   });
 
   it('matches a whole plan, never part of a longer one', () => {
     const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${CLAUDE}-longer` });
     expect(r.code).toBe(0);
     expect(touched(r.calls, CLAUDE)).toEqual([]);
+  });
+
+  it('renames the old node container with restart=no before starting the new one and removes -old-* once the new node is healthy', () => {
+    const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${CLAUDE}` });
+    expect(r.code).toBe(0);
+    const renameIdx = r.calls.findIndex(c => c.startsWith(`docker rename ${CLAUDE} ${CLAUDE}-old-`));
+    expect(renameIdx).toBeGreaterThanOrEqual(0);
+    const oldName = r.calls[renameIdx].split(' ')[3];
+    const noRestartIdx = r.calls.indexOf(`docker update --restart=no ${oldName}`);
+    const runIdx = r.calls.findIndex(c => c.startsWith(`docker run -d --name ${CLAUDE} `));
+    const healthIdx = r.calls.indexOf(`docker inspect --format {{.State.Running}} {{.State.Restarting}} ${CLAUDE}`);
+    const rmOldIdx = r.calls.indexOf(`docker rm -f ${oldName}`);
+    expect(noRestartIdx).toBeGreaterThan(renameIdx);
+    expect(runIdx).toBeGreaterThan(noRestartIdx);
+    expect(healthIdx).toBeGreaterThan(runIdx);
+    expect(rmOldIdx).toBeGreaterThan(healthIdx);
+    expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
+    expect(r.containers).toContain(`${CLAUDE}|http://localhost:8081|unless-stopped`);
+    expect(r.containers.some(line => line.startsWith(`${CLAUDE}-old-`))).toBe(false);
+  });
+
+  it('keeps and restores the old node container without touching volumes when the new node fails or is unhealthy', () => {
+    const cases: Record<string, string>[] = [
+      { STUB_RUN: 'fail' },
+      { STUB_NEW_NODE_STOPPED: CLAUDE },
+      { STUB_NEW_NODE_RESTARTING: CLAUDE },
+    ];
+    for (const bad of cases) {
+      const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${CLAUDE}`, ...bad });
+      expect(r.code).toBe(1);
+      const renameIdx = r.calls.findIndex(c => c.startsWith(`docker rename ${CLAUDE} ${CLAUDE}-old-`));
+      expect(renameIdx).toBeGreaterThanOrEqual(0);
+      const oldName = r.calls[renameIdx].split(' ')[3];
+      expect(r.calls).toContain(`docker update --restart=no ${oldName}`);
+      expect(r.calls).not.toContain(`docker rm -f ${oldName}`);
+      expect(r.calls).toContain(`docker rename ${oldName} ${CLAUDE}`);
+      expect(r.calls).toContain(`docker update --restart=unless-stopped ${CLAUDE}`);
+      expect(r.calls).toContain(`docker start ${CLAUDE}`);
+      expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
+      expect(r.containers).toContain(`${CLAUDE}|http://localhost:8081|unless-stopped`);
+      expect(r.containers.some(line => line.startsWith(`${CLAUDE}-old-`))).toBe(false);
+    }
+  });
+
+  it('sweeps leftover -old-* node containers whose new nodes are healthy and disables restart on kept ones', () => {
+    const kimi = 'hornhoof-kimi-fd5eff72';
+    const kimiOld = `${kimi}-old-01817`;
+    const codex = 'hornhoof-codex-606af686';
+    const codexOld = `${codex}-old-01817`;
+    const stoppedNode = 'hornhoof-claude-33333333';
+    const stoppedOld = `${stoppedNode}-old-01817`;
+    const foreignOld = 'hornhoof-kimi-44444444-old-01817';
+    const r = fromUpdater({
+      HORNHOOF_NODES_ONLY: 'builtin',
+      STUB_CONTAINERS: [
+        `${kimi}=http://localhost:8081`,
+        `${kimiOld}=http://localhost:8081`,
+        `${codex}=http://localhost:8081`,
+        `${codexOld}=http://localhost:8081`,
+        `${stoppedNode}=http://localhost:8081`,
+        `${stoppedOld}=http://localhost:8081`,
+        `${foreignOld}=https://other.example`,
+      ].join(' '),
+      STUB_STOPPED: stoppedNode,
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`docker update --restart=no ${kimiOld}`);
+    expect(r.calls).toContain(`docker update --restart=no ${codexOld}`);
+    expect(r.calls).toContain(`docker update --restart=no ${stoppedOld}`);
+    expect(r.calls).toContain(`docker rm -f ${kimiOld}`);
+    expect(r.calls).toContain(`docker rm -f ${codexOld}`);
+    expect(r.calls).not.toContain(`docker rm -f ${stoppedOld}`);
+    expect(r.calls.some(c => c.includes(foreignOld) && !c.startsWith('docker ps'))).toBe(false);
+    expect(r.calls.some(c => c.startsWith('docker run -d --name ') && c.includes('-old-'))).toBe(false);
+    expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
+    expect(r.containers).toContain(`${stoppedOld}|http://localhost:8081|no`);
   });
 });

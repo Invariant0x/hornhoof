@@ -56,7 +56,7 @@ async function answer(ctx: Ctx, job: ToolJob, id: string, waited: Waited): Promi
 function started(ctx: Ctx, job: ToolJob, machine: AccessMachine, command: string, seconds: number): Promise<{ id: string } | Said> {
   return withInputLock(ctx, job.agentId, async () => {
     if (!(await ctx.computer.openUntil(machine.id))) return say(closed(machine.name), true);
-    if (!(await machinePrincipal(ctx.db, job.id, machine.personId))) return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
+    if (!(await machinePrincipal(ctx.db, job.id, machine.personId, machine.id))) return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
     if (!ctx.computer.reachable(machine.id)) return say(unreachable(machine.name), true);
     const run = await ctx.computer.start(job, machine.id, command, seconds);
     if (run === 'closed') return say(closed(machine.name), true);

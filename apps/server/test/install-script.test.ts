@@ -57,8 +57,10 @@ describe('install.sh', () => {
     const steps = [
       `docker exec ${name} node /app/apps/node/dist/main.js prepare-stop node_update`,
       `docker stop --time 5 ${name}`,
-      `docker rm -f ${name}`,
+      `docker rename ${name} ${name}-old-`,
+      `docker update --restart=no ${name}-old-`,
       'docker run -d',
+      `docker rm -f ${name}-old-`,
     ].map(prefix => indexOf(r.calls, prefix));
     expect(steps.every(index => index >= 0)).toBe(true);
     expect([...steps].sort((a, b) => a - b)).toEqual(steps);
@@ -111,22 +113,22 @@ describe('install.sh', () => {
       const other = 'hornhoof-kimi-22222222';
       const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER} ${other}=${SERVER}`, STUB_WAIT_UPDATE: '1', STUB_STOPPED: other } });
       expect(r.code).toBe(1);
-      expect(r.calls).toContain(`docker rm -f ${other}`);
-      expect(r.calls).not.toContain(`docker rm -f ${name}`);
+      expect(r.calls.some(c => c.startsWith(`docker rm -f ${other}-old-`))).toBe(true);
+      expect(r.calls.some(c => c.startsWith(`docker rm -f ${name}`))).toBe(false);
     });
 
     it('asks nothing for an urgent security update, which goes as before', () => {
       const r = update({}, ['--urgent']);
       expect(r.code).toBe(0);
       expect(r.calls.some(c => c.endsWith('wait-update'))).toBe(false);
-      expect(r.calls).toContain(`docker rm -f ${name}`);
+      expect(r.calls.some(c => c.startsWith(`docker rm -f ${name}-old-`))).toBe(true);
     });
 
     it('asks nothing for a stopped node, which has no work to end', () => {
       const r = update({ STUB_STOPPED: name });
       expect(r.code).toBe(0);
       expect(r.calls.some(c => c.endsWith('wait-update'))).toBe(false);
-      expect(r.calls).toContain(`docker rm -f ${name}`);
+      expect(r.calls.some(c => c.startsWith(`docker rm -f ${name}-old-`))).toBe(true);
     });
 
     it('asks nothing for a node joined now', () => {
@@ -817,7 +819,7 @@ describe('install.sh', () => {
       expect(r.calls).toContain('docker compose up -d --no-build app node');
       expect(r.calls).toContain('docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update');
       expect(r.calls).toContain(`docker exec ${personal} node /app/apps/node/dist/main.js prepare-stop hornhoof_update`);
-      expect(r.calls).toContain(`docker rm -f ${personal}`);
+      expect(r.calls.some(c => c.startsWith(`docker rm -f ${personal}-old-`))).toBe(true);
     });
 
     it('starts a built-in node that does not run, which has no work to wait for', () => {
@@ -845,10 +847,12 @@ describe('install.sh', () => {
       });
       expect(r.code).toBe(0);
       expect(r.calls).toContain(`docker cp ${personal}:/data/removed -`);
-      const rm = indexOf(r.calls, `docker rm -f ${personal}`);
+      const rename = indexOf(r.calls, `docker rename ${personal} ${personal}-old-`);
       const run = indexOf(r.calls, `docker run -d --name ${personal} `);
-      expect(rm).toBeGreaterThanOrEqual(0);
-      expect(run).toBeGreaterThan(rm);
+      const rmOld = indexOf(r.calls, `docker rm -f ${personal}-old-`);
+      expect(rename).toBeGreaterThanOrEqual(0);
+      expect(run).toBeGreaterThan(rename);
+      expect(rmOld).toBeGreaterThan(run);
       expect(r.calls[run]).toContain(`-v ${personal}:/data`);
       expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
       for (const untouched of [foreign, unlabeled]) {
