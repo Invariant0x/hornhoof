@@ -1076,8 +1076,8 @@ button.dept.busy::before, button.dept.waits::before, button.chip-btn.attn::befor
   box-shadow: 0 0 12px color-mix(in srgb, var(--glow) 45%, transparent);
   animation: dglow 2.6s ease-in-out infinite;
 }
-.hub.attn { --glow: var(--amber); }
-.hub.attn::before { inset: 1px; border-radius: 50%; }
+/* Only the hub's breathing layer turns amber: the turn tag inside the hub keeps the skin's glow behind its accent ink. */
+.hub.attn::before { --glow: var(--amber); inset: 1px; border-radius: 50%; }
 .frame-breathe { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; opacity: 0; animation: dbreathe 2.6s ease-in-out infinite; }
 .frame-breathe > polygon, .frame-breathe > polyline { fill: none; stroke: var(--frame); stroke-width: 1.2; }
 button.dept.flash > .frame-breathe { animation: frame-flash 1.4s ease-out; }
