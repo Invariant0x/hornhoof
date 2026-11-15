@@ -108,7 +108,7 @@ const POINTS: Record<string, RegExp[]> = {
   'dev-work-pipeline': [
     /task, employee assignment[\s\S]*rather than a fixed sequence of roles/i,
     /access, root, permissions or secrets[\s\S]*independent Security engineer[\s\S]*before[\s\S]*shared branch/i,
-    /urgent work, small tasks, direct named orders and review fixes/i,
+    /only in echelon tasks[\s\S]*urgent and small work and review fixes too/i,
     /Self-review does not replace this gate/i,
     /one pinned commit[\s\S]*full candidate validation is assigned/i,
     /collected graph[\s\S]*not execution evidence/i,

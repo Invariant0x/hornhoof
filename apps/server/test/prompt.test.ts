@@ -150,10 +150,10 @@ describe('orchestrator instructions', () => {
   it('gives each goal to one department whole and carries the sprint admission method without a skill dependency', () => {
     const plan = ability('orch-plan-turn');
     expect(plan).toMatch(/one task for the one department that owns each goal end to end/i);
-    expect(plan).toMatch(/a turn is a sprint[\s\S]*without a rule of days or hours/i);
+    expect(plan).toMatch(/a turn has no rule of days or hours/i);
     expect(plan).toMatch(/pass a small addition to its head immediately/i);
     expect(plan).toMatch(/before the final gate starts[\s\S]*member holding the context[\s\S]*without a CEO-now instruction or an urgency flag/i);
-    expect(plan).toMatch(/reset a gate already running[\s\S]*next turn/i);
+    expect(plan).toMatch(/once that gate runs, give it as a task of its own/i);
     expect(plan).not.toContain('hh-lead-tasks');
     expect(carried).toMatch(/orchestrator[\s\S]*head immediately/);
     expect(carried).not.toMatch(/only when the CEO says (?:"now"|now)/);

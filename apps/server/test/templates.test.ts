@@ -124,8 +124,10 @@ describe('templates', () => {
     expect(body('orch-company')).toMatch(/urgentOnly[\s\S]*only what the authorized person called urgent/);
     for (const id of ['dev-task-flow', 'dev-implement', 'dev-lead', 'dev-gates', 'dev-worktrees', 'dev-work-pipeline', 'dev-ci-release']) {
       expect(body(id), id).toMatch(/access, root, permissions or secrets[\s\S]*independent Security engineer[\s\S]*before[\s\S]*shared branch/);
-      expect(body(id), id).toMatch(/urgent work, small tasks, direct named orders and review fixes/);
-      expect(body(id), id).toMatch(/Self-review does not replace this gate/);
+      expect(body(id), id).toMatch(/External Review and Security engineers work only in echelon tasks/);
+      expect(body(id), id).toMatch(/In an echelon task[^.]*urgent and small work and review fixes too; self-review does not replace this gate/);
+      expect(body(id), id).toMatch(/member of a turnkey team does and releases its task end to end alone[^.]*calls no external checker/);
+      expect(body(id), id).not.toMatch(/urgent work, small tasks, direct named orders/);
     }
     expect(body('dev-gates')).toMatch(/eligible reviewer is unavailable[\s\S]*candidate waiting/);
   });
@@ -291,7 +293,7 @@ describe('templates', () => {
     expect(body('dev-adversarial')).toMatch(/only preview or sandbox builds your task names, never production and never real customer data/);
     expect(body('dev-threat-model')).toMatch(/trust boundaries[\s\S]*Name the safeguard[\s\S]*case with no safeguard is a finding/i);
     expect(body('dev-security-review')).toMatch(/Report only weak spots you confirmed in the code/);
-    expect(body('dev-gates')).toMatch(/Every executable work result passes Review/);
+    expect(body('dev-gates')).toMatch(/Every executable work result of an echelon task passes Review/);
     expect(body('dev-gates')).toMatch(/Tests verifies the exact final candidate including[\s\S]*repairs/);
     expect(body('dev-review-verdict')).toMatch(/only the fixes[\s\S]*paths they affect/);
     expect(body('dev-qa-acceptance')).toMatch(/exact candidate[\s\S]*do not assume[\s\S]*shared turn/);

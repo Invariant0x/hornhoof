@@ -125,7 +125,7 @@ describe('turnkey work', () => {
     for (const id of ['hh-lead-tasks', 'dev-lead', 'orch-plan-turn', 'orch-company']) {
       expect(body(id), id).toMatch(/team that does it sets (?:a|each) task's route: a member of a turnkey team[^.]*end to end alone[^.]*everybody else's goes through/);
       expect(body(id), id).toMatch(/small, quick fix that need not go through every echelon goes to a member of a turnkey team/);
-      expect(body(id), id).not.toMatch(/waits for a turn|turn runs in echelons|members who work in the echelons take neither/);
+      expect(body(id), id).not.toMatch(/such work waits for a turn|turn runs in echelons|members who work in the echelons take neither/);
       expect(body(id), id).not.toMatch(/its holder does it end to end alone/);
     }
   });
