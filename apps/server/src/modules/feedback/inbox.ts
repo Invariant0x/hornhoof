@@ -116,8 +116,10 @@ export async function receive(ctx: Pick<Ctx, 'db' | 'bus' | 'clock'>, report: Re
       [card] = await open();
       card ??= await opened();
       if (!card) {
-        /* Its number was taken: a merge brought in cards with numbers this sequence had not given, so it moves past them. */
-        await tx.execute(sql`SELECT setval(pg_get_serial_sequence('feedback_inbox', 'number'), (SELECT max(number) FROM feedback_inbox))`);
+        /* Its number was taken: a merge brought in cards with numbers this sequence had not given, so it moves past them,
+           never back, as another report may hold a number it took and did not commit yet. */
+        await tx.execute(sql`SELECT setval(s, GREATEST((SELECT max(number) FROM feedback_inbox), pg_sequence_last_value(s::regclass)))
+          FROM pg_get_serial_sequence('feedback_inbox', 'number') AS s`);
         [card] = await open();
         card ??= await opened();
       }
