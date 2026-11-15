@@ -2470,6 +2470,28 @@ export const outboundEvents = pgTable('outbound_events', {
   check('outbound_events_kind', sql`${t.kind} IN ('delivered', 'bounce', 'refusal', 'complaint')`),
 ]);
 
+/* What was set up for a department's messages, and by whom: a person, or the department's head carrying out that person's
+   word. The owner reads it; it holds no setting, address or secret, only what changed and the ids it changed. */
+export const OUTBOUND_SETUP_KINDS = ['channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released'] as const;
+export type OutboundSetupKind = (typeof OUTBOUND_SETUP_KINDS)[number];
+export const outboundSetupEvents = pgTable('outbound_setup_events', {
+  id: id(),
+  companyId: companyId(),
+  departmentId: uuid('department_id').notNull(),
+  channelId: uuid('channel_id'),
+  kind: text('kind', { enum: OUTBOUND_SETUP_KINDS }).notNull(),
+  subjectId: uuid('subject_id'),
+  detail: jsonb('detail').$type<Record<string, string | number | boolean | null>>().notNull().default({}),
+  personId: uuid('person_id').notNull().references(() => people.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  createdAt: createdAt(),
+}, t => [
+  index('outbound_setup_events_department').on(t.companyId, t.departmentId, t.createdAt),
+  sameCompany('outbound_setup_events_place', t.companyId, t.departmentId, departments),
+  sameCompany('outbound_setup_events_channel', t.companyId, t.channelId, outboundChannels),
+  check('outbound_setup_events_kind', sql`${t.kind} IN (${sql.raw(OUTBOUND_SETUP_KINDS.map(k => `'${k}'`).join(', '))})`),
+]);
+
 /* The numbers sampling goes by: one counter of a channel, of a segment or of an author. It only goes on, whatever is
    retried or cancelled, so that a number nobody reviews cannot be fished for. */
 export const outboundSamplingCounters = pgTable('outbound_sampling_counters', {

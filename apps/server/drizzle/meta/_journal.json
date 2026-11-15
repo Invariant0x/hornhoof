@@ -883,6 +883,13 @@
       "when": 1794722417859,
       "tag": "0126_turn_releases",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1794743626293,
+      "tag": "0127_outbound_setup_events",
+      "breakpoints": true
     }
   ]
 }

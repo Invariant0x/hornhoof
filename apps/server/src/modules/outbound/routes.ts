@@ -4,18 +4,20 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
-import { requirePerson, type Person } from '../../auth/session.js';
-import type { Db } from '../../db/client.js';
+import { requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
-import { mayChangeRules, ownDepartment } from '../departments/approval-policy.js';
+import { ownDepartment } from '../departments/approval-policy.js';
 import { jobOf } from '../tools/job.js';
 import { accountRoutes } from './accounts.js';
 import { catalogRow, proposeRevision, ProposalInput, publishRevision, requireProductOf, revokeRevision } from './catalog.js';
+import { catalogOf } from './catalog-view.js';
 import { digestOf } from './checks.js';
 import { addContact, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
 import { outboundStatus, submitOutbound } from './core.js';
 import { receiptRoutes } from './dispatcher.js';
-import { addPolicy, channelIn, createChannel, reopenChannel, stopByPerson, type Channel } from './policies.js';
+import { addPolicy, channelIn, createChannel, currentPolicy, reopenChannel, stopByPerson, type Channel } from './policies.js';
+import { requireRunner } from './runner.js';
+import { autoSendKind, logSetup, setupLogOf } from './setup-log.js';
 import { authorityOf } from './tools.js';
 import { outboundViewRoutes } from './views.js';
 
@@ -24,6 +26,7 @@ import { outboundViewRoutes } from './views.js';
    transport: the dispatcher does, by itself, through the kernel's last look. */
 
 const IdParams = z.strictObject({ id: z.uuid() });
+const DepartmentQuery = z.strictObject({ department: z.uuid() });
 /* A signed link is longer than the router takes a named part of a path to be, so it is the rest of the path. */
 const TokenParams = z.object({ '*': z.string().min(1).max(1000) });
 const Name = z.string().trim().min(1).max(200);
@@ -34,34 +37,41 @@ const SuppressBody = z.strictObject({ evidence: Evidence });
 
 const idOf = (req: FastifyRequest): string => IdParams.parse(req.params).id;
 const notYours = (message: string) => new ApiError(403, 'forbidden', message, 'outbound_not_allowed');
+const noSuch = (what: string) => () => new ApiError(404, 'not_found', `There is no such ${what}.`, 'outbound_unknown');
+const noDepartment = () => new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
 const channelView = ({ id, status, generation }: Channel) => ({ channelId: id, status, generation });
 const logged = (req: FastifyRequest, me: Person, what: object) => req.log.info({ ...what, personId: me.id, viaAgent: me.via ?? null }, 'outbound setup changed');
 
-async function requireManager(db: Db, me: Person, departmentId: string): Promise<void> {
-  if (!(await mayChangeRules(db, me, departmentId))) throw notYours('Only this department\'s owner, the CEO or the CEO delegate does this.');
-}
-
 const manageChannel = async (ctx: Ctx, me: Person, id: string): Promise<Channel> => {
   const channel = await channelIn(ctx.db, me.companyId, id);
-  await requireManager(ctx.db, me, channel.departmentId);
+  await requireRunner(ctx.db, me, channel.departmentId, noSuch('channel'));
   return channel;
 };
 
 const manageRevision = async (ctx: Ctx, me: Person, id: string) => {
   const row = await catalogRow(ctx.db, me.companyId, id);
-  await requireManager(ctx.db, me, row.departmentId);
+  await requireRunner(ctx.db, me, row.departmentId, noSuch('catalog revision'));
   return row;
 };
+
+/* A department its runner names: one of this company, not a product, and theirs. */
+const manageDepartment = async (ctx: Ctx, me: Person, id: string) => {
+  const dept = await ownDepartment(ctx.db, me.companyId, id);
+  await requireRunner(ctx.db, me, dept.id, noDepartment);
+  return dept;
+};
+
+const setupOf = (channel: Channel) => ({ companyId: channel.companyId, departmentId: channel.departmentId, channelId: channel.id });
 
 function channelRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
   app.post('/api/outbound/channels', async req => {
     const me = await requirePerson(req, db);
     const body = ChannelBody.parse(req.body);
-    const dept = await ownDepartment(db, me.companyId, body.departmentId);
-    await requireManager(db, me, dept.id);
+    const dept = await manageDepartment(ctx, me, body.departmentId);
     await requireProductOf(db, { ...body, companyId: me.companyId });
-    const channel = await createChannel(db, { ...body, companyId: me.companyId, productId: body.productId ?? null, createdBy: me.id });
+    const channel = await createChannel(db, { ...body, departmentId: dept.id, companyId: me.companyId, productId: body.productId ?? null, createdBy: me.id });
+    await logSetup(db, me, { ...setupOf(channel), kind: 'channel_created', subjectId: channel.id });
     logged(req, me, { channelId: channel.id, did: 'created' });
     return channelView(channel);
   });
@@ -69,7 +79,11 @@ function channelRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/outbound/channels/:id/policies', async req => {
     const me = await requirePerson(req, db);
     const channel = await manageChannel(ctx, me, idOf(req));
-    const policy = await addPolicy(ctx, { companyId: me.companyId, channelId: channel.id, createdBy: me.id }, OutboundPolicyValue.parse(req.body));
+    const value = OutboundPolicyValue.parse(req.body);
+    const before = await currentPolicy(db, channel.id);
+    const policy = await addPolicy(ctx, { companyId: me.companyId, channelId: channel.id, createdBy: me.id }, value);
+    const detail = { revision: policy.revision, autoSend: value.autoSend === true, accountDailyLimit: value.accountDailyLimit, domainDailyLimit: value.domainDailyLimit };
+    await logSetup(db, me, { ...setupOf(channel), kind: autoSendKind(before?.value.autoSend === true, value.autoSend === true), subjectId: policy.id, detail });
     logged(req, me, { channelId: channel.id, did: 'policy', revision: policy.revision });
     return policy;
   });
@@ -78,6 +92,7 @@ function channelRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const channel = await manageChannel(ctx, me, idOf(req));
     const stopped = await stopByPerson(ctx, channel.id);
+    await logSetup(db, me, { ...setupOf(channel), kind: 'channel_stopped', subjectId: channel.id });
     logged(req, me, { channelId: channel.id, did: 'stopped' });
     return channelView(stopped);
   });
@@ -86,27 +101,43 @@ function channelRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const channel = await manageChannel(ctx, me, idOf(req));
     const reopened = await reopenChannel(ctx, { companyId: me.companyId, channelId: channel.id });
+    await logSetup(db, me, { ...setupOf(channel), kind: 'channel_reopened', subjectId: channel.id });
     logged(req, me, { channelId: channel.id, did: 'reopened' });
     return channelView(reopened);
+  });
+
+  /* What was set up for the department's messages and by whom, newest first. */
+  app.get('/api/outbound/setup-log', async req => {
+    const me = await requirePerson(req, db);
+    const dept = await manageDepartment(ctx, me, DepartmentQuery.parse(req.query).department);
+    return { departmentId: dept.id, entries: await setupLogOf(db, me.companyId, dept.id) };
   });
 }
 
 function catalogRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+  /* Every entry of the department with all its revisions, proposed, published and taken back. */
+  app.get('/api/outbound/catalog', async req => {
+    const me = await requirePerson(req, db);
+    const dept = await manageDepartment(ctx, me, DepartmentQuery.parse(req.query).department);
+    return { departmentId: dept.id, entries: await catalogOf(db, me.companyId, dept.id) };
+  });
+
   app.post('/api/outbound/catalog', async req => {
     const me = await requirePerson(req, db);
     const input = ProposalInput.parse(req.body);
-    const dept = await ownDepartment(db, me.companyId, input.departmentId);
-    await requireManager(db, me, dept.id);
-    return proposeRevision(ctx, { ...input, companyId: me.companyId, author: me.via ? { kind: 'agent', id: me.via } : { kind: 'person', id: me.id } });
+    const dept = await manageDepartment(ctx, me, input.departmentId);
+    return proposeRevision(ctx, { ...input, departmentId: dept.id, companyId: me.companyId, author: me.via ? { kind: 'agent', id: me.via } : { kind: 'person', id: me.id } });
   });
 
-  /* A model, even for the person its turn answers, never makes its own words sendable. */
+  /* A person who runs the department publishes, or its head carrying out their word, which the log keeps with both names.
+     The orchestrator, even for the person its turn answers, never makes words sendable. */
   app.post('/api/outbound/catalog/:id/publish', async req => {
     const me = await requirePerson(req, db);
-    if (me.via) throw notYours('Only a person publishes what a message may say.');
+    if (viaOrchestrator(me)) throw notYours('Only a person who runs this department, or its head carrying out their word, publishes what a message may say.');
     const row = await manageRevision(ctx, me, idOf(req));
     const published = await publishRevision(db, row, me.id);
+    await logSetup(db, me, { companyId: row.companyId, departmentId: row.departmentId, channelId: row.channelId, kind: 'catalog_published', subjectId: row.id, detail: { entryId: row.entryId, revision: row.revision, kind: row.kind } });
     logged(req, me, { revisionId: row.id, did: 'published' });
     return published;
   });
@@ -115,6 +146,7 @@ function catalogRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const row = await manageRevision(ctx, me, idOf(req));
     const revoked = await revokeRevision(db, row);
+    await logSetup(db, me, { companyId: row.companyId, departmentId: row.departmentId, channelId: row.channelId, kind: 'catalog_revoked', subjectId: row.id, detail: { entryId: row.entryId, revision: row.revision, kind: row.kind } });
     logged(req, me, { revisionId: row.id, did: 'revoked' });
     return revoked;
   });
@@ -142,7 +174,7 @@ function contactRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/outbound/permissions/:id/revoke', async req => {
     const me = await requirePerson(req, db);
     const permissionId = idOf(req);
-    await requireManager(db, me, (await permissionPlace(db, me.companyId, permissionId)).departmentId);
+    await requireRunner(db, me, (await permissionPlace(db, me.companyId, permissionId)).departmentId, noSuch('permission'));
     await revokePermission(ctx, { companyId: me.companyId, permissionId });
     return { permissionId, status: 'revoked' };
   });

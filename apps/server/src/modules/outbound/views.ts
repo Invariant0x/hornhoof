@@ -4,15 +4,17 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, listsDepartment, type Access } from '../../auth/access.js';
-import { canDecide, decidedBy } from '../../auth/decisions.js';
+import { actsAsCeo, canDecide, decidedBy } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import {
+  agents,
   departments,
   outboundAccounts,
   outboundApprovals,
   outboundAttempts,
+  outboundBindings,
   outboundCatalogRevisions,
   outboundChannels,
   outboundMessageRevisions,
@@ -26,6 +28,7 @@ import { ApiError } from '../../errors.js';
 import { decidedByView } from '../tasks/decision-views.js';
 import { candidates, decisionOwner, departmentNames, mayOpenRequest, type Candidate, type DecisionSubject } from '../tasks/decisions.js';
 import { requestSubject, taskSpot } from '../tasks/engine.js';
+import { currentPolicy } from './policies.js';
 import type { SealedPayload } from './ports.js';
 
 const IdParams = z.object({ id: z.uuid() });
@@ -56,7 +59,7 @@ const CATALOG_SUMMARIZERS: CatalogSummarizers = {
   taxonomy: v => `${v.classes.length} classes`,
 };
 
-function summarizeCatalogValue<K extends CatalogValue['kind']>(value: Extract<CatalogValue, { kind: K }>): string {
+export function summarizeCatalogValue<K extends CatalogValue['kind']>(value: Extract<CatalogValue, { kind: K }>): string {
   const summarize = CATALOG_SUMMARIZERS[value.kind] as (item: Extract<CatalogValue, { kind: K }>) => string;
   return summarize(value);
 }
@@ -269,13 +272,31 @@ async function resolveVisibleDepartmentIds(
   return allDepts.filter(d => d.parentId === null && listsDepartment(access, d.id)).map(d => d.id);
 }
 
-async function loadChannelDtos(db: Db, companyId: string, deptIds: readonly string[]) {
+/* Who writes from each account now, by name. */
+async function authorsOf(db: Db, companyId: string, accountIds: readonly string[]) {
+  if (!accountIds.length) return new Map<string, { agentId: string; name: string; generation: number }>();
+  const rows = await db
+    .select({ accountId: outboundBindings.accountId, agentId: outboundBindings.agentId, generation: outboundBindings.generation, name: agents.name })
+    .from(outboundBindings)
+    .innerJoin(agents, eq(agents.id, outboundBindings.agentId))
+    .where(and(eq(outboundBindings.companyId, companyId), eq(outboundBindings.status, 'active'), inArray(outboundBindings.accountId, [...accountIds])));
+  return new Map(rows.map(({ accountId, ...author }) => [accountId, author]));
+}
+
+/* The limits each channel goes by now, and whether it sends without a person's yes to each message. */
+async function policiesOf(db: Db, channelIds: readonly string[]) {
+  const pairs = await Promise.all(channelIds.map(async id => [id, await currentPolicy(db, id)] as const));
+  return new Map(pairs.map(([id, policy]) => [id, policy ? { revision: policy.revision, value: policy.value } : null]));
+}
+
+async function loadChannelDtos(db: Db, companyId: string, deptIds: readonly string[], runs: (departmentId: string) => boolean = () => false) {
   if (deptIds.length === 0) return { channels: [], channelMap: new Map(), accountMap: new Map() };
   const [channels, accounts, activeAttempts] = await Promise.all([
     db.select().from(outboundChannels).where(and(eq(outboundChannels.companyId, companyId), inArray(outboundChannels.departmentId, [...deptIds]))),
     db.select().from(outboundAccounts).where(and(eq(outboundAccounts.companyId, companyId), inArray(outboundAccounts.departmentId, [...deptIds]))),
     db.select({ accountId: outboundAttempts.accountId }).from(outboundAttempts).where(and(eq(outboundAttempts.companyId, companyId), inArray(outboundAttempts.status, ['sending', 'unknown']))),
   ]);
+  const [authors, policies] = await Promise.all([authorsOf(db, companyId, accounts.map(a => a.id)), policiesOf(db, channels.map(c => c.id))]);
   const heldIds = new Set(activeAttempts.map(a => a.accountId));
   const channelMap = new Map(channels.map(c => [c.id, c]));
   const accountMap = new Map(accounts.map(a => [a.id, a]));
@@ -292,6 +313,8 @@ async function loadChannelDtos(db: Db, companyId: string, deptIds: readonly stri
     generation: ch.generation,
     stoppedReason: ch.stoppedReason,
     stoppedAt: ch.stoppedAt ? ch.stoppedAt.toISOString() : null,
+    canManage: runs(ch.departmentId),
+    policy: policies.get(ch.id) ?? null,
     accounts: accounts
       .filter(acc => acc.channelId === ch.id)
       .map(acc => ({
@@ -301,6 +324,7 @@ async function loadChannelDtos(db: Db, companyId: string, deptIds: readonly stri
         status: acc.status,
         configGeneration: acc.configGeneration,
         available: ch.status === 'active' && acc.status === 'active' && !heldIds.has(acc.id),
+        author: authors.get(acc.id) ?? null,
       })),
   }));
   return { channels: dtos, channelMap, accountMap };
@@ -530,6 +554,9 @@ async function loadOpenApprovalDtos(
   return out;
 }
 
+/* A department's channels as its head reads them: limits, accounts by name and who writes from each, never a setting. */
+export const channelsOfDepartment = async (db: Db, companyId: string, departmentId: string) => (await loadChannelDtos(db, companyId, [departmentId], () => true)).channels;
+
 export function outboundViewRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/outbound', async req => {
     const me = await requirePerson(req, ctx.db);
@@ -537,7 +564,7 @@ export function outboundViewRoutes(app: FastifyInstance, ctx: Ctx): void {
     const access = await accessOf(ctx.db, me);
     const deptIds = await resolveVisibleDepartmentIds(ctx.db, me, access, query.department);
     const [everyone, places] = await Promise.all([candidates(ctx, me.companyId), departmentNames(ctx, deptIds)]);
-    const { channels, channelMap, accountMap } = await loadChannelDtos(ctx.db, me.companyId, deptIds);
+    const { channels, channelMap, accountMap } = await loadChannelDtos(ctx.db, me.companyId, deptIds, id => actsAsCeo(me) || access.owns?.has(id) === true);
     const [messages, escalations, approvals] = await Promise.all([
       loadMessageDtos(ctx.db, me.companyId, deptIds, channelMap, accountMap),
       loadEscalationDtos(ctx.db, me, access, everyone, places, deptIds),

@@ -10,6 +10,7 @@ export { outboundRoutes } from './routes.js';
 export { modelCheckRoutes } from '../model-checks/routes.js';
 export { registerOutboundTools } from './tools.js';
 export { registerOutboundControlTools } from './tools-control.js';
+export { registerOutboundHeadTools } from './tools-head.js';
 export { outboundRecordsOf } from './policies.js';
 export { reconcileOutbound } from './dispatcher.js';
 /* Which addresses are on the public internet: an API's model list at an address a person gave is asked only there. */

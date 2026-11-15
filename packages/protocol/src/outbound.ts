@@ -140,5 +140,8 @@ export const OutboundPolicyValue = z.strictObject({
   domainDailyLimit: Limit,
   sampling: z.strictObject({ matureAfter: Count, firstPerSegment: Count, firstPerAuthor: Count, everyNth: Limit }),
   circuit: z.strictObject({ windowHours: Limit, minimumSample: Limit, maxComplaints: Count, maxRefusals: Count, maxBounces: Count }),
+  /* The owner's word that a direct message of this channel goes without a person's yes to each one. Limits, consent,
+     suppression, content checks, prices and a check that wants a person still hold. Left out, each one is asked. */
+  autoSend: z.boolean().optional(),
 });
 export type OutboundPolicyValue = z.infer<typeof OutboundPolicyValue>;

@@ -18,15 +18,17 @@ import { digestOf, moneyWithinLimit, type Money } from './checks.js';
 
 export type Need = 'none' | 'approach' | 'message';
 type Rules = { sending: ApprovalRule; price: ApprovalRule };
-type Work = { audience: 'direct' | 'public'; money: readonly Money[]; escalated: boolean; hasSegment: boolean };
+type Work = { audience: 'direct' | 'public'; money: readonly Money[]; escalated: boolean; hasSegment: boolean; autoSend?: boolean };
 
 const asksEachTime = (rule: ApprovalRule, money: readonly Money[]): boolean => rule.mode === 'within_limits' ? !moneyWithinLimit(money, rule) : approvalNeeded(rule, { amount: null, known: true });
 
 /* What a person must approve for this work under the rules of its department. A public post, a check that wants a person,
-   and anything with no approach to name go one at a time, whatever the rules say. */
+   and anything with no approach to name go one at a time, whatever the rules say. A channel its owner lets send by itself
+   asks nothing for sending; a price still goes by its own rule. */
 export function approvalNeed(rules: Rules, work: Work): Need {
   if (work.audience === 'public' || work.escalated) return 'message';
-  const applying = work.money.length ? [rules.sending, rules.price] : [rules.sending];
+  const applying = [...(work.autoSend ? [] : [rules.sending]), ...(work.money.length ? [rules.price] : [])];
+  if (!applying.length) return 'none';
   if (applying.some(rule => asksEachTime(rule, work.money))) return 'message';
   if (!applying.some(rule => rule.mode === 'new_kinds')) return 'none';
   return work.hasSegment ? 'approach' : 'message';
