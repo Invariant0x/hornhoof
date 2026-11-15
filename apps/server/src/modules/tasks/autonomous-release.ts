@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, autonomousReleases, companies, departments, people, taskEvents, tasks, testParts, testRuns, turns } from '../../db/schema.js';
+import { agents, autonomousReleases, companies, departments, people, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { evidenceOf } from '../testruns/evidence.js';
 import { coversEveryPart } from '../testruns/github-status.js';
@@ -219,18 +219,9 @@ async function repoDepartmentIds(db: QueryDb, companyId: string, repositoryOwner
   return [repositoryOwnerId, ...children.filter(child => !child.repoUrl).map(child => child.id)];
 }
 
-async function openTurnNumber(db: QueryDb, companyId: string, turnId: string | null): Promise<number | null> {
-  if (!turnId) return null;
-  const [turn] = await db
-    .select({ number: turns.number })
-    .from(turns)
-    .where(and(eq(turns.id, turnId), eq(turns.companyId, companyId), eq(turns.status, 'open')));
-  return turn?.number ?? null;
-}
-
-function candidateBranchLeadsToMain(taskNumber: number, turnId: string | null, turnNumber: number | null, branch: string): boolean {
-  if (turnId === null) return branch === `task-${taskNumber}` || branch === 'main' || RELEASE_BRANCH_RE.test(branch);
-  return turnNumber !== null && (branch === `turn-${turnNumber}` || RELEASE_BRANCH_RE.test(branch));
+/* A result that goes to its own main line straight is on its task branch, on main, or on a release branch. */
+function candidateBranchLeadsToMain(taskNumber: number, branch: string): boolean {
+  return branch === `task-${taskNumber}` || branch === 'main' || RELEASE_BRANCH_RE.test(branch);
 }
 
 function isLiveMainCodeRoute(route: Route): boolean {
@@ -254,11 +245,8 @@ async function candidateIntegratesToMain(
   commit: string,
 ): Promise<{ candidate: EchelonCandidate; allowedRunBranches: Set<string> } | null> {
   const candidate = await loadCurrentCommitCandidate(db, verdictTask, route, commit);
-  if (!candidate) return null;
-  const turnNumber = await openTurnNumber(db, verdictTask.companyId, verdictTask.turnId);
-  if (!candidateBranchLeadsToMain(verdictTask.number, verdictTask.turnId, turnNumber, candidate.branch)) return null;
-  const allowedRunBranches = new Set<string>(['main', candidate.branch, ...(turnNumber !== null ? [`turn-${turnNumber}`] : [])]);
-  return { candidate, allowedRunBranches };
+  if (!candidate || !candidateBranchLeadsToMain(verdictTask.number, candidate.branch)) return null;
+  return { candidate, allowedRunBranches: new Set<string>(['main', candidate.branch]) };
 }
 
 function taskInRepoScope(task: Task, placeIds: string[]): boolean {
@@ -266,10 +254,11 @@ function taskInRepoScope(task: Task, placeIds: string[]): boolean {
   return task.status !== 'cancelled' && Boolean(spot && placeIds.includes(spot));
 }
 
+/* The task that has the verdict asks, or a running coordination task of the same repository: a result that goes to its own
+   main line straight joins no turn, so no turn tells them apart. */
 async function requesterMayAutoApprove(db: QueryDb, askingTask: Task, verdictTask: Task, placeIds: string[]): Promise<boolean> {
   if (!taskInRepoScope(askingTask, placeIds)) return false;
   if (askingTask.id === verdictTask.id) return true;
-  if (askingTask.turnId !== verdictTask.turnId) return false;
   const route = await routeOf(db, askingTask);
   return route.state.resultKind === 'coordination' && route.state.phase === 'active';
 }
@@ -399,7 +388,7 @@ async function candidateTaskIdsOnCommit(db: QueryDb, companyId: string, placeIds
   return [...new Set(rows.map(row => row.taskId))];
 }
 
-/* Condition (b): independent PASS verdict on that exact 40-char SHA from a main-line task in the same turn scope. */
+/* Condition (b): independent PASS verdict on that exact 40-char SHA from a main-line task of the same repository. */
 async function verifiedIndependentVerdict(db: QueryDb, askingTask: Task, repositoryOwnerId: string, commit: string): Promise<VerifiedVerdict | null> {
   const placeIds = await repoDepartmentIds(db, askingTask.companyId, repositoryOwnerId);
   const taskIds = (await candidateTaskIdsOnCommit(db, askingTask.companyId, placeIds, commit)).sort(
@@ -442,10 +431,13 @@ async function verifiedMainLine(ctx: Reader, repo: Repo, candidateBaseSha: strin
   return (await verifiedAncestorSha(ctx, repo, candidateBaseSha, mainSha)) ? mainSha : null;
 }
 
+/* Only a result that goes to its own main line straight is approved here: of a product, or a part of a department, that keeps
+   a repository of its own. A top-level department releases turns: its results join the open turn, and main moves for it
+   only by the release of that turn, which autonomous release approves at release_turn. */
 async function enabledMainRepo(ctx: Reader, task: Task): Promise<{ department: Dept; repo: Repo } | null> {
   if (!ctx.config || !(await isAutonomousReleaseEnabled(ctx.db, task.companyId))) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null);
-  return found && isMainRepository(found.department, found.repo) ? { department: found.department, repo: found.repo } : null;
+  return found && found.department.parentId && isMainRepository(found.department, found.repo) ? { department: found.department, repo: found.repo } : null;
 }
 
 async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Promise<VerifiedProof | null> {

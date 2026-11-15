@@ -1,7 +1,7 @@
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, companies, departments, people, requests, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
+import { agents, autonomousReleases, companies, departments, people, requests, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
 import { taskByRef } from './views.js';
@@ -12,9 +12,10 @@ import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R, the head of
-   turn-<number>, main under it, the full run on R, the results R brings with the verdicts on them, and the person's approval
-   of R. Main then goes to R by fast-forward and R is tagged vX.Y.Z; the minute round closes the turn on that tag, and what
-   the release left out goes into the next turn, whose branch starts from the head of this one. */
+   turn-<number>, main under it, the full run on R, the results R brings with the verdicts on them, and what approved R: a
+   person's approval of it, or, with autonomous release on, the entry of the autonomous release log, for a release every
+   commit of which was checked. Main then goes to R by fast-forward and R is tagged vX.Y.Z; the minute round closes the turn
+   on that tag, and what the release left out goes into the next turn, whose branch starts from the head of this one. */
 
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
@@ -50,12 +51,47 @@ async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, de
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
 }
 
-/* A person's approval of exactly R, on the release task. */
-async function requireApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string> {
+/* A person's approval of exactly R, on the release task, or none. */
+async function personApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
   const [approval] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id), eq(requests.kind, 'approval'),
     eq(requests.status, 'approved'), eq(requests.commit, commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt))).orderBy(desc(requests.answeredAt)).limit(1);
-  if (!approval) throw refuse(403, 'decision_not_allowed', `A release needs a person's approval of exactly ${commit}: ask for it on #${task.number} with ask_person, kind approval, naming the commit.`);
-  return approval.id;
+  return approval?.id ?? null;
+}
+
+const needsPerson = (task: Task, commit: string, why: string) =>
+  refuse(403, 'decision_not_allowed', `A release needs a person's approval of exactly ${commit}: ask for it on #${task.number} with ask_person, kind approval, naming the commit.${why}`);
+
+/* Autonomous release is on, held so the CEO's switch waits for the record, for a repository whose main line is main. */
+async function autonomousOn(db: Ctx['db'] | Tx, companyId: string, repo: Repo, hold = false): Promise<boolean> {
+  const query = db.select({ on: companies.autonomousRelease }).from(companies).where(eq(companies.id, companyId));
+  const [company] = hold ? await query.for('share') : await query;
+  return !!company?.on && repo.branch === 'main';
+}
+
+/* Who passed the results of a release, by their verdicts on the exact commits: each still at work, or null. */
+async function liveCheckers(db: Ctx['db'] | Tx, released: ReleasedTask[]): Promise<{ id: string; name: string; stage: string }[] | null> {
+  const ids = released.flatMap(r => r.verdicts).map(Number).filter(Number.isSafeInteger);
+  if (!ids.length) return null;
+  const rows = await db.select({ id: taskEvents.id, agentId: agents.id, name: agents.name, removedAt: agents.removedAt, switchedOffAt: agents.switchedOffAt, stage: sql<string>`coalesce(${taskEvents.data}->>'stage', 'review')` })
+    .from(taskEvents).innerJoin(agents, eq(agents.id, taskEvents.agentId)).where(and(inArray(taskEvents.id, ids), eq(taskEvents.kind, 'verdict'))).orderBy(asc(taskEvents.id));
+  if (rows.length !== new Set(ids).size || rows.some(row => row.removedAt || row.switchedOffAt)) return null;
+  return rows.map(row => ({ id: row.agentId, name: row.name, stage: row.stage }));
+}
+
+/* The entry of the autonomous release log that approves R: the release task, its holder, R and main under it, the full run, and
+   the checkers that passed what R brings. */
+async function logAutonomous(tx: Tx, turn: Turn, task: Task, agentId: string, commit: string, base: string, runId: string, released: ReleasedTask[]): Promise<string | null> {
+  const checkers = await liveCheckers(tx, released);
+  const [run] = await tx.select({ number: testRuns.number }).from(testRuns).where(eq(testRuns.id, runId));
+  const [holder] = await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  if (!checkers || !run || !holder) return null;
+  const unique = <T,>(items: T[]) => [...new Set(items)];
+  const ids = unique(checkers.map(c => c.id));
+  const [entry] = await tx.insert(autonomousReleases).values({
+    companyId: turn.companyId, departmentId: turn.departmentId, taskId: task.id, taskNumber: task.number, agentId, agentName: holder.name, commitSha: commit, baseCommitSha: base,
+    testRunId: runId, testRunNumber: run.number, reviewerAgentId: ids.length === 1 ? ids[0]! : null, reviewerName: unique(checkers.map(c => c.name)).join(', '), verdictStage: unique(checkers.map(c => c.stage)).join(', '),
+  }).returning({ id: autonomousReleases.id });
+  return entry!.id;
 }
 
 /* The commits of a comparison, or null where they could not all be read. */
@@ -147,10 +183,15 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   if (!(await branchHolds(ctx, target.repo, input.commit, base))) throw refuse(409, 'task_invalid', `${input.commit} does not hold ${target.repo.branch} at ${base}, so main cannot go to it by fast-forward. Take ${target.repo.branch} into ${target.branch} first.`);
   const [owner] = await ctx.db.select({ id: departments.id }).from(departments).where(eq(departments.id, turn.departmentId!));
   await requireFullRun(ctx.db, turn, target.branch, owner!.id, input.runId, input.commit);
-  const approvalRequestId = await requireApproval(ctx.db, task, input.commit);
   const results = await acceptedResults(ctx.db, turn);
   const uncovered = await coverage(ctx, target.repo, base, input.commit, results);
   const released: ReleasedTask[] = results.map(r => ({ taskId: r.task.id, number: r.task.number, commit: r.commit, verdicts: r.verdicts }));
+  /* A person's approval stands first; without one, autonomous release approves only what was checked whole. */
+  const asked = await personApproval(ctx.db, task, input.commit);
+  if (!asked) {
+    if (!(await autonomousOn(ctx.db, companyId, target.repo))) throw needsPerson(task, input.commit, '');
+    if (uncovered.length) throw needsPerson(task, input.commit, ` Autonomous release approves only a release every commit of which was checked, and this one brings what was not: ${uncovered.join(' ')}`);
+  }
   const record = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
@@ -158,16 +199,23 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     const still = await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.turnId, turn.id));
     if (still.length !== released.length || still.some(row => !released.some(r => r.taskId === row.id))) throw refuse(409, 'task_changed', `A result joined turn ${turn.number} meanwhile. Record the release again.`);
     await requireFullRun(tx, turn, target.branch, owner!.id, input.runId, input.commit);
-    await requireApproval(tx, task, input.commit);
-    const [row] = await tx.insert(turnReleases).values({ companyId, turnId: turn.id, commit: input.commit, baseCommitSha: base, runId: input.runId, tasks: released, taskId: task.id, approvalRequestId, requestedByAgentId: agentId, covered: uncovered.length === 0, uncovered }).returning();
-    await note(tx, task, { kind: 'comment', actor: { agentId }, text: `Recorded the release of Turn ${turn.number}: main ${base} goes to ${input.commit}.`, data: { release: row!.id } });
+    const approvalRequestId = await personApproval(tx, task, input.commit);
+    let autonomousReleaseId: string | null = null;
+    if (!approvalRequestId) {
+      if (!(await autonomousOn(tx, companyId, target.repo, true))) throw needsPerson(task, input.commit, ' Autonomous release was turned off meanwhile.');
+      autonomousReleaseId = await logAutonomous(tx, turn, task, agentId, input.commit, base, input.runId, released);
+      if (!autonomousReleaseId) throw needsPerson(task, input.commit, ' A checker of what it brings is no longer at work, so autonomous release cannot approve it.');
+    }
+    const [row] = await tx.insert(turnReleases).values({ companyId, turnId: turn.id, commit: input.commit, baseCommitSha: base, runId: input.runId, tasks: released, taskId: task.id, approvalRequestId, autonomousReleaseId, requestedByAgentId: agentId, covered: uncovered.length === 0, uncovered }).returning();
+    const by = autonomousReleaseId ? ', approved by autonomous release' : '';
+    await note(tx, task, { kind: 'comment', actor: { agentId }, text: `Recorded the release of Turn ${turn.number}: main ${base} goes to ${input.commit}${by}.`, data: { release: row!.id } });
     return row!;
   });
   return releaseView(turn, record, released);
 }
 
 const releaseView = (turn: Turn, record: Release, released: ReleasedTask[]) => ({
-  release: record.id, turn: turn.number, commit: record.commit, baseCommit: record.baseCommitSha, runId: record.runId, approvalRequestId: record.approvalRequestId,
+  release: record.id, turn: turn.number, commit: record.commit, baseCommit: record.baseCommitSha, runId: record.runId, approvalRequestId: record.approvalRequestId, autonomousReleaseId: record.autonomousReleaseId,
   tasks: released.map(({ number, commit, verdicts }) => ({ number, commit, verdicts })), covered: record.covered, uncovered: record.uncovered,
   next: `Fast-forward main to ${record.commit} and tag it vX.Y.Z: the tag closes Turn ${turn.number}.`,
 });
@@ -226,14 +274,21 @@ async function tellOfTag(ctx: Reader, turn: Turn, version: string, commit: strin
   ctx.log?.warn({ companyId: turn.companyId, turn: turn.number, version, commit, why }, `${version} released nothing of Turn ${turn.number}: ${cause}.`);
 }
 
-/* The full run and the approval the record relies on still stand as they stood. */
+/* The full run and the approval the record relies on still stand as they stood: the person's approval of its commit, or the
+   entry of the autonomous release log, while autonomous release is on and every checker it relied on is still at work. */
 async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolean> {
-  if (!record.runId || !record.approvalRequestId) return false;
+  if (!record.runId) return false;
   try { await requireFullRun(tx, turn, `turn-${turn.number}`, turn.departmentId!, record.runId, record.commit); }
   catch { return false; }
-  const [approval] = await tx.select({ id: requests.id }).from(requests).where(and(eq(requests.id, record.approvalRequestId), eq(requests.kind, 'approval'), eq(requests.status, 'approved'),
-    eq(requests.commit, record.commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt)));
-  return !!approval;
+  if (record.approvalRequestId) {
+    const [approval] = await tx.select({ id: requests.id }).from(requests).where(and(eq(requests.id, record.approvalRequestId), eq(requests.kind, 'approval'), eq(requests.status, 'approved'),
+      eq(requests.commit, record.commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt)));
+    return !!approval;
+  }
+  if (!record.autonomousReleaseId || !record.covered) return false;
+  const [company] = await tx.select({ on: companies.autonomousRelease }).from(companies).where(eq(companies.id, turn.companyId)).for('share');
+  const [entry] = await tx.select({ id: autonomousReleases.id }).from(autonomousReleases).where(and(eq(autonomousReleases.id, record.autonomousReleaseId), eq(autonomousReleases.commitSha, record.commit)));
+  return !!company?.on && !!entry && (await liveCheckers(tx, record.tasks)) !== null;
 }
 
 /* The tag closes the turn: it keeps the version and commit, the results of its record stay in it, and every other result of it,
