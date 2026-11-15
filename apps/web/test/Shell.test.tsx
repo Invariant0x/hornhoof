@@ -86,7 +86,8 @@ describe('Shell', () => {
     expect(screen.queryByRole('button', { name: 'English' })).not.toBeInTheDocument();
     expect(screen.queryByText('Язык')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Настройки' }));
-    await user.click(await screen.findByRole('radio', { name: 'English' }));
+    await user.click(await screen.findByRole('button', { name: 'Оформление и язык' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Язык' }), 'English');
     expect(screen.getByRole('button', { name: 'Map' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'People' })).toBeInTheDocument();
     expect(localStorage.getItem('hh-lang')).toBe('en');

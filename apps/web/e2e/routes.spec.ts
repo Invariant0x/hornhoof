@@ -55,7 +55,7 @@ for (const settings of SETTINGS) {
     await expect(page.getByRole('heading', { name: 'Development', exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`department-${lang}-${theme}-${width}.png`), animations: 'disabled' });
 
-    for (const [label, path, title] of [[t.about.menu, '/about', t.about.title], [t.settings.menu, '/settings', t.settings.title], [t.updates.menu, '/versions', t.updates.title]] as const) {
+    for (const [label, path, title] of [[t.about.menu, '/about', t.about.title], [t.settings.menu, '/settings/profile', t.settings.title], [t.updates.menu, '/versions', t.updates.title]] as const) {
       await page.getByRole('button', { name: t.shell.account, exact: true }).click();
       await page.getByRole('button', { name: label, exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${path}$`));
@@ -205,7 +205,8 @@ test('login keeps a local deep link and never follows an external return address
 test('the settings dialog reserves stable scrollbar room', async ({ page }) => {
   await serveRoutes(page);
   await page.goto('/settings/company');
-  await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toHaveCSS('scrollbar-gutter', 'stable');
+  /* The heading stays put; the body under it scrolls and keeps its room. */
+  await expect(page.getByRole('dialog', { name: 'Settings', exact: true }).locator('.settings-scroll')).toHaveCSS('scrollbar-gutter', 'stable');
 });
 
 test('unknown and inaccessible links show the same unavailable page', async ({ page }, info) => {

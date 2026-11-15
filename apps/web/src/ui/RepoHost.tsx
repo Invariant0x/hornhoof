@@ -1,8 +1,10 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { RepoHost, RepoKey } from '../types';
 import { Field } from './Field';
+import { Idents } from './Idents';
+import { IntegrationCard } from './IntegrationCard';
 
 type Props = {
   /* Where this key is saved. */
@@ -10,7 +12,7 @@ type Props = {
   /* The key saved there; never the key itself. */
   saved: RepoKey | null;
   /* What the person reads of the key in use. */
-  says: string;
+  says: ReactNode;
   /* The button that saves a first key there. */
   first: string;
   /* The key there now, for whoever keeps it; a department's comes back with the company's view instead. */
@@ -96,10 +98,9 @@ function KeyPart({ path, saved, says, first, onSaved }: Props) {
   );
 }
 
-/* The whole company's key, in the company's settings: shown once it is read. */
-export function CompanyRepoHost() {
+/* The whole company's key, as a card of the Integrations group: connected while a key is saved, shown once it is read. */
+export function RepoHostCard() {
   const t = useT();
-  const id = useId();
   const [host, setHost] = useState<RepoKey | null | undefined>(undefined);
   const [failure, setFailure] = useState<unknown>(null);
 
@@ -111,13 +112,12 @@ export function CompanyRepoHost() {
   }, []);
 
   if (host === undefined && failure === null) return null;
+  const says = host ? <Idents text={t.repoHost.saved(host.owner, host.tokenLast4)} idents={[host.owner]} /> : t.repoHost.none;
   return (
-    <section className="settings-part" aria-labelledby={`${id}-title`}>
-      <h3 id={`${id}-title`}>{t.repoHost.title}</h3>
-      <p>{t.repoHost.about}</p>
-      {host !== undefined && <KeyPart path="/api/repo-host" saved={host} says={host ? t.repoHost.saved(host.owner, host.tokenLast4) : t.repoHost.none} first={t.repoHost.save} onSaved={setHost} />}
+    <IntegrationCard name={t.repoHost.title} about={t.repoHost.about} connected={Boolean(host)}>
+      {host !== undefined && <KeyPart path="/api/repo-host" saved={host} says={says} first={t.repoHost.save} onSaved={setHost} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-    </section>
+    </IntegrationCard>
   );
 }
 

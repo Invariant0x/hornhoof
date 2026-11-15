@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import type { SettingsGroup } from '../routes';
@@ -10,15 +10,15 @@ import { INTEGRATIONS, Integrations } from '../ui/Integrations';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { ExternalMessaging, OUTBOUND_PATH } from '../ui/Outbound';
-import { CompanyRepoHost } from '../ui/RepoHost';
 import { Themes } from '../ui/Themes';
 import { Backups } from './Backups';
 import { useSteady } from './Feedback';
 import { unavailableFailure } from './RouteUnavailable';
 
-/* The groups of the window in their order; the first has no group of its own in the address. */
+/* The parts of the window in their order: Profile, then the four groups. Appearance & language has no group of its own in
+   the address. */
 type Group = 'appearance' | SettingsGroup;
-const GROUPS: readonly Group[] = ['appearance', 'integrations', 'messaging', 'company'];
+const GROUPS: readonly Group[] = ['profile', 'appearance', 'integrations', 'messaging', 'company'];
 /* What the window asks the server once it opens: a group shows only when the server gives this person what it holds. */
 const PROBES: readonly string[] = [...INTEGRATIONS.map(tool => tool.probe), OUTBOUND_PATH];
 
@@ -37,16 +37,22 @@ function useReached(): ReadonlySet<string> | null {
   return reached;
 }
 
-function groupShown(group: Group, reached: ReadonlySet<string>): boolean {
-  if (group === 'integrations') return INTEGRATIONS.some(tool => reached.has(tool.probe));
-  if (group === 'messaging') return reached.has(OUTBOUND_PATH);
+/* Company & access holds the public link for a person who sees the whole company and the backups for the CEO: anyone
+   else would find it empty. */
+const companyShown = (me: Me) => me.person.scopeKind === 'company' || me.person.isOwner;
+
+/* Whether this person has a group: Profile and Appearance & language everyone, the others when the server gives them
+   what the group holds. reached is null until the server said. */
+function groupShown(group: Group, me: Me, reached: ReadonlySet<string> | null): boolean {
+  if (group === 'company') return companyShown(me);
+  if (group === 'integrations') return reached !== null && INTEGRATIONS.some(tool => reached.has(tool.probe));
+  if (group === 'messaging') return reached !== null && reached.has(OUTBOUND_PATH);
   return true;
 }
 
 /* The name a person goes by, saved for everyone in the company. */
 function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => void }) {
   const t = useT();
-  const id = useId();
   const [name, setName] = useState(me.person.name);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
@@ -69,8 +75,7 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
   }
 
   return (
-    <section className="settings-part" aria-labelledby={id}>
-      <h3 id={id}>{t.profile.profile}</h3>
+    <section className="settings-part" aria-label={t.settings.groups.profile}>
       <form className="settings-form" noValidate onSubmit={e => void save(e)}>
         <Field label={t.common.name} problem={failure || undefined}>
           {p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} required />}
@@ -83,23 +88,22 @@ function NameForm({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => voi
   );
 }
 
-/* The language Hornhoof speaks in this browser: every shipped one, each named in itself. */
+/* The language Hornhoof speaks in this browser: one native list of every shipped language, each named in itself, that
+   switches the page as soon as another is picked. Closed it keeps one line; a long name reads whole in the open list. */
 function LanguagePart() {
   const t = useT();
   const id = useId();
   const { language, setLanguage } = useLanguage();
   return (
     <section className="settings-part lang-part" aria-labelledby={id}>
-      <h3 id={id} tabIndex={-1} data-autofocus>{t.language.title}</h3>
-      <p>{t.language.desc}</p>
-      <p className="muted">{t.language.local}</p>
-      <div className="lang-choices" role="radiogroup" aria-labelledby={id}>
-        {LANGUAGES.map(choice => (
-          <label key={choice.id} className="lang-choice" data-on={language === choice.id}>
-            <input type="radio" name={`${id}-language`} value={choice.id} checked={language === choice.id} onChange={() => setLanguage(choice.id)} />
-            <span lang={choice.id}>{choice.name}</span>
-          </label>
-        ))}
+      <h4 id={id}>{t.language.title}</h4>
+      <p id={`${id}-hint`} className="muted">{t.language.hint}</p>
+      <div className="select-wrap">
+        <select className="lang-select" aria-labelledby={id} aria-describedby={`${id}-hint`} value={language} onChange={e => setLanguage(LANGUAGES.find(choice => choice.id === e.target.value)?.id ?? language)}>
+          {LANGUAGES.map(choice => (
+            <option key={choice.id} value={choice.id} lang={choice.id}>{choice.name}</option>
+          ))}
+        </select>
       </div>
     </section>
   );
@@ -219,15 +223,11 @@ function CompanyLink() {
   );
 }
 
-/* Company & access: the person's own name for everyone; for a person who sees the whole company the public link and
-   the GitHub key too, and for the CEO alone the backups. */
-function CompanyGroup({ me, onRenamed }: { me: Me; onRenamed?: (name: string) => void }) {
-  const whole = me.person.scopeKind === 'company';
+/* Company & access: for a person who sees the whole company the public link, and for the CEO alone the backups. */
+function CompanyGroup({ me }: { me: Me }) {
   return (
     <div className="settings-group">
-      <NameForm me={me} onRenamed={onRenamed} />
-      {whole && <CompanyLink />}
-      {whole && <CompanyRepoHost />}
+      {me.person.scopeKind === 'company' && <CompanyLink />}
       {me.person.isOwner && <Backups />}
     </div>
   );
@@ -235,34 +235,53 @@ function CompanyGroup({ me, onRenamed }: { me: Me; onRenamed?: (name: string) =>
 
 type GroupProps = { group: Group; me: Me; reached: ReadonlySet<string> | null; onRenamed?: (name: string) => void; onOpenTask: (id: string) => void };
 
-/* The open group, once the server said which groups this person has; one it does not give them says so. */
-function GroupBody({ group, me, reached, onRenamed, onOpenTask }: GroupProps) {
+/* What the open group holds, once the server said which groups this person has; one it does not give them says so. */
+function GroupContent({ group, me, reached, onRenamed, onOpenTask }: GroupProps) {
   const t = useT();
+  if (group === 'profile') return <div className="settings-group"><NameForm me={me} onRenamed={onRenamed} /></div>;
   if (group === 'appearance') return <div className="settings-group"><LanguagePart /><Themes /></div>;
-  if (group === 'company') return <CompanyGroup me={me} onRenamed={onRenamed} />;
-  if (!reached) return <p className="muted" role="status">{t.common.loading}</p>;
-  if (!groupShown(group, reached)) {
+  if (!reached && group !== 'company') return <p className="muted" role="status">{t.common.loading}</p>;
+  if (!groupShown(group, me, reached)) {
     return (
       <section className="settings-part">
-        <h3>{t.routes.accessDenied}</h3>
+        <h4>{t.routes.accessDenied}</h4>
         <p className="muted">{t.routes.explanation}</p>
       </section>
     );
   }
-  return group === 'integrations' ? <Integrations reached={reached} /> : <ExternalMessaging onOpenTask={onOpenTask} />;
+  if (group === 'company') return <CompanyGroup me={me} />;
+  return group === 'integrations' ? <Integrations reached={reached!} /> : <ExternalMessaging onOpenTask={onOpenTask} />;
 }
 
-/* The switch between the groups, at the start of the window and above the group when it is narrow; the one open is the
-   current page. A group the server does not give this person is not there. */
-function GroupNav({ group, reached, onGroup }: { group: Group; reached: ReadonlySet<string> | null; onGroup: (group?: SettingsGroup) => void }) {
+/* The open group under its heading, which takes the focus when the window opens, and what it holds in a line. */
+function GroupBody(props: GroupProps) {
   const t = useT();
-  const shown = GROUPS.filter(id => (reached ? groupShown(id, reached) : id === 'appearance' || id === 'company'));
+  const id = useId();
+  const intro = props.group === 'appearance' || props.group === 'company' ? t.settings.intro[props.group] : props.group === 'integrations' ? t.integrations.intro : null;
+  return (
+    <section className="sgroup" data-group={props.group} aria-labelledby={id}>
+      <header className="g-head">
+        <h3 id={id} tabIndex={-1} data-autofocus>{t.settings.groups[props.group]}</h3>
+        {intro && <p>{intro}</p>}
+      </header>
+      <GroupContent {...props} />
+    </section>
+  );
+}
+
+/* The switch between Profile and the groups, at the start of the window and above the group when it is narrow; the one
+   open is the current page, and a line parts Profile from the groups. A group this person does not have is not there. */
+function GroupNav({ group, me, reached, onGroup }: { group: Group; me: Me; reached: ReadonlySet<string> | null; onGroup: (group?: SettingsGroup) => void }) {
+  const t = useT();
   return (
     <nav className="settings-nav" aria-label={t.settings.groupsLabel}>
-      {shown.map(id => (
-        <button key={id} className="btn small ghost" type="button" aria-current={group === id ? 'page' : undefined} onClick={() => onGroup(id === 'appearance' ? undefined : id)}>
-          {t.settings.groups[id]}
-        </button>
+      {GROUPS.filter(id => groupShown(id, me, reached)).map(id => (
+        <Fragment key={id}>
+          <button className="btn small ghost" type="button" aria-current={group === id ? 'page' : undefined} onClick={() => onGroup(id === 'appearance' ? undefined : id)}>
+            {t.settings.groups[id]}
+          </button>
+          {id === 'profile' && <hr className="nav-sep" />}
+        </Fragment>
       ))}
     </nav>
   );
@@ -279,17 +298,25 @@ type SettingsProps = {
 
 const nothing = () => {};
 
-/* Settings, for everyone signed in, in four groups: Appearance & language, Integrations, External messaging and
-   Company & access. Each group has its own address under /settings, and the switch between them keeps what lies under
-   the window. */
+/* Settings, for everyone signed in: Profile, then four groups, Appearance & language, Integrations, External messaging and
+   Company & access. Each has its own address under /settings, and the switch between them keeps what lies under the
+   window. */
 export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask = nothing, onClose }: SettingsProps) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
   const close = useSteady(onClose);
   const reached = useReached();
 
+  /* The room this browser's scrollbar takes beside the body, so the body keeps the same 18 px for it in every browser:
+     a classic scrollbar fills part of it, an overlay one none. */
+  useLayoutEffect(() => {
+    const body = scroll.current;
+    if (body) body.style.setProperty('--sb', `${Math.max(0, body.offsetWidth - body.clientWidth)}px`);
+  }, []);
+
   useEffect(() => {
-    /* A group can name where a person starts: Appearance & language starts at its first heading. */
+    /* A person starts at the heading of the open group. */
     (box.current?.querySelector<HTMLElement>('[data-autofocus]') ?? box.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (!takeEscape(e)) return;
@@ -307,10 +334,12 @@ export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask =
           <h2 id="settings-title">{t.settings.title}</h2>
           <button className="btn small ghost" type="button" onClick={onClose}>{t.common.done}</button>
         </header>
-        <div className="settings-body">
-          <GroupNav group={current} reached={reached} onGroup={onGroup} />
-          <div className="settings-main">
-            <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} onOpenTask={onOpenTask} />
+        <div className="settings-scroll" ref={scroll}>
+          <div className="settings-body">
+            <GroupNav group={current} me={me} reached={reached} onGroup={onGroup} />
+            <div className="settings-main">
+              <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} onOpenTask={onOpenTask} />
+            </div>
           </div>
         </div>
       </div>

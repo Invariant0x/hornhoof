@@ -154,12 +154,12 @@ describe('the public link under Company & access', () => {
   });
 });
 
-describe('your own name', () => {
+describe('your own name under Profile', () => {
   it('saves a trimmed name and reports the new name to the shell', async () => {
     const calls = mockApi({ 'PATCH /api/people/p1': [200, { person: { ...ME.person, name: 'Lisa' } }] });
     const renamed: string[] = [];
     const user = userEvent.setup();
-    render(<Settings me={LISTED} group="company" onClose={() => {}} onRenamed={name => renamed.push(name)} />);
+    render(<Settings me={LISTED} group="profile" onClose={() => {}} onRenamed={name => renamed.push(name)} />);
     const field = await screen.findByLabelText('Name');
     await user.clear(field);
     await user.type(field, '  Lisa  ');
@@ -168,10 +168,41 @@ describe('your own name', () => {
     expect(renamed).toEqual(['Lisa']);
   });
 
+  it('gives the name field and every field, list and button of the window but External messaging 44 px, its buttons on the end edge', () => {
+    const mine = '.settings-window :is(.settings-group, .integrations)';
+    expect(decl(`${mine} :is(.field input, .field select, .link-input input)`, 'height')).toBe('44px');
+    expect(decl(`${mine} .btn`, 'min-height')).toBe('44px');
+    expect(decl(`${mine} .btn`, 'padding')).toBe('8px 12px');
+    expect(decl(`${mine} .btn`, 'font-size')).toBe('14px');
+    expect(decl(`${mine} :is(.settings-actions, .repo-actions)`, 'justify-content')).toBe('flex-end');
+    expect(decl('.settings-window > header .btn', 'min-height')).toBe('44px');
+  });
+
+  it('keeps its heading and Done fixed and scrolls only its body, with the same 18 px of room for a scrollbar in every browser', async () => {
+    expect(decl('.dialog.settings-window', 'height')).toBe('calc(100vh - 32px)');
+    expect(decl('.dialog.settings-window', 'padding')).toBe('0');
+    expect(decl('.dialog.settings-window', 'overflow')).toBe('hidden');
+    /* The window itself keeps no room for a scrollbar: only its body scrolls. */
+    expect(decl('.dialog.settings-window', 'scrollbar-gutter')).toBe('auto');
+    expect(decl('.settings-window > header', 'padding-block')).toBe('12px');
+    expect(decl('.settings-window > header', 'padding-inline')).toBe('18px 36px');
+    expect(decl('.settings-window > header', 'border-block-end')).toBe('1px solid var(--line)');
+    expect(decl('.settings-scroll', 'overflow')).toBe('auto');
+    expect(decl('.settings-scroll', 'scrollbar-gutter')).toBe('stable');
+    expect(decl('.settings-scroll', 'padding')).toBe('18px');
+    expect(decl('.settings-scroll', 'padding-inline-end')).toBe('calc(18px + max(0px, 18px - var(--sb, 0px)))');
+    mockApi({});
+    render(<Settings me={LISTED} group="profile" onClose={() => {}} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    /* What this browser's scrollbar takes is measured on the body itself; jsdom draws none. */
+    expect(dialog.querySelector<HTMLElement>('.settings-scroll')!.style.getPropertyValue('--sb')).toBe('0px');
+    expect(dialog.querySelector('.settings-scroll > .settings-body')).not.toBeNull();
+  });
+
   it('shows empty and server name errors by the field', async () => {
     mockApi({ 'PATCH /api/people/p1': [403, { error: { code: 'forbidden', message: 'You cannot change this name.', reason: 'rename_failed' } }] });
     const user = userEvent.setup();
-    render(<Settings me={LISTED} group="company" onClose={() => {}} />);
+    render(<Settings me={LISTED} group="profile" onClose={() => {}} />);
     const field = await screen.findByLabelText('Name');
     await user.clear(field);
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -226,7 +257,7 @@ describe('Settings in the account menu', () => {
     history.replaceState(null, '', '/');
   });
 
-  it('opens one window in four groups, in order, for a person who sees the whole company', async () => {
+  it('opens one window on Profile, then four groups in order, for a person who sees the whole company', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/google-sheets': [200, { google: null }], 'GET /api/outbound': [200, OUTBOUND] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
@@ -234,31 +265,38 @@ describe('Settings in the account menu', () => {
     expect(screen.queryByRole('button', { name: 'Company settings' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-    await waitFor(async () => expect(await groups(dialog)).toEqual(['Appearance & language', 'Integrations', 'External messaging', 'Company & access']));
+    expect(location.pathname).toBe('/settings/profile');
+    expect(within(dialog).getByRole('heading', { name: 'Profile', level: 3 })).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'Profile' })).toHaveAttribute('aria-current', 'page');
+    await waitFor(async () => expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language', 'Integrations', 'External messaging', 'Company & access']));
     for (const [name, path, text] of [
       ['Integrations', '/settings/integrations', 'Google Sheets is not connected yet. Until a key is saved here, employees attach a ready .xlsx file to the task and chat instead.'],
       ['External messaging', '/settings/messaging', 'Nothing has been sent or queued outside yet.'],
       ['Company & access', '/settings/company', 'Hornhoof opens from anywhere at this link:'],
-      ['Appearance & language', '/settings', 'Your choice stays in this browser.'],
+      ['Appearance & language', '/settings', 'Only for you and only in this browser. Other members keep their language and theme.'],
+      ['Profile', '/settings/profile', 'Name'],
     ] as const) {
       await user.click(within(dialog).getByRole('button', { name }));
       expect(location.pathname).toBe(path);
       expect(within(dialog).getByRole('button', { name })).toHaveAttribute('aria-current', 'page');
+      expect(within(dialog).getByRole('heading', { name, level: 3 })).toBeInTheDocument();
       expect((await within(dialog).findAllByText(text))[0]).toBeInTheDocument();
     }
   });
 
-  it('shows a person who sees only some departments the groups the server gives them, with only their name under Company & access', async () => {
+  it('shows a person who sees only some departments their Profile and the groups the server gives them, and no empty Company & access', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': FORBIDDEN, 'GET /api/outbound': [200, OUTBOUND] });
     const user = userEvent.setup();
     render(<Shell me={LISTED} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-    await waitFor(async () => expect(await groups(dialog)).toEqual(['Appearance & language', 'External messaging', 'Company & access']));
-    await user.click(within(dialog).getByRole('button', { name: 'Company & access' }));
-    expect(within(dialog).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['Your profile']);
-    expect(calls.some(call => ['/api/link', '/api/repo-host', '/api/backups'].includes(call.path))).toBe(false);
+    await waitFor(async () => expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language', 'External messaging']));
+    expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue(LISTED.person.name);
+    expect(calls.some(call => ['/api/link', '/api/backups'].includes(call.path))).toBe(false);
+    history.pushState(null, '', '/settings/company');
+    dispatchEvent(new PopStateEvent('popstate'));
+    expect(await within(screen.getByRole('dialog', { name: 'Settings' })).findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
   });
 
   it('leaves out a group whose data the server does not give, and says so at its address', async () => {
@@ -267,7 +305,7 @@ describe('Settings in the account menu', () => {
     render(<Shell me={LISTED} onSignOut={() => {}} />);
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
     expect(await within(dialog).findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
-    expect(await groups(dialog)).toEqual(['Appearance & language', 'Company & access']);
+    expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language']);
   });
 
   it('names the groups in Russian, in the menu and on the window', async () => {
@@ -282,7 +320,7 @@ describe('Settings in the account menu', () => {
     await user.click(screen.getByRole('button', { name: 'Аккаунт' }));
     await user.click(screen.getByRole('button', { name: 'Настройки' }));
     const dialog = await screen.findByRole('dialog', { name: 'Настройки' });
-    await waitFor(async () => expect(await groups(dialog)).toEqual(['Оформление и язык', 'Интеграции', 'Внешние рассылки', 'Компания и доступ']));
+    await waitFor(async () => expect(await groups(dialog)).toEqual(['Профиль', 'Оформление и язык', 'Интеграции', 'Внешние рассылки', 'Компания и доступ']));
   });
 });
 
@@ -292,7 +330,7 @@ describe('the language under Appearance & language', () => {
     document.documentElement.lang = '';
   });
 
-  it('offers every shipped language, each named in itself, and switches the whole page at once', async () => {
+  it('offers every shipped language in one list, each named in itself, and switches the whole page at once', async () => {
     localStorage.setItem('hh-lang', 'en');
     mockApi({ 'GET /api/org': [200, ORG] });
     const user = userEvent.setup();
@@ -306,28 +344,38 @@ describe('the language under Appearance & language', () => {
     expect(screen.queryByRole('button', { name: 'Русский' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-    expect(within(dialog).getByRole('heading', { name: 'Language', level: 3 })).toHaveFocus();
-    const choices = within(within(dialog).getByRole('radiogroup', { name: 'Language' })).getAllByRole('radio');
-    expect(choices.map(choice => [choice.closest('label')!.textContent, (choice as HTMLInputElement).checked])).toEqual(LANGUAGES.map(l => [l.name, l.id === 'en']));
-    expect(LANGUAGES.map(l => within(dialog).getByText(l.name).getAttribute('lang'))).toEqual(LANGUAGES.map(l => l.id));
-    await user.click(within(dialog).getByRole('radio', { name: 'Русский' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Appearance & language' }));
+    expect(within(dialog).getByRole('heading', { name: 'Language', level: 4 })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('radiogroup')).not.toBeInTheDocument();
+    const list = within(dialog).getByRole('combobox', { name: 'Language' });
+    expect(list).toHaveAccessibleDescription('The language of Hornhoof. It changes at once.');
+    expect(list).toHaveValue('en');
+    const options = within(list).getAllByRole('option');
+    expect(options.map(option => [option.textContent, option.getAttribute('value'), option.getAttribute('lang')])).toEqual(LANGUAGES.map(l => [l.name, l.id, l.id]));
+    await user.selectOptions(list, 'Русский');
     expect(screen.getByRole('dialog', { name: 'Настройки' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('radio', { name: 'Русский' })).toBeChecked();
-    expect(within(dialog).getByRole('heading', { name: 'Язык', level: 3 })).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: 'Язык' })).toHaveValue('ru');
+    expect(within(dialog).getByRole('button', { name: 'Оформление и язык' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'Карта' })).toBeInTheDocument();
     expect(localStorage.getItem('hh-lang')).toBe('ru');
     expect(document.documentElement.lang).toBe('ru');
-    await user.click(within(dialog).getByRole('radio', { name: 'English' }));
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Язык' }), 'English');
     expect(screen.getByRole('button', { name: 'Map' })).toBeInTheDocument();
     expect(localStorage.getItem('hh-lang')).toBe('en');
   });
 
-  it('lays each language out as a 44 px choice from the theme tokens that wraps by whole names', () => {
-    expect(decl('.lang-choices', 'flex-wrap')).toBe('wrap');
-    expect(decl('.lang-choice', 'min-height')).toBe('44px');
-    expect(decl('.lang-choice', 'border')).toBe('1px solid var(--line2)');
-    expect(decl('.lang-choice', 'background')).toBe('var(--surface2)');
-    expect(decl(".lang-choice[data-on='true']", 'border-color')).toBe('var(--cyan)');
-    expect(decl(".lang-choice[data-on='true']", 'color')).toBe('var(--cyan-ink)');
+  it('draws the list 44 px high from the theme tokens, at most 360 px wide, with its own arrow at the end of either direction', () => {
+    expect(decl('.select-wrap', 'max-inline-size')).toBe('360px');
+    expect(decl('.select-wrap', 'position')).toBe('relative');
+    expect(decl('.lang-select', 'block-size')).toBe('44px');
+    expect(decl('.lang-select', 'inline-size')).toBe('100%');
+    expect(decl('.lang-select', 'padding-inline')).toBe('12px 36px');
+    expect(decl('.lang-select', 'background')).toBe('var(--surface2)');
+    expect(decl('.lang-select', 'border')).toBe('1px solid var(--line2)');
+    expect(decl('.lang-select', 'white-space')).toBe('nowrap');
+    expect(decl('.lang-select:focus-visible', 'outline')).toBe('2px solid var(--cyan-ink)');
+    expect(decl('.lang-select:focus-visible', 'outline-offset')).toBe('2px');
+    expect(decl('.select-wrap::after', 'inset-inline-end')).toBe('14px');
+    expect(decl('.select-wrap::after', 'border-bottom')).toBe('2px solid var(--muted)');
   });
 });

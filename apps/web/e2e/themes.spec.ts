@@ -74,6 +74,8 @@ async function openThemes(page: Page, words: Messages): Promise<Locator> {
   await page.getByRole('button', { name: words.shell.account, exact: true }).click();
   await page.getByRole('button', { name: words.settings.menu, exact: true }).click();
   const dialog = page.getByRole('dialog', { name: words.settings.title });
+  /* Settings opens on Profile; the skins stand in the group after it. */
+  await dialog.getByRole('button', { name: words.settings.groups.appearance, exact: true }).click();
   await expect(dialog.getByRole('button', { name: words.settings.groups.appearance, exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(dialog.getByRole('region', { name: words.skins.catalog })).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
@@ -115,10 +117,10 @@ async function chooseLanguages(page: Page): Promise<Language[]> {
 }
 
 /* Where every block of the window stands, with its padding, margin and font, the window scrolled to its top: a click
-   scrolls to the card it presses. The actions inside a card are left out: the current card says Applied, not Apply. */
+   scrolls to the card it presses. The actions inside a card are left out: the card on says Applied by a state, not Apply. */
 async function geometry(page: Page): Promise<unknown[]> {
   return page.evaluate(() => {
-    for (const scrolled of document.querySelectorAll('.dialog')) scrolled.scrollTop = 0;
+    for (const scrolled of document.querySelectorAll('.dialog, .settings-scroll')) scrolled.scrollTop = 0;
     const selectors = ['.dialog', '.dialog > *', '.settings-body > *', '.settings-nav > *', '.skins > *', '.skins-head > *', '.skins-add .btn', '.skins-catalog > *', '.skin-cards > *', '.skin-card > *', '.skin-preview > *', '.skins-guide > *'];
     /* Named by place, not by text: the line that says which skin is on changes its words with the skin. */
     return [...new Set(selectors.flatMap(selector => [...document.querySelectorAll<HTMLElement>(selector)]))].map((element, at) => {
@@ -164,7 +166,7 @@ const noSideScroll = (page: Page) => page.evaluate(() => document.documentElemen
 /* The whole window for Design, as tall as its content: the page grows for the picture and goes back to its size. */
 async function shot(page: Page, info: TestInfo, name: string) {
   const size = page.viewportSize()!;
-  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.dialog')].map(box => box.scrollHeight)));
+  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.dialog')].map(box => { const body = box.querySelector<HTMLElement>('.settings-scroll'); return body ? box.getBoundingClientRect().height - body.clientHeight + body.scrollHeight : box.scrollHeight; })));
   const room = content + 64;
   if (room > size.height) await page.setViewportSize({ width: size.width, height: room });
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true, animations: 'disabled' });
@@ -212,12 +214,15 @@ async function lowercaseHeight(page: Page, font: string): Promise<number> {
   return (Math.max(...rows) - Math.min(...rows) + 1) / (await page.evaluate(() => devicePixelRatio));
 }
 
-/* Applies a skin with a click on its card and waits until the page and the line under the heading say so. */
+/* The card of a skin, by its name. */
+const skinCard = (dialog: Locator, name: string) => dialog.locator('.skin-card').filter({ has: dialog.page().getByRole('heading', { name, exact: true }) });
+
+/* Applies a skin with a click on its card and waits until the page, the card's state and the line under the heading say so. */
 async function pick(page: Page, dialog: Locator, words: Messages, language: Language, choice: string) {
   const name = nameOf(words, language, choice);
   await dialog.getByRole('button', { name: `${words.skins.apply}: ${name}`, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', choice);
-  await expect(dialog.getByRole('button', { name: `${words.skins.applied}: ${name}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(skinCard(dialog, name).getByText(words.skins.applied, { exact: true })).toBeFocused();
   await expect(dialog.getByRole('status')).toHaveText(words.skins.nowOn(name));
   await page.evaluate(async () => { await document.fonts.ready; });
 }
@@ -347,7 +352,7 @@ test('Pixel lowercase stands as tall as Tektur, within a pixel, at the size of a
   expect(await heading.evaluate(element => getComputedStyle(element).fontSynthesis)).toBe('none');
   /* The Pixel card beside Cyberpunk's, written in Tektur, on one picture for Design. */
   const card = (name: string) => dialog.locator('.skin-card').filter({ has: page.getByRole('heading', { name, exact: true }) });
-  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.dialog')].map(box => box.scrollHeight)));
+  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.dialog')].map(box => { const body = box.querySelector<HTMLElement>('.settings-scroll'); return body ? box.getBoundingClientRect().height - body.clientHeight + body.scrollHeight : box.scrollHeight; })));
   await page.setViewportSize({ width: 1440, height: Math.max(900, content + 64) });
   const [first, second] = [(await card(words.skins.names.cyberpunk).boundingBox())!, (await card(words.skins.names.pixel).boundingBox())!];
   const x = Math.min(first.x, second.x), y = Math.min(first.y, second.y);
@@ -391,12 +396,13 @@ test('a skin file is added beside the others, a bad one is refused in plain word
   const again = page.getByRole('dialog', { name: words.settings.title });
   await again.getByRole('button', { name: 'Remove: Dawn', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'cyberpunk');
-  await expect(again.getByRole('button', { name: 'Applied: Cyberpunk', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(skinCard(again, 'Cyberpunk').getByText(words.skins.applied, { exact: true })).toBeVisible();
+  await expect(skinCard(again, 'Cyberpunk').getByRole('button', { name: 'Apply: Cyberpunk', exact: true })).toHaveCount(0);
   await expect(again.getByRole('status')).toHaveText(`${words.skins.removed('Dawn')} ${words.skins.nowOn('Cyberpunk')}${words.skins.undo}`);
   await expect(again.getByRole('button', { name: 'Apply: Dusk', exact: true })).toBeFocused();
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(CYBERPUNK.colors.bg));
   await again.getByRole('button', { name: words.skins.undo, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
-  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 5 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
+  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 6 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
   expect(problems).toEqual([]);
 });

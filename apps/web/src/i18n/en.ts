@@ -125,20 +125,23 @@ export const en = {
   },
   profile: {
     nameRequired: 'Enter your name.',
-    profile: 'Your profile',
   },
   /* The Language section of a person's settings: every language Hornhoof ships, each named in itself. */
   language: {
     title: 'Language',
-    desc: 'Hornhoof speaks this language to you. Other members keep their own.',
-    local: 'Your choice stays in this browser.',
+    hint: 'The language of Hornhoof. It changes at once.',
   },
   /* The Settings window: its groups in order, then the company's public link under Company & access. */
   settings: {
     menu: 'Settings',
     title: 'Settings',
     groupsLabel: 'Settings groups',
-    groups: { appearance: 'Appearance & language', integrations: 'Integrations', messaging: 'External messaging', company: 'Company & access' },
+    groups: { profile: 'Profile', appearance: 'Appearance & language', integrations: 'Integrations', messaging: 'External messaging', company: 'Company & access' },
+    /* What a group holds, under its heading. Integrations and External messaging say it in their own words. */
+    intro: {
+      appearance: 'Only for you and only in this browser. Other members keep their language and theme.',
+      company: 'Shared settings of the company and how Hornhoof opens from outside.',
+    },
     link: 'Link on the internet',
     opensAt: 'Hornhoof opens from anywhere at this link:',
     closed: 'Hornhoof opens only at its own address, on this computer and your network.',
@@ -221,7 +224,7 @@ export const en = {
     about: 'Every department keeps its work in a repository, so that each earlier version of a letter, a text or a table can be brought back. With a GitHub key saved here, the orchestrator itself creates a private repository for each department that has none yet, and tells you about it.',
     none: 'No GitHub key is saved, so the orchestrator cannot create repositories.',
     saved: (owner: string, last4: string) => `The orchestrator creates repositories on GitHub for ${owner}, with the key ending in ${last4}.`,
-    deptNone: 'No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Settings, under Company & access.',
+    deptNone: 'No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Settings, under Integrations.',
     deptCompany: (owner: string) => `The orchestrator creates this department's repositories on GitHub for ${owner}, with the company's key.`,
     deptOwn: (owner: string, last4: string) => `The orchestrator creates this department's repositories on GitHub for ${owner}, with its own key ending in ${last4}.`,
     save: 'Save a key',
@@ -280,7 +283,7 @@ export const en = {
   },
   /* The Themes section of the settings: the built-in themes, a person's own kept in this browser, and how to make one. */
   skins: {
-    title: 'Themes',
+    title: 'Skins',
     desc: 'Choose your own look. Other members keep their themes.',
     local: 'Your choice stays in this browser.',
     add: 'Add from file',
@@ -291,7 +294,6 @@ export const en = {
     builtIn: 'Built-in',
     own: 'Custom',
     byDefault: 'Default',
-    current: 'Current',
     apply: 'Apply',
     applied: 'Applied',
     download: 'Download',
@@ -2163,7 +2165,7 @@ export const en = {
     feedback_issued: 'This card has an issue already.',
     feedback_not_sent: 'This finding was not sent to Hornhoof developers.',
     feedback_no_repeats: 'No round found it again since Hornhoof developers last heard of it.',
-    feedback_no_github_key: 'No GitHub key for invariant0x is saved. Save one in Settings, under Company & access, with the right to create issues.',
+    feedback_no_github_key: 'No GitHub key for invariant0x is saved. Save one in Settings, under Integrations, with the right to create issues.',
     backlog_changed: 'The list changed meanwhile. It is shown again as it is now.',
     backlog_unknown: 'This task is no longer in the list.',
     turn_open: 'A turn is running. Close it before starting the next.',
@@ -2178,7 +2180,7 @@ export const en = {
     product_taken: 'This department already has a product with this name. Pick another name, or connect the repository to that product in the list above.',
     repo_host_invalid: 'Name the GitHub user or organization as in github.com/acme, with letters, digits and hyphens, and give the key the first time.',
     repo_host_on_product: 'A product uses the key of the department that holds it. Save the key on that department.',
-    repo_host_missing: "No GitHub key is saved for this department or the company. Save one in Settings, under Company & access, or under Repositories on the department's screen, or connect a repository you have.",
+    repo_host_missing: "No GitHub key is saved for this department or the company. Save one in Settings, under Integrations, or under Repositories on the department's screen, or connect a repository you have.",
     repo_host_refused: 'GitHub did not create the repository. Check that the key is still valid and may create repositories for this owner, and that the name is free.',
     repo_name_invalid: 'Name the repository with Latin letters, digits, dots, hyphens and underscores, 100 at most.',
     repo_exists: 'This product already has a repository. Create the new one on the department, where it comes as a new product.',

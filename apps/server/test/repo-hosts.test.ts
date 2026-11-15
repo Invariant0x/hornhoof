@@ -164,7 +164,7 @@ describe('a repository Hornhoof creates', () => {
     const keyless = await create(c, c.ceoToken, c.sales.id, { name: 'sales' });
     expect(keyless.statusCode).toBe(409);
     expect(keyless.json().error.reason).toBe('repo_host_missing');
-    expect(keyless.json().error.message).toMatch(/Settings, under Company & access/);
+    expect(keyless.json().error.message).toMatch(/Settings, under Integrations/);
     expect(keyless.json().error.message).toMatch(/set_repository|address and a token/);
 
     expect((await saveCompanyKey(c, c.ceoToken, { owner: 'acme', token: COMPANY_KEY })).statusCode).toBe(200);
@@ -275,7 +275,7 @@ describe('create_repository', () => {
       const answer = await call(await c.tools(c.orchestrator, person), { department: c.sales.id, name: 'sales' });
       expect(answer.isError).toBe(true);
       expect(answer.content[0]!.text).toMatch(/no GitHub key/);
-      expect(answer.content[0]!.text).toMatch(/Settings, under Company & access/);
+      expect(answer.content[0]!.text).toMatch(/Settings, under Integrations/);
     }
   });
 });
