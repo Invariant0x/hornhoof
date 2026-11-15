@@ -106,6 +106,9 @@ it("sets the Machines pool's and card's percentages in the text font at the size
   expect(decl('.g-f .pct', 'font-family')).toBe('var(--f-body)');
   expect(decl('.pool-facts .pct', 'font-variant-numeric')).toBe('tabular-nums');
   expect(decl('.g-f .pct', 'font-variant-numeric')).toBe('tabular-nums');
+  /* Its line is no taller than the figure's own, so the pool's tile and the meters keep their height. */
+  expect(decl('.pool-facts .pct', 'line-height')).toBe('1');
+  expect(decl('.g-f .pct', 'line-height')).toBe('1');
   for (const selector of ['.pool-facts .pct', '.g-f .pct']) {
     expect(decl(selector, 'font-size')).toBeUndefined();
     expect(decl(selector, 'font-weight')).toBeUndefined();

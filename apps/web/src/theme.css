@@ -882,8 +882,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .pool-facts dt { font-size: 12px; color: var(--muted); }
 .pool-facts dd { margin: 0 0 6px; font-family: var(--f-display); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* A share in percent, on the pool and on a machine's Load meter, in the text font at the size and weight of its figure,
-   like the map's scale. */
-.pool-facts .pct, .g-f .pct { font-family: var(--f-body); font-variant-numeric: tabular-nums; }
+   like the map's scale. Its own line is no taller than the figure's, so the tile and the meters keep their height. */
+.pool-facts .pct, .g-f .pct { font-family: var(--f-body); font-variant-numeric: tabular-nums; line-height: 1; }
 /* The machine the company's server runs on: a filled badge by its name and a cyan frame. */
 .badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
 /* A machine whose nodes are not the server's build waits for its owner to update them. */
