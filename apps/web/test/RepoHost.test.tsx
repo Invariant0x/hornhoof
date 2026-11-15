@@ -16,8 +16,8 @@ const LINK: Parameters<typeof mockApi>[0] = { 'GET /api/link': [200, { link: nul
 
 async function settings(routes: Parameters<typeof mockApi>[0]) {
   const calls = mockApi({ ...LINK, ...routes });
-  render(<Settings me={ME} onClose={() => {}} />);
-  const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
+  render(<Settings me={ME} group="company" onClose={() => {}} />);
+  const dialog = await screen.findByRole('dialog', { name: 'Settings' });
   return { calls, part: await within(dialog).findByRole('region', { name: 'Creating repositories' }) };
 }
 
@@ -111,7 +111,7 @@ describe("a department's key on its screen", () => {
 
   it('says where a key can be saved when there is none', () => {
     const { part } = department(null);
-    expect(part).toHaveTextContent('No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Company settings.');
+    expect(part).toHaveTextContent('No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Settings, under Company & access.');
     expect(within(part).getByRole('button', { name: 'Save a key' })).toBeInTheDocument();
   });
 });
@@ -123,7 +123,8 @@ describe('the words of the keys', () => {
       expect(words).not.toMatch(/[—ё]/);
     }
     expect(Object.keys(ru.repoHost).sort()).toEqual(Object.keys(en.repoHost).sort());
-    expect(ru.settings.title).toBe('Настройки компании');
+    expect(ru.settings.title).toBe('Настройки');
+    expect(ru.settings.groups.company).toBe('Компания и доступ');
     expect(ru.repoHost.about).toMatch(/оркестратор сам создает закрытый репозиторий каждому отделу, у которого его еще нет, и сообщает об этом/);
   });
 });

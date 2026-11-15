@@ -15,10 +15,11 @@ describe('workspace addresses', () => {
     ['/machines/m1', { kind: 'machines', id: 'm1' }],
     ['/improvements', { kind: 'improvements' }],
     ['/versions', { kind: 'versions' }],
-    ['/profile', { kind: 'profile' }],
     ['/settings', { kind: 'settings' }],
+    ['/settings/integrations', { kind: 'settings', group: 'integrations' }],
+    ['/settings/messaging', { kind: 'settings', group: 'messaging' }],
+    ['/settings/company', { kind: 'settings', group: 'company' }],
     ['/about', { kind: 'about' }],
-    ['/themes', { kind: 'themes' }],
     ['/invite/abc123', { kind: 'invite', token: 'abc123' }],
     ['/tasks?person=p2', { kind: 'tasks', personId: 'p2' }],
   ] as const)('opens and shares %s', (path, route) => {
@@ -26,7 +27,7 @@ describe('workspace addresses', () => {
     expect(routePath(route)).toBe(path);
   });
 
-  it.each(['/missing', '/tasks/a/b', '/theme', '/departments', '/tasks/%', '/people/%2fsecret', '/machines/%5cevil', '//outside.example', 'https://outside.example/tasks', '/\\outside.example', '/people/%00', '/people/..'])('rejects unknown or unsafe destination %s', path => {
+  it.each(['/missing', '/tasks/a/b', '/theme', '/departments', '/tasks/%', '/people/%2fsecret', '/machines/%5cevil', '//outside.example', 'https://outside.example/tasks', '/\\outside.example', '/people/%00', '/people/..', '/outbound', '/feedback', '/profile', '/themes', '/settings/appearance', '/settings/company/x'])('rejects unknown or unsafe destination %s', path => {
     expect(parseRoute(path)).toEqual({ kind: 'unavailable' });
   });
 

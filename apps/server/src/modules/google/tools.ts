@@ -19,9 +19,9 @@ const SheetInput = z.object({
 const NOT_CONNECTED = {
   connected: false,
   setup:
-    'Google Sheets is not connected for this company yet. A person who sees the whole company can connect a Google service account or OAuth JSON key in Company settings -> Google Sheets.',
+    'Google Sheets is not connected for this company yet. A person who sees the whole company can connect a Google service account or OAuth JSON key in Settings -> Integrations -> Google Sheets.',
   fallback:
-    'Do not refuse the request: tell the person plainly what needs to be connected in Company settings -> Google Sheets, and right now generate a ready .xlsx file with hh-xlsx and attach it with hh-attach (--task N and/or --chat).',
+    'Do not refuse the request: tell the person plainly what needs to be connected in Settings -> Integrations -> Google Sheets, and right now generate a ready .xlsx file with hh-xlsx and attach it with hh-attach (--task N and/or --chat).',
 };
 
 export function registerGoogleSheetsTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -30,7 +30,7 @@ export function registerGoogleSheetsTools(server: McpServer, ctx: Ctx, job: Tool
     {
       description:
         'Creates a populated Google Sheet and returns its link when Google Sheets is connected for the company. ' +
-        'If Google Sheets is not connected, returns { connected: false, setup, fallback } so you can explain what to connect in Company settings and immediately attach a ready .xlsx with hh-xlsx and hh-attach.',
+        'If Google Sheets is not connected, returns { connected: false, setup, fallback } so you can explain what to connect in Settings, under Integrations, and immediately attach a ready .xlsx with hh-xlsx and hh-attach.',
       inputSchema: {
         title: z.string().trim().min(1).max(200).describe('Title of the new Google spreadsheet.'),
         sheets: z.array(SheetInput).min(1).max(20).describe('Worksheets with optional column headers and literal cell rows.'),
@@ -43,7 +43,7 @@ export function registerGoogleSheetsTools(server: McpServer, ctx: Ctx, job: Tool
       try {
         secret = JSON.parse(decryptSecret(row.credentialsEnc, ctx.config.secret)) as StoredGoogleSecret;
       } catch {
-        return say('The saved Google Sheets key could not be opened. Ask a person with whole-company access to save it again in Company settings, and attach a ready .xlsx with hh-xlsx and hh-attach now.', true);
+        return say('The saved Google Sheets key could not be opened. Ask a person with whole-company access to save it again in Settings, under Integrations, and attach a ready .xlsx with hh-xlsx and hh-attach now.', true);
       }
       const result = await ctx.createSpreadsheet({ ...secret, shareEmail: row.shareEmail }, { title, sheets });
       if ('problem' in result) {

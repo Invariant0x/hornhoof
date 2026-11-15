@@ -1,12 +1,15 @@
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useT } from '../i18n';
 import { useVersionState, versionText } from '../ui/VersionMark';
 import { takeEscape } from '../ui/escape';
+import { FeedbackForm, useSteady } from './Feedback';
+
+const FOCUSABLE = ':is(button, input, textarea, select):not(:disabled), a[href]';
 
 function keepFocus(event: ReactKeyboardEvent<HTMLDivElement>): void {
   if (event.key !== 'Tab') return;
   const box = event.currentTarget;
-  const controls = box.querySelectorAll<HTMLElement>('button, a[href]');
+  const controls = box.querySelectorAll<HTMLElement>(FOCUSABLE);
   const first = controls[0];
   const last = controls[controls.length - 1];
   const edge = event.shiftKey ? first : last;
@@ -17,19 +20,25 @@ function keepFocus(event: ReactKeyboardEvent<HTMLDivElement>): void {
   target?.focus();
 }
 
-export function About({ onClose, onFeedback }: { onClose: () => void; onFeedback: () => void }) {
+/* About Hornhoof: what it is, its version, license, code and site, and under them writing to its developers. inbox:
+   this is Hornhoof's own installation, where what is written goes into its own inbox. */
+export function About({ inbox, onClose }: { inbox: boolean; onClose: () => void }) {
   const t = useT();
+  const feedbackId = useId();
   const { version, failed } = useVersionState('/api/updates/current');
   const box = useRef<HTMLDivElement>(null);
+  /* The same function for the window's whole life: a screen behind it drawn again does not take the focus from what the
+     person types. */
+  const close = useSteady(onClose);
   useEffect(() => {
     box.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (!takeEscape(event)) return;
-      onClose();
+      close();
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  }, [close]);
 
   return (
     <div className="dialog-back" onPointerDown={event => {
@@ -48,9 +57,12 @@ export function About({ onClose, onFeedback }: { onClose: () => void; onFeedback
           <dd aria-live="polite">{version ? versionText(version) : failed ? t.about.versionFailed : t.common.loading}</dd>
           <dt>{t.about.license}</dt><dd><a href="https://github.com/Invariant0x/hornhoof/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT</a></dd>
           <dt>{t.about.code}</dt><dd><a href="https://github.com/Invariant0x/hornhoof" target="_blank" rel="noopener noreferrer">{t.about.code}</a></dd>
-          <dt>{t.about.contact}</dt><dd><button className="t-link" type="button" onClick={onFeedback}>{t.about.issues}</button></dd>
           <dt>{t.about.website}</dt><dd><a href="https://hornhoof.org" target="_blank" rel="noopener noreferrer">hornhoof.org</a></dd>
         </dl>
+        <section className="about-feedback" aria-labelledby={feedbackId}>
+          <h3 id={feedbackId}>{t.feedback.title}</h3>
+          <FeedbackForm inbox={inbox} onDone={onClose} />
+        </section>
         <p className="about-author muted">{t.about.author}</p>
       </div>
     </div>

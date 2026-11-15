@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
+/* The groups of the Settings window after its first, Appearance & language, each at /settings/<group>. */
+export const SETTINGS_GROUPS = ['integrations', 'messaging', 'company'] as const;
+export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
+
 export type Route =
-  | { kind: 'map' | 'subscriptions' | 'improvements' | 'inbox' | 'outbound' | 'versions' | 'profile' | 'settings' | 'about' | 'themes' | 'feedback' | 'unavailable' }
+  | { kind: 'map' | 'subscriptions' | 'improvements' | 'inbox' | 'versions' | 'about' | 'unavailable' }
+  | { kind: 'settings'; group?: SettingsGroup }
   | { kind: 'tasks'; id?: string; personId?: string }
   | { kind: 'people' | 'machines'; id?: string }
   | { kind: 'department'; id: string }
@@ -9,8 +14,8 @@ export type Route =
 
 const PATHS = {
   map: '', tasks: 'tasks', people: 'people', department: 'departments', subscriptions: 'subscriptions',
-  machines: 'machines', improvements: 'improvements', inbox: 'inbox', outbound: 'outbound', versions: 'versions', profile: 'profile',
-  settings: 'settings', about: 'about', themes: 'themes', feedback: 'feedback', invite: 'invite', unavailable: 'not-found',
+  machines: 'machines', improvements: 'improvements', inbox: 'inbox', versions: 'versions',
+  settings: 'settings', about: 'about', invite: 'invite', unavailable: 'not-found',
 } as const;
 const validId = (id: string): boolean => /^[A-Za-z0-9_-]+$/.test(id);
 const unavailable = (): Route => ({ kind: 'unavailable' });
@@ -22,8 +27,15 @@ function cardRoute(kind: 'tasks' | 'people' | 'machines', id: string | undefined
   return personId && validId(personId) ? { kind, personId } : { kind };
 }
 
+function settingsRoute(group: string | undefined): Route {
+  if (group === undefined) return { kind: 'settings' };
+  const known = SETTINGS_GROUPS.find(name => name === group);
+  return known ? { kind: 'settings', group: known } : unavailable();
+}
+
 function fromParts(kind: Route['kind'], id: string | undefined, query: string): Route {
   if (kind === 'invite') return id ? { kind, token: id } : unavailable();
+  if (kind === 'settings') return settingsRoute(id);
   if (kind === 'department') return id ? { kind, id } : unavailable();
   if (kind === 'people' || kind === 'machines' || kind === 'tasks') return cardRoute(kind, id, query);
   return id === undefined ? { kind } : unavailable();
@@ -44,7 +56,7 @@ export function parseRoute(path: string): Route {
 }
 
 export function routePath(route: Route): string {
-  const id = 'id' in route ? route.id : 'token' in route ? route.token : undefined;
+  const id = 'id' in route ? route.id : 'token' in route ? route.token : 'group' in route ? route.group : undefined;
   if (id !== undefined && !validId(id)) return '/not-found';
   const base = `/${PATHS[route.kind]}${id ? `/${id}` : ''}`;
   const person = route.kind === 'tasks' ? route.personId : undefined;

@@ -146,17 +146,22 @@ for (const settings of SETTINGS) {
     await page.screenshot({ path: `${SHOTS_DIR}/outbound-requests-${lang}-${theme}-${width}.png`, animations: 'disabled' });
 
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
-    await page.getByRole('button', { name: t.shell.tabs.outbound, exact: true }).click();
-    await expect(page).toHaveURL(/\/outbound$/);
-    await expect(page.getByRole('heading', { name: t.outbound.heading, exact: true })).toBeVisible();
-    await expect(page.getByText(new RegExp(t.outbound.unknownHeading))).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Partner Webhook', exact: true })).toBeVisible();
+    await expect(page.locator('.account-menu').getByRole('button', { name: /outbound|исходящие/i })).toHaveCount(0);
+    await page.getByRole('button', { name: t.settings.menu, exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: t.settings.title, exact: true });
+    await dialog.getByRole('button', { name: t.settings.groups.messaging, exact: true }).click();
+    await expect(page).toHaveURL(/\/settings\/messaging$/);
+    await expect(dialog.getByRole('button', { name: t.settings.groups.messaging, exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(dialog.getByText(t.outbound.intro, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(new RegExp(t.outbound.unknownHeading))).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Partner Webhook', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: `${SHOTS_DIR}/outbound-overview-${lang}-${theme}-${width}.png`, animations: 'disabled' });
 
-    await page.getByRole('button', { name: t.tasks.approve, exact: true }).click();
+    await dialog.getByRole('button', { name: t.tasks.approve, exact: true }).click();
     await expect.poll(() => decided).toEqual([{ approved: true }]);
-    await expect(page.getByText('Quarterly enterprise plan overview')).toHaveCount(0);
+    await expect(dialog.getByText('Quarterly enterprise plan overview')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }

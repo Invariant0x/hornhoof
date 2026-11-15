@@ -1,8 +1,9 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { GoogleSheetsConfig } from '../types';
 import { Field } from './Field';
+import { IntegrationCard } from './IntegrationCard';
 
 type Mode = 'view' | 'edit' | 'remove';
 type Change = (action: () => Promise<GoogleSheetsConfig | null>) => void;
@@ -146,21 +147,19 @@ function GoogleSheetsBody({ google, mode, busy, change, pick }: { google: Google
   );
 }
 
-export function CompanyGoogleSheets() {
+/* Google Sheets as a card of the Integrations group: connected while a key is saved. */
+export function GoogleSheetsCard() {
   const t = useT();
-  const id = useId();
   const { google, mode, busy, failure, pick, change } = useGoogleSheets();
   if (google === undefined && failure === null) return null;
   return (
-    <section className="settings-part" aria-labelledby={`${id}-title`}>
-      <h3 id={`${id}-title`}>{t.googleSheets.title}</h3>
-      <p>{t.googleSheets.about}</p>
+    <IntegrationCard name={t.googleSheets.title} about={t.googleSheets.about} connected={Boolean(google)}>
       <GoogleSheetsBody google={google} mode={mode} busy={busy} change={change} pick={pick} />
       {failure !== null && (
         <p className="alert" role="alert">
           {errorText(t, failure)}
         </p>
       )}
-    </section>
+    </IntegrationCard>
   );
 }

@@ -44,9 +44,11 @@ describe('shareable workspace', () => {
     ['/people/p2', 'heading', 'Edit Maria'],
     ['/machines/m1', 'article', 'dev-laptop'],
     ['/departments/d2', 'heading', 'Development'],
-    ['/profile', 'dialog', 'Settings'],
     ['/about', 'dialog', 'About Hornhoof'],
-    ['/settings', 'dialog', 'Company settings'],
+    ['/settings', 'dialog', 'Settings'],
+    ['/settings/integrations', 'dialog', 'Settings'],
+    ['/settings/messaging', 'dialog', 'Settings'],
+    ['/settings/company', 'dialog', 'Settings'],
   ])('opens %s directly', async (path, role, name) => {
     fixture();
     history.replaceState(null, '', path!);
@@ -130,7 +132,8 @@ describe('shareable workspace', () => {
     await screen.findByRole('dialog', { name: 'About Hornhoof' });
     expect(location.pathname).toBe('/about');
     expect(tab('People')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByLabelText('Title')).toBe(title);
+    /* About has a Title of its own, for writing to Hornhoof developers; the person's stays first, beneath it. */
+    expect(screen.getAllByLabelText('Title')[0]).toBe(title);
     expect(title).toHaveValue('Unsaved person title');
     await user.keyboard('{Escape}');
     expect(location.pathname).toBe('/people/p2');
@@ -208,7 +211,7 @@ describe('shareable workspace', () => {
     expect(screen.getByRole('button', { name: 'Restore Orchestrator' })).toBeVisible();
   });
 
-  it.each(['settings', 'versions', 'improvements'])('blocks a restricted viewer from %s without showing the map behind it', async kind => {
+  it.each(['versions', 'improvements'])('blocks a restricted viewer from %s without showing the map behind it', async kind => {
     fixture();
     history.replaceState(null, '', `/${kind}`);
     render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } }} onSignOut={() => {}} />);
@@ -220,7 +223,7 @@ describe('shareable workspace', () => {
   it.each([
     ['/', '/api/org'], ['/tasks', '/api/tasks?status=all'], ['/subscriptions', '/api/subscriptions'],
     ['/people', '/api/people'], ['/machines', '/api/machines'], ['/improvements', '/api/improvements'],
-    ['/versions', '/api/updates'], ['/settings', '/api/link'],
+    ['/versions', '/api/updates'],
   ])('offers the map when %s is denied by its API', async (path, api) => {
     fixture({ [`GET ${api}`]: [403, { error: { code: 'forbidden' } }] });
     history.replaceState(null, '', path!);
