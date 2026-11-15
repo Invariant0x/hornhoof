@@ -11,10 +11,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 type Boot = {
   url: string;
-  tokens: Record<'ann' | 'bob' | 'olga' | 'wes' | 'lisa' | 'ceo', string>;
-  ids: Record<'ann' | 'bob' | 'olga' | 'wes' | 'lisa' | 'ceo', string>;
+  tokens: Record<'ann' | 'bob' | 'olga' | 'wes' | 'clara' | 'ceo', string>;
+  ids: Record<'ann' | 'bob' | 'olga' | 'wes' | 'clara' | 'ceo', string>;
   crew: Record<'mine' | 'other' | 'away' | 'far' | 'head' | 'owned' | 'wide' | 'deputy', { id: string; name: string }>;
-  plans: Record<'ann' | 'bob' | 'olga' | 'wes' | 'lisa', { id: string }>;
+  plans: Record<'ann' | 'bob' | 'olga' | 'wes' | 'clara', { id: string }>;
   dev: { id: string };
   sales: { id: string };
   hiddenTask: { id: string };
@@ -188,7 +188,7 @@ test('real server lets the department owner see every agent of their department 
     const olga = await signedIn(browser, server, 'olga', 'en', 'light', 1440);
     await olga.goto(`/departments/${server.dev.id}`);
     for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(olga.locator('.dcanvas')).toContainText(name);
-    for (const who of ['ceo', 'lisa'] as const) {
+    for (const who of ['ceo', 'clara'] as const) {
       const viewer = await signedIn(browser, server, who, 'en', 'light', 1440);
       await viewer.goto(`/departments/${server.dev.id}`);
       for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(viewer.locator('.dcanvas')).toContainText(name);

@@ -13,7 +13,8 @@ describe('candidate source and quality regressions', () => {
     const f = await rejectedFinding();
     await f.db.update(agents).set({ switchedOffAt: new Date(), removedAt: new Date(), subscriptionId: f.author.subscriptionId }).where(eq(agents.id, f.reviewer.id));
     expect((await f.confirm()).isError).toBeFalsy();
-    expect((await f.read()).reviewFindings.byVendor).toEqual([{ vendor: 'codex', count: 1, findingIds: [f.finding.findingId] }]);
+    /* The reviewer left the company, so its tools stop: the head reads the task. */
+    expect((await f.read(f.head)).reviewFindings.byVendor).toEqual([{ vendor: 'codex', count: 1, findingIds: [f.finding.findingId] }]);
   });
 
   it('does not credit a live-branch run on B to a verdict pinned to A', async () => {

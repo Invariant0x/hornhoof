@@ -1,12 +1,18 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, people } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, people, turns } from '../src/db/schema.js';
 import { checkOperations, ensureOperations } from '../src/modules/operations/ensure.js';
 import { appOn, createTestDb, SETUP, statements, ownDatabases } from './helpers.js';
 import { company, FOUR, opsDepartments, roles, staff, staffedLike } from './operations-required-fixture.js';
 
 ownDatabases();
+
+/* Every department has its open turn, which ends before the department goes, as when the structure removes one. */
+async function removeDepartments(db: Db, where: SQL): Promise<void> {
+  await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(inArray(turns.departmentId, db.select({ id: departments.id }).from(departments).where(where)));
+  await db.delete(departments).where(where);
+}
 
 describe('a company that lives already', () => {
   it('gets who is missing when the server starts, with its one head kept', async () => {
@@ -30,7 +36,7 @@ describe('a company that lives already', () => {
   it('creates Operations when it has none, first in a company without departments', async () => {
     const { app, db, companyId } = await company();
     await staffedLike(db, companyId, () => false);
-    await db.delete(departments).where(eq(departments.companyId, companyId));
+    await removeDepartments(db, eq(departments.companyId, companyId));
     await ensureOperations(app.ctx, companyId);
     const [ops] = await opsDepartments(db);
     expect(ops!.position).toBe(0);
@@ -40,12 +46,12 @@ describe('a company that lives already', () => {
   it('puts an Operations it creates after the departments the company has', async () => {
     const { app, db, companyId } = await company();
     await staffedLike(db, companyId, () => false);
-    await db.delete(departments).where(eq(departments.companyId, companyId));
+    await removeDepartments(db, eq(departments.companyId, companyId));
     await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', position: 0 });
     await ensureOperations(app.ctx, companyId);
     expect((await opsDepartments(db))[0]!.position).toBe(1);
     await staffedLike(db, companyId, () => false);
-    await db.delete(departments).where(eq(departments.templateKey, 'operations'));
+    await removeDepartments(db, eq(departments.templateKey, 'operations'));
     await db.update(departments).set({ position: 4 }).where(eq(departments.templateKey, 'sales'));
     await ensureOperations(app.ctx, companyId);
     expect((await opsDepartments(db))[0]!.position).toBe(5);

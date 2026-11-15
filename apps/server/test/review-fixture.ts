@@ -56,8 +56,8 @@ export async function rejectedFinding(category: 'security' | 'data' | 'spec' | '
   const issues = (await f.event('verdict')).data.issues;
   expect(issues).toEqual([expect.objectContaining({ findingId: expect.any(String), revision: expect.any(String), reviewedCommit: FIRST, reviewerId: f.reviewer.id, reviewerVendor: 'codex', taskId: f.task.id, authorId: f.author.id })]);
   const finding = (issues as Finding[])[0]!;
-  const read = async (): Promise<{ reviewFindings: FindingReport; fixReview?: { reviewedCommit: string; fixCommit: string; findingIds: string[] } }> => {
-    const result = await (await f.tools()).callTool({ name: 'task', arguments: { task: f.task.number } });
+  const read = async (actor = f.reviewer): Promise<{ reviewFindings: FindingReport; fixReview?: { reviewedCommit: string; fixCommit: string; findingIds: string[] } }> => {
+    const result = await (await f.tools(actor)).callTool({ name: 'task', arguments: { task: f.task.number } });
     return JSON.parse((result.content as { text: string }[])[0]!.text);
   };
   const confirm = async (actor = f.head, more: Record<string, unknown> = {}) => (await f.tools(actor)).callTool({ name: 'confirm_finding', arguments: { task: f.task.number, findingId: finding.findingId, revision: finding.revision, confirmed: true, reason: 'Verified the lost total', ...more } });

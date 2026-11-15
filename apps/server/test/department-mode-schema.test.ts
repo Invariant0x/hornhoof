@@ -5,36 +5,13 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
-import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { MIGRATIONS } from '../src/db/client.js';
-import { createTestDb, ownDatabases } from './helpers.js';
+import { ownDatabases } from './helpers.js';
 
 ownDatabases();
 
-it('stores a work mode on the fresh department schema', async () => {
-  const db = await createTestDb();
-  expect((await db.$client.query('SELECT work_mode FROM departments')).rows).toEqual([]);
-});
-
-it('keeps work mode readable but denies generic SQL writes for both roles', async () => {
-  const db = await createTestDb();
-  const client = db.$client;
-  /* Exercise grant policy against a newly introduced column independently of the
-     migration. Before the policy change this column inherits generic writes. */
-  await client.exec("ALTER TABLE departments ADD COLUMN IF NOT EXISTS work_mode text DEFAULT 'turns'");
-  const names = { write: agentRole('postgres'), read: readerRole('postgres') };
-  await client.exec(`${grantsFor(names.write)};\n${readerGrantsFor(names.read)}`);
-  const run = (name: string, sql: string) => client.transaction(async tx => {
-    await tx.exec(`SET LOCAL ROLE "${name}"`);
-    return tx.exec(sql);
-  });
-  for (const name of Object.values(names)) {
-    expect((await run(name, 'SELECT id,work_mode FROM departments'))[0]!.rows).toEqual([]);
-    await expect(run(name, "UPDATE departments SET work_mode = 'continuous' WHERE false")).rejects.toThrow(/permission denied/);
-    await expect(run(name, 'INSERT INTO departments(company_id,role_code,work_mode) SELECT company_id,role_code,work_mode FROM departments WHERE false')).rejects.toThrow(/permission denied/);
-  }
-});
-
+/* Departments kept a work mode from 0069 until 0126 took it away with planned turns: what 0069 did to the rows they had
+   still holds for an upgrade from before it. */
 it('backfills existing template defaults without losing department data and repeats safely', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'hh-department-mode-upgrade-'));
   onTestFinished(() => rm(directory, { recursive: true, force: true }));
@@ -70,12 +47,4 @@ it('backfills existing template defaults without losing department data and repe
   const history = await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id');
   await migrate(db, { migrationsFolder: directory });
   expect((await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id')).rows).toEqual(history.rows);
-});
-
-it('rejects an unknown persisted mode even for a direct service insert', async () => {
-  const db = await createTestDb();
-  await db.$client.exec("ALTER TABLE departments ADD COLUMN IF NOT EXISTS work_mode text DEFAULT 'turns'");
-  await db.$client.exec("INSERT INTO companies (id,name) VALUES ('00000000-0000-4000-8000-000000000001','Mode fixture')");
-  await expect(db.$client.exec(`INSERT INTO departments(company_id,role_code,work_mode)
-    VALUES ('00000000-0000-4000-8000-000000000001','CUSTOM','weekly')`)).rejects.toThrow(/check constraint/);
 });

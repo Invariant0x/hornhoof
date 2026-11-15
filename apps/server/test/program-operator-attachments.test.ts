@@ -90,12 +90,15 @@ it('refuses the target, workers outside the program operator and the head of Ope
   }
 });
 
+/* The tools of an employee who left the company stop at once, so its token reads nothing at all. */
+const refused = (change: object) => ('removedAt' in change ? 401 : 404);
+
 it('checks the operator current role, Operations department and enabled state, and lets Operations read a case given to another', async () => {
   const c = await fixture();
   const changes = [{ roleKey: 'OPS-WATCH' }, { kind: 'head' as const }, { departmentId: c.dev.id }, { departmentId: null }, { switchedOffAt: new Date() }, { removedAt: new Date() }];
   for (const change of changes) {
     await c.db.update(agents).set(change).where(eq(agents.id, c.operator!.id));
-    expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(404);
+    expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(refused(change));
     await c.db.update(agents).set({ roleKey: c.operator!.roleKey, kind: c.operator!.kind, departmentId: c.operator!.departmentId, switchedOffAt: null, removedAt: null }).where(eq(agents.id, c.operator!.id));
   }
   await c.db.update(programOperatorCases).set({ operatorAgentId: c.watcher.id }).where(eq(programOperatorCases.id, c.incident.id));
@@ -109,14 +112,14 @@ it('checks the report recipient is still the target department head and rejects 
   const changes = [{ kind: 'worker' as const }, { departmentId: c.watcher.departmentId }, { switchedOffAt: new Date() }, { removedAt: new Date() }];
   for (const change of changes) {
     await c.db.update(agents).set(change).where(eq(agents.id, c.head.id));
-    expect((await c.fetchPicture(c.headTurn.token)).statusCode).toBe(404);
+    expect((await c.fetchPicture(c.headTurn.token)).statusCode).toBe(refused(change));
     await c.db.update(agents).set({ kind: c.head.kind, departmentId: c.head.departmentId, switchedOffAt: null, removedAt: null }).where(eq(agents.id, c.head.id));
   }
   await c.db.update(jobs).set({ agentId: c.watcher.id }).where(eq(jobs.id, c.headTurn.job.id));
   expect((await c.fetchPicture((await c.turn(c.head.id)).token)).statusCode).toBe(404);
   for (const field of ['switchedOffAt', 'removedAt'] as const) {
     await c.db.update(agents).set({ [field]: new Date() }).where(eq(agents.id, c.orchestrator.id));
-    expect((await c.fetchPicture(c.orchestratorTurn.token)).statusCode).toBe(404);
+    expect((await c.fetchPicture(c.orchestratorTurn.token)).statusCode).toBe(refused({ [field]: true }));
     await c.db.update(agents).set({ [field]: null }).where(eq(agents.id, c.orchestrator.id));
   }
 });
