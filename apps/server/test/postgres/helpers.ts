@@ -77,10 +77,33 @@ async function requirePostgres17(pool: pg.Pool): Promise<void> {
   if (Math.floor(Number(version) / 10000) !== 17) throw new Error(`Live PostgreSQL 17 is required; server_version_num was ${version}.`);
 }
 
-export async function migrateCandidate(db: PgDb): Promise<void> {
-  await migrate(db, { migrationsFolder: MIGRATIONS });
-  await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+/* A migration holds a lock on each object it makes until it commits, some 3000 for the candidate's, and the cluster has room
+   for a few thousand in all: six test files migrating at once on one part ran it out of shared memory. So the test databases
+   of one cluster migrate one at a time, each in its turn under a lock of the database every test file shares; the session
+   that holds the turn gives it up as it ends, and a file waits for its turn with no deadline. */
+const TAKE_TURN = "SELECT pg_advisory_lock(hashtext('hornhoof: one test database migrates at a time'))";
+
+export async function holdMigrationTurn(label: string): Promise<() => Promise<void>> {
+  const client = new pg.Client({ connectionString: sourceUrl().toString(), application_name: label });
+  const errors: Error[] = [];
+  client.on('error', error => errors.push(error));
+  await client.connect();
+  try { await client.query(TAKE_TURN); } catch (error) { await client.end(); throw error; }
+  return async () => {
+    await client.end();
+    if (errors.length) throw new AggregateError(errors, `The migration turn was lost: ${label}`);
+  };
 }
+
+export async function migrateFolder(fixture: Pick<PostgresFixture, 'name' | 'db'>, migrationsFolder: string): Promise<void> {
+  const release = await holdMigrationTurn(`${fixture.name}_migration`);
+  try {
+    await migrate(fixture.db, { migrationsFolder });
+    await applyMissingMigrations(fixture.db, { migrationsFolder });
+  } finally { await release(); }
+}
+
+export const migrateCandidate = (fixture: Pick<PostgresFixture, 'name' | 'db'>): Promise<void> => migrateFolder(fixture, MIGRATIONS);
 
 /* Every test owns a new database, including grants and migration history. The supplied database is never reset. */
 export async function privatePostgres(options: { migrate?: boolean } = {}): Promise<PostgresFixture> {
@@ -100,12 +123,13 @@ export async function privatePostgres(options: { migrate?: boolean } = {}): Prom
   const pool = (label: string) => ownedPool(url.toString(), `${name}_${label}`, cleanups);
   const admin = pool('admin');
   const db = drizzle(admin, { schema });
+  const fixture: PostgresFixture = { name, url: url.toString(), db, admin, pool, cleanup: close => { cleanups.push(close); } };
   if (options.migrate !== false) {
-    await migrateCandidate(db);
+    await migrateCandidate(fixture);
     /* The lease every PGlite test database holds too (prepare-environment.ts): agent SQL writes only under one. */
     await admin.query(ENDLESS_LEASE);
   }
-  return { name, url: url.toString(), db, admin, pool, cleanup: close => { cleanups.push(close); } };
+  return fixture;
 }
 
 export async function backendPid(pool: pg.Pool): Promise<number> {
