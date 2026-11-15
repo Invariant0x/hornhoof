@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { eq } from 'drizzle-orm';
+import { asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -224,6 +224,30 @@ describe('the add_api_key tool', () => {
     expect(properties.provider!.enum).toEqual(['anthropic_api', 'openai_api', 'openrouter', 'custom_api']);
     expect(Object.keys(properties)).toEqual(expect.arrayContaining(['baseUrl', 'protocol', 'models']));
     expect(tool.description).toContain('openrouter');
+  });
+});
+
+describe('the cards that pick an API', () => {
+  it("offers an API with its models on the cards of what it serves: the orchestrator's, and an employee's of its department alone", async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'development' }, { template: 'sales' }] }, ...as(ceo) });
+    const [dev, sales] = await db.select().from(departments).where(isNull(departments.parentId)).orderBy(asc(departments.position));
+    const router = (await addKey(app, ceo, { provider: 'openrouter', label: 'Router', apiKey: OPENROUTER_KEY, models: OWN, target: { kind: 'orchestrator' } })).json().subscription.id as string;
+    const acme = (await addKey(app, ceo, custom({ target: { kind: 'department', id: dev!.id } }))).json().subscription.id as string;
+    const elsewhere = (await addKey(app, ceo, custom({ label: 'Sales LLM', target: { kind: 'department', id: sales!.id } }))).json().subscription.id as string;
+    const hired = await app.inject({ method: 'POST', url: `/api/departments/${dev!.id}/staff`, payload: { people: [{ role: 'DEV-BE', name: 'Bruno', model: 'llama-4-maverick', subscription: acme, skills: app.ctx.templates.roles.get('DEV-BE')!.skills.filter(s => s.on).map(s => s.id) }] }, ...as(ceo) });
+    expect(hired.json()).toMatchObject({ hired: [expect.any(String)] });
+    const card = async (id: string) => (await app.inject({ method: 'GET', url: `/api/agents/${id}`, ...as(ceo) })).json() as { runsOn: { subscription: { id: string; api: object | null }; models: { id: string }[] }[] };
+    const offered = (c: Awaited<ReturnType<typeof card>>, id: string) => c.runsOn.find(r => r.subscription.id === id);
+
+    const orchestrator = await card('orchestrator');
+    expect(offered(orchestrator, router)).toMatchObject({ subscription: { api: { baseUrl: 'https://openrouter.ai/api', protocol: 'anthropic' } }, models: OWN });
+    expect(offered(orchestrator, acme)).toBeUndefined();
+    const bruno = await card(hired.json().hired[0] as string);
+    expect(offered(bruno, acme)).toMatchObject({ subscription: { api: { baseUrl: 'https://llm.acme.example/v1', protocol: 'openai' } }, models: OWN });
+    expect([offered(bruno, router), offered(bruno, elsewhere)]).toEqual([undefined, undefined]);
+    expect(JSON.stringify([orchestrator, bruno])).not.toMatch(/0123456789abcdef/);
   });
 });
 
