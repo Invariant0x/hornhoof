@@ -1,6 +1,6 @@
 # Tasks and turns
 
-> In short: you write to the orchestrator, and he lays the work out as tasks, grouped in turns. One turn runs at a time, and each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit.
+> In short: you write to the orchestrator, and he lays the work out as tasks, grouped in turns. Each department runs one turn at a time, and different departments run theirs side by side. Each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit, unless the CEO has turned on autonomous release.
 
 ![Tasks and turns](../.github/assets/tasks.gif)
 
@@ -8,17 +8,18 @@
 
 The word has two meanings in Hornhoof.
 
-- A turn of the company is a batch of work, like turn 3. Tasks come in these turns.
+- A turn is a batch of one department's work, like turn 3. Tasks come in these turns. Turn numbers count across the whole company, so the turns of one department can skip numbers.
 - An agent's turn is one round of an agent's work, from the moment Hornhoof wakes it until it stops. The parts about waking agents, from "When does Hornhoof wake an agent?" on, count these.
 
 ## Where do tasks come from?
 
-Work moves as tasks, and tasks come in turns. Nobody fills the tracker by hand: people write to the orchestrator, and he lays the work out.
+Work moves as tasks, and tasks come in turns. Nobody fills the tracker by hand: people write to the orchestrator or to a department's head, and they lay the work out.
 
 A turn has:
 
 - a short title;
 - its main point;
+- the department whose turn it is;
 - one task for each goal the CEO gave it, whole, for the department that owns it;
 - the way it runs.
 
@@ -29,7 +30,7 @@ A turn runs in one of two ways, chosen as it starts:
 - In stages. Code work goes through the checks below: Architecture, Development, Review, Security and Tests.
 - Turnkey. One employee of a sub-unit marked "Works turnkey" does the turn's work alone from start to finish. Hornhoof refuses this way while no sub-unit works turnkey.
 
-The orchestrator picks the way when he lays out a turn. When you put tasks from a department's off-turn list into the next turn, you pick it next to the button. A person who sees the whole company can change it on the Tasks tab while the turn is planned. Once the turn starts, its way stays.
+Whoever lays out a turn, the orchestrator or the department's head, picks the way. When you put tasks from a department's off-turn list into the next turn, you pick it next to the button. A person who sees the whole company, or the department's owner, can change it on the Tasks tab while the turn is planned. Once the turn starts, its way stays.
 
 Work given outside any turn goes through no stages: whoever gets it does it alone from start to finish.
 
@@ -38,15 +39,16 @@ Work given outside any turn goes through no stages: whoever gets it does it alon
 From top to bottom:
 
 1. What agents wait for from people: questions to answer, commits to approve, and tasks an agent got stuck on.
-2. The running turn, with its tasks.
-3. The planned turns, in order.
-4. The finished turns, folded away.
+2. The department you pick.
+3. "The running turn and the next ones": that department's running turn and its planned turns, in order, with their tasks. Another department's turn shows here too while it holds a task of this department. The tasks given outside turns come after them.
+4. The department's off-turn list.
+5. The finished turns, folded away.
 
 ## What happens when I add work while a turn runs?
 
-One turn runs at a time. When the orchestrator lays out a turn while one runs, it waits as planned, with its tasks planned too.
+Each department runs one turn at a time, and turns of different departments run side by side. A new turn of a department that runs none starts at once. A new turn of a department that runs one waits as planned, after that department's planned turns, with its tasks planned too.
 
-When people add to the work, he puts it into the next planned turn, or into a new turn after them. It goes into the running turn, where it starts at once, only when the CEO says now. He says where it went.
+When people add to the work, a new goal gets a new turn of the department that owns it. Work for the goal of a turn that is not over joins that turn: in the running turn it goes to the department's head at once, and in a planned turn it waits for the turn to start. The orchestrator says where it went.
 
 ## How does a department split its task?
 
@@ -93,11 +95,11 @@ When one of those tasks is cancelled, whoever made the waiting task is told.
 
 ## When does a turn end?
 
-Once every task of the turn is closed, the turn ends. The next planned one starts by itself.
+Once every task of the turn is closed, the turn ends. The department's next planned turn starts by itself.
 
 ## How do I see how a turn went?
 
-Open a department, then "Speed", then "Report", and pick any turn that ran. You see that department's time from issue to acceptance, its critical path apart from the sum of agent hours, time by stage, waits by reason, returns, failures, interrupted turns, numbers by kind of task, quality after release and test time by package and file. Each number comes with its change in percent to the previous turn and to the starting turn: turn 7, or the first turn of a company that never ran one.
+Open a department, then "Speed", then "Report", and pick any turn that ran. You see that department's time from issue to acceptance, its critical path apart from the sum of agent hours, time by stage, waits by reason, returns, failures, interrupted turns, numbers by kind of task, quality after release and test time by package and file. Each number comes with its change in percent to the department's previous turn that ran and to its starting turn: turn 7 when that is a finished turn of the department, or else the department's first finished turn.
 
 Hornhoof saves a turn's numbers as it closes, before the next one opens. A turn closed before this existed is worked out from its events the first time someone reads it, and the report says so. Bugs found later keep counting after that, since they turn up later.
 
@@ -134,7 +136,7 @@ Three turns in a row on a task that break within minutes of starting stop Hornho
 
 ## Which turns are not counted?
 
-- A turn that ended at the plan's limit counts for neither. The agent goes on once the limit starts over.
+- A turn that ends without moving its task while the agent's plan is at its limit counts for neither. Another employee may take the task over, as [Machines and plans](machines-and-plans.md#what-happens-when-a-plan-hits-its-limit) explains. Otherwise the agent goes on once the limit starts over.
 - A turn a person stopped does not count.
 - Nothing is counted while the agent has another turn waiting on the task, or while the task waits for the tasks it gave out or for people.
 
@@ -182,10 +184,12 @@ The machine's own browser opens the page and waits until the page has loaded and
 
 ## Who can give a department a task?
 
-Anyone whose access lists a department can give it a task, from inside the department, with "New task". It goes to the department's head, and joins the running turn if one runs.
+Anyone whose access lists a department can give it a task, from inside the department, with "New task". It goes to the department's head, and joins the department's running turn if one runs. A department set to "Works all the time" runs no turns, so its tasks come outside turns. Operations starts that way.
 
 ## Who approves what reaches the main branch?
 
 Nothing reaches the main branch until someone who sees the whole company, or the orchestrator, approves the exact commit. The department's people see it waiting.
+
+The one exception is autonomous release. Only the signed-in CEO turns it on or off, for the whole company, with the switch among a department's approvals. While it is on, an exact commit for the main branch goes in without that approval when it has a green full test run, a PASS from another employee who checked that commit, and a fast-forward path from the main branch. The "Autonomous release log" next to the switch lists each such commit.
 
 [Back to the guide](README.md)
