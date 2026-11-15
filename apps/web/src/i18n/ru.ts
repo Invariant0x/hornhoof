@@ -853,15 +853,11 @@ export const ru: Messages = {
         lead: reason => `Не может взять сервер: ${reason}`,
         phone: 'это телефон.',
         noCore: host => `здесь Hornhoof работает без Docker; сделайте ${host} полной машиной.`,
-        memory: 'Docker здесь получает меньше 4 ГБ памяти.',
         scope: (person, departments) =>
           `данные компании хранятся только на машинах тех, кто видит всю компанию, а ${person} ${
             departments === undefined ? 'видит не всю' : departments === 0 ? 'не видит ни одного отдела' : departments === 1 ? 'видит один отдел' : `видит ${departments} ${plural('ru', departments, { one: 'отдел', few: 'отдела', many: 'отделов', other: 'отдела' })}`
           }.`,
         noLink: 'скрытое имя компании на hornhoof.org еще не создано; Hornhoof создаст его, как только hornhoof.org ответит.',
-        measuring: 'машина еще измеряется.',
-        disk: (free, need) => `свободно ${free} ГБ; нужно ${need} ГБ.`,
-        fsync: ms => `диск сохраняет медленно (${ms} мс); нужно меньше 50 мс.`,
       },
       onlyCopy: host => `${host} хранит единственную актуальную копию; сначала дайте место другой машине.`,
     },

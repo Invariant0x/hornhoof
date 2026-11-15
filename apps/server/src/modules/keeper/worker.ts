@@ -98,6 +98,10 @@ export type WorkerKeeperOptions = {
   extraReport?: () => object;
   /* What measures this machine's connection to the internet; none where a test gives none. */
   internet?: Internet;
+  /* How often the keeper times a synced write to its disk; a test's keeper takes its own. copying: whether the
+     machine makes its copy of the company's data now, when it times none. */
+  sampleMs?: number;
+  copying?: () => boolean;
   onView?: (view: KeeperView) => void;
 };
 
@@ -247,7 +251,7 @@ export class WorkerKeeper {
   private readonly stopping = new AbortController();
 
   constructor(private readonly opts: WorkerKeeperOptions) {
-    this.measures = new Measures({ dir: opts.config.dir, internet: opts.internet });
+    this.measures = new Measures({ dir: opts.config.dir, sampleMs: opts.sampleMs, internet: opts.internet, copying: opts.copying });
     this.following = new Following({ dir: opts.config.dir, controlDir: opts.config.controlDir, commit: opts.config.commit, now: opts.now, log: opts.log });
     /* A machine that joined opens only on what its owner signed with the key this keeper holds: it takes no app's word. */
     this.carrier = new ComputerCarrier({
