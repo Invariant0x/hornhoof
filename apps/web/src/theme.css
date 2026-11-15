@@ -2421,6 +2421,8 @@ th.k-prio .sorth { white-space: nowrap; }
    table, a sorting table keeps each status whole on one line as well; one that does not fit so stands as entries
    (useEntriesFit), where a status wraps its words inside its frame. */
 .dt td, .dt th, .cell-lim, .where-list { overflow-wrap: break-word; }
+/* The card open below a row is no cell of the table's columns: its words break as they do in a card anywhere else. */
+.dt > tbody > tr.det > td { overflow-wrap: anywhere; }
 .dt .status { white-space: normal; }
 @container tbl (width > 780px) {
   .dt:not([data-fit="entries"]) > tbody > tr.rm .status { white-space: nowrap; }
