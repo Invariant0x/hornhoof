@@ -12,7 +12,7 @@ function Conflict({ conflict, busy, onPick }: { conflict: MergeConflict; busy: b
   return (
     <div role="group" aria-label={conflict.what}>
       <p><b>{conflict.what}</b></p>
-      <table className="dt">
+      <table className="dt merge-table">
         <thead>
           <tr>
             <th scope="col" />

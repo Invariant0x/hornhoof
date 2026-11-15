@@ -111,7 +111,7 @@ function useRoutedOpen(selectedId: string | null | undefined, setOpen: Dispatch<
 /* A table that needs more than its frame by whole words stands as entries, as on a phone, before a phone's width:
    measured again as the frame changes, the rows shown change, and the fonts come. A change of the frame is measured in
    the next frame: turning into entries inside the observer would change the frame it is watching. */
-function useEntriesFit(frame: RefObject<HTMLDivElement | null>, shown: string) {
+export function useEntriesFit(frame: RefObject<HTMLDivElement | null>, shown: string) {
   useLayoutEffect(() => {
     const host = frame.current;
     const table = host?.querySelector('table');
