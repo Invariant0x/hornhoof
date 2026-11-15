@@ -73,6 +73,11 @@ export async function offences(panel: Locator, words: Words): Promise<string[]> 
       for (const set of form.querySelectorAll('fieldset')) {
         const s = css(set);
         if (px(s.borderTopWidth) || px(s.paddingInlineStart) || px(s.paddingInlineEnd)) out.push(`9: ${name(set)} keeps the browser's frame`);
+        /* Its heading stands 4px above what follows it, whether a browser lays the legend out as a legend or not. */
+        const legend = set.querySelector('legend');
+        const next = legend && set.querySelector('legend ~ * > :first-child, legend + :not(div)');
+        const gap = legend && next ? rect(next).top - rect(legend).bottom : NaN;
+        if (Math.abs(gap - 4) > 1) out.push(`9: ${name(set)} has ${Math.round(gap)}px under its heading`);
       }
       const fields = [...form.querySelectorAll('input:not([type=checkbox]), select, legend')].map(rect);
       const lefts = fields.map(f => Math.round(f.left));

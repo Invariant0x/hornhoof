@@ -204,13 +204,17 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
       </label>
       <fieldset className="outbound-numbers">
         <legend>{s.reviewTitle}</legend>
-        <p className="hint">{s.reviewHint}</p>
-        {NUMBERS.slice(0, 4).map(([, key]) => count(key, key === 'everyNth' ? 1 : 0))}
+        <div className="outbound-numbers-body">
+          <p className="hint">{s.reviewHint}</p>
+          {NUMBERS.slice(0, 4).map(([, key]) => count(key, key === 'everyNth' ? 1 : 0))}
+        </div>
       </fieldset>
       <fieldset className="outbound-numbers">
         <legend>{s.circuitTitle}</legend>
-        <p className="hint">{s.circuitHint}</p>
-        {NUMBERS.slice(4).map(([, key]) => count(key, key === 'windowHours' || key === 'minimumSample' ? 1 : 0))}
+        <div className="outbound-numbers-body">
+          <p className="hint">{s.circuitHint}</p>
+          {NUMBERS.slice(4).map(([, key]) => count(key, key === 'windowHours' || key === 'minimumSample' ? 1 : 0))}
+        </div>
       </fieldset>
       <FormFoot>
         <button className="btn" type="submit" disabled={busy}>{t.common.save}</button>

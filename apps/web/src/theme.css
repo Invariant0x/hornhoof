@@ -383,10 +383,12 @@ select:disabled { opacity: .55; }
 .outbound-setup .form-foot { margin-block-start: 8px; }
 /* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
 .outbound-setup .field :is(input, select) { height: 44px; }
-/* The groups of the limits form: no frame of the browser, their heading a line of its own, their fields on the form's edge. */
-.outbound-numbers { display: grid; gap: 10px; min-inline-size: 0; margin: 0; margin-block-start: 8px; padding: 0; border: 0; }
-.outbound-numbers > legend { float: inline-start; inline-size: 100%; padding: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: break-word; }
-.outbound-numbers > .hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+/* The groups of the limits form: no frame of the browser, their heading a line of its own, their fields on the form's edge.
+   What follows the heading is a block of its own under it, as every browser lays out a legend in its own way. */
+.outbound-numbers { display: block; min-inline-size: 0; margin: 0; margin-block-start: 8px; padding: 0; border: 0; }
+.outbound-numbers > legend { float: inline-start; inline-size: 100%; margin: 0; padding: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: break-word; }
+.outbound-numbers-body { clear: both; display: grid; gap: 10px; min-width: 0; padding-block-start: 4px; }
+.outbound-numbers-body > .hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 /* The box of sending without a yes, drawn by us and so the same in every browser. */
 .tick-box { position: relative; display: block; width: 16px; height: 16px; margin-block-start: 2px; }
 .check-card .tick-box input { appearance: none; display: block; box-sizing: border-box; width: 16px; height: 16px; margin: 0; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
