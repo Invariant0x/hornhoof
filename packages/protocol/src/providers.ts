@@ -31,7 +31,11 @@ export function apiEndpoint(provider: ProviderId, own: { baseUrl?: string | null
     }
     case 'custom_api':
       return own.baseUrl && own.protocol ? { baseUrl: own.baseUrl.replace(/\/+$/, ''), protocol: own.protocol } : null;
-    default:
+    case 'claude':
+    case 'codex':
+    case 'kimi':
+    case 'glm':
+    case 'antigravity':
       return null;
   }
 }
