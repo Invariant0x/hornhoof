@@ -13,7 +13,10 @@ export type TestPartPlanInput = {
   machines?: MachinePace[];
   /* How long a preparation takes, at the middle pace, that the first machine runs before its part. */
   preparationMs?: number;
+  /* A full run's parts: no fewer than min and no more than max, and enough of them that each ends within ceilingMs. */
+  spread?: PartSpread;
 };
+export type PartSpread = { min: number; max: number; ceilingMs: number };
 export type MachinePace = { key: string; pace: number };
 /* machine: the machine a part is laid out for and how long it should take there, when the machines go at different paces. */
 export type PlannedTestPart = { units: TestUnit[]; testMs: number; machine?: { key: string; ms: number } };
@@ -33,7 +36,8 @@ export type TestPartPlan = {
 
 type TimedUnit = { unit: TestUnit; ms: number; unknown: boolean };
 type Group = { key: string; units: TestUnit[]; ms: number };
-type Alternative = { parts: PlannedTestPart[]; estimate: PartEstimate };
+/* partMs: how long the longest part may take on the machine it goes to, with its setup. */
+type Alternative = { parts: PlannedTestPart[]; estimate: PartEstimate; partMs: number };
 export const fileKey = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => JSON.stringify([unit.suiteId, unit.file]);
 export const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
@@ -49,6 +53,11 @@ function validInput(input: TestPartPlanInput): void {
   nonnegative(input.unknownFileMs, 'unknown-file estimate');
   nonnegative(input.preparationMs ?? 0, 'preparation estimate');
   if (!input.unknownFileMs) throw new RangeError('The unknown-file estimate must be positive.');
+  if (input.spread) validSpread(input.spread);
+}
+function validSpread({ min, max, ceilingMs }: PartSpread): void {
+  if (!Number.isInteger(min) || min < 1 || !Number.isInteger(max) || max < min) throw new RangeError('Invalid part spread: use whole numbers with 1 <= min <= max.');
+  if (!Number.isFinite(ceilingMs) || ceilingMs <= 0) throw new RangeError('Invalid part ceiling: use a finite positive number.');
 }
 
 function durationIndex(durations: FileDuration[]): Map<string, number[]> {
@@ -101,14 +110,38 @@ function distribute(groups: Group[], machines: MachinePace[], paced: boolean, pr
   const longest = Math.max(...parts.map(part => paced ? Math.round(end(part)) : end(part)));
   return { longest, parts: parts.filter(part => part.units.length).map(({ units, testMs, pace, key }) => ({ units, testMs, ...(paced ? { machine: { key, ms: Math.round(testMs * pace) } } : {}) })) };
 }
-function alternative(groups: Group[], machines: MachinePace[], costs: TestPartPlanInput['costs'], paced: boolean, preparationMs: number): Alternative {
+/* A part laid out for no machine may go to any, so it may take as long as the slowest one takes. With more parts than lanes, the
+   machines free at once, the lanes share the work of all of them. */
+function alternative(groups: Group[], machines: MachinePace[], costs: TestPartPlanInput['costs'], paced: boolean, preparationMs: number, slowest = 1, lanes = machines.length): Alternative {
   const count = machines.length, { parts, longest } = distribute(groups, machines, paced, preparationMs);
+  const busiest = count > lanes ? Math.max(longest, (preparationMs + parts.reduce((sum, part) => sum + part.testMs, 0)) / lanes) : longest;
+  const partMs = costs.setupMs + Math.max(...parts.map(part => part.machine ? part.machine.ms : part.testMs * slowest));
   /* Setup can overlap across machines; collecting every result still costs time. Charge the extra machines' setup
      separately when choosing, rather than claiming that extra resource cost is measured wall time. */
-  const estimatedWallMs = costs.setupMs + longest + count * costs.collectMs;
+  const estimatedWallMs = costs.setupMs + busiest + count * costs.collectMs;
   const costAdjustedMs = estimatedWallMs + (count - 1) * costs.setupMs;
   nonnegative(costAdjustedMs, 'estimated total cost');
-  return { parts, estimate: { parts: count, estimatedWallMs, costAdjustedMs } };
+  return { parts, partMs, estimate: { parts: count, estimatedWallMs, costAdjustedMs } };
+}
+/* Each count a full run may take. A count beyond the free machines waits for machines as they free, at one pace, so its
+   parts are laid out evenly and counted at the pace of the slowest machine. */
+function spreadOptions(groups: Group[], machines: MachinePace[], input: TestPartPlanInput, paced: boolean, spread: PartSpread): { options: Alternative[]; least: number; most: number } {
+  const most = Math.min(spread.max, MAX_TEST_PARTS, groups.length), least = Math.min(spread.min, most);
+  const slowest = machines[machines.length - 1]!.pace, preparationMs = input.preparationMs ?? 0;
+  const options = Array.from({ length: most - least + 1 }, (_, index) => least + index).map(count => count <= machines.length
+    ? alternative(groups, machines.slice(0, count), input.costs, paced, preparationMs, slowest)
+    : alternative(groups, Array.from({ length: count }, () => ({ key: '', pace: slowest })), input.costs, false, preparationMs, slowest, machines.length));
+  return { options, least, most };
+}
+const cheapest = (options: Alternative[]): Alternative => options.reduce((chosen, next) => next.estimate.costAdjustedMs < chosen.estimate.costAdjustedMs ? next : chosen);
+/* The cheapest count whose every part ends within the ceiling; when none does, the one whose longest part is shortest. */
+function withinCeiling(options: Alternative[], ceilingMs: number): Alternative {
+  const fitting = options.filter(option => option.partMs <= ceilingMs);
+  return fitting.length ? cheapest(fitting) : options.reduce((chosen, next) => next.partMs < chosen.partMs ? next : chosen);
+}
+function spreadReason(spread: PartSpread, least: number, most: number, best: Alternative): string {
+  const fits = best.partMs <= spread.ceilingMs ? '' : `; no count fits that, so its longest part is estimated at ${best.partMs} ms`;
+  return ` A full run takes ${least} to ${most} parts of at most ${spread.ceilingMs} ms each${fits}.`;
 }
 function reasonFor(input: TestPartPlanInput, best: Alternative, oneMachineMs: number, unknown: number): string {
   const capacity = input.availableMachines ? `Selected ${best.parts.length} parts from ${input.availableMachines} free compatible machines.`
@@ -124,15 +157,18 @@ export function planTestParts(input: TestPartPlanInput): TestPartPlan {
   const timed = timedUnits(input), groups = groupsOf(timed), machines = pacesOf(input);
   const paced = machines[machines.length - 1]!.pace / machines[0]!.pace >= ONE_PACE;
   const limit = Math.min(MAX_TEST_PARTS, machines.length, groups.length);
-  const preparationMs = input.preparationMs ?? 0;
-  const options = Array.from({ length: limit }, (_, index) => alternative(groups, machines.slice(0, index + 1), input.costs, paced, preparationMs));
-  const best = options.reduce((chosen, next) => next.estimate.costAdjustedMs < chosen.estimate.costAdjustedMs ? next : chosen);
+  const preparationMs = input.preparationMs ?? 0, { spread } = input;
+  const single = alternative(groups, machines.slice(0, 1), input.costs, paced, preparationMs);
+  const spreading = spread && spreadOptions(groups, machines, input, paced, spread);
+  const options = spreading ? spreading.options : [single, ...Array.from({ length: limit - 1 }, (_, index) => alternative(groups, machines.slice(0, index + 2), input.costs, paced, preparationMs))];
+  const best = spread ? withinCeiling(options, spread.ceilingMs) : cheapest(options), bound = best.parts.some(part => part.machine);
   /* At one pace any machine takes any part: the part laid out beside the preparation goes last, for the machine it frees. */
-  const parts = preparationMs && !paced && best.parts.length === best.estimate.parts ? [...best.parts.slice(1), best.parts[0]!] : best.parts;
+  const parts = preparationMs && !bound && best.parts.length === best.estimate.parts ? [...best.parts.slice(1), best.parts[0]!] : best.parts;
   const unknownUnits = timed.filter(item => item.unknown).map(item => item.unit);
-  const oneMachineMs = options[0]!.estimate.estimatedWallMs;
+  const oneMachineMs = single.estimate.estimatedWallMs;
+  const reason = reasonFor(input, best, oneMachineMs, unknownUnits.length) + (spreading ? spreadReason(spread, spreading.least, spreading.most, best) : '');
   return { parts, oneMachineMs, estimatedWallMs: best.estimate.estimatedWallMs,
     costAdjustedMs: best.estimate.costAdjustedMs, alternatives: options.map(option => option.estimate), unknownUnits,
-    waitingForCapacity: input.availableMachines === 0, reason: reasonFor(input, best, oneMachineMs, unknownUnits.length),
-    ...(preparationMs && paced ? { preparationMachine: machines[0]!.key } : {}) };
+    waitingForCapacity: input.availableMachines === 0, reason,
+    ...(preparationMs && bound ? { preparationMachine: machines[0]!.key } : {}) };
 }

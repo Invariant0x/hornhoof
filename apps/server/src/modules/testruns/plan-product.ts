@@ -1,6 +1,6 @@
 import { candidateTestUnits, EnvironmentSnapshot, MAX_TEST_PARTS, ProductCommitSha, TestExecution, validateEnvironmentDescription } from '@hornhoof/protocol';
 import { planEnvironmentParts, unitKey, type PreparedEnvironmentPlanInput, type EnvironmentPartPlan } from './plan-environment.js';
-import type { TestPartPlan } from './plan.js';
+import type { PartSpread, TestPartPlan } from './plan.js';
 import type { ReuseDecision } from './reuse.js';
 
 export type ProductPlan = { leaves: { selection: TestExecution['selection']; after: number[]; computer?: string }[]; estimate: TestPartPlan | null; reason: string };
@@ -71,6 +71,11 @@ function remainingWork(input: ReusingInput) {
     remaining: input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit))),
   };
 }
+/* A full run's parts share the part count with its preparation and final checks. */
+function withinBudget(spread: PartSpread, budget: number): PartSpread {
+  const max = Math.max(1, Math.min(spread.max, budget));
+  return { ...spread, max, min: Math.min(spread.min, max) };
+}
 /* Plans what is left to run. No file proves a final check, so it stays; a reused preparation leaves nothing for the rest to wait for. */
 export async function planProductParts(input: ReusingInput): Promise<ProductPlan> {
   input = await candidateInput(input);
@@ -78,8 +83,8 @@ export async function planProductParts(input: ReusingInput): Promise<ProductPlan
   const finals = finalSuites(input, onceIds);
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');
-  const availableMachines = Math.min(input.availableMachines, Math.max(0, budget)), { preparationMs, ...rest } = input;
-  const planned = await remainingPlan({ ...rest, availableMachines, ...(preparation && preparationMs ? { preparationMs } : {}) }, remaining);
+  const availableMachines = Math.min(input.availableMachines, Math.max(0, budget)), { preparationMs, spread, ...rest } = input;
+  const planned = await remainingPlan({ ...rest, availableMachines, ...(preparation && preparationMs ? { preparationMs } : {}), ...(spread ? { spread: withinBudget(spread, budget) } : {}) }, remaining);
   const leaves = preparationLeaves(input, preparation, planned);
   leaves.push(...batchLeaves(input, planned));
   leaves.push(...finalLeaves(leaves, finals, preparation?.suiteIds ?? []));
