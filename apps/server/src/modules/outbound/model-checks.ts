@@ -56,7 +56,8 @@ export type FreshModelResponse =
 
 export type FreshModelInvoke = (request: FreshModelRequest) => Promise<FreshModelResponse>;
 
-const PROVIDER_VENDOR: Record<ProviderId, string> = {
+/* OpenRouter and a compatible API serve models of any maker, so only the model's own maker tells. */
+const PROVIDER_VENDOR: Record<ProviderId, string | null> = {
   claude: 'anthropic',
   anthropic_api: 'anthropic',
   codex: 'openai',
@@ -64,6 +65,8 @@ const PROVIDER_VENDOR: Record<ProviderId, string> = {
   kimi: 'moonshot',
   glm: 'zhipu',
   antigravity: 'google',
+  openrouter: null,
+  custom_api: null,
 };
 
 const VENDOR_FAMILIES: readonly [string, RegExp][] = [

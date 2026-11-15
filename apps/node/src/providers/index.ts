@@ -33,5 +33,20 @@ export function adapterFor(provider: ProviderId, opts: Options): ProviderAdapter
       return kimiAdapter(opts);
     case 'antigravity':
       return antigravityAdapter(opts);
+    case 'openrouter':
+    case 'custom_api':
+      return notYet(provider);
   }
+}
+
+/* A connection by address this node cannot run yet: its turns fail with why, and never reach another API with the key. */
+function notYet(provider: ProviderId): ProviderAdapter {
+  const output = `This node cannot run ${provider} connections yet.`;
+  return {
+    install: async () => {},
+    loggedIn: async () => true,
+    login: async () => {},
+    run: async () => ({ ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null }),
+    secrets: async () => [],
+  };
 }

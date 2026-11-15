@@ -20,7 +20,7 @@ import { FileOutcome, KeptFiles, RepositoryScope, RuntimeCapability, ProductComm
 import { HarnessSynced } from './harness.js';
 export { HarnessClaim, HarnessDone, HarnessFailed, HarnessSynced, HarnessUnit } from './harness.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
-import { PROVIDER_IDS, type ProviderId } from './providers.js';
+import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
 
 export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
@@ -28,6 +28,7 @@ export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } fro
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
 export { PROVIDER_IDS, type ProviderId };
+export { API_PROTOCOLS, API_PROVIDERS, apiEndpoint, isApiProvider, type ApiEndpoint, type ApiProtocol, type ApiProvider } from './providers.js';
 
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
@@ -186,12 +187,36 @@ export function modelsFor(provider: ProviderId, reported: ModelOption[] | null):
   if (reported && provider === 'claude') return reported.map(m => (m.defaultEffort ? m : { ...m, ...pick(CLAUDE_ALIASES.find(a => a.id === m.id)?.defaultEffort) }));
   if (reported) return reported;
   if (provider === 'anthropic_api' || provider === 'openai_api') return API_MODELS[provider];
+  /* OpenRouter and a compatible API run only the models their connection was given. */
   if (provider === 'claude') return CLAUDE_ALIASES;
   return [];
 }
 
 /* Job and subscription ids end up in folder names on the node, so they hold no slashes or dots. */
 const Id = z.string().regex(/^[A-Za-z0-9-]{1,64}$/);
+
+/* How many tokens a turn used, as its program counted them: what went in fresh, what came out, what was read from and
+   written to the prompt cache, and all of them together. A part the program does not tell is null; a turn whose program
+   tells none has no counts at all. */
+const Count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable();
+export const TurnTokens = z
+  .object({ input: Count, output: Count, cacheRead: Count, cacheWrite: Count, total: Count })
+  .refine(t => Object.values(t).some(v => v !== null), 'A turn without any count has no tokens.');
+export type TurnTokens = z.infer<typeof TurnTokens>;
+
+/* An API's address, as the company named it: http or https, with no sign-in in it, nothing after a #. */
+export const ApiBaseUrl = z
+  .string()
+  .max(500)
+  .refine(value => {
+    try {
+      const url = new URL(value);
+      return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password && !url.hash && url.hostname.length > 0;
+    } catch {
+      return false;
+    }
+  }, 'An API address is an http or https address with no sign-in in it.');
+export const ApiConnection = z.object({ baseUrl: ApiBaseUrl, protocol: z.enum(API_PROTOCOLS) });
 
 /* What an agent is doing while a job runs, already shortened by the node for people to watch. */
 export const AgentEvent = z.discriminatedUnion('kind', [
@@ -550,6 +575,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     wordsWaiting: z.boolean().optional(),
     /* Set on a failed turn whose program said why; older nodes send none. */
     failure: Failure.optional(),
+    /* The tokens the turn used; null when its program told none, left out by older nodes. */
+    tokens: TurnTokens.nullable().optional(),
     /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */
     exit: ProgramExit.optional(),
     n: MessageNumber,
@@ -678,6 +705,9 @@ const ServerMessage = z.discriminatedUnion('type', [
     /* Node's timers wait at most this long; a longer one fires at once. */
     timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
     secret: z.string().nullable(),
+    /* For an API key: where its program sends its calls and in which protocol. A node from before runs the Claude and
+       OpenAI APIs at their own addresses without it. */
+    api: ApiConnection.optional(),
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */
     instructions: z.string().max(MAX_INSTRUCTIONS).nullable(),
     toolToken: z.string().max(200).nullable(),
