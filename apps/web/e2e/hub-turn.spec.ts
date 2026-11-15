@@ -78,7 +78,7 @@ for (const lang of ['en', 'ru'] as const) {
     for (const width of [1440, 375, 360]) {
       test(`each department working in the turn shows it in its card and on the hub in ${lang} ${theme} ${width}`, async ({ page }, info) => {
         const t = MESSAGES[lang];
-        const label = (done: number, total: number) => t.tasks.turnProgress(done, total);
+        const label = (done: number, _total: number) => t.map.readyForRelease(done);
         const shot = (name: string) => page.screenshot({ path: info.outputPath(`hub-${name}-${lang}-${theme}-${width}.png`), animations: 'disabled' });
         const { live, errors, failures } = await open(page, lang, theme, width);
         const initialDocument = await page.evaluateHandle(() => document);

@@ -401,6 +401,45 @@ describe('decisions read failure', () => {
 });
 
 describe('turns as releases', () => {
+  it.each([
+    ['en', 'Tasks', 'By turn and release', 'Turn 2: release v1.2.0', 'Went into the release: 2', 'Turn 3: getting ready for release', 'Ready for release: 2'],
+    ['ru', 'Задачи', 'По ходам и выпускам', 'Ход 2: выпуск v1.2.0', 'Вошло в выпуск: 2', 'Ход 3: готовится к выпуску', 'Готово к выпуску: 2'],
+  ])('names a released turn by its version and counts what each turn holds for its release, with no bar of a share (%s)', async (lang, tasks, releases, released, went, preparing, ready) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      shell({});
+      await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
+      await user.click(screen.getByRole('radio', { name: releases }));
+      expect(await screen.findByRole('heading', { name: preparing })).toBeInTheDocument();
+      expect(screen.getByText(ready)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: released }));
+      expect(await screen.findByText(went)).toBeInTheDocument();
+      expect(screen.queryByRole('progressbar', { name: /2 of 5|2 из 5/ })).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it.each([
+    ['en', 'Tasks', 'Work of the departments', 'Waiting for your answer', 'Not started yet', 'Not in a release yet'],
+    ['ru', 'Задачи', 'Работа отделов', 'Ждет вашего ответа', 'Еще не начата', 'Еще не в выпуске'],
+  ])('says in plain words that a task waits for the answer of the person and that one has not started (%s)', async (lang, tasks, board, yours, notStarted, outside) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      shell({});
+      await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
+      const work = await screen.findByRole('region', { name: board });
+      expect(await within(work).findByRole('article', { name: '#9 Pick a payment provider' })).toHaveTextContent(yours);
+      const planned = within(work).getByRole('article', { name: '#14 Refund button' });
+      expect(planned).toHaveTextContent(notStarted);
+      expect(planned).toHaveTextContent(outside);
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it("lists every department's turns by turn and release, and only the picked department's when one is picked", async () => {
     const user = userEvent.setup();
     const launch = { ...TURN, id: 'u5', number: 5, title: 'Spring launch', goal: 'Tell people.', departmentId: 'd3', messages: [] };
@@ -419,8 +458,8 @@ describe('turns as releases', () => {
     shell({});
     await openTasks(user);
     await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
-    await user.click(await screen.findByRole('button', { name: 'Turn 2: released' }));
-    expect(await screen.findByText('v1.2.0')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Turn 2: release v1.2.0' }));
+    expect(await screen.findByText('Went into the release: 2')).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'How the turn runs' })).not.toBeInTheDocument();
     expect(screen.queryByText(/How the turn runs/)).not.toBeInTheDocument();
   });

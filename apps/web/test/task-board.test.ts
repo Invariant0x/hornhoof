@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byDepartment, byRelease, goals, humanStatus, inDepartment, inProgress, split, type Goal } from '../src/task-board';
+import { byDepartment, byRelease, goals, goalStatus, humanStatus, inDepartment, inProgress, split, type Goal } from '../src/task-board';
 import type { TaskLine, TurnView } from '../src/types';
 import { taskRoute } from './task-route';
 
@@ -34,17 +34,35 @@ function bigTree(): TaskLine[] {
 
 const count = (nodes: Goal[]): number => nodes.reduce((sum, node) => sum + 1 + count(node.children), 0);
 
+/* The table of the Design department: each state of a task in a word a person reads without effort. */
 describe('the human state of a task', () => {
   it.each([
-    ['open', 'working'],
+    ['open', 'notStarted'],
     ['working', 'working'],
     ['review', 'review'],
     ['waiting', 'waiting'],
-    ['blocked', 'waiting'],
+    ['blocked', 'stopped'],
     ['done', 'done'],
     ['cancelled', 'cancelled'],
   ] as const)('reads %s as %s', (status, human) => {
     expect(humanStatus(task({ id: 't1', number: 1, status }))).toBe(human);
+  });
+
+  it('reads a task that asks the person a question as waiting for their answer, until it is closed or paused', () => {
+    expect(humanStatus(task({ id: 't1', number: 1, status: 'waiting' }), true)).toBe('waitingYou');
+    expect(humanStatus(task({ id: 't1', number: 1, status: 'working' }), true)).toBe('waitingYou');
+    expect(humanStatus(task({ id: 't1', number: 1, status: 'done' }), true)).toBe('done');
+    expect(humanStatus(task({ id: 't1', number: 1, paused: { at: '2026-11-14T10:00:00.000Z', reason: 'Not now.', root: 't1' } }), true)).toBe('paused');
+  });
+
+  it('reads a goal as in progress once its work began, though its own task waits for the next turn of its holder', () => {
+    const goal = (child: TaskLine['status']) => goals([task({ id: 'g', number: 1, status: 'open' }), task({ id: 'c', number: 2, parentId: 'g', status: child })])[0]!;
+    expect(goalStatus(goal('working'))).toBe('working');
+    expect(goalStatus(goal('done'))).toBe('working');
+    expect(goalStatus(goal('open'))).toBe('notStarted');
+    expect(goalStatus(goals([task({ id: 'h', number: 3, status: 'open', echelons: taskRoute('review') })])[0]!)).toBe('working');
+    expect(goalStatus(goals([task({ id: 'n', number: 4, status: 'open' })])[0]!)).toBe('notStarted');
+    expect(goalStatus(goal('working'), true)).toBe('waitingYou');
   });
 
   it('reads a paused task as paused, and a task waiting for an event as waiting for an answer, until it is closed', () => {
@@ -92,17 +110,18 @@ describe('goals with their related tasks folded under them', () => {
     expect(tree.map(g => [g.task.id, g.children.map(c => c.task.id)])).toEqual([['c', ['d']]]);
   });
 
-  it('lists open goals by what needs people first, and folds the closed ones apart, the newest first', () => {
+  it('lists open goals by what needs people first, then what stopped, is checked, moves and has not started, and folds the closed ones apart, the newest first', () => {
     const tree = goals([
       task({ id: 'w', number: 1, status: 'working' }),
       task({ id: 'q', number: 2, status: 'waiting' }),
       task({ id: 'r', number: 3, status: 'review' }),
+      task({ id: 's', number: 4, status: 'blocked' }),
       task({ id: 'w2', number: 5, status: 'open' }),
       task({ id: 'x', number: 6, status: 'done' }),
       task({ id: 'y', number: 7, status: 'cancelled' }),
     ]);
     const { open, closed } = split(tree);
-    expect(open.map(g => g.task.id)).toEqual(['q', 'r', 'w2', 'w']);
+    expect(open.map(g => g.task.id)).toEqual(['q', 's', 'r', 'w', 'w2']);
     expect(closed.map(g => g.task.id)).toEqual(['y', 'x']);
   });
 });
