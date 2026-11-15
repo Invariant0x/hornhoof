@@ -8,8 +8,9 @@ import { ME, serveApi } from './api';
 
 /* A share in percent on the Machines screen, on the pool's tile and on a machine's Load meter, is set in the text font of
    the skin (--f-body) at the size and weight of the figures beside it, in every shipped language, left to right and right
-   to left, at desktop and phone width. The small unit beside the figure of every other meter, a machine's memory, disk
-   and processor and a plan's limits, keeps its own size, colour and font. */
+   to left, at desktop and phone width, and so is the used share of a plan's limit on the Subscriptions screen. The small
+   unit beside the figure of a meter, a machine's memory, disk and processor and a plan's limit, keeps its own size,
+   colour and font. */
 test.describe.configure({ timeout: 180_000 });
 
 const GIB = 1024 ** 3;
@@ -185,16 +186,35 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
     }
   });
 
-  test(`keeps the unit beside a plan's limit as it was, ${skin} ${language} ${width}`, async ({ page }, info) => {
+  test(`sets a plan's used share in the text font and keeps its unit as it was, ${skin} ${language} ${width}`, async ({ page }, info) => {
     const t = WORDS[language];
     await openScreen(page, language, skin, width, height, 'subscriptions');
     await page.locator('tr.rm').filter({ hasText: 'Max' }).locator('button.rowbtn').click();
     const limit = page.getByRole('article').locator('.gauge').filter({ has: page.locator('.g-f > span', { hasText: t.cards.used }) });
+    const meters = page.getByRole('article').locator('.gauges').filter({ has: page.locator('.g-f > span', { hasText: t.cards.used }) });
     await expect(limit).toBeVisible();
+    /* Pictures first, both ways, so a look that fails still leaves them. */
     for (const dir of ['ltr', 'rtl'] as const) {
       await page.evaluate(d => { document.documentElement.dir = d; }, dir);
       await limit.screenshot({ path: info.outputPath(`unit-plan-limit-${skin}-${language}-${width}-${dir}.png`) });
+      await meters.screenshot({ path: info.outputPath(`plan-limits-${skin}-${language}-${width}-${dir}.png`) });
+    }
+    for (const dir of ['ltr', 'rtl'] as const) {
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
       await expectUnitAsBefore(limit, t.cards.used);
+      /* Counted at once: the card is drawn, so a share set apart is there or never comes. */
+      expect(await limit.locator('.g-f .pct').count()).toBe(1);
+      expectTextFont(await look(limit.locator('.g-f .pct'), limit), '40%');
+      /* The figure's line is as tall as a figure's line without a share, so the meter keeps its height. */
+      const [shared, plain] = await limit.locator('.g-f b').evaluate(b => {
+        const alone = document.createElement('b');
+        alone.textContent = '40';
+        b.parentElement!.append(alone);
+        const heights = [b.getBoundingClientRect().height, alone.getBoundingClientRect().height];
+        alone.remove();
+        return heights;
+      });
+      expect(Math.abs(shared! - plain!)).toBeLessThan(0.01);
       expect(await noSideScroll(page)).toBe(true);
     }
   });

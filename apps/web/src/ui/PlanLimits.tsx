@@ -1,6 +1,6 @@
 import { useLanguage, useT } from '../i18n';
 import type { Limits, SubView } from '../types';
-import { Bar, percent } from './Bar';
+import { Bar, percent, Share } from './Bar';
 import { Gauge } from './Cards';
 import { ResetTime, resetDurationAt } from './reset';
 import { currentPlanLimits, limitState, MAIN_WINDOWS, unknownLimitData, windowName, windowUsage } from './subscription';
@@ -10,7 +10,7 @@ function LimitGauge({ sub, name, limits, now }: { sub: SubView; name: string; li
   const { language } = useLanguage();
   const w = limits?.windows.find(w => w.name === name);
   const used = windowUsage(sub, name, now);
-  const figure = used === null ? (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)) : `${percent(used)}%`;
+  const figure = used === null ? (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)) : <Share of={percent(used)} />;
   return <Gauge label={windowName(t, name)} figure={figure} unit={used === null ? undefined : t.cards.used} empty={used === null} used={used} sub={w && <ResetTime at={w.resetsAt} now={now} />} />;
 }
 

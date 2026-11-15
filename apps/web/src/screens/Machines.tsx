@@ -5,7 +5,7 @@ import { errorText, useLanguage, useT, type Language, type Messages } from '../i
 import { PROVIDER_NAMES } from '../providers';
 import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
-import { Bar } from '../ui/Bar';
+import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
@@ -36,8 +36,6 @@ const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
 const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
-/* A share in percent among the big figures, set apart so it takes the text font: the display font's percent sign reads poorly. */
-const Share = ({ of }: { of: number }) => <span className="pct">{of}%</span>;
 
 /* The date the link's certificate ends, when that is near and the machine has not renewed it. */
 function endingSoon(tls: TlsView | null, now: number): string | null {
