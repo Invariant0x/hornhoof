@@ -240,7 +240,6 @@ select:disabled { opacity: .55; }
 }
 .account-menu p { display: grid; gap: 2px; }
 .account-menu p span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
-.menu-row { display: grid; gap: 6px; }
 .menu-version { color: var(--muted); font-size: 12px; }
 
 /* Updates: a banner under the top bar and the Versions dialog. */
@@ -319,7 +318,6 @@ select:disabled { opacity: .55; }
   pointer-events: none;
   user-select: none;
 }
-.menu-row > span { color: var(--muted); font-size: 12px; }
 .seg { display: flex; }
 .seg button {
   flex: 1; min-height: 32px; margin-left: -1px; padding: 0 8px; cursor: pointer;
@@ -328,25 +326,36 @@ select:disabled { opacity: .55; }
 .seg button:first-child { margin-left: 0; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .seg button:focus-visible { position: relative; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-/* The Themes row of the account menu: the section's name, the theme on now and an arrow, one 44 px target that grows
-   with a long name rather than cut it. */
-.menu-link {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 12px;
-  min-height: 44px; margin: 0; padding: 8px 12px; cursor: pointer; text-align: start;
-  border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; font-size: 13px;
-}
-.menu-link .menu-value { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
-/* An angle quote turns by itself right to left: the browser draws its mirror, so it points to the end of the line. */
-.menu-link .menu-arrow { display: inline-block; }
-.menu-link:hover { border-color: var(--cyan-ink); }
-.menu-link:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-/* A person's settings: the sections at the start, 180 px, and the open one beside them; above it when narrow. */
-.dialog.user-settings { width: min(1240px, 100%); }
+/* Settings: the groups at the start, 180 px, and the open one beside them; above it when narrow. The parts of a group
+   stand one under another, a line between them. */
+.dialog.settings-window { width: min(1240px, 100%); }
 .settings-body { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; align-items: start; }
 .settings-nav { display: flex; flex-direction: column; gap: 8px; }
 .settings-nav .btn { justify-content: flex-start; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .settings-nav .btn[aria-current='page'] { border-inline-start: 4px solid var(--cyan-ink); background: var(--surface2); color: var(--cyan-ink); }
 .settings-main { min-width: 0; }
+.settings-group { display: grid; gap: 24px; min-width: 0; }
+.settings-group > * + * { padding-block-start: 24px; border-block-start: 1px solid var(--line); }
+.settings-part :is(h3, p) { overflow-wrap: break-word; }
+/* The language: each shipped one as a 44 px choice named in itself, wrapping by whole names. */
+.lang-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.lang-choice {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 8px 12px; cursor: pointer;
+  border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; overflow-wrap: anywhere;
+}
+.lang-choice input { margin: 0; accent-color: var(--cyan); }
+.lang-choice[data-on='true'] { border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
+.lang-choice:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* Integrations: one card for each outside tool, its name and whether it is connected on one line, then what it gives,
+   what it holds and its actions. */
+.integrations, .messaging { display: grid; gap: 16px; min-width: 0; }
+.integration { display: grid; gap: 10px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); background: var(--surface2); }
+.integration p { margin: 0; overflow-wrap: break-word; }
+.integration-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; min-width: 0; }
+.integration-head h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.integration-state { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.integration-state[data-connected='true'] { color: var(--ok); }
+.messaging > p { margin: 0; overflow-wrap: break-word; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; }
@@ -786,6 +795,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .dialog.about .facts { grid-template-columns: 6.5em minmax(0, 1fr); gap: 1px 10px; font-size: 12.5px; }
 .dialog.about .facts dd { margin-bottom: 0; }
 .dialog.about .about-author { font-size: 12px; }
+/* Writing to Hornhoof's developers, inside About under its facts, a line above it. */
+.about-feedback { display: grid; gap: 10px; min-width: 0; margin-block-start: 6px; padding-block-start: 12px; border-block-start: 1px solid var(--line); }
+.about-feedback h3 { margin: 0; font-size: 15px; overflow-wrap: break-word; }
 
 /* On a phone the header stays one row: the mark gives its place to the tabs, which get tighter instead of wrapping,
    and on the narrowest screens scroll inside their strip, so the account button stays in view and the page itself

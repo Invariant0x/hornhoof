@@ -105,13 +105,13 @@ describe('the feedback inbox', () => {
     await openInbox(user);
     const first = screen.getByRole('article', { name: 'Terminal froze after an update' });
     await user.click(within(first).getByRole('button', { name: 'Create GitHub issue' }));
-    expect(await within(first).findByRole('alert')).toHaveTextContent('No GitHub key for invariant0x is saved. Save one in Company settings, with the right to create issues.');
+    expect(await within(first).findByRole('alert')).toHaveTextContent('No GitHub key for invariant0x is saved. Save one in Settings, under Company & access, with the right to create issues.');
   });
 
   it('is not in the menu of an installation that is not the inbox', async () => {
     const { user } = page({ 'GET /api/feedback': [200, { inbox: false }] });
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    await screen.findByRole('button', { name: 'Feedback' });
+    await screen.findByRole('button', { name: 'About' });
     expect(screen.queryByRole('button', { name: 'Feedback inbox' })).not.toBeInTheDocument();
   });
 

@@ -46,23 +46,6 @@ async function readSkin(file: File): Promise<Skin | Problem> {
   }
 }
 
-/* One row of the account menu: where the themes are, and which one is on. */
-export function ThemesMenuItem({ onOpen }: { onOpen: () => void }) {
-  const t = useT();
-  const { language } = useLanguage();
-  const { active, custom } = useSkins();
-  const name = skinName(t, language, active, custom);
-  return (
-    <button className="menu-link" type="button" aria-label={t.skins.go(name)} onClick={onOpen}>
-      <span>{t.skins.title}</span>
-      <span className="menu-value">
-        {name}
-        <span className="menu-arrow" aria-hidden="true">›</span>
-      </span>
-    </button>
-  );
-}
-
 /* Two labels in one place, the other one hidden but holding its room, so a button keeps its size when its label changes. */
 function SwapLabel({ first, second, showSecond }: { first: string; second: string; showSecond: boolean }) {
   return (

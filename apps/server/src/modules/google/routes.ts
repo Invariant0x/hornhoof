@@ -73,7 +73,7 @@ export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* Only a person who may change the whole company, by themselves and never through a model, holds the company's Google key. */
   async function requireWholeCompany(me: Person): Promise<void> {
-    if (me.via) throw new ApiError(403, 'forbidden', 'A person connects Google Sheets directly in Company settings.');
+    if (me.via) throw new ApiError(403, 'forbidden', 'A person connects Google Sheets directly in Settings, under Integrations.');
     await requireDepartmentChanger(db, me, null);
   }
 

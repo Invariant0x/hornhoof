@@ -74,15 +74,19 @@ describe('Shell', () => {
     expect(tab('Machines')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('speaks the saved language and switches it from the account menu', async () => {
+  it('speaks the saved language, and switches it in Settings, not in the top bar or the account menu', async () => {
     localStorage.setItem('hh-lang', 'ru');
     const user = userEvent.setup();
     renderShell();
     expect(screen.getByRole('button', { name: 'Карта' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Люди' })).toBeInTheDocument();
     expect(document.documentElement.lang).toBe('ru');
+    expect(screen.queryByRole('button', { name: 'English' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Аккаунт' }));
-    await user.click(screen.getByRole('button', { name: 'English' }));
+    expect(screen.queryByRole('button', { name: 'English' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Язык')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Настройки' }));
+    await user.click(await screen.findByRole('radio', { name: 'English' }));
     expect(screen.getByRole('button', { name: 'Map' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'People' })).toBeInTheDocument();
     expect(localStorage.getItem('hh-lang')).toBe('en');
@@ -152,14 +156,19 @@ describe('Shell', () => {
     expect(await screen.findByText('Version 0.4.0 (abc1234)')).toBeInTheDocument();
   });
 
-  it('keeps the themes in the account menu, not in the top bar', async () => {
+  it.each([
+    ['who sees the whole company', ME, ['Improvements', 'Versions', 'Settings', 'About', 'Log out']],
+    ['who sees only some departments', { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } }, ['Settings', 'About', 'Log out']],
+  ])('keeps the account menu short for a person %s: no themes, language, feedback or outbound', async (_who, me, items) => {
+    mockApi({ 'GET /api/org': [200, ORG] });
     const user = userEvent.setup();
-    renderShell();
+    render(<LanguageProvider><Shell me={me} onSignOut={() => {}} /></LanguageProvider>);
     expect(screen.queryByRole('button', { name: /theme/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    await user.click(screen.getByRole('button', { name: 'Go to themes. Current: Cyberpunk' }));
-    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    expect(location.pathname).toBe('/themes');
+    const menu = document.querySelector<HTMLElement>('.account-menu')!;
+    expect(within(menu).getAllByRole('button').map(button => button.textContent)).toEqual(items);
+    for (const gone of [/theme/i, /^English$/, /^Русский$/, /feedback/i, /outbound/i, /^Company settings$/]) expect(within(menu).queryByRole('button', { name: gone })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole('group')).not.toBeInTheDocument();
   });
 
   /* The window checks its agent's card as it opens; one the server refuses would close it again. */
@@ -207,14 +216,16 @@ describe('the recovery file banner', () => {
     return calls;
   };
 
-  it('asks the CEO to save the recovery file while there is none, and opens the company settings', async () => {
+  it('asks the CEO to save the recovery file while there is none, and opens Company & access in Settings', async () => {
     const calls = shown();
     const banner = await screen.findByRole('status', { name: 'Backups' });
     expect(banner).toHaveTextContent('Save the recovery file, so the company can be restored if this server is lost.');
     expect(calls.filter(call => call.path.startsWith('/api/backups')).map(call => call.path)).toEqual(['/api/backups/recovery']);
     const user = userEvent.setup();
-    await user.click(within(banner).getByRole('button', { name: 'Open company settings' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
+    await user.click(within(banner).getByRole('button', { name: 'Open Company & access' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    expect(location.pathname).toBe('/settings/company');
+    expect(within(dialog).getByRole('button', { name: 'Company & access' })).toHaveAttribute('aria-current', 'page');
     expect(await within(dialog).findByRole('button', { name: 'Save the recovery file' })).toBeInTheDocument();
   });
 

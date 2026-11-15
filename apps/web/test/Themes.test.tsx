@@ -17,8 +17,8 @@ const own = (name: string, bg = '#010203', base = 'cyberpunk'): Skin => {
   return { ...sample, base, colors: { ...sample.colors, bg } };
 };
 const file = (body: string, name = 'dusk.json') => new File([body], name, { type: 'application/json' });
-const EN = { account: 'Account', item: /^Go to themes\. Current: /, title: 'Settings', add: 'Add from file' };
-const RU = { account: 'Аккаунт', item: /^Перейти к темам\. Текущая: /, title: 'Настройки', add: 'Добавить из файла' };
+const EN = { account: 'Account', item: 'Settings', title: 'Settings', add: 'Add from file' };
+const RU = { account: 'Аккаунт', item: 'Настройки', title: 'Настройки', add: 'Добавить из файла' };
 
 function renderShell(person = ME.person) {
   mockApi({ 'GET /api/org': [200, ORG] });
@@ -73,21 +73,20 @@ afterEach(() => {
 });
 
 describe('the Themes section of the settings', () => {
-  it('opens from one row of the account menu that names the theme on now, for a person who does not see the whole company too', async () => {
+  it('lives under Appearance & language in Settings, with no row of its own in the account menu, for a person who does not see the whole company too', async () => {
     const user = userEvent.setup();
     renderShell({ ...ME.person, scopeKind: 'listed', isOwner: false });
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    const row = screen.getByRole('button', { name: 'Go to themes. Current: Cyberpunk' });
-    expect(row).toHaveTextContent('ThemesCyberpunk›');
-    expect(screen.queryByRole('button', { name: 'Company settings' })).not.toBeInTheDocument();
-    await user.click(row);
+    expect(screen.queryByRole('button', { name: /theme/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Themes')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-    expect(location.pathname).toBe('/themes');
-    expect(within(dialog).getByRole('navigation', { name: 'Settings sections' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Themes' })).toHaveAttribute('aria-current', 'page');
-    expect(within(dialog).getByRole('heading', { name: 'Themes', level: 3 })).toHaveFocus();
+    expect(location.pathname).toBe('/settings');
+    expect(within(dialog).getByRole('button', { name: 'Appearance & language' })).toHaveAttribute('aria-current', 'page');
+    expect(within(dialog).getByRole('heading', { name: 'Themes', level: 3 })).toBeInTheDocument();
     expect(within(dialog).getByText('Choose your own look. Other members keep their themes.')).toBeInTheDocument();
-    expect(within(dialog).getByText('Your choice stays in this browser.')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('Your choice stays in this browser.')).toHaveLength(2);
+    expect(catalog(dialog)).toBeInTheDocument();
   });
 
   it('shows the four built-in skins as cards in the order of the registry, with origin, description and the current one marked', async () => {
@@ -114,7 +113,7 @@ describe('the Themes section of the settings', () => {
     expect((cards(dialog)[3]!.querySelector('.skin-preview') as HTMLElement).style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#151523');
   });
 
-  it('applies a skin in one click, at once, keeps focus on its button and says so, and the card, the menu row and the page agree', async () => {
+  it('applies a skin in one click, at once, keeps focus on its button and says so, and the card and the page agree', async () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
@@ -131,20 +130,21 @@ describe('the Themes section of the settings', () => {
     }
     await user.click(within(dialog).getByRole('button', { name: 'Apply: Matrix' }));
     await user.click(within(dialog).getByRole('button', { name: 'Done' }));
-    await user.click(screen.getByRole('button', { name: 'Account' }));
-    expect(screen.getByRole('button', { name: 'Go to themes. Current: Matrix' })).toBeInTheDocument();
+    expect(skinsState().active).toBe('matrix');
+    expect(await openThemes(user)).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Applied: Matrix' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('switches between Profile and Themes inside the settings at their own addresses', async () => {
+  it('switches between Appearance & language and Company & access inside Settings at their own addresses', async () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
-    await user.click(within(dialog).getByRole('button', { name: 'Profile' }));
-    expect(location.pathname).toBe('/profile');
+    await user.click(within(dialog).getByRole('button', { name: 'Company & access' }));
+    expect(location.pathname).toBe('/settings/company');
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('region', { name: 'Skin catalog' })).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: 'Themes' }));
-    expect(location.pathname).toBe('/themes');
+    await user.click(within(dialog).getByRole('button', { name: 'Appearance & language' }));
+    expect(location.pathname).toBe('/settings');
     expect(catalog(dialog)).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -321,8 +321,9 @@ describe('the guide in the Themes section', () => {
     const user = userEvent.setup();
     renderShell();
     await user.click(screen.getByRole('button', { name: RU.account }));
-    expect(screen.getByRole('button', { name: 'Перейти к темам. Текущая: Киберпанк' })).toBeInTheDocument();
+    expect(screen.queryByText('Темы')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: RU.item }));
+    expect(screen.getByRole('button', { name: 'Оформление и язык' })).toHaveAttribute('aria-current', 'page');
     const dialog = await screen.findByRole('dialog', { name: RU.title });
     expect(titles(dialog)).toEqual(['Киберпанк', 'Светлая', 'Матрица', 'Пиксельная']);
     expect(within(dialog).getByText('Встроенная · По умолчанию')).toBeInTheDocument();

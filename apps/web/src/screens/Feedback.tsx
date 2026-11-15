@@ -160,8 +160,9 @@ function KindPicker({ kind, onPick }: { kind: FeedbackKind; onPick: (kind: Feedb
   );
 }
 
-/* Writing: the kind, a title it needs, and what happened or what is wanted. */
-function WriteStep({ flow, onClose }: { flow: Flow; onClose: () => void }) {
+/* Writing: the kind, a title it needs, and what happened or what is wanted. onCancel: the Cancel beside Next, where
+   the place it stands in has one. */
+function WriteStep({ flow, onCancel }: { flow: Flow; onCancel?: () => void }) {
   const t = useT();
   const [problem, setProblem] = useState('');
   const { draft, busy } = flow;
@@ -186,7 +187,7 @@ function WriteStep({ flow, onClose }: { flow: Flow; onClose: () => void }) {
         <button className="btn" type="submit" disabled={busy} aria-busy={busy || undefined}>
           <BusyLabel busy={busy} idle={t.common.next} working={t.common.loading} />
         </button>
-        <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
+        {onCancel && <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>}
       </div>
     </form>
   );
@@ -224,7 +225,7 @@ function SentStep({ inbox, onClose }: { inbox: boolean; onClose: () => void }) {
 
 /* The same function for the window's whole life, calling the latest onClose: a screen behind it drawn again with a new one
    does not focus the window again and take the focus from what the person types. */
-function useSteady(onClose: () => void): () => void {
+export function useSteady(onClose: () => void): () => void {
   const latest = useRef(onClose);
   useEffect(() => {
     latest.current = onClose;
@@ -232,13 +233,29 @@ function useSteady(onClose: () => void): () => void {
   return useCallback(() => latest.current(), []);
 }
 
-/* The quick window for writing to Hornhoof's developers: a bug, an improvement or an idea, then exactly what goes, and
-   only the press of Send sends it. inbox: this is Hornhoof's own installation, where it goes into the inbox. */
+type FormProps = { inbox: boolean; start?: FeedbackStart; onDone: () => void; onCancel?: () => void; onSent?: () => void };
+
+/* Writing to Hornhoof's developers, wherever it stands: a bug, an improvement or an idea, then exactly what goes, and
+   only the press of Send sends it. inbox: this is Hornhoof's own installation, where it goes into the inbox. onDone: the
+   Done once it is sent. */
+export function FeedbackForm({ inbox, start, onDone, onCancel, onSent }: FormProps) {
+  const t = useT();
+  const flow = useFlow(start, onSent);
+  return (
+    <>
+      {flow.step === 'write' && <WriteStep flow={flow} onCancel={onCancel} />}
+      {flow.step === 'check' && flow.shown && <CheckStep flow={flow} shown={flow.shown} inbox={inbox} />}
+      {flow.step === 'loading' && <p className="muted" role="status">{t.common.loading}</p>}
+      {flow.step === 'sent' && <SentStep inbox={inbox} onClose={onDone} />}
+    </>
+  );
+}
+
+/* The quick window for a finding about Hornhoof itself, from its card. */
 export function Feedback({ inbox, start, onClose, onSent }: { inbox: boolean; start?: FeedbackStart; onClose: () => void; onSent?: () => void }) {
   const t = useT();
   const id = useId();
   const box = useDialogClose(useSteady(onClose));
-  const flow = useFlow(start, onSent);
   return (
     <div className="dialog-back" onPointerDown={event => event.target === event.currentTarget && onClose()}>
       <div className="dialog fb-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1} ref={box}>
@@ -246,10 +263,7 @@ export function Feedback({ inbox, start, onClose, onSent }: { inbox: boolean; st
           <h2 id={`${id}-title`}>{t.feedback.title}</h2>
           <button className="btn small ghost" type="button" aria-label={t.feedback.close} onClick={onClose}>×</button>
         </header>
-        {flow.step === 'write' && <WriteStep flow={flow} onClose={onClose} />}
-        {flow.step === 'check' && flow.shown && <CheckStep flow={flow} shown={flow.shown} inbox={inbox} />}
-        {flow.step === 'loading' && <p className="muted" role="status">{t.common.loading}</p>}
-        {flow.step === 'sent' && <SentStep inbox={inbox} onClose={onClose} />}
+        <FeedbackForm inbox={inbox} start={start} onDone={onClose} onCancel={onClose} onSent={onSent} />
       </div>
     </div>
   );

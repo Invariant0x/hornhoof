@@ -84,7 +84,7 @@ export const en = {
     goToMap: 'Go to the map',
     restore: {
       link: 'Restore from a recovery file',
-      choose: 'Choose the recovery file you saved in Company settings.',
+      choose: 'Choose the recovery file you saved in Settings, under Company & access.',
       waiting: 'Waiting for backups. Machines of the company that are still on send theirs within about 15 minutes.',
       upload: 'Or upload a backup file',
       thisOne: 'Restore this one',
@@ -100,7 +100,7 @@ export const en = {
   },
   link: {
     open: 'Open Hornhoof on the internet',
-    openHint: 'People open it from anywhere at this link, each with their own sign-in. Turn it off to keep Hornhoof on this computer and your network; you can open it later under Company settings.',
+    openHint: 'People open it from anywhere at this link, each with their own sign-in. Turn it off to keep Hornhoof on this computer and your network; you can open it later in Settings, under Company & access.',
     label: 'Link',
     random: 'Random name',
     empty: 'Type a name, or take a random one.',
@@ -114,24 +114,31 @@ export const en = {
     guessable: 'A name you pick shows in public certificate logs and may tell whose company this is. Only the company\'s sign-in protects what is inside.',
     hardToGuess: 'A random name does not say whose company it is. The company\'s sign-in still protects what is inside.',
     letsEncrypt: { before: 'The link\'s certificate comes from Let\'s Encrypt. Getting it accepts the ', agreement: 'Let\'s Encrypt Subscriber Agreement', after: ' for your company.' },
-    skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later under Company settings.',
+    skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later in Settings, under Company & access.',
   },
   about: {
     menu: 'About', title: 'About Hornhoof', close: 'Close',
     description: 'A company where people and agents work together.',
-    version: 'Version', license: 'License', code: 'Source code', contact: 'Contact', website: 'Website',
-    issues: 'Report a bug or suggest an idea', author: 'Author: Ivan Korol, © 2026',
+    version: 'Version', license: 'License', code: 'Source code', website: 'Website',
+    author: 'Author: Ivan Korol, © 2026',
     versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
   },
   profile: {
-    title: 'Settings',
     nameRequired: 'Enter your name.',
-    sections: 'Settings sections',
-    profile: 'Profile',
+    profile: 'Your profile',
   },
+  /* The Language section of a person's settings: every language Hornhoof ships, each named in itself. */
+  language: {
+    title: 'Language',
+    desc: 'Hornhoof speaks this language to you. Other members keep their own.',
+    local: 'Your choice stays in this browser.',
+  },
+  /* The Settings window: its groups in order, then the company's public link under Company & access. */
   settings: {
-    menu: 'Company settings',
-    title: 'Company settings',
+    menu: 'Settings',
+    title: 'Settings',
+    groupsLabel: 'Settings groups',
+    groups: { appearance: 'Appearance & language', integrations: 'Integrations', messaging: 'External messaging', company: 'Company & access' },
     link: 'Link on the internet',
     opensAt: 'Hornhoof opens from anywhere at this link:',
     closed: 'Hornhoof opens only at its own address, on this computer and your network.',
@@ -193,7 +200,7 @@ export const en = {
     leaveOutAsk: 'What it held after the backup will not come back. It stays as an encrypted backup for 30 days.',
     banner: 'Save the recovery file, so the company can be restored if this server is lost.',
     bannerLink: 'The public link changed, so the recovery file is out of date. Save a new one.',
-    openSettings: 'Open company settings',
+    openSettings: 'Open Company & access',
   },
   merge: {
     after: (time: string) => `What came after ${time}`,
@@ -214,7 +221,7 @@ export const en = {
     about: 'Every department keeps its work in a repository, so that each earlier version of a letter, a text or a table can be brought back. With a GitHub key saved here, the orchestrator itself creates a private repository for each department that has none yet, and tells you about it.',
     none: 'No GitHub key is saved, so the orchestrator cannot create repositories.',
     saved: (owner: string, last4: string) => `The orchestrator creates repositories on GitHub for ${owner}, with the key ending in ${last4}.`,
-    deptNone: 'No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Company settings.',
+    deptNone: 'No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Settings, under Company & access.',
     deptCompany: (owner: string) => `The orchestrator creates this department's repositories on GitHub for ${owner}, with the company's key.`,
     deptOwn: (owner: string, last4: string) => `The orchestrator creates this department's repositories on GitHub for ${owner}, with its own key ending in ${last4}.`,
     save: 'Save a key',
@@ -229,6 +236,12 @@ export const en = {
     key: 'Key',
     keyHint: "A GitHub token that may create repositories for this owner and push to them: on a fine-grained token, Administration and Contents set to Read and write for all its repositories; on a classic one, repo. With each repository it creates, it goes to the machines of that department's agents.",
     keyKeep: 'Leave it empty to keep the saved key.',
+  },
+  /* The Integrations group: one card for each outside tool, with its name, what it gives, whether it is connected and what to do. */
+  integrations: {
+    intro: 'Outside tools the employees of every department work with. Each one is connected for the whole company.',
+    connected: 'Connected',
+    notConnected: 'Not connected',
   },
   googleSheets: {
     title: 'Google Sheets',
@@ -260,16 +273,14 @@ export const en = {
   },
   shell: {
     sections: 'Sections',
-    tabs: { map: 'Map', tasks: 'Tasks', people: 'People', subscriptions: 'Subscriptions & API', machines: 'Machines', improvements: 'Improvements', outbound: 'Outbound' },
+    tabs: { map: 'Map', tasks: 'Tasks', people: 'People', subscriptions: 'Subscriptions & API', machines: 'Machines', improvements: 'Improvements' },
     account: 'Account',
-    language: 'Language',
     logOut: 'Log out',
     version: (v: string) => `Version ${v}`,
   },
   /* The Themes section of the settings: the built-in themes, a person's own kept in this browser, and how to make one. */
   skins: {
     title: 'Themes',
-    go: (name: string) => `Go to themes. Current: ${name}`,
     desc: 'Choose your own look. Other members keep their themes.',
     local: 'Your choice stays in this browser.',
     add: 'Add from file',
@@ -1877,7 +1888,6 @@ export const en = {
   },
   /* A bug, an improvement or an idea for Hornhoof's developers: what a person writes, what goes and what came of it. */
   feedback: {
-    menu: 'Feedback',
     title: 'Write to Hornhoof developers',
     close: 'Close',
     kind: 'What is it',
@@ -2080,7 +2090,7 @@ export const en = {
     update_running: 'An update is running already. Wait for it to finish.',
     restore_running: 'A restore from a backup is running. Wait for it to finish.',
     restore_busy: 'A restore or an update is running already. Wait for it to finish.',
-    merge_pending: 'A database from before a restore is still being brought back. Wait for it, or leave it out in Company settings.',
+    merge_pending: 'A database from before a restore is still being brought back. Wait for it, or leave it out in Settings, under Company & access.',
     not_pending: 'Nothing of this database is being brought back now.',
     leader_scope: "This person's machine runs the company server. Move the server to another machine first.",
     leader_pin: 'Move the server to another machine first.',
@@ -2153,7 +2163,7 @@ export const en = {
     feedback_issued: 'This card has an issue already.',
     feedback_not_sent: 'This finding was not sent to Hornhoof developers.',
     feedback_no_repeats: 'No round found it again since Hornhoof developers last heard of it.',
-    feedback_no_github_key: 'No GitHub key for invariant0x is saved. Save one in Company settings, with the right to create issues.',
+    feedback_no_github_key: 'No GitHub key for invariant0x is saved. Save one in Settings, under Company & access, with the right to create issues.',
     backlog_changed: 'The list changed meanwhile. It is shown again as it is now.',
     backlog_unknown: 'This task is no longer in the list.',
     turn_open: 'A turn is running. Close it before starting the next.',
@@ -2168,7 +2178,7 @@ export const en = {
     product_taken: 'This department already has a product with this name. Pick another name, or connect the repository to that product in the list above.',
     repo_host_invalid: 'Name the GitHub user or organization as in github.com/acme, with letters, digits and hyphens, and give the key the first time.',
     repo_host_on_product: 'A product uses the key of the department that holds it. Save the key on that department.',
-    repo_host_missing: "No GitHub key is saved for this department or the company. Save one in Company settings or under Repositories on the department's screen, or connect a repository you have.",
+    repo_host_missing: "No GitHub key is saved for this department or the company. Save one in Settings, under Company & access, or under Repositories on the department's screen, or connect a repository you have.",
     repo_host_refused: 'GitHub did not create the repository. Check that the key is still valid and may create repositories for this owner, and that the name is free.',
     repo_name_invalid: 'Name the repository with Latin letters, digits, dots, hyphens and underscores, 100 at most.',
     repo_exists: 'This product already has a repository. Create the new one on the department, where it comes as a new product.',
@@ -2198,8 +2208,7 @@ export const en = {
     telegram_person_taken: 'This Telegram is set for another person already.',
   },
   outbound: {
-    heading: 'Outbound',
-    intro: 'Messages sent outside the company, exact bound approvals, unknown delivery states and support escalations. Account secrets and recipient addresses stay on the server.',
+    intro: 'What the departments send to people outside the company, by mail or webhook: messages waiting for approval and sent, unknown delivery outcomes, support escalations, and the channels with their accounts. Account secrets and recipient addresses stay on the server.',
     empty: 'Nothing has been sent or queued outside yet.',
     approvalsHeading: 'Waiting for exact approval',
     approvalsEmpty: 'No outbound messages or approaches wait for approval right now.',
