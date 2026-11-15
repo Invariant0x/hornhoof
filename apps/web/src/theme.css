@@ -881,6 +881,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .pool-facts { display: grid; grid-template-rows: auto auto; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px 20px; margin: 0; }
 .pool-facts dt { font-size: 12px; color: var(--muted); }
 .pool-facts dd { margin: 0 0 6px; font-family: var(--f-display); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A share in percent, on the pool and on a machine's Load meter, in the text font at the size and weight of its figure,
+   like the map's scale. */
+.pool-facts .pct, .g-f .pct { font-family: var(--f-body); font-variant-numeric: tabular-nums; }
 /* The machine the company's server runs on: a filled badge by its name and a cyan frame. */
 .badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
 /* A machine whose nodes are not the server's build waits for its owner to update them. */
@@ -2191,7 +2194,7 @@ th.k-prio .sorth { white-space: nowrap; }
 .g-l { font-size: 12px; color: var(--muted); }
 .g-f { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 5px; min-width: 0; }
 .g-f b { font-family: var(--f-display); font-size: 22px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.g-f span { font-size: 12.5px; color: var(--muted); }
+.g-f > span { font-size: 12.5px; color: var(--muted); }
 .gauge .bar { height: 5px; }
 .g-s { display: flex; flex-wrap: wrap; column-gap: 10px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 /* A connection's 30 days by model: the name, the whole count and its share, over a thin bar of that share. */

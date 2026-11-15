@@ -36,6 +36,8 @@ const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
 const gigabytes = (language: Language, bytes: number) => new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(Math.round((bytes / GIB) * 10) / 10);
 
 const busyShare = (load: number, cpus: number) => Math.min(100, Math.round((load / Math.max(1, cpus)) * 100));
+/* A share in percent among the big figures, set apart so it takes the text font: the display font's percent sign reads poorly. */
+const Share = ({ of }: { of: number }) => <span className="pct">{of}%</span>;
 
 /* The date the link's certificate ends, when that is near and the machine has not renewed it. */
 function endingSoon(tls: TlsView | null, now: number): string | null {
@@ -94,7 +96,7 @@ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: 
             [t.machines.poolOnline, t.machines.of(String(online), String(all))],
             [t.machines.poolCores, cores ? String(cores) : t.machines.unknown],
             [t.machines.poolMemory, loads.length ? t.machines.gbOf(gigabytes(language, sum(l => l.memFree)), gigabytes(language, sum(l => l.memTotal))) : t.machines.unknown],
-            [t.machines.poolBusy, cores ? `${busyShare(sum(l => l.load), cores)}%` : t.machines.unknown],
+            [t.machines.poolBusy, cores ? <Share of={busyShare(sum(l => l.load), cores)} /> : t.machines.unknown],
           ]}
         />
       </Edge>
@@ -127,7 +129,7 @@ function Resources({ row }: { row: MachineRow }) {
   const busy = busyShare(load.load, load.cpus);
   return <>
     <div className="gauges">
-      <Gauge label={t.machines.load} figure={`${busy}%`} used={busy / 100} sub={t.cards.ofCores(load.cpus)} />
+      <Gauge label={t.machines.load} figure={<Share of={busy} />} used={busy / 100} sub={t.cards.ofCores(load.cpus)} />
       <MemoryGauge load={load} less={less} />
       <DiskGauge load={load} />
       <Gauge label={t.machines.processor} figure={load.cpus} unit={` ${t.cards.coresWord(load.cpus)}`} sub={[load.cpuModel, fewer ? t.cards.hostCores(load.hostCpus!) : null].filter(Boolean).join(', ')} />
