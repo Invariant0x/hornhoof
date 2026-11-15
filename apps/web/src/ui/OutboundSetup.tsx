@@ -200,16 +200,16 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
           <small>{channel.audience === 'public' ? s.autoSendPublic : s.autoSendHint}</small>
         </span>
       </label>
-      <fieldset className="outbound-numbers">
+      <fieldset className="field-group outbound-numbers">
         <legend>{s.reviewTitle}</legend>
-        <div className="outbound-numbers-body">
+        <div className="field-group-body">
           <p className="hint">{s.reviewHint}</p>
           {NUMBERS.slice(0, 4).map(([, key]) => count(key, key === 'everyNth' ? 1 : 0))}
         </div>
       </fieldset>
-      <fieldset className="outbound-numbers">
+      <fieldset className="field-group outbound-numbers">
         <legend>{s.circuitTitle}</legend>
-        <div className="outbound-numbers-body">
+        <div className="field-group-body">
           <p className="hint">{s.circuitHint}</p>
           {NUMBERS.slice(4).map(([, key]) => count(key, key === 'windowHours' || key === 'minimumSample' ? 1 : 0))}
         </div>

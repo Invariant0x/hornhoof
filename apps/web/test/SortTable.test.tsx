@@ -140,3 +140,40 @@ it('stands as entries where the table does not fit its frame by whole words, and
   expect(decl('.dt[data-fit="entries"] > tbody > tr.rm', 'display')).toBe('grid');
   expect(decl('.dt[data-fit="entries"] td[data-label]::before', 'content')).toBe('attr(data-label)');
 });
+
+it('gives sort headers and row name buttons 44px touch targets, compact row padding, logical RTL sides and an unclipped focus ring', () => {
+  expect(decl('.dt > thead > tr > th', 'text-align')).toBe('start');
+  expect(decl('.dt > thead > tr > th', 'padding-inline')).toBe('10px');
+  expect(decl('.dt > thead > tr > th:has(> .sorth)', 'padding')).toBe('0');
+  expect(decl('.sorth', 'min-block-size')).toBe('44px');
+  expect(decl('.sorth', 'min-inline-size')).toBe('max(44px, 100%)');
+  expect(decl('.sorth', 'text-align')).toBe('start');
+  expect(decl('.sorth', 'overflow-wrap')).toBe('normal');
+  expect(decl('.sorth', 'word-break')).toBe('normal');
+
+  expect(decl('.sortb', 'min-block-size')).toBe('44px');
+  expect(decl('.sortb', 'min-inline-size')).toBe('44px');
+  expect(decl('.sortb', 'block-size')).toBe('auto');
+  expect(decl('.sortb', 'text-align')).toBe('start');
+
+  expect(decl('.rowbtn', 'min-block-size')).toBe('44px');
+  expect(decl('.rowbtn', 'min-inline-size')).toBe('44px');
+  expect(decl('.rowbtn', 'padding-inline-start')).toBe('20px');
+  expect(decl('.rowbtn', 'text-align')).toBe('start');
+  expect(decl('.rowbtn', 'padding')).toBeUndefined();
+  expect(decl('.rowbtn .chev', 'inset-inline-start')).toBe('0');
+  expect(decl('.rowbtn .chev', 'left')).toBeUndefined();
+  expect(decl('[dir="rtl"] .rowbtn .chev', 'transform')).toBe('scaleX(-1)');
+  expect(decl('[dir="rtl"] .rowbtn[aria-expanded="true"] .chev', 'transform')).toBe('scaleX(-1) rotate(90deg)');
+
+  /* Height belongs to the button rather than double-padding the name cell. */
+  expect(decl('.dt > tbody > tr.rm > td.k-name', 'padding-block')).toBe('0');
+
+  /* The 2px ring at 2px offset is not clipped by the chamfered table frame. */
+  for (const button of ['.sorth:focus-visible', '.sortb:focus-visible', '.rowbtn:focus-visible']) {
+    expect(decl(button, 'outline')).toBe('2px solid var(--cyan-ink)');
+    expect(decl(button, 'outline-offset')).toBe('2px');
+  }
+  expect(decl('.tbl-frame:has(:focus-visible)', 'clip-path')).toBe('none');
+  expect(decl('.tbl-frame:has(:focus-visible) > .edge-in', 'clip-path')).toBe('none');
+});

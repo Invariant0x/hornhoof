@@ -25,13 +25,12 @@ export async function offences(part: Locator, words: Words): Promise<string[]> {
     };
     const rtl = css(root).direction === 'rtl';
 
-    /* 1. Every control is a target of 44px: a button from 44, a field or a list exactly 44, a box's whole line from 44.
-       A field in a frame with its button (a key, a search) is that frame. The shared table keeps its own: a row opens
-       its card wherever it is pressed, its name's button being the keyboard's way in, and its sort headers are those of
-       every table in the product. */
+    /* 1. Every control is a target of 44px: a button from 44 by 44, a field or a list exactly 44 high, a box's whole
+       line from 44. A field in a frame with its button (a key, a search) is that frame. */
     const framed = '.keybox, .search';
-    const table = 'thead, .rowbtn';
-    for (const b of root.querySelectorAll('button')) if (shown(b) && !b.closest(framed) && !b.closest(table) && tall(b) < 44) out.push(`1: ${name(b)} is ${tall(b)}px high`);
+    const wide = (el: Element) => Math.round(rect(el).width);
+    for (const b of root.querySelectorAll('button'))
+      if (shown(b) && !b.closest(framed) && (tall(b) < 44 || wide(b) < 44)) out.push(`1: ${name(b)} is ${wide(b)}x${tall(b)}px`);
     for (const f of root.querySelectorAll('input:not([type=checkbox]):not([type=radio]), select'))
       if (shown(f) && !f.closest(framed) && tall(f) !== 44) out.push(`1: ${name(f)} is ${tall(f)}px high`);
     for (const frame of root.querySelectorAll(framed)) if (shown(frame) && (tall(frame) < 44 || tall(frame) > 46)) out.push(`1: ${name(frame)} is ${tall(frame)}px high`);
@@ -70,6 +69,20 @@ export async function offences(part: Locator, words: Words): Promise<string[]> {
 
     /* 5. A number is typed as text: no arrows of the browser. */
     for (const field of root.querySelectorAll('input[type=number]')) if (look(field) !== 'textfield') out.push(`5: ${name(field)} keeps the look ${look(field)}`);
+
+    /* 6. A group of fields has no frame of the browser: its heading stands 4px above what follows it, on the part's edge. */
+    const px = (value: string) => parseFloat(value) || 0;
+    for (const set of root.querySelectorAll('fieldset')) {
+      if (!shown(set)) continue;
+      const s = css(set);
+      if (px(s.borderTopWidth) || px(s.paddingInlineStart) || px(s.paddingInlineEnd)) out.push(`6: ${name(set)} keeps the browser's frame`);
+      const host = set.parentElement ? rect(set.parentElement) : rect(root);
+      if (Math.abs(rect(set).left - host.left) > 1 || Math.abs(rect(set).right - host.right) > 1) out.push(`6: ${name(set)} leaves its parent's edge`);
+      const legend = set.querySelector(':scope > legend');
+      const next = legend && set.querySelector(':scope > legend ~ * > :first-child, :scope > legend + :not(div)');
+      const gap = legend && next ? rect(next).top - rect(legend).bottom : NaN;
+      if (legend && Math.abs(gap - 4) > 1) out.push(`6: ${name(set)} has ${Math.round(gap)}px under its heading`);
+    }
     return out;
   }, words);
 }
@@ -103,7 +116,7 @@ export async function focusRing(page: Page): Promise<string> {
     probe.style.color = 'var(--cyan-ink)';
     const cyan = getComputedStyle(probe).color;
     probe.remove();
-    return s.outlineStyle === 'solid' && s.outlineWidth === '2px' && s.outlineColor === cyan ? 'ring' : `${el.tagName.toLowerCase()} has the outline ${s.outlineWidth} ${s.outlineStyle} ${s.outlineColor}`;
+    return s.outlineStyle === 'solid' && s.outlineWidth === '2px' && s.outlineOffset === '2px' && s.outlineColor === cyan ? 'ring' : `${el.tagName.toLowerCase()} has the outline ${s.outlineWidth} ${s.outlineStyle} ${s.outlineColor} offset ${s.outlineOffset}`;
   });
 }
 

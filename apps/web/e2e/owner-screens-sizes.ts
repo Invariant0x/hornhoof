@@ -33,7 +33,11 @@ export function apart(all: readonly Measured[]): string[] {
   });
 }
 
-export default function compareSizes(): void {
-  const off = apart(measured(RESULTS));
+export function checkSizes(dir: string): void {
+  const off = apart(measured(dir));
   if (off.length) throw new Error(`Pieces of the owner's screens differ in size between browsers by more than 1px:\n${off.join('\n')}`);
+}
+
+export default function compareSizes(): void {
+  checkSizes(RESULTS);
 }
