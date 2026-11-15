@@ -379,8 +379,8 @@ describe('staffing', () => {
       ],
     });
     expect(hired.statusCode).toBe(201);
-    const [hannaId, simonId, brunoId] = hired.json().hired as [string, string, string];
-    expect((await c.db.select().from(agents).where(eq(agents.id, simonId)))[0]!.teamId).toBe(urgent!.id);
+    const [hannaId, robinId, brunoId] = hired.json().hired as [string, string, string];
+    expect((await c.db.select().from(agents).where(eq(agents.id, robinId)))[0]!.teamId).toBe(urgent!.id);
 
     for (const badMove of [
       { id: hannaId, team: urgent!.id },
