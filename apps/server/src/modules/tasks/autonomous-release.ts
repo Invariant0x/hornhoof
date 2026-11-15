@@ -254,11 +254,26 @@ function taskInRepoScope(task: Task, placeIds: string[]): boolean {
   return task.status !== 'cancelled' && Boolean(spot && placeIds.includes(spot));
 }
 
-/* The task that has the verdict asks, or a running coordination task of the same repository: a result that goes to its own
-   main line straight joins no turn, so no turn tells them apart. */
+/* The task is above the other by its parents, in its company, however far up. */
+async function isAncestor(db: QueryDb, ancestor: Task, task: Task): Promise<boolean> {
+  const seen = new Set<string>([task.id]);
+  let parentId = task.parentId;
+  while (parentId && !seen.has(parentId)) {
+    if (parentId === ancestor.id) return true;
+    seen.add(parentId);
+    const [row] = await db.select({ parentId: tasks.parentId }).from(tasks).where(and(eq(tasks.id, parentId), eq(tasks.companyId, task.companyId)));
+    parentId = row?.parentId ?? null;
+  }
+  return false;
+}
+
+/* The task that has the verdict asks, or a running coordination task above it by its parents. No other coordination task of
+   the repository asks for a verdict on work it does not coordinate: a result that goes to its own main line joins no turn,
+   so no turn could tell them apart. */
 async function requesterMayAutoApprove(db: QueryDb, askingTask: Task, verdictTask: Task, placeIds: string[]): Promise<boolean> {
   if (!taskInRepoScope(askingTask, placeIds)) return false;
   if (askingTask.id === verdictTask.id) return true;
+  if (!(await isAncestor(db, askingTask, verdictTask))) return false;
   const route = await routeOf(db, askingTask);
   return route.state.resultKind === 'coordination' && route.state.phase === 'active';
 }
