@@ -10,12 +10,13 @@ import { pageAfter, type WaitPlace } from './wait-views.js';
 /* The cards kept for a person about waits past their dates: only their own, of what they reach, until they say they saw them.
    Seeing one decides nothing: no question it speaks of is answered, and no approval is given or changed. */
 
-export type WaitCardKind = 'late' | 'final_review' | 'goal_risk' | 'turn_summary';
+export type WaitCardKind = 'late' | 'final_review' | 'goal_risk' | 'turn_summary' | 'release_tag';
 /* words: what Hornhoof wrote for them, which holds no words of the work itself. */
 export type WaitCard = { id: string; about: WaitCardKind; taskId: string | null; number: number | null; kind: WaitSourceKind | null; level: number | null; words: string; at: string };
 export type CardPage = { cards: WaitCard[]; next: string | null };
 
 const aboutOf = (card: typeof waitNotices.$inferSelect): WaitCardKind => {
+  if (card.guard.tag) return 'release_tag';
   if (card.guard.turn) return 'turn_summary';
   if (card.guard.goal) return 'goal_risk';
   return card.guard.wait?.ordinal !== undefined ? 'final_review' : 'late';

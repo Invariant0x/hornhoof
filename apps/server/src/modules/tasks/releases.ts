@@ -1,13 +1,14 @@
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, companies, departments, requests, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
+import { agents, companies, departments, people, requests, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
 import { taskByRef } from './views.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
+import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R, the head of
@@ -172,7 +173,8 @@ const releaseView = (turn: Turn, record: Release, released: ReleasedTask[]) => (
 });
 
 /* One department's open turn on its repository's tags: the first look takes the newest tag as where the turn starts; a newer
-   tag of a release recorded before main moved, on its exact commit and from where the turn started, closes it. */
+   tag of a release recorded before main moved, on its exact commit and from where the turn started, closes it. A newer tag of
+   its line that no standing record names releases nothing: the turn stays open, and its head and the CEO hear of it once. */
 async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
   if (!ctx.readTags) return;
   const before = (await ctx.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.turnId, turn.id))).map(row => row.id).sort();
@@ -187,15 +189,41 @@ async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
   const records = await ctx.db.select().from(turnReleases).where(eq(turnReleases.turnId, turn.id)).orderBy(desc(turnReleases.createdAt));
   for (const [name, commit] of versions) {
     if (!newerVersion(name, turn.baseVersion)) return;
-    const record = records.find(r => r.commit === commit);
-    if (!record) continue;
     if (turn.baseCommit && !(await branchHolds(ctx, repo, commit, turn.baseCommit))) continue;
-    if (record.baseCommitSha === commit || !(await branchHolds(ctx, repo, commit, record.baseCommitSha))) continue;
+    const record = records.find(r => r.commit === commit && r.baseCommitSha !== commit);
+    if (!record || !(await branchHolds(ctx, repo, commit, record.baseCommitSha))) {
+      await tellOfTag(ctx, turn, name, commit, 'unrecorded');
+      continue;
+    }
     const head = await headOf(ctx, repo, `turn-${turn.number}`);
     if (!head || !(await branchHolds(ctx, repo, head, commit))) return;
-    await closeTurn(ctx, turn, record, name, head, before);
+    if (await closeTurn(ctx, turn, record, name, head, before) === 'stale') await tellOfTag(ctx, turn, name, commit, 'stale');
     return;
   }
+}
+
+/* What a tag that released nothing says, to the head of the department and to the CEO, once for each tag on its commit. The CEO's
+   card goes on the first goal of the turn, as its summary would; a turn with nothing in it holds nothing back from a release, so
+   only its head hears. */
+async function tellOfTag(ctx: Reader, turn: Turn, version: string, commit: string, why: 'unrecorded' | 'stale'): Promise<void> {
+  const [goal] = await ctx.db.select().from(tasks).where(and(eq(tasks.turnId, turn.id), isNull(tasks.parentId))).orderBy(asc(tasks.number)).limit(1);
+  const [head] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, turn.companyId), eq(agents.departmentId, turn.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
+  const [ceo] = await ctx.db.select({ id: people.id }).from(people).where(and(eq(people.companyId, turn.companyId), eq(people.isOwner, true), eq(people.status, 'active'))).limit(1);
+  const on = goal ? [{ id: goal.id, number: goal.number }] : [];
+  const cause = why === 'unrecorded'
+    ? `no release of it was recorded before main moved`
+    : `the full run or the approval its release record relied on no longer stands`;
+  const key = `release_tag:${turn.departmentId}:${version}:${commit}`;
+  const notification = { source: 'release_tag' as const, tasks: on };
+  if (head) await recordWaitNotice(ctx.db, {
+    companyId: turn.companyId, agentId: head.id, personId: null, dedupKey: `${key}:head`, guard: { tasks: [] },
+    message: { personId: null, notification, text: `${version} was tagged on ${commit}, newer than ${turn.baseVersion} where Turn ${turn.number} started, but ${cause}. Turn ${turn.number} stays open, and none of its results counts as released. Find out how this tag came to be. The turn is released only by the tag of a release recorded with release_turn before main moves, on its exact commit.` },
+  });
+  if (ceo && goal) await recordWaitNotice(ctx.db, {
+    companyId: turn.companyId, agentId: null, personId: ceo.id, dedupKey: `${key}:ceo`, guard: { tasks: [], turn: { id: turn.id, taskId: goal.id }, tag: { version, commit } },
+    message: { personId: null, notification, text: `Version ${version} was marked in the code, but ${why === 'unrecorded' ? 'its release was not recorded and approved beforehand' : 'the full check or the approval its release relied on no longer holds'}. So the tasks of Turn ${turn.number} are not counted as released, and the turn stays open. The head of the department was told.` },
+  });
+  ctx.log?.warn({ companyId: turn.companyId, turn: turn.number, version, commit, why }, `${version} released nothing of Turn ${turn.number}: ${cause}.`);
 }
 
 /* The full run and the approval the record relies on still stand as they stood. */
@@ -211,14 +239,14 @@ async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolea
 /* The tag closes the turn: it keeps the version and commit, the results of its record stay in it, and every other result of it,
    one accepted while the repository was read too, goes into the next turn, which starts from the head of this one. Anything
    that joined the turn after it was first read puts the close off to the next minute, so the head read holds it. */
-async function closeTurn(ctx: Reader, turn: Turn, record: Release, version: string, head: string, before: string[]): Promise<void> {
+async function closeTurn(ctx: Reader, turn: Turn, record: Release, version: string, head: string, before: string[]): Promise<'closed' | 'later' | 'stale'> {
   const closed = await ctx.db.transaction(async tx => {
     await lockCompany(tx, turn.companyId);
     const rows = await tx.select().from(tasks).where(eq(tasks.turnId, turn.id)).orderBy(asc(tasks.number)).for('no key update');
-    if (rows.map(row => row.id).sort().join() !== before.join()) return null;
+    if (rows.map(row => row.id).sort().join() !== before.join()) return 'later' as const;
     const [open] = await tx.select().from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
-    if (!open) return null;
-    if (!(await recordStands(tx, turn, record))) return null;
+    if (!open) return 'later' as const;
+    if (!(await recordStands(tx, turn, record))) return 'stale' as const;
     const [done] = await tx.update(turns).set({ status: 'closed', version, commit: record.commit, closedAt: new Date() }).where(eq(turns.id, turn.id)).returning();
     await keepSnapshot(tx, done!, ctx.log);
     await recordTurnSummary(tx, done!);
@@ -231,9 +259,10 @@ async function closeTurn(ctx: Reader, turn: Turn, record: Release, version: stri
     if (by) for (const row of left) await note(tx, row, { kind: 'updated', actor: { agentId: by }, text: `${version} was released without it, so it goes into Turn ${next!.number}.`, data: { fields: ['turn'], from: turn.number, to: next!.number } });
     return { done: done!, next: next! };
   });
-  if (!closed) return;
+  if (typeof closed === 'string') return closed;
   ctx.bus.publish(turn.companyId, { type: 'org' });
   ctx.log?.info({ companyId: turn.companyId, turn: turn.number, version, next: closed.next.number, startCommit: head }, `Turn ${turn.number} was released as ${version}; create turn-${closed.next.number} from ${head}.`);
+  return 'closed';
 }
 
 /* Every minute: each department that keeps a repository, on its tags. One department's trouble keeps no other from it. */

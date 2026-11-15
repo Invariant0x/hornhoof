@@ -55,6 +55,7 @@ export const ru: Messages = {
     wait_overdue: 'ожидание вышло за срок',
     goal_risk: 'цель под угрозой',
     turn_summary: 'итог хода',
+    release_tag: 'тег версии без записи выпуска',
     service: 'сохраненное служебное сообщение',
   },
   common: {

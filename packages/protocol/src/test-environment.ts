@@ -67,8 +67,9 @@ export const TestMutation = z.discriminatedUnion('status', [
 ]);
 const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, commands: z.array(Command).max(1000) })
   .refine(value => value.suiteIds.length + value.commands.length > 0, 'An explicit preparation must contain work.');
-/* A run of the profile it replaces, on a due turn, runs as profile and reuses nothing. */
-const FullRun = z.strictObject({ everyTurns: z.number().int().min(1).max(1000), replaces: Id, profile: Id });
+/* The full run every release runs on its exact commit: profile runs every suite of the profile it replaces, and more, and
+   reuses nothing. No turn makes a run of replaces a full run: only asking for profile by name does. */
+const FullRun = z.strictObject({ replaces: Id, profile: Id });
 const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional(), fullRun: FullRun.optional() });
 /* Who reads a file the import graph cannot follow: the named suites whole, or with tests only those of their test files. */
 const ImpactRule = z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1), tests: Inputs.min(1).optional() });

@@ -16,7 +16,7 @@ function sameSource(run: Run, snapshot: EnvironmentSnapshot): boolean {
 
 function selectedUnits(run: Run, snapshot: EnvironmentSnapshot): TestUnit[] {
   const request = run.environmentRequest!, { manifest, inventory } = snapshot.description;
-  const mode = chooseRunMode(manifest, request, false, true);
+  const mode = chooseRunMode(manifest, request, true);
   if (mode?.mode !== 'cached' || mode.profile !== snapshot.profile) return [];
   const ids = request.suite ? [request.suite] : manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
   const units = inventory.filter(unit => ids.includes(unit.suiteId));

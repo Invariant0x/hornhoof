@@ -1,5 +1,5 @@
 import { KeptFiles, PREPARATION_UNIT, runsInClass, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, lt, notExists, sql } from 'drizzle-orm';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
 import { unitKey as keyOf } from './plan-environment.js';
@@ -7,8 +7,8 @@ import { reusableUnits } from './reuse-evidence.js';
 import { openTurnOf } from '../tasks/turn-department.js';
 
 /* Reusing green test results. A file that passed at a fingerprint need not run again at that fingerprint. Every doubt runs the
-   file: no fingerprint, no green result, a group with one file changed, a machine that sent none. Every so many turns a run
-   reuses nothing, and what it finds red that was kept green is shown. */
+   file: no fingerprint, no green result, a group with one file changed, a machine that sent none. The full run, which every
+   release runs on its exact commit, reuses nothing, and what it finds red that was kept green is shown. */
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -22,18 +22,12 @@ const SHOWN_FILES = 30;
 
 export const printKey = (unit: TestFileKey, fingerprint: string): string => `${keyOf(unit)}\0${fingerprint}`;
 
-/* Due on a multiple of the interval, or when a multiple went by without one, and not twice in one turn. */
-export function fullRunDue({ turn, everyTurns, lastFullTurn }: { turn: number | null; everyTurns: number; lastFullTurn: number | null }): boolean {
-  if (turn === null || lastFullTurn === turn) return false;
-  return turn % everyTurns === 0 || (lastFullTurn !== null && turn - lastFullTurn >= everyTurns);
-}
-
-/* A manifest that names no full run reuses nothing, as nothing would ever check what it reused. One suite is never the full run,
-   whatever its profile: it would stand in for the rest of its turn. */
-export function chooseRunMode(manifest: TestEnvironmentV1, request: { profile?: string; suite?: string }, due: boolean, printed: boolean): { mode: Mode; profile: string } | null {
+/* A manifest that names no full run reuses nothing, as nothing would ever check what it reused. Only the full profile asked for
+   by name is the full run, and never one suite of it: it would stand in for the rest of its release. */
+export function chooseRunMode(manifest: TestEnvironmentV1, request: { profile?: string; suite?: string }, printed: boolean): { mode: Mode; profile: string } | null {
   const fullRun = manifest.execution?.fullRun, profile = request.profile ?? manifest.defaultProfile;
   if (!fullRun) return null;
-  if (!request.suite && (profile === fullRun.profile || (due && profile === fullRun.replaces))) return { mode: 'full', profile: fullRun.profile };
+  if (!request.suite && profile === fullRun.profile) return { mode: 'full', profile: fullRun.profile };
   return { mode: printed ? 'cached' : 'off', profile };
 }
 
@@ -125,24 +119,12 @@ async function onMainLine(db: Db, branch: string | null, scope: RepositoryScope,
   const [owner] = await db.select({ branch: departments.repoBranch }).from(departments).where(eq(departments.id, scope.repositoryOwnerId));
   return branch === (owner?.branch ?? 'main');
 }
-/* A full run of another branch, stopped halfway, or with a part that failed without naming a file (no machine, out of time, no
-   preparation) did not get to all the turn needs, so the next one is the full run. One still going counts, so two do not start. */
-async function lastFullTurnOf(db: Db, run: Pick<Run, 'id' | 'companyId'>, scope: RepositoryScope): Promise<number | null> {
-  const [last] = await db.select({ turn: sql<number | null>`max((${testRuns.fileCache}->>'turn')::int)` }).from(testRuns).where(and(
-    eq(testRuns.companyId, run.companyId), eq(testRuns.departmentId, scope.repositoryOwnerId), inArray(testRuns.status, ['running', 'passed', 'failed']),
-    sql`${testRuns.fileCache}->>'mode' = 'full'`, sql`(${testRuns.fileCache}->>'mainLine')::boolean`, sql`${testRuns.environmentRequest}->'repositoryScope'->>'repoUrlHash' = ${scope.repoUrlHash}`,
-    notExists(db.select({ part: testParts.id }).from(testParts).where(and(eq(testParts.runId, testRuns.id), eq(testParts.status, 'failed'), isNull(testParts.failedFiles)))),
-  ));
-  return last?.turn ?? null;
-}
-
 export type RunMode = { mode: Mode; profile: string; turn: number | null; mainLine: boolean } | null;
 export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEnvironmentV1, scope: RepositoryScope, printed: boolean): Promise<RunMode> {
   const request = run.environmentRequest!, fullRun = manifest.execution?.fullRun;
   if (!fullRun) return null;
   const turn = await turnOfRun(ctx.db, run), mainLine = await onMainLine(ctx.db, run.branch, scope, turn);
-  const due = mainLine && fullRunDue({ turn, everyTurns: fullRun.everyTurns, lastFullTurn: await lastFullTurnOf(ctx.db, run, scope) });
-  const chosen = chooseRunMode(manifest, request, due, printed);
+  const chosen = chooseRunMode(manifest, request, printed);
   return chosen && { ...chosen, turn, mainLine };
 }
 

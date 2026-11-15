@@ -112,7 +112,7 @@ describe('the server closes a turn by the tag of its release', () => {
   /* What the head of the department and the CEO were told of a version tag that released nothing. */
   const toldOfTag = async (f: Awaited<ReturnType<typeof released>>) => (await f.db.select().from(waitNotices)).filter(n => n.dedupKey.startsWith('release_tag:'));
 
-  it.each([
+  it.each<[string, { record?: boolean; at?: string }]>([
     ['with no recorded release', { record: false }],
     ['of another commit than the recorded release', { at: OTHER }],
   ])('tells the head of the department and the CEO once of a tag %s, and counts none of the turn as released', async (_what, options) => {

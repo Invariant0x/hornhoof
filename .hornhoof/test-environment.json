@@ -882,7 +882,6 @@
       ]
     },
     "fullRun": {
-      "everyTurns": 5,
       "replaces": "final",
       "profile": "full"
     }
