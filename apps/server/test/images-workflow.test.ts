@@ -359,13 +359,13 @@ describe('.github/workflows/images.yml', () => {
 
   it('sends the first job and the tests by one variable, and images, publishing and the release by another', () => {
     for (const name of ['mark', 'passed']) expect(JOBS[name]!['runs-on']).toBe(TESTS_RUNS_ON);
-    /* The tests against real Postgres and Pebble start their servers in Docker, which our own test runners lack: they
-       run only where a variable of their own names a runner that has a daemon, and are left out while it names none. */
+    /* The tests against real Postgres and Pebble start their servers in Docker, which the runners TESTS_RUNS_ON names need
+       not have: they run only where a variable of their own names a runner that has a daemon, and are left out while it
+       names none. */
     expect(JOBS['test-real']!['runs-on']).toBe(runsOn('REAL_RUNS_ON'));
     expect(JOBS['test-real']!.if).toBe("${{ vars.REAL_RUNS_ON != '' }}");
     for (const name of ['images', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
     expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'passed', 'publish', 'release', 'test', 'test-real']);
-    expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host|hornhoof-gh-buildkit/);
   });
 
   it('builds with the BuildKit the repository variable names, and with GitHub’s own and its emulator without one', () => {
@@ -386,10 +386,11 @@ describe('.github/workflows/images.yml', () => {
   });
 });
 
-/* Where a job runs, as GitHub reads its runs-on: a property that is not there is null, a variable that is not set is empty. */
+/* Where a job runs, as GitHub reads its runs-on: a property that is not there is null, a variable that is not set is empty.
+   Labels written out, as a list or as a plain value, come back as they are. */
 const RUNNER_VARS = ['TESTS_RUNS_ON', 'BUILD_RUNS_ON', 'REAL_RUNS_ON'];
-function runnerOf(expression: string, event_name: string, event: unknown, set: string): unknown {
-  if (!expression.startsWith('${{')) return expression;
+function runnerOf(expression: unknown, event_name: string, event: unknown, set: string): unknown {
+  if (typeof expression !== 'string' || !expression.startsWith('${{')) return expression;
   const body = expression.replace(/^\$\{\{|\}\}$/g, '').trim().replace(/\.(?=[A-Za-z_])/g, '?.');
   const vars = Object.fromEntries([...RUNNER_VARS, 'BUILDKIT_ENDPOINT'].map(name => [name, RUNNER_VARS.includes(name) ? set : '']));
   return runInNewContext(body, { github: { event_name, repository: 'acme/shop', event }, vars, fromJSON: (text: string) => JSON.parse(text) as unknown });
@@ -408,12 +409,15 @@ describe('the runners of every workflow', () => {
     }
   });
 
-  it('sends a push, a run by hand and a pull request from a branch of this repository where the variables say, and to GitHub’s machines without them', () => {
+  /* A label written into a workflow, self-hosted or a machine's own, would send a job to that machine whatever the
+     repository's settings say: a job runs on GitHub's machines or on the runners a repository variable names, and nowhere
+     else. */
+  it('sends a push, a run by hand and a pull request from a branch of this repository where the variables say, to GitHub’s machines without them, and names no runner of its own', () => {
     for (const name of WORKFLOWS) {
       for (const [job, { 'runs-on': runs }] of jobsOf(name)) {
-        if (!/vars\./.test(runs)) continue;
+        const fromVariable = typeof runs === 'string' && /\bvars\./.test(runs);
         for (const [event_name, event] of [['push', PUSH], ['workflow_dispatch', PUSH], ['pull_request', FROM_BRANCH]] as const) {
-          expect(runnerOf(runs, event_name, event, OWN), `${name} ${job} ${event_name}`).toEqual(['own', 'x64']);
+          expect(runnerOf(runs, event_name, event, OWN), `${name} ${job} ${event_name}`).toEqual(fromVariable ? ['own', 'x64'] : 'ubuntu-latest');
           expect(runnerOf(runs, event_name, event, ''), `${name} ${job} ${event_name} without variables`).toBe('ubuntu-latest');
         }
       }

@@ -38,11 +38,11 @@ jobs:
   # Without one, this job chooses the tests, as an author's check does (.hornhoof/author-check.md): those the change since
   # the nearest commit whose tests passed reaches. A change the selector cannot tell, or one that reaches every suite whole,
   # runs the whole suite, and so does a choice that fails.
-  # The repository variable TESTS_RUNS_ON, a JSON list of runner labels, can send this job and the tests to our own
-  # runners; without it they run on GitHub's machines. A pull request from a fork runs on GitHub's machines whatever the
-  # variable says, as every job here with a runner from a variable does, so code from outside never runs on ours. A fork
-  # can still change this file in its own pull request, so the repository's settings must also hold the runs of pull
-  # requests from outside until a maintainer approves them.
+  # The repository variable TESTS_RUNS_ON, a JSON list of runner labels, can send this job and the tests to the
+  # repository's own runners; without it they run on GitHub's machines. A pull request from a fork runs on GitHub's
+  # machines whatever the variable says, as every job here with a runner from a variable does, so code from outside
+  # never runs on them. A fork can still change this file in its own pull request, so the repository's settings must
+  # also hold the runs of pull requests from outside until a maintainer approves them.
   mark:
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
@@ -195,9 +195,10 @@ jobs:
     needs: [mark, test]
     # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
-    # The repository variable BUILD_RUNS_ON can send the image, publish and release jobs to our own runner, and
-    # BUILDKIT_ENDPOINT names the BuildKit those jobs build with there. These jobs run only for a push to main or a run by
-    # hand, never for a pull request, and their runner keeps a pull request from a fork on GitHub's machines as well.
+    # The repository variable BUILD_RUNS_ON can send the image, publish and release jobs to the repository's own runner,
+    # and BUILDKIT_ENDPOINT names the BuildKit those jobs build with there. These jobs run only for a push to main or a
+    # run by hand, never for a pull request, and their runner keeps a pull request from a fork on GitHub's machines as
+    # well.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
