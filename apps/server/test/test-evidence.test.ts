@@ -378,7 +378,7 @@ describe('an approval of a commit', () => {
     environmentRequest: { version: 1, repositoryScope: { companyId: c0, repositoryOwnerId: c0, repoUrlHash: 'a'.repeat(64) }, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 1, problem: null } as never,
     environmentSnapshot: { profile, ...(candidate ? { candidate: { baseCommit: OLD_COMMIT, baseFingerprints: [], fingerprints: [] } } : {}), description: { manifest: {
       defaultProfile: 'fast', profiles: [{ id: 'fast', requiredSuiteIds: ['server'] }, { id: 'final', requiredSuiteIds: ['server', 'server-postgres', 'browser'] }, { id: 'full', requiredSuiteIds: ['server', 'server-postgres', 'browser', 'browser-matrix'] }],
-      suites: ['server', 'server-postgres', 'browser', 'browser-matrix'].map(id => ({ id })), execution: { version: 2, fullRun: { everyTurns: 5, replaces: 'final', profile: 'full' } } } } } as never,
+      suites: ['server', 'server-postgres', 'browser', 'browser-matrix'].map(id => ({ id })), execution: { version: 2, fullRun: { replaces: 'final', profile: 'full' } } } } } as never,
     fileCache: { mode: kept ? 'cached' : 'full', turn: 4, mainLine: false, fingerprints: [], reused: kept, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] } as never,
   });
   const c0 = '00000000-0000-4000-8000-000000000001';

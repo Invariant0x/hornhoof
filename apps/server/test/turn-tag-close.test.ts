@@ -1,11 +1,12 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { tasks, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
+import { tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { loadTask } from '../src/modules/tasks/engine.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
+import { deliverWaitNotices } from '../src/modules/tasks/wait-notices.js';
 import { BASE } from './development-echelons-fixture.js';
-import { ownDatabases } from './helpers.js';
+import { as, ownDatabases } from './helpers.js';
 import { releasing } from './turn-release-fixture.js';
 
 ownDatabases();
@@ -33,7 +34,7 @@ async function released(options: { record?: boolean; tag?: string; at?: string }
     await f.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: f.turn.id }).where(eq(tasks.id, task.id));
     return task;
   };
-  return { ...f, round, errors, departmentTurns, open, lateResult };
+  return { ...f, round, errors, departmentTurns, open, lateResult, run };
 }
 
 describe('the server closes a turn by the tag of its release', () => {
@@ -106,6 +107,52 @@ describe('the server closes a turn by the tag of its release', () => {
     await f.round();
     expect(await f.open()).toMatchObject({ id: f.turn.id, status: 'open' });
     expect(await loadTask(f.db, f.task.id)).toMatchObject({ turnId: f.turn.id });
+  });
+
+  /* What the head of the department and the CEO were told of a version tag that released nothing. */
+  const toldOfTag = async (f: Awaited<ReturnType<typeof released>>) => (await f.db.select().from(waitNotices)).filter(n => n.dedupKey.startsWith('release_tag:'));
+
+  it.each([
+    ['with no recorded release', { record: false }],
+    ['of another commit than the recorded release', { at: OTHER }],
+  ])('tells the head of the department and the CEO once of a tag %s, and counts none of the turn as released', async (_what, options) => {
+    const f = await released(options);
+    f.repo.holds[OTHER] = [BASE];
+    const at = options.at ?? f.R;
+    await f.round();
+    await f.round();
+    expect(await f.open()).toMatchObject({ id: f.turn.id, status: 'open' });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ turnId: f.turn.id });
+    const told = await toldOfTag(f);
+    expect(told.map(n => n.agentId ?? n.personId).sort()).toEqual([f.head.id, f.claude.ownerPersonId].sort());
+    const head = told.find(n => n.agentId === f.head.id)!;
+    expect(head.message.notification).toEqual({ source: 'release_tag', tasks: [{ id: f.task.id, number: f.task.number }] });
+    for (const words of ['v1.7.0', at, `Turn ${f.turn.number} stays open`, 'release_turn']) expect(head.message.text).toContain(words);
+    const card = told.find(n => n.personId)!;
+    expect(card.guard).toMatchObject({ turn: { id: f.turn.id, taskId: f.task.id }, tag: { version: 'v1.7.0', commit: at } });
+    expect(card.message.text).toContain('not counted as released');
+    /* The CEO sees it among their cards. */
+    await deliverWaitNotices(f.ctx);
+    const cards = (await f.app.inject({ method: 'GET', url: '/api/wait-cards', ...as(f.ceoToken) })).json().cards;
+    expect(cards).toEqual([expect.objectContaining({ about: 'release_tag', taskId: f.task.id, number: f.task.number })]);
+  });
+
+  it('tells them too when the full run its record relied on failed since, and keeps the turn open', async () => {
+    const f = await released();
+    await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, f.run.id));
+    await f.round();
+    expect(await f.open()).toMatchObject({ id: f.turn.id });
+    const told = await toldOfTag(f);
+    expect(told).toHaveLength(2);
+    expect(told.find(n => n.agentId)!.message.text).toContain('no longer stands');
+  });
+
+  it('tells nobody of a tag that releases its turn, of an older one or of one not named as a version', async () => {
+    for (const options of [{}, { tag: 'v1.5.9' }, { tag: 'nightly' }]) {
+      const f = await released(options);
+      await f.round();
+      expect(await toldOfTag(f)).toEqual([]);
+    }
   });
 
   it('leaves the turn open on a tag that does not come from where the turn started', async () => {
