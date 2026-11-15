@@ -236,7 +236,7 @@ for (const { lang, skin, width } of LOOKS) {
     await expect(form).toContainText(t.subs.modelsFound(3));
     const qwen = form.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true });
     /* A box stands at the first line of its name, the size of a box. */
-    const [tick, name] = [await box(qwen), await box(form.locator('.model-found label').filter({ has: page.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }) }).locator('span'))];
+    const [tick, name] = [await box(qwen), await box(form.locator('.model-found label').filter({ has: page.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }) }).locator(':scope > span:not(.tick-box)'))];
     expect(tick.height).toBeLessThan(22);
     expect(Math.abs(tick.y + tick.height / 2 - (name.y + Math.min(name.height, 22) / 2))).toBeLessThan(5);
     await qwen.check();

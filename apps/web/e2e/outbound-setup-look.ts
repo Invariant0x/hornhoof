@@ -88,6 +88,12 @@ export async function offences(panel: Locator, words: Words): Promise<string[]> 
         const look = s.appearance || s.webkitAppearance;
         if (look !== 'none' || Math.round(rect(box).width) !== 16 || Math.round(rect(box).height) !== 16) out.push(`9: the box is ${look} ${rect(box).width}x${rect(box).height}`);
       }
+      /* A number is typed as text: no arrows of the browser, which each browser draws its own way. */
+      for (const field of form.querySelectorAll('input[type=number]')) {
+        const s = css(field) as CSSStyleDeclaration & { webkitAppearance?: string; MozAppearance?: string };
+        const look = s.appearance || s.webkitAppearance || s.MozAppearance;
+        if (look !== 'textfield') out.push(`9: ${name(field)} keeps the arrows of ${look}`);
+      }
     }
 
     /* 11. A channel's caption: how and to whom on one line, limits and sending on the next. */
