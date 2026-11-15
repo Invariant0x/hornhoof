@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, sql } from 'drizzle-orm';
@@ -84,7 +85,7 @@ describe('tools a skill grants', () => {
     expect((await db.select().from(jobs).where(eq(jobs.agentId, olga.id))).map(j => j.prompt)).toEqual([expect.stringContaining('Which token did the Stripe connector get?')]);
     const away = await call(client, 'message_employee', { employee: bruno.id, text: 'Hi Bruno.' });
     expect(away.isError).toBe(true);
-    expect(away.content[0]!.text).toContain('another department');
+    expect(away.content[0]!.text).toBe(`Bruno works in another department. Ask your head, who has the orchestrator pass it on.\nNot delivered: reason other_department, recipient ${bruno.id}, task none.`);
   });
 
   it('let an employee answer the one who wrote to it last, in another department or the orchestrator, with one message', async () => {
@@ -231,7 +232,7 @@ describe('tools a skill grants', () => {
       expect(result.isError, `Message ${i + 1}: ${result.content[0]!.text}`).toBeFalsy();
     }
     const more = await call(client, 'message_employee', { employee: hana.id, text: 'One more.' });
-    expect([more.isError, more.content[0]!.text]).toEqual([true, 'One turn sends at most 10 messages. Go on in your next round.']);
+    expect([more.isError, more.content[0]!.text]).toEqual([true, `One turn sends at most 10 messages. Go on in your next round.\nNot delivered: reason send_limit, recipient ${hana.id}, task none.`]);
     expect(await messagesFrom(db, wendy.id)).toEqual(Array.from({ length: 10 }, (_, i) => `Nudge ${i}.`));
   });
 
@@ -246,7 +247,8 @@ describe('tools a skill grants', () => {
     }
     for (const name of ['message_employee', 'tell_orchestrator']) {
       const more = await call(client, name, { text: 'One more.', ...(name === 'message_employee' ? { employee: bruno.id } : {}) });
-      expect([more.isError, more.content[0]!.text]).toEqual([true, 'One turn sends at most 10 messages. Go on in your next round.']);
+      const undelivered = name === 'message_employee' ? `\nNot delivered: reason send_limit, recipient ${bruno.id}, task none.` : '';
+      expect([more.isError, more.content[0]!.text]).toEqual([true, `One turn sends at most 10 messages. Go on in your next round.${undelivered}`]);
     }
     expect(await messagesFrom(db, wendy.id)).toEqual(Array.from({ length: 10 }, (_, i) => `Report ${i}.`));
   });
@@ -257,10 +259,7 @@ describe('tools a skill grants', () => {
     for (let i = 0; i < 9; i++) expect((await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` })).isError).toBeFalsy();
     const last = await Promise.all([1, 2, 3].map(i => call(client, 'message_employee', { employee: hana.id, text: `At once ${i}.` })));
     expect(last.filter(r => !r.isError)).toHaveLength(1);
-    expect(last.filter(r => r.isError).map(r => r.content[0]!.text)).toEqual([
-      'One turn sends at most 10 messages. Go on in your next round.',
-      'One turn sends at most 10 messages. Go on in your next round.',
-    ]);
+    expect(last.filter(r => r.isError).map(r => r.content[0]!.text)).toEqual(Array(2).fill(`One turn sends at most 10 messages. Go on in your next round.\nNot delivered: reason send_limit, recipient ${hana.id}, task none.`));
     expect(await messagesFrom(db, wendy.id)).toHaveLength(10);
   });
 
@@ -301,6 +300,7 @@ describe('tools a skill grants', () => {
         since: expect.any(String),
         why: 'Waits for #40: the staging database does not answer.',
         whyTail: null,
+        next: 'Waits for #40: the staging database does not answer.',
         lastTurn: { status: 'failed', error: 'timeout', at: hung.toISOString() },
       },
     ]);
@@ -405,6 +405,50 @@ describe('tools a skill grants', () => {
       expect.objectContaining({ tail: `git push failed for ${HOME}`, reason: null }),
       expect.objectContaining({ tail: '', reason: `unknown: Cannot load ${HOME}` }),
     ]);
+  });
+
+  it('let a failure collector read the Next section of a blocked report as next, cleaned for every reader, beside why as it was', async () => {
+    const { app, db, acme, sub, hana, bruno, task } = await company(['ops-failure-review']);
+    const own = 'tool-token-watch-own-next-0123456789ab';
+    await db.update(agents).set({ skills: ['ops-failure-review'] }).where(eq(agents.id, hana.id));
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(own) });
+    const report = [
+      '- **Status:** BLOCKED',
+      `- **What changed:** nothing, as ${HOME} cannot be read.`,
+      `- **Next:** the head connects the registry with token=${GITHUB_TOKEN} from ${HOME}`,
+      '- **Concerns:** none.',
+    ].join('\n');
+    await blocked(app.ctx, bruno.id, task.id, report);
+    const heldBy = async (token: string) => (JSON.parse((await call(await mcp(app, token), 'failures', { hours: 6 })).content[0]!.text) as { blocked: { why: string; whyTail: string | null; next: string }[] }).blocked;
+    expect(await heldBy(own)).toEqual([expect.objectContaining({ why: report, whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
+    expect(await heldBy(TOKEN)).toEqual([expect.objectContaining({ why: expect.not.stringContaining(HOME), whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
+  });
+
+  it('let a failure collector read every message an employee could not deliver, with its code, its recipient and its task, and no credential in it', async () => {
+    const { app, db, acme, sub, hana, bruno, task } = await company(['ops-failure-review']);
+    const client = await mcp(app, TOKEN);
+    await db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, hana.id));
+    const off = await call(client, 'message_employee', { employee: hana.id, text: 'Are you there?', task: task.number });
+    expect([off.isError, off.content[0]!.text]).toEqual([true, `Hana is switched off and takes no work until a person switches it on.\nNot delivered: reason switched_off, recipient ${hana.id}, task #${task.number}.`]);
+    const nobody = randomUUID();
+    const gone = await call(client, 'message_employee', { employee: nobody, text: 'Hello.' });
+    expect([gone.isError, gone.content[0]!.text]).toEqual([true, `There is no employee with id ${nobody}. Call agents to see the current ids.\nNot delivered: reason recipient_unknown, recipient ${nobody}, task none.`]);
+    /* A credential given as the task fits the 40 characters a task reference takes. */
+    const token = 'ghp_' + 'b'.repeat(36);
+    const unknown = await call(client, 'message_employee', { employee: bruno.id, text: 'About the leak.', task: token });
+    expect([unknown.isError, unknown.content[0]!.text]).toEqual([true, `There is no task [hidden] you can message.\nNot delivered: reason task_unknown, recipient ${bruno.id}, task [hidden].`]);
+    /* A turn Hornhoof failed for a message before it kept why. */
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'message_not_delivered', tail: '', finishedAt: new Date() });
+
+    const out = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: unknown[]; undelivered: unknown[] };
+    expect(out.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'message_not_delivered', task: task.number, reason: `Not delivered: reason reason_not_recorded, recipient ${bruno.id}, task #${task.number}.` })]);
+    const line = (reason: string, recipient: string, on: string) => `Not delivered: reason ${reason}, recipient ${recipient}, task ${on}.`;
+    expect(out.undelivered).toEqual([
+      { agent: 'Wendy', at: expect.any(String), recipient: bruno.id, to: 'Bruno', task: '[hidden]', reason: 'task_unknown', text: line('task_unknown', bruno.id, '[hidden]') },
+      { agent: 'Wendy', at: expect.any(String), recipient: nobody, to: null, task: null, reason: 'recipient_unknown', text: line('recipient_unknown', nobody, 'none') },
+      { agent: 'Wendy', at: expect.any(String), recipient: hana.id, to: 'Hana', task: task.number, reason: 'switched_off', text: line('switched_off', hana.id, `#${task.number}`) },
+    ]);
+    expect(JSON.stringify(out)).not.toContain(token);
   });
 
   /* Where agents stumbled and stopped on another department's task, its title and a node log of a restart, each with a

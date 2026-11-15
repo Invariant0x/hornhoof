@@ -449,17 +449,18 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   return jobId;
 }
 
-/* Direct messages need the node's receipt, including when their topic is a task. The caller owns the input lock. */
-export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): Promise<string> {
+/* Words go into the turn that runs when its node says they went in, and otherwise wait in the agent's line for its next
+   turn, including when their topic is a task. The caller owns the input lock. */
+export async function insertOrDeliverTurn(ctx: Ctx, t: Turn): Promise<string> {
   if (isMail(t) && takesInsteadOfTurn(t) && (await inboxModeOf(ctx.db, t.agentId)).effective === 'inbox') return intoInbox(ctx, t);
-  const combined = await combineReport(ctx, t, { send: deliverLockedInput, required });
+  const combined = await combineReport(ctx, t, { send: deliverLockedInput });
   if (combined) {
     if (isMail(t)) await keepLetter(ctx, t, combined, (await runsNow(ctx, combined)) ? 'read' : 'unread');
     return combined;
   }
   const message = t.repeated ? undefined : t.message;
   const into = message
-    ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
+    ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message } }, async (jobId, kept) => {
         if (await actsForCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
         await showMessage(ctx, t, jobId, kept, true);
       })
@@ -1212,6 +1213,29 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
 
 /* A node that waits or restarts for an update is not away: it comes back by itself, and its turns wait in line for it. */
 const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isReady(node) || nodeHeld(ctx, node);
+
+/* How long a machine that lost its line counts as getting back on it, as long as Hornhoof keeps the turns it runs for it. */
+export const RECONNECT_MS = 5 * 60_000;
+
+/* A node is getting back on the line while its socket is open before its hello, or for a while after it was last heard. */
+function comingBack(ctx: Ctx, node: NodeIdentity, seenAt: Date | null, now: number): boolean {
+  if (ctx.hub.isOnline(node)) return !ctx.hub.isReady(node);
+  const seen = Math.max(ctx.hub.lastSeenAt(node) ?? 0, seenAt?.getTime() ?? 0);
+  return now - seen < RECONNECT_MS;
+}
+
+/* Whether the machine an agent's turns wait for is only getting back on the line: they wait in line for it, and go out
+   once it says hello. One with work in progress waits for its own machine alone, as its turns do. */
+export async function reconnecting(ctx: Ctx, agentId: string, now = Date.now()): Promise<boolean> {
+  const sub = await liveSubscription(ctx, agentId);
+  if (!sub) return false;
+  if (sub.kind === 'api_key') return comingBack(ctx, ownBuiltin(ctx.config), null, now);
+  const [agent] = await ctx.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+  const all = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready');
+  const own = all.find(n => n.id === agent?.nodeId);
+  const waited = own && (await holdsWork(ctx, agentId)) ? [own] : all;
+  return waited.some(n => comingBack(ctx, nodeIdentity(n.id), n.lastSeenAt, now));
+}
 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work

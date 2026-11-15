@@ -112,7 +112,8 @@ describe('the machine of an employee outside the department', () => {
     const res = (await (await c.tools(c.seller)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text: 'The ones from the fair' } })) as { content: { text: string }[]; isError?: boolean };
     expect(res.isError).toBe(true);
     expect(res.content[0]!.text).toBe(
-      'Bruno cannot run now: the machine of its plan is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.',
+      'Bruno cannot run now: the machine of its plan is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.' +
+        `\nNot delivered: reason machine_offline, recipient ${c.worker.id}, task none.`,
     );
   });
 });
@@ -144,7 +145,8 @@ describe('an agent writing to an employee whose machine is offline', () => {
     const res = (await hana.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text: 'Go on with the leads' } })) as { content: { text: string }[]; isError?: boolean };
     expect(res.isError).toBe(true);
     expect(res.content[0]!.text).toBe(
-      'Bruno cannot run now: Homebox, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.',
+      'Bruno cannot run now: Homebox, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.' +
+        `\nNot delivered: reason machine_offline, recipient ${c.worker.id}, task none.`,
     );
   });
 });

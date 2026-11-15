@@ -10,7 +10,7 @@ import type { deliverLockedInput } from './decision-context.js';
 
 /* Persisted queued turns form the window, including across a server restart. */
 export const REPORT_WINDOW_MS = 10_000;
-type Delivery = { send: typeof deliverLockedInput; required?: boolean };
+type Delivery = { send: typeof deliverLockedInput };
 type ReportTurn = { companyId: string; agentId: string; message?: TurnMessage; withMessage?: WithEvent };
 type Stored = { event: typeof agentEvents.$inferSelect; job: typeof jobs.$inferSelect };
 type Group = { data: Record<string, unknown>; message: MessageEnvelope; text: string; prompt: string };
@@ -162,7 +162,7 @@ async function saveGroup(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMes
 async function deliverCopy(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string, delivery: Delivery): Promise<string | null> {
   const group = mergeGroup(row, input, incoming, report);
   if (!group) return null;
-  return delivery.send(ctx, turn.agentId, group.prompt, { source: { data: group.data }, required: delivery.required }, async (id, kept) => {
+  return delivery.send(ctx, turn.agentId, group.prompt, { source: { data: group.data } }, async (id, kept) => {
     if (!await saveGroup(ctx, turn, row, input, incoming, report, id, kept)) throw new Error('The report left its queue while its copy was delivered.');
   });
 }
