@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Notification, NotificationSource } from '@hornhoof/protocol';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { people, requests, taskEvents, tasks, turns } from '../../db/schema.js';
 import { CLOSED, note, refuse, type Actor, type Request, type Task, type Tx } from './engine.js';
@@ -93,7 +93,9 @@ function resultLine(task: Task, recorded: Set<string>): string {
 async function summaryWords(tx: Tx, turn: Turn, roots: Task[]): Promise<string> {
   const reports = await tx.select({ taskId: taskEvents.taskId }).from(taskEvents).where(and(inArray(taskEvents.taskId, roots.map(t => t.id)), inArray(taskEvents.kind, ['report', 'submitted'])));
   const recorded = new Set(reports.map(r => r.taskId));
-  const danger = await tx.select({ number: tasks.number, impact: requests.goalImpact }).from(requests).innerJoin(tasks, eq(tasks.id, requests.taskId)).where(and(eq(requests.goalState, 'open'), eq(tasks.turnId, turn.id)));
+  /* Of the work the release took in, and of the release itself, as a goal about the turn is said on work going into it. */
+  const danger = await tx.select({ number: tasks.number, impact: requests.goalImpact }).from(requests).innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(and(eq(requests.goalState, 'open'), or(eq(tasks.turnId, turn.id), and(eq(requests.goalRefKind, 'turn'), eq(requests.goalRefId, turn.id)))));
   const more = roots.length > SHOWN ? [`and ${roots.length - SHOWN} more`] : [];
   return [
     `Turn ${turn.number} is over. Its goal: ${turn.goal}`,

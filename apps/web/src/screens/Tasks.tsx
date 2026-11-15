@@ -1,12 +1,11 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useId, useRef, useState } from 'react';
-import { api } from '../api';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { placeName, useTaskDepartments, useTasks, useTurns } from '../tasks';
 import { searchTasks } from '../task-search';
 import { ALL_DEPARTMENTS, byDepartment, byRelease, goals, inDepartment, indexGoals, inProgress, NO_DEPARTMENT, type ReleaseSection } from '../task-board';
-import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskDepartments, TaskLine, TurnMode as Mode, TurnView } from '../types';
+import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskDepartments, TaskLine, TurnView } from '../types';
 import { Backlog } from '../ui/Backlog';
 import { ComputerCard } from '../ui/ComputerCard';
 import { Field } from '../ui/Field';
@@ -95,42 +94,15 @@ function ViewPicker({ value, onChange }: { value: View; onChange: (view: View) =
   );
 }
 
-/* How a turn runs. A person who sees the whole company or owns the turn's department picks it while the turn is planned;
-   once it starts it stays as it is, so only its words show. */
-function TurnModeOf({ turn }: { turn: TurnView }) {
-  const t = useT();
-  const id = useId();
-  const [failure, setFailure] = useState<unknown>(null);
-  if (!turn.canChangeMode || turn.status !== 'planned') return <small className="turn-wait">{t.tasks.turnModeIs[turn.mode]}</small>;
-  async function change(mode: Mode) {
-    setFailure(null);
-    try {
-      await api.patch(`/api/turns/${turn.number}`, { mode });
-    } catch (err) {
-      setFailure(err);
-    }
-  }
-  return (
-    <span className="turn-mode">
-      <label htmlFor={id}>{t.tasks.turnMode}</label>
-      <select id={id} value={turn.mode} onChange={e => void change(e.target.value as Mode)}>
-        <option value="echelons">{t.tasks.turnModes.echelons}</option>
-        <option value="turnkey">{t.tasks.turnModes.turnkey}</option>
-      </select>
-      {failure !== null && <span className="alert" role="alert">{errorText(t, failure)}</span>}
-    </span>
-  );
-}
-
-/* What a turn is for, how it runs, how far it is, and the words it came from on click. */
+/* What a turn is for, the version it came out as, how far it is, and the words it came from on click. */
 function TurnAbout({ turn }: { turn: TurnView }) {
   const t = useT();
   return (
     <div className="grp-head">
       <b className="grp-title">{turn.title}</b>
       {turn.goal && turn.goal !== turn.title && <span className="muted">{turn.goal}</span>}
-      <TurnModeOf turn={turn} />
-      {turn.status === 'planned' ? <small className="turn-wait">{t.tasks.plannedTasks(turn.tasks.total)}</small> : <TurnProgress tasks={turn.tasks} />}
+      {turn.version && <small className="turn-wait">{turn.version}</small>}
+      <TurnProgress tasks={turn.tasks} />
       {turn.messages.length > 0 && (
         <details className="turn-words">
           <summary>{t.tasks.words(turn.messages.length)}</summary>
@@ -149,7 +121,7 @@ function TurnAbout({ turn }: { turn: TurnView }) {
 const releaseHeading = (t: Messages, section: ReleaseSection) => {
   if (!section.turn) return t.tasks.board.outside;
   const { number } = section.turn;
-  return section.kind === 'preparing' ? t.tasks.board.preparing(number) : section.kind === 'planned' ? t.tasks.board.planned(number) : t.tasks.board.released(number);
+  return section.kind === 'preparing' ? t.tasks.board.preparing(number) : t.tasks.board.released(number);
 };
 
 /* By turn and release: what gets ready for release, what waits for its turn, the work outside every turn and what came out,

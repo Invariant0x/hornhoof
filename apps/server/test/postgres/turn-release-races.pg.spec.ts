@@ -26,7 +26,8 @@ function serve(ctx: Ctx, repo: Repo): void {
     const held = want.head === want.base || (repo.holds[want.head] ?? []).includes(want.base);
     return { complete: true, baseSha: want.base, headSha: held ? want.head : 'f'.repeat(40), paths: ['screens/tasks.fig'], diff: '@@ -1 +1 @@\n-a\n+b', commits: held ? [{ sha: want.head, parents: [want.base] }] : [] };
   };
-  (ctx as unknown as { readTags: unknown }).readTags = async () => ({ tags: { ...repo.tags } });
+  ctx.readMerged = async (_at, want) => want.base === want.head || (repo.holds[want.base] ?? []).includes(want.head);
+  ctx.readTags = async () => ({ tags: { ...repo.tags } });
 }
 
 /* Design keeping its work in a repository, nobody there to check it, so a submitted result goes straight to its head; a
@@ -51,8 +52,14 @@ async function released(pg: PostgresFixture) {
   const repo: Repo = { heads: { main: RELEASE, [branch]: RELEASE }, tags: { 'v1.6.0': MAIN, 'v1.7.0': RELEASE }, holds: { [RELEASE]: [MAIN], [OWN]: [MAIN], [LATER]: [OWN, RELEASE, MAIN] } };
   serve(a.ctx, repo);
   serve(b.ctx, repo);
-  /* The release of the turn as the release tool keeps it, recorded before main moved. */
-  await pg.admin.query(`INSERT INTO turn_releases(company_id, turn_id, commit, base_commit_sha, tasks, approval_request_id, requested_by_agent_id, covered, uncovered) VALUES ($1, $2, $3, $4, '[]', NULL, $5, false, '[]')`, [company!.id, turn!.id, RELEASE, MAIN, head.id]);
+  /* The release of the turn as the release tool keeps it, recorded before main moved: its release task, the full run of its
+     commit and the person's approval of it. */
+  const [release] = await pg.db.insert(schema.tasks).values({ companyId: company!.id, number: 100, title: 'Release', status: 'open', departmentId: dept!.id, assigneeAgentId: head.id }).returning();
+  const [job] = await pg.db.insert(schema.jobs).values({ companyId: company!.id, subscriptionId: plan!.id, agentId: head.id, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running' }).returning();
+  const [run] = await pg.db.insert(schema.testRuns).values({ companyId: company!.id, number: 1, taskId: release!.id, agentId: head.id, jobId: job!.id, departmentId: dept!.id, branch, commitSha: RELEASE, command: 'npm test', parts: 1, timeoutMs: 600000, status: 'passed', finishedAt: new Date() }).returning();
+  await pg.db.insert(schema.testParts).values({ companyId: company!.id, runId: run!.id, part: 1, status: 'passed', commit: RELEASE, exitCode: 0 });
+  const [approval] = await pg.db.insert(schema.requests).values({ companyId: company!.id, taskId: release!.id, agentId: head.id, kind: 'approval', text: 'Release turn 1.', commit: RELEASE, status: 'approved', answeredBy: person!.id, answeredAt: new Date() }).returning();
+  await pg.db.insert(schema.turnReleases).values({ companyId: company!.id, turnId: turn!.id, commit: RELEASE, baseCommitSha: MAIN, runId: run!.id, tasks: [], taskId: release!.id, approvalRequestId: approval!.id, requestedByAgentId: head.id, covered: true, uncovered: [] });
   const designTask = async () => {
     const { task } = await createTask(a.ctx, { agentId: head.id }, { title: 'Screen', brief: 'Lay out a screen.', body: 'Lay it out.', departmentId: dept!.id, assigneeAgentId: author.id, executor: true, small: false, riskClass: 'none', paths: ['screens/**'] });
     repo.heads[`task-${task.number}`] = OWN;

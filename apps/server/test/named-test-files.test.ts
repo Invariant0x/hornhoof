@@ -66,8 +66,8 @@ describe('what GitHub answers about a repository', () => {
 
   it('compares two commits of the repository', async () => {
     const asked = answering(() => Response.json({ base_commit: { sha: SHA }, commits: [], total_commits: 0, status: 'identical', files: [] }));
-    expect(await readCompare({ url: 'https://github.com/acme/shop', token: '' }, { base: SHA, head: SHA })).toEqual({ complete: true, baseSha: SHA, headSha: SHA, paths: [], diff: '', omitted: [] });
-    expect(asked[0]!.url).toBe(`https://api.github.com/repos/acme/shop/compare/${SHA}...${SHA}`);
+    expect(await readCompare({ url: 'https://github.com/acme/shop', token: '' }, { base: SHA, head: SHA })).toEqual({ complete: true, baseSha: SHA, headSha: SHA, paths: [], diff: '', omitted: [], commits: [] });
+    expect(asked[0]!.url).toBe(`https://api.github.com/repos/acme/shop/compare/${SHA}...${SHA}?per_page=250`);
     expect(asked[0]!.headers).not.toHaveProperty('authorization');
   });
 });

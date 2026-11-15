@@ -17,11 +17,11 @@ async function fixture() {
   const [dev, sales, ops] = await db.insert(departments).values([
     { companyId, roleCode: 'DEV', templateKey: 'development' },
     { companyId, roleCode: 'SAL', templateKey: 'sales' },
-    { companyId, roleCode: 'OPS', templateKey: 'operations', workMode: 'continuous' },
+    { companyId, roleCode: 'OPS', templateKey: 'operations' },
   ]).returning();
   const [turn, salesTurn] = await db.insert(turns).values([
-    { companyId, departmentId: dev!.id, number: 8, goal: 'The turn of Development' },
-    { companyId, departmentId: sales!.id, number: 9, goal: 'The turn of Sales' },
+    { companyId, departmentId: dev!.id, number: 8, goal: 'The turn of Development', status: 'open', openedAt: new Date() },
+    { companyId, departmentId: sales!.id, number: 9, goal: 'The turn of Sales', status: 'open', openedAt: new Date() },
   ]).returning();
   const turnOf = new Map([[dev!.id, turn!.id], [sales!.id, salesTurn!.id]]);
   let number = 100;
@@ -33,7 +33,7 @@ async function fixture() {
   const org = async (token = ceo) => {
     const response = await app.inject({ url: '/api/org', ...as(token) });
     expect(response.statusCode).toBe(200);
-    return response.json() as { departments: { id: string; workMode: string; turnProgress: { turnNumber: number; done: number; total: number } | null }[] };
+    return response.json() as { departments: { id: string; turnProgress: { turnNumber: number; done: number; total: number } | null }[] };
   };
   const current = async (token = ceo, department?: string) => (await app.inject({ url: `/api/turns/current${department ? `?department=${department}` : ''}`, ...as(token) })).json().turn;
   return { app, db, ceo, companyId, person: person!, dev: dev!, sales: sales!, ops: ops!, turn: turn!, add, org, current };
@@ -51,10 +51,11 @@ it("counts the exact turnView task set of each department's own turn, including 
   const [old] = await c.db.insert(turns).values({ companyId: c.companyId, number: 7, goal: 'Old', status: 'closed' }).returning();
   await c.add(c.dev.id, { turnId: old!.id, status: 'done' });
   const map = new Map((await c.org()).departments.map(d => [d.id, d]));
-  expect(map.get(c.dev.id)).toMatchObject({ workMode: 'turns', turnProgress: { turnNumber: 8, total: 10, done: 3 } });
+  expect(map.get(c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 9, done: 3 });
+  expect(map.get(c.dev.id)).not.toHaveProperty('workMode');
   expect(map.get(c.sales.id)!.turnProgress).toEqual({ turnNumber: 9, total: 1, done: 1 });
-  expect(map.get(c.ops.id)).toMatchObject({ workMode: 'continuous', turnProgress: null });
-  expect((await c.current()).tasks).toEqual({ total: 10, done: 3 });
+  expect(map.get(c.ops.id)!.turnProgress).toBeNull();
+  expect((await c.current()).tasks).toEqual({ total: 9, done: 3 });
   expect(await c.current(c.ceo, c.sales.id)).toMatchObject({ number: 9, tasks: { total: 1, done: 1 } });
   expect(await c.current(c.ceo, c.ops.id)).toBeNull();
 });
@@ -66,21 +67,12 @@ it('returns exact zero counts and 100 percent rather than inventing progress', a
   expect((await c.org()).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
 });
 
-it('returns no progress with no open turn even if a planned turn has tasks', async () => {
+it('returns no progress with no open turn even if a released turn has tasks', async () => {
   const c = await fixture();
   await c.add(c.dev.id, { status: 'done' });
-  await c.db.update(turns).set({ status: 'planned' }).where(eq(turns.companyId, c.companyId));
+  await c.db.update(turns).set({ status: 'closed', closedAt: new Date(), version: 'v1.0.0' }).where(eq(turns.companyId, c.companyId));
   expect((await c.org()).departments.every(d => d.turnProgress === null)).toBe(true);
   expect(await c.current()).toBeNull();
-});
-
-it('changes an existing department between turns and continuous without changing its tasks', async () => {
-  const c = await fixture();
-  await c.add(c.dev.id, { status: 'done' });
-  await c.db.update(departments).set({ workMode: 'continuous' }).where(eq(departments.id, c.dev.id));
-  expect((await c.org()).departments.find(d => d.id === c.dev.id)!.turnProgress).toBeNull();
-  await c.db.update(departments).set({ workMode: 'turns' }).where(eq(departments.id, c.dev.id));
-  expect((await c.org()).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
 });
 
 it('counts the same tasks as turnView for everyone, of every department, reached or not', async () => {
@@ -107,8 +99,6 @@ it('excludes another company even when its task references the same turn and dep
   expect(org.departments.some(d => d.id === foreign!.id)).toBe(false);
   expect(org.departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
   expect((await c.current()).tasks).toEqual({ total: 1, done: 1 });
-  const denied = await c.app.inject({ method: 'PUT', url: `/api/departments/${foreign!.id}/work-mode`, payload: { workMode: 'continuous' }, ...as(c.ceo) });
-  expect(denied.statusCode).toBe(404);
 });
 
 it('propagates a failed count instead of returning an invented zero', async () => {
@@ -121,7 +111,7 @@ it('propagates a failed count instead of returning an invented zero', async () =
 });
 
 
-it('shows the whole progress to product-only and team-only access, and keeps changing the mode with the department', async () => {
+it('shows the whole progress to product-only and team-only access, and lets nobody pick how a department works', async () => {
   const c = await fixture();
   const [product] = await c.db.insert(departments).values({ companyId: c.companyId, roleCode: 'DEV', parentId: c.dev.id, name: 'Product' }).returning();
   const productToken = await invitePerson(c.app, c.ceo, { name: 'Product reader', email: 'product@example.test', access: { departments: [product!.id] } });
@@ -134,7 +124,8 @@ it('shows the whole progress to product-only and team-only access, and keeps cha
   const teamToken = await invitePerson(c.app, c.ceo, { name: 'Team reader', email: 'team@example.test', access: { teams: [team!.id] } });
   expect((await c.org(teamToken)).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 2, done: 2 });
   expect((await c.current(teamToken)).tasks).toEqual({ total: 2, done: 2 });
-  for (const token of [productToken, teamToken]) {
-    expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/work-mode`, payload: { workMode: 'continuous' }, ...as(token) })).statusCode).toBe(403);
+  /* Every department works in one flow now: the route that switched it between turns and continuous work is gone. */
+  for (const token of [c.ceo, productToken, teamToken]) {
+    expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/work-mode`, payload: { workMode: 'continuous' }, ...as(token) })).statusCode).toBe(404);
   }
 });

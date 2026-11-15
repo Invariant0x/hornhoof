@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../../db/schema.js';
 import { CLOSED, openAfter, type Task } from './engine.js';
 import { waitingCycles } from './wait-graph.js';
+import { workOfOpenTurn } from './turn-department.js';
 
 export const QUIET_DEPARTMENT_MS = 15 * 60_000;
 export const waitKey = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -11,7 +12,7 @@ export const taskVersions = (rows: Task[]) => rows.map(t => ({ id: t.id, version
 
 export async function waitCycles(ctx: Ctx, now: Date) {
   const rows = await ctx.db.select({ task: tasks, employee: agents }).from(tasks).innerJoin(agents, eq(agents.id, tasks.assigneeAgentId)).where(and(
-    notInArray(tasks.status, ['planned', ...CLOSED]), isNull(agents.removedAt), isNull(agents.switchedOffAt),
+    notInArray(tasks.status, [...CLOSED]), isNull(agents.removedAt), isNull(agents.switchedOffAt),
   ));
   const edges = rows.flatMap(({ task, employee }) => task.externalWait?.on?.kind === 'employee' && new Date(task.externalWait.until) > now
     ? [{ from: employee.id, to: task.externalWait.on.employee, task, name: employee.name }] : []);
@@ -69,7 +70,7 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   const [turn] = await ctx.db.select().from(turns).where(and(eq(turns.id, turnId), eq(turns.status, 'open')));
   if (!turn) return null;
   const scope = await departmentScope(ctx, turn.companyId, departmentId);
-  const work = await ctx.db.select().from(tasks).where(and(eq(tasks.turnId, turn.id), inArray(tasks.departmentId, scope), notInArray(tasks.status, ['planned', ...CLOSED])));
+  const work = await ctx.db.select().from(tasks).where(and(workOfOpenTurn(turn.id), inArray(tasks.departmentId, scope), notInArray(tasks.status, [...CLOSED])));
   if (!work.length) return null;
   const employees = ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)));
   const conversations = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, turn.companyId), eq(jobs.kind, 'conversation'), or(inArray(jobs.agentId, employees), inArray(jobs.taskId, work.map(task => task.id)))));

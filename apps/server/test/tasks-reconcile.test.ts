@@ -117,7 +117,7 @@ const waitingCases: { why: string; hold(c: Company, task: Task): Promise<unknown
     const job = await c.job({ agentId: c.head.id, status: 'done', finishedAt: c.at });
     await c.db.insert(testRuns).values({ companyId: c.companyId, number: 1, taskId: task.id, agentId: c.bruno.id, jobId: job.id, command: 'npm test', timeoutMs: 30 * MIN });
   } },
-  ...(['planned', 'waiting', 'done', 'cancelled'] as const).map(status => ({ why: status, hold: (c: Company, task: Task) => c.db.update(tasks).set({ status, closedAt: c.at }).where(eq(tasks.id, task.id)) })),
+  ...(['waiting', 'done', 'cancelled'] as const).map(status => ({ why: status, hold: (c: Company, task: Task) => c.db.update(tasks).set({ status, closedAt: c.at }).where(eq(tasks.id, task.id)) })),
 ];
 
 describe('turns on a machine that went away', () => {
@@ -251,7 +251,7 @@ describe('work whose move lost its wake', () => {
     expect(await c.turnsOf(c.bruno.id)).toHaveLength(count);
   });
 
-  it.each(['planned', 'open', 'working', 'review', 'waiting', 'blocked'] as const)('leaves a parent waiting for its %s subtask', async status => {
+  it.each(['open', 'working', 'review', 'waiting', 'blocked'] as const)('leaves a parent waiting for its %s subtask', async status => {
     const c = await company();
     const parent = await c.task({ status: 'working', assigneeAgentId: c.head.id, executorAgentId: null });
     await c.db.update(taskEvents).set({ agentId: null, personId: c.ceo.id }).where(eq(taskEvents.taskId, parent.id));

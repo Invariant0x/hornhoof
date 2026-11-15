@@ -63,7 +63,7 @@ const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id', 'node_id']
 const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email', 'repo_full_test_command'];
 /* Settings change only through a person's guarded API, never through generic SQL. So does who owns a department, as its
    owner decides what its agents send out. */
-const DEPARTMENT_SETTINGS = [...REPOSITORY, 'work_mode', 'owner_person_id'];
+const DEPARTMENT_SETTINGS = [...REPOSITORY, 'owner_person_id'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 /* How urgent work is changes only through the CEO's route and tools, which keep a tree of tasks as urgent as its top. */

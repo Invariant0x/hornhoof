@@ -132,14 +132,14 @@ describe('a task that comes after others', () => {
     expect(await reason(submit(ctx, tess.id, tests.id, code))).toBe('task_invalid');
   });
 
-  it('comes after work of any turn that started, but not after cancelled work, work of a turn yet to start, or itself', async () => {
+  it('comes after work of any turn or none, but not after cancelled work, unknown work, or itself', async () => {
     const { ctx, db, companyId, dev, head, bruno, tess, member } = await company();
     const [old] = await db.insert(turns).values({ companyId, departmentId: dev.id, number: 1, goal: 'Old', status: 'closed', closedAt: new Date() }).returning();
     const [earlier] = await db.insert(tasks).values({ companyId, number: 90, turnId: old!.id, departmentId: dev.id, title: 'Old work', status: 'done', closedAt: new Date() }).returning();
     expect(await reason(member('Release notes', tess.id, [earlier!.id]))).toBe('ok');
-    const [next] = await db.insert(turns).values({ companyId, departmentId: dev.id, number: 18, goal: 'Next', status: 'planned' }).returning();
-    const [later] = await db.insert(tasks).values({ companyId, number: 990, turnId: next!.id, departmentId: dev.id, title: 'Later work', status: 'planned' }).returning();
-    expect(await reason(member('End-to-end tests', tess.id, [later!.id]))).toBe('task_invalid');
+    const going = (await member('Card form', bruno.id)).task;
+    expect(going.turnId).toBeNull();
+    expect(await reason(member('Card tests', tess.id, [going.id]))).toBe('ok');
     const api = (await member('Checkout API', bruno.id)).task;
     await db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, api.id));
     expect(await reason(member('End-to-end tests', tess.id, [api.id]))).toBe('task_invalid');

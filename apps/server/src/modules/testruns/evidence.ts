@@ -4,6 +4,7 @@ import { departments, testRuns, turns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { type Task } from '../tasks/engine.js';
 import { routeOf } from '../tasks/echelons-store.js';
+import { openTurnOf } from '../tasks/turn-department.js';
 import { commandShown } from './commit-proof.js';
 import type { CommitAt } from './refs.js';
 
@@ -53,11 +54,13 @@ export async function evidenceOf(ctx: Reader, run: Pick<Run, 'branch' | 'commitS
   return { commitSha, head: at.commitSha, freshness, why: freshness === 'stale' ? `The branch is at ${at.commitSha} now, not at the ${commitSha} this run checked.` : null };
 }
 
-/* The turn's branch, for the tasks about the turn's work as a whole: its review and the department's task of the turn. */
+/* The turn's branch, for the tasks about the turn's work as a whole, as its release: the turn such a task went into, else
+   its department's open turn. */
 async function turnBranchOf(db: Reader['db'], task: Task): Promise<string | null> {
-  if (!task.turnId || (await routeOf(db, task)).state.resultKind !== 'coordination') return null;
-  const [turn] = await db.select({ number: turns.number }).from(turns).where(eq(turns.id, task.turnId));
-  return `turn-${turn!.number}`;
+  const [own] = task.turnId ? await db.select({ number: turns.number }).from(turns).where(eq(turns.id, task.turnId)) : [];
+  const turn = own ?? (await openTurnOf(db, task.companyId, task.departmentId));
+  if (!turn || (await routeOf(db, task)).state.resultKind !== 'coordination') return null;
+  return `turn-${turn.number}`;
 }
 
 /* Where a task's turn branch is: its product's repository, or for a task of the whole department every repository the

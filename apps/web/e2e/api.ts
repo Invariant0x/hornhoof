@@ -30,7 +30,7 @@ const ORG: Org = {
 const DECISIONS: Decisions = { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } };
 
 const TURN: TurnView = {
-  id: 'u3', number: 3, title: 'Payments', goal: 'Take card payments in the shop.', status: 'open', mode: 'echelons', departmentId: DEV.id, canChangeMode: true, messages: [], taskId: null,
+  id: 'u3', number: 3, title: 'Payments', goal: 'Take card payments in the shop.', status: 'open', version: null, commit: null, baseVersion: null, departmentId: DEV.id, messages: [], taskId: null,
   startedAt: '2026-10-30T07:00:00.000Z', openedAt: '2026-10-30T07:00:00.000Z', closedAt: null, tasks: { total: 30, done: 0 },
 };
 
@@ -96,9 +96,6 @@ export async function serveApi(page: Page) {
     if (path === '/api/stream') return;
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));
-    /* A department works in turns unless a test says otherwise, and the person may change it. */
-    const workMode = /^\/api\/departments\/([^/]+)\/work-mode$/.exec(path);
-    if (workMode) return route.fulfill(json({ departmentId: workMode[1], workMode: 'turns', canChangeWorkMode: true }));
     /* A department has no task branch outside main unless a test says otherwise. */
     if (/^\/api\/departments\/[^/]+\/branches$/.test(path)) return route.fulfill(json({ branches: [], problem: null }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);

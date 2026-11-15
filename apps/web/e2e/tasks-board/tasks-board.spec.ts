@@ -57,7 +57,7 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     const view = page.getByRole('group', { name: t.tasks.board.view });
     await expect(view.getByRole('radio', { name: t.tasks.board.views.active })).toBeChecked();
 
-    /* In progress: the goals alone, the planned one waiting for its turn left out, the related tasks folded. */
+    /* In progress: the goals alone, the related tasks folded. */
     await expect(goals(page)).toHaveCount(9);
     await expect(related(page)).toHaveCount(0);
     const payments = card(page, goalOf('Take card payments').number);
@@ -104,10 +104,9 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await expect(board(page, t).getByRole('region', { name: 'Development' })).toContainText(t.tasks.board.inProgress(7));
     await capture(page, info, `departments-${lang}`);
 
-    /* By turn and release: what gets ready for release, what is planned, the work outside releases, and what came out folded. */
+    /* By turn and release: what gets ready for release, the work outside releases, and what came out folded. */
     await view.getByRole('radio', { name: t.tasks.board.views.releases }).check({ force: true });
-    await expect(sections).toHaveText([t.tasks.board.preparing(3), t.tasks.board.preparing(5), t.tasks.board.planned(4), t.tasks.board.outside, t.tasks.board.released(2)]);
-    await expect(board(page, t).getByRole('region', { name: t.tasks.board.planned(4) })).toContainText('Receipt wording');
+    await expect(sections).toHaveText([t.tasks.board.preparing(3), t.tasks.board.preparing(5), t.tasks.board.outside, t.tasks.board.released(2)]);
     await expect(card(page, goalOf('Old checkout').number)).toHaveCount(0);
     await expect(board(page, t).getByText(t.tasks.board.pickDepartment)).toBeVisible();
     await department.selectOption({ label: 'Development' });

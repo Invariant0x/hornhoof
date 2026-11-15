@@ -7,7 +7,7 @@ import type { TaskLine } from '../types';
 export type CardRows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string };
 
 /* The colours of a state as the task lists already draw them. */
-const STATE_CLASS: Record<HumanStatus, string> = { planned: 'planned', working: 'working', review: 'review', waiting: 'waiting', paused: 'blocked', done: 'done', cancelled: 'cancelled' };
+const STATE_CLASS: Record<HumanStatus, string> = { working: 'working', review: 'review', waiting: 'waiting', paused: 'blocked', done: 'done', cancelled: 'cancelled' };
 
 function Chevron() {
   return <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>;

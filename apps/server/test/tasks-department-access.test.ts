@@ -1,17 +1,16 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { departments, people, tasks } from '../src/db/schema.js';
-import { as, invitePerson } from './helpers.js';
+import { as, echelonsTurn, invitePerson } from './helpers.js';
 import { call, company, work } from './turns-company.js';
 
-/* A company with a running turn in Development and in Sales, a task outside turns in Sales, the owner of Sales and a deputy
+/* A company with an open turn in each department, a task of Development and two of Sales, the owner of Sales and a deputy
    of the CEO. Development's task waits for an event, in its holder's words. */
 async function tracker() {
   const c = await company();
+  await echelonsTurn(c.db, c.companyId);
   const boss = await c.tools(c.orchestrator);
-  await call(boss, 'plan_turn', { department: c.dev.id, mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(c.dev.id, 'Checkout')] });
-  await call(boss, 'plan_turn', { department: c.sales.id, mode: 'echelons', title: 'Launch', goal: 'Tell people.', tasks: [work(c.sales.id, 'Announcement')] });
-  await call(boss, 'add_tasks', { tasks: [work(c.sales.id, 'Call the bank')] });
+  await call(boss, 'add_tasks', { tasks: [work(c.dev.id, 'Checkout'), work(c.sales.id, 'Announcement'), work(c.sales.id, 'Call the bank')] });
   const dora = await invitePerson(c.app, c.ceoToken, { name: 'Dora', email: 'dora@acme.test', access: { departments: [c.sales.id] } });
   const [doraRow] = await c.db.select().from(people).where(eq(people.email, 'dora@acme.test'));
   await c.db.update(departments).set({ ownerPersonId: doraRow!.id }).where(eq(departments.id, c.sales.id));
@@ -39,7 +38,7 @@ describe("another department's tasks for the people of a department", () => {
     expect(card.json().task).toMatchObject({ number: 1, title: 'Checkout', assignee: { name: 'Hana' }, externalWait: null });
     expect((await get(ceoToken, `/api/tasks/${checkout.id}`)).json().task.externalWait).toMatchObject({ reason: 'Hana waits for the bank to answer.' });
     expect((await get(dora, `/api/tasks/${checkout.id}/waits`)).statusCode).toBe(200);
-    expect((await get(dora, '/api/turns')).json().turns.map((t: { number: number }) => t.number)).toEqual([1, 2]);
+    expect((await get(dora, '/api/turns')).json().turns.map((t: { number: number }) => t.number)).toEqual([1, 2, 3]);
     /* The orchestrator's own work stays with the people who have the whole company. */
     expect(reason(await get(dora, '/api/tasks?department=none'))).toEqual([403, 'not_your_department']);
   });
@@ -51,8 +50,6 @@ describe("another department's tasks for the people of a department", () => {
     expect(reason(await send(dora, 'POST', `/api/tasks/${checkout.id}/cancel`, { why: 'Not needed.' }))).toEqual([403, 'task_not_yours']);
     expect(reason(await send(dora, 'PUT', `/api/tasks/${checkout.id}/paused`, { paused: true, reason: 'Wait.' }))).toEqual([403, 'task_not_yours']);
     expect(reason(await send(dora, 'PUT', `/api/tasks/${checkout.id}/urgent`, { urgent: true }))).toEqual([403, 'task_not_yours']);
-    expect((await send(dora, 'PATCH', '/api/turns/1', { mode: 'turnkey' })).statusCode).toBe(403);
-    expect((await send(dora, 'PUT', `/api/departments/${dev.id}/work-mode`, { workMode: 'continuous' })).statusCode).toBe(403);
     expect((await send(dora, 'POST', '/api/tasks', { title: 'Price list', department: sales.id })).statusCode).toBe(201);
     expect((await send(dora, 'POST', `/api/tasks/${announcement.id}/comments`, { text: 'Thanks.' })).statusCode).toBe(201);
   });

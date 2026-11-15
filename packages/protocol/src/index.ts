@@ -1,6 +1,5 @@
 export * from './department-mode.js';
 export * from './external-operations.js';
-import type { DepartmentWorkMode } from './department-mode.js';
 export * from './request-materials.js';
 export * from './questions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
@@ -216,17 +215,17 @@ export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 /* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt.
    teamMembers: how many people the turnkey teams of its template bring, for the headcount on a company template's card;
    a test keeps it equal to the team templates. */
-export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: DepartmentWorkMode; teamMembers: number }[] = [
-  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous', teamMembers: 1 },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns', teamMembers: 2 },
-  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; teamMembers: number }[] = [
+  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, teamMembers: 1 },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, teamMembers: 2 },
+  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, teamMembers: 1 },
+  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, teamMembers: 1 },
+  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, teamMembers: 1 },
+  { key: 'design', roleCode: 'DSN', ticked: false, always: false, teamMembers: 1 },
+  { key: 'support', roleCode: 'SUP', ticked: false, always: false, teamMembers: 1 },
+  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, teamMembers: 1 },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, teamMembers: 1 },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false, teamMembers: 1 },
 ];
 
 /* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products

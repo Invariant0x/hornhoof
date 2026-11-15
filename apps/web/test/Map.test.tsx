@@ -1041,7 +1041,7 @@ describe('Map', () => {
     ...ORG,
     turn: { id: TURN.id, number: 3, goal: TURN.goal },
     departments: Object.entries(progress).map(([id, p]) =>
-      dept({ id, name: id, roleCode: id.slice(0, 3).toUpperCase(), workMode: p ? 'turns' : 'continuous', turnProgress: p && { turnNumber: 3, done: p[0], total: p[1] } }),
+      dept({ id, name: id, roleCode: id.slice(0, 3).toUpperCase(), turnProgress: p && { turnNumber: 3, done: p[0], total: p[1] } }),
     ),
   });
   const card = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}`) });

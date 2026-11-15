@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { tasks, testRuns } from '../../db/schema.js';
+import { openTurnOf } from '../tasks/turn-department.js';
 import { ranEverything, runScope, scopeWords, type RunScope, type ScopeSource } from './purpose.js';
 
 type TaskPlace = Pick<typeof tasks.$inferSelect, 'id' | 'companyId' | 'turnId' | 'departmentId'>;
@@ -49,10 +50,16 @@ async function bestPassed(db: Db, companyId: string, commit: string): Promise<(P
   return scoped.find(run => run.scope && ranEverything(run.scope)) ?? scoped[0] ?? null;
 }
 
-/* The newest run that pinned a commit and passed, on the task or on its department's work in this turn. As none passed on
+/* The turn a task's work is in: the one it went into, else its department's open turn, the release it goes into. */
+async function workTurn(db: Db, task: TaskPlace): Promise<string | null> {
+  return task.turnId ?? (await openTurnOf(db, task.companyId, task.departmentId))?.id ?? null;
+}
+
+/* The newest run that pinned a commit and passed, on the task or on its department's work in its turn. As none passed on
    the commit asked about, it checked another one. */
 async function passedElsewhere(db: Db, task: TaskPlace): Promise<CommitProof['other']> {
-  const sameWork = task.turnId && task.departmentId ? and(eq(tasks.turnId, task.turnId), eq(tasks.departmentId, task.departmentId)) : undefined;
+  const turn = await workTurn(db, task);
+  const sameWork = turn && task.departmentId ? and(eq(tasks.turnId, turn), eq(tasks.departmentId, task.departmentId)) : undefined;
   const [run] = await db
     .select({ number: testRuns.number, commitSha: testRuns.commitSha })
     .from(testRuns)

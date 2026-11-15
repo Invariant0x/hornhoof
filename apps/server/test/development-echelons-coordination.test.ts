@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { taskRoutes, tasks, testParts, turns } from '../src/db/schema.js';
 import { loadTask, report, submit } from '../src/modules/tasks/engine.js';
@@ -12,8 +12,9 @@ async function groupFixture(accepted: boolean, stale = false) {
   const f = await testsFixture();
   const group = (await f.create({ title: 'Coordinate totals', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
   const child = f.task;
-  const [turn] = await f.db.update(turns).set({ number: 17, goal: 'Keep totals correct.' }).where(eq(turns.id, child.turnId!)).returning();
-  await f.db.update(tasks).set({ parentId: group.id, turnId: turn!.id }).where(eq(tasks.id, child.id));
+  /* The department's open turn, which the child joins as its head accepts it into turn-17. */
+  await f.db.update(turns).set({ number: 17, goal: 'Keep totals correct.' }).where(and(eq(turns.departmentId, child.departmentId!), eq(turns.status, 'open')));
+  await f.db.update(tasks).set({ parentId: group.id }).where(eq(tasks.id, child.id));
   f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: f.finalCommit });
   const run = await f.run();
   await report(f.ctx, f.tester.id, child.id, f.verified([run.id]));

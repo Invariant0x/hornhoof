@@ -3,7 +3,7 @@ import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, DepartmentTurnProgress, DepartmentWorkMode, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -192,14 +192,10 @@ export type Department = {
   repoHost?: RepoHost | null;
   /* The person who takes its approvals and runs it as the CEO does; none means the CEO. */
   ownerPersonId?: string | null;
-  /* Whether it works in turns of its own or all the time, and the tasks of its open turn done out of all, as far as this
-     person sees them; none for a department that works all the time, while it runs no turn or out of reach. */
-  workMode?: DepartmentWorkMode;
+  /* The results accepted into its open turn, the next release, as far as this person sees them; none while it runs no turn
+     or out of reach. */
   turnProgress?: DepartmentTurnProgress | null;
 };
-
-/* A department's way of working as its settings show it, and whether this person may change it. */
-export type WorkModeView = { departmentId: string; workMode: DepartmentWorkMode; canChangeWorkMode: boolean };
 
 export type { ApprovalChannel, ApprovalMode };
 /* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
@@ -395,7 +391,7 @@ export type StreamMessage =
   /* A plan's owner finished or gave up a sign-in on one of its machines; only the owner hears it. */
   | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
 
-export type TaskStatus = 'planned' | 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
+export type TaskStatus = 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker' | 'assistant'; role: Lang | null };
 export type TaskPlace = { id: string; name: string } | null;
 
@@ -560,23 +556,21 @@ export type Decisions = {
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
-/* A turn as the orchestrator or a department's head laid it out: a short title, its main point, and the people's own words
-   it came from (only for people who see the whole company). Each top-level department runs its own turns; its planned ones
-   wait in number order. */
-export type TurnMode = 'echelons' | 'turnkey';
-
+/* A turn is a release of its department: the open one takes in each result as it is accepted into its branch, and the tag of
+   its release closes it with that version and commit. The people's own words it came from show only to people who see the
+   whole company. */
 export type TurnView = {
   id: string;
   number: number;
   title: string;
   goal: string;
-  status: 'planned' | 'open' | 'closed';
-  /* How the turn runs, fixed once it starts: through the stages, or by one employee of a turnkey team alone. */
-  mode: TurnMode;
+  status: 'open' | 'closed';
+  /* The version and commit its release was tagged with, and the release it went on from; none while it is open or before. */
+  version: string | null;
+  commit: string | null;
+  baseVersion: string | null;
   /* The department whose turn it is; none only for a closed turn of a department that was removed. */
   departmentId: string | null;
-  /* Whether this person may pick how it runs while it is planned: with the whole company, or as the department's owner. */
-  canChangeMode: boolean;
   messages: { by: string; text: string; at: string }[];
   taskId: string | null;
   startedAt: string;

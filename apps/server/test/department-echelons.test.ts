@@ -188,9 +188,10 @@ describe('a department that keeps no repository', () => {
     expect((await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Wrote the launch text.' })).task).toMatchObject({ status: 'done' });
   });
 
-  it('works as before outside a turn, and in a department whose route has no check', async () => {
+  it('takes the work through its stages with an open turn or none, and as before in a department whose route has no check', async () => {
+    /* The team of who does it decides, never a turn. */
     const outside = await office(['hh-check-work'], { turn: false });
-    expect(await outside.echelons((await outside.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'coordination' });
+    expect(await outside.echelons((await outside.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'document', stage: 'development', abilities: { review: 'hh-check-work' } });
     const home = await fixture('household', { head: 'HHD-HEAD', author: 'HHD-BILLS' }, ['hh-check-work'], { repo: false });
     expect(await home.echelons((await home.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'coordination' });
   });

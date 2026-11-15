@@ -30,9 +30,12 @@ export function serve(ctx: Ctx, repo: Repository): void {
     const key = `${want.base}..${want.head}`;
     const commits = repo.between[key] ?? [];
     if (!contains(repo, want.head, want.base)) return { complete: true, baseSha: want.base, headSha: 'f'.repeat(40), paths: [], diff: '', commits: [] };
-    return { complete: !repo.cut.has(key), baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new', commits };
+    /* A comparison cut short reads as GitHub's: too many commits to page through. */
+    if (repo.cut.has(key)) return { complete: false, reason: 'incomplete-comparison' };
+    return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new', commits };
   };
-  (ctx as unknown as { readTags: unknown }).readTags = async () => ({ tags: { ...repo.tags } });
+  ctx.readMerged = async (_at, want) => contains(repo, want.base, want.head);
+  ctx.readTags = async () => ({ tags: { ...repo.tags } });
 }
 
 /* A department in turn 1..N, its open turn, and a checked candidate of one of its tasks ready for its head, the task in no
@@ -74,7 +77,7 @@ export async function releasing() {
       branch: options.branch ?? f.branch, commitSha: commit, command: 'npm test', parts: 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
       fileCache: options.reused ? { mode: 'cached', turn: f.turn.number, mainLine: true, fingerprints: [], reused: options.reused, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] } : { mode: 'full', turn: f.turn.number, mainLine: true, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
     }).returning();
-    await f.db.insert(testParts).values([1, 2].map(part => ({ runId: run!.id, part, status: options.failedPart && part === 2 ? 'failed' as const : 'passed' as const, commit, exitCode: options.failedPart && part === 2 ? 1 : 0 })));
+    await f.db.insert(testParts).values([1, 2].map(part => ({ companyId: f.task.companyId, runId: run!.id, part, status: options.failedPart && part === 2 ? 'failed' as const : 'passed' as const, commit, exitCode: options.failedPart && part === 2 ? 1 : 0 })));
     return run!;
   };
   const approve = async (commit = R) => {

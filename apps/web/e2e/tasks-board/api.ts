@@ -22,13 +22,12 @@ const ORG: Org = {
 };
 
 const turn = (number: number, status: TurnView['status'], title: string, goal: string, tasks: TurnView['tasks'], departmentId = DEV.id): TurnView => ({
-  id: `u${number}`, number, title, goal, status, mode: 'echelons', departmentId, canChangeMode: true, messages: [], taskId: null, tasks,
-  startedAt: '2026-11-14T07:00:00.000Z', openedAt: status === 'planned' ? null : '2026-11-14T07:00:00.000Z', closedAt: status === 'closed' ? '2026-11-14T08:00:00.000Z' : null,
+  id: `u${number}`, number, title, goal, status, version: status === 'closed' ? `v1.${number}.0` : null, commit: null, baseVersion: null, departmentId, messages: [], taskId: null, tasks,
+  startedAt: '2026-11-14T07:00:00.000Z', openedAt: '2026-11-14T07:00:00.000Z', closedAt: status === 'closed' ? '2026-11-14T08:00:00.000Z' : null,
 });
 export const TURNS: TurnView[] = [
   turn(2, 'closed', 'First shop', 'Open the shop.', { total: 1, done: 1 }),
   turn(3, 'open', 'Payments', 'Take card payments in the shop.', { total: 6, done: 0 }),
-  turn(4, 'planned', 'Receipts', 'Send a receipt for every payment.', { total: 1, done: 0 }),
   turn(5, 'open', 'Spring sale', 'Tell the shop owners about the sale.', { total: 1, done: 0 }, SALES.id),
 ];
 
@@ -59,7 +58,6 @@ function company(): TaskLine[] {
   all.push(task('Fix the sign-in page', DEV, { turn: null, urgent: true, status: 'waiting' }));
   all.push(task('Rename the shop', DEV, { turn: null, status: 'done' }));
   all.push(task('Old checkout', DEV, { turn: 2, status: 'done' }));
-  all.push(task('Receipt wording', DEV, { turn: 4, status: 'planned', assignee: null }));
   all.push(task('Call the shop owners back', SALES, { turn: 5, status: 'review' }));
   all.push(task('Pick the next goals', null, { turn: null, status: 'working', assignee: null }));
   return all.reverse();

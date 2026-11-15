@@ -24,6 +24,8 @@ export async function withoutOperations(db: Db): Promise<void> {
     const staff = await db.select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.departmentId, id));
     for (const agent of staff) await db.delete(schema.agentChanges).where(eq(schema.agentChanges.agentId, agent.id));
     await db.delete(schema.agents).where(eq(schema.agents.departmentId, id));
+    /* The open turn every department gets, its release never begun. */
+    await db.delete(schema.turns).where(eq(schema.turns.departmentId, id));
     await db.delete(schema.departments).where(eq(schema.departments.id, id));
   }
 }

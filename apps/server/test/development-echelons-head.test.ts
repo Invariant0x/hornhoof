@@ -55,15 +55,20 @@ describe('head decisions on the current route', () => {
     const f = await fixture();
     await expect(updateTask(f.ctx, f.author.id, f.task.id, { ...{ ownerAgentId: f.reviewer.id } }).then(() => null)).rejects.toMatchObject({ status: 403 });
   });
-  it('applies explicit Cleanup to the department turn and to new tasks of that turn', async () => {
+  it("applies explicit Cleanup to the department's work until its next release, and to new tasks until then", async () => {
     const f = await fixture({ turn: null });
-    const [turn] = await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 1, title: 'Totals', goal: 'Correct totals', status: 'open', createdByAgentId: f.head.id }).returning();
+    const [turn] = await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 1, title: 'Totals', goal: 'Correct totals', status: 'open', openedAt: new Date(), createdByAgentId: f.head.id }).returning();
     const first = (await f.create({ title: 'Turn first' })).task;
     const second = (await f.create({ title: 'Turn second' })).task;
-    expect(first.turnId).toBe(turn!.id);
+    expect(first.turnId).toBeNull();
     await updateTask(f.ctx, f.head.id, first.id, { ...{ cleanup: true, cleanupForTurn: true } });
     const third = (await f.create({ title: 'Turn third' })).task;
-    for (const task of [first, second, third]) expect((await f.detail(task.id)).echelons.stages.map(step => step.stage)).toEqual(['architecture', 'development', 'review', 'cleanup', 'security', 'tests']);
-    expect((await f.detail()).echelons.stages.some(step => step.stage === 'cleanup')).toBe(false);
+    /* The work going on in the department is the open turn's, whenever it was given out. */
+    for (const task of [f.task, first, second, third]) expect((await f.detail(task.id)).echelons.stages.map(step => step.stage)).toEqual(['architecture', 'development', 'review', 'cleanup', 'security', 'tests']);
+    /* Its release ends the decision: work given out for the next one goes as the department's route says. */
+    await f.db.update(turns).set({ status: 'closed', closedAt: new Date(), version: 'v1.0.0' }).where(eq(turns.id, turn!.id));
+    await f.db.insert(turns).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, number: 2, goal: 'The next release.', status: 'open', openedAt: new Date() });
+    const fourth = (await f.create({ title: 'Next release' })).task;
+    expect((await f.detail(fourth.id)).echelons.stages.some(step => step.stage === 'cleanup')).toBe(false);
   });
 });

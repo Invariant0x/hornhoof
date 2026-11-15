@@ -1,7 +1,11 @@
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { encryptSecret } from '../src/crypto/secrets.js';
+import { agents, people, subscriptions } from '../src/db/schema.js';
+import { reconcile } from '../src/modules/tasks/reconcile.js';
+import { appOn, TEST_API_KEY } from './helpers.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 const ACME = '00000000-0000-4000-8000-000000000a01';
@@ -53,7 +57,9 @@ async function migrated(): Promise<PGlite> {
       ('${K(2)}', '${ACME}', '${JSON.stringify({ ...CODE, phase: 'done' })}'),
       ('${K(3)}', '${ACME}', '${JSON.stringify({ ...TURNKEY, phase: 'done' })}'),
       ('${K(4)}', '${ACME}', '${JSON.stringify({ ...TURNKEY, resultKind: 'coordination', phase: 'done' })}'),
-      ('${K(5)}', '${ACME}', '${JSON.stringify(CODE)}');
+      ('${K(5)}', '${ACME}', '${JSON.stringify(CODE)}'),
+      ('${K(7)}', '${ACME}', '${JSON.stringify({ ...TURNKEY, resultKind: 'coordination' })}'),
+      ('${K(8)}', '${ACME}', '${JSON.stringify({ ...TURNKEY, resultKind: 'coordination' })}');
     INSERT INTO task_events(company_id, task_id, kind, text, data, agent_id) VALUES
       ('${ACME}', '${K(2)}', 'report', 'Accepted.', '{"done":true,"acceptedCandidate":{"integration":{"branch":"turn-24","commit":"${'b'.repeat(40)}"}}}', '${DEV_HEAD}');
   `);
@@ -103,6 +109,24 @@ describe('turns become releases', () => {
     const notes = await rows<{ text: string }>(client, `SELECT text FROM task_events WHERE task_id = '${K(7)}' AND kind = 'updated'`);
     expect(notes.map(note => note.text).join(' ')).toMatch(/Spring.*The spring release\./);
     expect(await rows(client, `SELECT id FROM tasks WHERE status = 'planned'`)).toEqual([]);
+  });
+
+  it('wakes the head the planned work went to at the next check of lost wakes', async () => {
+    const client = await migrated();
+    const { app, db } = await appOn(client);
+    /* Its employees on the company's key, on the machine Hornhoof keeps, ready to run. */
+    const [owner] = await db.insert(people).values({ companyId: ACME, name: 'Owner', email: 'owner@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
+    const [key] = await db.insert(subscriptions).values({ companyId: ACME, provider: 'anthropic_api', kind: 'api_key', label: 'Key', ownerPersonId: owner!.id, secretEnc: encryptSecret(TEST_API_KEY, app.ctx.config.secret), last4: TEST_API_KEY.slice(-4), status: 'ready', targetKind: 'any' }).returning();
+    await db.update(agents).set({ subscriptionId: key!.id, model: 'claude-opus-5-5' });
+    vi.spyOn(app.ctx.hub, 'isReady').mockReturnValue(true);
+    vi.spyOn(app.ctx.hub, 'hasTerminals').mockReturnValue(false);
+    vi.spyOn(app.ctx.hub, 'takesSkillFiles').mockReturnValue(true);
+    vi.spyOn(app.ctx.hub, 'send').mockReturnValue(true);
+    const later = new Date(Date.now() + 10 * 60_000);
+    await reconcile(app.ctx, later);
+    /* One turn at a time: the other given task waits for this one to end rather than run beside it. */
+    const woken = await rows<{ task_id: string; status: string }>(client, `SELECT task_id, status FROM jobs WHERE agent_id = '${DEV_HEAD}'`);
+    expect(woken).toEqual([{ task_id: K(7), status: 'running' }]);
   });
 
   it('drops the modes of turns and departments and keeps a release for each turn', async () => {

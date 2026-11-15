@@ -25,7 +25,7 @@ export async function fixture(options: { small?: boolean; riskClass?: 'none' | '
   const tester = await hire('Tests', 'worker', 'DEV-TEST', claude!.id, 'claude-opus-5-5');
   let commit = HEAD;
   let changedPaths = ['logic/totals.ts'];
-  app.ctx.readCommit = async () => ({ branch: 'task-1', commitSha: commit });
+  app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : 'task-1', commitSha: commit });
   app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: changedPaths, diff: '@@ -1 +1 @@\n-old\n+new' });
   const input = {
     title: 'Keep totals', brief: 'Keep the total correct.', body: 'Change logic/totals.ts.',

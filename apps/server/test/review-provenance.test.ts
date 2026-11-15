@@ -147,7 +147,7 @@ describe('explicit finding confirmation', () => {
     const f = await rejectedFinding();
     const companyId = f.author.companyId;
     const [baseline] = await f.db.insert(turns).values({ companyId, departmentId: f.task.departmentId, number: 7, title: 'Baseline', goal: '', status: 'closed', openedAt: new Date(Date.now() - 10000), closedAt: new Date(Date.now() - 5000) }).returning();
-    const [current] = await f.db.update(turns).set({ number: 8, title: 'Current' }).where(eq(turns.id, f.task.turnId!)).returning();
+    const [current] = await f.db.update(turns).set({ number: 8, title: 'Current' }).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open'))).returning();
     const [old] = await f.db.insert(tasks).values({ companyId, number: 100, turnId: baseline!.id, departmentId: f.author.departmentId, title: 'Legacy review', brief: '', body: '', status: 'done', executorAgentId: f.head.id, closedAt: new Date() }).returning();
     await f.db.transaction(async tx => {
       await createRoute(tx, old!, {}, developmentStages());

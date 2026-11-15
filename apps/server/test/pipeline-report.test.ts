@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq, sql } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, taskRoutes, tasks, testParts, testRuns, turnSnapshots, turns } from '../src/db/schema.js';
 import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
 import { departmentPipeline, pipelineReport, turnFacts } from '../src/modules/tasks/pipeline-report.js';
-import { settle } from '../src/modules/tasks/turns.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, ownDatabases } from './helpers.js';
 
 ownDatabases();
@@ -39,7 +38,7 @@ async function company() {
   const sam = await hire('Sam', 'worker', 'SAL-AE', sales!.id);
 
   let n = 0;
-  const turn = async (number: number, status: 'open' | 'closed' | 'planned', from: number | null, to: number | null, title = `Turn ${number}`, departmentId = dev!.id) =>
+  const turn = async (number: number, status: 'open' | 'closed', from: number | null, to: number | null, title = `Turn ${number}`, departmentId = dev!.id) =>
     (await db.insert(turns).values({ companyId, departmentId, number, title, goal: title, status, createdAt: at(from ?? 0), openedAt: from === null ? null : at(from), closedAt: to === null ? null : at(to) }).returning())[0]!;
   const task = async (turnId: string, number: number, over: Partial<typeof tasks.$inferInsert> = {}) => {
     const closed = ['done', 'cancelled'].includes(over.status ?? 'done');
@@ -211,71 +210,7 @@ describe('the facts of any turn', () => {
 });
 
 describe('the snapshot of a turn', () => {
-  /* Two turns, the first with one task of the head's still open, and the task that is the last of it. */
-  async function twoTurns(c: Company) {
-    const seven = await c.turn(7, 'open', 0, null);
-    const eight = await c.turn(8, 'planned', null, null);
-    const last = await c.task(seven.id, 1, { closedAt: new Date() });
-    await c.db.insert(tasks).values({ companyId: c.companyId, number: 2, turnId: eight.id, title: 'Next', departmentId: c.dev.id, status: 'planned', createdByAgentId: c.orchestrator.id });
-    return { seven, eight, last };
-  }
-
-  it('is kept when the turn closes, before the next one opens', async () => {
-    const c = await company();
-    const { seven, eight, last } = await twoTurns(c);
-    await settle(c.ctx, last);
-
-    const [snapshot] = await c.db.select().from(turnSnapshots).where(eq(turnSnapshots.turnId, seven.id));
-    const [closed] = await c.db.select().from(turns).where(eq(turns.id, seven.id));
-    const [opened] = await c.db.select().from(turns).where(eq(turns.id, eight.id));
-    expect(closed!.status).toBe('closed');
-    expect(opened!.status).toBe('open');
-    expect(snapshot).toMatchObject({ companyId: c.companyId, source: 'closed' });
-    expect(snapshot!.facts.whole.tasks.total).toBe(1);
-    expect(snapshot!.facts.departments[0]!.department.id).toBe(c.dev.id);
-    expect(snapshot!.createdAt.getTime()).toBeLessThanOrEqual(opened!.openedAt!.getTime());
-    expect(await c.db.select().from(turnSnapshots).where(eq(turnSnapshots.turnId, eight.id))).toEqual([]);
-  });
-
-  it('is kept when a new plan finds the open turn with nothing left', async () => {
-    const c = await company();
-    const seven = await c.turn(7, 'open', 0, null);
-    await c.task(seven.id, 1, { closedAt: new Date() });
-    const client = await c.tools(c.orchestrator);
-    const planned = (await client.callTool({ name: 'plan_turn', arguments: { mode: 'echelons', title: 'Next', goal: 'Go.', tasks: [{ department: c.dev.id, title: 'One', brief: '', body: '' }] } })) as { isError?: boolean };
-    expect(planned.isError).toBeFalsy();
-    expect(await c.db.select({ source: turnSnapshots.source }).from(turnSnapshots).where(eq(turnSnapshots.turnId, seven.id))).toEqual([{ source: 'closed' }]);
-  });
-
-  it('is not kept for a planned turn that closes without running', async () => {
-    const c = await company();
-    const seven = await c.turn(7, 'open', 0, null);
-    const planned = await c.turn(8, 'planned', null, null);
-    const last = await c.task(seven.id, 1, { closedAt: new Date() });
-    await settle(c.ctx, last);
-    expect((await c.db.select().from(turns).where(eq(turns.id, planned.id)))[0]!.status).toBe('closed');
-    expect((await c.db.select().from(turnSnapshots)).map(s => s.turnId)).toEqual([seven.id]);
-  });
-
-  it('never stops a turn from closing: a failure is logged and the turn rebuilds when it is read', async () => {
-    const c = await company();
-    const { seven, eight, last } = await twoTurns(c);
-    await c.db.execute(sql`create function refuse_snapshot() returns trigger language plpgsql as $$ begin raise exception 'no snapshots'; end $$`);
-    await c.db.execute(sql`create trigger no_snapshots before insert on turn_snapshots for each row execute function refuse_snapshot()`);
-    const logged = vi.spyOn(c.ctx.log, 'error');
-
-    await settle(c.ctx, last);
-
-    expect((await c.db.select().from(turns).where(eq(turns.id, seven.id)))[0]!.status).toBe('closed');
-    expect((await c.db.select().from(turns).where(eq(turns.id, eight.id)))[0]!.status).toBe('open');
-    expect(await c.db.select().from(turnSnapshots)).toEqual([]);
-    expect(logged.mock.calls.some(([, text]) => String(text).includes('snapshot'))).toBe(true);
-
-    await c.db.execute(sql`drop trigger no_snapshots on turn_snapshots`);
-    const report = await pipelineReport(c.db, c.companyId, 7);
-    expect(report.turn).toMatchObject({ number: 7, source: 'rebuilt' });
-  });
-
+  /* Keeping it as the tag of its release closes the turn: in turn-tag-close.test.ts. */
   it('is built from the events for a turn that closed before snapshots, once, and stays as it was', async () => {
     const c = await company();
     const { seven, one } = await closedTurn(c);
@@ -397,10 +332,9 @@ describe('the report', () => {
     expect((await pipelineReport(c.db, c.companyId, undefined, c.sales.id)).turn.number).toBe(2);
   });
 
-  it('reads the last closed turn by default when none is open, and refuses one that has not run', async () => {
+  it('reads the last closed turn by default when none is open, and refuses one there is not', async () => {
     const c = await company();
     await turnsOf(c, { 7: 100 });
-    await c.turn(8, 'planned', null, null);
     expect((await pipelineReport(c.db, c.companyId)).turn.number).toBe(7);
     await expect(pipelineReport(c.db, c.companyId, 8)).rejects.toMatchObject({ status: 404 });
     await expect(pipelineReport(c.db, c.companyId, 99)).rejects.toMatchObject({ status: 404 });

@@ -30,6 +30,7 @@ describe('a candidate with a file too large for GitHub to show', () => {
       complete: true, baseSha: BASE, headSha: FIRST, paths: ['logic/totals.ts', 'logic/snapshot.json', 'logic/old-snapshot.json'],
       diff: '@@ -3 +3 @@\n-old\n+new\nGitHub shows no patch of logic/snapshot.json: 16641 lines added, 3 removed.',
       omitted: [{ path: 'logic/snapshot.json', additions: 16641, deletions: 3 }],
+      commits: [{ sha: FIRST, parents: [] }],
     });
   });
 

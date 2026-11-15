@@ -8,6 +8,7 @@ import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { RepoPath } from './review-schema.js';
 import { CLOSED, note, published, refuse, type Task, type TaskChange, type Tx, type Wake } from './engine.js';
 import { turnkeyTeamOf, turnkeyWork } from './turnkey.js';
+import { openTurnOf, workOfOpenTurn } from './turn-department.js';
 
 export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, agentId: string): Promise<void> {
   const [actor] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
@@ -33,15 +34,15 @@ function changedPaths(route: Route, change: TaskChange): string[] {
   return paths;
 }
 
-/* Work with no echelons is done by its holder alone and takes no stage, Cleanup or checker. Outside a turn it goes to
-   anyone; in a turn it stays with a member of a turnkey team, as the turn's work goes through no echelons only there. */
+/* Work with no echelons is done by its holder alone and takes no stage, Cleanup or checker. It stays with a member of a
+   turnkey team, as the team of who does a task is what takes it past the echelons. */
 async function turnkeyChange(ctx: Ctx, task: Task, route: Route, change: TaskChange): Promise<RouteChange> {
   if (change.cleanup !== undefined) throw turnkeyWork(task);
   const paths = changedPaths(route, change);
   const ownerId = change.ownerAgentId ?? change.executor;
   if (!ownerId) return { state: route.state, set: {}, paths };
   await requireAvailableOwner(ctx, task, ownerId);
-  if (task.turnId && !(await turnkeyTeamOf(ctx.db, task.companyId, ownerId))) throw refuse(409, 'task_invalid', `#${task.number} goes through no echelons in its turn, so it stays with a member of a turnkey team. Give other work as a new task.`);
+  if (!(await turnkeyTeamOf(ctx.db, task.companyId, ownerId))) throw refuse(409, 'task_invalid', `#${task.number} goes through no echelons, as a member of a turnkey team does it, so it stays with a member of a turnkey team. Give other work as a new task.`);
   return { state: route.state, set: { assigneeAgentId: ownerId, ...(task.executorAgentId || change.executor ? { executorAgentId: ownerId } : {}), status: 'open', silent: 0 }, paths };
 }
 
@@ -86,15 +87,17 @@ async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['st
   return { state: next, set };
 }
 
-/* A head decision belongs to its department in this turn; it is an event, not a compatibility switch. */
+/* A head decision belongs to its department until its next release, the open turn; it is an event, not a compatibility
+   switch. */
 export async function turnCleanupDefault(tx: Tx, task: Task): Promise<boolean> {
-  if (!task.turnId) return false;
-  const [event] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'turnCleanup'->>'turnId' = ${task.turnId}`, sql`${taskEvents.data}->'turnCleanup'->>'departmentId' = ${task.departmentId}`)).orderBy(desc(taskEvents.id)).limit(1);
+  const turnId = task.turnId ?? (await openTurnOf(tx, task.companyId, task.departmentId))?.id;
+  if (!turnId) return false;
+  const [event] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'turnCleanup'->>'turnId' = ${turnId}`, sql`${taskEvents.data}->'turnCleanup'->>'departmentId' = ${task.departmentId}`)).orderBy(desc(taskEvents.id)).limit(1);
   return (event?.data.turnCleanup as { enabled?: boolean } | undefined)?.enabled === true;
 }
 
-export async function applyTurnCleanup(tx: Tx, task: Task, agentId: string, enabled: boolean, wakes: Wake[]): Promise<Task[]> {
-  const rows = await tx.select().from(tasks).where(and(eq(tasks.companyId, task.companyId), eq(tasks.turnId, task.turnId!), eq(tasks.departmentId, task.departmentId!))).orderBy(tasks.id).for('update');
+export async function applyTurnCleanup(tx: Tx, task: Task, turnId: string, agentId: string, enabled: boolean, wakes: Wake[]): Promise<Task[]> {
+  const rows = await tx.select().from(tasks).where(and(eq(tasks.companyId, task.companyId), workOfOpenTurn(turnId), eq(tasks.departmentId, task.departmentId!))).orderBy(tasks.id).for('update');
   const changed: Task[] = [];
   for (const row of rows) {
     if (row.id === task.id || CLOSED.includes(row.status)) continue;

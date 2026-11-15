@@ -12,7 +12,7 @@ const task = (over: Partial<TaskLine> & Pick<TaskLine, 'id' | 'number'>): TaskLi
 });
 
 const turn = (over: Partial<TurnView> & Pick<TurnView, 'id' | 'number' | 'status'>): TurnView => ({
-  title: `Turn ${over.number}`, goal: '', mode: 'echelons', departmentId: 'd2', canChangeMode: false, messages: [], taskId: null, startedAt: '2026-11-14T07:00:00.000Z',
+  title: `Turn ${over.number}`, goal: '', version: null, commit: null, baseVersion: null, departmentId: 'd2', messages: [], taskId: null, startedAt: '2026-11-14T07:00:00.000Z',
   openedAt: null, closedAt: null, tasks: { total: 0, done: 0 }, ...over,
 });
 
@@ -36,7 +36,6 @@ const count = (nodes: Goal[]): number => nodes.reduce((sum, node) => sum + 1 + c
 
 describe('the human state of a task', () => {
   it.each([
-    ['planned', 'planned'],
     ['open', 'working'],
     ['working', 'working'],
     ['review', 'review'],
@@ -98,13 +97,12 @@ describe('goals with their related tasks folded under them', () => {
       task({ id: 'w', number: 1, status: 'working' }),
       task({ id: 'q', number: 2, status: 'waiting' }),
       task({ id: 'r', number: 3, status: 'review' }),
-      task({ id: 'p', number: 4, status: 'planned' }),
       task({ id: 'w2', number: 5, status: 'open' }),
       task({ id: 'x', number: 6, status: 'done' }),
       task({ id: 'y', number: 7, status: 'cancelled' }),
     ]);
     const { open, closed } = split(tree);
-    expect(open.map(g => g.task.id)).toEqual(['q', 'r', 'w2', 'w', 'p']);
+    expect(open.map(g => g.task.id)).toEqual(['q', 'r', 'w2', 'w']);
     expect(closed.map(g => g.task.id)).toEqual(['y', 'x']);
   });
 });
@@ -117,11 +115,10 @@ describe('the department filter and the sections of the tracker', () => {
     task({ id: 'c', number: 4, department: null, turn: null }),
     task({ id: 'd', number: 5, turn: null, status: 'done' }),
     task({ id: 'e', number: 6, turn: 2, status: 'done' }),
-    task({ id: 'f', number: 7, turn: 4, status: 'planned' }),
   ];
 
   it('keeps the tasks of one department, of none, or of all of them', () => {
-    expect(inDepartment(work, 'all').map(t => t.id)).toEqual(['a', 'a1', 'b', 'c', 'd', 'e', 'f']);
+    expect(inDepartment(work, 'all').map(t => t.id)).toEqual(['a', 'a1', 'b', 'c', 'd', 'e']);
     expect(inDepartment(work, 'd3').map(t => t.id)).toEqual(['b']);
     expect(inDepartment(work, 'none').map(t => t.id)).toEqual(['c']);
   });
@@ -136,17 +133,16 @@ describe('the department filter and the sections of the tracker', () => {
     ]);
   });
 
-  it('leaves the work that waits for its turn out of what is in progress', () => {
+  it('keeps every goal still going in progress, and folds what is over apart', () => {
     const { open, closed } = inProgress(work);
     expect(open.map(g => g.task.id)).toEqual(['c', 'b', 'a']);
     expect(closed.map(g => g.task.id)).toEqual(['e', 'd']);
   });
 
-  it('shows what is getting ready for release, what is planned, the work outside releases and what came out, by turn', () => {
+  it('shows what is getting ready for release, the work in no turn yet and what came out, by turn', () => {
     const turns = [
-      turn({ id: 'u2', number: 2, status: 'closed' }),
+      turn({ id: 'u2', number: 2, status: 'closed', version: 'v1.2.0' }),
       turn({ id: 'u3', number: 3, status: 'open' }),
-      turn({ id: 'u4', number: 4, status: 'planned' }),
       turn({ id: 'u5', number: 5, status: 'open', departmentId: 'd3' }),
       turn({ id: 'u1', number: 1, status: 'closed' }),
     ];
@@ -154,7 +150,6 @@ describe('the department filter and the sections of the tracker', () => {
     expect(sections.map(s => [s.kind, s.turn?.number ?? null, s.split.open.map(g => g.task.id), s.split.closed.map(g => g.task.id)])).toEqual([
       ['preparing', 3, ['a'], []],
       ['preparing', 5, ['b'], []],
-      ['planned', 4, ['f'], []],
       ['outside', null, ['c'], ['d']],
       ['released', 2, [], ['e']],
     ]);

@@ -456,16 +456,19 @@ describe('an approval of a commit', () => {
     expect(seen.res.text).toContain('Test run 1 (npm test) passed on this commit.');
   });
 
-  it('names another commit only from this task or its department in this turn', async () => {
+  it('names another commit only from this task or its department in the turn it goes into', async () => {
     const c = await company();
-    const [turn5] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 5, title: 'Next', goal: 'Next.', status: 'planned' }).returning();
-    const later = await c.member('Later');
-    await c.db.update(tasks).set({ turnId: turn5!.id }).where(eq(tasks.id, later.id));
-    await c.aRun({ taskId: later.id, commitSha: OLD_COMMIT });
+    const [turn3] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 3, title: 'Earlier', goal: 'Earlier.', status: 'closed', openedAt: new Date(), closedAt: new Date(), version: 'v1.0.0' }).returning();
+    const earlier = await c.member('Earlier');
+    await c.db.update(tasks).set({ turnId: turn3!.id }).where(eq(tasks.id, earlier.id));
+    await c.aRun({ taskId: earlier.id, commitSha: OLD_COMMIT });
     const { res } = await asked(c, NEW_COMMIT);
     expect(res.text).toContain('No passed test run checked this commit.');
     expect(res.text).not.toContain(OLD_COMMIT);
+    /* A result already accepted into the open turn the task goes into. */
     const sibling = await c.member('Sibling');
+    const [open] = await c.db.select().from(turns).where(eq(turns.number, 4));
+    await c.db.update(tasks).set({ turnId: open!.id }).where(eq(tasks.id, sibling.id));
     await c.aRun({ taskId: sibling.id, commitSha: TEST_COMMIT });
     expect((await commitProof(c.db, c.task, NEW_COMMIT)).other).toEqual({ run: 2, commitSha: TEST_COMMIT });
   });

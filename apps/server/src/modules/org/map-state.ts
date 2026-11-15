@@ -21,7 +21,7 @@ export type Facts = { tasks: ReadonlyMap<string, TaskFacts>; notDone: ReadonlySe
 
 const LIVE = ['open', 'working'];
 /* A department task in one of these no longer keeps its department's line on with the work under it. */
-const OVER = ['blocked', 'done', 'cancelled', 'planned'];
+const OVER = ['blocked', 'done', 'cancelled'];
 /* How far up a task's parents are followed; the engine refuses circles, this only bounds a broken chain. */
 const DEPTH = 50;
 

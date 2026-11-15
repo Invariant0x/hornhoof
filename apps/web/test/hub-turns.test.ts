@@ -40,11 +40,11 @@ describe('sharePercent', () => {
 describe('workingTurns', () => {
   it('keeps the departments with tasks in the open turn, in the order of their cards', () => {
     const departments = [
-      dept({ id: 'ops', roleCode: 'OPS', workMode: 'continuous', turnProgress: null }),
-      dept({ id: 'dev', roleCode: 'CTO', workMode: 'turns', turnProgress: { turnNumber: 8, done: 33, total: 96 } }),
-      dept({ id: 'mkt', roleCode: 'CMO', workMode: 'turns', turnProgress: { turnNumber: 8, done: 0, total: 0 } }),
+      dept({ id: 'ops', roleCode: 'OPS', turnProgress: null }),
+      dept({ id: 'dev', roleCode: 'CTO', turnProgress: { turnNumber: 8, done: 33, total: 96 } }),
+      dept({ id: 'mkt', roleCode: 'CMO', turnProgress: { turnNumber: 8, done: 0, total: 0 } }),
       dept({ id: 'old', roleCode: 'OLD' }),
-      dept({ id: 'sal', roleCode: 'CRO', workMode: 'turns', turnProgress: { turnNumber: 8, done: 0, total: 4 } }),
+      dept({ id: 'sal', roleCode: 'CRO', turnProgress: { turnNumber: 8, done: 0, total: 4 } }),
     ];
     expect(workingTurns(departments)).toEqual([
       { id: 'dev', roleCode: 'CTO', turnNumber: 8, done: 33, total: 96 },

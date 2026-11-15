@@ -89,3 +89,22 @@ export const readBranches: BranchReader = async (repo, timeoutMs = READ_MS) => {
   const refs = await refsOf(repo, timeoutMs);
   return refs instanceof Map ? { heads: headsIn(refs) } : refs;
 };
+
+/* Every tag a repository has now, with the commit it is on: for an annotated tag the commit it points at. */
+export type TagsAt = { tags: Record<string, string> } | { problem: string };
+export type TagReader = (repo: RepoAddress, timeoutMs?: number) => Promise<TagsAt>;
+const TAGS = 'refs/tags/';
+export const tagsIn = (refs: Map<string, string>): Record<string, string> => {
+  const tags: Record<string, string> = {};
+  for (const [ref, sha] of refs) {
+    if (!ref.startsWith(TAGS)) continue;
+    const name = ref.slice(TAGS.length);
+    if (name.endsWith('^{}')) tags[name.slice(0, -3)] = sha;
+    else tags[name] ??= sha;
+  }
+  return tags;
+};
+export const readTags: TagReader = async (repo, timeoutMs = READ_MS) => {
+  const refs = await refsOf(repo, timeoutMs);
+  return refs instanceof Map ? { tags: tagsIn(refs) } : refs;
+};

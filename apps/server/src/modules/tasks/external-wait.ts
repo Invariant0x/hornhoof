@@ -284,7 +284,7 @@ export async function checkExternalWaits(ctx: Ctx, now = new Date()): Promise<nu
   const due = await ctx.db.select().from(tasks).where(and(
     isNotNull(tasks.externalWait),
     lte(sql<string>`${tasks.externalWait}->>'until'`, now.toISOString()),
-    notInArray(tasks.status, ['planned', 'done', 'cancelled']),
+    notInArray(tasks.status, ['done', 'cancelled']),
   ));
   let ended = 0;
   for (const task of due) if (await expireWait(ctx, task)) ended++;

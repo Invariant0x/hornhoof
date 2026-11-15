@@ -51,7 +51,7 @@ import { nodeUpdateRoutes } from './modules/updates/node-routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { partFileRoutes } from './modules/testruns/files.js';
 import { harnessRoutes } from './modules/testruns/harness.js';
-import { readBranches, readCommit, type BranchReader, type CommitReader } from './modules/testruns/refs.js';
+import { readBranches, readCommit, readTags, type BranchReader, type CommitReader, type TagReader } from './modules/testruns/refs.js';
 import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
 import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
@@ -74,7 +74,7 @@ import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; templates?: Templates };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; readTags?: TagReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; templates?: Templates };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
@@ -123,6 +123,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     readCompare,
     readTree,
     readBranches,
+    readTags,
     readMerged,
     createRepository: createOnGitHub(),
     createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),

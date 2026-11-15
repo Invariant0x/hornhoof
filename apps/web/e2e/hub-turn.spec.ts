@@ -172,36 +172,3 @@ for (const lang of ['en', 'ru'] as const) {
     }
   }
 }
-
-for (const [lang, theme, width] of [['en', 'light', 1440], ['ru', 'dark', 375]] as const) {
-  test(`a department switched to work all the time leaves the turn on the map in ${lang} ${theme} ${width}`, async ({ page }, info) => {
-    const t = MESSAGES[lang];
-    const { live, errors, failures } = await open(page, lang, theme, width);
-    await expect(bar(page, 'Development')).toHaveAttribute('aria-valuenow', '18');
-    await card(page, 'Development').click();
-    await page.getByRole('button', { name: t.dept.about, exact: true }).click();
-    const how = page.getByRole('region', { name: t.dept.workMode.title, exact: true });
-    const turns = how.getByRole('radio', { name: t.dept.workMode.turns, exact: true });
-    const always = how.getByRole('radio', { name: t.dept.workMode.continuous, exact: true });
-    await expect(turns).toBeChecked();
-    await expect(how).toContainText(t.dept.workMode.turnsHint);
-    await expect(how).toContainText(t.dept.workMode.continuousHint);
-    expect(await page.evaluate(() => {
-      const drawer = document.querySelector('.dv-drawer')!;
-      return document.documentElement.scrollWidth <= innerWidth && drawer.scrollWidth <= drawer.clientWidth;
-    })).toBe(true);
-    await how.screenshot({ path: info.outputPath(`work-mode-${lang}-${theme}-${width}.png`) });
-    await page.screenshot({ path: info.outputPath(`work-mode-page-${lang}-${theme}-${width}.png`) });
-
-    await always.check();
-    await expect(always).toBeChecked();
-    expect(live.puts).toEqual([{ workMode: 'continuous' }]);
-    await page.getByRole('button', { name: t.dept.close, exact: true }).click();
-    await page.getByRole('button', { name: t.dept.back, exact: true }).click();
-    await expect(card(page, 'Development')).toBeVisible();
-    await expect(page.locator('.dept-turn')).toHaveCount(0);
-    await expect(page.locator('.hub .turn-sec, .hub .hub-eq, .hub .hub-focus-tag')).toHaveCount(0);
-    expect(failures).toEqual([]);
-    expect(errors).toEqual([]);
-  });
-}
