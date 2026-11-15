@@ -267,7 +267,7 @@ select:disabled { opacity: .55; }
 .update-progress { display: grid; gap: 8px; }
 /* Settings: each part with its heading; the public link with its copy button, and its actions in a row. */
 .settings-part { display: grid; gap: 10px; }
-.settings-part h3 { margin: 0; font-size: 15px; }
+.settings-part :is(h3, h4) { margin: 0; font-size: 15px; }
 .settings-part p { margin: 0; }
 .settings-form { display: grid; gap: 12px; }
 .settings-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -326,52 +326,89 @@ select:disabled { opacity: .55; }
 .seg button:first-child { margin-left: 0; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .seg button:focus-visible { position: relative; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-/* Settings: the groups at the start, 180 px, and the open one beside them; above it when narrow. The parts of a group
-   stand one under another, a line between them. */
+/* Settings, as Design's variant A draws it: Profile and the groups at the start, 200 px, a line between them, and the
+   open one beside them in a column of at most 880 px; above it when narrow. The open group stands under its heading and
+   what it holds, its parts one under another, 16 px apart. */
 /* One height for every group, so the window stays put when a person switches between them. */
-.dialog.settings-window { width: min(1240px, 100%); min-height: min(720px, calc(100vh - 32px)); align-content: start; }
+.dialog.settings-window { width: min(1160px, 100%); min-height: min(720px, calc(100vh - 32px)); align-content: start; }
+.settings-window > header .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; }
 /* The heading a window starts on holds the focus for a screen reader, it is no control to show a ring around. */
 .settings-window [data-autofocus]:focus { outline: none; }
-.settings-body { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; align-items: start; }
-.settings-nav { display: flex; flex-direction: column; gap: 8px; }
-.settings-nav .btn { justify-content: flex-start; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; text-align: start; white-space: normal; overflow-wrap: anywhere; }
-.settings-nav .btn[aria-current='page'] { border-inline-start: 4px solid var(--cyan-ink); background: var(--surface2); color: var(--cyan-ink); }
-.settings-main { min-width: 0; }
-.settings-group { display: grid; gap: 24px; min-width: 0; }
-.settings-group > * + * { padding-block-start: 24px; border-block-start: 1px solid var(--line); }
-.settings-part :is(h3, p) { overflow-wrap: break-word; }
-/* The language: each shipped one as a 44 px choice named in itself, wrapping by whole names. */
-/* The language's heading stands as large as Themes' beside it, the two parts of one group. */
-.lang-part h3 { font-size: 26px; line-height: 1.4; }
-.lang-choices { display: flex; flex-wrap: wrap; gap: 8px; }
-.lang-choice {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 8px 12px; cursor: pointer;
-  border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; overflow-wrap: anywhere;
+.settings-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
+.settings-nav { display: flex; flex-direction: column; gap: 4px; }
+.settings-nav .btn {
+  justify-content: flex-start; min-height: 44px; padding: 8px 12px; border-inline-start: 4px solid transparent; box-shadow: none;
+  font-size: 14px; line-height: 1.4; text-align: start; white-space: normal; overflow-wrap: break-word;
 }
-.lang-choice input { margin: 0; accent-color: var(--cyan); }
-.lang-choice[data-on='true'] { border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
-.lang-choice:focus-within { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-/* Integrations: one card for each outside tool, its name and whether it is connected on one line, then what it gives,
-   what it holds and its actions. */
+.settings-nav .btn:hover { background: var(--surface2); box-shadow: none; }
+.settings-nav .btn[aria-current='page'] { border-inline-start-color: var(--cyan-ink); background: var(--surface2); color: var(--cyan-ink); }
+.settings-nav .nav-sep { block-size: 0; margin: 6px 0; border: 0; border-block-start: 1px solid var(--line); }
+.settings-main { min-width: 0; max-inline-size: 880px; }
+.sgroup { display: grid; gap: 16px; min-width: 0; }
+.g-head { display: grid; gap: 4px; min-width: 0; }
+.g-head h3 { margin: 0; font-size: 18px; line-height: 1.15; overflow-wrap: break-word; }
+.g-head p { margin: 0; max-inline-size: 72ch; color: var(--muted); overflow-wrap: break-word; }
+.settings-group { display: grid; gap: 16px; min-width: 0; }
+.settings-window .settings-part { gap: 12px; }
+.settings-part :is(h3, h4, p) { overflow-wrap: break-word; }
+/* Every field, list and button of the groups is a 44 px target, Save and the other actions on the end edge of the
+   column. External messaging keeps its own. */
+.settings-window :is(.settings-group, .integrations) .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; }
+.settings-window :is(.settings-group, .integrations) :is(.field input, .field select, .link-input input) { height: 44px; }
+.settings-window :is(.settings-group, .integrations) :is(.settings-actions, .repo-actions) { justify-content: flex-end; justify-self: stretch; }
+.settings-window .settings-actions > .entry-main { flex: 1 1 100%; }
+/* The link with its copy button under it on the end edge. */
+.settings-window .settings-link { display: grid; justify-items: start; gap: 8px; }
+.settings-window .settings-link > .btn { justify-self: end; }
+/* An address, account or name inside a sentence: it moves to the next line whole, and breaks only where it is longer
+   than a line. */
+.ident { display: inline-block; max-inline-size: 100%; overflow-wrap: anywhere; }
+/* The language: one native list, each language named in itself; closed it keeps one line, its own arrow at the end in
+   either direction. */
+.select-wrap { position: relative; inline-size: 100%; max-inline-size: 360px; }
+.lang-select {
+  display: block; inline-size: 100%; block-size: 44px; padding-block: 0; padding-inline: 12px 36px;
+  border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 42px;
+  white-space: nowrap; cursor: pointer;
+}
+.lang-select:focus, .lang-select:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; border-color: var(--cyan); box-shadow: none; }
+.lang-select option { background: var(--surface); color: var(--ink); }
+/* The arrow points down in both directions, so its two strokes are physical sides on purpose. */
+.select-wrap::after {
+  content: ''; position: absolute; inset-inline-end: 14px; inset-block-start: 50%; inline-size: 7px; block-size: 7px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-70%) rotate(45deg); pointer-events: none;
+}
+/* Integrations: one record for each outside tool, a line between them: its name and whether it is connected, then what it
+   gives, what it holds and its actions. */
 .integrations, .messaging { display: grid; gap: 16px; min-width: 0; }
-.integration { display: grid; gap: 10px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); background: var(--surface2); }
+.integrations { gap: 0; }
+.integration { display: grid; gap: 8px; min-width: 0; padding-block: 16px; border-block-start: 1px solid var(--line); }
+.integration:first-child { padding-block-start: 0; border-block-start: 0; }
 .integration p { margin: 0; overflow-wrap: break-word; }
-.integration-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; min-width: 0; }
-.integration-head h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
-.integration-state { color: var(--muted); font-size: 12.5px; font-weight: 600; }
-.integration-state[data-connected='true'] { color: var(--ok); }
+.integration-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.integration-head h4 { margin: 0; font-size: 15px; line-height: 1.4; overflow-wrap: break-word; }
+/* A state is a frame with a word and a shape: a full dot when on, an empty one when not. Colour is never all it says. */
+.integration-state, .skin-state {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line2);
+  color: var(--muted); font-size: 12px; font-weight: 600; line-height: 1.45; overflow-wrap: break-word;
+}
+.integration-state::before, .skin-state::before { content: ''; flex: none; inline-size: 8px; block-size: 8px; border: 1px solid currentColor; border-radius: 50%; }
+.integration-state[data-connected='true'] { border-color: var(--ok); color: var(--ok); }
+.integration-state[data-connected='true']::before { background: currentColor; }
 .messaging > p { margin: 0; overflow-wrap: break-word; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .settings-nav { flex-direction: row; flex-wrap: wrap; }
-  .settings-nav .btn { flex: 1 1 auto; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+  .settings-nav .btn { flex: 1 1 auto; border-inline-start: 0; box-shadow: inset 0 0 0 1px var(--line2); }
+  .settings-nav .btn:hover { box-shadow: inset 0 0 0 1px var(--cyan); }
+  .settings-nav .btn[aria-current='page'] { box-shadow: inset 0 0 0 1px var(--cyan-ink), inset 0 -4px 0 var(--cyan-ink); }
+  .settings-nav .nav-sep { display: none; }
 }
 /* Themes: the heading with Add from file at its end, the line of what was done,
    the catalog of cards and the guide. Its buttons are 44 px targets that grow with their words. */
-.skins { display: grid; gap: 24px; min-width: 0; }
-.skins :is(p, h3, h4, h5) { margin: 0; overflow-wrap: anywhere; }
-.skins h3 { font-size: 26px; line-height: 1.4; }
-.skins :is(h4, h5) { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.4; }
+.skins { display: grid; gap: 16px; min-width: 0; }
+.skins :is(p, h4, h5, h6) { margin: 0; overflow-wrap: break-word; }
+.skins :is(h4, h5, h6) { font-family: var(--f-display); font-size: 15px; font-weight: 600; line-height: 1.4; }
 .skins .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; white-space: normal; text-align: center; overflow-wrap: anywhere; }
 .skins .btn.danger { color: var(--pink-ink); }
 .skins-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 16px; }
@@ -390,15 +427,26 @@ select:disabled { opacity: .55; }
 .skins-notice .entry-actions { margin-block-start: 4px; justify-content: flex-start; }
 .skins-catalog { display: grid; gap: 12px; min-width: 0; }
 .skins-catalog-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
-.skin-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); align-items: start; gap: 16px; margin: 0; padding: 0; list-style: none; }
-.skin-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--line); background: var(--surface); }
-.skin-card[data-current] { border-color: var(--cyan-ink); }
-.skin-card-text { display: grid; gap: 4px; min-width: 0; }
-.skin-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 8px; }
-.skin-name { flex: 1 1 120px; min-width: 0; }
-.skin-current { max-width: 100%; padding: 2px 8px; border: 1px solid var(--cyan-ink); background: var(--surface2); color: var(--cyan-ink); font-size: 12px; font-weight: 600; line-height: 1.45; }
+/* Two columns where the place is wide, one where it is narrow: the place decides, not the window. An odd last card takes
+   the whole row, so no card stands alone in half a row. */
+.skin-wrap { container: skins / inline-size; min-width: 0; }
+.skin-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
+.skin-cards > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+@container skins (max-width: 559px) {
+  .skin-cards { grid-template-columns: minmax(0, 1fr); }
+}
+.skin-card { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; min-width: 0; padding: 12px; border: 1px solid var(--line); background: var(--surface); }
+.skin-card[data-current] { border-color: var(--cyan); }
+.skin-card-text { display: grid; gap: 4px; align-content: start; min-width: 0; }
+/* As tall as the state, so a card keeps its height whether its skin is on or not. */
+.skin-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-block-size: 24px; }
+.skin-name { min-width: 0; }
+/* The skin on: its state in a frame of --ok with a full dot, in place of Apply. */
+.skin-state { border: 1px solid var(--ok); color: var(--ok); }
+.skin-state::before { background: currentColor; }
+.skin-state:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .skin-meta { color: var(--muted); }
-.skin-actions { margin-block-start: 8px; }
+.skin-actions { justify-content: flex-end; align-self: end; }
 /* The same small task card in each skin's own tokens: no action, hidden from a screen reader, the card names it all. */
 .skin-preview { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line2); background: var(--bg); color: var(--ink); font-family: var(--f-body); pointer-events: none; }
 .sp-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }

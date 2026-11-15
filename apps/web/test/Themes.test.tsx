@@ -17,8 +17,8 @@ const own = (name: string, bg = '#010203', base = 'cyberpunk'): Skin => {
   return { ...sample, base, colors: { ...sample.colors, bg } };
 };
 const file = (body: string, name = 'dusk.json') => new File([body], name, { type: 'application/json' });
-const EN = { account: 'Account', item: 'Settings', title: 'Settings', add: 'Add from file' };
-const RU = { account: 'Аккаунт', item: 'Настройки', title: 'Настройки', add: 'Добавить из файла' };
+const EN = { account: 'Account', item: 'Settings', title: 'Settings', group: 'Appearance & language', add: 'Add from file' };
+const RU = { account: 'Аккаунт', item: 'Настройки', title: 'Настройки', group: 'Оформление и язык', add: 'Добавить из файла' };
 
 function renderShell(person = ME.person) {
   mockApi({ 'GET /api/org': [200, ORG] });
@@ -29,16 +29,22 @@ function renderShell(person = ME.person) {
   );
 }
 
+/* Settings opens on Profile; the skins stand in the group after it. */
 async function openThemes(user: ReturnType<typeof userEvent.setup>, words = EN) {
   await user.click(screen.getByRole('button', { name: words.account }));
   await user.click(screen.getByRole('button', { name: words.item }));
-  return screen.findByRole('dialog', { name: words.title });
+  const dialog = await screen.findByRole('dialog', { name: words.title });
+  await user.click(within(dialog).getByRole('button', { name: words.group }));
+  return dialog;
 }
 
 const catalog = (dialog: HTMLElement) => within(dialog).getByRole('region', { name: /^(Skin catalog|Каталог скинов)$/ });
 const cards = (dialog: HTMLElement) => within(catalog(dialog)).getAllByRole('listitem');
 const titles = (dialog: HTMLElement) => cards(dialog).map(card => within(card).getByRole('heading').textContent);
-const pressed = (dialog: HTMLElement) => within(dialog).getAllByRole('button', { pressed: true });
+/* The card that says it is on: the state in its name row, not a button. */
+const applied = (dialog: HTMLElement) => cards(dialog).filter(card => within(card).queryByText(/^(Applied|Включена)$/) !== null);
+const state = (card: HTMLElement) => within(card).getByText(/^(Applied|Включена)$/);
+const labels = (card: HTMLElement) => within(card).getAllByRole('button').map(button => button.getAttribute('aria-label'));
 const input = (dialog: HTMLElement) => dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
 const addFile = (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement, body: string, name = 'dusk.json') => user.upload(input(dialog), file(body, name));
 
@@ -81,39 +87,40 @@ describe('the Themes section of the settings', () => {
     expect(screen.queryByText('Themes')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    expect(location.pathname).toBe('/settings/profile');
+    await user.click(within(dialog).getByRole('button', { name: 'Appearance & language' }));
     expect(location.pathname).toBe('/settings');
     expect(within(dialog).getByRole('button', { name: 'Appearance & language' })).toHaveAttribute('aria-current', 'page');
-    expect(within(dialog).getByRole('heading', { name: 'Themes', level: 3 })).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: 'Skins', level: 4 })).toBeInTheDocument();
     expect(within(dialog).getByText('Choose your own look. Other members keep their themes.')).toBeInTheDocument();
-    expect(within(dialog).getAllByText('Your choice stays in this browser.')).toHaveLength(2);
+    expect(within(dialog).getByText('Your choice stays in this browser.')).toBeInTheDocument();
     expect(catalog(dialog)).toBeInTheDocument();
   });
 
-  it('shows the four built-in skins as cards in the order of the registry, with origin, description and the current one marked', async () => {
+  it('shows the four built-in skins as cards in the order of the registry, with origin, description and the one on marked by a state, not a button', async () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
     expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel']);
     expect(cards(dialog)).toHaveLength(BUILTIN_SKINS.length);
     const [cyberpunk, light] = cards(dialog) as [HTMLElement, HTMLElement];
-    expect(within(cyberpunk).getByText('Current')).toBeInTheDocument();
+    expect(within(cyberpunk).queryByText('Current')).not.toBeInTheDocument();
+    expect(applied(dialog)).toEqual([cyberpunk]);
     expect(within(cyberpunk).getByText('Built-in · Default')).toBeInTheDocument();
     expect(within(cyberpunk).getByText('A night console with a cyan accent.')).toBeInTheDocument();
     expect(within(light).getByText('Built-in')).toBeInTheDocument();
-    expect(within(light).queryByText('Current')).not.toBeInTheDocument();
-    expect(pressed(dialog)).toEqual([within(cyberpunk).getByRole('button', { name: 'Applied: Cyberpunk' })]);
-    expect(within(light).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Apply: Light', 'Download: Light']);
-    /* Apply and Applied share one place, so the button keeps its size; only the one that is true shows. */
-    const shown = (button: HTMLElement) => [...button.querySelectorAll('.swap-label > span:not(.sizer)')].map(label => label.textContent);
-    expect(shown(within(light).getByRole('button', { name: 'Apply: Light' }))).toEqual(['Apply']);
-    expect(shown(within(cyberpunk).getByRole('button', { name: 'Applied: Cyberpunk' }))).toEqual(['Applied']);
+    expect(labels(cyberpunk)).toEqual(['Download: Cyberpunk']);
+    expect(labels(light)).toEqual(['Apply: Light', 'Download: Light']);
+    expect(within(dialog).queryAllByRole('button', { pressed: true })).toEqual([]);
+    /* No button on a card is filled: Apply is as quiet as Download. */
+    expect(cards(dialog).flatMap(card => within(card).getAllByRole('button')).every(button => button.classList.contains('ghost'))).toBe(true);
     expect(within(dialog).getByText('No custom skins yet')).toBeInTheDocument();
     expect(within(dialog).getByText('Add a file. Download any built-in skin to use as a sample.')).toBeInTheDocument();
     expect(cards(dialog).map(card => card.querySelector('.skin-preview')!.getAttribute('data-cut'))).toEqual(['bevel', 'bevel', 'bevel', 'steps']);
     expect((cards(dialog)[3]!.querySelector('.skin-preview') as HTMLElement).style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#151523');
   });
 
-  it('applies a skin in one click, at once, keeps focus on its button and says so, and the card and the page agree', async () => {
+  it('applies a skin in one click, at once, moves focus to its state and says so, and the card and the page agree', async () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
@@ -121,10 +128,10 @@ describe('the Themes section of the settings', () => {
       await user.click(within(dialog).getByRole('button', { name: `Apply: ${name}` }));
       expect([root.dataset.theme, root.dataset.cut]).toEqual([id, builtinSkin(id)!.shape]);
       expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe(builtinSkin(id)!.colors.bg);
-      const button = within(dialog).getByRole('button', { name: `Applied: ${name}` });
-      expect(button).toHaveAttribute('aria-pressed', 'true');
-      expect(button).toHaveFocus();
-      expect(pressed(dialog)).toHaveLength(1);
+      const card = cards(dialog).find(item => within(item).getByRole('heading').textContent === name)!;
+      expect(applied(dialog)).toEqual([card]);
+      expect(state(card)).toHaveFocus();
+      expect(labels(card)).toEqual([`Download: ${name}`]);
       expect(within(dialog).getByRole('status')).toHaveTextContent(`“${name}” is now applied.`);
       expect(skinsState().active).toBe(id);
     }
@@ -132,15 +139,16 @@ describe('the Themes section of the settings', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Done' }));
     expect(skinsState().active).toBe('matrix');
     expect(await openThemes(user)).toBeInTheDocument();
-    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Applied: Matrix' })).toHaveAttribute('aria-pressed', 'true');
+    expect(applied(screen.getByRole('dialog')).map(card => within(card).getByRole('heading').textContent)).toEqual(['Matrix']);
   });
 
-  it('switches between Appearance & language and Company & access inside Settings at their own addresses', async () => {
+  it('switches between Profile and Appearance & language inside Settings at their own addresses', async () => {
     const user = userEvent.setup();
     renderShell();
     const dialog = await openThemes(user);
-    await user.click(within(dialog).getByRole('button', { name: 'Company & access' }));
-    expect(location.pathname).toBe('/settings/company');
+    expect(location.pathname).toBe('/settings');
+    await user.click(within(dialog).getByRole('button', { name: 'Profile' }));
+    expect(location.pathname).toBe('/settings/profile');
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('region', { name: 'Skin catalog' })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Appearance & language' }));
@@ -177,7 +185,7 @@ describe('the collection of a person\'s own skins', () => {
     await user.click(within(dawn).getByRole('button', { name: 'Apply: Dawn' }));
     expect([root.dataset.theme, root.dataset.cut]).toEqual(['custom-2', 'steps']);
     expect(root.style.getPropertyValue(COLOR_TOKENS.bg)).toBe('#0A0B0C');
-    expect(within(dawn).getByText('Current')).toBeInTheDocument();
+    expect(applied(dialog)).toEqual([dawn]);
   });
 
   it('changes nothing when no file is picked', async () => {
@@ -286,17 +294,17 @@ describe('the collection of a person\'s own skins', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Remove: Dusk' }));
     expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dawn']);
     expect(root.dataset.theme).toBe('cyberpunk');
-    expect(within(dialog).getByRole('button', { name: 'Applied: Cyberpunk' })).toHaveAttribute('aria-pressed', 'true');
+    expect(applied(dialog)).toEqual([cards(dialog)[0]]);
     expect(within(dialog).getByRole('status')).toHaveTextContent('“Dusk” was removed. “Cyberpunk” is now applied.Undo');
     expect(within(dialog).getByRole('button', { name: 'Apply: Dawn' })).toHaveFocus();
     await user.click(within(dialog).getByRole('button', { name: 'Undo' }));
     expect(titles(dialog)).toEqual(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
     expect(root.dataset.theme).toBe('custom-1');
     expect(within(dialog).getByRole('status')).toHaveTextContent('“Dusk” was restored.');
-    expect(within(dialog).getByRole('button', { name: 'Applied: Dusk' })).toHaveFocus();
+    expect(state(cards(dialog)[4]!)).toHaveFocus();
     await user.click(within(dialog).getByRole('button', { name: 'Remove: Dawn' }));
     expect(within(dialog).getByRole('status')).toHaveTextContent('“Dawn” was removed.Undo');
-    expect(within(dialog).getByRole('button', { name: 'Applied: Dusk' })).toHaveFocus();
+    expect(state(cards(dialog)[4]!)).toHaveFocus();
   });
 });
 
@@ -323,11 +331,14 @@ describe('the guide in the Themes section', () => {
     await user.click(screen.getByRole('button', { name: RU.account }));
     expect(screen.queryByText('Темы')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: RU.item }));
+    expect(screen.getByRole('button', { name: 'Профиль' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: RU.group }));
     expect(screen.getByRole('button', { name: 'Оформление и язык' })).toHaveAttribute('aria-current', 'page');
     const dialog = await screen.findByRole('dialog', { name: RU.title });
     expect(titles(dialog)).toEqual(['Киберпанк', 'Светлая', 'Матрица', 'Пиксельная']);
     expect(within(dialog).getByText('Встроенная · По умолчанию')).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Включена: Киберпанк' })).toBeInTheDocument();
+    expect(state(cards(dialog)[0]!)).toHaveTextContent('Включена');
+    expect(within(dialog).getByRole('button', { name: 'Включить: Светлая' })).toBeInTheDocument();
     expect(within(dialog).getByRole('region', { name: 'Свой скин за минуту' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Скопировать просьбу для ИИ' })).toBeInTheDocument();
     await addFile(user, dialog, JSON.stringify({ ...JSON.parse(skinText(own('Плохой'))), cut: 3 }), 'bad.json');
@@ -341,7 +352,17 @@ describe('the guide in the Themes section', () => {
 describe('the look of the Themes section', () => {
   it('paints each preview in its own skin from the tokens, and lays the catalog, cards and actions out to fit', () => {
     expect(decl('.skin-preview', 'background')).toBe('var(--bg)');
-    expect(decl('.skin-cards', 'grid-template-columns')).toBe('repeat(auto-fit, minmax(min(100%, 280px), 1fr))');
+    /* Two columns where the place is wide, one where it is narrow; an odd last card takes the whole row. */
+    expect(decl('.skin-wrap', 'container')).toBe('skins / inline-size');
+    expect(decl('.skin-cards', 'grid-template-columns')).toBe('repeat(2, minmax(0, 1fr))');
+    expect(decl('.skin-cards', 'gap')).toBe('16px');
+    expect(decl('.skin-cards', 'grid-template-columns', 'skins (max-width: 559px)')).toBe('minmax(0, 1fr)');
+    expect(decl('.skin-cards > :last-child:nth-child(odd)', 'grid-column')).toBe('1 / -1');
+    expect(decl('.skin-card[data-current]', 'border-color')).toBe('var(--cyan)');
+    expect(decl('.skin-state', 'border')).toBe('1px solid var(--ok)');
+    expect(decl('.skin-state', 'color')).toBe('var(--ok)');
+    expect(decl('.skin-state::before', 'background')).toBe('currentColor');
+    expect(decl('.skin-actions', 'justify-content')).toBe('flex-end');
     expect(decl('.skins .btn', 'min-height')).toBe('44px');
     expect(decl('.skins .btn', 'white-space')).toBe('normal');
     expect(decl('.skin-card-head', 'flex-wrap')).toBe('wrap');
@@ -350,7 +371,9 @@ describe('the look of the Themes section', () => {
     /* The line of what was done marks its kind at its start only: the shared .status and .alert classes would frame it. */
     expect(decl('.skins-notice', 'border-inline-start')).toBe('4px solid var(--line2)');
     expect(decl(".skins-notice[data-tone='alert']", 'border-inline-start-color')).toBe('var(--pink-ink)');
-    expect(decl('.settings-body', 'grid-template-columns')).toBe('180px minmax(0, 1fr)');
+    expect(decl('.settings-body', 'grid-template-columns')).toBe('200px minmax(0, 1fr)');
+    expect(decl('.settings-main', 'max-inline-size')).toBe('880px');
+    expect(decl('.dialog.settings-window', 'width')).toBe('min(1160px, 100%)');
     expect(decl('.settings-body', 'grid-template-columns', '(max-width: 760px)')).toBe('minmax(0, 1fr)');
   });
 });

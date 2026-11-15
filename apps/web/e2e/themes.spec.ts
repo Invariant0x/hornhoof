@@ -74,6 +74,8 @@ async function openThemes(page: Page, words: Messages): Promise<Locator> {
   await page.getByRole('button', { name: words.shell.account, exact: true }).click();
   await page.getByRole('button', { name: words.settings.menu, exact: true }).click();
   const dialog = page.getByRole('dialog', { name: words.settings.title });
+  /* Settings opens on Profile; the skins stand in the group after it. */
+  await dialog.getByRole('button', { name: words.settings.groups.appearance, exact: true }).click();
   await expect(dialog.getByRole('button', { name: words.settings.groups.appearance, exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(dialog.getByRole('region', { name: words.skins.catalog })).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
@@ -115,7 +117,7 @@ async function chooseLanguages(page: Page): Promise<Language[]> {
 }
 
 /* Where every block of the window stands, with its padding, margin and font, the window scrolled to its top: a click
-   scrolls to the card it presses. The actions inside a card are left out: the current card says Applied, not Apply. */
+   scrolls to the card it presses. The actions inside a card are left out: the card on says Applied by a state, not Apply. */
 async function geometry(page: Page): Promise<unknown[]> {
   return page.evaluate(() => {
     for (const scrolled of document.querySelectorAll('.dialog')) scrolled.scrollTop = 0;
@@ -212,12 +214,15 @@ async function lowercaseHeight(page: Page, font: string): Promise<number> {
   return (Math.max(...rows) - Math.min(...rows) + 1) / (await page.evaluate(() => devicePixelRatio));
 }
 
-/* Applies a skin with a click on its card and waits until the page and the line under the heading say so. */
+/* The card of a skin, by its name. */
+const skinCard = (dialog: Locator, name: string) => dialog.locator('.skin-card').filter({ has: dialog.page().getByRole('heading', { name, exact: true }) });
+
+/* Applies a skin with a click on its card and waits until the page, the card's state and the line under the heading say so. */
 async function pick(page: Page, dialog: Locator, words: Messages, language: Language, choice: string) {
   const name = nameOf(words, language, choice);
   await dialog.getByRole('button', { name: `${words.skins.apply}: ${name}`, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', choice);
-  await expect(dialog.getByRole('button', { name: `${words.skins.applied}: ${name}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(skinCard(dialog, name).getByText(words.skins.applied, { exact: true })).toBeFocused();
   await expect(dialog.getByRole('status')).toHaveText(words.skins.nowOn(name));
   await page.evaluate(async () => { await document.fonts.ready; });
 }
@@ -391,12 +396,13 @@ test('a skin file is added beside the others, a bad one is refused in plain word
   const again = page.getByRole('dialog', { name: words.settings.title });
   await again.getByRole('button', { name: 'Remove: Dawn', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'cyberpunk');
-  await expect(again.getByRole('button', { name: 'Applied: Cyberpunk', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(skinCard(again, 'Cyberpunk').getByText(words.skins.applied, { exact: true })).toBeVisible();
+  await expect(skinCard(again, 'Cyberpunk').getByRole('button', { name: 'Apply: Cyberpunk', exact: true })).toHaveCount(0);
   await expect(again.getByRole('status')).toHaveText(`${words.skins.removed('Dawn')} ${words.skins.nowOn('Cyberpunk')}${words.skins.undo}`);
   await expect(again.getByRole('button', { name: 'Apply: Dusk', exact: true })).toBeFocused();
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(rgb(CYBERPUNK.colors.bg));
   await again.getByRole('button', { name: words.skins.undo, exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
-  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 5 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
+  await expect(again.getByRole('region', { name: words.skins.catalog }).getByRole('heading', { level: 6 })).toHaveText(['Cyberpunk', 'Light', 'Matrix', 'Pixel', 'Dusk', 'Dawn']);
   expect(problems).toEqual([]);
 });

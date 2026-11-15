@@ -1,5 +1,4 @@
 import type { ComponentType } from 'react';
-import { useT } from '../i18n';
 import { GoogleSheetsCard } from './GoogleSheets';
 
 /* Every outside tool Hornhoof connects, one entry each: the address whose answer says the person may manage it, and its
@@ -12,10 +11,8 @@ export const INTEGRATIONS: readonly Integration[] = [
 
 /* The Integrations group: the cards of the tools the server lets this person manage, in the order of the list. */
 export function Integrations({ reached }: { reached: ReadonlySet<string> }) {
-  const t = useT();
   return (
     <div className="integrations">
-      <p className="muted">{t.integrations.intro}</p>
       {INTEGRATIONS.filter(tool => reached.has(tool.probe)).map(({ id, Card }) => (
         <Card key={id} />
       ))}

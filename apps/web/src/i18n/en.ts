@@ -125,20 +125,23 @@ export const en = {
   },
   profile: {
     nameRequired: 'Enter your name.',
-    profile: 'Your profile',
   },
   /* The Language section of a person's settings: every language Hornhoof ships, each named in itself. */
   language: {
     title: 'Language',
-    desc: 'Hornhoof speaks this language to you. Other members keep their own.',
-    local: 'Your choice stays in this browser.',
+    hint: 'The language of Hornhoof. It changes at once.',
   },
   /* The Settings window: its groups in order, then the company's public link under Company & access. */
   settings: {
     menu: 'Settings',
     title: 'Settings',
     groupsLabel: 'Settings groups',
-    groups: { appearance: 'Appearance & language', integrations: 'Integrations', messaging: 'External messaging', company: 'Company & access' },
+    groups: { profile: 'Profile', appearance: 'Appearance & language', integrations: 'Integrations', messaging: 'External messaging', company: 'Company & access' },
+    /* What a group holds, under its heading. Integrations and External messaging say it in their own words. */
+    intro: {
+      appearance: 'Only for you and only in this browser. Other members keep their language and theme.',
+      company: 'Shared settings of the company and how Hornhoof opens from outside.',
+    },
     link: 'Link on the internet',
     opensAt: 'Hornhoof opens from anywhere at this link:',
     closed: 'Hornhoof opens only at its own address, on this computer and your network.',
@@ -280,7 +283,7 @@ export const en = {
   },
   /* The Themes section of the settings: the built-in themes, a person's own kept in this browser, and how to make one. */
   skins: {
-    title: 'Themes',
+    title: 'Skins',
     desc: 'Choose your own look. Other members keep their themes.',
     local: 'Your choice stays in this browser.',
     add: 'Add from file',
@@ -291,7 +294,6 @@ export const en = {
     builtIn: 'Built-in',
     own: 'Custom',
     byDefault: 'Default',
-    current: 'Current',
     apply: 'Apply',
     applied: 'Applied',
     download: 'Download',

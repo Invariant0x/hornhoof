@@ -24,7 +24,8 @@ describe('account dialog Escape', () => {
     mockApi({ 'GET /api/link': [200, { link: null, domain: 'example.test' }] });
     render(<Dialog kind={kind} />);
     const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveFocus();
+    /* Settings starts at the heading of its open group, Versions on the window itself. */
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
     const consumed = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     consumed.preventDefault();
     fireEvent(document, consumed);

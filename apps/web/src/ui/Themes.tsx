@@ -75,26 +75,33 @@ function Preview({ look }: { look: SkinLook }) {
 
 type CardProps = { card: Card; on: boolean; onApply: () => void; onDownload: () => void; onRemove: () => void };
 
+/* A skin's card: its preview, name, origin and description, then its quiet buttons on the end edge. The skin on says so
+   by a state beside its name instead of Apply, and that state holds the focus once Apply is gone. */
 function SkinCard({ card, on, onApply, onDownload, onRemove }: CardProps) {
   const t = useT();
   const words = t.skins;
   const origin = card.own ? words.own : card.id === DEFAULT_SKIN ? `${words.builtIn} · ${words.byDefault}` : words.builtIn;
-  const state = on ? words.applied : words.apply;
   return (
     <li className="skin-card" data-current={on || undefined}>
       <Preview look={card.look} />
       <div className="skin-card-text">
         <div className="skin-card-head">
-          <h5 className="skin-name">{card.name}</h5>
-          {on && <span className="skin-current">{words.current}</span>}
+          <h6 className="skin-name">{card.name}</h6>
+          {on && (
+            <span className="skin-state" tabIndex={-1} data-focus-skin={card.id}>
+              {words.applied}
+            </span>
+          )}
         </div>
         <p className="skin-meta">{origin}</p>
         <p className="skin-meta">{card.desc}</p>
       </div>
       <div className="entry-actions skin-actions">
-        <button className={on ? 'btn small ghost' : 'btn small'} type="button" aria-pressed={on} aria-label={`${state}: ${card.name}`} data-apply={card.id} onClick={onApply}>
-          <SwapLabel first={words.apply} second={words.applied} showSecond={on} />
-        </button>
+        {!on && (
+          <button className="btn small ghost" type="button" aria-label={`${words.apply}: ${card.name}`} data-focus-skin={card.id} onClick={onApply}>
+            {words.apply}
+          </button>
+        )}
         <button className="btn small ghost" type="button" aria-label={`${words.download}: ${card.name}`} onClick={onDownload}>
           {words.download}
         </button>
@@ -143,7 +150,7 @@ function Guide() {
 
   return (
     <section className="skins-guide" aria-labelledby={id}>
-      <h4 id={id}>{t.skins.guide}</h4>
+      <h5 id={id}>{t.skins.guide}</h5>
       <ol>{t.skins.steps.map(step => <li key={step}>{step}</li>)}</ol>
       <div className="entry-actions">
         <button className="btn small ghost" type="button" onClick={() => void copy()}>
@@ -203,9 +210,9 @@ function download(t: Messages, card: Card, say: (notice: Notice) => void): void 
   }
 }
 
-/* Focus after the catalog has drawn again: the Apply of the card named, else Add from file. */
+/* Focus after the catalog has drawn again: the Apply of the card named, or its state when it is on, else Add from file. */
 function moveFocus(root: HTMLElement | null, to: string): void {
-  const target = root?.querySelector<HTMLElement>(`[data-apply="${to}"]`) ?? root?.querySelector<HTMLElement>('[data-add]');
+  const target = root?.querySelector<HTMLElement>(`[data-focus-skin="${to}"]`) ?? root?.querySelector<HTMLElement>('[data-add]');
   target?.focus();
 }
 
@@ -250,14 +257,16 @@ function Catalog({ cards, active, onApply, onDownload, onRemove }: CatalogProps)
   return (
     <section className="skins-catalog" aria-labelledby={id}>
       <div className="skins-catalog-head">
-        <h4 id={id}>{t.skins.catalog}</h4>
+        <h5 id={id}>{t.skins.catalog}</h5>
         <p className="muted">{t.skins.catalogHint}</p>
       </div>
-      <ul className="skin-cards">
-        {cards.map(card => (
-          <SkinCard key={card.id} card={card} on={card.id === active} onApply={() => onApply(card)} onDownload={() => onDownload(card)} onRemove={() => onRemove(card)} />
-        ))}
-      </ul>
+      <div className="skin-wrap">
+        <ul className="skin-cards">
+          {cards.map(card => (
+            <SkinCard key={card.id} card={card} on={card.id === active} onApply={() => onApply(card)} onDownload={() => onDownload(card)} onRemove={() => onRemove(card)} />
+          ))}
+        </ul>
+      </div>
       {!cards.some(card => card.own) && (
         <div className="skins-empty">
           <p className="skins-empty-title">{t.skins.empty}</p>
@@ -290,7 +299,9 @@ export function Themes() {
   };
 
   function apply(card: Card) {
-    if (card.id !== active && chooseSkin(card.id)) setNotice({ tone: 'status', text: t.skins.nowOn(card.name) });
+    if (card.id === active || !chooseSkin(card.id)) return;
+    setNotice({ tone: 'status', text: t.skins.nowOn(card.name) });
+    focusOn(card.id);
   }
 
   function remove(card: Card) {
@@ -311,9 +322,7 @@ export function Themes() {
     <div className="skins" ref={root}>
       <div className="skins-head">
         <div className="skins-intro">
-          <h3 id={headingId} tabIndex={-1} data-autofocus>
-            {t.skins.title}
-          </h3>
+          <h4 id={headingId}>{t.skins.title}</h4>
           <p>{t.skins.desc}</p>
           <p className="muted">{t.skins.local}</p>
         </div>

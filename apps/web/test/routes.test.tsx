@@ -16,6 +16,7 @@ describe('workspace addresses', () => {
     ['/improvements', { kind: 'improvements' }],
     ['/versions', { kind: 'versions' }],
     ['/settings', { kind: 'settings' }],
+    ['/settings/profile', { kind: 'settings', group: 'profile' }],
     ['/settings/integrations', { kind: 'settings', group: 'integrations' }],
     ['/settings/messaging', { kind: 'settings', group: 'messaging' }],
     ['/settings/company', { kind: 'settings', group: 'company' }],

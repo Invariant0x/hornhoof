@@ -9,7 +9,7 @@ export function IntegrationCard({ name, about, connected, children }: { name: st
   return (
     <article className="integration" aria-labelledby={id}>
       <header className="integration-head">
-        <h3 id={id}>{name}</h3>
+        <h4 id={id}>{name}</h4>
         <span className="integration-state" data-connected={connected}>{connected ? t.integrations.connected : t.integrations.notConnected}</span>
       </header>
       <p>{about}</p>

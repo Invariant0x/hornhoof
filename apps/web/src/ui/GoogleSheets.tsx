@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { GoogleSheetsConfig } from '../types';
 import { Field } from './Field';
+import { Idents } from './Idents';
 import { IntegrationCard } from './IntegrationCard';
 
 type Mode = 'view' | 'edit' | 'remove';
@@ -141,7 +142,7 @@ function GoogleSheetsBody({ google, mode, busy, change, pick }: { google: Google
   if (mode === 'edit') return <GoogleSheetsForm google={google} busy={busy} change={change} onCancel={() => pick('view')} />;
   return (
     <div className="repo">
-      <p>{google ? t.googleSheets.saved(google.account, google.keyLast4, google.shareEmail) : t.googleSheets.none}</p>
+      <p>{google ? <Idents text={t.googleSheets.saved(google.account, google.keyLast4, google.shareEmail)} idents={[google.account, google.shareEmail]} /> : t.googleSheets.none}</p>
       <GoogleSheetsActions google={google} mode={mode} busy={busy} change={change} setMode={pick} />
     </div>
   );

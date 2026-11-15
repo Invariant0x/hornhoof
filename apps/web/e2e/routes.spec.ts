@@ -55,7 +55,7 @@ for (const settings of SETTINGS) {
     await expect(page.getByRole('heading', { name: 'Development', exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`department-${lang}-${theme}-${width}.png`), animations: 'disabled' });
 
-    for (const [label, path, title] of [[t.about.menu, '/about', t.about.title], [t.settings.menu, '/settings', t.settings.title], [t.updates.menu, '/versions', t.updates.title]] as const) {
+    for (const [label, path, title] of [[t.about.menu, '/about', t.about.title], [t.settings.menu, '/settings/profile', t.settings.title], [t.updates.menu, '/versions', t.updates.title]] as const) {
       await page.getByRole('button', { name: t.shell.account, exact: true }).click();
       await page.getByRole('button', { name: label, exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${path}$`));

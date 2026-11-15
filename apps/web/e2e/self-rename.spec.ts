@@ -41,8 +41,8 @@ for (const lang of ['en', 'ru'] as const) {
         await page.getByRole('button', { name: lang === 'en' ? 'Account' : 'Аккаунт' }).click();
         await page.getByRole('button', { name: lang === 'en' ? 'Settings' : 'Настройки' }).click();
         const dialog = page.getByRole('dialog', { name: lang === 'en' ? 'Settings' : 'Настройки' });
-        /* One's own name stands first under Company & access. */
-        await dialog.getByRole('button', { name: lang === 'en' ? 'Company & access' : 'Компания и доступ', exact: true }).click();
+        /* Settings opens on Profile, one's own name. */
+        await expect(dialog.getByRole('button', { name: lang === 'en' ? 'Profile' : 'Профиль', exact: true })).toHaveAttribute('aria-current', 'page');
         const field = dialog.getByLabel(lang === 'en' ? 'Name' : 'Имя', { exact: true });
         await expect(field).toHaveValue('Lisa');
         await page.screenshot({ path: info.outputPath(`self-rename-field-${width}-${lang}-${theme}.png`) });
