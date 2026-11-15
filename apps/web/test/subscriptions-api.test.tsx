@@ -93,6 +93,8 @@ describe('Subscriptions & API', () => {
     await user.type(within(form).getByLabelText('Name'), 'OpenRouter');
     await user.type(within(form).getByLabelText('API key'), 'sk-or-v1-key-0123456789');
     expect(within(form).queryByLabelText('Address')).toBeNull();
+    expect(within(form).getByLabelText('API key')).toHaveAccessibleDescription('Kept encrypted. Only its last 4 characters are ever shown.');
+    expect(screen.getAllByText(/last 4 characters/)).toHaveLength(1);
     await user.click(within(form).getByRole('button', { name: 'Load from the API' }));
     await user.click(await within(form).findByRole('checkbox', { name: 'Meta: Llama 4 Maverick' }));
     await user.selectOptions(within(form).getByLabelText('Serves'), 'orchestrator');

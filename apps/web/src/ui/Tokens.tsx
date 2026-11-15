@@ -3,11 +3,10 @@ import { api } from '../api';
 import { useLanguage, useT } from '../i18n';
 import type { SubView, TokenPeriods } from '../types';
 import { Gauge } from './Cards';
+import { tokenCount } from './token-count';
 
 const PERIODS = ['today', 'week', 'month', 'all'] as const;
 
-/* A count of tokens as the person's language writes a whole number. */
-export const tokenCount = (language: string, n: number) => new Intl.NumberFormat(language).format(n);
 
 const viewerZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
