@@ -6,8 +6,10 @@ import { enqueueTurn } from '../conversation/queue.js';
 import { publishWorking } from '../events/store.js';
 import { identityOf, keyOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { failOpenJobs, jobsOf } from '../nodes/messages.js';
-import { agentProgramState, alreadyAlerted, screenReader } from './silent.js';
+import { livePrograms } from '../nodes/program-room.js';
+import { agentProgramState, alreadyAlerted, programGoneSince, screenReader } from './silent.js';
 import { logTurnFact } from './turn-log.js';
+import { lastTurnSigns } from './turn-signs.js';
 import { afterJob } from './wake.js';
 
 type Job = typeof jobs.$inferSelect;
@@ -20,12 +22,23 @@ export const PULSE_MS = 2 * 60_000;
 const WORKING: ReadonlySet<ProgramState> = new Set(['thinking', 'tool', 'asking', 'retrying']);
 
 const NOT_HELD = 'Hornhoof ended this turn as interrupted: its machine said it no longer runs this turn, and its program gave no sign of work for 2 minutes. The next waiting turn goes out.';
+const GONE_HELD = 'Hornhoof ended this turn as interrupted: its machine still listed this turn, but its program was gone, the machine named no program of this employee after that, and the turn gave no sign of work for 2 minutes. The next waiting turn goes out.';
 const NO_MACHINE = 'Hornhoof ended this turn as interrupted: it went out to no machine of its plan, so no machine can run it or end it. The next waiting turn goes out.';
 
-/* Its program reported work a moment ago: it thinks, runs a tool, asks or retries. */
-function working(ctx: Ctx, job: Job, now: number): boolean {
+/* Its program reported work a moment ago: it thinks, runs a tool, asks or retries. Or the turn itself showed work a moment
+   ago, as a program with no screen does: its node streamed an event of it, or it called a Hornhoof tool. */
+function working(ctx: Ctx, job: Job, now: number, worked: number | null): boolean {
   const program = agentProgramState(ctx, job).program;
-  return Boolean(program && WORKING.has(program.state) && now - program.reportedAt < PULSE_MS);
+  return Boolean(program && WORKING.has(program.state) && now - program.reportedAt < PULSE_MS) || (worked !== null && now - worked < PULSE_MS);
+}
+
+/* The node that holds the turn said its program is gone, and named the programs that run on it after that without this
+   employee's: no program is left to run the turn. A restart asked for after the program went is left to bring it back. */
+function programLeft(ctx: Ctx, node: NodeIdentity, job: Job): boolean {
+  const goneAt = programGoneSince(ctx, job.id);
+  const live = livePrograms(ctx, node);
+  if (goneAt === null || !live || live.at <= goneAt || !job.agentId) return false;
+  return !live.agents.has(job.agentId) && !(job.restartedAt && job.restartedAt.getTime() >= goneAt);
 }
 
 /* The turn ends as one its machine lost, as when a node connects again without it: what was going on in it goes on in the
@@ -55,14 +68,21 @@ export async function askOfRunningTurns(ctx: Ctx, now: Date): Promise<void> {
   for (const { node, jobIds } of asks.values()) for (let i = 0; i < jobIds.length; i += 100) ctx.hub.send(node, { type: 'jobs.check', jobIds: jobIds.slice(i, i + 100) });
 }
 
-/* What the node answered: a turn it was asked about and no longer runs, whose program shows no work, is over. A node speaks
-   only of its own turns, and only of the ones asked about once they ran long enough to have reached it. */
+/* What the node answered: a turn it was asked about that shows no work is over when the node no longer runs it, or when it
+   still lists it but no program of the employee is left on it. A node speaks only of its own turns, and only of the ones
+   asked about once they ran long enough to have reached it. */
 export async function turnsHeld(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'jobs.held' }>, now = new Date()): Promise<void> {
   const held = new Set(msg.held);
-  const gone = msg.asked.filter(jobId => !held.has(jobId));
-  if (!gone.length) return;
-  const lost = await ctx.db.select().from(jobs).where(and(inArray(jobs.id, gone), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), jobsOf(id, ctx), lte(jobs.startedAt, new Date(now.getTime() - ASK_AFTER_MS))));
-  for (const job of lost) if (!working(ctx, job, now.getTime())) await endLost(ctx, job, NOT_HELD);
+  /* A turn the node still runs whose program it never said is gone is its own to go on with. */
+  const doubtful = msg.asked.filter(jobId => !held.has(jobId) || programGoneSince(ctx, jobId) !== null);
+  if (!doubtful.length) return;
+  const asked = await ctx.db.select().from(jobs).where(and(inArray(jobs.id, doubtful), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), jobsOf(id, ctx), lte(jobs.startedAt, new Date(now.getTime() - ASK_AFTER_MS))));
+  const signs = await lastTurnSigns(ctx, asked.map(job => job.id));
+  for (const job of asked) {
+    if (working(ctx, job, now.getTime(), signs.get(job.id) ?? null)) continue;
+    if (!held.has(job.id)) await endLost(ctx, job, NOT_HELD);
+    else if (programLeft(ctx, id, job)) await endLost(ctx, job, GONE_HELD);
+  }
 }
 
 /* How long a program may stand idle at its prompt in a turn its node still runs while the agent's next messages wait: the

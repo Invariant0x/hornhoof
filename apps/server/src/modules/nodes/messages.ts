@@ -14,6 +14,7 @@ import { startWork } from '../tasks/engine.js';
 import { programRestarted } from '../tasks/program-restarts.js';
 import { recordJobProgram } from '../tasks/silent.js';
 import { turnsHeld } from '../tasks/orphan-turns.js';
+import { turnSign } from '../tasks/turn-signs.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { staleOutput } from '../tasks/wake-state.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
@@ -382,7 +383,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
 
     case 'job.event': {
-      await appendTurnEvent(ctx, msg.jobId, msg.event, jobsOf(id, ctx));
+      if (await appendTurnEvent(ctx, msg.jobId, msg.event, jobsOf(id, ctx))) turnSign(ctx, msg.jobId, now.getTime());
       return;
     }
     case 'job.started':

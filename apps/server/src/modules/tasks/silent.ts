@@ -12,6 +12,7 @@ import { logTurnFact } from './turn-log.js';
 import { jobCheckQueued, jobCheckLastEnd } from '../nodes/check-slots.js';
 import { builtinOf, nodeIdentity } from '../nodes/hub.js';
 import { stopStaleProgram } from './stale-program.js';
+import { dropTurnSign, lastTurnSigns } from './turn-signs.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
 
@@ -21,7 +22,8 @@ type Agent = typeof agents.$inferSelect;
 type Job = typeof jobs.$inferSelect;
 type ProgramReport = Extract<NodeMessage, { type: 'job.program' }>;
 type GoneProgram = { state: 'gone'; exitCode: number | null; signal: string | null; screen: string | null };
-type StoredProgram = { program: TurnProgram; gone: GoneProgram | null };
+/* goneAt: when the node first said, in this server's time, that the program is gone, while it still says so. */
+type StoredProgram = { program: TurnProgram; gone: GoneProgram | null; goneAt: number | null };
 type SilentTurn = {
   job: Job;
   agent: Agent;
@@ -82,7 +84,8 @@ async function keepProgramChange(ctx: Ctx, job: HistoryJob, program: TurnProgram
 async function replaceProgram(ctx: Ctx, job: HistoryJob, msg: ProgramReport, now: Date): Promise<void> {
   const programs = mapOf(turnPrograms, ctx), previous = programs.get(job.id);
   const program = programOf(msg, now);
-  programs.set(job.id, { program, gone: goneProgram(msg) });
+  const goneAt = program.state !== 'gone' ? null : previous?.goneAt ?? now.getTime();
+  programs.set(job.id, { program, gone: goneProgram(msg), goneAt });
   if (!sameProgram(previous?.program, program)) await keepProgramChange(ctx, job, program, mapOf(turnAlarms, ctx).get(job.id) ?? null, now);
 }
 
@@ -98,7 +101,13 @@ export function clearTurnProgram(ctx: Ctx, jobId: string): GoneProgram | null {
   const gone = mapOf(turnPrograms, ctx).get(jobId)?.gone ?? null;
   mapOf(turnPrograms, ctx).delete(jobId);
   mapOf(turnAlarms, ctx).delete(jobId);
+  dropTurnSign(ctx, jobId);
   return gone;
+}
+
+/* Since when the turn's node says its program is gone, in this server's time; null while it says the program is there. */
+export function programGoneSince(ctx: Ctx, jobId: string): number | null {
+  return mapOf(turnPrograms, ctx).get(jobId)?.goneAt ?? null;
 }
 
 export function failedProgramData(error: string | null, program: GoneProgram | null): { error: string | null; program?: GoneProgram; text?: string } {
@@ -124,8 +133,11 @@ export function signInTurn(program: Pick<TurnProgram, 'signAt'>, job: Pick<Job, 
   return program.signAt === 0 ? (job.startedAt ?? job.createdAt).getTime() : program.signAt;
 }
 
-function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number): TurnAlarm | null {
-  if (nowMs - program.reportedAt >= SILENT_TURN_MS) return { reason: 'node_silent', since: program.reportedAt };
+/* worked: the turn's last sign besides its program's reports, an event of its work or a call of a Hornhoof tool. A node
+   that streams the work of a program with no screen is not silent, nor is a program that calls Hornhoof. */
+function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number, worked: number | null): TurnAlarm | null {
+  const heard = Math.max(program.reportedAt, worked ?? 0);
+  if (nowMs - heard >= SILENT_TURN_MS) return { reason: 'node_silent', since: heard };
   if (signAt !== null) {
     if (program.state === 'asking') return null;
     const threshold = program.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
@@ -135,18 +147,22 @@ function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: num
   return nowMs - lastChange >= SILENT_TURN_MS ? { reason: 'program_stalled', since: lastChange } : null;
 }
 
-function alarmForTurn(job: Job, program: TurnProgram | null, nowMs: number): TurnAlarm | null {
-  if (program) return alarmForProgram(program, signInTurn(program, job), nowMs);
-  const startedAt = (job.startedAt ?? job.createdAt).getTime();
-  return nowMs - startedAt >= SILENT_TURN_MS ? { reason: 'node_silent', since: startedAt } : null;
+/* What the watchdog knows of a running turn: its program as its node reported it, and the turn's last sign besides. */
+type Watched = { job: Job; program: TurnProgram | null; worked: number | null };
+
+function alarmForTurn({ job, program, worked }: Watched, nowMs: number): TurnAlarm | null {
+  if (program) return alarmForProgram(program, signInTurn(program, job), nowMs, worked);
+  const heard = Math.max((job.startedAt ?? job.createdAt).getTime(), worked ?? 0);
+  return nowMs - heard >= SILENT_TURN_MS ? { reason: 'node_silent', since: heard } : null;
 }
 
-function alarmForTask(job: Job, program: TurnProgram | null, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
-  return task?.externalWait ? null : alarmForTurn(job, program, nowMs);
+function alarmForTask(turn: Watched, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
+  return task?.externalWait ? null : alarmForTurn(turn, nowMs);
 }
 
-function alarmWithCheckQueue(ctx: Ctx, job: Job, program: TurnProgram | null, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
-  const detected = alarmForTask(job, program, task, nowMs);
+function alarmWithCheckQueue(ctx: Ctx, turn: Watched, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
+  const { job, program } = turn;
+  const detected = alarmForTask(turn, task, nowMs);
   if (missingProgramReport(detected)) return detected;
   if (jobCheckQueued(ctx, job.id, nowMs)) return null;
   return afterQueuedCheck(program, detected, jobCheckLastEnd(ctx, job.id, nowMs), nowMs);
@@ -195,13 +211,15 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
     .orderBy(asc(jobs.createdAt));
   const programs = mapOf(turnPrograms, ctx);
   const nowMs = now.getTime();
+  const signs = await lastTurnSigns(ctx, rows.map(r => r.job.id));
   const silent: SilentTurn[] = [];
   for (const { job, agent, task } of rows) {
     const program = programs.get(job.id)?.program ?? null;
     /* A program on a machine Hornhoof cannot reach is silent for that reason, and nobody can look at its screen: no
        alarm is raised for it until the machine is back. */
     const node = job.nodeId ? nodeIdentity(job.nodeId) : job.builtinMachine ? builtinOf(job.builtinMachine) : null;
-    const alarm = node && ctx.hub.awaySince(node) !== null ? null : alarmWithCheckQueue(ctx, job, program, task, nowMs);
+    const turn = { job, program, worked: signs.get(job.id) ?? null };
+    const alarm = node && ctx.hub.awaySince(node) !== null ? null : alarmWithCheckQueue(ctx, turn, task, nowMs);
     await updateTurnAlarm(ctx, job, alarm, now);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
   }

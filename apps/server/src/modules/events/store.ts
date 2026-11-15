@@ -56,8 +56,9 @@ export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e:
   return event;
 }
 
-/* Serialize a stream write with Stop and completion on the same job row, before publishing it. */
-export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<void> {
+/* Serialize a stream write with Stop and completion on the same job row, before publishing it. Whether it was stored: only
+   for a turn of the node's own that runs. */
+export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<boolean> {
   const stored = await ctx.db.transaction(async tx => {
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('no key update');
@@ -66,6 +67,7 @@ export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: strin
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
   });
   if (stored) await publishEvent(ctx, stored.companyId, stored.agentId, stored.id);
+  return stored !== null;
 }
 
 /* Only the receiving copy carries by, which the per-turn send quota counts after a restart. */
