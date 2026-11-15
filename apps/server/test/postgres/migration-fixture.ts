@@ -2,9 +2,8 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { applyMissingMigrations, MIGRATIONS } from '../../src/db/client.js';
-import type { PostgresFixture } from './helpers.js';
+import { MIGRATIONS } from '../../src/db/client.js';
+import { migrateFolder, type PostgresFixture } from './helpers.js';
 
 type Journal = { version: string; dialect: string; entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[] };
 export type HistoryRow = { hash: string; created_at: string };
@@ -46,8 +45,7 @@ export async function savedRows(fixture: PostgresFixture): Promise<SavedRows> {
 
 export async function prepareUpgrade(fixture: PostgresFixture): Promise<{ rows: SavedRows; history: HistoryRow[] }> {
   const migrationsFolder = await oldMigrations(fixture);
-  await migrate(fixture.db, { migrationsFolder });
-  await applyMissingMigrations(fixture.db, { migrationsFolder });
+  await migrateFolder(fixture, migrationsFolder);
   const rows = JSON.parse(await readFile(new URL('./fixtures/upgrade-rows.json', import.meta.url), 'utf8')) as SavedRows;
   for (const [table, values] of Object.entries(rows)) await insertRows(fixture, table, values);
   return { rows: await savedRows(fixture), history: await migrationHistory(fixture) };

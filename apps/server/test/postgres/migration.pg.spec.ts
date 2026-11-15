@@ -1,8 +1,6 @@
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { expect, it } from 'vitest';
-import { applyMissingMigrations } from '../../src/db/client.js';
 import { migrationsBefore } from '../migrations-before.js';
-import { migrateCandidate, privatePostgres } from './helpers.js';
+import { migrateCandidate, migrateFolder, privatePostgres } from './helpers.js';
 import { candidateHistory, migrationHistory, prepareUpgrade, savedRows, UPGRADE_PART, UPGRADE_RUN } from './migration-fixture.js';
 
 /* Migration 0088 removes the gate columns of a task; its required route replaces them. */
@@ -11,8 +9,7 @@ const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];
 it('keeps retired developer lines in pending staffing proposals without changing their other choices or history', async () => {
   const fixture = await privatePostgres({ migrate: false });
   const migrationsFolder = await migrationsBefore('composable_skills');
-  await migrate(fixture.db, { migrationsFolder });
-  await applyMissingMigrations(fixture.db, { migrationsFolder });
+  await migrateFolder(fixture, migrationsFolder);
   const company = (await fixture.admin.query<{ id: string }>("INSERT INTO companies (name) VALUES ('Proposal upgrade') RETURNING id")).rows[0]!.id;
   const agent = (await fixture.admin.query<{ id: string }>("INSERT INTO agents (company_id, kind, name, model) VALUES ($1, 'orchestrator', 'Coordinator', '') RETURNING id", [company])).rows[0]!.id;
   const legacy = {
@@ -37,11 +34,11 @@ it('keeps retired developer lines in pending staffing proposals without changing
   }
   const rows = async () => (await fixture.admin.query<{ fields: Record<string, unknown>; items: unknown }>("SELECT to_jsonb(p) - 'items' AS fields, items FROM proposals p ORDER BY brief")).rows;
   const before = await rows();
-  await migrateCandidate(fixture.db);
+  await migrateCandidate(fixture);
   const after = await rows();
   expect(after.map(row => row.fields)).toEqual(before.map(row => row.fields));
   expect(after.map(row => row.items)).toEqual(cases.map(row => row.expected));
-  await migrateCandidate(fixture.db);
+  await migrateCandidate(fixture);
   expect(await rows()).toEqual(after);
 });
 
@@ -58,7 +55,7 @@ it('upgrades nonempty 0059 rows through candidate migrations and preserves data 
   expect(before.rows.subscriptions![0]).not.toHaveProperty('limits_updated_at');
   expect(before.rows.test_runs![0]).not.toHaveProperty('commit_sha');
   expect(before.rows.agents).toMatchObject([{ kind: 'worker', role_key: 'DEV-BE', skills: [] }]);
-  await migrateCandidate(fixture.db);
+  await migrateCandidate(fixture);
   const after = await savedRows(fixture);
   for (const [table, rows] of Object.entries(before.rows)) {
     // Migrations 0084 and 0085 add these abilities to the existing developer.
@@ -79,7 +76,7 @@ it('upgrades nonempty 0059 rows through candidate migrations and preserves data 
   expect(history).toEqual(candidateHistory());
   expect(history.length).toBeGreaterThan(before.history.length);
   expect(history).toEqual(expect.arrayContaining(before.history));
-  await migrateCandidate(fixture.db);
+  await migrateCandidate(fixture);
   expect(await migrationHistory(fixture)).toEqual(history);
   expect(await savedRows(fixture)).toEqual(after);
   expect((await fixture.admin.query('SELECT part_id, run_id, files, packages FROM test_part_timings')).rows).toEqual(timings);
