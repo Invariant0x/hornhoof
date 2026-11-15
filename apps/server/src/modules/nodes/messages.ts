@@ -31,6 +31,7 @@ import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
+import { closeCheck, openCheck } from '../tools/outside.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 const LOAD_SEEN_MS = 60_000;
@@ -417,6 +418,15 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'agent.start':
       await startProgram(ctx, id, msg.agentKey);
+      return;
+    case 'tools.call':
+      await ctx.toolsOutside?.(id, msg);
+      return;
+    case 'tools.check':
+      await openCheck(ctx, id, msg);
+      return;
+    case 'tools.checked':
+      await closeCheck(ctx, id, msg);
       return;
     case 'agent.restarted':
       await programRestarted(ctx, id, msg);

@@ -89,8 +89,9 @@ const isTerminalFrame = (msg: ProgramNodeMessage): msg is TerminalMessage =>
 export const isOperatorReply = (msg: ProgramNodeMessage): msg is ProgramView | ProgramInputResult | OperatorRecoveryState =>
   msg.type === 'program.view' || msg.type === 'program.input_result' || msg.type === 'program.recovery_state';
 
-/* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
-const isAwaitedFrame = (msg: ProgramNodeMessage) => msg.type === 'agent.said' || isOperatorReply(msg);
+/* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. A tool
+   called with no turn running is taken at once too: it may run long, or wait for what the node says next. */
+const isAwaitedFrame = (msg: ProgramNodeMessage) => msg.type === 'agent.said' || msg.type === 'tools.call' || isOperatorReply(msg);
 
 const closeReason = (reason?: Buffer) => (reason?.length ? reason.toString() : null);
 

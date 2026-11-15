@@ -4,6 +4,7 @@ import { viewerOf } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import { agents, jobs, requests, tasks } from '../../db/schema.js';
 import { seesTask } from '../tasks/sight.js';
+import { notStep } from '../tools/steps.js';
 
 type Task = typeof tasks.$inferSelect;
 type Agent = Pick<typeof agents.$inferSelect, 'id' | 'subscriptionId'>;
@@ -52,7 +53,7 @@ export async function agentWork(db: Db, companyId: string) {
     .where(and(eq(tasks.companyId, companyId), notInArray(tasks.status, ['done', 'cancelled', 'planned'])))
     .orderBy(desc(tasks.number));
   const running = await db.select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
-    .from(jobs).where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)));
+    .from(jobs).where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), notStep));
   const asked = await db.select({ agentId: requests.agentId, taskId: requests.taskId })
     .from(requests).where(and(eq(requests.companyId, companyId), eq(requests.status, 'open')));
   const afterIds = [...new Set(openTasks.flatMap(t => t.after))];

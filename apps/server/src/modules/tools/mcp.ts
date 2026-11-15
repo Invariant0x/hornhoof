@@ -15,6 +15,7 @@ import { READ_ONLY_MESSAGE } from '../keeper/app-mode.js';
 import { readKeeperState } from '../keeper/state.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
+import { answerOutside } from './outside.js';
 import { registerApprovalControlTools, registerApprovalTools } from './approval-policy.js';
 import { registerControlTools } from './control.js';
 import { registerDepartmentControlTools } from './department-control.js';
@@ -174,8 +175,10 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
   return server;
 }
 
-/* Streamable HTTP without sessions: every POST gets its own server and transport. */
+/* Streamable HTTP without sessions: every POST gets its own server and transport. What a program sends with no turn
+   running comes the same way, from inside, in a step of its own. */
 export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
+  ctx.toolsOutside = (node, call) => answerOutside(app, ctx, node, call);
   app.post('/mcp', async (req, reply) => {
     /* On a machine that only reads: a tool that changes something is turned away before any tool runs while the
        machine has the internet, since it then only waits for the leader or for the CEO, and the front door tries the

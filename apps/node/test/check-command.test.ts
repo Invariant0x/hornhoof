@@ -9,7 +9,7 @@ import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readdirSync, 
 import type { JobUser } from '../src/isolation.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Bridge } from '../src/terminal/bridge.js';
+import { Bridge, type OpensCheck } from '../src/terminal/bridge.js';
 import { procOwner } from '../src/terminal/peer.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -181,6 +181,83 @@ describe('check command bridge', () => {
     await vi.advanceTimersByTimeAsync(1);
     await eventually(() => released);
     expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  describe('with no turn of the agent running', () => {
+    const STEP = '20000000-0000-4000-8000-000000000001';
+    /* A machine queue that gives each slot at once, and what the node asked it for. */
+    function grantingQueue() {
+      const asked: Record<string, unknown>[] = [];
+      const client = new CheckClient(frame => {
+        if (frame.type === 'check.acquire') { asked.push(frame); queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 })); }
+        return true;
+      });
+      client.online(true); setCheckClient(client);
+      onTestFinished(() => { client.online(false); setCheckClient(null); });
+      return asked;
+    }
+    async function bridgeWith(checkStep: OpensCheck) {
+      const bridge = new Bridge('http://127.0.0.1:1', () => {}, null, { checkStep });
+      await bridge.start();
+      onTestFinished(() => bridge.stop());
+      return bridge;
+    }
+    const run = (bridge: Bridge, key: string, script: string) => fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
+      method: 'POST', body: JSON.stringify({ command: [process.execPath, '-e', script], cwd: '/tmp', env: { PATH: process.env.PATH } }),
+    });
+
+    it('runs a command in a step Hornhoof opens for it, with the slot asked for that step, and says how it ended', async () => {
+      const key = '10000000-0000-4000-8000-000000000011';
+      const asked = grantingQueue(), opened: string[] = [], ended: boolean[] = [];
+      const bridge = await bridgeWith(async k => (opened.push(k), { jobId: STEP, signal: new AbortController().signal, end: ok => ended.push(ok) }));
+      expect(await (await run(bridge, key, 'process.exit(7)')).text()).toContain('"type":"exit","code":7');
+      expect(await (await run(bridge, key, 'process.exit(0)')).text()).toContain('"type":"exit","code":0');
+      expect(opened).toEqual([key, key]);
+      expect(ended).toEqual([false, true]);
+      expect(asked).toMatchObject([{ agentId: key, jobId: STEP }, { agentId: key, jobId: STEP }]);
+    });
+
+    it("gives Hornhoof's words when the command may not run, and the old answer when Hornhoof cannot be asked", async () => {
+      const key = '10000000-0000-4000-8000-000000000012';
+      const words = 'This employee is switched off: its tools work again once a person switches it on.';
+      const refusing = await bridgeWith(async () => ({ refused: words }));
+      const refused = await run(refusing, key, 'process.exit(0)');
+      expect([refused.status, await refused.text()]).toEqual([409, words]);
+      const away = await bridgeWith(async () => null);
+      expect((await run(away, key, 'process.exit(0)')).status).toBe(409);
+      /* The program reads the words in what hh-check says. */
+      const cliRun = spawn(process.execPath, [cli, '--', process.execPath, '-e', 'process.exit(0)'], {
+        cwd: '/tmp', env: { PATH: process.env.PATH, HH_BRIDGE: refusing.agent(key).hookUrl }, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stderr = '';
+      cliRun.stderr.on('data', chunk => (stderr += String(chunk)));
+      expect(await new Promise(resolve => cliRun.once('close', resolve))).toBe(1);
+      expect(stderr).toContain(words);
+    });
+
+    it('stops the command at once when Hornhoof stops its step, and not when a turn of the agent starts', async () => {
+      const key = '10000000-0000-4000-8000-000000000013';
+      grantingQueue();
+      const stop = new AbortController(), ended: boolean[] = [];
+      const bridge = await bridgeWith(async () => ({ jobId: STEP, signal: stop.signal, end: ok => ended.push(ok) }));
+      const response = await run(bridge, key, 'process.stdout.write("up");setInterval(()=>{},1000)');
+      const reader = response.body!.getReader();
+      let seen = '';
+      for (let part = await reader.read(); !part.done; part = await reader.read()) {
+        seen += new TextDecoder().decode(part.value);
+        if (seen.includes('"type":"stdout"')) break;
+      }
+      expect(seen).toContain('"type":"stdout"');
+      /* A turn starts: what it stops when it ends are its own commands. */
+      const kills = vi.spyOn(process, 'kill');
+      bridge.setToken(key, 'turn');
+      expect(kills).not.toHaveBeenCalled();
+      kills.mockRestore();
+      stop.abort();
+      for (let part = await reader.read(); !part.done; part = await reader.read()) seen += new TextDecoder().decode(part.value);
+      expect(seen).toContain('"type":"exit","code":null,"signal":"SIGTERM"');
+      expect(ended).toEqual([false]);
+    });
   });
 });
 

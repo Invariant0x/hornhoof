@@ -4,6 +4,7 @@ import { agents, departments, jobs, machines, nodes, subscriptions, tasks, testP
 import { enqueueTurn } from '../conversation/queue.js';
 import { ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
+import { notStep } from '../tools/steps.js';
 
 /* The work that runs on a node now. Each machine that holds the data has a built-in node of its own, so a built-in
    node's work is what names its machine; work that names none is of the built-in node of the machine this server
@@ -13,7 +14,7 @@ export async function drainWork(ctx: Ctx, node: NodeIdentity) {
   const onBuiltin = (machine: typeof jobs.builtinMachine | typeof testParts.builtinMachine, id: string) => (own ? or(eq(machine, id), isNull(machine)) : eq(machine, id));
   const here = node.kind === 'builtin' ? and(isNull(jobs.nodeId), onBuiltin(jobs.builtinMachine, node.machine)) : eq(jobs.nodeId, node.nodeId);
   const turns = await ctx.db.select({ id: jobs.id, kind: jobs.kind, companyId: jobs.companyId, task: tasks.number, agent: agents.name })
-    .from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId)).leftJoin(agents, eq(agents.id, jobs.agentId)).where(and(eq(jobs.status, 'running'), here));
+    .from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId)).leftJoin(agents, eq(agents.id, jobs.agentId)).where(and(eq(jobs.status, 'running'), here, notStep));
   const parts = await ctx.db.select({ id: testParts.id, companyId: testParts.companyId }).from(testParts)
     .where(and(eq(testParts.status, 'running'), node.kind === 'builtin' ? and(eq(testParts.builtin, true), onBuiltin(testParts.builtinMachine, node.machine)) : eq(testParts.nodeId, node.nodeId)))
     .orderBy(testParts.part);

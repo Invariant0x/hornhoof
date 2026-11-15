@@ -865,20 +865,25 @@ describe('connect', () => {
 });
 
 describe('connect acks', () => {
-  async function openedWith(confirms: boolean): Promise<boolean> {
+  async function openedWith(...said: string[]): Promise<{ acks: boolean; tools: boolean }> {
     const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
     onTestFinished(() => server.close());
     await new Promise(r => server.once('listening', r));
-    if (confirms) server.on('headers', headers => headers.push('Hornhoof-Acks: 1'));
-    const opened = new Promise<boolean>(resolve => {
-      const conn = connect({ url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`, key: 'node-key-1234567890', handshakeTimeoutMs: NEVER, onOpen: (_send, acks) => resolve(acks), onMessage: () => {} });
+    server.on('headers', headers => headers.push(...said));
+    const opened = new Promise<{ acks: boolean; tools: boolean }>(resolve => {
+      const conn = connect({ url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`, key: 'node-key-1234567890', handshakeTimeoutMs: NEVER, onOpen: (_send, acks, tools) => resolve({ acks, tools }), onMessage: () => {} });
       onTestFinished(() => conn.close());
     });
     return opened;
   }
 
   it('knows a server that confirms', async () => {
-    expect(await openedWith(true)).toBe(true);
-    expect(await openedWith(false)).toBe(false);
+    expect((await openedWith('Hornhoof-Acks: 1')).acks).toBe(true);
+    expect((await openedWith()).acks).toBe(false);
+  });
+
+  it("knows a server that answers an agent's tools with no turn running, which one from before does not", async () => {
+    expect(await openedWith('Hornhoof-Acks: 1', 'Hornhoof-Tools: 1')).toEqual({ acks: true, tools: true });
+    expect(await openedWith('Hornhoof-Acks: 1')).toEqual({ acks: true, tools: false });
   });
 });

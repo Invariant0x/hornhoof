@@ -5,6 +5,7 @@ import { agentEvents, jobs, nodeConnections, nodes, tasks, testParts, testRuns }
 import { jobCheckLastEnd, jobCheckQueued } from '../nodes/check-slots.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { agentProgramState, signInTurn, SILENT_TURN_MS } from '../tasks/silent.js';
+import { notStep } from '../tools/steps.js';
 
 /* Same grace window checkTestTimes grants a running test part past its run timeout. */
 const TEST_PART_LATE_MS = 2 * 60_000;
@@ -103,7 +104,7 @@ async function externalWaitByTask(ctx: Ctx, taskIds: string[]): Promise<Map<stri
 async function runningWorkOf(ctx: Ctx, node: NodeIdentity): Promise<{ runningJobs: RunningJob[]; runningParts: RunningPart[] }> {
   const jobWhere = node.kind === 'builtin' ? isNull(jobs.nodeId) : eq(jobs.nodeId, node.nodeId);
   const partWhere = node.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, node.nodeId);
-  const runningJobs = await ctx.db.select().from(jobs).where(and(eq(jobs.status, 'running'), jobWhere));
+  const runningJobs = await ctx.db.select().from(jobs).where(and(eq(jobs.status, 'running'), jobWhere, notStep));
   const runningParts = await ctx.db
     .select({ startedAt: testParts.startedAt, queuedAt: testParts.queuedAt, timeoutMs: testRuns.timeoutMs })
     .from(testParts)

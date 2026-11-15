@@ -1,7 +1,9 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import type { NodeMessage } from '@hornhoof/protocol';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
+import { until } from './terminal-host-helpers.js';
 import { cleanups, liveTerminal } from './terminal-host-live-helpers.js';
 
 /* How an agent's program gets Hornhoof's tools through the node. Claude Code and Codex connect to their tools on their own
@@ -44,6 +46,17 @@ function calling(c: Terminal, id: number, method: string): Promise<{ result?: un
   });
 }
 const call = (c: Terminal, id: number, method: string) => c.on(calling(c, id, method));
+
+/* Hornhoof as the node's link reaches it with no turn running: what the program sent, and its answer as /mcp's. */
+function overLink() {
+  const asked: { key: string; method: string }[] = [];
+  const outside = async (key: string, body: string) => {
+    const msg = JSON.parse(body) as { id?: number; method: string };
+    asked.push({ key, method: msg.method });
+    return { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: msg.id ?? null, result: msg.method === 'tools/list' ? { tools: [{ name: 'company' }] } : { overLink: msg.method } }) };
+  };
+  return { asked, outside };
+}
 
 /* What an MCP client sends to connect: it asks the server what it is, then lists its tools. */
 const connect = async (c: Terminal) => [await call(c, 1, 'initialize'), await call(c, 2, 'tools/list')];
@@ -117,6 +130,46 @@ describe("a program's connection to Hornhoof's tools", () => {
     c.finish();
     expect(await c.on(next)).toMatchObject({ ok: true });
     expect(up.heard).toEqual([{ method: 'initialize', auth: 'Bearer tok-turn' }, { method: 'tools/list', auth: 'Bearer tok-turn' }]);
+  });
+
+  it("asks Hornhoof over the node's link for a program that connects or calls a tool between turns, and refuses none of it", async () => {
+    const up = await hornhoof();
+    const link = overLink();
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsOutside: link.outside }, connects: true, watched: true });
+    await connect(c);
+    c.finish();
+    await c.on(c.running);
+    /* The turn's own calls went with its token. */
+    expect(up.heard).toEqual([{ method: 'initialize', auth: 'Bearer tok-turn' }, { method: 'tools/list', auth: 'Bearer tok-turn' }]);
+    /* Started again between turns, it connects and calls a tool, as Claude Code does on what a person typed. */
+    expect(await connect(c)).toEqual([{ jsonrpc: '2.0', id: 1, result: { overLink: 'initialize' } }, { jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'company' }] } }]);
+    expect(await call(c, 3, 'tools/call')).toEqual({ jsonrpc: '2.0', id: 3, result: { overLink: 'tools/call' } });
+    expect(link.asked).toEqual([{ key: 'receipt', method: 'initialize' }, { key: 'receipt', method: 'tools/list' }, { key: 'receipt', method: 'tools/call' }]);
+    expect(up.heard).toHaveLength(2);
+    expect(c.log.mock.calls.filter(([line]) => String(line).startsWith("Hornhoof's tools refused"))).toEqual([]);
+  });
+
+  it("lets a tool call made as a person's words open a turn wait for that turn, and go with its token", async () => {
+    const up = await hornhoof();
+    const link = overLink();
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsOutside: link.outside }, connects: true, watched: true });
+    await connect(c);
+    c.finish();
+    await c.on(c.running);
+    /* A person types into the agent's terminal: Claude Code says so in its hook and waits there while Hornhoof opens a turn. */
+    const opening = vi.spyOn(c.host as unknown as { openingTurn: (key: string) => Promise<unknown> | null }, 'openingTurn');
+    const prompt = c.hook('prompt', { prompt: 'what is on my desk' });
+    await c.until(() => c.sent.some(m => m.type === 'turn.open'));
+    const open = c.sent.find(m => m.type === 'turn.open') as Extract<NodeMessage, { type: 'turn.open' }>;
+    /* The program goes on at once and calls a tool, before Hornhoof answered. */
+    const called = calling(c, 3, 'tools/call');
+    /* While the program's call is on its way the clock stands still, so the turn's wait does not run out meanwhile. */
+    await until(() => opening.mock.results.some(r => r.value !== null));
+    c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'job-typed', toolToken: 'tok-typed', ref: open.ref });
+    expect(await c.on(called)).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
+    expect(up.heard.at(-1)).toEqual({ method: 'tools/call', auth: 'Bearer tok-typed' });
+    expect(link.asked).toEqual([]);
+    await c.on(prompt);
   });
 
   /* A new Kimi session connects to its tools only with its first message, and Antigravity once it takes one, so the node
