@@ -17,6 +17,8 @@ const NODE_ONLY = new Set([
   'KIMI_MODEL_CAPABILITIES', 'KIMI_MODEL_DISPLAY_NAME', 'KIMI_MODEL_MAX_OUTPUT_SIZE', 'KIMI_MODEL_REASONING_KEY',
   'KIMI_MODEL_THINKING_EFFORT', 'KIMI_MODEL_ADAPTIVE_THINKING',
   'AGY_ADC_AUTH', 'GEMINI_API_KEY', 'GOOGLE_GEMINI_BASE_URL',
+  /* The key of an API at an address, which Codex reads for its provider. */
+  'HH_API_KEY',
 ]);
 
 /* A tmux server may outlive the node and still hold old settings. Reset them before reading Hornhoof's private env file. */

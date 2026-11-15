@@ -1213,6 +1213,19 @@ describe('an API by the token at an address', () => {
     expect(programFor('openai_api').bin).toBe('codex');
   });
 
+  it.each([['openrouter', anthropic, 'claude'], ['custom_api', openai, 'codex']] as const)("keeps the key of %s on the node: what its program printed reaches Hornhoof without it", async (provider, api, bin) => {
+    const secret = 'api-key-the-program-printed-0123456789';
+    process.env.FAKE_MODE = 'fail-long';
+    process.env.FAKE_ERROR_SECRET = secret;
+    const msg: Extract<ServerMessage, { type: 'job.run' }> = {
+      type: 'job.run', jobId: 'api-key', subscriptionId: 'key', provider, prompt: 'fail', sessionId: null, model: 'llama-4-maverick', timeoutMs: NEVER_JOB_MS, secret, instructions: null, toolToken: null, api,
+    };
+    const done = await runJob(on(provider, api, bin), msg, dir);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(done.tail).toContain('boom [hidden]');
+    expect(JSON.stringify(done)).not.toContain(secret);
+  });
+
   it("never runs a compatible API that came without its address, so its key goes to no other API", async () => {
     const res = await on('custom_api', null, 'claude').run(input({ secret: ACME_KEY }));
     expect(res).toMatchObject({ ok: false, error: 'agent_failed' });

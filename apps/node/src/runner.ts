@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
 import type { JobUser } from './isolation.js';
@@ -39,7 +39,8 @@ export type RunInput = {
   /* More environment for the program, such as git access to the agent's repository for this turn. */
   env?: Record<string, string>;
 };
-export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean };
+/* tokens: what the turn used, as its program reported it; none when it reports nothing. */
+export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
@@ -81,7 +82,7 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
   const output = program ? programEnded(text, program, program.complete) : text;
   return {
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
-    result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets)), error: res.error,
+    result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
     ...(res.wordsWaiting ? { wordsWaiting: true } : {}),
     ...(res.failure ? { failure: { ...res.failure, text: redact(res.failure.text, secrets).slice(0, 2000) } } : {}),
     ...(program ? { exit: { code: program.code, signal: signalName(program.signal) } } : {}),

@@ -143,7 +143,7 @@ export function builtinAdapters(dir: string, tools: string, { isRoot = isRootUse
     const user = userFor(dir, agent ? `agent:${agent}` : job.subscriptionId, isRoot);
     const home = prepareFolder(agent ? join(dir, 'agents', agent) : join(dir, 'subs', job.subscriptionId), user, ops);
     if (user) ensurePasswd(user, home, files);
-    const adapter = adapterFor(job.provider, { home, tools, user });
+    const adapter = adapterFor(job.provider, { home, tools, user, api: job.api ?? null });
     return {
       ...adapter,
       owner: { user, home, prepare: path => void prepareFolder(path, user, ops) },

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const LOGGED_ENV = [
+const LOGGED_ENV = ['HH_API_KEY', 
   'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CODEX_HOME', 'KIMI_CODE_HOME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
   'API_TIMEOUT_MS', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'CODEX_API_KEY', 'NODE_KEY', 'HORNHOOF_DATA', 'HH_TOOL_TOKEN', 'HOME', 'PATH', 'GIT_ASKPASS', 'HH_GIT_PASSWORD', 'GIT_TERMINAL_PROMPT',
