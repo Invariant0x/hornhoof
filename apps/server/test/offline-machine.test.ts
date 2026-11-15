@@ -1,8 +1,9 @@
 import { EventEmitter } from 'node:events';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { WebSocket } from 'ws';
-import { agentEvents, agents, machines, nodes, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, machines, nodeConnections, nodes, subscriptions, tasks } from '../src/db/schema.js';
+import { pump } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { company } from './department-owner-fixture.js';
 import { as } from './helpers.js';
@@ -13,6 +14,7 @@ import { as } from './helpers.js';
 type C = Awaited<ReturnType<typeof company>>;
 const send = (c: C, token: string, method: 'GET' | 'PATCH', url: string, payload?: object) => c.app.inject({ method, url, ...(payload ? { payload } : {}), ...as(token) });
 const SEEN = new Date('2026-11-13T18:07:00.000Z');
+const MINUTE = 60_000;
 
 async function plan(c: C, label: string, ownerPersonId: string) {
   const [row] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'claude', kind: 'personal', label, status: 'ready', ownerPersonId }).returning();
@@ -29,6 +31,7 @@ async function machineOf(c: C, sub: { id: string; ownerPersonId: string }, hostn
 function connect(c: C, nodeId: string): void {
   const socket = Object.assign(new EventEmitter(), {
     readyState: 1,
+    send() {},
     close() { socket.readyState = 3; socket.emit('close', 1000); },
     ping() { socket.emit('pong'); },
     terminate() { socket.readyState = 3; socket.emit('close', 1006); },
@@ -47,6 +50,8 @@ async function staged() {
   await machineOf(c, away, 'Homebox', SEEN);
   connect(c, (await machineOf(c, spare, 'Office', new Date('2026-11-13T21:00:00.000Z'))).id);
   await c.db.update(agents).set({ subscriptionId: away.id }).where(eq(agents.id, c.worker.id));
+  /* The server's clock reads the evening of that day, long after Homebox went quiet. */
+  c.app.ctx.clock = () => Date.parse('2026-11-13T21:10:00.000Z');
   return { ...c, away, spare, salesPlan };
 }
 
@@ -148,5 +153,49 @@ describe('an agent writing to an employee whose machine is offline', () => {
       'Bruno cannot run now: Homebox, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.' +
         `\nNot delivered: reason machine_offline, recipient ${c.worker.id}, task none.`,
     );
+  });
+});
+
+describe('an agent writing to an employee whose machine is getting back on the line', () => {
+  type Answer = { content: { text: string }[]; isError?: boolean };
+  /* Homebox was on the line for an hour until SEEN, when its connection closed; the server's clock reads this long after. */
+  async function dropped(c: C, after: number) {
+    const [homebox] = await c.db.select({ id: nodes.id, machineId: nodes.machineId }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(machines.hostname, 'Homebox'));
+    await c.db.insert(nodeConnections).values({ companyId: c.companyId, machineId: homebox!.machineId, nodeId: homebox!.id, connectedAt: new Date(SEEN.getTime() - 60 * MINUTE), disconnectedAt: SEEN, cause: 'network' });
+    c.app.ctx.clock = () => SEEN.getTime() + after;
+    const hana = await c.tools(c.head);
+    const write = (text: string) => hana.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text } }) as Promise<Answer>;
+    return { homebox: homebox!, write };
+  }
+  const waiting = (c: C) => c.db.select().from(jobs).where(and(eq(jobs.agentId, c.worker.id), eq(jobs.status, 'queued')));
+  const statusOf = async (c: C, id: string) => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id)))[0]!.status;
+
+  it('keeps the message while the connection is closed, and sends it once the machine is back and says hello', async () => {
+    const c = await staged();
+    const { homebox, write } = await dropped(c, MINUTE);
+    const sent = await write('Go on with the leads');
+    expect([sent.isError, sent.content[0]!.text]).toEqual([undefined, 'Sent to Bruno. Its machine is getting back on the line, so the turn starts once it is back.']);
+    const [turn, ...more] = await waiting(c);
+    expect([turn!.prompt, more]).toEqual([expect.stringContaining('Go on with the leads'), []]);
+    connect(c, homebox.id);
+    await pump(c.app.ctx, c.worker.id);
+    expect(await statusOf(c, turn!.id)).toBe('queued');
+    c.app.ctx.hub.greet(nodeIdentity(homebox.id), true);
+    await pump(c.app.ctx, c.worker.id);
+    expect(await statusOf(c, turn!.id)).toBe('running');
+  });
+
+  it('keeps a message until the machine has been off as long as its card takes, and refuses one with the code from then', async () => {
+    const c = await staged();
+    const { write } = await dropped(c, 5 * MINUTE - 1000);
+    expect((await write('Go on with the leads')).isError).toBeFalsy();
+    c.app.ctx.clock = () => SEEN.getTime() + 5 * MINUTE;
+    const refused = await write('Are you there?');
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toBe(
+      'Bruno cannot run now: Homebox, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.' +
+        `\nNot delivered: reason machine_offline, recipient ${c.worker.id}, task none.`,
+    );
+    expect((await waiting(c)).map(j => j.prompt)).toEqual([expect.stringContaining('Go on with the leads')]);
   });
 });

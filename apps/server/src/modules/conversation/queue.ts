@@ -17,6 +17,7 @@ import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
 import { pickBuiltin } from '../nodes/builtin.js';
 import { cameBack } from '../nodes/connections.js';
+import { shownAway } from '../nodes/machine-away.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -1214,9 +1215,12 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
 /* A node that waits or restarts for an update is not away: it comes back by itself, and its turns wait in line for it. */
 const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isReady(node) || nodeHeld(ctx, node);
 
-/* A node is getting back on the line while its socket is open and it has not said hello yet; one whose socket is closed
-   is away. */
-const comingBack = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isOnline(node) && !ctx.hub.isReady(node);
+/* A node is getting back on the line until it says hello: while its socket is open, or closed while its machine is not
+   off for as long as a card of it takes. The machine of a built-in node has no card, so one whose socket is closed is away. */
+async function comingBack(ctx: Ctx, node: NodeIdentity, machineId?: string): Promise<boolean> {
+  if (ctx.hub.isReady(node)) return false;
+  return ctx.hub.isOnline(node) || (machineId !== undefined && !(await shownAway(ctx, machineId)));
+}
 
 /* Whether the machine an agent's turns wait for is only getting back on the line: they wait in line for it, and go out
    once it says hello. One with work in progress waits for its own machine alone, as its turns do. */
@@ -1228,7 +1232,7 @@ export async function reconnecting(ctx: Ctx, agentId: string): Promise<boolean> 
   const all = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready');
   const own = all.find(n => n.id === agent?.nodeId);
   const waited = own && (await holdsWork(ctx, agentId)) ? [own] : all;
-  return waited.some(n => comingBack(ctx, nodeIdentity(n.id)));
+  return (await Promise.all(waited.map(n => comingBack(ctx, nodeIdentity(n.id), n.machineId)))).some(Boolean);
 }
 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,

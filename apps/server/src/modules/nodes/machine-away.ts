@@ -49,6 +49,16 @@ export function spellToShow(connections: Connection[], heard: Date | null, start
 
 const newest = (dates: (Date | null)[]): Date | null => dates.reduce<Date | null>((best, d) => (d && (!best || d > best) ? d : best), null);
 
+/* Whether the machine is off the line as its card shows it: away now, for as long as a card takes. Until then it may be
+   only getting back on the line, as its connection closes before a new one opens. */
+export async function shownAway(ctx: Pick<Ctx, 'db' | 'startedAt' | 'clock'>, machineId: string): Promise<boolean> {
+  const [connections, heard] = await Promise.all([
+    ctx.db.select().from(nodeConnections).where(eq(nodeConnections.machineId, machineId)),
+    ctx.db.select({ lastSeenAt: nodes.lastSeenAt }).from(nodes).where(eq(nodes.machineId, machineId)),
+  ]);
+  return spellToShow(connections, newest(heard.map(h => h.lastSeenAt)), ctx.startedAt, new Date(ctx.clock()))?.back === null;
+}
+
 const importantOf = (crew: { name: string; kind: string }[]): Important[] =>
   (['orchestrator', 'head'] as const).flatMap(kind => crew.filter(a => a.kind === kind).map(a => ({ name: a.name, kind })));
 
