@@ -1,13 +1,11 @@
 import { useId, useState, type ReactNode } from 'react';
 import { useT } from '../i18n';
-import { askingTask, goalStatus, stateOf, type Asks, type Goal, type HumanStatus, type Split } from '../task-board';
+import { askingTask, goalStatus, type Asks, type Goal, type HumanStatus, type Split } from '../task-board';
 import type { TaskLine } from '../types';
 
 /* How a card opens its task and names where it is: its department or product. asksYou: whether an open question on a task is
-   the person's to answer; question: the words of that question. */
-export type CardRows = {
-  selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string; asksYou?: Asks; question?: (taskId: string) => string | null;
-};
+   the person's to answer. */
+export type CardRows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string; asksYou?: Asks };
 
 /* The colours of a state as the task lists already draw them; the person's own answer in the colour of attention. */
 const STATE_CLASS: Record<HumanStatus, string> = {
@@ -51,18 +49,20 @@ export function Fold({ open, onToggle, children }: { open: boolean; onToggle: ()
   );
 }
 
-/* A task in one short line: its state, its title to open it and who has it. The work under it is not unfolded here; a link
-   opens the task with it. */
+/* A task in one short line: its state, its title to open it and who has it. The work under it is not unfolded here, and a
+   question for the person waits under what waits for them: a link opens the task with that work, or the task that asks. */
 export function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const t = useT();
   const { task } = goal;
-  const open = () => rows.onOpenTask(task.id);
+  const asking = askingTask(goal, rows.asksYou);
   return (
     <li className={`goal-row${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
-      <StateChip status={stateOf(goal, rows.asksYou)} />
-      <button className="linkish goal-row-title" type="button" onClick={open}>{task.title}</button>
+      <StateChip status={goalStatus(goal, asking !== null)} />
+      <button className="linkish goal-row-title" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
       <span className="goal-row-who">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
-      {goal.children.length > 0 && <button className="linkish goal-row-open" type="button" onClick={open}>{t.tasks.board.openTask}</button>}
+      {(asking || goal.children.length > 0) && (
+        <button className="linkish goal-row-open" type="button" onClick={() => rows.onOpenTask(asking?.id ?? task.id)}>{t.tasks.board.openTask}</button>
+      )}
     </li>
   );
 }
@@ -73,21 +73,9 @@ export function GoalRows({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
   return <ul className="goal-rows">{goals.map(goal => <GoalRow key={goal.task.id} goal={goal} rows={rows} />)}</ul>;
 }
 
-/* What waits for the person on a goal: the words of the question, which a button opens to answer. */
-function AskBlock({ question }: { question: string | null }) {
-  const t = useT();
-  const id = useId();
-  return (
-    <div className="goal-ask" role="group" aria-labelledby={id}>
-      <b id={id}>{t.tasks.board.askHead}</b>
-      {question && <p>{question}</p>}
-    </div>
-  );
-}
-
 /* One goal as a card: its title, what it does and why, its state in plain words, where it is, who has it and how many of
-   its related tasks are done. A goal whose work waits for the person's answer is framed, with the question and a button to
-   the task that asks. The related tasks stay folded until one click opens them as short lines. */
+   its related tasks are done. A goal whose work waits for the person's answer is framed and marked, with a button to the
+   task that asks; the question itself is under what waits for the person. The related tasks stay folded until one click opens them as short lines. */
 export function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -111,7 +99,6 @@ export function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
         <span>{task.turn === null ? t.tasks.board.outsideTurns : t.tasks.turn(task.turn)}</span>
         <span>{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
       </div>
-      {asking && <AskBlock question={rows.question?.(asking.id) ?? null} />}
       {goal.total > 0 && <Progress done={goal.done} total={goal.total} label={t.tasks.board.progress(goal.done, goal.total)} />}
       {goal.children.length > 0 && (
         <>

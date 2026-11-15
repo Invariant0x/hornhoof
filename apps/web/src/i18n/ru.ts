@@ -1557,7 +1557,6 @@ export const ru: Messages = {
       related: (done: number, total: number) => `Сопутствующие задачи: ${done} из ${total} готово`,
       progress: (done, total) => `Готово ${done} из ${total}`,
       summary: { label: 'Коротко', you: 'Ждут вашего ответа', youNone: 'Вашего ответа ничего не ждет', running: 'Идут сейчас', ready: 'Готово к выпуску' },
-      askHead: 'Нужен ваш ответ',
       openTask: 'Открыть задачу',
       assignee: (name: string) => `Исполнитель: ${name}`,
       noAssignee: 'Исполнителя пока нет',

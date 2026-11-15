@@ -64,13 +64,16 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     const summary = page.getByRole('list', { name: t.tasks.board.summary.label });
     await expect(summary.getByRole('listitem')).toHaveText([`1 ${t.tasks.board.summary.you}`, `7 ${t.tasks.board.summary.running}`, `0 ${t.tasks.board.summary.ready}`]);
 
-    /* In progress: the goals alone, the related tasks folded, the one that waits for the person first with the question. */
+    /* In progress: the goals alone, the related tasks folded, the one that waits for the person first, marked, its question
+       only in what waits for the person. */
     await expect(goals(page)).toHaveCount(9);
     await expect(related(page)).toHaveCount(0);
     const signIn = card(page, goalOf('Fix the sign-in page').number);
     await expect(goals(page).first()).toHaveAttribute('aria-label', `#${goalOf('Fix the sign-in page').number} Fix the sign-in page`);
     await expect(signIn).toContainText(t.tasks.board.statuses.waitingYou);
-    await expect(signIn.getByRole('group', { name: t.tasks.board.askHead })).toContainText(QUESTION);
+    await expect(signIn).not.toContainText(QUESTION);
+    await expect(signIn.getByRole('button', { name: t.tasks.board.openTask })).toBeVisible();
+    await expect(page.getByRole('region', { name: t.tasks.waiting })).toContainText(QUESTION);
     await expect(signIn).toContainText(t.tasks.board.urgent);
     await expect(signIn).toContainText(t.tasks.board.outsideTurns);
     const payments = card(page, goalOf('Take card payments').number);
@@ -135,8 +138,11 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await expect(next.getByRole('progressbar', { name: t.tasks.board.goalsDone(0, 7) })).toHaveAttribute('aria-valuemax', '7');
     await expect(next.getByRole('listitem')).toHaveCount(7);
     const closed = board(page, t).getByRole('region', { name: t.tasks.board.closedReleases });
+    const released = closed.getByRole('button', { name: new RegExp(`${t.tasks.board.released(2, 'v1.2.0')}.*${t.tasks.board.relCount(1)}`) });
+    await expect(released).toHaveAttribute('aria-expanded', 'false');
     await expect(closed.getByRole('listitem')).toHaveCount(0);
-    await closed.getByRole('button', { name: new RegExp(`${t.tasks.board.released(2, 'v1.2.0')}.*${t.tasks.board.relCount(1)}`) }).click();
+    await released.click();
+    await expect(released).toHaveAttribute('aria-expanded', 'true');
     await expect(row(page, goalOf('Old checkout').number)).toContainText(t.tasks.board.statuses.done);
     await expect(board(page, t).getByText(t.tasks.board.pickDepartment)).toBeVisible();
     await department.selectOption({ label: 'Development' });
@@ -144,11 +150,12 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await capture(page, info, `releases-${lang}`);
     await department.selectOption({ label: t.tasks.board.allDepartments });
     const show = board(page, t).getByRole('group', { name: t.tasks.board.show });
-    await show.getByRole('radio', { name: t.tasks.board.showOutside, exact: true }).check({ force: true });
+    await show.getByText(t.tasks.board.showOutside, { exact: true }).click();
+    await expect(show.getByRole('radio', { name: t.tasks.board.showOutside, exact: true })).toBeChecked();
     await expect(goals(page)).toHaveCount(2);
     await expect(card(page, goalOf('Call the shop owners back').number)).toBeVisible();
     await expect(next).toHaveCount(0);
-    await show.getByRole('radio', { name: t.tasks.board.showReleases, exact: true }).check({ force: true });
+    await show.getByText(t.tasks.board.showReleases, { exact: true }).click();
     await expect(next).toBeVisible();
 
     /* A search looks through every task, the related ones too, by number or words. */

@@ -1537,7 +1537,6 @@ export const en = {
       progress: (done: number, total: number) => `${done} of ${total} done`,
       /* The tiles under the heading: what waits for the person's answer, what goes on now and what is ready for release. */
       summary: { label: 'At a glance', you: 'Waiting for your answer', youNone: 'Nothing waits for your answer', running: 'Going on now', ready: 'Ready for release' },
-      askHead: 'Your answer is needed',
       openTask: 'Open task',
       assignee: (name: string) => `Assignee: ${name}`,
       noAssignee: 'No assignee yet',

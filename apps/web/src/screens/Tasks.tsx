@@ -389,11 +389,10 @@ export function Tasks({ decisions, decisionsFailure, onDecisionsChanged, personI
   const { tasks, failure } = useTasks({ status: 'all' });
   const { turns, failure: turnsFailure } = useTurns();
   const place = (p: TaskLine['department']) => placeName(t, org, p);
-  const questions = new Map<string, string>();
-  for (const r of decisions?.requests ?? []) if (r.canAnswer && !questions.has(r.task.id)) questions.set(r.task.id, r.text);
+  const asking = new Set((decisions?.requests ?? []).filter(r => r.canAnswer).map(r => r.task.id));
   const rows: CardRows = {
     selected, onOpenTask, place: (task: TaskLine) => [task.department ? place(task.department) : t.tasks.board.orchestrator, task.product?.name].filter(Boolean).join(' / '),
-    asksYou: id => questions.has(id), question: id => questions.get(id) ?? null,
+    asksYou: id => asking.has(id),
   };
   const broken = placesFailure ?? failure ?? turnsFailure;
   if (unavailableFailure(broken)) return <RouteUnavailable onHome={onHome} />;

@@ -496,9 +496,9 @@ describe('the tracker at a glance', () => {
   });
 
   it.each([
-    ['en', /^Tasks/, 'Work of the departments', 'Your answer is needed', 'Open task'],
-    ['ru', /^Задачи/, 'Работа отделов', 'Нужен ваш ответ', 'Открыть задачу'],
-  ])('puts first the goal that waits for the answer of the person, framed, with the question and a way to open it (%s)', async (lang, tasks, board, ask, open) => {
+    ['en', /^Tasks/, 'Work of the departments', 'Waiting for your answer', 'Open task', 'Waiting for you'],
+    ['ru', /^Задачи/, 'Работа отделов', 'Ждет вашего ответа', 'Открыть задачу', 'Ждут вас'],
+  ])('puts first the goal that waits for the answer of the person, framed and marked, with a way to open it and its question only in what waits for the person (%s)', async (lang, tasks, board, mark, open, waiting) => {
     localStorage.setItem('hh-lang', lang);
     try {
       const user = userEvent.setup();
@@ -508,7 +508,10 @@ describe('the tracker at a glance', () => {
       const cards = await within(work).findAllByRole('article');
       expect(cards[0]).toHaveAccessibleName('#9 Pick a payment provider');
       expect(cards[0]).toHaveClass('you');
-      expect(within(cards[0]!).getByRole('group', { name: ask })).toHaveTextContent('Stripe or Adyen?');
+      expect(cards[0]).toHaveTextContent(mark);
+      expect(cards[0]).not.toHaveTextContent('Stripe or Adyen?');
+      expect(within(cards[0]!).queryByRole('group')).not.toBeInTheDocument();
+      expect(screen.getByRole('region', { name: waiting })).toHaveTextContent('Stripe or Adyen?');
       expect(within(cards[1]!).queryByRole('button', { name: open })).not.toBeInTheDocument();
       await user.click(within(cards[0]!).getByRole('button', { name: open }));
       expect(await screen.findByRole('complementary', { name: '#9 Pick a payment provider' })).toBeInTheDocument();
@@ -524,7 +527,8 @@ describe('the tracker at a glance', () => {
     await openTasks(user);
     const cards = await within(await screen.findByRole('region', { name: 'Work of the departments' })).findAllByRole('article');
     expect(cards[0]).toHaveAccessibleName('#12 Checkout API');
-    expect(within(cards[0]!).getByRole('group', { name: 'Your answer is needed' })).toHaveTextContent('Which card brands?');
+    expect(cards[0]).toHaveTextContent('Waiting for your answer');
+    expect(cards[0]).not.toHaveTextContent('Which card brands?');
     await user.click(within(cards[0]!).getByRole('button', { name: 'Open task' }));
     await waitFor(() => expect(calls.some(call => call.path === '/api/tasks/t13')).toBe(true));
   });
@@ -586,13 +590,16 @@ describe('the tracker at a glance', () => {
 describe('turns as releases', () => {
   const DONE_IN_TURN = { ...TASKS[1]!, id: 't16', number: 16, title: 'Price list', brief: '', status: 'done' as const, turn: 3, parentId: null };
   it.each([
-    ['en', 'Tasks', 'Turns and releases', 'A turn is everything that goes into one release of the program.', 'Getting ready: turn 3, the release after v1.2.0', '1 of 5 goals done', 'Closed releases', 'Turn 2: release v1.2.0', 'tasks: 1'],
-    ['ru', 'Задачи', 'Ходы и выпуски', 'Ход: все, что войдет в один выпуск программы.', 'Готовится: ход 3, выпуск после v1.2.0', 'Готово 1 из 5 целей', 'Закрытые выпуски', 'Ход 2: выпуск v1.2.0', 'задач: 1'],
-  ])('gets the next release ready, counted in goals, and folds the closed releases with their tasks (%s)', async (lang, tasks, releases, why, preparing, goalsDone, closedHeading, released, count) => {
+    ['en', 'Tasks', 'Turns and releases', 'A turn is everything that goes into one release of the program.', 'Getting ready: turn 3, the release after v1.2.0', '1 of 5 goals done', 'Closed releases', 'Turn 2: release v1.2.0', 'tasks: 1', 'Open task'],
+    ['ru', 'Задачи', 'Ходы и выпуски', 'Ход: все, что войдет в один выпуск программы.', 'Готовится: ход 3, выпуск после v1.2.0', 'Готово 1 из 5 целей', 'Закрытые выпуски', 'Ход 2: выпуск v1.2.0', 'задач: 1', 'Открыть задачу'],
+  ])('gets the next release ready, counted in goals, and folds the closed releases with their tasks (%s)', async (lang, tasks, releases, why, preparing, goalsDone, closedHeading, released, count, open) => {
     localStorage.setItem('hh-lang', lang);
     try {
       const user = userEvent.setup();
-      shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, SUBTASK, PLANNED, DONE_IN_TURN, { ...CLOSED_TASKS[0]!, turn: 2 }] }] });
+      const calls = shell({
+        [`GET ${ALL}`]: [200, { tasks: [...TASKS, SUBTASK, PLANNED, DONE_IN_TURN, { ...CLOSED_TASKS[0]!, turn: 2 }] }],
+        'GET /api/tasks/t9': [200, { task: { ...TASK_DETAIL, id: 't9', number: 9, title: 'Pick a payment provider', parentId: null } }],
+      });
       await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
       await user.click(screen.getByRole('radio', { name: releases }));
       expect(await screen.findByText(new RegExp(`^${why}`))).toBeInTheDocument();
@@ -601,8 +608,16 @@ describe('turns as releases', () => {
       expect(within(next).getByRole('progressbar', { name: goalsDone })).toHaveAttribute('aria-valuemax', '5');
       expect(within(next).getByRole('button', { name: /Price list/ })).toBeInTheDocument();
       expect(within(next).getByRole('button', { name: /Pick a payment provider/ })).toBeInTheDocument();
+      /* The line that waits for the person's answer opens its task like the lines with work under them; a line with neither
+         opens from its title alone. */
+      expect(within(within(next).getByRole('listitem', { name: '#16 Price list' })).queryByRole('button', { name: open })).not.toBeInTheDocument();
       const closed = screen.getByRole('region', { name: closedHeading });
+      /* Every closed release starts folded to its line. */
+      expect(within(closed).getAllByRole('button').map(fold => fold.getAttribute('aria-expanded'))).toEqual(['false']);
+      expect(within(closed).queryAllByRole('listitem')).toHaveLength(0);
       expect(within(closed).queryByRole('button', { name: /Login page/ })).not.toBeInTheDocument();
+      await user.click(within(within(next).getByRole('listitem', { name: '#9 Pick a payment provider' })).getByRole('button', { name: open }));
+      await waitFor(() => expect(calls.some(call => call.path === '/api/tasks/t9')).toBe(true));
       await user.click(within(closed).getByRole('button', { name: new RegExp(`${released}.*${count}`) }));
       expect(await within(closed).findByRole('button', { name: /Login page/ })).toBeInTheDocument();
     } finally {

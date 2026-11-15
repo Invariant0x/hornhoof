@@ -1439,14 +1439,11 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .sum.you:not(.calm) { box-shadow: inset 0 0 0 2px var(--pink); }
 .sum.you:not(.calm) b { color: var(--pink-ink); }
 .sum.you:not(.calm) span { color: var(--ink); font-weight: 600; }
-/* A goal whose work waits for the person's answer: framed, its state marked, the question in its own block, a button to it. */
+/* A goal whose work waits for the person's answer: framed, its state marked, a button to the task that asks. */
 .goal.you { border: 2px solid var(--pink); box-shadow: inset 4px 0 0 var(--pink); }
 [dir="rtl"] .goal.you { box-shadow: inset -4px 0 0 var(--pink); }
 .goal .tstate, .goal-row .tstate { display: inline-flex; align-items: center; gap: 6px; }
 .goal .tstate.you, .goal-row .tstate.you { color: var(--on-pink); background: var(--pink); border-color: var(--pink); }
-.goal-ask { display: grid; gap: 4px; padding: 10px 12px; background: var(--surface2); border-inline-start: 3px solid var(--pink); min-width: 0; }
-.goal-ask b { color: var(--ink); font-size: 13.5px; }
-.goal-ask p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .goal-answer { justify-self: start; }
 /* Related tasks and the goals of a release in one short line each: state, title, who has it. */
 .goal-rows { display: grid; margin: 0; padding: 0; list-style: none; min-width: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
