@@ -9,7 +9,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { CLAUDE_ALIASES, MAX_INSTRUCTIONS, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { adapterFor } from '../src/providers/index.js';
+import { adapterFor, programFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
@@ -22,7 +22,7 @@ import { listenIn } from '../../../test-support/ports.mjs';
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
 const FAKE_BIN: Record<ProviderId, string> = {
-  claude: 'claude', anthropic_api: 'claude', glm: 'claude', codex: 'codex', openai_api: 'codex', kimi: 'kimi', antigravity: 'agy',
+  claude: 'claude', anthropic_api: 'claude', glm: 'claude', codex: 'codex', openai_api: 'codex', kimi: 'kimi', antigravity: 'agy', openrouter: 'claude', custom_api: 'claude',
 };
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
 const CLAUDE_SESSION = '5e55c1a0-0000-4000-8000-000000000001';
@@ -1163,3 +1163,70 @@ describe('helpers', () => {
   });
 });
 
+describe('an API by the token at an address', () => {
+  const ROUTER_KEY = 'sk-or-v1-router-key-0123456789abcdef';
+  const ACME_KEY = 'acme-llm-key-0123456789abcdef';
+  const anthropic = { baseUrl: 'https://openrouter.ai/api', protocol: 'anthropic' } as const;
+  const openai = { baseUrl: 'https://llm.acme.example/v1', protocol: 'openai' } as const;
+  const on = (provider: ProviderId, api: typeof anthropic | typeof openai | null, bin: string) => adapterFor(provider, { home, tools, bin: join(FAKES, bin), api });
+
+  it("runs in Claude Code for Anthropic's protocol, with the key as its bearer token and the chosen model for every alias", async () => {
+    const res = await on('openrouter', anthropic, 'claude').run(input({ secret: ROUTER_KEY, model: 'anthropic/claude-sonnet-4.5' }));
+    expect(res.ok).toBe(true);
+    const { argv, env } = lastRun();
+    expect(env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_AUTH_TOKEN: ROUTER_KEY,
+      /* Claude Code would sign in to Anthropic with a key of its own, so that one is set empty. */
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'anthropic/claude-sonnet-4.5',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'anthropic/claude-sonnet-4.5',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'anthropic/claude-sonnet-4.5',
+    });
+    expect(argv).toEqual(expect.arrayContaining(['--model', 'anthropic/claude-sonnet-4.5']));
+    expect(argv.join(' ')).not.toContain(ROUTER_KEY);
+    expect(await on('openrouter', anthropic, 'claude').models!()).toEqual([]);
+  });
+
+  it("runs in Codex for OpenAI's protocol as a provider of its own, the key in an env variable only", async () => {
+    const res = await on('custom_api', openai, 'codex').run(input({ secret: ACME_KEY, model: 'llama-4-maverick' }));
+    expect(res.ok).toBe(true);
+    const { argv, env } = lastRun();
+    expect(argv).toEqual(expect.arrayContaining([
+      '-c', 'model_provider="hornhoof"',
+      '-c', 'model_providers.hornhoof.name="API"',
+      '-c', 'model_providers.hornhoof.base_url="https://llm.acme.example/v1"',
+      '-c', 'model_providers.hornhoof.env_key="HH_API_KEY"',
+      '-c', 'model_providers.hornhoof.wire_api="responses"',
+      '-m', 'llama-4-maverick',
+    ]));
+    expect(env.HH_API_KEY).toBe(ACME_KEY);
+    /* OpenAI's own key would send it to OpenAI. */
+    expect(env).not.toHaveProperty('CODEX_API_KEY');
+    expect(argv.join(' ')).not.toContain(ACME_KEY);
+  });
+
+  it('picks the program by the protocol, Claude Code for OpenRouter unless told otherwise', () => {
+    expect(programFor('openrouter').bin).toBe('claude');
+    expect(programFor('openrouter', anthropic).bin).toBe('claude');
+    expect(programFor('custom_api', openai).bin).toBe('codex');
+    expect(programFor('openai_api').bin).toBe('codex');
+  });
+
+  it("never runs a compatible API that came without its address, so its key goes to no other API", async () => {
+    const res = await on('custom_api', null, 'claude').run(input({ secret: ACME_KEY }));
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(res.output).toContain('address');
+    expect(existsSync(logFile)).toBe(false);
+  });
+});
+
+describe("a turn's tokens", () => {
+  it('come from what each program reported, and are no data where it reports none', async () => {
+    expect((await adapter('claude').run(input())).tokens).toEqual({ input: 2, output: 4, cacheRead: null, cacheWrite: null, total: 6 });
+    expect((await adapter('glm').run(input())).tokens).toEqual({ input: 2, output: 4, cacheRead: null, cacheWrite: null, total: 6 });
+    expect((await adapter('codex').run(input())).tokens).toEqual({ input: 3316, output: 5, cacheRead: 12288, cacheWrite: 0, total: 15609 });
+    expect((await adapter('antigravity').run(input())).tokens).toEqual({ input: 2305, output: 589, cacheRead: 8113, cacheWrite: null, total: 11007 });
+    expect((await adapter('kimi').run(input())).tokens ?? null).toBeNull();
+  });
+});
