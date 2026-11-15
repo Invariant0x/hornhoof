@@ -27,7 +27,8 @@ const TIMEOUT_MS = 15_000;
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_MODELS = 1000;
 
-const hostOf = (url: URL): string => url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+/* A name that ends in the root's dot is the same name. */
+const hostOf = (url: URL): string => url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase();
 
 /* Whether an address names this machine or a network inside, which the server's operator did not allow. A name that
    only resolves to one is caught when the server asks it. */
