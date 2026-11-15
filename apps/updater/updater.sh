@@ -2331,37 +2331,59 @@ live_subnet() {
   printf '%s' "${cfg%%,*}"
 }
 
-# Whether the project's networks were made before its compose file named their subnets: the file names them, the
-# settings hold none yet, and Docker has a network of the project. Compose takes such a network for one whose settings
-# changed and removes it to make it again, which it cannot while other containers are on it, so it would start nothing.
-# OLD_DEFAULT and OLD_INTERNAL are the subnets those networks have.
+# The subnets the project's networks have in Docker, OLD_DEFAULT and OLD_INTERNAL, each empty when there is no such
+# network; fails when Docker has neither.
 OLD_DEFAULT=''
 OLD_INTERNAL=''
-old_networks() {
+live_networks() {
   local project found=''
-  grep -q 'HORNHOOF_SUBNET' "$SERVER_DIR/compose.yaml" 2> /dev/null || return 1
-  [ -z "$(env_value HORNHOOF_SUBNET)" ] || [ -z "$(env_value HORNHOOF_INTERNAL_SUBNET)" ] || return 1
   project=$(compose_project)
-  if OLD_DEFAULT=$(live_subnet "${project}_default"); then found=1; fi
-  if OLD_INTERNAL=$(live_subnet "${project}_internal"); then found=1; fi
+  if OLD_DEFAULT=$(live_subnet "${project}_default"); then found=1; else OLD_DEFAULT=''; fi
+  if OLD_INTERNAL=$(live_subnet "${project}_internal"); then found=1; else OLD_INTERNAL=''; fi
   [ -n "$found" ]
 }
 
-# new_networks <log>: the settings name the subnets the networks have, so every address on them stays, and the project
-# stops whole with its networks, its data staying in its volumes. The built-in node hears first that it stops for an
-# update, as when the installer stops it. The next up makes the networks again with those subnets.
+# Whether the networks Docker has are not the ones the compose file asks for: the file names their subnets, and the
+# settings hold none for a network that is there, or another subnet than it has. Compose takes such a network for
+# changed and removes it to make it again, which it cannot while other containers are on it, so it would start nothing.
+old_networks() {
+  local want_default want_internal
+  grep -q 'HORNHOOF_SUBNET' "$SERVER_DIR/compose.yaml" 2> /dev/null || return 1
+  live_networks || return 1
+  want_default=$(env_value HORNHOOF_SUBNET)
+  want_internal=$(env_value HORNHOOF_INTERNAL_SUBNET)
+  { [ -n "$OLD_DEFAULT" ] && [ "$want_default" != "$OLD_DEFAULT" ]; } || { [ -n "$OLD_INTERNAL" ] && [ "$want_internal" != "$OLD_INTERNAL" ]; }
+}
+
+# Whether compose refused because Docker would not remove a network of the project that containers are still on. Its
+# file asks for the network otherwise than it was made, in a way Docker does not show, as a network made with no
+# subnets named, which Docker shows with the subnet it gave.
+endpoints_refused() { grep -q 'has active endpoints' "$1" 2> /dev/null && live_networks; }
+
+# new_networks <log>: the settings name the subnets the networks have where they name none, so every address on them
+# stays, and the project stops whole with its networks, the containers its file no longer names too, its data staying
+# in its volumes. The built-in node hears first that it stops for an update, as when the installer stops it. The next
+# up makes the networks again with those subnets. ADDED_SUBNETS names the settings it wrote.
+ADDED_SUBNETS=''
 new_networks() {
   local node
-  if [ -n "$OLD_DEFAULT" ] && [ -z "$(env_value HORNHOOF_SUBNET)" ]; then PUT_VALUE=$OLD_DEFAULT put_env HORNHOOF_SUBNET || return 1; fi
-  if [ -n "$OLD_INTERNAL" ] && [ -z "$(env_value HORNHOOF_INTERNAL_SUBNET)" ]; then PUT_VALUE=$OLD_INTERNAL put_env HORNHOOF_INTERNAL_SUBNET || return 1; fi
+  if [ -n "$OLD_DEFAULT" ] && [ -z "$(env_value HORNHOOF_SUBNET)" ]; then
+    PUT_VALUE=$OLD_DEFAULT put_env HORNHOOF_SUBNET || return 1
+    ADDED_SUBNETS="$ADDED_SUBNETS HORNHOOF_SUBNET"
+  fi
+  if [ -n "$OLD_INTERNAL" ] && [ -z "$(env_value HORNHOOF_INTERNAL_SUBNET)" ]; then
+    PUT_VALUE=$OLD_INTERNAL put_env HORNHOOF_INTERNAL_SUBNET || return 1
+    ADDED_SUBNETS="$ADDED_SUBNETS HORNHOOF_INTERNAL_SUBNET"
+  fi
   node=$(compose ps -q node 2> /dev/null || true)
   [ -z "$node" ] || docker exec "$node" node /app/apps/node/dist/main.js prepare-stop hornhoof_update > /dev/null 2>&1 || true
   compose down --remove-orphans >> "$1" 2>&1
 }
 
 # old_build_up <log>: the build from before starts whole again, with the compose file and the settings it had, on
-# networks made as that file makes them, since its updater goes back with its own file. That updater finds the way
-# back marked and goes back by itself, with the database it had, which runs again with it.
+# networks made as that file makes them, since its updater goes back with its own file. Only the subnets new_networks
+# wrote leave the settings. That updater finds the way back marked and goes back by itself, with the database it had,
+# which runs again with it.
 old_build_up() {
   local ok=''
   WORK=$(mktemp -d)
@@ -2369,7 +2391,10 @@ old_build_up() {
   rm -rf "$WORK"
   WORK=''
   [ -n "$ok" ] || return 1
-  drop_env HORNHOOF_SUBNET HORNHOOF_INTERNAL_SUBNET || return 1
+  if [ -n "$ADDED_SUBNETS" ]; then
+    # shellcheck disable=SC2086 # setting names, one word each
+    drop_env $ADDED_SUBNETS || return 1
+  fi
   compose down --remove-orphans >> "$1" 2>&1 || true
   HORNHOOF_APP_REF="$BACK_APP" HORNHOOF_NODE_REF="$BACK_NODE" HORNHOOF_UPDATER_REF="$BACK_UPDATER" compose up -d --no-build >> "$1" 2>&1
 }
@@ -2393,9 +2418,10 @@ compose_said() {
 
 # The helper container this build's installer starts when an older updater runs it. Compose replaces that updater, and
 # the installer waiting in it, with this build's, which finds the update by the older one's note. If it does not say so
-# in time, the older updater starts again, finds step rollback and goes back, by itself. On networks made before compose
-# files named their subnets, the project stops first and its networks are made again, and then the way back brings the
-# build from before up whole, as nothing of it runs any more.
+# in time, the older updater starts again, finds step rollback and goes back, by itself. On networks other than the
+# compose file asks for, as Docker shows them or as compose says when it refuses, the project stops first and its
+# networks are made again, once, and then the way back brings the build from before up whole, as nothing of it runs any
+# more.
 take_over() {
   local said fresh=''
   update_running || return 0
@@ -2404,15 +2430,21 @@ take_over() {
   said=$(mktemp)
   if old_networks; then
     fresh=1
+  elif compose up -d --no-build --wait updater > "$said" 2>&1 && taken_over; then
+    rm -f "$said"
+    return 0
+  elif endpoints_refused "$said"; then
+    compose_said "$said"
+    fresh=1
+  fi
+  if [ -n "$fresh" ]; then
     say "The networks of this server are made again with the subnets they have, so Hornhoof stops for a moment."
     write_status running install
+    : > "$said"
     if new_networks "$said" && compose up -d --no-build --wait db updater >> "$said" 2>&1 && taken_over; then
       rm -f "$said"
       return 0
     fi
-  elif compose up -d --no-build --wait updater > "$said" 2>&1 && taken_over; then
-    rm -f "$said"
-    return 0
   fi
   say "This build's updater did not start, so the build from before goes back."
   compose_said "$said"

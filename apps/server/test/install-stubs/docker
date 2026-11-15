@@ -91,9 +91,10 @@ next_pool_subnet() {
   printf '192.168.240.0/20'
 }
 ensure_compose_network() {
-  local project=$1 suffix=$2 var=$3 internal=$4 name sub='' has_gw=1 n id
+  local project=$1 suffix=$2 var=$3 internal=$4 name sub='' has_gw=1 n id made=''
   name="${project}_${suffix}"
   grep -Fq "|$name|" "$PORTS/networks" 2> /dev/null && return 0
+  [ -z "${STUB_RUNNING_SERVICES:-}" ] || made=$(made_by "$var")
   if [ -f compose.yaml ] && grep -Fq "$var" compose.yaml; then
     sub=$(grep "^$var=" .env 2> /dev/null | tail -1 | cut -d= -f2-)
     [ -n "$sub" ] || sub=$(sed -n "s/.*${var}:-\\([^}]*\\)}.*/\\1/p" compose.yaml | head -1)
@@ -104,7 +105,76 @@ ensure_compose_network() {
   n=$(($(cat "$PORTS/net-count" 2> /dev/null || echo 0) + 1))
   echo "$n" > "$PORTS/net-count"
   id=$(printf 'net%012d' "$n")
-  printf '%s|%s|%s|%s|%s|\n' "$id" "$name" "$project" "$sub" "$internal" >> "$PORTS/networks"
+  printf '%s|%s|%s|%s|%s||%s\n' "$id" "$name" "$project" "$sub" "$internal" "$made" >> "$PORTS/networks"
+}
+# A network record's seventh field says how compose made it: "plain" by a compose file that named no subnet for it,
+# "subnets" by one that did, nothing when compose kept no mark of it. STUB_RUNNING_SERVICES words are the services of the
+# project whose containers run now, kept in $STUB_STATE/running from then on; with them the networks this stub makes are
+# marked too. Compose takes a marked network its file asks for otherwise for changed: it stops the services of the up
+# that are on it and removes it to make it again, which Docker refuses while another container that runs is on it.
+made_by() { if grep -Fq "$1" compose.yaml 2> /dev/null; then echo subnets; else echo plain; fi; }
+RUNNING="$STUB_STATE/running"
+running() {
+  [ -f "$RUNNING" ] || for svc in ${STUB_RUNNING_SERVICES:-}; do echo "$svc"; done > "$RUNNING"
+  cat "$RUNNING"
+}
+# not_running <service>...: those services' containers no longer run.
+not_running() {
+  local svc list
+  list=$(running)
+  for svc in "$@"; do list=$(grep -vx "$svc" <<< "$list" || true); done
+  printf '%s\n' "$list" | awk 'NF' > "$RUNNING"
+}
+now_running() {
+  { running; for svc in "$@"; do echo "$svc"; done; } | awk 'NF && !seen[$0]++' > "$RUNNING.new"
+  mv "$RUNNING.new" "$RUNNING"
+}
+file_services() { awk '/^services:/ { s = 1; next } /^[^ #]/ { s = 0 } s && /^  [a-z][a-z-]*:/ { sub(":.*", "", $1); print $1 }' compose.yaml 2> /dev/null; }
+# The services on each network, as compose.yaml puts them, with the tunnel of a build from before on the default one.
+# STUB_STAYS_ON words are containers outside the project on the default network, which no down of it stops.
+# shellcheck disable=SC2086 # container names, one word each
+on_network() { case "$1" in default) echo front keeper app node updater tunnel ${STUB_STAYS_ON:-} ;; *) echo keeper migrate app db ;; esac; }
+networks_diverge() {
+  [ -n "${STUB_RUNNING_SERVICES:-}" ] || return 0
+  init_networks
+  local project chosen suffix var name line made id holders svc
+  project=$(grep '^COMPOSE_PROJECT_NAME=' .env 2> /dev/null | tail -1 | cut -d= -f2-)
+  [ -n "$project" ] || project=$(basename "$PWD")
+  chosen=" $(up_services "$@") "
+  [ -n "${chosen// /}" ] || chosen=" $(file_services | tr '\n' ' ') "
+  for suffix in default internal; do
+    name="${project}_${suffix}"
+    line=$(grep -F "|$name|" "$PORTS/networks" | head -1 || true)
+    [ -n "$line" ] || continue
+    made=$(cut -d'|' -f7 <<< "$line")
+    if [ "$suffix" = default ]; then var=HORNHOOF_SUBNET; else var=HORNHOOF_INTERNAL_SUBNET; fi
+    [ -n "$made" ] && [ "$made" != "$(made_by "$var")" ] || continue
+    holders=''
+    for svc in $(on_network "$suffix"); do
+      case "$chosen" in *" $svc "*) continue ;; esac
+      if running | grep -qx "$svc"; then holders="$holders $svc"; fi
+    done
+    id=$(cut -d'|' -f1 <<< "$line")
+    if [ -n "$holders" ]; then
+      printf 'network %s held by%s\n' "$name" "$holders" >> "$STUB_LOG"
+      echo "Error response from daemon: error while removing network: network $name id $id has active endpoints" >&2
+      exit 1
+    fi
+    printf 'network %s made again\n' "$name" >> "$STUB_LOG"
+    # shellcheck disable=SC2046 # service names, one word each
+    not_running $(on_network "$suffix")
+    awk -F'|' -v n="$name" '$2 != n' "$PORTS/networks" > "$PORTS/networks.new"
+    mv "$PORTS/networks.new" "$PORTS/networks"
+  done
+}
+# What runs once an up or a down is through, and what a stop leaves.
+services_run() {
+  [ -n "${STUB_RUNNING_SERVICES:-}" ] || return 0
+  local chosen
+  chosen=$(up_services "$@")
+  [ -n "${chosen// /}" ] || chosen=$(file_services | tr '\n' ' ')
+  # shellcheck disable=SC2086 # service names, one word each
+  now_running $chosen
 }
 subnets_overlap_fail() {
   local project cidr flag
@@ -134,10 +204,24 @@ compose_networks_up() {
 compose_networks_down() {
   [ -f "$PORTS/networks" ] || [ -n "${STUB_DOCKER_NETWORKS:-}" ] || return 0
   init_networks
-  local project
+  local project kept=''
   project=$(grep '^COMPOSE_PROJECT_NAME=' .env 2> /dev/null | tail -1 | cut -d= -f2-)
   [ -n "$project" ] || project=$(basename "$PWD")
-  awk -F'|' -v p="$project" '$3 != p && $2 != p "_default" && $2 != p "_internal"' "$PORTS/networks" > "$PORTS/networks.new"
+  if [ -n "${STUB_RUNNING_SERVICES:-}" ]; then
+    # A down stops what the file names; the containers of services it names no more stay unless it removes the orphans,
+    # and Docker keeps the default network that containers still run on.
+    case " $* " in
+      *' --remove-orphans '*)
+        : > "$RUNNING"
+        # shellcheck disable=SC2086 # container names, one word each
+        now_running ${STUB_STAYS_ON:-} ;;
+      *)
+        # shellcheck disable=SC2046 # service names, one word each
+        not_running $(file_services) ;;
+    esac
+    if [ -n "$(running)" ]; then kept="${project}_default"; fi
+  fi
+  awk -F'|' -v p="$project" -v kept="$kept" '$2 == kept || ($3 != p && $2 != p "_default" && $2 != p "_internal")' "$PORTS/networks" > "$PORTS/networks.new"
   mv "$PORTS/networks.new" "$PORTS/networks"
 }
 case "$1" in
@@ -157,6 +241,8 @@ case "$1" in
       *) echo cid-app ;;
     esac ;;
   rm) if [ "${2:-}" = "$(cat "$PORTS/lock" 2> /dev/null)" ]; then rm -f "$PORTS/lock"; fi ;;
+  # The built-in node's container stops.
+  stop) if [ -n "${STUB_RUNNING_SERVICES:-}" ] && [ "${!#}" = nodecid ]; then not_running node; fi ;;
   # STUB_NO_OVERLAY=1: a build from before machines had the company's core.
   cp)
     case "$2" in
@@ -193,14 +279,15 @@ case "$1" in
   compose)
     # STUB_COMPOSE_VERSION: what "compose version --short" says; nothing unless a test names one.
     case "$*" in 'compose version --short') [ -z "${STUB_COMPOSE_VERSION:-}" ] || echo "$STUB_COMPOSE_VERSION"; exit 0 ;; esac
-    case " $* " in *' up '*) up_fails "$@"; binds_ports "$@"; subnets_overlap_fail "$@"; migrate_runs "$@"; compose_networks_up "$@" ;; esac
-    case " $* " in *' down '*) compose_networks_down ;; esac
+    case " $* " in *' up '*) up_fails "$@"; binds_ports "$@"; subnets_overlap_fail "$@"; migrate_runs "$@"; networks_diverge "$@"; compose_networks_up "$@"; services_run "$@" ;; esac
+    case " $* " in *' down '*) compose_networks_down "$@" ;; esac
     case "$*" in
-      *' down') compose_networks_down ;;
+      *' stop app') [ -z "${STUB_RUNNING_SERVICES:-}" ] || not_running app ;;
+      *' down') compose_networks_down "$@" ;;
       *' pull') case "${STUB_PULL:-ok}" in fail) echo "pull access denied" >&2; exit 1 ;; esac ;;
       # STUB_SERVICES: the services the folder's compose files name, with the profiles its settings turn on.
       *' config --services') for s in ${STUB_SERVICES:-}; do echo "$s"; done ;;
-      *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
+      *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && { [ -z "${STUB_RUNNING_SERVICES:-}" ] || running | grep -qx node; } && echo nodecid ;;
       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
       *'cat /control/tunnel.json') if [ -n "${STUB_TUNNEL_SETTINGS:-}" ]; then echo "$STUB_TUNNEL_SETTINGS"; else echo "cat: can't open /control/tunnel.json" >&2; exit 1; fi ;;
@@ -230,7 +317,7 @@ case "$1" in
         fmt=''
         if [ "${1:-}" = --format ]; then fmt=${2:-}; shift 2; fi
         for want in "$@"; do
-          while IFS='|' read -r id name proj sub internal bridge; do
+          while IFS='|' read -r id name proj sub internal bridge _; do
             [ -n "$id" ] || continue
             [ "$id" = "$want" ] || [ "$name" = "$want" ] || continue
             cidr=${sub%%,*}

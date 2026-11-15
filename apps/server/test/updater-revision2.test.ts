@@ -354,11 +354,16 @@ describe('updater, revision 2', () => {
   const REMADE = 'The networks of this server are made again with the subnets they have, so Hornhoof stops for a moment.';
   const DOWN = 'docker compose down --remove-orphans';
   const composeOf = (s: Stand) => readFileSync(join(s.server, 'compose.yaml'), 'utf8');
-  /* This build's updater says it goes on while the helper waits its first second for it. */
+  /* This build's updater says it goes on while the helper waits its first second for it, after what the log says by then,
+     as it reads the log it goes on with. */
   function goesOnMeanwhile(s: Stand) {
-    const later = join(s.dir, 'status-later.json');
-    writeFileSync(later, JSON.stringify({ ...JSON.parse(readFileSync(statusFile(s), 'utf8')), log: `${GOES_ON}\n` }));
-    return { HORNHOOF_TAKE_OVER_WAIT: '10', STUB_DURING_SLEEP: `[ ! -f "${later}" ] || mv "${later}" "${statusFile(s)}"` };
+    const once = join(s.dir, 'goes-on-once');
+    const status = statusFile(s);
+    writeFileSync(once, '');
+    return {
+      HORNHOOF_TAKE_OVER_WAIT: '10',
+      STUB_DURING_SLEEP: `[ ! -f "${once}" ] || { jq --arg l "${GOES_ON}" '.log |= (if . == "" or endswith("\\n") then . else . + "\\n" end) + $l + "\\n"' "${status}" > "${status}.new" && mv "${status}.new" "${status}" && rm "${once}"; }`,
+    };
   }
 
   it("makes the networks of a server from before subnets again with the subnets they have, and this build's updater goes on", async () => {
@@ -436,14 +441,79 @@ describe('updater, revision 2', () => {
     expect(t.status.log).not.toContain(secret);
   });
 
-  it('writes into the log that compose could not make the networks again, for each updater', async () => {
-    /* Settings that name subnets the networks were not made with: nothing tells this updater to make them again. */
-    const { s } = await handedOver('n7', PLAIN, `${PLAIN_ENV}HORNHOOF_SUBNET=172.18.0.0/16\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n`);
-    const t = await takeOver(s, { ...PLAIN, HORNHOOF_TAKE_OVER_WAIT: '1' });
-    expect(t.status).toMatchObject({ id: 'n7', state: 'failed', step: 'finished' });
-    const refused = 'Compose said: Error response from daemon: error while removing network: network hornhoof_default id 3f1e9a has active endpoints';
-    expect(t.status.log.split('\n').filter((line: string) => line === refused)).toHaveLength(2);
+  /* Settings that name the subnets the networks have, as an install by hand of 0.24.0 wrote before it stopped: neither
+     the settings nor Docker show that the networks were made with no subnets named, only compose's refusal does. */
+  const NAMED_ENV = `${PLAIN_ENV}HORNHOOF_SUBNET=172.18.0.0/16\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n`;
+  const REFUSED = 'Compose said: Error response from daemon: error while removing network: network hornhoof_default id 3f1e9a has active endpoints';
+  const PREPARE = 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update';
+
+  it('makes the networks again once compose says other containers are on them, when the settings name their subnets already', async () => {
+    const { s, first } = await handedOver('n7', PLAIN, NAMED_ENV);
+    const t = await takeOver(s, { ...PLAIN, ...goesOnMeanwhile(s) });
+    expect(t.status).toMatchObject({ id: 'n7', state: 'running', step: 'install' });
+    expect(t.status.log).toContain(GOES_ON);
+    expect(t.status.log).not.toContain(NO_START);
+    const log = t.status.log.split('\n');
+    expect(log.filter((line: string) => line === REFUSED)).toHaveLength(1);
+    expect(log.indexOf(REMADE)).toBeGreaterThan(log.indexOf(REFUSED));
+    const calls = t.calls.slice(first.calls.length);
+    const refused = calls.indexOf('docker compose up -d --no-build --wait updater');
+    const down = calls.indexOf(DOWN);
+    expect(refused).toBeGreaterThan(-1);
+    expect(calls.indexOf(PREPARE)).toBeGreaterThan(refused);
+    expect(down).toBeGreaterThan(calls.indexOf(PREPARE));
+    expect(calls.indexOf('docker compose up -d --no-build --wait db updater')).toBeGreaterThan(down);
+    expect(calls.filter(c => c === DOWN)).toHaveLength(1);
+    expect(envOf(s)).toContain('\nHORNHOOF_SUBNET=172.18.0.0/16\n');
+    expect(envOf(s)).toContain('\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n');
+    const r = await runOnce(s, null, { ...PLAIN, STUB_BROKEN: '', STUB_PROJECT_CONTAINERS: MOVED_IN });
+    expect(r.status).toMatchObject({ id: 'n7', state: 'done', step: 'finished' });
+    expect(readState(s, 'running')).toBe('bbb');
+  });
+
+  it('makes the networks again only once, and then brings the build from before back whole with why in the log', async () => {
+    const { s, first } = await handedOver('n8', PLAIN, NAMED_ENV);
+    const t = await takeOver(s, { ...PLAIN, STUB_UPDATER_UP: 'never', HORNHOOF_TAKE_OVER_WAIT: '1' });
+    expect(t.status).toMatchObject({ id: 'n8', state: 'running', step: 'rollback' });
+    const log = t.status.log.split('\n');
+    expect(log.filter((line: string) => line === REFUSED)).toHaveLength(1);
+    expect(log.filter((line: string) => line === REMADE)).toHaveLength(1);
+    expect(log.indexOf(NO_START)).toBeGreaterThan(log.indexOf(REMADE));
+    const calls = t.calls.slice(first.calls.length);
+    expect(calls.filter(c => c === 'docker compose up -d --no-build --wait db updater')).toHaveLength(1);
+    expect(calls.filter(c => c === DOWN)).toHaveLength(2);
+    expect(calls.indexOf(`all up ${refs('0.4.0')}`)).toBeGreaterThan(calls.lastIndexOf(DOWN));
+    expect(composeOf(s)).toContain('# build 0.4.0');
+    /* The settings had the subnets before the update, so they keep them. */
+    expect(envOf(s)).toContain('\nHORNHOOF_SUBNET=172.18.0.0/16\n');
+    expect(envOf(s)).toContain('\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n');
+    const r = await runRev1(s, null, PLAIN);
+    expect(r.status).toMatchObject({ id: 'n8', state: 'rolled_back', step: 'finished' });
+    expect(readState(s, 'running')).toBe('aaa');
+    expect(readState(s, 'migrations')).toBe('20');
+  });
+
+  it('makes the networks again before it starts anything, when the settings name another subnet than a network has', async () => {
+    const moved = `${PLAIN_ENV}HORNHOOF_SUBNET=10.200.5.0/24\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n`;
+    const { s, first } = await handedOver('n9', { ...PLAIN, STUB_NETWORKS: 'subnets' }, moved);
+    const t = await takeOver(s, { ...PLAIN, STUB_NETWORKS: 'subnets', ...goesOnMeanwhile(s) });
+    expect(t.status.log).toContain(REMADE);
+    expect(t.status.log).toContain(GOES_ON);
+    const calls = t.calls.slice(first.calls.length);
+    expect(calls.findIndex(c => c.startsWith('docker compose up'))).toBeGreaterThan(calls.indexOf(DOWN));
+    expect(calls).not.toContain('docker compose up -d --no-build --wait updater');
+    expect(envOf(s)).toContain('\nHORNHOOF_SUBNET=10.200.5.0/24\n');
+  });
+
+  it('leaves networks made with the subnets the settings name as they are, and the built-in node runs on', async () => {
+    const { s, first } = await handedOver('n10', { ...PLAIN, STUB_NETWORKS: 'subnets' }, NAMED_ENV);
+    const t = await takeOver(s, { ...PLAIN, STUB_NETWORKS: 'subnets', ...goesOnMeanwhile(s) });
+    expect(t.status).toMatchObject({ id: 'n10', state: 'running', step: 'install' });
+    expect(t.status.log).toContain(GOES_ON);
     expect(t.status.log).not.toContain(REMADE);
+    const calls = t.calls.slice(first.calls.length);
+    expect(calls.filter(c => c.startsWith('docker compose'))).toEqual(['docker compose up -d --no-build --wait updater']);
+    expect(calls).not.toContain(PREPARE);
   });
 
   it('does nothing when there is no status at all', async () => {
