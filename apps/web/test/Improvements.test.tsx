@@ -323,22 +323,16 @@ describe('improvements', () => {
     await user.keyboard('{Enter}');
     const improvements = await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
     const versions = screen.getByRole('button', { name: 'Versions' });
-    const profile = screen.getByRole('button', { name: 'Settings' });
-    const companySettings = screen.getByRole('button', { name: 'Company settings' });
-    const feedback = screen.getByRole('button', { name: 'Feedback' });
+    const settings = screen.getByRole('button', { name: 'Settings' });
     const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
-    /* Before Improvements: the row to the themes, the two languages and Outbound. */
-    for (let i = 0; i < 5; i += 1) await user.tab();
+    /* Improvements comes first: the themes, the languages and Outbound are no longer in the menu. */
+    await user.tab();
     expect(improvements).toHaveFocus();
     await user.tab();
     expect(versions).toHaveFocus();
     await user.tab();
-    expect(profile).toHaveFocus();
-    await user.tab();
-    expect(companySettings).toHaveFocus();
-    await user.tab();
-    expect(feedback).toHaveFocus();
+    expect(settings).toHaveFocus();
     await user.tab();
     expect(about).toHaveFocus();
     await user.tab();
@@ -348,7 +342,7 @@ describe('improvements', () => {
     expect(account).toHaveFocus();
     await user.keyboard('{Enter}');
     await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
-    for (let i = 0; i < 5; i += 1) await user.tab();
+    await user.tab();
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('heading', { level: 1, name: 'Improvements' })).toBeInTheDocument();
   });

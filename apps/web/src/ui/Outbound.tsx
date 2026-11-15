@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useT } from '../i18n';
-import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import type { DecidedBy } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
@@ -336,8 +335,8 @@ function isEmptyOverview(data: OutboundOverview): boolean {
 function ApprovalsSection({ items, onChanged }: { items: BoundOutboundApproval[]; onChanged: () => void }) {
   const t = useT();
   return (
-    <section className="waiting" aria-label={t.outbound.approvalsHeading}>
-      <h2>{t.outbound.approvalsHeading}</h2>
+    <section className="settings-part" aria-label={t.outbound.approvalsHeading}>
+      <h3>{t.outbound.approvalsHeading}</h3>
       {items.length === 0 ? (
         <p className="muted">{t.outbound.approvalsEmpty}</p>
       ) : (
@@ -355,8 +354,8 @@ function MessagesSection({ items, onOpenTask }: { items: OutboundMessageItem[]; 
   const t = useT();
   if (items.length === 0) return null;
   return (
-    <section className="turns" aria-label={t.outbound.messagesHeading}>
-      <h2>{t.outbound.messagesHeading}</h2>
+    <section className="settings-part" aria-label={t.outbound.messagesHeading}>
+      <h3>{t.outbound.messagesHeading}</h3>
       <div className="imps">
         {items.map(msg => (
           <OutboundMessageRow key={msg.id} item={msg} onOpenTask={onOpenTask} />
@@ -370,8 +369,8 @@ function EscalationsSection({ items, onOpenTask }: { items: OutboundEscalationIt
   const t = useT();
   if (items.length === 0) return null;
   return (
-    <section className="turns" aria-label={t.outbound.escalationsHeading}>
-      <h2>{t.outbound.escalationsHeading}</h2>
+    <section className="settings-part" aria-label={t.outbound.escalationsHeading}>
+      <h3>{t.outbound.escalationsHeading}</h3>
       <div className="imps">
         {items.map(esc => (
           <EscalationRow key={`${esc.ticketId}-${esc.revision}`} item={esc} onOpenTask={onOpenTask} />
@@ -385,8 +384,8 @@ function ChannelsSection({ items }: { items: OutboundChannelItem[] }) {
   const t = useT();
   if (items.length === 0) return null;
   return (
-    <section className="turns" aria-label={t.outbound.channelsHeading}>
-      <h2>{t.outbound.channelsHeading}</h2>
+    <section className="settings-part" aria-label={t.outbound.channelsHeading}>
+      <h3>{t.outbound.channelsHeading}</h3>
       <div className="imps">
         {items.map(ch => (
           <ChannelRow key={ch.id} channel={ch} />
@@ -427,13 +426,18 @@ function OutboundBody({
   onOpenTask: (id: string) => void;
 }) {
   const t = useT();
-  if (loading) return <p className="muted" role="status">{t.tasks.sending}</p>;
+  if (loading) return <p className="muted" role="status">{t.common.loading}</p>;
   if (!data) return null;
   if (isEmptyOverview(data)) return <p className="muted">{t.outbound.empty}</p>;
   return <OutboundSections data={data} onChanged={onChanged} onOpenTask={onOpenTask} />;
 }
 
-export function Outbound({ onOpenTask, onHome }: { onOpenTask: (id: string) => void; onHome?: () => void }) {
+/* What the overview of messages to people outside the company holds. */
+export const OUTBOUND_PATH = '/api/outbound';
+
+/* The External messaging group of Settings: what the departments send outside, by mail or webhook, with the approvals
+   that wait, the sends of unknown outcome, the escalations and the channels with their accounts. */
+export function ExternalMessaging({ onOpenTask }: { onOpenTask: (id: string) => void }) {
   const t = useT();
   const [data, setData] = useState<OutboundOverview | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -441,7 +445,7 @@ export function Outbound({ onOpenTask, onHome }: { onOpenTask: (id: string) => v
   const load = useCallback(() => {
     setFailure(null);
     api
-      .get<OutboundOverview>('/api/outbound')
+      .get<OutboundOverview>(OUTBOUND_PATH)
       .then(setData)
       .catch(setFailure);
   }, []);
@@ -450,19 +454,13 @@ export function Outbound({ onOpenTask, onHome }: { onOpenTask: (id: string) => v
     load();
   }, [load]);
 
-  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
   const hasFailure = failure !== null;
 
   return (
-    <section className="tasks">
-      <header className="people-head">
-        <div>
-          <h1>{t.outbound.heading}</h1>
-          <p className="muted">{t.outbound.intro}</p>
-        </div>
-      </header>
+    <div className="messaging">
+      <p className="muted">{t.outbound.intro}</p>
       {hasFailure && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       <OutboundBody data={data} loading={!data && !hasFailure} onChanged={load} onOpenTask={onOpenTask} />
-    </section>
+    </div>
   );
 }

@@ -16,7 +16,7 @@ function Dialog({ kind }: { kind: 'settings' | 'versions' }) {
   const [open, setOpen] = useState(true);
   if (!open) return null;
   const close = () => setOpen(false);
-  return kind === 'settings' ? <Settings me={ME} onClose={close} /> : <Versions updates={updates} onClose={close} />;
+  return kind === 'settings' ? <Settings me={ME} group="company" onClose={close} /> : <Versions updates={updates} onClose={close} />;
 }
 
 describe('account dialog Escape', () => {
