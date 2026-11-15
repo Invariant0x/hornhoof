@@ -27,7 +27,7 @@ import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn, openTypedTurn, startProgram } from '../src/modules/conversation/queue.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { reserveDelivery } from '../src/modules/program-operator/deliveries.js';
-import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, createTestDb, listen, mcp, setUpCompany, testApp } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 
 const CEO_ORCH_TOKEN = 'tool-token-orch-isolation-0123456789';
@@ -182,19 +182,19 @@ async function sqlFixture() {
 
 describe('SQL isolation of personal assistants from OPS-HEAD', () => {
   it('grants readerRole zero table or column privileges on every assistant* table in public', async () => {
-    const f = await sqlFixture();
-    const { rows } = await f.db.execute<{ tablename: string }>(
-      sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'assistant%' ORDER BY tablename`,
+    const { $client: client } = await createTestDb();
+    const { rows } = await client.query<{ tablename: string }>(
+      "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'assistant%' ORDER BY tablename",
     );
     expect(rows.map(r => r.tablename)).toEqual([...ASSISTANT_TABLES].sort());
     const reader = readerRole('postgres');
     const writer = agentRole('postgres');
-    await f.db.$client.exec(`${grantsFor(writer)};\n${readerGrantsFor(reader)}`);
+    await client.exec(`${grantsFor(writer)};\n${readerGrantsFor(reader)}`);
     for (const table of ASSISTANT_TABLES) {
-      const tablePriv = await f.db.$client.query<{ has: boolean }>(
+      const tablePriv = await client.query<{ has: boolean }>(
         `SELECT has_table_privilege('${reader}', 'public.${table}', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') AS has`,
       );
-      const colPriv = await f.db.$client.query<{ has: boolean }>(
+      const colPriv = await client.query<{ has: boolean }>(
         `SELECT has_any_column_privilege('${reader}', 'public.${table}', 'SELECT, INSERT, UPDATE, REFERENCES') AS has`,
       );
       expect(tablePriv.rows, `table privilege on ${table}`).toEqual([{ has: false }]);
