@@ -443,10 +443,11 @@ describe('the migration', () => {
     onTestFinished(() => client.close());
     await migrate(drizzle(client), { migrationsFolder: directory });
     const ids = { company: '00000000-0000-4000-8000-000000000001', department: '00000000-0000-4000-8000-000000000002', team: '00000000-0000-4000-8000-000000000003' };
+    const teamMarker = 'FixtureUrgentTeam';
     await client.exec(`
       INSERT INTO companies (id, name) VALUES ('${ids.company}', 'Retained');
       INSERT INTO departments (id, company_id, template_key, role_code, name) VALUES ('${ids.department}', '${ids.company}', 'development', 'DEV', 'Retained');
-      INSERT INTO teams (id, company_id, department_id, name, about, stage, gate) VALUES ('${ids.team}', '${ids.company}', '${ids.department}', 'Rapid Squad', 'kept', 2, true);
+      INSERT INTO teams (id, company_id, department_id, name, about, stage, gate) VALUES ('${ids.team}', '${ids.company}', '${ids.department}', '${teamMarker}', 'kept', 2, true);
       INSERT INTO tasks (company_id, number, title, brief, body, department_id, work_kind) VALUES ('${ids.company}', 7, 'URGENT old', 'срочно', 'kept', '${ids.department}', 'bug');
     `);
     const rows = async () => ({
@@ -461,7 +462,7 @@ describe('the migration', () => {
     expect(after.tasks).toEqual(before.tasks.map(row => ({ ...row, urgent: false })));
     expect(after.teams).toEqual(before.teams.map(row => ({ ...row, urgent_only: false })));
     const sql = await readFile(join(directory, `${target.at(-1)!.tag}.sql`), 'utf8');
-    expect(sql).not.toMatch(/INSERT|UPDATE|Rapid|[0-9a-f]{8}-[0-9a-f]{4}/i);
+    expect(sql).not.toMatch(new RegExp(`INSERT|UPDATE|${teamMarker}|[0-9a-f]{8}-[0-9a-f]{4}`, 'i'));
   });
 });
 

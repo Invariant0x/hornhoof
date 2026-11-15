@@ -40,7 +40,7 @@ async function finding(db: Awaited<ReturnType<typeof installation>>['db'], compa
   return row!;
 }
 
-const BUG = { kind: 'bug', title: 'Terminal froze for ivan@acme.example', text: 'In /home/ivan/shop the key ghp_0123456789abcdefghijABCDEFGHIJ012345 showed, then nothing.' };
+const BUG = { kind: 'bug', title: 'Terminal froze for alex@acme.example', text: 'In /home/alex/shop the key ghp_0123456789abcdefghijABCDEFGHIJ012345 showed, then nothing.' };
 
 describe('sending feedback to Hornhoof developers', () => {
   it('shows exactly what would go and sends exactly that once the person presses send', async () => {

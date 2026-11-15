@@ -49,11 +49,11 @@ describe('cleaning a report before it leaves', () => {
   });
 
   it('hides email addresses', () => {
-    expect(hidden('Write to ivan.petrov+hh@acme-corp.example.com or to me.')).toBe('Write to [email] or to me.');
+    expect(hidden('Write to alex.rivera+hh@acme-corp.example.com or to me.')).toBe('Write to [email] or to me.');
   });
 
   it("hides the addresses of the company's repositories and its other places, with or without a sign-in in them", () => {
-    expect(hidden('git clone https://ivan:p4ss@git.acme.example/shop/backend.git failed')).toBe('git clone [address] failed');
+    expect(hidden('git clone https://user:p4ss@git.acme.example/shop/backend.git failed')).toBe('git clone [address] failed');
     expect(hidden('remote git@github.com:acme/private-shop.git refused')).toBe('remote [address] refused');
     expect(hidden('see https://github.com/acme/private-shop/pull/12.')).toBe('see [address].');
     expect(hidden('ssh://git@gitlab.acme.example:2222/group/repo.git')).toBe('[address]');
@@ -67,14 +67,14 @@ describe('cleaning a report before it leaves', () => {
   });
 
   it("cleans secrets, email and home paths inside Hornhoof's own page addresses", () => {
-    const own = 'https://github.com/invariant0x/hornhoof/issues/12?token=abc123&email=ivan@acme.example&next=/home/ivan/work';
+    const own = 'https://github.com/invariant0x/hornhoof/issues/12?token=abc123&email=alex@acme.example&next=/home/alex/work';
     expect(hidden(own)).toBe('https://github.com/invariant0x/hornhoof/issues/12?token=[secret]&email=[email]&next=[path]');
   });
 
   it('hides paths in a home folder, on Linux, macOS and Windows', () => {
-    expect(hidden('opened /home/ivan/work/shop/.env at once')).toBe('opened [path] at once');
-    expect(hidden('in /Users/Ivan/Library/Logs/hornhoof.log')).toBe('in [path]');
-    expect(hidden('C:\\Users\\Ivan\\AppData\\Roaming\\x.json is missing')).toBe('[path] is missing');
+    expect(hidden('opened /home/alex/work/shop/.env at once')).toBe('opened [path] at once');
+    expect(hidden('in /Users/Alex/Library/Logs/hornhoof.log')).toBe('in [path]');
+    expect(hidden('C:\\Users\\Alex\\AppData\\Roaming\\x.json is missing')).toBe('[path] is missing');
     expect(hidden('read ~/projects/acme/notes.md')).toBe('read [path]');
     expect(hidden('the key in /root/.ssh/id_ed25519')).toBe('the key in [path]');
     expect(hidden('the folder /data/home/agents/x/hornhoof')).toBe('the folder [path]');
@@ -86,7 +86,7 @@ describe('cleaning a report before it leaves', () => {
   });
 
   it('counts what it hid, and hides nothing more when it cleans its own result', () => {
-    const once = cleanText('Mail ivan@acme.example, key ghp_0123456789abcdefghijABCDEFGHIJ012345, repo git@github.com:acme/x.git, file /home/ivan/x, token=abc');
+    const once = cleanText('Mail alex@acme.example, key ghp_0123456789abcdefghijABCDEFGHIJ012345, repo git@github.com:acme/x.git, file /home/alex/x, token=abc');
     expect(once.hidden).toEqual({ secret: 2, email: 1, address: 1, path: 1 });
     expect(once.text).toBe('Mail [email], key [secret], repo [address], file [path], token=[secret]');
     expect(cleanText(once.text)).toEqual({ text: once.text, hidden: { secret: 0, email: 0, address: 0, path: 0 } });
