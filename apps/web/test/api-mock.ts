@@ -311,6 +311,7 @@ export const TURN: TurnView = {
   commit: null,
   baseVersion: 'v1.2.0',
   departmentId: 'd2',
+  releases: true,
   messages: [{ by: 'Ivan', text: 'We need card payments.\nStripe is fine.', at: '2026-10-30T06:50:00.000Z' }],
   taskId: null,
   startedAt: '2026-10-30T07:00:00.000Z',

@@ -56,6 +56,21 @@ describe("each department's turn for people", () => {
   });
 });
 
+describe('which turns come out as releases', () => {
+  it('says of each turn whether its department releases it: one that keeps a repository does, one without has nothing to release', async () => {
+    const { db, companyId, dev, sales, ceoToken, get } = await company();
+    await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev.id));
+    await db.update(departments).set({ repoUrl: null }).where(eq(departments.id, sales.id));
+    await db.insert(turns).values([
+      { companyId, departmentId: dev.id, number: 1, goal: 'The next release.', status: 'open', openedAt: new Date() },
+      { companyId, departmentId: sales.id, number: 2, goal: 'The next release.', status: 'open', openedAt: new Date() },
+    ]);
+    const all = (await get(ceoToken, '/api/turns')).json().turns as { number: number; releases: boolean }[];
+    expect(all.map(t => [t.number, t.releases])).toEqual([[1, true], [2, false]]);
+    expect((await get(ceoToken, `/api/turns/current?department=${sales.id}`)).json().turn).toMatchObject({ number: 2, releases: false });
+  });
+});
+
 describe("a head's turns", () => {
   it('gives tasks of its own department, renames its own open turn and lists its own turns, and no other', async () => {
     const { db, companyId, dev, sales, hana, bruno, tools } = await company();

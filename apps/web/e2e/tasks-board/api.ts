@@ -22,7 +22,7 @@ const ORG: Org = {
 };
 
 const turn = (number: number, status: TurnView['status'], title: string, goal: string, tasks: TurnView['tasks'], departmentId = DEV.id): TurnView => ({
-  id: `u${number}`, number, title, goal, status, version: status === 'closed' ? `v1.${number}.0` : null, commit: null, baseVersion: null, departmentId, messages: [], taskId: null, tasks,
+  id: `u${number}`, number, title, goal, status, version: status === 'closed' ? `v1.${number}.0` : null, commit: null, baseVersion: status === 'closed' ? null : 'v1.2.0', departmentId, releases: departmentId === DEV.id, messages: [], taskId: null, tasks,
   startedAt: '2026-11-14T07:00:00.000Z', openedAt: '2026-11-14T07:00:00.000Z', closedAt: status === 'closed' ? '2026-11-14T08:00:00.000Z' : null,
 });
 export const TURNS: TurnView[] = [
