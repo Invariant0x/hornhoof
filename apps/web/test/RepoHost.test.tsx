@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -14,11 +14,12 @@ import { ME, mockApi } from './api-mock';
 const KEY = { provider: 'github', owner: 'acme', tokenLast4: '1111' } as const;
 const LINK: Parameters<typeof mockApi>[0] = { 'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }] };
 
+/* The company's key is a card of Integrations, beside Google Sheets. */
 async function settings(routes: Parameters<typeof mockApi>[0]) {
-  const calls = mockApi({ ...LINK, ...routes });
-  render(<Settings me={ME} group="company" onClose={() => {}} />);
+  const calls = mockApi({ ...LINK, 'GET /api/google-sheets': [200, { google: null }], ...routes });
+  render(<Settings me={ME} group="integrations" onClose={() => {}} />);
   const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-  return { calls, part: await within(dialog).findByRole('region', { name: 'Creating repositories' }) };
+  return { calls, dialog, part: await within(dialog).findByRole('article', { name: 'Creating repositories' }) };
 }
 
 function department(repoHost: RepoHost | null, routes: Parameters<typeof mockApi>[0] = {}) {
@@ -31,7 +32,30 @@ function department(repoHost: RepoHost | null, routes: Parameters<typeof mockApi
   return { calls, part: screen.getByRole('region', { name: 'Creating repositories' }) };
 }
 
-describe("the company's key in Settings", () => {
+describe("the company's key in Settings, under Integrations", () => {
+  it('stands as a card after Google Sheets, connected once a key is saved, and no longer under Company & access', async () => {
+    const { dialog, part } = await settings({ 'GET /api/repo-host': [200, { host: null }] });
+    expect(within(dialog).getAllByRole('article').map(card => within(card).getByRole('heading').textContent)).toEqual(['Google Sheets', 'Creating repositories']);
+    expect(within(part).getByText('Not connected')).toBeInTheDocument();
+    cleanup();
+    const again = await settings({ 'GET /api/repo-host': [200, { host: KEY }] });
+    expect(within(again.part).getByText('Connected')).toBeInTheDocument();
+    cleanup();
+    mockApi({ ...LINK, 'GET /api/repo-host': [200, { host: KEY }], 'GET /api/backups': [200, { last: null, recovery: null, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [] }] });
+    render(<Settings me={ME} group="company" onClose={() => {}} />);
+    const company = await screen.findByRole('dialog', { name: 'Settings' });
+    expect(await within(company).findByRole('heading', { name: 'Backups' })).toBeInTheDocument();
+    expect(within(company).queryByRole('heading', { name: 'Creating repositories' })).not.toBeInTheDocument();
+  });
+
+  it('is not there for a person the server does not give the key', async () => {
+    mockApi({ ...LINK, 'GET /api/google-sheets': [200, { google: null }], 'GET /api/repo-host': [403, { error: { code: 'forbidden', message: 'Forbidden.' } }] });
+    render(<Settings me={ME} group="integrations" onClose={() => {}} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    expect(await within(dialog).findByRole('article', { name: 'Google Sheets' })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('article').map(card => within(card).getByRole('heading').textContent)).toEqual(['Google Sheets']);
+  });
+
   it('says what it is for when none is saved, and saves the owner and the key', async () => {
     const user = userEvent.setup();
     const { calls, part } = await settings({
@@ -47,7 +71,9 @@ describe("the company's key in Settings", () => {
     await user.type(within(part).getByLabelText('GitHub owner'), ' acme ');
     await user.type(within(part).getByLabelText('Key'), 'ghp_x1111');
     await user.click(within(part).getByRole('button', { name: 'Save' }));
-    expect(await within(part).findByText('The orchestrator creates repositories on GitHub for acme, with the key ending in 1111.')).toBeInTheDocument();
+    await waitFor(() => expect(part).toHaveTextContent('The orchestrator creates repositories on GitHub for acme, with the key ending in 1111.'));
+    expect(within(part).getByText('acme', { selector: 'bdi.ident' })).toBeInTheDocument();
+    expect(within(part).getByText('Connected')).toBeInTheDocument();
     expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/repo-host', body: { owner: 'acme', token: 'ghp_x1111' } });
   });
 
@@ -64,7 +90,7 @@ describe("the company's key in Settings", () => {
     await user.clear(within(part).getByLabelText('GitHub owner'));
     await user.type(within(part).getByLabelText('GitHub owner'), 'acme-labs');
     await user.click(within(part).getByRole('button', { name: 'Save' }));
-    expect(await within(part).findByText(/for acme-labs, with the key ending in 1111/)).toBeInTheDocument();
+    await waitFor(() => expect(part).toHaveTextContent(/for acme-labs, with the key ending in 1111/));
     expect(calls.find(c => c.method === 'PUT')!.body).toEqual({ owner: 'acme-labs' });
 
     await user.click(within(part).getByRole('button', { name: 'Remove key' }));
@@ -111,7 +137,7 @@ describe("a department's key on its screen", () => {
 
   it('says where a key can be saved when there is none', () => {
     const { part } = department(null);
-    expect(part).toHaveTextContent('No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Settings, under Company & access.');
+    expect(part).toHaveTextContent('No GitHub key is saved, so the orchestrator cannot create a repository for this department. Save one here, or the CEO saves one for the whole company in Settings, under Integrations.');
     expect(within(part).getByRole('button', { name: 'Save a key' })).toBeInTheDocument();
   });
 });

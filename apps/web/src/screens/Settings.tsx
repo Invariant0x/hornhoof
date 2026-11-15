@@ -10,7 +10,6 @@ import { INTEGRATIONS, Integrations } from '../ui/Integrations';
 import { LetsEncryptNote } from '../ui/LetsEncryptNote';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 import { ExternalMessaging, OUTBOUND_PATH } from '../ui/Outbound';
-import { CompanyRepoHost } from '../ui/RepoHost';
 import { Themes } from '../ui/Themes';
 import { Backups } from './Backups';
 import { useSteady } from './Feedback';
@@ -224,14 +223,11 @@ function CompanyLink() {
   );
 }
 
-/* Company & access: for a person who sees the whole company the public link and the GitHub key, and for the CEO alone
-   the backups. */
+/* Company & access: for a person who sees the whole company the public link, and for the CEO alone the backups. */
 function CompanyGroup({ me }: { me: Me }) {
-  const whole = me.person.scopeKind === 'company';
   return (
     <div className="settings-group">
-      {whole && <CompanyLink />}
-      {whole && <CompanyRepoHost />}
+      {me.person.scopeKind === 'company' && <CompanyLink />}
       {me.person.isOwner && <Backups />}
     </div>
   );

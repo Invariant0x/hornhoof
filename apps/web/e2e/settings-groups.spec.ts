@@ -204,9 +204,16 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
     await expect(dialog.locator('.skin-card[data-current]').getByText(t.skins.applied, { exact: true })).toBeVisible();
     await expect(dialog.locator('.skin-card .btn:not(.ghost)')).toHaveCount(0);
   }
-  if (group === 'integrations') await expect(dialog.getByRole('article', { name: t.googleSheets.title, exact: true }).getByText(t.integrations.connected, { exact: true })).toBeVisible();
+  if (group === 'integrations') {
+    await expect(dialog.getByRole('article', { name: t.googleSheets.title, exact: true }).getByText(t.integrations.connected, { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('article', { name: t.repoHost.title, exact: true }).getByText(t.integrations.notConnected, { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('article')).toHaveCount(2);
+  }
   if (group === 'messaging') await expect(dialog.getByRole('heading', { name: 'Sales Mail', exact: true })).toBeVisible();
-  if (group === 'company') await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
+  if (group === 'company') {
+    await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: t.repoHost.title, exact: true })).toHaveCount(0);
+  }
   const found = await layout(page);
   expect(found.pageScroll, `${look}: the page does not scroll sideways`).toBe(false);
   expect(found.windowScroll, `${look}: the window does not scroll sideways`).toBe(false);

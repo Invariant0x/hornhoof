@@ -60,7 +60,7 @@ for (const lang of ['en', 'ru'] as const) {
       const look = `${width}-${lang}-${theme}`;
       const capture = shot(look);
 
-      test(`a person saves the company's GitHub key in its settings, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+      test(`a person saves the company's GitHub key in its settings, under Integrations, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
         const errors = await prepare(page, lang, theme, width);
         let saved: RepoKey | null = null;
@@ -74,9 +74,10 @@ for (const lang of ['en', 'ru'] as const) {
           saved = { ...KEY, owner: body.owner };
           return route.fulfill({ json: { host: saved } });
         });
-        await page.goto('/settings/company');
+        /* The company's key is a card of Integrations, beside Google Sheets. */
+        await page.goto('/settings/integrations');
         const dialog = page.getByRole('dialog', { name: t.settings.title, exact: true });
-        const part = dialog.getByRole('region', { name: t.repoHost.title, exact: true });
+        const part = dialog.getByRole('article', { name: t.repoHost.title, exact: true });
         await expect(part.getByText(t.repoHost.none)).toBeVisible();
         await page.evaluate(async () => { await document.fonts.ready; });
         await capture(dialog, 'settings-none', info);

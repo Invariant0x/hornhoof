@@ -60,7 +60,7 @@ async function keyFor(db: Pick<Db, 'select'>, companyId: string, departmentId: s
 const invalid = (message: string) => new ApiError(400, 'validation', message, 'repo_host_invalid');
 
 const MISSING = (dept: string) =>
-  `Hornhoof has no GitHub key to create a repository for ${dept} with. People who see the whole company save one for every department in Settings, under Company & access, ` +
+  `Hornhoof has no GitHub key to create a repository for ${dept} with. People who see the whole company save one for every department in Settings, under Integrations, ` +
   "and the department's owner one for this department under Repositories on its screen. Or they create the repository themselves and give its address and a token to connect it with set_repository.";
 
 /* What GitHub shows under the repository's name, and its README's first commit holds. */

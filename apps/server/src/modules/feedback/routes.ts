@@ -203,6 +203,6 @@ async function issueKey(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string) {
   const rows = await ctx.db.select().from(repoHosts).where(eq(repoHosts.companyId, companyId)).orderBy(asc(repoHosts.updatedAt));
   const ours = rows.filter(r => r.owner.toLowerCase() === ISSUE_OWNER);
   const host = ours.find(r => !r.departmentId) ?? ours[0];
-  if (!host) throw new ApiError(409, 'conflict', `No GitHub key for ${ISSUE_OWNER} is saved. Save one in Settings, under Company & access, with the right to create issues.`, 'feedback_no_github_key');
+  if (!host) throw new ApiError(409, 'conflict', `No GitHub key for ${ISSUE_OWNER} is saved. Save one in Settings, under Integrations, with the right to create issues.`, 'feedback_no_github_key');
   return { provider: host.provider, owner: host.owner, token: decryptSecret(host.tokenEnc, ctx.config.secret) };
 }
