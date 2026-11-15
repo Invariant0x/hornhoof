@@ -1,4 +1,4 @@
-import { matchesGlob } from 'node:path';
+import { posix } from 'node:path';
 import { RepoPath } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
 import { DocumentCandidate, EchelonCandidate, type HandedCandidate } from '@hornhoof/protocol/echelons';
@@ -13,9 +13,19 @@ import type { Route } from './echelons-store.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { exactComparison, type Review } from './review-context.js';
 
-export function producedCandidate(route: Route, producer: CheckerIdentity, review: Review): EchelonCandidate {
+const TEST_FILE_PATTERNS = ['**/test/**', '**/tests/**', '**/e2e/**', '**/*.test.*', '**/*.spec.*'] as const;
+
+export function isTestFilePath(path: string): boolean {
+  return RepoPath.safeParse(path).success && TEST_FILE_PATTERNS.some(pattern => posix.matchesGlob(path, pattern));
+}
+
+function pathWithinScope(path: string, patterns: readonly string[], allowed?: ReadonlySet<string>): boolean {
+  return RepoPath.safeParse(path).success && (allowed?.has(path) === true || patterns.some(pattern => posix.matchesGlob(path, pattern)));
+}
+
+export function producedCandidate(route: Route, producer: CheckerIdentity, review: Review, allowedPaths?: ReadonlySet<string>): EchelonCandidate {
   if (!review.commit || !review.branch || !review.source) throw refuse(409, 'task_invalid', 'A handoff needs the exact candidate commit, branch and base comparison.');
-  const inScope = review.source.paths.every(path => RepoPath.safeParse(path).success && route.paths.some(pattern => matchesGlob(path, pattern)));
+  const inScope = review.source.paths.every(path => pathWithinScope(path, route.paths, allowedPaths));
   if (!inScope) throw refuse(403, 'task_not_yours', 'The candidate changes paths outside the head-approved scope. Ask the head to revise the scope.');
   return EchelonCandidate.parse({ id: randomUUID(), parentId: route.state.candidateId, revision: route.revision + 1,
     baseCommit: review.source.baseCommit, commit: review.commit, branch: review.branch, paths: review.source.paths,

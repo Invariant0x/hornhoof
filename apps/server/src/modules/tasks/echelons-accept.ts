@@ -6,6 +6,7 @@ import { requests } from '../../db/schema.js';
 import { confirmAutonomousMainAcceptance, verifyAutonomousMainAcceptance } from './autonomous-release.js';
 import { NO_DEPARTMENT_CHECKER } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
+import { AUTHOR_CHECK_PASSED } from './echelons-handoff.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { testedEvidence } from './echelons-tests.js';
 import { requireTaskHead } from './echelons-update.js';
@@ -20,10 +21,11 @@ export type AcceptanceInput = z.infer<typeof AcceptanceInput>;
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
 
 export function requiredStagesComplete(route: Route): boolean {
-  /* Review and Tests are never skipped where the route has them, unless nobody in the department can do them, and Security
-     not once it is required. */
+  /* Review and Tests are never skipped where the route has them, unless nobody in the department can do them or green
+     author-check cleared intermediate Review, and Security not once it is required. */
+  const clearedReview = (step: Route['state']['stages'][number]) => step.stage === 'review' && step.reason === AUTHOR_CHECK_PASSED;
   const mayBeSkipped = (step: Route['state']['stages'][number]) => !(step.stage === 'security' && route.state.security.required)
-    && (step.reason === NO_DEPARTMENT_CHECKER || (step.stage !== 'review' && step.stage !== 'tests'));
+    && (step.reason === NO_DEPARTMENT_CHECKER || clearedReview(step) || (step.stage !== 'review' && step.stage !== 'tests'));
   return route.state.stages.every(step => step.status === 'complete' || (step.status === 'skipped' && mayBeSkipped(step)));
 }
 

@@ -16,9 +16,10 @@ import { ReviewSha } from './review-schema.js';
 export { ReviewSha } from './review-schema.js';
 const Counts = z.object({ passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), other: z.number().int().nonnegative() });
 const Run = z.object({ id: z.string().uuid(), number: z.number().int(), authorId: z.string().uuid(), commit: z.string().nullable(), command: z.string(), status: z.string(), parts: Counts, receipts: z.array(CheckReceiptPart).default([]), verified: z.boolean() });
+const CherryPickOrigin = z.object({ baseCommit: ReviewSha, commit: ReviewSha }).strict();
 /* branch names where the work is when it is not on the task's own branch; commit, when given, must be its head. */
-export const ReviewSubmission = z.object({ baseCommit: ReviewSha, branch: Branch.optional(), commit: ReviewSha.optional() }).strict();
-const Source = z.object({ baseCommit: ReviewSha, commit: ReviewSha, paths: z.array(z.string()), changedLines: z.number().int().nonnegative() });
+export const ReviewSubmission = z.object({ baseCommit: ReviewSha, branch: Branch.optional(), commit: ReviewSha.optional(), cherryPick: CherryPickOrigin.optional() }).strict();
+const Source = z.object({ baseCommit: ReviewSha, commit: ReviewSha, paths: z.array(z.string()), changedLines: z.number().int().nonnegative(), cleanCherryPick: z.boolean().default(false) });
 export const ReviewRecord = z.object({
   revision: z.string().uuid(), commit: ReviewSha.nullable(), branch: z.string().nullable(),
   authorId: z.string().uuid(), authorVendor: z.string().nullable(),
@@ -77,13 +78,57 @@ async function readPin(read: Ctx['readCommit'], repo: RepoAddress, want: CommitW
   return { commit: at.commitSha, branch: at.branch, status: 'pinned', reason: null };
 }
 
+type CompleteCompare = Extract<CompareResult, { complete: true }>;
+const CHERRY_PICK_TRAILER = /\(cherry picked from commit ([0-9a-f]{40})\)/i;
+const CONFLICT_MARKER = /^[+-](?:<{7}|={7}|>{7})(?: |$)/m;
+
+function cleanPickDiff(compared: CompleteCompare): boolean {
+  const linear = (compared.commits ?? []).every(item => item.parents.length <= 1);
+  return compared.paths.length > 0 && (compared.omitted ?? []).length === 0 && linear && !CONFLICT_MARKER.test(compared.diff);
+}
+
+function samePaths(left: string[], right: string[]): boolean {
+  const a = [...new Set(left)].sort(), b = [...new Set(right)].sort();
+  return a.length === b.length && a.every((path, index) => path === b[index]);
+}
+
+function sameComparedPatch(picked: CompareResult | null, headSha: string, compared: CompleteCompare, baseSha?: string): boolean {
+  if (!picked?.complete || picked.headSha !== headSha || (baseSha !== undefined && picked.baseSha !== baseSha)) return false;
+  return (picked.omitted ?? []).length === 0 && samePaths(picked.paths, compared.paths) && picked.diff === compared.diff;
+}
+
+async function matchesPickOrigin(ctx: Reader, repo: RepoAddress, commit: string, compared: CompleteCompare, origin: z.infer<typeof CherryPickOrigin>): Promise<boolean> {
+  if (origin.commit === commit || origin.baseCommit === commit || !ctx.readCompare) return false;
+  try { return sameComparedPatch(await ctx.readCompare(repo, { base: origin.baseCommit, head: origin.commit }, 10_000), origin.commit, compared, origin.baseCommit); }
+  catch { return false; }
+}
+
+function trailerOriginSha(compared: CompleteCompare, commit: string): string | null {
+  if (compared.commits?.length !== 1) return null;
+  const sha = CHERRY_PICK_TRAILER.exec(compared.commits[0]?.message ?? '')?.[1]?.toLowerCase() ?? null;
+  return sha && sha !== commit ? sha : null;
+}
+
+async function matchesTrailerOrigin(ctx: Reader, repo: RepoAddress, commit: string, compared: CompleteCompare): Promise<boolean> {
+  const originSha = trailerOriginSha(compared, commit);
+  if (!originSha || !ctx.readCompare) return false;
+  try { return sameComparedPatch(await ctx.readCompare(repo, { base: `${originSha}^`, head: originSha }, 10_000), originSha, compared); }
+  catch { return false; }
+}
+
+async function isCleanCherryPick(ctx: Reader, repo: RepoAddress, commit: string, compared: CompleteCompare, origin?: z.infer<typeof CherryPickOrigin>): Promise<boolean> {
+  if (!cleanPickDiff(compared)) return false;
+  return origin ? matchesPickOrigin(ctx, repo, commit, compared, origin) : matchesTrailerOrigin(ctx, repo, commit, compared);
+}
+
 async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string, input?: z.infer<typeof ReviewSubmission>): Promise<NonNullable<Review['source']>> {
   if (!input) throw refuse(400, 'task_invalid', 'Name review.baseCommit, the commit the change starts from.');
   let compared: Awaited<ReturnType<NonNullable<Ctx['readCompare']>>> | null = null;
   try { compared = ctx.readCompare ? await ctx.readCompare(repo, { base: input.baseCommit, head: commit }, 10_000) : null; }
   catch { /* An incomplete source is refused below, never an invented inventory. */ }
   if (!compared || !exactComparison(compared, input.baseCommit, commit)) throw refuse(409, 'repo_invalid', `The change from ${input.baseCommit} to ${commit} could not be compared. Check that the base is in the branch's history.`);
-  return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared) };
+  const cleanCherryPick = await isCleanCherryPick(ctx, repo, commit, compared, input.cherryPick);
+  return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared), cleanCherryPick };
 }
 
 /* Resolve the repository before a task transaction; an outage refuses the submission rather than record it without a

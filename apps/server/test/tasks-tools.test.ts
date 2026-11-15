@@ -143,7 +143,8 @@ describe('task tools', () => {
     expect(made.isError).toBeFalsy();
     const [task] = await db.select().from(tasks);
     const snapshot = routeSnapshot(await routeOf(db, task!), task!.assigneeAgentId);
-    expect(snapshot.stage).toBe('architecture');
+    expect(snapshot.stage).toBe('development');
+    expect(snapshot.stages.find(step => step.stage === 'architecture')).toMatchObject({ status: 'skipped', reason: 'same_executor' });
     expect(snapshot.stages.find(step => step.stage === 'review')).toMatchObject({ status: 'pending' });
     expect(snapshot.stages.find(step => step.stage === 'security')).toMatchObject({ status: 'skipped' });
     expect(snapshot.stages.some(step => step.stage === 'cleanup')).toBe(false);

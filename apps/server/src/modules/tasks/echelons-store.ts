@@ -8,19 +8,21 @@ import { ApiError } from '../../errors.js';
 import type { StageRoute } from '../templates/load.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { throughEchelons } from './turnkey.js';
-import { NO_DEPARTMENT_CHECKER, uncheckable } from './echelons-assign.js';
+import { NO_DEPARTMENT_CHECKER, populateSecurityOwner, uncheckable } from './echelons-assign.js';
+import { AUTHOR_CHECK_PASSED } from './echelons-handoff.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
-export type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
+export type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; architectAgentId?: string; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
+export type SkippedCheck = EchelonStep['stage'] | { stage: EchelonStep['stage']; reason: typeof NO_DEPARTMENT_CHECKER | typeof AUTHOR_CHECK_PASSED };
 
 function routeStep(name: EchelonStep['stage'], current: EchelonStep['stage'], ownerAgentId: string | null = null): EchelonStep {
   return { stage: name, status: name === current ? 'active' : 'pending', ownerAgentId, reason: null, inputCandidateId: null, candidateId: null };
 }
 
-function architectureStep(task: Task, current: EchelonStep['stage']): EchelonStep {
-  const step = routeStep('architecture', current, task.assigneeAgentId);
-  if (task.small) Object.assign(step, { status: 'skipped', reason: 'small_task', ownerAgentId: null });
-  return step;
+function architectureStep(task: Task, archOwner: string | null, collapsed: boolean, current: EchelonStep['stage']): EchelonStep {
+  const step = routeStep('architecture', current, archOwner);
+  if (task.small) return { ...step, status: 'skipped', reason: 'small_task', ownerAgentId: null };
+  return collapsed ? { ...step, status: 'skipped', reason: 'same_executor', ownerAgentId: null } : step;
 }
 
 function securityState(task: Task, input: RouteInput, current: EchelonStep['stage']): { step: EchelonStep; security: Route['state']['security'] } {
@@ -34,7 +36,7 @@ const NO_SECURITY: Route['state']['security'] = { required: false, reason: null,
 
 /* A stage the route of the department lacks takes no owner, and Cleanup cannot be asked for where there is none. */
 function requireStages(task: Task, plan: StageRoute, input: RouteInput, cleanup: boolean): void {
-  const asked: [EchelonStep['stage'], unknown][] = [['review', input.reviewerAgentId], ['security', input.securityAgentId], ['tests', input.testsAgentId], ['cleanup', cleanup]];
+  const asked: [EchelonStep['stage'], unknown][] = [['architecture', input.architectAgentId], ['review', input.reviewerAgentId], ['security', input.securityAgentId], ['tests', input.testsAgentId], ['cleanup', cleanup]];
   const missing = asked.find(([stage, wanted]) => wanted && !plan.stages.some(step => step.stage === stage));
   if (missing) throw refuse(409, 'task_invalid', `The route of this department has no ${missing[0]} stage for #${task.number}.`);
 }
@@ -47,10 +49,13 @@ export const documentCheck = (plan: StageRoute): string | null => documentStages
 function stagedState(task: Task, input: RouteInput, cleanup: boolean, plan: StageRoute, resultKind: 'code' | 'document'): Route['state'] {
   requireStages(task, plan, input, cleanup);
   const has = (name: EchelonStep['stage']) => plan.stages.some(step => step.stage === name);
-  const stage = has('architecture') && !task.small ? 'architecture' : 'development';
+  const archOwner = input.architectAgentId ?? task.assigneeAgentId;
+  const devOwner = resultKind === 'document' ? (task.executorAgentId ?? task.assigneeAgentId) : task.executorAgentId;
+  const collapsed = !task.small && archOwner !== null && archOwner === devOwner;
+  const stage = has('architecture') && !task.small && !collapsed ? 'architecture' : 'development';
   const { step: security, security: policy } = securityState(task, input, stage);
   const steps: Record<EchelonStep['stage'], EchelonStep | null> = {
-    architecture: architectureStep(task, stage), development: routeStep('development', stage, task.executorAgentId ?? task.assigneeAgentId),
+    architecture: architectureStep(task, archOwner, collapsed, stage), development: routeStep('development', stage, devOwner),
     review: routeStep('review', stage, input.reviewerAgentId ?? null), cleanup: cleanup ? routeStep('cleanup', stage) : null,
     security, tests: routeStep('tests', stage, input.testsAgentId ?? null),
   };
@@ -102,15 +107,24 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput, plan: S
   /* The head's Cleanup for a whole turn reaches only the departments whose route has it. */
   const cleanup = resultKind === 'document' ? input.cleanup ?? false : input.cleanup ?? (plan.stages.some(step => step.stage === 'cleanup') && await turnCleanupDefault(tx, task));
   const staged = resultKind === 'document' ? stagedState(task, input, cleanup, documentStages(plan), 'document') : stagedState(task, input, cleanup, plan, 'code');
-  const { state, skipped } = await withoutUncheckable(tx, task, staged);
+  const withSecurity = await populateSecurityOwner(tx, task, staged);
+  const { state, skipped } = await withoutUncheckable(tx, task, withSecurity);
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: resultKind === 'document' ? [] : input.paths ?? [], state });
   return skipped;
 }
 
+function skippedEntry(item: SkippedCheck) {
+  const stage = typeof item === 'string' ? item : item.stage;
+  const reason = typeof item === 'string' ? NO_DEPARTMENT_CHECKER : item.reason;
+  const why = reason === AUTHOR_CHECK_PASSED
+    ? 'Author check passed with CRAP under 10 on this low-risk change, so intermediate Review was skipped.'
+    : `Nobody in this department carries the skill of ${stage}, so the head accepts the result.`;
+  return { stage, reason, why };
+}
+
 /* What the log keeps of the checks a route skipped, with why, so the head and the people see why the result came
-   straight to the head. */
-export const skippedData = (skipped: EchelonStep['stage'][]) =>
-  skipped.length ? { skipped: skipped.map(stage => ({ stage, reason: NO_DEPARTMENT_CHECKER, why: `Nobody in this department carries the skill of ${stage}, so the head accepts the result.` })) } : {};
+   straight to the head or past intermediate Review. */
+export const skippedData = (skipped: SkippedCheck[]) => (skipped.length ? { skipped: skipped.map(skippedEntry) } : {});
 
 export async function routeOf(db: Db | Tx, task: Pick<Task, 'id' | 'companyId'>): Promise<Route> {
   const [route] = await db.select().from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));

@@ -75,6 +75,21 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
   return eligible.find(identity => identity.provider !== producer.provider) ?? eligible[0] ?? null;
 }
 
+/* Assigns an eligible Security checker as soon as the task's risk requires Security, so it does not wait after submission. */
+export async function initialSecurityOwner(db: Reader['db'], task: Task, ability: string | undefined, producer?: CheckerIdentity | null): Promise<string | null> {
+  if (!ability || !task.departmentId) return null;
+  const authorId = task.executorAgentId ?? task.assigneeAgentId;
+  const origin = producer ?? (authorId ? await agentIdentity(db, task.companyId, authorId) : null);
+  return origin ? (await checkerFor({ db }, task, origin, ability, null))?.agentId ?? null : null;
+}
+
+export async function populateSecurityOwner(db: Reader['db'], task: Task, state: Route['state'], producer?: CheckerIdentity | null): Promise<Route['state']> {
+  const step = state.security.required ? state.stages.find(item => item.stage === 'security') : undefined;
+  if (!step || step.ownerAgentId || !state.abilities.security) return state;
+  const ownerAgentId = await initialSecurityOwner(db, task, state.abilities.security, producer);
+  return ownerAgentId ? { ...state, stages: state.stages.map(item => item.stage === 'security' ? { ...item, ownerAgentId } : item) } : state;
+}
+
 /* A verdict and a repair use the same live assignment, including its ability and subscription. */
 export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
   const ability = route.state.stage ? route.state.abilities[route.state.stage] : undefined;
