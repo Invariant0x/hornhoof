@@ -74,9 +74,24 @@ function Failure({ failure }: { failure: unknown }) {
   return failure === null ? null : <p className="alert" role="alert">{errorOf(t, failure)}</p>;
 }
 
-function Actions({ children }: { children: ReactNode }) {
-  return <div className="repo-actions">{children}</div>;
+/* The buttons of an entry, and the foot of a form: each a group at the end of its line. */
+function EntryActions({ children }: { children: ReactNode }) {
+  return <div className="entry-actions">{children}</div>;
 }
+
+function FormFoot({ children }: { children: ReactNode }) {
+  return <div className="form-foot">{children}</div>;
+}
+
+/* A status in a frame of its own: its word says it, its colour only repeats it. */
+const TONE: Record<string, 'active' | 'invited' | 'offline'> = { active: 'active', published: 'active', new: 'invited', proposed: 'invited', invalid: 'invited', stopped: 'offline', revoked: 'offline' };
+
+function Status({ of, children }: { of: string; children: ReactNode }) {
+  return <span className={`status ${TONE[of] ?? 'offline'}`}>{children}</span>;
+}
+
+/* Pieces of one line, the dot held to the piece before it, so that no line begins with it. */
+const joined = (pieces: readonly (string | null | undefined | false)[]): string => pieces.filter(Boolean).join('\u00a0· ');
 
 /* A mail account or a webhook for a channel. Its password or key leaves this form once and is forgotten here at once. */
 function AccountForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(): void; onCancel(): void }) {
@@ -119,10 +134,10 @@ function AccountForm({ channel, onDone, onCancel }: { channel: SetupChannel; onD
           <Field label={s.signingKey} hint={s.signingKeyHint}>{p => <input {...p} type="password" value={v.signingKey} onChange={set('signingKey')} minLength={32} maxLength={1024} autoComplete="new-password" required />}</Field>
         </>
       )}
-      <Actions>
-        <button className="btn small" type="submit" disabled={busy}>{s.connect}</button>
-        <button className="btn small ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
-      </Actions>
+      <FormFoot>
+        <button className="btn" type="submit" disabled={busy}>{s.connect}</button>
+        <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+      </FormFoot>
       <Failure failure={failure} />
     </form>
   );
@@ -178,7 +193,10 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
       <Field label={s.domainDailyLimit} hint={s.domainDailyLimitHint}>{p => <input {...p} type="number" min={1} step={1} value={v.domainDailyLimit} onChange={e => setV({ ...v, domainDailyLimit: e.target.value })} required />}</Field>
       <Field label={s.timezone} hint={s.timezoneHint}>{p => <input {...p} value={v.timezone} onChange={e => setV({ ...v, timezone: e.target.value })} maxLength={64} required />}</Field>
       <label className="check-card">
-        <input type="checkbox" checked={v.autoSend} onChange={e => setV({ ...v, autoSend: e.target.checked })} />
+        <span className="tick-box">
+          <input type="checkbox" checked={v.autoSend} onChange={e => setV({ ...v, autoSend: e.target.checked })} />
+          <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 8.5l3 3 6-7" /></svg>
+        </span>
         <span>
           <b>{s.autoSend}</b>
           <small>{channel.audience === 'public' ? s.autoSendPublic : s.autoSendHint}</small>
@@ -194,10 +212,10 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
         <p className="hint">{s.circuitHint}</p>
         {NUMBERS.slice(4).map(([, key]) => count(key, key === 'windowHours' || key === 'minimumSample' ? 1 : 0))}
       </fieldset>
-      <Actions>
-        <button className="btn small" type="submit" disabled={busy}>{t.common.save}</button>
-        <button className="btn small ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
-      </Actions>
+      <FormFoot>
+        <button className="btn" type="submit" disabled={busy}>{t.common.save}</button>
+        <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+      </FormFoot>
       <Failure failure={failure} />
     </form>
   );
@@ -205,15 +223,21 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
 
 function policyLine(s: Messages['outboundSetup'], policy: SetupChannel['policy']): string {
   if (!policy) return s.noPolicy;
-  return `${s.limits(policy.value.accountDailyLimit, policy.value.domainDailyLimit)} · ${policy.value.autoSend ? s.autoSendOn : s.autoSendOff}`;
+  return joined([s.limits(policy.value.accountDailyLimit, policy.value.domainDailyLimit), policy.value.autoSend ? s.autoSendOn : s.autoSendOff]);
 }
 
 function AccountLine({ account }: { account: SetupAccount }) {
   const s = useT().outboundSetup;
   return (
-    <li>
-      <b>{account.label}</b>
-      {` (${account.senderDomain}) · ${s.accountStatuses[account.status]} · ${account.author ? s.writes(account.author.name) : s.nobodyWrites}`}
+    <li className="outbound-entry">
+      <span className="outbound-title">
+        <b>{account.label}</b>
+        <Status of={account.status}>{s.accountStatuses[account.status]}</Status>
+      </span>
+      <small>
+        <bdi className="outbound-address">{account.senderDomain}</bdi>
+        {`\u00a0· ${account.author ? s.writes(account.author.name) : s.nobodyWrites}`}
+      </small>
     </li>
   );
 }
@@ -235,22 +259,25 @@ function ChannelCard({ channel, onChanged }: { channel: SetupChannel; onChanged(
   return (
     <div className="imp imp-taken">
       <header>
-        <h3>{channel.name}</h3>
-        <p className="imp-meta">
-          <span>{`${s.adapters[channel.adapter]} · ${s.audiences[channel.audience]} · ${t.outbound.channelStatuses[channel.status]}`}</span>
+        <div className="outbound-title">
+          <h3>{channel.name}</h3>
+          <Status of={channel.status}>{t.outbound.channelStatuses[channel.status]}</Status>
+        </div>
+        <p className="outbound-meta">
+          <span>{joined([s.adapters[channel.adapter], s.audiences[channel.audience]])}</span>
           <span>{policyLine(s, channel.policy)}</span>
         </p>
       </header>
-      {channel.accounts.length ? <ul className="req-ways">{channel.accounts.map(a => <AccountLine key={a.id} account={a} />)}</ul> : null}
+      {channel.accounts.length ? <ul className="outbound-list">{channel.accounts.map(a => <AccountLine key={a.id} account={a} />)}</ul> : null}
       {!working && <p className="muted">{s.noAccount}</p>}
       {open === 'account' && <AccountForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'policy' && <PolicyForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === null && (
-        <Actions>
-          <button className="btn small ghost" type="button" onClick={() => setOpen('account')}>{channel.adapter === 'smtp' ? s.connectMail : s.connectHook}</button>
-          <button className="btn small ghost" type="button" onClick={() => setOpen('policy')}>{channel.policy ? s.changePolicy : s.setPolicy}</button>
-          <button className="btn small ghost" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/channels/${channel.id}/${stopOrReopen}`, {}))}>{s[stopOrReopen]}</button>
-        </Actions>
+        <EntryActions>
+          <button className="btn ghost" type="button" onClick={() => setOpen('account')}>{channel.adapter === 'smtp' ? s.connectMail : s.connectHook}</button>
+          <button className="btn ghost" type="button" onClick={() => setOpen('policy')}>{channel.policy ? s.changePolicy : s.setPolicy}</button>
+          <button className={stopOrReopen === 'stop' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/channels/${channel.id}/${stopOrReopen}`, {}))}>{s[stopOrReopen]}</button>
+        </EntryActions>
       )}
       <Failure failure={failure} />
     </div>
@@ -269,7 +296,7 @@ function NewChannel({ departmentId, onChanged }: { departmentId: string; onChang
     setV({ name: '', adapter: 'smtp', purpose: '', audience: 'direct' });
     onChanged();
   });
-  if (!open) return <Actions><button className="btn small ghost" type="button" onClick={() => setOpen(true)}>{s.newChannel}</button></Actions>;
+  if (!open) return <EntryActions><button className="btn ghost" type="button" onClick={() => setOpen(true)}>{s.newChannel}</button></EntryActions>;
   function save(e: FormEvent) {
     e.preventDefault();
     void run(() => api.post('/api/outbound/channels', { departmentId, name: v.name.trim(), adapter: v.adapter, purpose: v.purpose.trim(), audience: v.audience }));
@@ -294,10 +321,10 @@ function NewChannel({ departmentId, onChanged }: { departmentId: string; onChang
           </select>
         )}
       </Field>
-      <Actions>
-        <button className="btn small" type="submit" disabled={busy}>{s.create}</button>
-        <button className="btn small ghost" type="button" onClick={() => setOpen(false)}>{t.common.cancel}</button>
-      </Actions>
+      <FormFoot>
+        <button className="btn" type="submit" disabled={busy}>{s.create}</button>
+        <button className="btn ghost" type="button" onClick={() => setOpen(false)}>{t.common.cancel}</button>
+      </FormFoot>
       <Failure failure={failure} />
     </form>
   );
@@ -314,16 +341,17 @@ function RevisionLine({ revision, onChanged }: { revision: Revision; onChanged()
   const author = revision.createdBy.name ?? '';
   const move = revision.status === 'proposed' ? 'publish' : revision.status === 'published' ? 'revoke' : null;
   return (
-    <li className="outbound-revision">
-      <span>
-        <b>{`${s.revision(revision.revision)} · ${s.statuses[revision.status]}`}</b>
-        {` · ${revision.summary}`}
+    <li className="outbound-entry">
+      <span className="outbound-title">
+        <b>{s.revision(revision.revision)}</b>
+        <Status of={revision.status}>{s.statuses[revision.status]}</Status>
       </span>
-      <small>{[s.wrote(author), revision.status !== 'proposed' ? byWhom(s, revision.publishedBy, revision.publishedVia) : ''].filter(Boolean).join(' · ')}</small>
+      <span>{revision.summary}</span>
+      <small>{joined([s.wrote(author), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
       {move && (
-        <Actions>
-          <button className="btn small ghost" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/catalog/${revision.id}/${move}`, {}))}>{s[move]}</button>
-        </Actions>
+        <EntryActions>
+          <button className={move === 'revoke' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/catalog/${revision.id}/${move}`, {}))}>{s[move]}</button>
+        </EntryActions>
       )}
       <Failure failure={failure} />
     </li>
@@ -333,17 +361,17 @@ function RevisionLine({ revision, onChanged }: { revision: Revision; onChanged()
 function CatalogEntry({ entry, onChanged }: { entry: Entry; onChanged(): void }) {
   const s = useT().outboundSetup;
   const kind = (s.kinds as Record<string, string>)[entry.kind] ?? entry.kind;
-  const where = [entry.locale, entry.channel?.name].filter(Boolean).join(' · ');
+  const where = joined([entry.locale, entry.channel?.name]);
   return (
     <div className="imp imp-taken">
       <header>
         <h3>{`${kind}: ${entry.revisions[0]!.summary}`}</h3>
-        <p className="imp-meta">
+        <p className="outbound-meta">
           {where && <span>{where}</span>}
           <span>{entry.current === null ? s.notInUse : s.inUse(entry.current)}</span>
         </p>
       </header>
-      <ul className="req-ways">{entry.revisions.map(r => <RevisionLine key={r.id} revision={r} onChanged={onChanged} />)}</ul>
+      <ul className="outbound-list outbound-entries">{entry.revisions.map(r => <RevisionLine key={r.id} revision={r} onChanged={onChanged} />)}</ul>
     </div>
   );
 }
@@ -354,10 +382,10 @@ function LogLine({ entry }: { entry: LogEntry }) {
   const at = new Date(entry.at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
   const what = s.log[entry.kind] ?? entry.kind;
   return (
-    <li>
+    <li className="outbound-entry">
       <b>{what}</b>
-      {entry.channel && ` · ${entry.channel.name}`}
-      <small>{` ${at} · ${byWhom(s, entry.person, entry.agent)}`}</small>
+      {entry.channel && <span>{entry.channel.name}</span>}
+      <small>{joined([at, byWhom(s, entry.person, entry.agent)])}</small>
     </li>
   );
 }
@@ -426,7 +454,7 @@ function SetupBody({ data, departmentId, onChanged: load }: { data: Extract<Load
         {data.entries.length === 0 ? <p className="muted">{s.catalogEmpty}</p> : <div className="imps">{data.entries.map(e => <CatalogEntry key={e.entryId} entry={e} onChanged={load} />)}</div>}
       </Part>
       <Part title={s.logTitle}>
-        {data.log.length === 0 ? <p className="muted">{s.logEmpty}</p> : <ul className="req-ways outbound-log">{data.log.map(e => <LogLine key={e.id} entry={e} />)}</ul>}
+        {data.log.length === 0 ? <p className="muted">{s.logEmpty}</p> : <ul className="outbound-list outbound-entries">{data.log.map(e => <LogLine key={e.id} entry={e} />)}</ul>}
       </Part>
     </div>
   );

@@ -1,7 +1,9 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
+import type { Measured } from './outbound-setup-edges';
+import { edges, offences, type Words } from './outbound-setup-look';
 import { serveRoutes } from './routes-api';
 
 /* A department's own outbound setup as the people who run it meet it, in Settings and on the department's screen: every
@@ -101,6 +103,8 @@ async function shot(page: Page, what: Locator, file: string) {
 for (const look of LOOKS) {
   const t = look.lang === 'en' ? en : ru;
   const name = `${look.lang}-${look.dir}-${look.width}`;
+  const statuses = [...Object.values(t.outbound.channelStatuses), ...Object.values(t.outboundSetup.accountStatuses), ...Object.values(t.outboundSetup.statuses)];
+  const words: Words = { statuses, danger: [t.outboundSetup.stop, t.outboundSetup.revoke], entryBlocks: [t.outboundSetup.catalogTitle, t.outboundSetup.logTitle] };
   test(`a department's own outbound setup in Settings and on its screen ${name}`, async ({ page, browserName }) => {
     test.setTimeout(0);
     const published: string[] = [];
@@ -115,6 +119,8 @@ for (const look of LOOKS) {
     await expect(block(t.outboundSetup.catalogTitle)).toBeVisible();
     await expect(part.getByText(t.outboundSetup.byVia('Ivan', 'Mia')).first()).toBeVisible();
     await fits(page, part);
+    expect.soft(await offences(part, words)).toEqual([]);
+    const measured: Measured[] = [{ browser: browserName, look: name, screen: 'settings', ...(await edges(part)) }];
     await shot(page, block(t.outboundSetup.channelsTitle), `settings-channels-${browserName}-${name}`);
     await shot(page, block(t.outboundSetup.catalogTitle), `settings-catalog-${browserName}-${name}`);
     await shot(page, block(t.outboundSetup.logTitle), `settings-log-${browserName}-${name}`);
@@ -126,6 +132,7 @@ for (const look of LOOKS) {
     await expect(policy.getByRole('checkbox')).toBeChecked();
     await expect(part.getByRole('form', { name: t.outboundSetup.newChannel }).getByRole('combobox')).toHaveCount(2);
     expect(await small(part)).toEqual([]);
+    expect.soft(await offences(part, { ...words, danger: [] })).toEqual([]);
     await fits(page, part);
     await shot(page, policy, `settings-policy-form-${browserName}-${name}`);
     await shot(page, part.getByRole('form', { name: t.outboundSetup.connectHook }), `settings-account-form-${browserName}-${name}`);
@@ -143,6 +150,9 @@ for (const look of LOOKS) {
     await fits(page, own);
     await shot(page, own.getByRole('heading', { name: t.settings.groups.messaging }), `department-${browserName}-${name}`);
     expect(await small(own)).toEqual([]);
+    expect.soft(await offences(own, words)).toEqual([]);
+    measured.push({ browser: browserName, look: name, screen: 'department', ...(await edges(own)) });
+    writeFileSync(test.info().outputPath('edges.json'), JSON.stringify(measured));
     expect(errors).toEqual([]);
   });
 }

@@ -59,6 +59,9 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
 .act:hover { border-color: var(--cyan); color: var(--cyan-ink); }
 .act:disabled { opacity: .45; cursor: not-allowed; border-color: var(--line2); color: var(--ink); }
 .act.danger:hover { border-color: var(--pink); color: var(--pink-ink); }
+/* A secondary button that stops or takes back: pink words, and a pink frame on hover. */
+.btn.ghost.danger { color: var(--pink-ink); }
+.btn.ghost.danger:hover { box-shadow: inset 0 0 0 1px var(--pink); }
 
 /* Form fields */
 select {
@@ -364,16 +367,32 @@ select:disabled { opacity: .55; }
 /* A department's own outbound setup: its channels and accounts, its catalog and its log. */
 .outbound-setup { display: grid; gap: 16px; min-width: 0; }
 .outbound-setup > p, .outbound-setup .settings-part h4 { margin: 0; overflow-wrap: break-word; }
-.outbound-setup .settings-part h4 { font-size: 14px; }
-.outbound-numbers { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 10px 12px; border: 1px solid var(--line2); }
-.outbound-numbers > legend { padding: 0 4px; font-weight: 600; overflow-wrap: break-word; }
-.outbound-numbers > .hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
-.outbound-revision, .outbound-log > li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.outbound-revision small, .outbound-log small { color: var(--muted); font-size: 12px; }
-.outbound-revision .repo-actions { margin-block-start: 2px; }
-/* Its fields, lists and buttons are touch targets of 44px, as everywhere in the Settings window. */
+.outbound-setup .settings-part h4 { font-family: var(--f-display); font-weight: 600; font-size: 15px; line-height: 1.15; }
+/* A name with its status beside it, and a card's caption: how and to whom on one line, its limits on the next. */
+.outbound-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.outbound-title > :is(h3, b) { min-width: 0; overflow-wrap: break-word; }
+.outbound-meta { display: grid; gap: 4px; margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: break-word; }
+/* Lists with nothing of the browser's; revisions and log entries stand 16px apart, with a line from the second on. */
+.outbound-list { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.outbound-list.outbound-entries { gap: 16px; }
+.outbound-entries > li + li { padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.outbound-entry { display: grid; gap: 4px; min-width: 0; overflow-wrap: break-word; }
+.outbound-entry small { color: var(--muted); font-size: 12px; }
+.outbound-entry > .entry-actions { margin-block-start: 4px; }
+.outbound-address { overflow-wrap: anywhere; }
+.outbound-setup .form-foot { margin-block-start: 8px; }
+/* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
 .outbound-setup .field :is(input, select) { height: 44px; }
-.outbound-setup .btn { min-height: 44px; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; text-align: center; }
+/* The groups of the limits form: no frame of the browser, their heading a line of its own, their fields on the form's edge. */
+.outbound-numbers { display: grid; gap: 10px; min-inline-size: 0; margin: 0; margin-block-start: 8px; padding: 0; border: 0; }
+.outbound-numbers > legend { float: inline-start; inline-size: 100%; padding: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: break-word; }
+.outbound-numbers > .hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+/* The box of sending without a yes, drawn by us and so the same in every browser. */
+.tick-box { position: relative; display: block; width: 16px; height: 16px; margin-block-start: 2px; }
+.check-card .tick-box input { appearance: none; display: block; box-sizing: border-box; width: 16px; height: 16px; margin: 0; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
+.check-card .tick-box input:checked { border-color: var(--cyan-ink); background: var(--cyan-ink); }
+.tick-box svg { position: absolute; inset: 0; width: 16px; height: 16px; fill: none; stroke: var(--surface2); stroke-width: 2; visibility: hidden; pointer-events: none; }
+.tick-box input:checked + svg { visibility: visible; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; }
@@ -386,7 +405,6 @@ select:disabled { opacity: .55; }
 .skins h3 { font-size: 26px; line-height: 1.4; }
 .skins :is(h4, h5) { font-family: var(--f-display); font-size: 18px; font-weight: 600; line-height: 1.4; }
 .skins .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; white-space: normal; text-align: center; overflow-wrap: anywhere; }
-.skins .btn.danger { color: var(--pink-ink); }
 .skins-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 16px; }
 .skins-intro { display: grid; gap: 4px; flex: 1 1 320px; min-width: 0; }
 .skins-intro p { max-width: 65ch; }

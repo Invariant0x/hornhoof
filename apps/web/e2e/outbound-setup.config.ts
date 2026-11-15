@@ -13,6 +13,7 @@ export default defineConfig({
   testDir: '.',
   testMatch: 'outbound-setup.spec.ts',
   outputDir: 'results/outbound-setup',
+  globalTeardown: './outbound-setup-edges.ts',
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./file-report.ts']] : 'list',

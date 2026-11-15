@@ -60,8 +60,14 @@ describe('a department\'s own outbound setup', () => {
     mockApi(routes());
     show();
     const spring = (await screen.findByRole('heading', { name: 'Spring letters' })).closest('.imp') as HTMLElement;
-    expect(spring).toHaveTextContent('up to 40 a day per account, 200 per domain · sends without a yes to each message');
-    expect(spring).toHaveTextContent('Spring (mkt.example) · works · Max writes from it');
+    expect(within(spring).getByText('new')).toHaveClass('status', 'invited');
+    expect(within(spring).getByText('Mail (SMTP) · to contacts who agreed')).toBeInTheDocument();
+    expect(within(spring).getByText('up to 40 a day per account, 200 per domain · sends without a yes to each message')).toBeInTheDocument();
+    const account = within(spring).getByRole('listitem');
+    expect(within(account).getByText('Spring')).toBeInTheDocument();
+    expect(within(account).getByText('works')).toHaveClass('status', 'active');
+    expect(account).toHaveTextContent('mkt.example · Max writes from it');
+    expect(within(spring).getByRole('button', { name: 'Stop the channel' })).toHaveClass('danger');
     const news = screen.getByRole('heading', { name: 'News' }).closest('.imp') as HTMLElement;
     expect(news).toHaveTextContent('No limits yet: nothing goes until they are set');
     expect(news).toHaveTextContent('No working account');
@@ -76,6 +82,10 @@ describe('a department\'s own outbound setup', () => {
     expect(catalog).toHaveTextContent('Template: Spring');
     expect(catalog).toHaveTextContent('Messages use revision 1');
     expect(catalog).toHaveTextContent('by Mia on the word of Mona');
+    expect(within(catalog).getByText('proposed')).toHaveClass('status', 'invited');
+    expect(within(catalog).getByText('published')).toHaveClass('status', 'active');
+    expect(within(catalog).getByRole('button', { name: 'Publish' })).not.toHaveClass('danger');
+    expect(within(catalog).getByRole('button', { name: 'Take back' })).toHaveClass('danger');
     await user.click(within(catalog).getByRole('button', { name: 'Publish' }));
     await user.click(within(catalog).getByRole('button', { name: 'Take back' }));
     await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.path)).toEqual(['/api/outbound/catalog/r2/publish', '/api/outbound/catalog/r1/revoke']));
@@ -132,11 +142,14 @@ describe('a department\'s own outbound setup', () => {
     mockApi(routes());
     show();
     const log = (await screen.findByRole('heading', { name: 'Setup log' })).closest('section') as HTMLElement;
-    const lines = within(log).getAllByRole('listitem').map(li => li.textContent);
-    expect(lines[0]).toContain('Sending without a yes turned on · Spring letters');
-    expect(lines[0]).toContain('by Mia on the word of Mona');
-    expect(lines[1]).toContain('Account connected');
-    expect(lines[1]).toContain('by Mona');
+    const [first, second] = within(log).getAllByRole('listitem');
+    expect(within(first!).getByText('Sending without a yes turned on')).toBeInTheDocument();
+    expect(within(first!).getByText('Spring letters')).toBeInTheDocument();
+    expect(first).toHaveTextContent('by Mia on the word of Mona');
+    expect(within(second!).getByText('Account connected')).toBeInTheDocument();
+    expect(second).toHaveTextContent('by Mona');
+    /* A dot holds to the piece before it, so that no line of the log begins with one. */
+    expect(log.textContent).not.toMatch(/(^|[ \n])·/);
   });
 
   it('shows nothing to someone who does not run the department, and reads neither its catalog nor its log', async () => {
