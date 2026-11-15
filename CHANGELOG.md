@@ -5,6 +5,41 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.24.2] - 2026-11-15
+
+Opening access to a computer by its button lets the orchestrator work on that computer right away without asking the
+person to write again in chat, and updating nodes removes the renamed `-old-*` node containers once the new ones run.
+
+### Fixed
+
+- Opening access to a computer by its button went into the orchestrator's inbox without the person's permission for that
+  computer, so the woken turn refused to run commands there with "computer runs only in a turn that answers a person"
+  until the person wrote again in chat. The orchestrator now runs commands on the opened computer in the turn woken by
+  that click, and only on that computer until a person writes or presses Enter in the window; no other decision is
+  opened.
+- Replacing a node container during an update could leave the renamed `-old-*` container behind with automatic restart
+  still on, restarting every minute with "This machine has no key yet" while the new node already ran. Renamed `-old-*`
+  node containers now turn automatic restart off at once, are removed as soon as the new node container is running and
+  not restarting, and are restored if the new container fails to start; updates also clean up leftover `-old-*`
+  containers whose new node containers are healthy, without touching node volumes.
+
+### Russian
+
+Кнопка открытия доступа к компьютеру сразу дает оркестратору работать на этом компьютере без повторного сообщения
+человека в чате, а обновление узлов удаляет переименованные старые контейнеры `-old-*`, как только новые узлы запущены.
+
+- Нажатие кнопки открытия доступа к компьютеру уходило во входящий ящик оркестратора без полномочия открывшего человека,
+  из-за чего разбуженный ход отказывался выполнять команды на этом компьютере с сообщением «computer runs only in a turn
+  that answers a person», пока человек не напишет в чате еще раз. Теперь оркестратор выполняет команды на открытом
+  компьютере сразу в ходе, разбуженном этим нажатием, и только на этом компьютере до нового сообщения человека или
+  нажатия Enter в окне; никакие другие решения это нажатие не открывает.
+- При подмене контейнера узла во время обновления переименованная старая копия `-old-*` могла остаться с включенным
+  автоперезапуском и каждую минуту перезапускаться с ошибкой «This machine has no key yet», хотя новый узел уже штатно
+  работал. Теперь у переименованных контейнеров `-old-*` автоперезапуск сразу выключается, они удаляются, как только
+  новый контейнер узла запущен и не уходит в перезапуск, и возвращаются обратно, если новый контейнер не поднялся; кроме
+  того, обновление подчищает оставшиеся от прошлых обновлений контейнеры `-old-*` для здоровых узлов, не трогая тома и
+  данные.
+
 ## [0.24.1] - 2026-11-15
 
 An update by the button from 0.23 to 0.24 goes through again: Hornhoof makes its networks again with the addresses they
