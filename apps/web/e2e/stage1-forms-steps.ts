@@ -296,8 +296,8 @@ export async function checkForms(page: Page, browserName: string, info: TestInfo
   await page.addInitScript(() => { if (!localStorage.getItem('hh-lang')) localStorage.setItem('hh-lang', 'en'); });
   await prepare(page);
   await page.goto('/');
-  /* Of two shipped languages one is the shortest and the other the longest, so only more need measuring, which every part
-     of the check does again. */
+  /* Ranking only picks the shortest and the longest shipped language. Of two languages those are both, so both are checked
+     whole without measuring them first; with more, each file ranks them again. */
   const languages = LANGUAGES.length <= 2 ? LANGUAGES.map(({ id }) => id) : await chooseLanguages(page);
   const report: Record<string, unknown> = { browserName, languages, contrast: {}, geometry: {} };
   for (const language of languages) for (const width of widths) {
