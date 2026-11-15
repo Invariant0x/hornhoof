@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { ApprovalPolicyView, Briefing, Department, Employee, EmployeeStatus, Org, TurnView } from '../src/types';
+import type { ApprovalPolicyView, Briefing, Department, Employee, EmployeeStatus, Org, PersonView, TurnView } from '../src/types';
 import { ME, serveApi } from './api';
 
 /* Development's open turn as the Tasks screen reads it. */
@@ -43,13 +43,19 @@ function department({ name, roleCode, progress }: Company[number], i: number, op
   };
 }
 
-function org(company: Company, open: boolean): Org {
+/* A director of the whole company whom a decision waits for: the hub breathes amber while the turn goes on. */
+export const ASKED: PersonView = {
+  id: 'p1', name: 'Alex Director', email: 'alex@acme.com', title: 'Director', status: 'active', isOwner: false,
+  access: { whole: true, departments: [], teams: [] }, pendingDecisions: 1,
+};
+
+function org(company: Company, open: boolean, people: PersonView[]): Org {
   const departments = company.map((d, i) => department(d, i, open));
   const agents = departments.reduce((n, d) => ({ total: n.total + d.agents.total, working: n.working + d.agents.working }), { total: 1, working: 0 });
   return {
     company: ME.company,
     orchestrator: { id: 'a1', name: 'Orchestrator', model: '', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
-    agents, people: [], departments,
+    agents, people, departments,
     turn: open ? { id: HUB_TURN.id, number: HUB_TURN.number, goal: HUB_TURN.goal } : null,
   };
 }
@@ -83,15 +89,16 @@ export async function taskStream(page: Page) {
   });
 }
 
-/* The company as the server counts it for the map, changed as tasks close, departments join and the turn closes. */
-export async function serveHubTurn(page: Page, start: Company = ONE) {
+/* The company as the server counts it for the map, changed as tasks close, departments join and the turn closes, with the
+   whole-company people over it. */
+export async function serveHubTurn(page: Page, start: Company = ONE, people: PersonView[] = []) {
   let company = start;
   let open = true;
   await taskStream(page);
   await serveApi(page);
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
-    if (url.pathname === '/api/org') return route.fulfill({ json: org(company, open) });
+    if (url.pathname === '/api/org') return route.fulfill({ json: org(company, open, people) });
     if (url.pathname === '/api/turns') return route.fulfill({ json: { turns: open ? [HUB_TURN] : [] } });
     if (url.pathname === '/api/version') return route.fulfill({ json: { version: '0.18.7', commit: 'hub-turns' } });
     if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.18.7', commit: 'hub-turns' }, available: false, latest: null, updater: { status: null, waiting: null } } });

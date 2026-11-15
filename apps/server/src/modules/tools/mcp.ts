@@ -200,7 +200,7 @@ export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* An assistant's own agent works for its owner alone, with the owner's assistant tools, never the company's; on a
        machine that only reads it waits, as its tools keep what they do. */
     if (reading && job.agentKind === 'assistant') throw paused();
-    const server = job.agentKind === 'assistant' ? assistantAgentTools(ctx, job) : toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
+    const server = job.agentKind === 'assistant' ? await assistantAgentTools(ctx, job, callName(req.body)) : toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

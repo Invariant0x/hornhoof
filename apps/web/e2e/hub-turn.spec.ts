@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { FIVE, ONE, serveHubTurn, THREE, type Company } from './hub-turn-api';
+import type { PersonView } from '../src/types';
+import { ASKED, FIVE, ONE, serveHubTurn, THREE, type Company } from './hub-turn-api';
 
 test.use({ reducedMotion: 'reduce' });
 
@@ -12,7 +13,7 @@ const card = (page: Page, name: string) => page.getByRole('button', { name: new 
 const bar = (page: Page, name: string) => card(page, name).locator('.dept-turn [role="progressbar"]');
 const with_ = (company: Company, name: string, progress: [number, number]): Company => company.map(d => (d.name === name ? { ...d, progress } : d));
 
-async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', width: number, start: Company = ONE) {
+async function open(page: Page, lang: 'en' | 'ru', theme: string, width: number, start: Company = ONE, people: PersonView[] = []) {
   await page.setViewportSize({ width, height: 1000 });
   await page.addInitScript(({ lang, theme }) => {
     localStorage.setItem('hh-lang', lang);
@@ -24,7 +25,7 @@ async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', widt
   page.on('console', e => { if (e.type() === 'error') errors.push(e.text()); });
   page.on('requestfailed', r => failures.push(r.url()));
   page.on('response', r => { if (r.status() >= 400) failures.push(`${r.status()} ${new URL(r.url()).pathname}`); });
-  const live = await serveHubTurn(page, start);
+  const live = await serveHubTurn(page, start, people);
   await page.goto('/');
   await expect(page.locator('.hub')).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
@@ -171,3 +172,68 @@ for (const lang of ['en', 'ru'] as const) {
     }
   }
 }
+
+/* The tag that names the turn keeps the skin's own glow and accent ink, held to 4.5:1 on the inner circle it stands on and
+   whole inside its box, in every built-in skin: while decisions wait for a whole-company person and the hub breathes amber,
+   and while nothing waits. */
+const STATES: [state: string, people: PersonView[]][] = [['while decisions wait', [ASKED]], ['while nothing waits', []]];
+
+test.describe('the turn tag on the hub', () => {
+  test.use({ reducedMotion: 'no-preference' });
+  for (const [state, people] of STATES) {
+    for (const skin of ['cyberpunk', 'light', 'matrix', 'pixel']) {
+      test(`stays in the skin's colours and reads clearly in ${skin} ${state}`, async ({ page, browserName }, info) => {
+        const waiting = people.length > 0;
+        const { errors, failures } = await open(page, 'en', skin, 1440, ONE, people);
+        const hub = page.locator('.hub');
+        if (waiting) await expect(hub).toHaveClass(/\battn\b/);
+        else await expect(hub).not.toHaveClass(/\battn\b/);
+        await expect(hub.locator('.hub-focus-tag')).toHaveText(en.tasks.turn(3));
+        await page.evaluate(async () => { await document.fonts.ready; });
+        await hub.screenshot({ path: info.outputPath(`hub-tag-${waiting ? 'waiting' : 'calm'}-${skin}-${browserName}.png`), animations: 'disabled' });
+        const found = await hub.evaluate(hub => {
+          /* A token as the engine paints it, read off an element outside the hub. */
+          const token = (property: 'color' | 'backgroundColor', value: string) => {
+            const probe = document.body.appendChild(document.createElement('i'));
+            probe.style[property] = value;
+            const painted = getComputedStyle(probe)[property];
+            probe.remove();
+            return painted;
+          };
+          const parse = (value: string): number[] => {
+            const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(value);
+            return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])] : [0, 0, 0, 0];
+          };
+          const over = (top: number[], under: number[]) => [0, 1, 2].map(i => top[i]! * top[3]! + under[i]! * (1 - top[3]!)).concat(1);
+          const luminance = (c: number[]) => [0, 1, 2].map(i => c[i]! / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i]!, 0);
+          const box = hub.querySelector<HTMLElement>('.hub-focus-tag')!;
+          const tag = getComputedStyle(box);
+          const glow = getComputedStyle(hub, '::before');
+          const ground = over(parse(tag.backgroundColor), parse(getComputedStyle(hub.querySelector('.hub-in')!).fill));
+          const [a, b] = [luminance(over(parse(tag.color), ground)), luminance(ground)].sort((x, y) => y - x);
+          return {
+            background: tag.backgroundColor, skinGlow: token('backgroundColor', 'var(--glow)'), amber: token('backgroundColor', 'var(--amber)'),
+            color: tag.color, ink: token('color', 'var(--cyan-ink)'),
+            contrast: Math.round(((a! + 0.05) / (b! + 0.05)) * 100) / 100,
+            whole: box.scrollWidth <= box.clientWidth && box.scrollHeight <= box.clientHeight,
+            /* The amber breath itself: its own layer, which animates only its opacity, and the ring around the hub. */
+            breath: { glow: token('backgroundColor', glow.getPropertyValue('--glow')), animation: glow.animationName, ring: getComputedStyle(hub.querySelector('.hub-ring')!).stroke, amberStroke: token('color', 'var(--amber)') },
+          };
+        });
+        expect(found.background, JSON.stringify(found)).toBe(found.skinGlow);
+        expect(found.background).not.toBe(found.amber);
+        expect(found.color).toBe(found.ink);
+        expect(found.contrast, JSON.stringify(found)).toBeGreaterThanOrEqual(4.5);
+        expect(found.whole).toBe(true);
+        if (waiting) {
+          expect(found.breath.glow).toBe(found.amber);
+          expect(found.breath.animation).toBe('dglow');
+          expect(found.breath.ring).toBe(found.breath.amberStroke);
+        }
+        await looksRight(page);
+        expect(errors).toEqual([]);
+        expect(failures).toEqual([]);
+      });
+    }
+  }
+});
