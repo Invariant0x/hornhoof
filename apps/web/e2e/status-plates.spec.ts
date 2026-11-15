@@ -1,9 +1,9 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
-import type { BuiltinView, MachineView, Org, SubView } from '../src/types';
-import { ME, brokenHeaderWords, serveApi, tableFits } from './api';
+import type { BuiltinView, MachineView, Org, PersonView, SubView } from '../src/types';
+import { ME, brokenHeaderWords, serveApi } from './api';
 
-/* A status plate and the cells of a sorting table keep their words whole, on Subscriptions & API and on Machines: as a
+/* A status plate and the cells of a table keep their words whole, on Subscriptions & API, Machines and People: as a
    table and as entries, at the widths of a desk, a laptop, a small laptop and a phone, in every shipped language (so in
    the longest and the shortest) and laid out right to left. A word breaks only where it does not fit a line of its own, a
    status is one frame, on one line as long as the rows stand as a table, and the table stands inside its frame. */
@@ -44,12 +44,22 @@ const MACHINES: MachineView[] = [
   machine('m4', 'build-box-with-a-rather-long-name-of-its-own', { online: false, lastSeenAt: '2026-11-15T09:00:00.000Z', load: null, lendsTests: false }),
 ];
 const BUILTIN: BuiltinView = { online: true, load: null, running: { agents: [], parts: [] }, machine: { id: 'm1', hostname: 'rack-01' } };
-
-type Screen = { key: 'subscriptions' | 'machines'; rows: number; tab: (t: Messages) => string };
-const SCREENS: Screen[] = [
-  { key: 'subscriptions', rows: SUBS.length, tab: t => t.shell.tabs.subscriptions },
-  { key: 'machines', rows: MACHINES.length, tab: t => t.shell.tabs.machines },
+const WHOLE = { whole: true, departments: [], teams: [] };
+const PEOPLE: PersonView[] = [
+  { id: 'p1', name: 'Ivan Korol', email: 'ivan@acme.com', title: 'CEO', status: 'active', isOwner: true, access: WHOLE },
+  { id: 'p2', name: 'Konstantin Konstantinopolsky', email: 'konstantin@acme.com', title: 'Head of customer operations', status: 'invited', isOwner: false, isCeoDelegate: true, access: WHOLE },
+  { id: 'p3', name: 'Mia', email: 'mia@acme.com', title: 'CTO', status: 'disabled', isOwner: false, access: WHOLE },
 ];
+
+/* rows: how many rows the table shows; card: a row of a sorting table opens its card under it. */
+type Screen = { key: 'subscriptions' | 'machines' | 'people'; rows: number; card: boolean; tab: (t: Messages) => string };
+const SCREENS: Screen[] = [
+  { key: 'subscriptions', rows: SUBS.length, card: true, tab: t => t.shell.tabs.subscriptions },
+  { key: 'machines', rows: MACHINES.length, card: true, tab: t => t.shell.tabs.machines },
+  { key: 'people', rows: PEOPLE.length, card: false, tab: t => t.shell.tabs.people },
+];
+const ROWS = '.dt > tbody > tr.rm, .ptable > tbody > tr';
+const TABLE = 'table.dt, table.ptable';
 
 async function messagesFor(language: Language): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${language}.ts`) as Record<string, Messages>;
@@ -66,22 +76,23 @@ async function serve(page: Page, subs = SUBS) {
   await page.route(only('/api/machines'), route => route.fulfill({ json: { machines: MACHINES, builtin: BUILTIN, priority: false, move: null, canMove: false, copies: null } }));
   await page.route(only('/api/nodes/commands'), route => route.fulfill({ json: { commands: [] } }));
   await page.route(only('/api/machines/access'), route => route.fulfill({ json: { views: [] } }));
+  await page.route(only('/api/people'), route => route.fulfill({ json: { people: PEOPLE } }));
 }
 
 async function open(page: Page, screen: Screen, language: Language, theme: 'light' | 'dark', dir: 'ltr' | 'rtl') {
   await page.evaluate(({ language, theme }) => { localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', theme); }, { language, theme });
-  await page.goto('/');
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(direction => { document.documentElement.dir = direction; }, dir);
   await page.getByRole('navigation').getByRole('button', { name: screen.tab(await messagesFor(language)), exact: true }).click();
-  await expect(page.locator('.dt > tbody > tr.rm')).toHaveCount(screen.rows);
+  await expect(page.locator(ROWS)).toHaveCount(screen.rows);
   await page.evaluate(() => document.fonts.ready);
 }
 
 /* The words of the rows and of every status and badge on the page that stand on more than one line: a run of letters and
    digits split across lines is a word broken inside, as Ready into Read and y. */
-const brokenWords = (page: Page) => page.evaluate(() => {
+const brokenWords = (page: Page) => page.evaluate(rows => {
   const broken: string[] = [];
-  for (const root of document.querySelectorAll('.dt > tbody > tr.rm, .status, .badge')) {
+  for (const root of document.querySelectorAll(`${rows}, .status, .badge`)) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       for (const word of (node.textContent ?? '').matchAll(/[\p{L}\p{N}]+/gu)) {
@@ -94,10 +105,10 @@ const brokenWords = (page: Page) => page.evaluate(() => {
     }
   }
   return broken;
-});
+}, ROWS);
 
 /* Each status of the rows: its frames (one, never split across lines) and the lines its words take inside. */
-const statuses = (page: Page) => page.locator('.dt > tbody > tr.rm .status').evaluateAll(all => all.map(el => {
+const statuses = (page: Page) => page.locator(ROWS).locator('.status').evaluateAll(all => all.map(el => {
   const range = document.createRange();
   range.selectNodeContents(el);
   const lines = new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top))).size;
@@ -105,10 +116,12 @@ const statuses = (page: Page) => page.locator('.dt > tbody > tr.rm .status').eva
 }));
 
 /* The rows stand as a table (not as entries, as on a phone or where whole words do not fit). */
-const asTable = (page: Page) => page.locator('.dt').evaluate(el => getComputedStyle(el).display === 'table');
+const asTable = (page: Page) => page.locator(TABLE).evaluate(el => getComputedStyle(el).display === 'table');
+/* The table stands inside the frame that measures it. */
+const tableFits = (page: Page) => page.locator(TABLE).evaluate(el => el.parentElement!.scrollWidth <= el.parentElement!.clientWidth + 1);
 const pageFits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 /* How many letters the rows and headers show: what ranks the languages from the longest to the shortest. */
-const shownLength = (page: Page) => page.locator('.dt').evaluate(el => (el.textContent ?? '').replace(/\s+/g, '').length);
+const shownLength = (page: Page) => page.locator(TABLE).evaluate(el => (el.textContent ?? '').replace(/\s+/g, '').length);
 
 async function check(page: Page, place: string) {
   const table = await asTable(page);
@@ -130,36 +143,53 @@ async function shoot(page: Page, info: TestInfo, name: string) {
   await page.screenshot({ path: info.outputPath(`${name}.png`), animations: 'disabled' });
 }
 
+/* The languages from the longest to the shortest on a screen, by the letters its table shows. */
+async function rank(page: Page, screen: Screen): Promise<Language[]> {
+  const ranked: { id: Language; letters: number }[] = [];
+  for (const { id } of LANGUAGES) {
+    await open(page, screen, id, 'dark', 'ltr');
+    ranked.push({ id, letters: await shownLength(page) });
+  }
+  return ranked.sort((a, b) => b.letters - a.letters || a.id.localeCompare(b.id)).map(r => r.id);
+}
+
+/* One look of a screen at every width: closed, and with the first row's card open on a sorting table. A desk shows the
+   rows as a table. */
+async function every(page: Page, info: TestInfo, browserName: string, screen: Screen, language: Language, dir: 'ltr' | 'rtl') {
+  const modes: Record<number, boolean> = {};
+  for (const width of WIDTHS) {
+    const place = `${screen.key} ${language} ${dir} ${width} ${browserName}`;
+    await page.setViewportSize({ width, height: HEIGHT(width) });
+    await open(page, screen, language, dir === 'rtl' ? 'light' : 'dark', dir);
+    await shoot(page, info, `${screen.key}-${language}-${dir}-${width}-${browserName}`);
+    modes[width] = await check(page, place);
+    if (!screen.card) continue;
+    await page.locator('.dt > tbody > tr.rm .rowbtn').first().click();
+    await expect(page.locator('.dt > tbody > tr.det')).toHaveCount(1);
+    await check(page, `${place} with a card open`);
+  }
+  await info.attach(`table-or-entries-${screen.key}-${language}-${dir}`, { body: JSON.stringify(modes), contentType: 'application/json' });
+  expect(modes[1440], `${screen.key} ${language} ${dir} 1440 stands as a table`).toBe(true);
+}
+
+/* Every shipped language, so the longest and the shortest of each screen, left to right; and a right-to-left one once one
+   ships, until then the longest laid out mirrored. */
 for (const screen of SCREENS) {
-  test(`${screen.key}: status plates and row words stay whole in every shipped language, ltr and rtl, at every width`, async ({ page, browserName }, info) => {
+  for (const { id } of LANGUAGES) {
+    test(`${screen.key}: status plates and row words stay whole, ${id} ltr, at every width`, async ({ page, browserName }, info) => {
+      await serve(page);
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await every(page, info, browserName, screen, id, 'ltr');
+    });
+  }
+  test(`${screen.key}: status plates and row words stay whole, right to left, at every width`, async ({ page, browserName }, info) => {
     await serve(page);
-    await page.goto('/');
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.setViewportSize({ width: 1440, height: 900 });
-    /* The languages from the longest to the shortest on this screen, and a right-to-left one once one ships; until then the
-       longest is laid out mirrored as well. */
-    const ranked: { id: Language; letters: number }[] = [];
-    for (const { id } of LANGUAGES) {
-      await open(page, screen, id, 'dark', 'ltr');
-      ranked.push({ id, letters: await shownLength(page) });
-    }
-    ranked.sort((a, b) => b.letters - a.letters || a.id.localeCompare(b.id));
+    const ranked = await rank(page, screen);
     const rtl = LANGUAGES.map(l => l.id).filter(id => RTL.test(id));
-    const looks = [...ranked.map(({ id }) => ({ language: id, dir: 'ltr' as const })), { language: rtl[0] ?? ranked[0]!.id, dir: 'rtl' as const }];
-    const modes: Record<string, boolean> = {};
-    for (const { language, dir } of looks) for (const width of WIDTHS) {
-      const place = `${screen.key} ${language} ${dir} ${width} ${browserName}`;
-      await page.setViewportSize({ width, height: HEIGHT(width) });
-      await open(page, screen, language, dir === 'rtl' ? 'light' : 'dark', dir);
-      await shoot(page, info, `${screen.key}-${language}-${dir}-${width}-${browserName}`);
-      modes[`${language}-${dir}-${width}`] = await check(page, place);
-      /* A row's card opens under it and the rows keep their words. */
-      await page.locator('.dt > tbody > tr.rm .rowbtn').first().click();
-      await expect(page.locator('.dt > tbody > tr.det')).toHaveCount(1);
-      await check(page, `${place} with a card open`);
-    }
-    await info.attach('languages-and-modes', { body: JSON.stringify({ ranked, rtl: rtl.length ? 'CHECKED' : 'NOT_SHIPPED, the longest mirrored', table: modes }, null, 2), contentType: 'application/json' });
-    /* A desk shows the rows as a table. */
-    for (const { language, dir } of looks) expect(modes[`${language}-${dir}-1440`], `${screen.key} ${language} ${dir} 1440 stands as a table`).toBe(true);
+    await info.attach('languages', { body: JSON.stringify({ longestFirst: ranked, rtl: rtl.length ? rtl : 'none shipped, the longest mirrored' }), contentType: 'application/json' });
+    await every(page, info, browserName, screen, rtl[0] ?? ranked[0]!, 'rtl');
   });
 }
 
@@ -168,7 +198,7 @@ for (const screen of SCREENS) {
 test('Subscriptions & API: Ready stays on one line in its column, en 1280', async ({ page }) => {
   const ready = [SUBS[0]!, { ...SUBS[1]!, status: 'ready' as const, place: COMPANY }, SUBS[2]!];
   await serve(page, ready);
-  await page.goto('/');
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await open(page, { ...SCREENS[0]!, rows: ready.length }, 'en', 'dark', 'ltr');
   expect(await asTable(page)).toBe(true);
