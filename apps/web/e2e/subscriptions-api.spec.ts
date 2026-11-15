@@ -6,7 +6,7 @@ import type { SubView, TokenPeriods, TokenSum } from '../src/types';
 import { tokenCount } from '../src/ui/token-count';
 import { CARD } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
-import { box, serveApi } from './api';
+import { box, brokenHeaderWords, serveApi, tableFits } from './api';
 
 /* One section holds the plans and the APIs paid by the token: each says how it is paid, the table filters by it and shows
    what each used in 30 days, an open card shows its tokens beside its limits, the whole company connects an API with the
@@ -60,9 +60,8 @@ const BY_MODEL = [{ model: 'meta-llama/llama-4-maverick', total: 19_687_500 }, {
 const pathOf = (url: URL | string) => new URL(url.toString()).pathname;
 
 /* The section's own answers over the company of serveApi: its list, a card's tokens, an API's models and a new connection. */
-async function serveSection(page: Page, sent: Request[]) {
+async function serveSection(page: Page, sent: Request[], list = [PLAN, ROUTER, CLAUDE_API, ACME]) {
   await serveApi(page);
-  const list = [PLAN, ROUTER, CLAUDE_API, ACME];
   await page.route(url => pathOf(url) === '/api/subscriptions', route => {
     if (route.request().method() === 'POST') {
       sent.push(route.request());
@@ -95,23 +94,6 @@ const fits = (page: Page) => page.evaluate(() => document.documentElement.scroll
 /* A box's height in whole pixels: Firefox lays out in sixtieths of a pixel, so 44 px can come as 43.99997. */
 const tall = async (locator: Locator) => Math.round((await box(locator)).height);
 
-/* The words of the table's headers that stand on more than one line: a word broken in its middle. */
-const brokenHeaderWords = (page: Page) => page.evaluate(() => {
-  const broken: string[] = [];
-  for (const th of document.querySelectorAll('.dt > thead th')) {
-    const walker = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      for (const word of (node.textContent ?? '').matchAll(/\S+/g)) {
-        const range = document.createRange();
-        range.setStart(node, word.index);
-        range.setEnd(node, word.index + word[0].length);
-        const lines = new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top)));
-        if (lines.size > 1) broken.push(word[0]);
-      }
-    }
-  }
-  return broken;
-});
 
 async function insideCard(card: Locator) {
   const blocks = await box(card.locator('.blocks'));
@@ -176,15 +158,15 @@ for (const { lang, skin, width } of LOOKS) {
       await expect(row('WXYZ').locator('td[colspan="2"]')).toHaveText(t.subs.noPlanLimits);
       /* A header breaks between its words only, in a table that fits its frame. */
       expect(await brokenHeaderWords(page)).toEqual([]);
-      expect(await page.locator('.tbl').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      expect(await tableFits(page)).toBe(true);
     } else await expect(row('WXYZ').getByRole('cell', { name: `${t.subs.limits} ${t.subs.noPlanLimits}`, exact: true })).toBeVisible();
     await expect(page.getByRole('searchbox')).toHaveAttribute('placeholder', width > 720 ? t.tables.searchSubscriptions : t.tables.searchSubscriptionsShort);
     expect(await fits(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(`list-${lang}-${skin}-${width}.png`), fullPage: true });
 
     const type = page.getByRole('group', { name: t.subs.payFilter, exact: true });
-    const all = type.getByRole('button', { name: new RegExp(`^${t.subs.payAll}`) });
-    await expect(all).toHaveText(`${t.subs.payAll}4`);
+    const all = type.getByRole('button', { name: new RegExp(`^${t.tables.all}`) });
+    await expect(all).toHaveText(`${t.tables.all}4`);
     await expect(all).toHaveAttribute('aria-pressed', 'true');
     for (const button of await type.getByRole('button').all()) expect(await tall(button)).toBeGreaterThanOrEqual(44);
     await type.getByRole('button', { name: new RegExp(`^${t.subs.pay.api_key}`) }).click();
@@ -274,6 +256,51 @@ for (const { lang, skin, width } of LOOKS) {
   });
 }
 
+/* Every filter group with two values or more starts with All and its count, pressed until a value is; each button is a
+   target of 44 px. A Codex plan of Maria's that waits for its sign-in gives Program, Owner and State two values each. */
+test('Subscriptions & API: every filter group starts with All, ru dark cyberpunk 1440', async ({ page }, info) => {
+  const errors = watch(page);
+  const t = ru;
+  const codex: SubView = { ...PLAN, id: 's-codex', provider: 'codex', label: 'Codex', tier: null, owner: { id: 'p2', name: 'Maria' }, status: 'needs_login', machines: [{ id: 'm1', hostname: 'a-host', status: 'needs_login', online: true }], limits: null, limitsUpdatedAt: null };
+  await page.clock.install({ time: NOW });
+  await page.addInitScript(() => {
+    localStorage.setItem('hh-lang', 'ru');
+    localStorage.setItem('hh-theme', 'cyberpunk');
+  });
+  await serveSection(page, [], [PLAN, codex, ROUTER, CLAUDE_API]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
+  const rows = page.locator('tr.rm');
+  await expect(rows).toHaveCount(4);
+  /* The ink of a link in this skin, as the page computes it. */
+  const linkInk = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('span'));
+    probe.style.color = 'var(--cyan-ink)';
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  for (const [label, option] of [[t.subs.payFilter, t.subs.pay.personal], [t.tables.provider, 'Codex'], [t.tables.owner, 'Maria'], [t.tables.status, t.subs.states.needs_login]]) {
+    const group = page.getByRole('group', { name: label, exact: true });
+    const all = group.getByRole('button').first();
+    await expect(all).toHaveText(`${t.tables.all}4`);
+    await expect(all).toHaveAttribute('aria-pressed', 'true');
+    for (const button of await group.getByRole('button').all()) expect(await tall(button)).toBeGreaterThanOrEqual(44);
+    await group.getByRole('button', { name: new RegExp(option) }).click();
+    await expect(all).toHaveAttribute('aria-pressed', 'false');
+    await expect(group.getByRole('button', { name: new RegExp(option) })).toHaveCSS('border-top-color', linkInk);
+    await all.click();
+    await expect(rows).toHaveCount(4);
+  }
+  /* A program keeps its own mark in its button. */
+  await expect(page.getByRole('group', { name: t.tables.provider, exact: true }).getByRole('img', { name: 'Codex' })).toBeVisible();
+  expect(await fits(page)).toBe(true);
+  await page.locator('.tools').screenshot({ path: info.outputPath('filters-ru-cyberpunk-1440.png') });
+  await page.screenshot({ path: info.outputPath('filters-page-ru-cyberpunk-1440.png'), fullPage: true });
+  expect(errors).toEqual([]);
+});
+
 /* Wider than a phone, a table that needs more than its frame by whole words stands as entries; wider still, as a table. */
 test('Subscriptions & API: entries where the table does not fit by whole words, ru light 830 and 1440', async ({ page }) => {
   const errors = watch(page);
@@ -290,7 +317,7 @@ test('Subscriptions & API: entries where the table does not fit by whole words, 
   await expect(table).toHaveAttribute('data-fit', 'entries');
   await expect(page.locator('.dt > thead')).toBeHidden();
   await expect(page.getByRole('group', { name: ru.tables.sortBy })).toBeVisible();
-  expect(await page.locator('.tbl').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(await tableFits(page)).toBe(true);
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(table).not.toHaveAttribute('data-fit');
   await expect(page.locator('.dt > thead')).toBeVisible();

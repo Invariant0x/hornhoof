@@ -468,7 +468,6 @@ export const en = {
     intro: 'The plans and APIs the agents run on. A personal plan runs on its owner\'s machines and serves wherever its owner works. An API is paid by the tokens its agents use.',
     pay: { personal: 'By subscription', api_key: 'By tokens' },
     payFilter: 'Type',
-    payAll: 'All',
     tokensColumn: 'Tokens, 30 days',
     tokens: {
       title: 'Tokens',
@@ -651,7 +650,7 @@ export const en = {
   },
   tables: {
     search: 'Search', searchMachines: 'Search by machine, owner, agent or role', searchSubscriptions: 'Search by plan, owner, agent or machine', searchSubscriptionsShort: 'Search connections',
-    provider: 'Provider', testFilters: 'Tests',
+    provider: 'Provider', testFilters: 'Tests', all: 'All',
     lentFilter: 'Lent to test runs',
     machineCount: (n: number) => `${n} ${plural('en', n, { one: 'machine', other: 'machines' })}`,
     subscriptionCount: (n: number) => `${n} ${plural('en', n, { one: 'subscription', other: 'subscriptions' })}`,

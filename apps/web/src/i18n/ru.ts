@@ -496,7 +496,6 @@ export const ru: Messages = {
     intro: 'Тарифы и API, на которых работают агенты. Личный тариф работает на машинах владельца и служит там, где работает владелец. API оплачивается по токенам, которые тратят агенты.',
     pay: { personal: 'По подписке', api_key: 'По токенам' },
     payFilter: 'Тип',
-    payAll: 'Все',
     tokensColumn: 'Токены, 30 дней',
     tokens: {
       title: 'Токены',
@@ -676,7 +675,7 @@ export const ru: Messages = {
   },
   tables: {
     search: 'Поиск', searchMachines: 'Поиск по машине, владельцу, агенту или роли', searchSubscriptions: 'Поиск по подписке, владельцу, агенту или машине', searchSubscriptionsShort: 'Поиск подключений',
-    provider: 'Провайдер', testFilters: 'Тесты',
+    provider: 'Провайдер', testFilters: 'Тесты', all: 'Все',
     lentFilter: 'Отдана под тесты',
     machineCount: n => `${n} ${plural('ru', n, { one: 'машина', few: 'машины', many: 'машин', other: 'машины' })}`,
     subscriptionCount: n => `${n} ${plural('ru', n, { one: 'подписка', few: 'подписки', many: 'подписок', other: 'подписки' })}`,

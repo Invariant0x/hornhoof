@@ -86,7 +86,7 @@ function SubscriptionStatus({ sub, now, showUntil = false }: { sub: SubView; now
 
 /* The sign of how a connection is paid: arrows going round for a subscription, a stack of coins for tokens. */
 function PaySign({ kind }: { kind: SubView['kind'] }) {
-  return <svg viewBox="0 0 24 24" aria-hidden="true">{kind === 'api_key'
+  return <svg className="sign" viewBox="0 0 24 24" aria-hidden="true">{kind === 'api_key'
     ? <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>
     : <><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9" /><path d="M20 4v5h-5" /><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15" /><path d="M4 20v-5h5" /></>}</svg>;
 }
@@ -189,12 +189,14 @@ function PlanAccount({ sub: s }: { sub: SubView }) {
 
 function subscriptionFilters(t: Messages, now: number, subs: SubView[]): FilterGroup<SubView>[] {
   const labels: Record<string, string> = { ...t.subs.states, limit: t.subs.limitReached(null) };
-  return [
-    { key: 'pay', label: t.subs.payFilter, all: t.subs.payAll, values: s => [s.kind], text: kind => t.subs.pay[kind as SubView['kind']] ?? kind, mark: kind => <PaySign kind={kind as SubView['kind']} /> },
+  const groups: FilterGroup<SubView>[] = [
+    { key: 'pay', label: t.subs.payFilter, values: s => [s.kind], text: kind => t.subs.pay[kind as SubView['kind']] ?? kind, mark: kind => <PaySign kind={kind as SubView['kind']} /> },
     providerFilter(t.tables.provider, s => [s.provider]),
     { key: 'owner', label: t.tables.owner, values: s => [s.owner.id], text: id => subs.find(s => s.owner.id === id)?.owner.name ?? id },
     { key: 'status', label: t.tables.status, values: s => [stateOf(s, now)], text: value => labels[value] ?? value },
   ];
+  /* Each group starts with All, as the Type one does. */
+  return groups.map(group => ({ ...group, all: t.tables.all }));
 }
 
 function subscriptionSearch(t: Messages, language: Language, s: SubView): string {

@@ -139,6 +139,27 @@ export async function box(locator: Locator) {
   return b;
 }
 
+/* The words of the table's headers that stand on more than one line: a word broken in its middle. */
+export const brokenHeaderWords = (page: Page) => page.evaluate(() => {
+  const broken: string[] = [];
+  for (const th of document.querySelectorAll('.dt > thead th')) {
+    const walker = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const word of (node.textContent ?? '').matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        const lines = new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top)));
+        if (lines.size > 1) broken.push(word[0]);
+      }
+    }
+  }
+  return broken;
+});
+
+/* Whether a sorting table stands inside its frame. */
+export const tableFits = (page: Page) => page.locator('.tbl').evaluate(el => el.scrollWidth <= el.clientWidth + 1);
+
 const OPEN_TASK = new RegExp(`^(${en.tasks.table.open}|${ru.tasks.table.open})$`);
 
 /* A task opens from the table of the Tasks screen: its row unfolds, and the button in what it shows opens the panel. */

@@ -754,7 +754,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .badge.old { color: var(--amber-ink); }
 /* How a connection is paid, in a word and its sign; color tells nothing here. The orchestrator's mark is a role, quiet too. */
 .badge.ctype { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); border-color: var(--line2); white-space: nowrap; }
-.badge.ctype svg, .fgroup.whole .chipf svg { inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.badge.ctype svg.sign, .chipf svg.sign { inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .badge.orch-role { color: var(--muted); border-color: var(--line2); }
 .nmg + .badge { margin-inline-end: 6px; }
 /* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
