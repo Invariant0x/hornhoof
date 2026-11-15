@@ -178,6 +178,27 @@ describe('your own name under Profile', () => {
     expect(decl('.settings-window > header .btn', 'min-height')).toBe('44px');
   });
 
+  it('keeps its heading and Done fixed and scrolls only its body, with the same 18 px of room for a scrollbar in every browser', async () => {
+    expect(decl('.dialog.settings-window', 'height')).toBe('calc(100vh - 32px)');
+    expect(decl('.dialog.settings-window', 'padding')).toBe('0');
+    expect(decl('.dialog.settings-window', 'overflow')).toBe('hidden');
+    /* The window itself keeps no room for a scrollbar: only its body scrolls. */
+    expect(decl('.dialog.settings-window', 'scrollbar-gutter')).toBe('auto');
+    expect(decl('.settings-window > header', 'padding-block')).toBe('12px');
+    expect(decl('.settings-window > header', 'padding-inline')).toBe('18px 36px');
+    expect(decl('.settings-window > header', 'border-block-end')).toBe('1px solid var(--line)');
+    expect(decl('.settings-scroll', 'overflow')).toBe('auto');
+    expect(decl('.settings-scroll', 'scrollbar-gutter')).toBe('stable');
+    expect(decl('.settings-scroll', 'padding')).toBe('18px');
+    expect(decl('.settings-scroll', 'padding-inline-end')).toBe('calc(18px + max(0px, 18px - var(--sb, 0px)))');
+    mockApi({});
+    render(<Settings me={LISTED} group="profile" onClose={() => {}} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    /* What this browser's scrollbar takes is measured on the body itself; jsdom draws none. */
+    expect(dialog.querySelector<HTMLElement>('.settings-scroll')!.style.getPropertyValue('--sb')).toBe('0px');
+    expect(dialog.querySelector('.settings-scroll > .settings-body')).not.toBeNull();
+  });
+
   it('shows empty and server name errors by the field', async () => {
     mockApi({ 'PATCH /api/people/p1': [403, { error: { code: 'forbidden', message: 'You cannot change this name.', reason: 'rename_failed' } }] });
     const user = userEvent.setup();

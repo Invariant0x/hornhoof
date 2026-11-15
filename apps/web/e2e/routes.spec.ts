@@ -205,7 +205,8 @@ test('login keeps a local deep link and never follows an external return address
 test('the settings dialog reserves stable scrollbar room', async ({ page }) => {
   await serveRoutes(page);
   await page.goto('/settings/company');
-  await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toHaveCSS('scrollbar-gutter', 'stable');
+  /* The heading stays put; the body under it scrolls and keeps its room. */
+  await expect(page.getByRole('dialog', { name: 'Settings', exact: true }).locator('.settings-scroll')).toHaveCSS('scrollbar-gutter', 'stable');
 });
 
 test('unknown and inaccessible links show the same unavailable page', async ({ page }, info) => {

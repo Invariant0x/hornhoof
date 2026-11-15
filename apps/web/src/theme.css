@@ -329,9 +329,13 @@ select:disabled { opacity: .55; }
 /* Settings, as Design's variant A draws it: Profile and the groups at the start, 200 px, a line between them, and the
    open one beside them in a column of at most 880 px; above it when narrow. The open group stands under its heading and
    what it holds, its parts one under another, 16 px apart. */
-/* One height for every group, so the window stays put when a person switches between them. */
-.dialog.settings-window { width: min(1160px, 100%); min-height: min(720px, calc(100vh - 32px)); align-content: start; }
+/* The whole height of the screen for every group, so the window stays put when a person switches between them. Its
+   heading and Done stay at the top; only the body scrolls, with 18 px of room at its end for a scrollbar in every
+   browser: --sb is what this browser's scrollbar takes of it. */
+.dialog.settings-window { width: min(1160px, 100%); height: calc(100vh - 32px); grid-template-rows: auto minmax(0, 1fr); gap: 0; padding: 0; overflow: hidden; scrollbar-gutter: auto; }
+.settings-window > header { padding-block: 12px; padding-inline: 18px 36px; border-block-end: 1px solid var(--line); }
 .settings-window > header .btn { min-width: 44px; min-height: 44px; padding: 8px 12px; font-size: 14px; line-height: 1.4; }
+.settings-scroll { overflow: auto; scrollbar-gutter: stable; padding: 18px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
 /* The heading a window starts on holds the focus for a screen reader, it is no control to show a ring around. */
 .settings-window [data-autofocus]:focus { outline: none; }
 .settings-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }

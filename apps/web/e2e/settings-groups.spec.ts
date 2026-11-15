@@ -85,11 +85,12 @@ async function direction(page: Page, dir: string) {
   await page.evaluate(value => { document.documentElement.dir = value; }, dir);
 }
 
-/* A picture of the whole window: the page is made as tall as what the window holds, then given back its height. */
+/* A picture of the whole window: the page is made as tall as what the window holds, its heading and its whole body, then
+   given back its height. */
 async function shot(page: Page, info: TestInfo, name: string) {
   await page.evaluate(async () => { await document.fonts.ready; });
   const viewport = page.viewportSize()!;
-  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.dialog')].map(box => box.scrollHeight)));
+  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.dialog')].map(box => { const body = box.querySelector<HTMLElement>('.settings-scroll'); return body ? box.getBoundingClientRect().height - body.clientHeight + body.scrollHeight : box.scrollHeight; })));
   if (content + 64 > viewport.height) await page.setViewportSize({ width: viewport.width, height: content + 64 });
   const file = `${name}-${info.project.name}.png`;
   await page.screenshot({ path: SHOTS ? `${SHOTS}/${file}` : info.outputPath(file), animations: 'disabled' });

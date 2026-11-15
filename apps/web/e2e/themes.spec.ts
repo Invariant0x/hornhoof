@@ -120,7 +120,7 @@ async function chooseLanguages(page: Page): Promise<Language[]> {
    scrolls to the card it presses. The actions inside a card are left out: the card on says Applied by a state, not Apply. */
 async function geometry(page: Page): Promise<unknown[]> {
   return page.evaluate(() => {
-    for (const scrolled of document.querySelectorAll('.dialog')) scrolled.scrollTop = 0;
+    for (const scrolled of document.querySelectorAll('.dialog, .settings-scroll')) scrolled.scrollTop = 0;
     const selectors = ['.dialog', '.dialog > *', '.settings-body > *', '.settings-nav > *', '.skins > *', '.skins-head > *', '.skins-add .btn', '.skins-catalog > *', '.skin-cards > *', '.skin-card > *', '.skin-preview > *', '.skins-guide > *'];
     /* Named by place, not by text: the line that says which skin is on changes its words with the skin. */
     return [...new Set(selectors.flatMap(selector => [...document.querySelectorAll<HTMLElement>(selector)]))].map((element, at) => {
@@ -166,7 +166,7 @@ const noSideScroll = (page: Page) => page.evaluate(() => document.documentElemen
 /* The whole window for Design, as tall as its content: the page grows for the picture and goes back to its size. */
 async function shot(page: Page, info: TestInfo, name: string) {
   const size = page.viewportSize()!;
-  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.dialog')].map(box => box.scrollHeight)));
+  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.dialog')].map(box => { const body = box.querySelector<HTMLElement>('.settings-scroll'); return body ? box.getBoundingClientRect().height - body.clientHeight + body.scrollHeight : box.scrollHeight; })));
   const room = content + 64;
   if (room > size.height) await page.setViewportSize({ width: size.width, height: room });
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true, animations: 'disabled' });
@@ -352,7 +352,7 @@ test('Pixel lowercase stands as tall as Tektur, within a pixel, at the size of a
   expect(await heading.evaluate(element => getComputedStyle(element).fontSynthesis)).toBe('none');
   /* The Pixel card beside Cyberpunk's, written in Tektur, on one picture for Design. */
   const card = (name: string) => dialog.locator('.skin-card').filter({ has: page.getByRole('heading', { name, exact: true }) });
-  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll('.dialog')].map(box => box.scrollHeight)));
+  const content = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.dialog')].map(box => { const body = box.querySelector<HTMLElement>('.settings-scroll'); return body ? box.getBoundingClientRect().height - body.clientHeight + body.scrollHeight : box.scrollHeight; })));
   await page.setViewportSize({ width: 1440, height: Math.max(900, content + 64) });
   const [first, second] = [(await card(words.skins.names.cyberpunk).boundingBox())!, (await card(words.skins.names.pixel).boundingBox())!];
   const x = Math.min(first.x, second.x), y = Math.min(first.y, second.y);

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import type { SettingsGroup } from '../routes';
@@ -304,8 +304,16 @@ const nothing = () => {};
 export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask = nothing, onClose }: SettingsProps) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
   const close = useSteady(onClose);
   const reached = useReached();
+
+  /* The room this browser's scrollbar takes beside the body, so the body keeps the same 18 px for it in every browser:
+     a classic scrollbar fills part of it, an overlay one none. */
+  useLayoutEffect(() => {
+    const body = scroll.current;
+    if (body) body.style.setProperty('--sb', `${Math.max(0, body.offsetWidth - body.clientWidth)}px`);
+  }, []);
 
   useEffect(() => {
     /* A person starts at the heading of the open group. */
@@ -326,10 +334,12 @@ export function Settings({ me, group, onGroup = nothing, onRenamed, onOpenTask =
           <h2 id="settings-title">{t.settings.title}</h2>
           <button className="btn small ghost" type="button" onClick={onClose}>{t.common.done}</button>
         </header>
-        <div className="settings-body">
-          <GroupNav group={current} me={me} reached={reached} onGroup={onGroup} />
-          <div className="settings-main">
-            <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} onOpenTask={onOpenTask} />
+        <div className="settings-scroll" ref={scroll}>
+          <div className="settings-body">
+            <GroupNav group={current} me={me} reached={reached} onGroup={onGroup} />
+            <div className="settings-main">
+              <GroupBody group={current} me={me} reached={reached} onRenamed={onRenamed} onOpenTask={onOpenTask} />
+            </div>
           </div>
         </div>
       </div>
