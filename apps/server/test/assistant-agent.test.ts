@@ -391,7 +391,7 @@ describe('GET /api/assistant/attachments/:id', () => {
     const id = await attach(c, run.toolToken!, 'report.bin', BYTES);
     const [kept] = await c.db.select({ agentId: attachments.agentId, jobId: attachments.jobId, personId: attachments.personId }).from(attachments).where(eq(attachments.id, id));
     expect(kept).toEqual({ agentId: agent.id, jobId: run.jobId, personId: null });
-    for (const _ of [1, 2, 3]) {
+    for (let time = 1; time <= 3; time++) {
       const got = await download(c, ava.key, id);
       expect(got.statusCode).toBe(200);
       expect(got.rawPayload.equals(BYTES)).toBe(true);
@@ -471,7 +471,7 @@ describe('GET /api/assistant/attachments/:id', () => {
       "another company's file": await file({ companyId: other!.id, agentId: otherAgent!.id, jobId: await turnOf(otherAgent!.id, other!.id, otherPlan!.id) }),
     };
     const seen = (got: Awaited<ReturnType<typeof download>>) => {
-      const { date: _, ...headers } = got.headers;
+      const headers = Object.fromEntries(Object.entries(got.headers).filter(([name]) => name !== 'date'));
       return { status: got.statusCode, body: got.body, headers };
     };
     const unknown = seen(await download(c, ava.key, randomUUID()));
