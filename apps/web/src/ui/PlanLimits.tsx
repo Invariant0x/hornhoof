@@ -10,7 +10,7 @@ function LimitGauge({ sub, name, limits, now }: { sub: SubView; name: string; li
   const { language } = useLanguage();
   const w = limits?.windows.find(w => w.name === name);
   const used = windowUsage(sub, name, now);
-  const figure = used === null ? (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)) : <Share of={percent(used)} />;
+  const figure = used === null ? (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)) : <Share>{`${percent(used)}%`}</Share>;
   return <Gauge label={windowName(t, name)} figure={figure} unit={used === null ? undefined : t.cards.used} empty={used === null} used={used} sub={w && <ResetTime at={w.resetsAt} now={now} />} />;
 }
 

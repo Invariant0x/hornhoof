@@ -94,7 +94,7 @@ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: 
             [t.machines.poolOnline, t.machines.of(String(online), String(all))],
             [t.machines.poolCores, cores ? String(cores) : t.machines.unknown],
             [t.machines.poolMemory, loads.length ? t.machines.gbOf(gigabytes(language, sum(l => l.memFree)), gigabytes(language, sum(l => l.memTotal))) : t.machines.unknown],
-            [t.machines.poolBusy, cores ? <Share of={busyShare(sum(l => l.load), cores)} /> : t.machines.unknown],
+            [t.machines.poolBusy, cores ? <Share>{`${busyShare(sum(l => l.load), cores)}%`}</Share> : t.machines.unknown],
           ]}
         />
       </Edge>
@@ -127,7 +127,7 @@ function Resources({ row }: { row: MachineRow }) {
   const busy = busyShare(load.load, load.cpus);
   return <>
     <div className="gauges">
-      <Gauge label={t.machines.load} figure={<Share of={busy} />} used={busy / 100} sub={t.cards.ofCores(load.cpus)} />
+      <Gauge label={t.machines.load} figure={<Share>{`${busy}%`}</Share>} used={busy / 100} sub={t.cards.ofCores(load.cpus)} />
       <MemoryGauge load={load} less={less} />
       <DiskGauge load={load} />
       <Gauge label={t.machines.processor} figure={load.cpus} unit={` ${t.cards.coresWord(load.cpus)}`} sub={[load.cpuModel, fewer ? t.cards.hostCores(load.hostCpus!) : null].filter(Boolean).join(', ')} />
