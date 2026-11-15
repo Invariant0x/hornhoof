@@ -97,6 +97,8 @@ SAYS_MIGRATIONS=''
 # How long this build's updater may take to say it goes on with an update it takes over.
 TAKE_OVER_WAIT="${HORNHOOF_TAKE_OVER_WAIT:-60}"
 TAKEN_OVER="This build's updater goes on with the update."
+# A Docker network as docker network inspect gives it: id|name|project|bridge|internal|subnet,gateway;...
+NETWORK_FORMAT='{{.Id}}|{{.Name}}|{{with .Labels}}{{with index . "com.docker.compose.project"}}{{.}}{{end}}{{end}}|{{with .Options}}{{with index . "com.docker.network.bridge.name"}}{{.}}{{end}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{with index . "Subnet"}}{{.}}{{end}},{{with index . "Gateway"}}{{.}}{{end}};{{end}}'
 KEEP_BACKUPS=3
 # How often it looks whether a node is behind, and asks again after a server that gave no answer, in seconds.
 NODES_CHECK=30
@@ -196,6 +198,14 @@ stop_with() {
 compose() { (cd "$SERVER_DIR" && docker compose "$@"); }
 
 env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
+
+# The compose project of the server: the one its settings name, else the one compose takes from the folder's name.
+compose_project() {
+  local project
+  project=$(env_value COMPOSE_PROJECT_NAME)
+  [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  printf '%s' "$project"
+}
 
 plain_tag() {
   case "$1" in '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*) return 1 ;; esac
@@ -733,10 +743,26 @@ install_mode() { shape; }
 # saved, and the build from before ran here. Compose downloads only an image that is missing.
 install() {
   unpack "$1" "$2" || return 1
+  keep_networks "$WORK/$1/compose.yaml" || return 1
   remove_unnamed "$WORK/$1/compose.yaml"
   if worker; then after_nodes_look; fi
   run_installer "$@" || return 1
   drop_orphans
+}
+
+# keep_networks <compose file>: a build from before compose files named the networks' subnets would make the networks
+# again, as compose takes those made with subnets for changed, and it cannot while this updater is on them. Its file
+# takes the networks as the one in the server folder names them, which that build runs on as on its own.
+keep_networks() {
+  local now="$SERVER_DIR/compose.yaml"
+  grep -q 'HORNHOOF_SUBNET' "$now" 2> /dev/null || return 0
+  ! grep -q 'HORNHOOF_SUBNET' "$1" || return 0
+  awk '
+    FNR == 1 { file++ }
+    /^[^[:space:]]/ { inside = /^networks:/ }
+    file == 1 { if (inside) kept = kept $0 "\n"; next }
+    !inside { print }
+    END { printf "%s", kept }' "$now" "$1" > "$1.new" && mv "$1.new" "$1"
 }
 
 # The installer of a build starts only the services it knows, so after going back to a build from before a service,
@@ -973,11 +999,10 @@ warn_subnet_overlap() {
   [ -n "$addrs" ] || return 0
   ids=$(docker network ls -q 2> /dev/null || true)
   [ -n "$ids" ] || return 0
-  project=$(env_value COMPOSE_PROJECT_NAME)
-  [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  project=$(compose_project)
   [ -n "$project" ] || return 0
   # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
-  nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{with index . "com.docker.compose.project"}}{{.}}{{end}}{{end}}|{{with .Options}}{{with index . "com.docker.network.bridge.name"}}{{.}}{{end}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{with index . "Subnet"}}{{.}}{{end}},{{with index . "Gateway"}}{{.}}{{end}};{{end}}' $ids 2> /dev/null || true)
+  nets=$(docker network inspect --format "$NETWORK_FORMAT" $ids 2> /dev/null || true)
   [ -n "$nets" ] || return 0
   hits=$(
     {
@@ -1345,6 +1370,14 @@ put_env() {
     index($0, name "=") == 1 { if (!put) print name "=" value; put = 1; next }
     { print }
     END { if (!put) print name "=" value }' "$file" > "$file.new") && as_env "$file.new"
+}
+
+# drop_env <name>...: .env without the lines of those names, and every other line as it was.
+drop_env() {
+  local file="$SERVER_DIR/.env"
+  (umask 077 && DROP_NAMES=" $* " awk '
+    BEGIN { names = ENVIRON["DROP_NAMES"] }
+    { name = $0; sub(/=.*/, "", name); if (index(names, " " name " ") == 0) print }' "$file" > "$file.new") && as_env "$file.new"
 }
 
 # A password for this machine's own database: 24 letters and digits.
@@ -2287,18 +2320,153 @@ taken_over() {
   done
 }
 
+# live_subnet <network>: the first subnet Docker gave that network, empty when it names none; fails when there is no
+# such network.
+live_subnet() {
+  local line cfg
+  line=$(docker network inspect --format "$NETWORK_FORMAT" "$1" 2> /dev/null | head -n 1 || true)
+  [ -n "$line" ] || return 1
+  cfg=${line##*|}
+  cfg=${cfg%%;*}
+  printf '%s' "${cfg%%,*}"
+}
+
+# The subnets the project's networks have in Docker, OLD_DEFAULT and OLD_INTERNAL, each empty when there is no such
+# network; fails when Docker has neither.
+OLD_DEFAULT=''
+OLD_INTERNAL=''
+live_networks() {
+  local project found=''
+  project=$(compose_project)
+  if OLD_DEFAULT=$(live_subnet "${project}_default"); then found=1; else OLD_DEFAULT=''; fi
+  if OLD_INTERNAL=$(live_subnet "${project}_internal"); then found=1; else OLD_INTERNAL=''; fi
+  [ -n "$found" ]
+}
+
+# Whether the networks Docker has are not the ones the compose file asks for: the file names their subnets, and the
+# settings hold none for a network that is there, or another subnet than it has. Compose takes such a network for
+# changed and removes it to make it again, which it cannot while other containers are on it, so it would start nothing.
+old_networks() {
+  local want_default want_internal
+  grep -q 'HORNHOOF_SUBNET' "$SERVER_DIR/compose.yaml" 2> /dev/null || return 1
+  live_networks || return 1
+  want_default=$(env_value HORNHOOF_SUBNET)
+  want_internal=$(env_value HORNHOOF_INTERNAL_SUBNET)
+  { [ -n "$OLD_DEFAULT" ] && [ "$want_default" != "$OLD_DEFAULT" ]; } || { [ -n "$OLD_INTERNAL" ] && [ "$want_internal" != "$OLD_INTERNAL" ]; }
+}
+
+# Whether compose refused because Docker would not remove a network of the project that containers are still on. Its
+# file asks for the network otherwise than it was made, in a way Docker does not show, as a network made with no
+# subnets named, which Docker shows with the subnet it gave.
+endpoints_refused() { grep -q 'has active endpoints' "$1" 2> /dev/null && live_networks; }
+
+# new_networks <log>: the settings name the subnets the networks have where they name none, so every address on them
+# stays, and the project stops whole with its networks, the containers its file no longer names too, its data staying
+# in its volumes. The built-in node hears first that it stops for an update, as when the installer stops it. The next
+# up makes the networks again with those subnets. ADDED_SUBNETS names the settings it wrote.
+ADDED_SUBNETS=''
+new_networks() {
+  local node
+  if [ -n "$OLD_DEFAULT" ] && [ -z "$(env_value HORNHOOF_SUBNET)" ]; then
+    PUT_VALUE=$OLD_DEFAULT put_env HORNHOOF_SUBNET || return 1
+    ADDED_SUBNETS="$ADDED_SUBNETS HORNHOOF_SUBNET"
+  fi
+  if [ -n "$OLD_INTERNAL" ] && [ -z "$(env_value HORNHOOF_INTERNAL_SUBNET)" ]; then
+    PUT_VALUE=$OLD_INTERNAL put_env HORNHOOF_INTERNAL_SUBNET || return 1
+    ADDED_SUBNETS="$ADDED_SUBNETS HORNHOOF_INTERNAL_SUBNET"
+  fi
+  node=$(compose ps -q node 2> /dev/null || true)
+  [ -z "$node" ] || docker exec "$node" node /app/apps/node/dist/main.js prepare-stop hornhoof_update > /dev/null 2>&1 || true
+  compose down --remove-orphans >> "$1" 2>&1
+}
+
+# old_build_up <log>: the build from before starts whole again, with the compose file and the settings it had, on
+# networks made as that file makes them, since its updater goes back with its own file. Only the subnets new_networks
+# wrote leave the settings. That updater finds the way back marked and goes back by itself, with the database it had,
+# which runs again with it.
+old_build_up() {
+  local ok=''
+  WORK=$(mktemp -d)
+  if unpack "$PREVIOUS" "$BACK_APP" && cp "$WORK/$PREVIOUS/compose.yaml" "$SERVER_DIR/compose.yaml"; then ok=1; fi
+  rm -rf "$WORK"
+  WORK=''
+  [ -n "$ok" ] || return 1
+  if [ -n "$ADDED_SUBNETS" ]; then
+    # shellcheck disable=SC2086 # setting names, one word each
+    drop_env $ADDED_SUBNETS || return 1
+  fi
+  compose down --remove-orphans >> "$1" 2>&1 || true
+  HORNHOOF_APP_REF="$BACK_APP" HORNHOOF_NODE_REF="$BACK_NODE" HORNHOOF_UPDATER_REF="$BACK_UPDATER" compose up -d --no-build >> "$1" 2>&1
+}
+
+# compose_said <log>: why compose refused, for the update's log: its last lines, without the value of any key, secret,
+# password or ticket the settings hold, each cut short.
+compose_said() {
+  local text line name value
+  text=$(awk 'NF' "$1" | tail -n 3)
+  while IFS= read -r line || [ -n "$line" ]; do
+    name=${line%%=*}
+    value=${line#*=}
+    case "$name" in *KEY* | *SECRET* | *PASSWORD* | *TOKEN* | *TICKET*) ;; *) continue ;; esac
+    [ "${#value}" -ge 8 ] || continue
+    text=${text//"$value"/<hidden>}
+  done < "$SERVER_DIR/.env"
+  while IFS= read -r line; do
+    [ -z "$line" ] || say "$(printf 'Compose said: %s' "$line" | cut -c1-240)"
+  done <<< "$text"
+}
+
 # The helper container this build's installer starts when an older updater runs it. Compose replaces that updater, and
 # the installer waiting in it, with this build's, which finds the update by the older one's note. If it does not say so
-# in time, the older updater starts again, finds step rollback and goes back, by itself.
+# in time, the older updater starts again, finds step rollback and goes back, by itself. On networks other than the
+# compose file asks for, as Docker shows them or as compose says when it refuses, the project stops first and its
+# networks are made again, once, and then the way back brings the build from before up whole, as nothing of it runs any
+# more.
 take_over() {
+  local said fresh=''
   update_running || return 0
   read_status
   { [ "$STEP" = install ] && recall; } || return 0
-  if compose up -d --no-build --wait updater > /dev/null 2>&1 && taken_over; then return 0; fi
+  said=$(mktemp)
+  if old_networks; then
+    fresh=1
+  elif compose up -d --no-build --wait updater > "$said" 2>&1 && taken_over; then
+    rm -f "$said"
+    return 0
+  elif endpoints_refused "$said"; then
+    compose_said "$said"
+    fresh=1
+  fi
+  if [ -n "$fresh" ]; then
+    say "The networks of this server are made again with the subnets they have, so Hornhoof stops for a moment."
+    write_status running install
+    : > "$said"
+    if new_networks "$said" && compose up -d --no-build --wait db updater >> "$said" 2>&1 && taken_over; then
+      rm -f "$said"
+      return 0
+    fi
+  fi
   say "This build's updater did not start, so the build from before goes back."
+  compose_said "$said"
   write_status running rollback
-  HORNHOOF_UPDATER_REF="$BACK_UPDATER" compose up -d --no-build updater > /dev/null 2>&1 ||
-    stop_with failed "No updater could start. Hornhoof still runs the build from before; run install.sh server in $SERVER_DIR." finished
+  : > "$said"
+  if [ -n "$fresh" ]; then
+    if old_build_up "$said"; then
+      rm -f "$said"
+      return 0
+    fi
+    compose_said "$said"
+    rm -f "$said"
+    stop_with failed "No updater could start, and the build from before did not start again either, so Hornhoof is stopped. Run install.sh server in $SERVER_DIR." finished
+    return 0
+  fi
+  if HORNHOOF_UPDATER_REF="$BACK_UPDATER" compose up -d --no-build updater > "$said" 2>&1; then
+    rm -f "$said"
+    return 0
+  fi
+  compose_said "$said"
+  rm -f "$said"
+  stop_with failed "No updater could start. Hornhoof still runs the build from before; run install.sh server in $SERVER_DIR." finished
 }
 
 # Whether the machine's owner keeps access to the computer open now, by the time its keeper wrote, which ends it by
@@ -2587,7 +2755,7 @@ write_addresses() {
     ids=$(docker network ls -q 2> /dev/null || true)
     if [ -n "$ids" ]; then
       # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per network
-      nets=$(docker network inspect --format '{{.Id}}|{{.Name}}|{{with .Labels}}{{with index . "com.docker.compose.project"}}{{.}}{{end}}{{end}}|{{with .Options}}{{with index . "com.docker.network.bridge.name"}}{{.}}{{end}}{{end}}|{{.Internal}}|{{range .IPAM.Config}}{{with index . "Subnet"}}{{.}}{{end}},{{with index . "Gateway"}}{{.}}{{end}};{{end}}' $ids 2> /dev/null || true)
+      nets=$(docker network inspect --format "$NETWORK_FORMAT" $ids 2> /dev/null || true)
     fi
   fi
   list=$(

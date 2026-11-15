@@ -5,6 +5,57 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.24.1] - 2026-11-15
+
+An update by the button from 0.23 to 0.24 goes through again: Hornhoof makes its networks again with the addresses they
+had, and when the new build does not start, the build from before comes back.
+
+### Before you update
+
+- If an update to 0.24.0 ended with "No updater could start", the updater of that server is stopped and the button does
+  nothing. Run the server install command on that computer again, as the message says, and Hornhoof moves to 0.24.1. Or
+  start the stopped updater container again in Docker, then update by the button.
+
+### Fixed
+
+- An update by the button from 0.23 to 0.24.0 stopped with "No updater could start". The networks of a server set up
+  before 0.24.0 have no fixed subnets, and Docker would not make them again while Hornhoof ran on them, so neither the
+  new updater nor the old one started. The update now stops Hornhoof for a moment and makes the networks again with the
+  subnets they had; the database and every other volume stay. It does so too when the settings name those subnets
+  already and only Docker Compose's refusal shows that the networks were made the old way, once. If the new updater
+  still does not start, the build from before starts again whole and the update goes back.
+- Going back from 0.24 to a 0.23 build keeps the networks as they are, so the build from before starts on them.
+- The update log says why Docker Compose refused to start an updater, in a few short lines and without the server's
+  keys and passwords.
+- The server install command run again on a server set up before 0.24.0 makes its networks again with the subnets they
+  had, also when its settings name those subnets already: when Docker would not make a network again while the
+  built-in node, the updater or an old tunnel are on it, the install tells the node, stops every container of Hornhoof
+  and starts again, once. If something outside Hornhoof stays on those networks, it says which networks to free.
+
+### Russian
+
+Обновление кнопкой с 0.23 на 0.24 снова проходит: Hornhoof заново создает свои сети с прежними адресами, а если новая
+сборка не запускается, возвращается прежняя.
+
+- Перед обновлением: если обновление до 0.24.0 закончилось сообщением «No updater could start», обновлятор этого
+  сервера остановлен, и кнопка ничего не делает. Запустите на этом компьютере команду установки сервера еще раз, как
+  говорит сообщение, и Hornhoof перейдет на 0.24.1. Или снова запустите остановленный контейнер обновлятора в Docker,
+  а потом обновите кнопкой.
+- Обновление кнопкой с 0.23 на 0.24.0 останавливалось с «No updater could start». У сетей сервера, установленного до
+  0.24.0, нет заданных подсетей, и Docker не пересоздавал их, пока на них работал Hornhoof, поэтому не запускался ни
+  новый обновлятор, ни старый. Теперь обновление ненадолго останавливает Hornhoof и создает сети заново с прежними
+  подсетями; база и все остальные тома остаются. Так же и тогда, когда в настройках эти подсети уже записаны и только
+  отказ Docker Compose показывает, что сети созданы по-старому, один раз. Если новый обновлятор все равно не
+  запускается, прежняя сборка запускается снова целиком, и обновление откатывается.
+- Откат с 0.24 на сборку 0.23 оставляет сети как есть, и прежняя сборка запускается на них.
+- В журнале обновления написано, почему Docker Compose отказался запустить обновлятор: несколько коротких строк, без
+  ключей и паролей сервера.
+- Команда установки сервера, запущенная еще раз на сервере, установленном до 0.24.0, создает его сети заново с
+  прежними подсетями, и тогда, когда они уже записаны в настройках: если Docker не пересоздает сеть, пока на ней
+  встроенный узел, обновлятор или старый туннель, установка предупреждает узел, останавливает все контейнеры Hornhoof
+  и запускает их снова, один раз. Если на этих сетях остается что-то не от Hornhoof, она говорит, какие сети
+  освободить.
+
 ## [0.24.0] - 2026-11-15
 
 Agents run on any API that speaks the Anthropic or OpenAI protocol and are paid by the tokens they use, Hornhoof counts

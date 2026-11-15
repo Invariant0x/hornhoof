@@ -247,6 +247,87 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     expect(refused.calls.some(c => c.startsWith('docker compose up'))).toBe(false);
   }, 60_000);
 
+  it('makes the networks of a server from before subnets again with the subnets they have, once, before it starts anything', () => {
+    const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
+    mkdirSync(machine.folder(), { recursive: true });
+    writeFileSync(join(machine.folder(), '.env'), 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n');
+    const live = { STUB_DOCKER_NETWORKS: 'n-def|hornhoof_default|hornhoof|172.18.0.0/16|false| n-int|hornhoof_internal|hornhoof|172.19.0.0/16|true|' };
+    const first = machine.runServer([], live);
+    expect(first.code).toBe(0);
+    const down = first.calls.indexOf('docker compose down --remove-orphans');
+    expect(down).toBeGreaterThan(-1);
+    expect(first.calls.findIndex(c => c.startsWith('docker compose up'))).toBeGreaterThan(down);
+    expect(machine.dotEnv()).toMatchObject({ HORNHOOF_SUBNET: '172.18.0.0/16', HORNHOOF_INTERNAL_SUBNET: '172.19.0.0/16' });
+    const again = machine.runServer([], live);
+    expect(again.code).toBe(0);
+    expect(again.calls.some(c => c.startsWith('docker compose down'))).toBe(false);
+  }, 60_000);
+
+  /* A server of 0.23 by hand: networks compose made with no subnets named, and its services running on them, the
+     built-in node, the updater and the tunnel 0.24 names no more among them. */
+  const PLAIN_NETS = 'n-def|hornhoof_default|hornhoof|172.18.0.0/16|false||plain n-int|hornhoof_internal|hornhoof|172.19.0.0/16|true||plain';
+  const OLD_RUNNING = { STUB_RUNNING_SERVICES: 'db app node updater tunnel', STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.23.3' };
+  const OLD_ENV = 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n';
+  /* As an install by hand of 0.24.0 left it on a-host: the settings name the subnets the networks have. */
+  const NAMED_ENV = `${OLD_ENV}HORNHOOF_SUBNET=172.18.0.0/16\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n`;
+  const PREPARE = 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update';
+  const DOWN = 'docker compose down --remove-orphans';
+  const marks = (rows: string[]) => rows.map(line => line.split('|')).map(f => `${f[1]} ${f[3]} ${f[6]}`);
+  const netLines = (machine: ReturnType<typeof makeComputer>) => readFileSync(join(machine.portsDir, 'networks'), 'utf8').trim().split('\n');
+
+  /* With no subnets in the settings it knows before it starts anything; with them, only once compose refused. */
+  it.each([
+    ['name no subnets', OLD_ENV, []],
+    ['name the subnets the networks have already', NAMED_ENV, ['network hornhoof_default held by node updater tunnel']],
+  ])('makes the networks of a server from 0.23 again once, with the node told and every container off them, when its settings %s', (_, dotEnv, held) => {
+    const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
+    mkdirSync(machine.folder(), { recursive: true });
+    writeFileSync(join(machine.folder(), '.env'), dotEnv);
+    const run = machine.runServer([], { STUB_DOCKER_NETWORKS: PLAIN_NETS, ...OLD_RUNNING });
+    expect(run.code, run.out).toBe(0);
+    expect(run.calls.filter(c => c === DOWN)).toHaveLength(1);
+    const down = run.calls.indexOf(DOWN);
+    expect(run.calls.indexOf(PREPARE)).toBeGreaterThan(-1);
+    expect(run.calls.indexOf(PREPARE)).toBeLessThan(down);
+    expect(run.calls.indexOf('docker stop --time 5 nodecid')).toBeLessThan(down);
+    expect(run.calls.filter(c => c.includes(' held by '))).toEqual(held);
+    expect(run.calls.findLastIndex(c => c.includes(' held by '))).toBeLessThan(down);
+    expect(run.calls.slice(down).some(c => c.startsWith('docker compose up'))).toBe(true);
+    expect(machine.dotEnv()).toMatchObject({ HORNHOOF_SUBNET: '172.18.0.0/16', HORNHOOF_INTERNAL_SUBNET: '172.19.0.0/16' });
+    expect(marks(netLines(machine)).sort()).toEqual(['hornhoof_default 172.18.0.0/16, subnets', 'hornhoof_internal 172.19.0.0/16, subnets']);
+    expect(readFileSync(join(run.dir, 'running'), 'utf8').split('\n')).not.toContain('tunnel');
+  }, 60_000);
+
+  it('says why compose refused, and makes the networks again only once, when containers outside the server stay on them', () => {
+    const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
+    mkdirSync(machine.folder(), { recursive: true });
+    writeFileSync(join(machine.folder(), '.env'), NAMED_ENV);
+    const run = machine.runServer([], { STUB_DOCKER_NETWORKS: PLAIN_NETS, ...OLD_RUNNING, STUB_STAYS_ON: 'visitor' });
+    expect(run.code).toBe(1);
+    expect(run.calls.filter(c => c === DOWN)).toHaveLength(1);
+    expect(run.out).toContain('Hornhoof stops for a moment and makes them again.');
+    expect(run.out).toContain(
+      'Hornhoof did not start: Docker would not make the networks of this server again, as containers outside it are still on them. Stop the containers on the networks hornhoof_default and hornhoof_internal, then run this command again.',
+    );
+  }, 60_000);
+
+  it('leaves networks made with the subnets the settings name as they are, and the built-in node runs on', () => {
+    const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
+    mkdirSync(machine.folder(), { recursive: true });
+    writeFileSync(join(machine.folder(), '.env'), NAMED_ENV);
+    const made = 'n-def|hornhoof_default|hornhoof|172.18.0.0/16,|false||subnets n-int|hornhoof_internal|hornhoof|172.19.0.0/16,|true||subnets';
+    const run = machine.runServer([], {
+      STUB_DOCKER_NETWORKS: made,
+      STUB_RUNNING_SERVICES: 'db app keeper front node updater',
+      STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:latest',
+    });
+    expect(run.code, run.out).toBe(0);
+    expect(run.calls.some(c => c.startsWith('docker compose down'))).toBe(false);
+    expect(run.calls).not.toContain(PREPARE);
+    expect(run.calls.some(c => c.startsWith('network '))).toBe(false);
+    expect(marks(netLines(machine)).sort()).toEqual(['hornhoof_default 172.18.0.0/16, subnets', 'hornhoof_internal 172.19.0.0/16, subnets']);
+  }, 60_000);
+
   it('recreates an existing overlapping project network, retries on daemon pool overlap, and cleans subnets on remove', () => {
     const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
     mkdirSync(machine.folder(), { recursive: true });
@@ -258,7 +339,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
       STUB_DOCKER_NETWORKS: 'oldnet000000001|hornhoof_default|hornhoof|192.168.0.0/20|false|',
     });
     expect(healed.code).toBe(0);
-    expect(healed.calls).toContain('docker compose down');
+    expect(healed.calls).toContain('docker compose down --remove-orphans');
     const healedEnv = machine.dotEnv();
     expect(cidrsOverlap(healedEnv.HORNHOOF_SUBNET!, '192.168.0.0/20')).toBe(false);
     expect(machine.networks().some(n => n.id === 'oldnet000000001')).toBe(false);
@@ -453,7 +534,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
       STUB_HOSTNAME: 'updater-cid',
     });
     expect(fromUpdater.code).toBe(0);
-    expect(fromUpdater.calls).not.toContain('docker compose down');
+    expect(fromUpdater.calls.some(c => c.startsWith('docker compose down'))).toBe(false);
     expect(machine.dotEnv().HORNHOOF_SUBNET).toBe('192.168.0.0/20');
     expect(cidrsOverlap(machine.dotEnv().HORNHOOF_INTERNAL_SUBNET!, '192.168.0.0/20')).toBe(false);
     expect(fromUpdater.out).toContain('192.168.0.0/20');
