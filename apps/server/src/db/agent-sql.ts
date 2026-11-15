@@ -59,13 +59,14 @@ export const SECRET: Record<string, string[]> = {
    would let a test go unrun. Where a product's harness stands, as a forged row would hold its machines back from building
    or quiet what its head hears. A department's rules of approval, which say what a person must see first, and change only
    through a person's guarded API. An employee's inbox, whose letters name who wrote them: a forged one would put words in
-   a person's or an employee's mouth, so only Hornhoof keeps it and the employee marks it with inbox_mark. */
+   a person's or an employee's mouth, so only Hornhoof keeps it and the employee marks it with inbox_mark. What each turn
+   used of its subscription, which Hornhoof writes as the node told it, so that what a connection costs can be believed. */
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
-  'autonomous_releases', 'agent_inbox',
+  'autonomous_releases', 'agent_inbox', 'turn_tokens',
   'assistants', 'assistant_events', 'assistant_replies', 'assistant_requests',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by

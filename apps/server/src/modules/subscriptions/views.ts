@@ -1,4 +1,4 @@
-import { currentLimits, type Account, type Limits } from '@hornhoof/protocol';
+import { apiEndpoint, currentLimits, modelsFor, type Account, type ApiEndpoint, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
@@ -35,6 +35,10 @@ export type SubView = {
   signedInOnce: boolean;
   /* The machine a Codex plan signed in once runs on now, one at a time. */
   leaseMachine: string | null;
+  /* Where an API connection's program sends its calls and in which protocol; none for a plan. */
+  api: ApiEndpoint | null;
+  /* The models it runs: an API connection's own, or the ones its node reported. */
+  models: ModelOption[];
 };
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
@@ -71,6 +75,9 @@ const columns = {
   leaseNodeId: subscriptions.leaseNodeId,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
+  baseUrl: subscriptions.baseUrl,
+  apiProtocol: subscriptions.apiProtocol,
+  models: subscriptions.models,
   ownerId: people.id,
   ownerName: people.name,
   ownerScopeKind: people.scopeKind,
@@ -170,6 +177,8 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       ...accountViews(mine, accountOf, viewer, r.ownerId),
       signedInOnce: r.kind === 'personal' && r.credVersion > 0,
       leaseMachine: (r.leaseNodeId && mine.find(n => n.id === r.leaseNodeId)?.hostname) || null,
+      api: r.kind === 'api_key' ? apiEndpoint(r.provider, { baseUrl: r.baseUrl, protocol: r.apiProtocol }) : null,
+      models: modelsFor(r.provider, r.models),
     };
   });
 }

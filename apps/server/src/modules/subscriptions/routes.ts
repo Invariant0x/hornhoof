@@ -1,10 +1,10 @@
-import { Sealed, type ProviderId } from '@hornhoof/protocol';
+import { API_PROTOCOLS, API_PROVIDERS, ApiBaseUrl, apiEndpoint, isApiProvider, Sealed, type ApiProtocol, type ApiProvider, type ProviderId } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
-import { encryptSecret } from '../../crypto/secrets.js';
+import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -17,7 +17,9 @@ import { resumeAgent } from '../tasks/wake.js';
 import { createInstallCommand } from '../nodes/command.js';
 import { builtinOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { liveNode, planNodes } from '../nodes/nodes.js';
+import { internalAddress, modelsFrom, modelsRequest, type ModelsAnswer } from './api-models.js';
 import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
+import { periodsOf, together, tokensBySubscription, TokensQuery } from './tokens.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
@@ -32,16 +34,42 @@ const Target = z.discriminatedUnion('kind', [
 ]);
 
 const label = z.string().trim().min(1).max(80);
-export const BudgetBody = z.object({ budget: z.number().int().min(10).max(100).nullable() });
+const Budget = z.number().int().min(10).max(100).nullable();
+export const BudgetBody = z.object({ budget: Budget });
+
+/* The models an API connection runs, each once: what its API listed and a person kept, or ids a person wrote. */
+const ConnectionModels = z
+  .array(z.object({ id: z.string().trim().min(1).max(80), name: z.string().trim().min(1).max(80) }))
+  .max(100)
+  .refine(list => new Set(list.map(m => m.id)).size === list.length, 'models: Each model once.');
+
+const apiKey = z.string().trim().min(8).max(500);
+
+/* Where an API answers. Only a compatible API names its address, and it needs its protocol too; OpenRouter may choose
+   its protocol; the Claude and OpenAI APIs have both of their own. */
+const Connection = { provider: z.enum(API_PROVIDERS), baseUrl: ApiBaseUrl.optional(), protocol: z.enum(API_PROTOCOLS).optional() };
+function connectionRules(body: { provider: ApiProvider; baseUrl?: string; protocol?: ApiProtocol }, check: z.RefinementCtx): void {
+  const custom = body.provider === 'custom_api';
+  if (custom && !body.baseUrl) check.addIssue({ code: 'custom', path: ['baseUrl'], message: 'A compatible API needs the address it answers at.' });
+  if (custom && !body.protocol) check.addIssue({ code: 'custom', path: ['protocol'], message: 'A compatible API needs the protocol it speaks: anthropic or openai.' });
+  if (!custom && body.baseUrl) check.addIssue({ code: 'custom', path: ['baseUrl'], message: 'Only a compatible API takes an address; this one has its own.' });
+  if (!custom && body.provider !== 'openrouter' && body.protocol) check.addIssue({ code: 'custom', path: ['protocol'], message: 'This API speaks its own protocol.' });
+}
+
+/* A company API connection, as a person or the add_api_key tool gives it. */
+export const ApiKeyFields = z.object({ kind: z.literal('api_key'), ...Connection, label, apiKey, target: Target, models: ConnectionModels.optional() });
 
 /* Company API keys only. Personal subscriptions are connected by their owner through a machine. */
-export const SubscriptionBody = z.object({
-  kind: z.literal('api_key'),
-  provider: z.enum(['anthropic_api', 'openai_api']),
-  label,
-  apiKey: z.string().trim().min(8),
-  target: Target,
-});
+export const SubscriptionBody = ApiKeyFields.superRefine(connectionRules);
+
+/* An API's models, asked before its connection is saved. */
+export const ModelsBody = z.object({ ...Connection, apiKey }).superRefine(connectionRules);
+
+/* What a subscription's owner or company scope changes: the share of its limits, and of an API connection its name,
+   models and the place it serves. */
+export const SubscriptionPatch = z
+  .object({ budget: Budget.optional(), label: label.optional(), models: ConnectionModels.optional(), target: Target.optional() })
+  .refine(patch => Object.values(patch).some(value => value !== undefined), 'Say what to change.');
 
 const PLANS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' } as const;
 type Plan = keyof typeof PLANS;
@@ -64,6 +92,31 @@ export const CredentialBody = z.object({
 });
 
 const unknown = () => new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
+const internal = () =>
+  new ApiError(400, 'validation', "baseUrl: This address is on the internal network. The server's operator can allow its host in API_INTERNAL_HOSTS.", 'internal_address');
+const notApiKey = () => new ApiError(400, 'validation', 'Only an API connection has a name, models and a place of its own to change.', 'not_api_key');
+
+const MODELS_SAY: Record<Exclude<ModelsAnswer, { ok: true }>['reason'], (status?: number) => string> = {
+  internal_address: () => "The API's name leads into the internal network, which Hornhoof does not reach unless the server's operator allows its host.",
+  redirect: () => 'The API answered with a redirect, which Hornhoof does not follow. Give the address it answers at itself.',
+  too_large: () => "The API's list of models is too long to read.",
+  timeout: () => 'The API did not answer in time.',
+  unreachable: () => 'Hornhoof could not reach an API at this address.',
+  bad_answer: () => "The API's answer is not a list of models.",
+  refused: status => `The API refused with status ${status ?? 'unknown'}. Check the key and the address.`,
+};
+
+/* The models an API lists with this key, or why it did not. */
+async function listedModels(ctx: Ctx, provider: ApiProvider, own: { baseUrl?: string | null; protocol?: ApiProtocol | null }, key: string) {
+  const endpoint = apiEndpoint(provider, own)!;
+  if (provider === 'custom_api' && internalAddress(new URL(endpoint.baseUrl), ctx.config.apiInternalHosts)) throw internal();
+  const answer = await ctx.readModels(modelsRequest(provider, endpoint, key));
+  const models = answer.ok ? modelsFrom(answer.body) : null;
+  if (models) return { models };
+  const reason = answer.ok ? 'bad_answer' : answer.reason;
+  throw new ApiError(400, 'validation', MODELS_SAY[reason](answer.ok ? undefined : answer.status), `models_${reason}`);
+}
+
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this subscription can do this.', 'not_owner');
 const connectedAlready = () =>
   new ApiError(409, 'conflict', 'This plan runs on a machine already. To run it on another one too, use Add my plan on that machine under Machines.', 'already_connected');
@@ -147,6 +200,13 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   const ownsOrCompany = (me: Person, ownerId: string) => me.id === ownerId || me.scopeKind === 'company';
 
+  async function placeExists(target: z.infer<typeof Target>) {
+    if (target.kind !== 'department' && target.kind !== 'team') return;
+    const table = target.kind === 'department' ? departments : teams;
+    const [row] = await db.select({ id: table.id }).from(table).where(eq(table.id, target.id));
+    if (!row) throw new ApiError(400, 'validation', `target.id: No ${target.kind} with this id.`, 'unknown_place');
+  }
+
   /* The orchestrator moves to a subscription. Another provider names its levels its own way, so he starts at its default,
      as a move on his card does. */
   const orchestratorOn = (sub: { id: string; provider: ProviderId }) => ({
@@ -164,10 +224,47 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/subscriptions', async req => {
     const me = await requirePerson(req, db);
+    const { zone } = TokensQuery.parse(req.query);
     const all = await subViews(db, online, undefined, me);
     const placed = await runningAgents(ctx, me);
     const visible = me.scopeKind === 'company' ? all : all.filter(s => s.owner.id === me.id);
-    return { subscriptions: visible.map(s => ({ ...s, agents: placed.filter(a => a.subscriptionId === s.id).map(a => a.view) })) };
+    const tokens = await tokensBySubscription(db, me.companyId, ctx.clock(), zone, visible.map(s => s.id));
+    return { subscriptions: visible.map(s => ({ ...s, agents: placed.filter(a => a.subscriptionId === s.id).map(a => a.view), tokens: periodsOf(tokens, s.id) })) };
+  });
+
+  /* What a subscription's turns used, for its owner and company scope. */
+  app.get('/api/subscriptions/:id/tokens', async req => {
+    const me = await requirePerson(req, db);
+    const { zone } = TokensQuery.parse(req.query);
+    const [sub] = await db.select({ id: subscriptions.id, ownerPersonId: subscriptions.ownerPersonId }).from(subscriptions).where(and(eq(subscriptions.id, IdParams.parse(req.params).id), eq(subscriptions.companyId, me.companyId)));
+    if (!sub) throw unknown();
+    if (!ownsOrCompany(me, sub.ownerPersonId)) throw notOwner();
+    return { tokens: periodsOf(await tokensBySubscription(db, me.companyId, ctx.clock(), zone, [sub.id]), sub.id) };
+  });
+
+  /* What all the subscriptions a person sees used together: the whole company's for company scope, their own plans' else. */
+  app.get('/api/tokens', async req => {
+    const me = await requirePerson(req, db);
+    const { zone } = TokensQuery.parse(req.query);
+    const own = me.scopeKind === 'company' ? undefined : (await db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.ownerPersonId, me.id))).map(s => s.id);
+    return { tokens: together((await tokensBySubscription(db, me.companyId, ctx.clock(), zone, own)).values()) };
+  });
+
+  /* An API's models with a key a person gives, before the connection is saved. */
+  app.post('/api/subscriptions/models', async req => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const body = ModelsBody.parse(req.body);
+    return listedModels(ctx, body.provider, body, body.apiKey);
+  });
+
+  /* An API connection's models with its own key, which never goes back to the browser. */
+  app.post('/api/subscriptions/:id/models', async req => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const sub = await liveSubscription(IdParams.parse(req.params).id);
+    if (sub.kind !== 'api_key' || !sub.secretEnc || !isApiProvider(sub.provider)) throw notApiKey();
+    return listedModels(ctx, sub.provider, { baseUrl: sub.baseUrl, protocol: sub.apiProtocol }, decryptSecret(sub.secretEnc, config.secret));
   });
 
   app.post('/api/subscriptions', async (req, reply) => {
@@ -175,12 +272,10 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     requireCompanyScope(me);
     const body = SubscriptionBody.parse(req.body);
     const { target } = body;
+    const endpoint = apiEndpoint(body.provider, body)!;
+    if (body.provider === 'custom_api' && internalAddress(new URL(endpoint.baseUrl), config.apiInternalHosts)) throw internal();
 
-    if (target.kind === 'department' || target.kind === 'team') {
-      const table = target.kind === 'department' ? departments : teams;
-      const [row] = await db.select({ id: table.id }).from(table).where(eq(table.id, target.id));
-      if (!row) throw new ApiError(400, 'validation', `target.id: No ${target.kind} with this id.`, 'unknown_place');
-    }
+    await placeExists(target);
 
     const orchestratorBefore = target.kind === 'orchestrator' ? await orchestratorOf(ctx, me.companyId) : null;
     const id = await db.transaction(async tx => {
@@ -195,6 +290,9 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         status: 'ready',
         targetKind: target.kind,
         targetId: 'id' in target ? target.id : null,
+        baseUrl: body.provider === 'custom_api' ? endpoint.baseUrl : null,
+        apiProtocol: body.provider === 'custom_api' || body.provider === 'openrouter' ? endpoint.protocol : null,
+        models: body.models ?? null,
       }).returning({ id: subscriptions.id });
       if (target.kind === 'orchestrator') await tx.update(agents).set(orchestratorOn({ id: sub!.id, provider: body.provider })).where(eq(agents.kind, 'orchestrator'));
       return sub!.id;
@@ -280,9 +378,16 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     if (!ownsOrCompany(me, sub.ownerPersonId)) throw notOwner();
-    const { budget } = BudgetBody.parse(req.body);
-    await db.update(subscriptions).set({ budget }).where(eq(subscriptions.id, sub.id));
+    const { budget, label, models, target } = SubscriptionPatch.parse(req.body);
+    if (label !== undefined || models !== undefined || target !== undefined) {
+      requireCompanyScope(me);
+      if (sub.kind !== 'api_key') throw notApiKey();
+    }
+    if (target) await placeExists(target);
+    const place = target ? { targetKind: target.kind, targetId: 'id' in target ? target.id : null } : {};
+    await db.update(subscriptions).set({ ...(budget !== undefined ? { budget } : {}), ...(label !== undefined ? { label } : {}), ...(models !== undefined ? { models } : {}), ...place }).where(eq(subscriptions.id, sub.id));
     await pumpWaiting(ctx);
+    ctx.bus.publish(sub.companyId, { type: 'org' });
     return { subscription: await subView(db, online, sub.id, me) };
   });
 

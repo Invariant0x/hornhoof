@@ -1,7 +1,7 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
-import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
+import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { BindingPart } from '../modules/model-checks/lifecycle.js';
@@ -562,8 +562,12 @@ export const subscriptions = pgTable(
     /* The share of each limit window, in percent, that task turns may use; past it they wait for the window to start
        over while people's own messages still go. Null: the whole limit. */
     budget: integer('budget'),
-    /* The models its node says it can run; null until a node reports them. */
+    /* The models its node says it can run; null until a node reports them. An API connection's are the ones it was given. */
     models: jsonb('models').$type<ModelOption[]>(),
+    /* Where a compatible API answers, which a person named; null for every other subscription, whose address is known. */
+    baseUrl: text('base_url'),
+    /* The protocol an API connection's program talks to it in: OpenRouter's choice, a compatible API's own. */
+    apiProtocol: text('api_protocol', { enum: API_PROTOCOLS }),
     /* Counts the plan's sign-ins: each new one is sealed to its nodes under a higher number, and older ones are dropped. */
     credVersion: integer('cred_version').notNull().default(0),
     /* Codex runs on one machine at a time, as its sign-in renews itself: the node that holds it now. */
@@ -812,6 +816,30 @@ export const jobs = pgTable(
   },
   t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
     check('jobs_builtin_machine', sql`builtin_machine ~ '^[0-9a-f]{32}([0-9a-f]{32})?$'`),
+  ],
+);
+
+/* What one turn used of its subscription, as its program told it when the turn ended: null where it told a count not,
+   and all null for a program that tells no tokens. Input is what the model read anew, the cache what it read from its
+   cache and wrote to it, the total all of them and the output. */
+export const turnTokens = pgTable(
+  'turn_tokens',
+  {
+    jobId: uuid('job_id').primaryKey().references(() => jobs.id),
+    companyId: companyId(),
+    agentId: uuid('agent_id').references(() => agents.id),
+    subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+    inputTokens: bigint('input_tokens', { mode: 'number' }),
+    outputTokens: bigint('output_tokens', { mode: 'number' }),
+    cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' }),
+    cacheWriteTokens: bigint('cache_write_tokens', { mode: 'number' }),
+    totalTokens: bigint('total_tokens', { mode: 'number' }),
+    at: timestamp('at', { withTimezone: true }).notNull(),
+  },
+  t => [
+    index('turn_tokens_subscription_at').on(t.subscriptionId, t.at),
+    index('turn_tokens_company_at').on(t.companyId, t.at),
+    check('turn_tokens_counts', sql`coalesce(${t.inputTokens}, 0) >= 0 and coalesce(${t.outputTokens}, 0) >= 0 and coalesce(${t.cacheReadTokens}, 0) >= 0 and coalesce(${t.cacheWriteTokens}, 0) >= 0 and coalesce(${t.totalTokens}, 0) >= 0`),
   ],
 );
 

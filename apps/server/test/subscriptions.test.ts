@@ -82,7 +82,9 @@ describe('POST /api/subscriptions/connect', () => {
     const moved = await app.inject({ method: 'PATCH', url: `/api/people/${person.id}`, payload: { access: { teams: [backend.id] } }, ...as(ceo) });
     expect(moved.statusCode).toBe(200);
     const after = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id);
-    expect(after).toEqual({ ...sub, agents: [], place: { kind: 'department', id: development.id, name: 'Development' } });
+    /* The list adds the plan's agents and what its turns used. */
+    const none = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, turns: 0, noData: 0 };
+    expect(after).toEqual({ ...sub, agents: [], tokens: { today: none, week: none, month: none, all: none }, place: { kind: 'department', id: development.id, name: 'Development' } });
   });
 
   it('reuses a plan still waiting for its machine after its command expires instead of making a second one', async () => {

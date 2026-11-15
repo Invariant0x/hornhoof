@@ -12,6 +12,8 @@ export { registerOutboundTools } from './tools.js';
 export { registerOutboundControlTools } from './tools-control.js';
 export { outboundRecordsOf } from './policies.js';
 export { reconcileOutbound } from './dispatcher.js';
+/* Which addresses are on the public internet: an API's model list at an address a person gave is asked only there. */
+export { isPublicAddress } from './webhook.js';
 
 /* What the minute round does here, each with what to say when it fails. */
 export const outboundRounds = (ctx: Ctx, now: Date): [Promise<unknown>, string][] => [

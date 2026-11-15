@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson, type ModelCheckKind, type ModelIdentity, type ProviderId, type SkillFile, type Workspace } from '@hornhoof/protocol';
+import { apiEndpoint, canonicalJson, type ModelCheckKind, type ModelIdentity, type ProviderId, type SkillFile, type Workspace } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
@@ -59,12 +59,18 @@ const jobExtras = (job: JobToSend) => ({
    A queued conversation turn still waits in Hornhoof and goes out later. */
 export const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
+/* OpenRouter and a compatible API run only the models their connection was given, so a turn that names none takes the
+   first: the program's own default is a model of its maker, which such an API may not have. */
+const ownModel = (sub: { provider: ProviderId; models: { id: string }[] | null }): string | null =>
+  (sub.provider === 'openrouter' || sub.provider === 'custom_api') && sub.models?.length ? sub.models[0]!.id : null;
+
 /* Sends a job to its node. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
   const node = sub && identityOf(sub, job.nodeId, job.builtinMachine ?? null, ownBuiltin(ctx.config));
   if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role, job.leader)) return false;
   const secret = sub.kind === 'api_key' ? secretOf(ctx, sub) : null;
+  const api = sub.kind === 'api_key' ? apiEndpoint(sub.provider, { baseUrl: sub.baseUrl, protocol: sub.apiProtocol }) : null;
   return ctx.hub.send(node, {
     type: 'job.run',
     jobId: job.id,
@@ -72,12 +78,13 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     provider: sub.provider,
     prompt: job.prompt,
     sessionId: job.sessionId,
-    model: job.model ?? null,
+    model: job.model || (ownModel(sub) ?? job.model ?? null),
     effort: job.effort ?? null,
     timeoutMs: job.timeoutMs,
     secret,
     instructions: job.instructions,
     toolToken: job.toolToken,
+    ...(api ? { api } : {}),
     ...jobExtras(job),
   });
 }

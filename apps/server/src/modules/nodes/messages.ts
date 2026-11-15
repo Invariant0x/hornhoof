@@ -2,7 +2,8 @@ import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type NodeStatus } from '../../db/schema.js';
+import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
+import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { ON_NODE } from '../jobs/dispatch.js';
 import { keepLeftInput } from '../conversation/left-input.js';
@@ -94,11 +95,19 @@ async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
         finishedAt: now,
       })
       .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
-      .returning({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind });
+      .returning({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, subscriptionId: jobs.subscriptionId });
     holdForWaitingWords(ctx, id, msg, finished, now);
+    await keepTokens(ctx, msg, finished, now);
     return finished;
   };
   return job?.agentId ? onAgent(ctx, job.agentId, finish) : finish();
+}
+
+/* What the turn used, as its program told its node: once, when the turn ends, and no data when it told none. */
+async function keepTokens(ctx: Ctx, msg: Extract<NodeMessage, { type: 'job.done' }>, finished: { companyId: string; agentId: string | null; subscriptionId: string }[], now: Date): Promise<void> {
+  const [job] = finished;
+  if (!job) return;
+  await ctx.db.insert(turnTokens).values({ jobId: msg.jobId, companyId: job.companyId, agentId: job.agentId, subscriptionId: job.subscriptionId, ...tokenRow(msg.tokens), at: now }).onConflictDoNothing();
 }
 
 /* Why a node restart cut a turn off, with the number of the task it was on; nothing for a turn that failed otherwise. */

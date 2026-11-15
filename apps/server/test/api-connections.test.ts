@@ -140,7 +140,7 @@ describe('the models of an API', () => {
       ok: true,
       body: request.url.hostname === 'openrouter.ai'
         ? { data: [{ id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic: Claude Sonnet 4.5' }, { id: 'meta-llama/llama-4-maverick', name: 'Meta: Llama 4 Maverick' }] }
-        : request.url.pathname.endsWith('/v1/models')
+        : request.headers['x-api-key']
           ? { data: [{ id: 'claude-sonnet-4-5', display_name: 'Claude Sonnet 4.5', type: 'model' }], has_more: false }
           : { object: 'list', data: [{ id: 'llama-4-maverick', object: 'model' }, { id: 'qwen-3-coder', object: 'model' }] },
     }));
