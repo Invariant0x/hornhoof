@@ -1,0 +1,191 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
+import { Subscriptions } from '../src/screens/Subscriptions';
+import type { SubView } from '../src/types';
+import { ME, mockApi, ORG, SUBS } from './api-mock';
+import { decl } from './css';
+
+/* What the head of Design asked of Subscriptions & API (#947): neutral marks of how a connection is paid, each with its
+   sign; a neutral orchestrator; a Type filter that starts with All; one cell for the two limits of an API; a key the
+   person may show while they type it; a short search hint on a phone; and a Tokens part in the reference's words, with
+   each model's share and the whole count where a short one stands. */
+
+const sum = (total: number, turns = 3) => ({ input: Math.round(total / 10), output: Math.round(total / 20), cacheRead: total - Math.round(total / 10) - Math.round(total / 20) * 2, cacheWrite: Math.round(total / 20), total, turns, noData: 0 });
+const periods = (n: number) => ({ today: sum(n), week: sum(n * 6), month: sum(n * 21), all: sum(n * 40) });
+const ROUTER: SubView = {
+  ...SUBS[3]!, id: 's-router', provider: 'openrouter', label: 'OpenRouter', last4: 'WXYZ', isOrchestrator: true,
+  api: { baseUrl: 'https://openrouter.ai/api', protocol: 'anthropic' }, models: [{ id: 'meta-llama/llama-4-maverick', name: 'Llama 4 Maverick' }], tokens: periods(1_250_000),
+};
+const LIST = [{ ...SUBS[0]!, tokens: periods(20) }, ROUTER];
+const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const MODELS = [{ model: 'meta-llama/llama-4-maverick', total: 19_687_500 }, { model: 'qwen/qwen-3-coder', total: 5_250_000 }, { model: null, total: 1_312_500 }];
+
+const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({
+  'GET /api/nodes/commands': [200, { commands: [] }],
+  'GET /api/subscriptions': [200, { subscriptions: LIST }],
+  'GET /api/org': [200, ORG],
+  [`GET /api/subscriptions/s-router/tokens?zone=${encodeURIComponent(zone)}`]: [200, { tokens: periods(1_250_000), models: MODELS }],
+  [`GET /api/subscriptions/${SUBS[0]!.id}/tokens?zone=${encodeURIComponent(zone)}`]: [200, { tokens: periods(20), models: [] }],
+  ...extra,
+});
+const show = (language = 'en') => {
+  localStorage.setItem('hh-lang', language);
+  render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+};
+/* A row by its connection's name: the plan is Claude, the API ends in WXYZ. */
+const row = (text: string) => screen.getByRole('row', { name: text === 'Claude' ? /^Claude$/ : new RegExp(text) });
+const openCard = async (text: string) => {
+  fireEvent.click(within(row(text)).getByRole('button', { name: /^(Open the card of |Открыть карточку )/ }));
+  return screen.findByRole('article', { name: text === 'Claude' ? /^Claude, / : new RegExp(text) });
+};
+
+afterEach(() => {
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
+
+describe('marks of a connection', () => {
+  it('say how it is paid in a word and a sign, in the ink of the page: color carries no meaning', async () => {
+    lists();
+    show();
+    await screen.findByRole('table');
+    for (const [text, word] of [['Claude', 'By subscription'], ['WXYZ', 'By tokens']] as const) {
+      const badge = within(row(text)).getByText(word).closest('.badge')!;
+      expect(badge).toHaveClass('ctype');
+      expect(badge.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    }
+    expect(decl('.badge.ctype', 'color')).toBe('var(--ink)');
+    expect(decl('.badge.ctype', 'border-color')).toBe('var(--line2)');
+    expect(decl('.badge.pay-tokens', 'color')).toBeUndefined();
+    expect(decl('.badge.pay-plan', 'color')).toBeUndefined();
+  });
+
+  it('mark the orchestrator without the color of attention', async () => {
+    lists();
+    show();
+    await screen.findByRole('table');
+    expect(within(row('WXYZ')).getByText('Orchestrator')).toHaveClass('badge', 'orch');
+    expect(decl('.badge.orch', 'color')).toBe('var(--muted)');
+    expect(decl('.badge.orch', 'border-color')).toBe('var(--line2)');
+  });
+});
+
+describe('the Type filter', () => {
+  it.each([['en', 'Type', 'All', 'By tokens'], ['ru', 'Тип', 'Все', 'По токенам']])('in %s starts with All, which shows every connection again', async (language, type, all, tokens) => {
+    lists();
+    show(language);
+    await screen.findByRole('table');
+    const group = screen.getByRole('group', { name: type });
+    const buttons = within(group).getAllByRole('button');
+    expect(buttons[0]).toHaveTextContent(`${all}2`);
+    expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(group).getByRole('button', { name: new RegExp(`^${tokens}`) }));
+    expect(buttons[0]).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(1);
+    fireEvent.click(buttons[0]!);
+    expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByRole('row').slice(1)).toHaveLength(2);
+    expect(group).toHaveClass('whole');
+    expect(decl('.fgroup.whole .chipf', 'min-block-size')).toBe('44px');
+    expect(decl('.fgroup.whole .chipf[aria-pressed="true"]', 'border-color')).toBe('var(--cyan-ink)');
+  });
+});
+
+describe('the limits of an API', () => {
+  it('say once across both limit columns that it pays as it goes, while a plan keeps a cell for each', async () => {
+    lists();
+    show();
+    await screen.findByRole('table');
+    const api = within(row('WXYZ')).getAllByRole('cell');
+    const once = api.filter(cell => cell.textContent === 'Pay as you go, no plan limits');
+    expect(once).toHaveLength(1);
+    expect(once[0]).toHaveAttribute('colspan', '2');
+    expect(once[0]).toHaveAttribute('data-label', 'Limits');
+    expect(api).toHaveLength(within(row('Claude')).getAllByRole('cell').length - 1);
+  });
+});
+
+describe('the key of a new API', () => {
+  it('shows what the person typed while they ask, and hides it again; a saved key never comes back to show', async () => {
+    lists();
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole('button', { name: 'Connect an API' }));
+    const form = screen.getByRole('form', { name: 'Connect an API' });
+    const key = within(form).getByLabelText('API key');
+    await user.type(key, 'sk-or-v1-typed-0123456789');
+    expect(key).toHaveAttribute('type', 'password');
+    await user.click(within(form).getByRole('button', { name: 'Show the key' }));
+    expect(key).toHaveAttribute('type', 'text');
+    expect(key).toHaveValue('sk-or-v1-typed-0123456789');
+    await user.click(within(form).getByRole('button', { name: 'Hide the key' }));
+    expect(key).toHaveAttribute('type', 'password');
+    expect(key.closest('.keybox')).not.toBeNull();
+    expect(decl('.keybox input', 'min-block-size')).toBe('44px');
+    expect(decl('.keybox .show', 'min-block-size')).toBe('44px');
+  });
+});
+
+describe('the search of the section', () => {
+  const narrow = (matches: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+
+  it.each([['en', 'Search connections'], ['ru', 'Поиск подключений']])('in %s asks in short on a phone, and in full where it fits', async (language, short) => {
+    narrow(true);
+    lists();
+    show(language);
+    expect(await screen.findByRole('searchbox')).toHaveAttribute('placeholder', short);
+  });
+
+  it('keeps the whole hint on a wide screen', async () => {
+    narrow(false);
+    lists();
+    show();
+    expect(await screen.findByRole('searchbox')).toHaveAttribute('placeholder', 'Search by plan, owner, agent or machine');
+  });
+});
+
+describe('the Tokens part of an open card', () => {
+  const n = (language: string, value: number) => new Intl.NumberFormat(language).format(value);
+
+  it.each([
+    ['en', 'Input', 'Output', 'Cache', 'tokens', 'By model, 30 days', 'Default model'],
+    ['ru', 'Ввод', 'Вывод', 'Кэш', 'токенов', 'По моделям за 30 дней', 'Модель по умолчанию'],
+  ])('in %s names in, out and cache as the reference does, gives each tile its whole count, and splits 30 days by model', async (language, input, output, cache, tokens, byModel, defaultModel) => {
+    lists();
+    show(language);
+    await screen.findByRole('table');
+    const card = await openCard('WXYZ');
+    const part = await waitFor(() => {
+      const found = [...card.querySelectorAll('.blk-facts .part')].find(p => p.querySelector('.models'));
+      expect(found).toBeDefined();
+      return found as HTMLElement;
+    });
+    const today = periods(1_250_000).today;
+    const tile = within(part).getByRole('group', { name: new RegExp(`${n(language, today.total)} ${tokens}`) });
+    expect(tile).toHaveAttribute('title', `${n(language, today.total)} ${tokens}`);
+    expect(tile.textContent).toContain(`${input} ${n(language, today.input)}`);
+    expect(tile.textContent).toContain(`${output} ${n(language, today.output)}`);
+    expect(tile.textContent).toMatch(new RegExp(`${cache} `));
+    expect(within(part).getAllByRole('group', { name: new RegExp(` ${tokens}$`) })).toHaveLength(4);
+
+    const models = part.querySelector('.models')!;
+    expect(models.textContent).toContain(byModel);
+    const rows = [...models.querySelectorAll('li')];
+    expect(rows.map(r => r.querySelector('.mname')!.textContent)).toEqual(['Llama 4 Maverick', 'qwen/qwen-3-coder', defaultModel]);
+    expect(rows[0]!.textContent).toContain(n(language, 19_687_500));
+    expect(rows[0]!.textContent).toContain(new Intl.NumberFormat(language, { style: 'percent' }).format(0.75));
+    expect(rows[0]!.querySelector<HTMLElement>('.bar i')!.style.inlineSize).toBe('75%');
+    expect(decl('.models .bar i', 'background')).toBe('var(--cyan-ink)');
+  });
+
+  it('shows no split by model, nor its frame, where no turn told its model', async () => {
+    lists();
+    show();
+    await screen.findByRole('table');
+    const card = await openCard('Claude');
+    await waitFor(() => expect(card.querySelectorAll('.blk-facts .gauge').length).toBeGreaterThan(0));
+    expect(card.querySelector('.models')).toBeNull();
+  });
+});
