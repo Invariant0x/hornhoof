@@ -2,7 +2,7 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useId, useRef, useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
-import { placeName, useTaskDepartments, useTasks, useTurns } from '../tasks';
+import { placeName, useTaskDepartments, useTasks, useTurns, useWaitCards } from '../tasks';
 import { searchTasks } from '../task-search';
 import { ALL_DEPARTMENTS, byDepartment, byRelease, goals, inDepartment, indexGoals, inProgress, NO_DEPARTMENT, type ReleaseSection } from '../task-board';
 import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskDepartments, TaskLine, TurnView } from '../types';
@@ -16,6 +16,7 @@ import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { BoardSection, GoalList, SplitGoals, type CardRows } from '../ui/TaskBoard';
 import { TurnProgress } from '../ui/TurnProgress';
+import { WaitCards } from '../ui/WaitCards';
 
 type Props = {
   onHome?: () => void;
@@ -278,12 +279,14 @@ function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () 
   </div>;
 }
 
-/* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer. Opened from a
-   person's card, only theirs, with the filter in sight. */
+/* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer, and the cards
+   Hornhoof kept for them. Opened from a person's card, only that person's decisions, with the filter in sight. */
 function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
+  const { cards: kept, load: reloadCards } = useWaitCards();
   const shown = shownOf(decisions, personId);
+  const cards = personId ? [] : (kept ?? []);
   const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
 
   return (
@@ -291,7 +294,8 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, .
       <h2>{t.tasks.waiting}</h2>
       {personId && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
-      {decisions && shownNone(shown) && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
+      <WaitCards cards={cards} onOpenTask={rest.onOpenTask} onSeen={reloadCards} />
+      {decisions && shownNone(shown) && !cards.length && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
       <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </section>

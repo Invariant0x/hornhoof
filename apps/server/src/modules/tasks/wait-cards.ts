@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { AgentViewer } from '../../auth/agent-view.js';
 import { canReach } from '../../auth/access.js';
-import { tasks, taskWaits, waitNotices } from '../../db/schema.js';
+import { tasks, taskWaits, turns, waitNotices } from '../../db/schema.js';
 import { ownNote, taskSpot } from './engine.js';
 import { pageAfter, type WaitPlace } from './wait-views.js';
 
@@ -11,8 +11,13 @@ import { pageAfter, type WaitPlace } from './wait-views.js';
    Seeing one decides nothing: no question it speaks of is answered, and no approval is given or changed. */
 
 export type WaitCardKind = 'late' | 'final_review' | 'goal_risk' | 'turn_summary' | 'release_tag';
-/* words: what Hornhoof wrote for them, which holds no words of the work itself. */
-export type WaitCard = { id: string; about: WaitCardKind; taskId: string | null; number: number | null; kind: WaitSourceKind | null; level: number | null; words: string; at: string };
+/* words: what Hornhoof wrote for them, which holds no words of the work itself. turn: the turn a summary or a tag is of, with
+   the version it came out as; tag: the version a tag that released nothing names, and why. A screen says them in the
+   person's language. */
+export type WaitCard = {
+  id: string; about: WaitCardKind; taskId: string | null; number: number | null; kind: WaitSourceKind | null; level: number | null; words: string; at: string;
+  turn: { number: number; version: string | null } | null; tag: { version: string; why: 'unrecorded' | 'stale' } | null;
+};
 export type CardPage = { cards: WaitCard[]; next: string | null };
 
 const aboutOf = (card: typeof waitNotices.$inferSelect): WaitCardKind => {
@@ -29,8 +34,11 @@ const olderThan = (place: WaitPlace | null) => (place
 type CardRow = { card: typeof waitNotices.$inferSelect; kind: WaitSourceKind | null; waitTask: string | null };
 const taskIdOf = (row: CardRow): string | null => row.waitTask ?? row.card.guard.turn?.taskId ?? null;
 
-const cardOf = (row: CardRow, task: typeof tasks.$inferSelect): WaitCard => ({
+type TurnOf = Pick<typeof turns.$inferSelect, 'id' | 'number' | 'version'>;
+const cardOf = (row: CardRow, task: typeof tasks.$inferSelect, turn: TurnOf | undefined): WaitCard => ({
   id: row.card.id, about: aboutOf(row.card), taskId: task.id, number: task.number, kind: row.kind, level: row.card.level, words: row.card.message.text, at: row.card.createdAt.toISOString(),
+  turn: turn ? { number: turn.number, version: turn.version } : null,
+  tag: row.card.guard.tag ? { version: row.card.guard.tag.version, why: row.card.guard.tag.why } : null,
 });
 
 export async function waitCards(ctx: Pick<Ctx, 'db'>, viewer: AgentViewer, page: { limit: number; before: WaitPlace | null }): Promise<CardPage> {
@@ -41,9 +49,11 @@ export async function waitCards(ctx: Pick<Ctx, 'db'>, viewer: AgentViewer, page:
   const shown = rows.slice(0, page.limit);
   const ids = shown.flatMap(row => taskIdOf(row) ?? []);
   const places = ids.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, ids)) : [];
+  const turnIds = shown.flatMap(row => row.card.guard.turn?.id ?? []);
+  const of = turnIds.length ? await ctx.db.select({ id: turns.id, number: turns.number, version: turns.version }).from(turns).where(inArray(turns.id, turnIds)) : [];
   const cards = shown.flatMap(row => {
     const task = places.find(t => t.id === taskIdOf(row));
-    return task && canReach(viewer.access, taskSpot(task)) ? [cardOf(row, task)] : [];
+    return task && canReach(viewer.access, taskSpot(task)) ? [cardOf(row, task, of.find(turn => turn.id === row.card.guard.turn?.id))] : [];
   });
   return { cards, next: rows.length > page.limit ? pageAfter(shown.at(-1)!.card) : null };
 }

@@ -171,3 +171,39 @@ test('shows a clean empty board and says what to do', async ({ page }) => {
   await page.getByRole('searchbox', { name: t.tasks.search }).fill('anything');
   await expect(found.getByRole('status')).toHaveText(t.tasks.noSearchResults);
 });
+
+/* The cards Hornhoof kept for the person: a version marked in the code that released nothing, and a turn that is over. */
+test('shows the cards kept for the person inside the page, at a desk and on a phone, in every language and mirrored right to left', async ({ page }, info) => {
+  await serveTasksBoard(page);
+  const goal = TASKS.find(x => x.turn !== null && !x.parentId)!;
+  const kept = { taskId: goal.id, number: goal.number, kind: null, level: null, at: '2026-11-14T10:00:00.000Z' };
+  const cards = [
+    { ...kept, id: 'c1', about: 'release_tag', turn: { number: 24, version: null }, tag: { version: 'v1.7.0', why: 'unrecorded' } },
+    { ...kept, id: 'c2', about: 'turn_summary', turn: { number: 23, version: 'v1.6.0' }, tag: null },
+  ];
+  await page.route('**/api/wait-cards', route => route.fulfill({ json: { cards, next: null } }));
+  const within = async (t: Messages) => {
+    const frame = (await page.getByRole('region', { name: t.tasks.waiting }).boundingBox())!;
+    for (const box of await page.locator('.wait-card, .wait-card button').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
+      expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
+      expect(box.right).toBeLessThanOrEqual(frame.x + frame.width + 1);
+    }
+  };
+  for (const lang of LANGUAGES.map(l => l.id)) for (const width of [1440, 375]) {
+    const t = MESSAGES[lang];
+    await open(page, lang, width);
+    await expect(page.getByRole('region', { name: t.tasks.cards.tagTitle })).toContainText(t.tasks.cards.tag('v1.7.0', 24, 'unrecorded'));
+    await expect(page.getByRole('region', { name: t.tasks.cards.summaryTitle(23) })).toContainText(t.tasks.cards.summary(23, 'v1.6.0', t.tasks.board.views.releases));
+    expect(await sideways(page), `${lang} ${width}`).toBeLessThanOrEqual(0);
+    await within(t);
+    await capture(page, info, `cards-${lang}-${width}`);
+  }
+  await open(page, 'en', 375);
+  await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+  const tag = page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle });
+  /* Its edge line moves to the right, where the text starts. */
+  expect(await tag.evaluate(el => getComputedStyle(el).borderRightWidth)).toBe('2px');
+  expect(await sideways(page)).toBeLessThanOrEqual(0);
+  await within(MESSAGES.en);
+  await capture(page, info, 'cards-rtl-375');
+});

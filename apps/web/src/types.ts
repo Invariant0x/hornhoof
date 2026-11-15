@@ -1,7 +1,7 @@
 import type { EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
-import type { ExternalWait } from '@hornhoof/protocol/waits';
+import type { ExternalWait, WaitSourceKind } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, DepartmentTurnProgress, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
@@ -534,6 +534,22 @@ export type ProposalDecision = MaterialStampView & {
 /* The orchestrator's request for the computer the server runs on, which people of the whole company see and the CEO and
    the delegate answer. */
 export type ComputerAccessDecision = { kind: 'computer_access'; id: 'server'; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerView };
+
+/* A card Hornhoof kept for this person until they say they saw it: a wait past its date that came up to them, a goal at
+   risk, a turn that is over, or a version marked in the code that released nothing of its turn. Seeing it decides nothing.
+   turn: the turn a summary or a tag is of, with the version it came out as; tag: what that version is named and why it
+   released nothing. */
+export type WaitCard = {
+  id: string;
+  about: 'late' | 'final_review' | 'goal_risk' | 'turn_summary' | 'release_tag';
+  taskId: string | null;
+  number: number | null;
+  kind: WaitSourceKind | null;
+  level: number | null;
+  at: string;
+  turn: { number: number; version: string | null } | null;
+  tag: { version: string; why: 'unrecorded' | 'stale' } | null;
+};
 
 /* A machine with agents on it that went away: for its owner and the CEO, closed by itself once back is set. */
 export type MachineAwayCard = {

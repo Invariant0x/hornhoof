@@ -1310,6 +1310,24 @@ export const en = {
     },
     waiting: 'Waiting for you',
     nothingWaiting: 'Nothing waits for you.',
+    /* Cards Hornhoof kept for the person until they say they saw them, in their words. */
+    cards: {
+      open: 'Open task',
+      seen: 'Got it',
+      tagTitle: 'A version was marked without a release',
+      tag: (version: string, turn: number, why: 'unrecorded' | 'stale') =>
+        `Version ${version} was marked in the code, but ${why === 'unrecorded' ? 'its release was not recorded and approved beforehand' : 'the full check or the approval its release relied on no longer holds'}. So the tasks of Turn ${turn} are not counted as released, and the turn stays open. The head of the department was told.`,
+      summaryTitle: (turn: number) => `Turn ${turn} is over`,
+      summary: (turn: number, version: string | null, where: string) =>
+        `${version ? `Turn ${turn} came out as version ${version}.` : `Turn ${turn} is over.`} What went into it is under “${where}”.`,
+      goalTitle: 'A goal is at risk',
+      goal: (n: number) => `A head or the orchestrator says the goal of #${n} is at risk. The question is on the task.`,
+      stillOpenTitle: 'A wait is still open',
+      stillOpen: (n: number) => `The wait on #${n} is still open.`,
+      lateTitle: 'A task waits past its date',
+      late: (n: number, what: string | null) => `#${n} waits${what ? ` for ${what}` : ''} past its date, and the decision has come to you.`,
+      waitsFor: { after: 'another task', review: 'a review', person: "a person's answer", run: 'a test run', external: 'an external event' },
+    },
     machineAway: (host: string, owner: string | null) => (owner ? `Machine ${host} (${owner}) is offline` : `Machine ${host} is offline`),
     machineAwaySince: (at: string, agents: number) => `Offline since ${at}. Agents on it: ${agents}.`,
     machineAwayKinds: { orchestrator: 'orchestrator', head: 'head' },
