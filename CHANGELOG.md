@@ -5,6 +5,105 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.24.0] - 2026-11-15
+
+Agents run on any API that speaks the Anthropic or OpenAI protocol and are paid by the tokens they use, Hornhoof counts
+each turn's tokens, a turn is now the release of its department, and Tasks shows the goals of every department on one
+board.
+
+### Before you update
+
+- Migrations 0125 and 0126 come with this release. 0125 adds an empty table `turn_tokens` for each turn's tokens and
+  the address and protocol of an API connection. 0126 makes turns releases: planned turns are removed and their tasks
+  go to the head of their top-level department, or wait blocked where it has no head, and what each planned turn was
+  for stays in the log of its tasks; an open turn keeps only the work accepted into its branch or done turnkey, and the
+  rest goes on outside every turn; every top-level department gets one open turn; a department's work mode is removed.
+  Going back to 0.23.6 means the database goes back to the copy made before the update, so changes made after the
+  update are lost.
+- An API on your own network, not on the internet, is reached only when its host is in `API_INTERNAL_HOSTS` in the
+  server's `.env` file, as host names or addresses separated by commas.
+
+### Added
+
+- Subscriptions & API connects an API by its key: Claude API, OpenAI API, OpenRouter or a compatible API at its own
+  address. Agents run on it in Claude Code or in Codex, by its protocol, and its models are loaded from the API or
+  added by their id. The key is kept encrypted and only its last 4 characters are ever shown, and a connection serves
+  any department or the orchestrator.
+- Each turn's tokens are kept with the model it ran on. Subscriptions & API shows input, output and cache tokens for
+  today, 7 days, 30 days and all time, and a card splits its 30 days by model. Each plan is marked as paid by
+  subscription or by tokens, with a filter for that.
+- The cards of the orchestrator and of an employee offer the APIs they may run on, with their models.
+- Tasks shows the goals of every department as a board, each with its related tasks folded under it, in progress, by
+  department, or by turns and releases. Tiles on top say at a glance what waits for your answer, what goes on now and
+  what is ready for release. A question stands only where it waits for you, with a link on its row, and closed
+  releases are folded. Another department's tasks are read-only there.
+- An agent's program gets answers from Hornhoof's tools while no turn runs, such as when it connects or runs its
+  checks.
+
+### Changed
+
+- A turn is the release of its department. Each top-level department always has one open turn, the release it gets
+  ready; a task joins it as its result is accepted into the turn's branch, and the tag of the recorded release closes
+  the turn. Work never waits for a turn, there are no planned turns, and the choice between work in turns and
+  continuous work is gone.
+- Every release runs the full test run, and a version tag that no recorded release names is reported. Autonomous
+  release approves a turn's release too, asked only by the task that holds the verdict or a coordination task above it.
+- A route skips a check that nobody in the department can do instead of waiting for it, and a department that keeps a
+  repository hands its documents in through it.
+- The skills every agent gets describe tasks and turns as releases. A turnkey team does and releases its task end to
+  end with its own review and security check. Independent Review and Security engineers work in echelon tasks, where a
+  change affecting access, root, permissions or secrets passes an independent Security engineer before any shared
+  branch.
+- The README, the install guide and every package say what Hornhoof is, its MIT licence and where its code lives. A
+  pull request from a fork never runs on a machine a repository variable names. Texts, tests and fixtures use neutral
+  names.
+
+### Russian
+
+Агенты работают на любом API с протоколом Anthropic или OpenAI и оплачиваются по израсходованным токенам, Hornhoof
+считает токены каждого хода, ход теперь это выпуск своего отдела, а «Задачи» показывают цели всех отделов на одной
+доске.
+
+- Перед обновлением: в выпуске миграции 0125 и 0126. 0125 добавляет пустую таблицу `turn_tokens` для токенов каждого
+  хода, а также адрес и протокол подключения API. 0126 делает ходы выпусками: запланированные ходы удаляются, их задачи
+  переходят к главе отдела верхнего уровня, а где главы нет, ждут как заблокированные, и то, для чего был каждый
+  запланированный ход, остается в журнале его задач; в открытом ходе остается только работа, принятая в его ветку или
+  сделанная под ключ, остальное идет дальше вне ходов; у каждого отдела верхнего уровня появляется один открытый ход;
+  режим работы отдела убран. Откат на 0.23.6 возвращает базу к копии, сделанной перед обновлением, поэтому изменения
+  после обновления пропадут.
+- API в вашей собственной сети, а не в интернете, доступен только если его хост указан в `API_INTERNAL_HOSTS` в файле
+  `.env` сервера: имена или адреса через запятую.
+- «Подписки и API» подключают API по ключу: Claude API, OpenAI API, OpenRouter или совместимый API по своему адресу.
+  Агенты работают на нем в Claude Code или в Codex, по его протоколу, а модели загружаются из API или добавляются по
+  их id. Ключ хранится зашифрованным, видны только его последние 4 символа, а подключение служит любому отделу или
+  оркестратору.
+- Токены каждого хода хранятся вместе с моделью, на которой он шел. «Подписки и API» показывают входящие, исходящие и
+  кешированные токены за сегодня, 7 дней, 30 дней и все время, а карточка делит свои 30 дней по моделям. Каждый план
+  помечен как оплата подпиской или токенами, с фильтром по этому.
+- Карточки оркестратора и сотрудника предлагают API, на которых они могут работать, с их моделями.
+- «Задачи» показывают цели всех отделов доской, у каждой свернуты связанные задачи: в работе, по отделам или по ходам
+  и выпускам. Плитки сверху сразу говорят, что ждет вашего ответа, что идет сейчас и что готово к выпуску. Вопрос стоит
+  только там, где ждет вас, со ссылкой в своей строке, а закрытые выпуски свернуты. Задачи другого отдела там только
+  для чтения.
+- Программа агента получает ответы инструментов Hornhoof, пока ход не идет, например когда подключается или выполняет
+  свои проверки.
+- Ход это выпуск своего отдела. У каждого отдела верхнего уровня всегда есть один открытый ход, выпуск, который он
+  готовит; задача входит в него, когда ее результат принят в ветку хода, а тег записанного выпуска закрывает ход.
+  Работа никогда не ждет хода, запланированных ходов больше нет, и выбора между работой ходами и непрерывной работой
+  тоже нет.
+- Каждый выпуск проходит полный прогон тестов, а о теге версии, который не называет ни один записанный выпуск,
+  сообщается. Самостоятельный выпуск одобряет и выпуск хода, и просит его только задача с вердиктом или задача
+  координации над ней.
+- Маршрут пропускает проверку, которую в отделе никто не может сделать, вместо того чтобы ждать ее, а отдел со своим
+  репозиторием сдает документы через него.
+- Навыки, которые получает каждый агент, описывают задачи и ходы как выпуски. Команда под ключ делает и выпускает свою
+  задачу целиком сама, со своей проверкой кода и безопасности. Независимые проверяющие кода и безопасности работают в
+  задачах с этапами, где изменение доступа, прав root, разрешений или секретов проходит независимого инженера
+  безопасности до любой общей ветки.
+- README, руководство по установке и каждый пакет говорят, что такое Hornhoof, его лицензию MIT и где лежит его код.
+  Запрос на слияние из форка никогда не запускается на машине, которую называет переменная репозитория. Тексты, тесты и
+  данные тестов используют нейтральные имена.
+
 ## [0.23.6] - 2026-11-14
 
 A company runs on several machines of its own with encrypted backups and a link of its own, employees' letters wait in
