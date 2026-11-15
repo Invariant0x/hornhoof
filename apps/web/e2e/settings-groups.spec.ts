@@ -2,7 +2,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { SETTINGS_GROUPS } from '../src/routes';
-import { ME, serveApi } from './api';
+import { serveApi } from './api';
 
 /* The short account menu and Settings in its four groups, as a person meets them: in a light and a dark skin, in the
    longest and the shortest shipped language and right to left, at a desktop's width and a phone's. Every group keeps its
@@ -125,12 +125,11 @@ for (const skin of SKINS) for (const { lang, dir } of LOOKS) for (const width of
   });
 }
 
-test('About holds writing to the developers in a light and a dark skin, in both languages and right to left, wide and narrow', async ({ page }, info) => {
-  test.setTimeout(120_000);
-  for (const skin of SKINS) for (const { lang, dir } of LOOKS) for (const width of WIDTHS) {
+for (const skin of SKINS) for (const { lang, dir } of LOOKS) for (const width of WIDTHS) {
+  const look = `${lang}-${dir}-${skin}-${width}`;
+  test(`About holds writing to the developers: ${look}`, async ({ page }, info) => {
     const t = MESSAGES[lang];
-    await page.unrouteAll();
-    await prepare(page, lang, skin, width);
+    const problems = await prepare(page, lang, skin, width);
     await page.route('**/api/updates/current', route => route.fulfill({ json: { version: '0.24.0', commit: 'c6bd5a8' } }));
     await page.goto('/about');
     await direction(page, dir);
@@ -139,6 +138,7 @@ test('About holds writing to the developers in a light and a dark skin, in both 
     await expect(part.getByRole('button', { name: t.common.next, exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await about.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-    await shot(page, info, `about-feedback-${lang}-${dir}-${skin}-${width}`);
-  }
-});
+    await shot(page, info, `about-feedback-${look}`);
+    expect(problems).toEqual([]);
+  });
+}
