@@ -3,6 +3,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS } from '../src/skins/registry';
 import type { SubView, TokenPeriods, TokenSum } from '../src/types';
+import { tokenCount } from '../src/ui/token-count';
 import { CARD } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
 import { box, serveApi } from './api';
@@ -108,7 +109,7 @@ for (const { lang, skin, width } of LOOKS) {
   const mode = skin === 'light' ? 'light' : `dark ${skin}`;
   test(`Subscriptions & API: payment, tokens and a new API connection, ${lang} ${mode} ${width}`, async ({ page }, info) => {
     const t = messages[lang];
-    const n = (value: number) => new Intl.NumberFormat(lang).format(value);
+    const n = (value: number) => tokenCount(lang, value);
     const errors = watch(page);
     const sent: Request[] = [];
     await page.setViewportSize({ width, height: 900 });
@@ -157,6 +158,8 @@ for (const { lang, skin, width } of LOOKS) {
       await expect(gauges.nth(i + 1)).toContainText(n(own[period].total));
     }
     await expect(gauges.nth(0)).toContainText(t.subs.tokens.split(n(own.today.input), n(own.today.output), n(own.today.cacheRead + own.today.cacheWrite)));
+    /* Each figure stands on one line, a billion as well as a thousand. */
+    for (const figure of await part.locator('.g-f b').all()) expect((await box(figure)).height).toBeLessThan(36);
     await insideCard(card);
     expect(await fits(page)).toBe(true);
     await card.scrollIntoViewIfNeeded();
@@ -171,7 +174,14 @@ for (const { lang, skin, width } of LOOKS) {
     await expect(form.getByLabel(t.subs.apiAddress, { exact: true })).toHaveCount(0);
     await form.getByRole('button', { name: t.subs.loadModels, exact: true }).click();
     await expect(form).toContainText(t.subs.modelsFound(3));
-    await form.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }).check();
+    const qwen = form.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true });
+    /* A box stands at the first line of its name, the size of a box. */
+    const [tick, name] = [await box(qwen), await box(form.locator('.model-found label').filter({ has: page.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }) }).locator('span'))];
+    expect(tick.height).toBeLessThan(22);
+    expect(Math.abs(tick.y + tick.height / 2 - (name.y + Math.min(name.height, 22) / 2))).toBeLessThan(5);
+    await qwen.check();
+    await expect(form.getByLabel(t.subs.apiKey, { exact: true })).toHaveAccessibleDescription(t.subs.apiKeyHint);
+    await expect(page.getByText(t.subs.apiKeyHint, { exact: true })).toHaveCount(1);
     await form.getByLabel(t.subs.apiServes, { exact: true }).selectOption('department:d2');
     expect(await fits(page)).toBe(true);
     await form.scrollIntoViewIfNeeded();

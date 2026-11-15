@@ -139,7 +139,7 @@ function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>):
         </select>
       )}
     </Field>
-    <Field label={t.subs.apiKey} hint={t.subs.apiIntro}>
+    <Field label={t.subs.apiKey} hint={t.subs.apiKeyHint}>
       {p => <input {...p} className="mono" type="password" autoComplete="off" spellCheck={false} value={form.apiKey} onChange={e => set({ apiKey: e.target.value })} />}
     </Field>
     {form.provider === 'custom_api' && (

@@ -712,7 +712,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .api-models .model-list .nm { min-width: 0; overflow-wrap: anywhere; }
 .api-models .model-list small { display: block; color: var(--muted); font-size: 12.5px; }
 .api-models .model-found { max-block-size: 260px; overflow-y: auto; scrollbar-gutter: stable; padding-inline-end: 4px; }
-.api-models .model-found label { display: flex; align-items: flex-start; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.api-models .model-found label { display: flex; align-items: flex-start; gap: 8px; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+.api-models .model-found input { flex: none; inline-size: 16px; block-size: 16px; margin-block-start: 2px; padding: 0; border: 0; background: none; accent-color: var(--cyan-ink); }
 .api-models .field { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .api-models .field > :is(label, .label) { padding-block-start: 0; }
 .api-models .model-actions, .api-models .model-add { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
