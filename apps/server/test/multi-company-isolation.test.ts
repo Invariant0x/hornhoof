@@ -247,6 +247,22 @@ describe('Docker subnet selection outside host networks and multi-project isolat
     expect(refused.calls.some(c => c.startsWith('docker compose up'))).toBe(false);
   }, 60_000);
 
+  it('makes the networks of a server from before subnets again with the subnets they have, once, before it starts anything', () => {
+    const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
+    mkdirSync(machine.folder(), { recursive: true });
+    writeFileSync(join(machine.folder(), '.env'), 'COMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n');
+    const live = { STUB_DOCKER_NETWORKS: 'n-def|hornhoof_default|hornhoof|172.18.0.0/16|false| n-int|hornhoof_internal|hornhoof|172.19.0.0/16|true|' };
+    const first = machine.runServer([], live);
+    expect(first.code).toBe(0);
+    const down = first.calls.indexOf('docker compose down --remove-orphans');
+    expect(down).toBeGreaterThan(-1);
+    expect(first.calls.findIndex(c => c.startsWith('docker compose up'))).toBeGreaterThan(down);
+    expect(machine.dotEnv()).toMatchObject({ HORNHOOF_SUBNET: '172.18.0.0/16', HORNHOOF_INTERNAL_SUBNET: '172.19.0.0/16' });
+    const again = machine.runServer([], live);
+    expect(again.code).toBe(0);
+    expect(again.calls.some(c => c.startsWith('docker compose down'))).toBe(false);
+  }, 60_000);
+
   it('recreates an existing overlapping project network, retries on daemon pool overlap, and cleans subnets on remove', () => {
     const machine = makeComputer(LAN_ADDR_B, LAN_ROUTE_B);
     mkdirSync(machine.folder(), { recursive: true });
@@ -258,7 +274,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
       STUB_DOCKER_NETWORKS: 'oldnet000000001|hornhoof_default|hornhoof|192.168.0.0/20|false|',
     });
     expect(healed.code).toBe(0);
-    expect(healed.calls).toContain('docker compose down');
+    expect(healed.calls).toContain('docker compose down --remove-orphans');
     const healedEnv = machine.dotEnv();
     expect(cidrsOverlap(healedEnv.HORNHOOF_SUBNET!, '192.168.0.0/20')).toBe(false);
     expect(machine.networks().some(n => n.id === 'oldnet000000001')).toBe(false);
@@ -453,7 +469,7 @@ describe('Docker subnet selection outside host networks and multi-project isolat
       STUB_HOSTNAME: 'updater-cid',
     });
     expect(fromUpdater.code).toBe(0);
-    expect(fromUpdater.calls).not.toContain('docker compose down');
+    expect(fromUpdater.calls.some(c => c.startsWith('docker compose down'))).toBe(false);
     expect(machine.dotEnv().HORNHOOF_SUBNET).toBe('192.168.0.0/20');
     expect(cidrsOverlap(machine.dotEnv().HORNHOOF_INTERNAL_SUBNET!, '192.168.0.0/20')).toBe(false);
     expect(fromUpdater.out).toContain('192.168.0.0/20');

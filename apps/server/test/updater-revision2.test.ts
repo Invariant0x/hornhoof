@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { APP, ask, at, runOnce, runRev1, stand, takeOver, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
+import { APP, ask, at, refs, runOnce, runRev1, stand, takeOver, UPDATER_DIGESTS, type Stand } from './updater-fixture.js';
 
 
 /* What revision 2 changes: the copy of the database, the services a build does not name, where health is asked, and
@@ -30,8 +30,8 @@ describe('updater, revision 2', () => {
     writeFileSync(statusFile(s), JSON.stringify({ ...JSON.parse(readFileSync(statusFile(s), 'utf8')), ...change }));
   }
   /* An older updater began the update and its installer handed it over, so that updater is gone. */
-  async function handedOver(id: string, env: Record<string, string> = HAND_OVER) {
-    const s = stand();
+  async function handedOver(id: string, env: Record<string, string> = HAND_OVER, dotEnv?: string) {
+    const s = stand(dotEnv);
     const first = await runRev1(s, ask(id), env);
     expect(first.status).toMatchObject({ id, state: 'running', step: 'install' });
     expect(first.calls).toContain('installer hands over');
@@ -340,6 +340,110 @@ describe('updater, revision 2', () => {
       expect(t.calls.slice(first.calls.length)).toEqual([]);
       expect(readFileSync(statusFile(s), 'utf8')).toBe(before);
     }
+  });
+
+  /* A server from before compose files named the networks' subnets, whose networks have the ones Docker gave them. */
+  const PLAIN = {
+    ...HAND_OVER,
+    STUB_SUBNET_BUILDS: '0.4.1',
+    STUB_NETWORKS: 'plain',
+    STUB_DOCKER_NETWORKS: 'n-def|hornhoof_default|hornhoof|172.18.0.0/16|false| n-int|hornhoof_internal|hornhoof|172.19.0.0/16|true|',
+  };
+  /* The settings of such a server, which name its compose project as every install does. */
+  const PLAIN_ENV = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\nCOMPOSE_PROJECT_NAME=hornhoof\n';
+  const REMADE = 'The networks of this server are made again with the subnets they have, so Hornhoof stops for a moment.';
+  const DOWN = 'docker compose down --remove-orphans';
+  const composeOf = (s: Stand) => readFileSync(join(s.server, 'compose.yaml'), 'utf8');
+  /* This build's updater says it goes on while the helper waits its first second for it. */
+  function goesOnMeanwhile(s: Stand) {
+    const later = join(s.dir, 'status-later.json');
+    writeFileSync(later, JSON.stringify({ ...JSON.parse(readFileSync(statusFile(s), 'utf8')), log: `${GOES_ON}\n` }));
+    return { HORNHOOF_TAKE_OVER_WAIT: '10', STUB_DURING_SLEEP: `[ ! -f "${later}" ] || mv "${later}" "${statusFile(s)}"` };
+  }
+
+  it("makes the networks of a server from before subnets again with the subnets they have, and this build's updater goes on", async () => {
+    const { s, first } = await handedOver('n1', PLAIN, PLAIN_ENV);
+    const t = await takeOver(s, { ...PLAIN, ...goesOnMeanwhile(s) });
+    expect(t.status).toMatchObject({ id: 'n1', state: 'running', step: 'install' });
+    expect(t.status.log).toContain(GOES_ON);
+    expect(t.status.log).not.toContain(NO_START);
+    const calls = t.calls.slice(first.calls.length);
+    const down = calls.indexOf(DOWN);
+    expect(down).toBeGreaterThan(calls.indexOf('docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update'));
+    expect(calls.indexOf('docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update')).toBeGreaterThan(-1);
+    expect(calls.indexOf('docker compose up -d --no-build --wait db updater')).toBeGreaterThan(down);
+    expect(envOf(s)).toContain('\nHORNHOOF_SUBNET=172.18.0.0/16\n');
+    expect(envOf(s)).toContain('\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n');
+    const r = await runOnce(s, null, { ...PLAIN, STUB_BROKEN: '', STUB_PROJECT_CONTAINERS: MOVED_IN });
+    expect(r.status).toMatchObject({ id: 'n1', state: 'done', step: 'finished' });
+    expect(readState(s, 'running')).toBe('bbb');
+    expect(readState(s, 'migrations')).toBe('21');
+  });
+
+  it('goes back to the build from before on the networks made again, when the new build fails', async () => {
+    const { s } = await handedOver('n2', PLAIN, PLAIN_ENV);
+    await takeOver(s, { ...PLAIN, ...goesOnMeanwhile(s) });
+    const r = await runOnce(s, null, { ...PLAIN, STUB_PROJECT_CONTAINERS: MOVED_IN });
+    expect(r.status).toMatchObject({ id: 'n2', state: 'rolled_back', step: 'finished' });
+    expect(readState(s, 'running')).toBe('aaa');
+    expect(readState(s, 'migrations')).toBe('20');
+    expect(composeOf(s)).toContain('# build 0.4.0');
+    expect(composeOf(s)).toContain('subnet: ${HORNHOOF_SUBNET:-10.200.0.0/24}');
+  });
+
+  it.each([
+    ['never takes the update', 'n3', {}],
+    ['does not start', 'n4', { STUB_UPDATER_UP: 'never' }],
+  ])("brings the build from before back whole, on networks as its own file makes them, when this build's updater %s", async (_, id, change) => {
+    const { s, first } = await handedOver(id, PLAIN, PLAIN_ENV);
+    const t = await takeOver(s, { ...PLAIN, ...change, HORNHOOF_TAKE_OVER_WAIT: '1' });
+    expect(t.status).toMatchObject({ id, state: 'running', step: 'rollback' });
+    expect(t.status.log).toContain(REMADE);
+    expect(t.status.log).toContain(NO_START);
+    const calls = t.calls.slice(first.calls.length);
+    expect(calls.filter(c => c === DOWN)).toHaveLength(2);
+    expect(calls.indexOf(`all up ${refs('0.4.0')}`)).toBeGreaterThan(calls.lastIndexOf(DOWN));
+    expect(composeOf(s)).toContain('# build 0.4.0');
+    expect(composeOf(s)).not.toContain('HORNHOOF_SUBNET');
+    expect(envOf(s)).not.toContain('SUBNET=');
+    const r = await runRev1(s, null, PLAIN);
+    expect(r.status).toMatchObject({ id, state: 'rolled_back', step: 'finished' });
+    expect(readState(s, 'running')).toBe('aaa');
+    expect(readState(s, 'migrations')).toBe('20');
+    expect(envOf(s)).toContain('HORNHOOF_VERSION=0.4.0');
+  });
+
+  it('says Hornhoof is stopped and what to do when the build from before does not start again either', async () => {
+    const { s } = await handedOver('n5', PLAIN, PLAIN_ENV);
+    const t = await takeOver(s, { ...PLAIN, STUB_UPDATER_UP: 'never', STUB_ALL_UP: 'fail', HORNHOOF_TAKE_OVER_WAIT: '1' });
+    expect(t.status).toMatchObject({ id: 'n5', state: 'failed', step: 'finished' });
+    expect(t.status.log).toContain(`No updater could start, and the build from before did not start again either, so Hornhoof is stopped. Run install.sh server in ${s.server}.`);
+    expect(existsSync(join(s.server, 'backups', 'update.json'))).toBe(false);
+  });
+
+  it("writes why compose refused each updater into the log, cut short and without the server's secrets", async () => {
+    const secret = 'Pw7dK2xQ9mZ4vR8sT1';
+    const { s } = await handedOver('n6', HAND_OVER, `HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\nPOSTGRES_PASSWORD=${secret}\n`);
+    const says = `level=error msg="password ${secret} refused" ${'x'.repeat(400)}`;
+    const t = await takeOver(s, { ...HAND_OVER, STUB_UPDATER_UP: 'never', STUB_COMPOSE_SAYS: says, HORNHOOF_TAKE_OVER_WAIT: '1' });
+    expect(t.status).toMatchObject({ id: 'n6', state: 'failed', step: 'finished' });
+    const said = t.status.log.split('\n').filter((line: string) => line.includes('refused'));
+    expect(said).toHaveLength(2);
+    for (const line of said) {
+      expect(line.startsWith('Compose said: level=error msg="password <hidden> refused" xxx')).toBe(true);
+      expect(line.length).toBeLessThanOrEqual(240);
+    }
+    expect(t.status.log).not.toContain(secret);
+  });
+
+  it('writes into the log that compose could not make the networks again, for each updater', async () => {
+    /* Settings that name subnets the networks were not made with: nothing tells this updater to make them again. */
+    const { s } = await handedOver('n7', PLAIN, `${PLAIN_ENV}HORNHOOF_SUBNET=172.18.0.0/16\nHORNHOOF_INTERNAL_SUBNET=172.19.0.0/16\n`);
+    const t = await takeOver(s, { ...PLAIN, HORNHOOF_TAKE_OVER_WAIT: '1' });
+    expect(t.status).toMatchObject({ id: 'n7', state: 'failed', step: 'finished' });
+    const refused = 'Compose said: Error response from daemon: error while removing network: network hornhoof_default id 3f1e9a has active endpoints';
+    expect(t.status.log.split('\n').filter((line: string) => line === refused)).toHaveLength(2);
+    expect(t.status.log).not.toContain(REMADE);
   });
 
   it('does nothing when there is no status at all', async () => {

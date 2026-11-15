@@ -852,7 +852,7 @@ worker_core() {
   WANT_WEB=$CORE_PORT
   reserve_ports
   say "Starting the company's core on this machine, in $SERVER_DIR."
-  if [ -n "$SUBNET_MOVED" ]; then compose_step "${COMPOSE[@]}" down || true; fi
+  if [ -n "$SUBNET_MOVED" ]; then compose_step "${COMPOSE[@]}" down --remove-orphans || true; fi
   start_keeper_and_front "${COMPOSE[@]}"
   compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
   web=$(port_of "$env_file")
@@ -2000,6 +2000,12 @@ choose_subnets() {
     { [ -n "$LIVE_INTERNAL_SUBNET" ] && [ "$LIVE_INTERNAL_SUBNET" != "$int_sub" ]; }; then
     SUBNET_MOVED=1
   fi
+  # Networks made before compose.yaml named their subnets have none in .env. Compose takes them for changed and cannot
+  # make them again while other containers are on them, so they are made again here, with their subnets when those
+  # stay free.
+  if [ -n "$LIVE_DEFAULT_SUBNET$LIVE_INTERNAL_SUBNET" ] && { [ -z "$(env_value HORNHOOF_SUBNET)" ] || [ -z "$(env_value HORNHOOF_INTERNAL_SUBNET)" ]; }; then
+    SUBNET_MOVED=1
+  fi
   CHOSEN_DEFAULT_SUBNET=$def_sub
   CHOSEN_INTERNAL_SUBNET=$int_sub
 }
@@ -2183,7 +2189,7 @@ start_server_services() {
   fi
   if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
     prepare_builtin_stop "$@"
-    compose_step "$@" down || true
+    compose_step "$@" down --remove-orphans || true
   fi
   (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
   until compose_step "$@" up -d --no-build --remove-orphans --wait db; do
@@ -2384,7 +2390,7 @@ worker_core_update() {
   reserve_ports
   say "Starting the company's core${PIN:+ $PIN}."
   if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
-    compose_step "${COMPOSE[@]}" down || true
+    compose_step "${COMPOSE[@]}" down --remove-orphans || true
     compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
     return 0
   fi
