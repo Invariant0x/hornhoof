@@ -54,6 +54,8 @@ const ACME: SubView = {
 };
 /* What the card asks for its own day, where the viewer is: a little more than the list's UTC day. */
 const OWN_DAY = (sub: SubView): TokenPeriods => ({ ...sub.tokens!, today: sum(sub.tokens!.today.total + 4_200, 3) });
+/* The router's 30 days by model: one it lists, one it does not, and the turns that told no model. */
+const BY_MODEL = [{ model: 'meta-llama/llama-4-maverick', total: 19_687_500 }, { model: 'qwen/qwen3-coder-480b-a35b-instruct', total: 5_250_000 }, { model: null, total: 1_312_500 }];
 
 const pathOf = (url: URL | string) => new URL(url.toString()).pathname;
 
@@ -71,7 +73,7 @@ async function serveSection(page: Page, sent: Request[]) {
   await page.route(url => /^\/api\/subscriptions\/[^/]+\/tokens$/.test(pathOf(url)), route => {
     const id = pathOf(route.request().url()).split('/')[3];
     const sub = list.find(s => s.id === id)!;
-    return route.fulfill({ json: { tokens: OWN_DAY(sub) } });
+    return route.fulfill({ json: { tokens: OWN_DAY(sub), models: sub.id === ROUTER.id ? BY_MODEL : [] } });
   });
   await page.route(url => pathOf(url) === '/api/subscriptions/models', route => {
     sent.push(route.request());
@@ -91,6 +93,24 @@ function watch(page: Page) {
 
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
+/* The words of the table's headers that stand on more than one line: a word broken in its middle. */
+const brokenHeaderWords = (page: Page) => page.evaluate(() => {
+  const broken: string[] = [];
+  for (const th of document.querySelectorAll('.dt > thead th')) {
+    const walker = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const word of (node.textContent ?? '').matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        const lines = new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top)));
+        if (lines.size > 1) broken.push(word[0]);
+      }
+    }
+  }
+  return broken;
+});
+
 async function insideCard(card: Locator) {
   const blocks = await box(card.locator('.blocks'));
   for (const blk of await card.locator('.blocks > .blk').all()) {
@@ -103,6 +123,7 @@ async function insideCard(card: Locator) {
 const LOOKS = [
   ...BUILTIN_SKINS.flatMap(skin => [1440, 375].map(width => ({ lang: 'ru' as const, skin: skin.id, width }))),
   ...[1440, 375].map(width => ({ lang: 'en' as const, skin: 'light', width })),
+  { lang: 'en' as const, skin: 'cyberpunk', width: 1440 },
 ];
 
 for (const { lang, skin, width } of LOOKS) {
@@ -134,14 +155,38 @@ for (const { lang, skin, width } of LOOKS) {
     await expect(row('WXYZ')).toContainText(n(ROUTER.tokens!.month.total));
     await expect(row('M3N4').getByRole('img')).toHaveAccessibleName('Codex');
     await expect(row('Max')).toContainText(n(PLAN.tokens!.month.total));
+    /* How each is paid reads by its word and sign, in the ink of the page, as the orchestrator's mark is quiet. */
+    const ink = await page.evaluate(() => getComputedStyle(document.body).color);
+    for (const badge of await rows.locator('.badge.ctype').all()) {
+      await expect(badge.locator('svg')).toBeVisible();
+      await expect(badge).toHaveCSS('color', ink);
+    }
+    await expect(row('WXYZ').locator('.badge.orch')).toHaveText(t.subs.orchestrator);
+    expect(await row('WXYZ').locator('.badge.orch').evaluate(el => getComputedStyle(el).color)).not.toBe(ink);
+    /* An API says once that it pays as it goes, across both limit columns on a desk, under Limits as an entry. */
+    if (width > 780) {
+      await expect(row('WXYZ').getByText(t.subs.noPlanLimits, { exact: true })).toHaveCount(1);
+      await expect(row('WXYZ').locator('td[colspan="2"]')).toHaveText(t.subs.noPlanLimits);
+      /* A header breaks between its words only, in a table that fits its frame. */
+      expect(await brokenHeaderWords(page)).toEqual([]);
+      expect(await page.locator('.tbl').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    } else await expect(row('WXYZ').getByRole('cell', { name: `${t.subs.limits} ${t.subs.noPlanLimits}`, exact: true })).toBeVisible();
+    await expect(page.getByRole('searchbox')).toHaveAttribute('placeholder', width > 720 ? t.tables.searchSubscriptions : t.tables.searchSubscriptionsShort);
     expect(await fits(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(`list-${lang}-${skin}-${width}.png`), fullPage: true });
 
-    await page.getByRole('group', { name: t.subs.payFilter }).getByRole('button', { name: new RegExp(`^${t.subs.pay.api_key}`) }).click();
+    const type = page.getByRole('group', { name: t.subs.payFilter, exact: true });
+    const all = type.getByRole('button', { name: new RegExp(`^${t.subs.payAll}`) });
+    await expect(all).toHaveText(`${t.subs.payAll}4`);
+    await expect(all).toHaveAttribute('aria-pressed', 'true');
+    for (const button of await type.getByRole('button').all()) expect((await box(button)).height).toBeGreaterThanOrEqual(44);
+    await type.getByRole('button', { name: new RegExp(`^${t.subs.pay.api_key}`) }).click();
     await expect(rows).toHaveCount(3);
     await expect(row('Max')).toHaveCount(0);
-    await page.getByRole('group', { name: t.subs.payFilter }).getByRole('button', { name: new RegExp(`^${t.subs.pay.api_key}`) }).click();
+    await expect(all).toHaveAttribute('aria-pressed', 'false');
+    await all.click();
     await expect(rows).toHaveCount(4);
+    await expect(all).toHaveAttribute('aria-pressed', 'true');
 
     await row('WXYZ').locator('button.rowbtn').click();
     const card = page.getByRole('article', { name: /WXYZ/ });
@@ -157,7 +202,20 @@ for (const { lang, skin, width } of LOOKS) {
       await expect(gauges.nth(i + 1)).toContainText(t.subs.tokens[period]);
       await expect(gauges.nth(i + 1)).toContainText(n(own[period].total));
     }
-    await expect(gauges.nth(0)).toContainText(t.subs.tokens.split(n(own.today.input), n(own.today.output), n(own.today.cacheRead + own.today.cacheWrite)));
+    for (const [term, count] of [[t.subs.tokens.input, own.today.input], [t.subs.tokens.output, own.today.output], [t.subs.tokens.cache, own.today.cacheRead + own.today.cacheWrite]] as const)
+      await expect(gauges.nth(0)).toContainText(`${term} ${n(count)}`);
+    /* Each tile says its whole count in its name and tooltip; the short one stands on screen. */
+    const whole = (count: number) => t.subs.tokens.full(new Intl.NumberFormat(lang).format(count), count);
+    await expect(gauges.nth(2)).toHaveAccessibleName(`${t.subs.tokens.month}: ${whole(own.month.total)}`);
+    await expect(gauges.nth(2)).toHaveAttribute('title', whole(own.month.total));
+    /* Its 30 days by model: the name it is listed by, else its id, else the default model, each with its whole count. */
+    const models = part.locator('.models li');
+    await expect(part.locator('.models')).toContainText(t.subs.tokens.byModel);
+    await expect(models.locator('.mname')).toHaveText(['Llama 4 Maverick', 'qwen/qwen3-coder-480b-a35b-instruct', t.subs.tokens.defaultModel]);
+    await expect(models.first()).toContainText(new Intl.NumberFormat(lang).format(19_687_500));
+    await expect(models.first()).toContainText(new Intl.NumberFormat(lang, { style: 'percent' }).format(0.75));
+    const bar = await box(models.first().locator('.bar i'));
+    expect(bar.width / (await box(models.first().locator('.bar'))).width).toBeCloseTo(0.75, 2);
     /* Each figure stands on one line, a billion as well as a thousand. */
     for (const figure of await part.locator('.g-f b').all()) expect((await box(figure)).height).toBeLessThan(36);
     await insideCard(card);
@@ -169,7 +227,15 @@ for (const { lang, skin, width } of LOOKS) {
     const form = page.getByRole('form', { name: t.subs.connectApi });
     await expect(form).toBeVisible();
     await form.getByLabel(t.subs.apiService, { exact: true }).selectOption('openrouter');
-    await form.getByLabel(t.subs.apiKey, { exact: true }).fill(KEY);
+    const key = form.getByLabel(t.subs.apiKey, { exact: true });
+    await key.fill(KEY);
+    /* The typed key shows while the person asks, and hides again; both the field and its button are targets of 44 px. */
+    await form.getByRole('button', { name: t.subs.showTypedKey.label, exact: true }).click();
+    await expect(key).toHaveAttribute('type', 'text');
+    await form.getByRole('button', { name: t.subs.hideTypedKey.label, exact: true }).click();
+    await expect(key).toHaveAttribute('type', 'password');
+    expect((await box(key)).height).toBeGreaterThanOrEqual(44);
+    expect((await box(form.getByRole('button', { name: t.subs.showTypedKey.label, exact: true }))).height).toBeGreaterThanOrEqual(44);
     await form.getByLabel(t.subs.apiName, { exact: true }).fill('Router 2');
     await expect(form.getByLabel(t.subs.apiAddress, { exact: true })).toHaveCount(0);
     await form.getByRole('button', { name: t.subs.loadModels, exact: true }).click();

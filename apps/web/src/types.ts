@@ -117,6 +117,8 @@ export type SubView = {
 /* What a subscription's turns used in a period: turns counts them all, noData those whose program told no tokens. */
 export type TokenSum = { input: number; output: number; cacheRead: number; cacheWrite: number; total: number; turns: number; noData: number };
 export type TokenPeriods = { today: TokenSum; week: TokenSum; month: TokenSum; all: TokenSum };
+/* What one model's turns used of a connection in 30 days; model null for the turns that told none. */
+export type ModelTokens = { model: string | null; total: number };
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 

@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react';
 
-type InputProps = { id: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean };
+export type InputProps = { id: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean };
 
 type Props = { label: string; hint?: ReactNode; problem?: string; children: (props: InputProps) => ReactNode };
 

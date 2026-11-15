@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useT } from '../i18n';
 import { PLAN_PROVIDERS, PROGRAM_NAMES } from '../providers';
 import type { ProviderId } from '../types';
@@ -12,6 +12,8 @@ export type FilterGroup<T> = {
   text: (value: string) => string;
   mark?: (value: string) => ReactNode;
   single?: boolean;
+  /* The word of a first button that shows every row again, with their count. */
+  all?: string;
 };
 export function providerFilter<T>(label: string, providers: (row: T) => ProviderId[]): FilterGroup<T> {
   return {
@@ -21,7 +23,23 @@ export function providerFilter<T>(label: string, providers: (row: T) => Provider
 }
 
 export type Selections = Record<string, string[]>;
-export type TableSearch<T> = { placeholder: string; text: (row: T) => string; count: (n: number) => string };
+/* short: the hint where the whole one would not fit, on a phone. */
+export type TableSearch<T> = { placeholder: string; short?: string; text: (row: T) => string; count: (n: number) => string };
+
+const NARROW = '(max-width: 720px)';
+
+/* Whether the screen is a phone's, as it changes. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.(NARROW).matches ?? false);
+  useEffect(() => {
+    const query = window.matchMedia?.(NARROW);
+    if (!query) return;
+    const change = () => setNarrow(query.matches);
+    query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
+  }, []);
+  return narrow;
+}
 
 type Option = { value: string; count: number };
 
@@ -35,15 +53,28 @@ export function matchesFilters<T>(row: T, groups: FilterGroup<T>[], selected: Se
   return groups.every(group => !selected[group.key]?.length || group.values(row).some(value => selected[group.key]!.includes(value)));
 }
 
-export function TableTools<T>({ rows, groups, selected, toggle, query, setQuery, placeholder }: {
-  rows: readonly T[]; groups: FilterGroup<T>[]; selected: Selections; toggle: (key: string, value: string) => void; query: string; setQuery: (query: string) => void; placeholder: string;
-}) {
+type ToolsProps<T> = {
+  rows: readonly T[]; groups: FilterGroup<T>[]; selected: Selections; toggle: (key: string, value: string) => void; clear: (key: string) => void;
+  query: string; setQuery: (query: string) => void; placeholder: string; short?: string;
+};
+
+function Chip({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
+  return <button className="chipf" type="button" aria-pressed={pressed} onClick={onClick}>{children}</button>;
+}
+
+function Group<T>({ rows, group, selected, toggle, clear }: { rows: readonly T[]; group: FilterGroup<T>; selected: string[]; toggle: (value: string) => void; clear: () => void }) {
+  const options = optionsFor(rows, group);
+  if (options.length < (group.single ? 1 : 2)) return null;
+  return <div className={`fgroup${group.all ? ' whole' : ''}`} role="group" aria-label={group.label}><span className="lbl">{group.label}</span>
+    {group.all && <Chip pressed={!selected.length} onClick={clear}>{group.all}<span className="n">{rows.length}</span></Chip>}
+    {options.map(option => <Chip key={option.value} pressed={selected.includes(option.value)} onClick={() => toggle(option.value)}>{group.mark?.(option.value)}{group.text(option.value)}<span className="n">{option.count}</span></Chip>)}
+  </div>;
+}
+
+export function TableTools<T>({ rows, groups, selected, toggle, clear, query, setQuery, placeholder, short }: ToolsProps<T>) {
   const t = useT();
-  return <Edge className="tools"><div className="tools-r1"><label className="search"><svg className="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" /><path d="m10 10 4 4" /></svg><span className="sr">{t.tables.search}</span><input type="search" autoComplete="off" placeholder={placeholder} value={query} onChange={e => setQuery(e.target.value)} /></label></div>
-    <div className="tools-r2">{groups.map(group => {
-      const options = optionsFor(rows, group);
-      if (options.length < (group.single ? 1 : 2)) return null;
-      return <div key={group.key} className="fgroup" role="group" aria-label={group.label}><span className="lbl">{group.label}</span>{options.map(option => <button key={option.value} className="chipf" type="button" aria-pressed={Boolean(selected[group.key]?.includes(option.value))} onClick={() => toggle(group.key, option.value)}>{group.mark?.(option.value)}{group.text(option.value)}<span className="n">{option.count}</span></button>)}</div>;
-    })}</div>
+  const narrow = useNarrow();
+  return <Edge className="tools"><div className="tools-r1"><label className="search"><svg className="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" /><path d="m10 10 4 4" /></svg><span className="sr">{t.tables.search}</span><input type="search" autoComplete="off" placeholder={narrow && short ? short : placeholder} value={query} onChange={e => setQuery(e.target.value)} /></label></div>
+    <div className="tools-r2">{groups.map(group => <Group key={group.key} rows={rows} group={group} selected={selected[group.key] ?? []} toggle={value => toggle(group.key, value)} clear={() => clear(group.key)} />)}</div>
   </Edge>;
 }

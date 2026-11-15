@@ -31,8 +31,8 @@ afterEach(() => localStorage.clear());
 
 describe('Subscriptions & API', () => {
   it.each([
-    ['en', 'Subscriptions & API', 'By subscription', 'By tokens', 'Payment'],
-    ['ru', 'Подписки и API', 'По подписке', 'По токенам', 'Оплата'],
+    ['en', 'Subscriptions & API', 'By subscription', 'By tokens', 'Type'],
+    ['ru', 'Подписки и API', 'По подписке', 'По токенам', 'Тип'],
   ])('names the section in %s, marks how each connection is paid and filters by it', async (language, heading, plan, tokens, payment) => {
     localStorage.setItem('hh-lang', language);
     lists();
@@ -45,7 +45,7 @@ describe('Subscriptions & API', () => {
     expect(rows().map(r => r.textContent!.includes('By tokens') || r.textContent!.includes('По токенам'))).toEqual([true, true]);
   });
 
-  it.each([['en', 'Tokens, 30 days', 'Tokens', 'Today', '7 days', '30 days', 'All time', 'in', 'turn told no tokens'], ['ru', 'Токены, 30 дней', 'Токены', 'Сегодня', '7 дней', '30 дней', 'Всего', 'вход', 'ход без данных']])(
+  it.each([['en', 'Tokens, 30 days', 'Tokens', 'Today', '7 days', '30 days', 'All time', 'Input', 'turn told no tokens'], ['ru', 'Токены, 30 дней', 'Токены', 'Сегодня', '7 дней', '30 дней', 'Всего', 'Ввод', 'ход без данных']])(
     'shows in %s what each used in 30 days, and in the open card today, 7 and 30 days and all along', async (language, column, title, today, week, month, all, input, noData) => {
       localStorage.setItem('hh-lang', language);
       const calls = lists();

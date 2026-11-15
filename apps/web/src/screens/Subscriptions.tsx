@@ -84,10 +84,24 @@ function SubscriptionStatus({ sub, now, showUntil = false }: { sub: SubView; now
   return <><span className={`status ${state}`}>{state === 'limit' ? t.subs.limitReached(null) : t.subs.states[state]}</span>{at && <small className="until">{t.cards.until(at)}</small>}</>;
 }
 
-/* How the connection is paid: a plan by its subscription, an API by the tokens its agents use. */
+/* The sign of how a connection is paid: arrows going round for a subscription, a stack of coins for tokens. */
+function PaySign({ kind }: { kind: SubView['kind'] }) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true">{kind === 'api_key'
+    ? <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>
+    : <><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9" /><path d="M20 4v5h-5" /><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15" /><path d="M4 20v-5h5" /></>}</svg>;
+}
+
+/* How the connection is paid: a plan by its subscription, an API by the tokens its agents use. The word and its sign
+   tell it; the mark keeps the ink of the page. */
 function PayBadge({ sub: s }: { sub: SubView }) {
   const t = useT();
-  return <span className={`badge ${s.kind === 'api_key' ? 'pay-tokens' : 'pay-plan'}`}>{t.subs.pay[s.kind]}</span>;
+  return <span className={`badge ctype ${s.kind === 'api_key' ? 'pay-tokens' : 'pay-plan'}`}><PaySign kind={s.kind} />{t.subs.pay[s.kind]}</span>;
+}
+
+/* The mark of the orchestrator's connection, in the quiet ink: it is a role, not an alarm. */
+function OrchestratorBadge() {
+  const t = useT();
+  return <span className="badge orch">{t.subs.orchestrator}</span>;
 }
 
 /* What the connection's turns used in 30 days, or nothing from an older server. */
@@ -96,14 +110,17 @@ function TokensCell({ sub: s }: { sub: SubView }) {
   return s.tokens ? <span className="num">{tokenCount(language, s.tokens.month.total)}</span> : null;
 }
 
+/* An API has no plan limits: it says so once across both limit columns, under the name of both. */
+const apiLimits = (t: Messages) => (s: SubView) => (s.kind === 'api_key' ? { columns: 2, label: t.subs.limits } : null);
+
 function subscriptionColumns(t: Messages, now: number): TableColumn<SubView>[] {
   return [
-    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [subName(t, s), s.owner.name], cell: s => <><span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><b>{subName(t, s)}</b>{s.tier && <small>{s.tier}</small>}</span></span><PayBadge sub={s} />{s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>}</> },
+    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [subName(t, s), s.owner.name], cell: s => <><span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><b>{subName(t, s)}</b>{s.tier && <small>{s.tier}</small>}</span></span><PayBadge sub={s} />{s.isOrchestrator && <OrchestratorBadge />}</> },
     { key: 'owner', label: t.tables.owner, direction: 1, value: s => s.owner.name, cell: s => s.owner.name },
     { key: 'status', label: t.tables.status, direction: 1, value: s => STATUS_ORDER.indexOf(stateOf(s, now)), className: 'k-status', cell: s => <SubscriptionStatus sub={s} now={now} showUntil /> },
     { key: 'serves', label: t.tables.serves, direction: 1, value: s => [s.place.kind === 'company' ? 0 : 1, s.place.name], cell: s => s.place.kind === 'company' ? t.people.wholeCompany : s.place.name },
     { key: 'machines', label: t.subs.columns.machine, direction: -1, value: s => s.kind === 'api_key' ? null : s.machines.length, cell: s => <MachinesCell sub={s} /> },
-    ...['five_hour', 'seven_day'].map(key => ({ key, label: windowName(t, key), direction: -1 as const, value: (s: SubView) => windowUsage(s, key, now), cell: (s: SubView) => <LimitCell sub={s} name={key} now={now} /> })),
+    ...['five_hour', 'seven_day'].map(key => ({ key, label: windowName(t, key), direction: -1 as const, value: (s: SubView) => windowUsage(s, key, now), cell: (s: SubView) => <LimitCell sub={s} name={key} now={now} />, span: key === 'five_hour' ? apiLimits(t) : undefined })),
     { key: 'tokens', label: t.subs.tokensColumn, direction: -1, value: s => s.tokens?.month.total ?? null, cell: s => <TokensCell sub={s} /> },
     { key: 'agents', label: t.tables.agents, direction: -1, value: s => agentAmounts(s.agents ?? []), cell: s => <AgentsCell agents={s.agents ?? []} /> },
   ];
@@ -170,7 +187,7 @@ function PlanAccount({ sub: s }: { sub: SubView }) {
 function subscriptionFilters(t: Messages, now: number, subs: SubView[]): FilterGroup<SubView>[] {
   const labels: Record<string, string> = { ...t.subs.states, limit: t.subs.limitReached(null) };
   return [
-    { key: 'pay', label: t.subs.payFilter, values: s => [s.kind], text: kind => t.subs.pay[kind as SubView['kind']] ?? kind },
+    { key: 'pay', label: t.subs.payFilter, all: t.subs.payAll, values: s => [s.kind], text: kind => t.subs.pay[kind as SubView['kind']] ?? kind, mark: kind => <PaySign kind={kind as SubView['kind']} /> },
     providerFilter(t.tables.provider, s => [s.provider]),
     { key: 'owner', label: t.tables.owner, values: s => [s.owner.id], text: id => subs.find(s => s.owner.id === id)?.owner.name ?? id },
     { key: 'status', label: t.tables.status, values: s => [stateOf(s, now)], text: value => labels[value] ?? value },
@@ -398,7 +415,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   const name = subName(t, s);
   return (
     <CardFrame label={`${name}, ${s.owner.name}`} accent={s.isOrchestrator}
-      head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={name} tier={s.tier} badges={<><PayBadge sub={s} />{s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>}</>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
+      head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={name} tier={s.tier} badges={<><PayBadge sub={s} />{s.isOrchestrator && <OrchestratorBadge />}</>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
       extra={<PlanExtra sub={s} controls={controls} />}>
       {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>
@@ -547,7 +564,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
           columns={subscriptionColumns(t, now)}
           name={s => subName(t, s)}
           initialSort={{ key: 'status', direction: 1 }}
-          search={{ placeholder: t.tables.searchSubscriptions, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount }}
+          search={{ placeholder: t.tables.searchSubscriptions, short: t.tables.searchSubscriptionsShort, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount }}
           filters={subscriptionFilters(t, now, subs)}
           card={s => <SubscriptionDetails sub={s} me={me} now={now} controls={{
             command: commands ? commandForPlan(commands, s, now) : undefined,

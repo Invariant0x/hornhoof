@@ -4,8 +4,11 @@ import { Edge } from './Edge';
 import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
 import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sort';
 
-/* lead: a narrow column that stands before the name. The name is the first column without it, and opens the card. */
-export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string; lead?: true };
+/* lead: a narrow column that stands before the name. The name is the first column without it, and opens the card.
+   span: for a row whose cell says one thing for this column and the next ones, how many it takes and the label it goes by
+   when the table stands as entries. */
+export type ColumnSpan = { columns: number; label: string };
+export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string; lead?: true; span?: (row: T) => ColumnSpan | null };
 type Props<T> = {
   rows: readonly T[];
   columns: TableColumn<T>[];
@@ -40,11 +43,23 @@ function SortBar<T>({ columns, sort, choose }: SortControls<T>) {
   </div>;
 }
 
+/* The row's cells, each with the column it starts at and how many it takes. */
+function rowCells<T>(row: T, columns: TableColumn<T>[]): { column: TableColumn<T>; index: number; span: ColumnSpan | null }[] {
+  const cells = [];
+  for (let index = 0; index < columns.length; ) {
+    const column = columns[index]!;
+    const span = column.span?.(row) ?? null;
+    cells.push({ column, index, span });
+    index += Math.max(1, span?.columns ?? 1);
+  }
+  return cells;
+}
+
 function TableRow<T>({ row, columns, name, expanded, toggle }: { row: T; columns: TableColumn<T>[]; name: string; expanded: boolean; toggle: () => void }) {
   const t = useT();
   const named = Math.max(0, columns.findIndex(c => !c.lead));
   return <tr className={`rm${expanded ? ' open' : ''}`} aria-label={name} onClick={() => { if (!window.getSelection()?.toString()) toggle(); }}>
-    {columns.map((c, i) => <td key={c.key} className={i === named ? 'k-name' : c.className} data-label={i === named || c.className === 'k-status' ? undefined : c.label}>
+    {rowCells(row, columns).map(({ column: c, index: i, span }) => <td key={c.key} className={i === named ? 'k-name' : c.className} colSpan={span?.columns} data-label={i === named || c.className === 'k-status' ? undefined : (span?.label ?? c.label)}>
       {i === named ? <button className="rowbtn" type="button" aria-expanded={expanded} aria-label={t.tables.openCard(name)}>
         <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>{c.cell(row)}
       </button> : c.cell(row)}
@@ -137,7 +152,7 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
 
   return <>
     {search && <>
-      <TableTools rows={rows} groups={filters} selected={selected} toggle={toggleFilter} query={query} setQuery={setQuery} placeholder={search.placeholder} />
+      <TableTools rows={rows} groups={filters} selected={selected} toggle={toggleFilter} clear={key => setSelected(previous => ({ ...previous, [key]: [] }))} query={query} setQuery={setQuery} placeholder={search.placeholder} short={search.short} />
       <ResultLine filtered={filtered} count={search.count(rows.length)} shown={visible.length} all={rows.length} clear={() => { setQuery(''); setSelected({}); }} />
     </>}
     {search && visible.length === 0 && <p className="nothing">{t.tables.noMatch}</p>}

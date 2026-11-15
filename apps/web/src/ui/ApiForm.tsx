@@ -5,7 +5,7 @@ import { useOrg } from '../org';
 import type { ModelOption, SubView } from '../types';
 import { subName } from './subscription';
 import { BusyLabel } from './BusyLabel';
-import { Field } from './Field';
+import { Field, type InputProps } from './Field';
 
 /* A company connects an API paid by the token, and changes its name, models and the place it serves: company scope
    alone, as the server checks. The key goes to the server once and never comes back; changing a connection asks for it no
@@ -128,6 +128,17 @@ function ModelsField({ models, setModels, load }: { models: Model[]; setModels(m
   );
 }
 
+/* The key the person types, which they may show while they type it. Only this one: a saved key never comes back. */
+function TypedKey({ field, value, change }: { field: InputProps; value: string; change: (value: string) => void }) {
+  const t = useT();
+  const [shown, setShown] = useState(false);
+  const button = shown ? t.subs.hideTypedKey : t.subs.showTypedKey;
+  return <div className="keybox">
+    <input {...field} className="mono" type={shown ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={value} onChange={e => change(e.target.value)} />
+    <button className="show" type="button" aria-label={button.label} onClick={() => setShown(!shown)}>{button.word}</button>
+  </div>;
+}
+
 /* A new connection: its service, name, key, and for a compatible API its address and protocol. */
 function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>): void }) {
   const t = useT();
@@ -140,7 +151,7 @@ function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>):
       )}
     </Field>
     <Field label={t.subs.apiKey} hint={t.subs.apiKeyHint}>
-      {p => <input {...p} className="mono" type="password" autoComplete="off" spellCheck={false} value={form.apiKey} onChange={e => set({ apiKey: e.target.value })} />}
+      {p => <TypedKey field={p} value={form.apiKey} change={apiKey => set({ apiKey })} />}
     </Field>
     {form.provider === 'custom_api' && (
       <Field label={t.subs.apiAddress} hint={t.subs.apiAddressHint}>
