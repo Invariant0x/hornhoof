@@ -101,7 +101,7 @@ function PayBadge({ sub: s }: { sub: SubView }) {
 /* The mark of the orchestrator's connection, in the quiet ink: it is a role, not an alarm. */
 function OrchestratorBadge() {
   const t = useT();
-  return <span className="badge orch">{t.subs.orchestrator}</span>;
+  return <span className="badge orch-role">{t.subs.orchestrator}</span>;
 }
 
 /* What the connection's turns used in 30 days, or nothing from an older server. */

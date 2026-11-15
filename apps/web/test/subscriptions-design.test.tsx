@@ -66,9 +66,11 @@ describe('marks of a connection', () => {
     lists();
     show();
     await screen.findByRole('table');
-    expect(within(row('WXYZ')).getByText('Orchestrator')).toHaveClass('badge', 'orch');
-    expect(decl('.badge.orch', 'color')).toBe('var(--muted)');
-    expect(decl('.badge.orch', 'border-color')).toBe('var(--line2)');
+    expect(within(row('WXYZ')).getByText('Orchestrator')).toHaveClass('badge', 'orch-role');
+    expect(decl('.badge.orch-role', 'color')).toBe('var(--muted)');
+    expect(decl('.badge.orch-role', 'border-color')).toBe('var(--line2)');
+    /* Not the orchestrator's window, which is .orch: a mark of its own class takes none of its place on the page. */
+    expect(within(row('WXYZ')).getByText('Orchestrator')).not.toHaveClass('orch');
   });
 });
 

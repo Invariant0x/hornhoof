@@ -163,8 +163,13 @@ for (const { lang, skin, width } of LOOKS) {
       await expect(badge.locator('svg')).toBeVisible();
       await expect(badge).toHaveCSS('color', ink);
     }
-    await expect(row('WXYZ').locator('.badge.orch')).toHaveText(t.subs.orchestrator);
-    expect(await row('WXYZ').locator('.badge.orch').evaluate(el => getComputedStyle(el).color)).not.toBe(ink);
+    const orchestrator = row('WXYZ').locator('.badge.orch-role');
+    await expect(orchestrator).toHaveText(t.subs.orchestrator);
+    expect(await orchestrator.evaluate(el => getComputedStyle(el).color)).not.toBe(ink);
+    /* A mark stands inside the name's cell, a line high. */
+    const [mark, nameCell] = [await box(orchestrator), await box(row('WXYZ').locator('td.k-name'))];
+    expect(mark.x + mark.width).toBeLessThanOrEqual(nameCell.x + nameCell.width + 1);
+    expect(mark.height).toBeLessThan(30);
     /* An API says once that it pays as it goes, across both limit columns on a desk, under Limits as an entry. */
     if (width > 780) {
       await expect(row('WXYZ').getByText(t.subs.noPlanLimits, { exact: true })).toHaveCount(1);
