@@ -80,43 +80,54 @@ describe('templates', () => {
     for (const id of ['hh-task-flow', 'hh-break-down']) expect(body(id), id).toMatch(/required approvals|Required approvals/i);
   });
 
-  it('preserves sprint admission without adding an unconditional downstream chain', () => {
+  it('admits small work into the flow without adding an unconditional downstream chain or resetting a running gate', () => {
     for (const id of ['hh-lead-tasks', 'orch-plan-turn', 'dev-lead']) {
       const text = body(id);
-      expect(text, id).toMatch(/turn is a sprint/i);
       expect(text, id).toMatch(/days or hours/);
       expect(text, id).toMatch(/final gate[\s\S]*starts|final gate has not started/);
       expect(text, id).toMatch(/context/);
       expect(text, id).toMatch(/urgency flag/);
-      expect(text, id).toMatch(/next turn/);
+      expect(text, id).toMatch(/once that gate runs, give it as a task of its own/);
       expect(text, id).toMatch(/simple visual change/);
       expect(text, id).toMatch(/required|mandatory|protected/i);
+      expect(text, id).not.toMatch(/turn is a sprint|(?:use|place it in|put it in) the next turn/i);
     }
     expect(body('orch-plan-turn')).toMatch(/independent pieces belong together, however large/);
     expect(body('orch-plan-turn')).toMatch(/reviewed, tested and released before dependent work/);
-    expect(body('orch-plan-turn')).toMatch(/explicit authorized hold[\s\S]*never[\s\S]*close the last task[\s\S]*explicit hold/i);
+    expect(body('orch-plan-turn')).toMatch(/never tell people to start or close a turn manually/i);
   });
 
-  it('gives each top-level department turns of its own, a new goal a new turn, and a turn only the work of its goal', () => {
-    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).toMatch(/runs its own turns|run their own turns|your department's own turns/i);
-    const plan = body('orch-plan-turn');
-    expect(plan).toMatch(/new goal[^.]*new turn of the department that owns it/i);
-    expect(plan).toMatch(/add_tasks[^.]*only[^.]*that turn's own goal/i);
-    expect(plan).toMatch(/head[^.]*lays out and closes[^.]*its department's turns/i);
-    const head = body('hh-head');
-    expect(head).toMatch(/plan_turn/);
-    expect(head).toMatch(/new goal[^.]*new turn/i);
-    expect(head).toMatch(/add_tasks[^.]*only[^.]*that turn's own goal/i);
+  /* The flow of #883: a task goes to its department's head at once, the open turn of each top-level department is its next
+     release, a task joins it as its result is accepted, and the tag of the release closes it by itself. */
+  it('gives each top-level department turns of its own as its releases, with the work flowing and no turn to wait for', () => {
+    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) {
+      const text = body(id);
+      expect(text, id).toMatch(/runs its own turns, one open at a time/i);
+      expect(text, id).toMatch(/next release/);
+      expect(text, id).toMatch(/repository of its own goes to its own main line/);
+      expect(text, id).not.toMatch(/plan_turn|merge_turn|such work waits for a turn|outside (?:a|planned) turns?|turn runs in echelons|that turn's own goal|lays? out and closes/i);
+    }
+    for (const id of ['orch-plan-turn', 'hh-head', 'hh-lead-tasks', 'dev-lead']) {
+      const text = body(id);
+      expect(text, id).toMatch(/nothing waits for a turn/i);
+      expect(text, id).toMatch(/joins it[^.]*as its result is accepted into the turn branch/);
+      expect(text, id).toMatch(/tag[^.]*closes (?:the turn|it) by itself/);
+    }
+    for (const id of ['orch-plan-turn', 'hh-head', 'dev-lead']) expect(body(id), id).toMatch(/release_turn[^.]*before main moves/);
+    expect(body('orch-plan-turn')).toMatch(/nobody picks a turn for a task or waits for one to close/);
+    expect(body('orch-plan-turn')).toMatch(/edit_turn[^.]*only[^.]*title or main point/);
   });
 
   it('preserves named and urgent-only orders without bypassing protected integration checks', () => {
-    expect(body('orch-company')).toMatch(/named orders end to end outside planned turns/);
+    expect(body('orch-company')).toMatch(/named orders end to end, with the department's oversight/);
     expect(body('orch-company')).toMatch(/department's oversight[\s\S]*checks[\s\S]*exact release approval/);
     expect(body('orch-company')).toMatch(/urgentOnly[\s\S]*only what the authorized person called urgent/);
     for (const id of ['dev-task-flow', 'dev-implement', 'dev-lead', 'dev-gates', 'dev-worktrees', 'dev-work-pipeline', 'dev-ci-release']) {
       expect(body(id), id).toMatch(/access, root, permissions or secrets[\s\S]*independent Security engineer[\s\S]*before[\s\S]*shared branch/);
-      expect(body(id), id).toMatch(/urgent work, small tasks, direct named orders and review fixes/);
-      expect(body(id), id).toMatch(/Self-review does not replace this gate/);
+      expect(body(id), id).toMatch(/External Review and Security engineers work only in echelon tasks/);
+      expect(body(id), id).toMatch(/In an echelon task[^.]*urgent and small work and review fixes too; self-review does not replace this gate/);
+      expect(body(id), id).toMatch(/member of a turnkey team does and releases its task end to end alone[^.]*calls no external checker/);
+      expect(body(id), id).not.toMatch(/urgent work, small tasks, direct named orders/);
     }
     expect(body('dev-gates')).toMatch(/eligible reviewer is unavailable[\s\S]*candidate waiting/);
   });
@@ -282,7 +293,7 @@ describe('templates', () => {
     expect(body('dev-adversarial')).toMatch(/only preview or sandbox builds your task names, never production and never real customer data/);
     expect(body('dev-threat-model')).toMatch(/trust boundaries[\s\S]*Name the safeguard[\s\S]*case with no safeguard is a finding/i);
     expect(body('dev-security-review')).toMatch(/Report only weak spots you confirmed in the code/);
-    expect(body('dev-gates')).toMatch(/Every executable work result passes Review/);
+    expect(body('dev-gates')).toMatch(/Every executable work result of an echelon task passes Review/);
     expect(body('dev-gates')).toMatch(/Tests verifies the exact final candidate including[\s\S]*repairs/);
     expect(body('dev-review-verdict')).toMatch(/only the fixes[\s\S]*paths they affect/);
     expect(body('dev-qa-acceptance')).toMatch(/exact candidate[\s\S]*do not assume[\s\S]*shared turn/);

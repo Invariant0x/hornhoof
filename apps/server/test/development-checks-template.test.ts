@@ -121,19 +121,17 @@ describe('turnkey work', () => {
     }
   });
 
-  it('teaches heads and the orchestrator the two modes of a turn, and that work outside a turn and a quick fix go to a turnkey team', () => {
+  it('teaches heads and the orchestrator that the team sets a task\'s route, and that a quick fix goes to a turnkey team', () => {
     for (const id of ['hh-lead-tasks', 'dev-lead', 'orch-plan-turn', 'orch-company']) {
-      expect(body(id), id).toMatch(/turn runs in echelons[^.]*or turnkey[^.]*one member of a turnkey team/);
-      expect(body(id), id).toMatch(/Code work outside a turn, and a small, quick fix[^.]*goes to a member of a turnkey team[^.]*members who work in the echelons take neither/);
-      expect(body(id), id).toMatch(/no turnkey team, such work waits for a turn/);
+      expect(body(id), id).toMatch(/team that does it sets (?:a|each) task's route: a member of a turnkey team[^.]*end to end alone[^.]*everybody else's goes through/);
+      expect(body(id), id).toMatch(/small, quick fix that need not go through every echelon goes to a member of a turnkey team/);
+      expect(body(id), id).not.toMatch(/such work waits for a turn|turn runs in echelons|members who work in the echelons take neither/);
       expect(body(id), id).not.toMatch(/its holder does it end to end alone/);
     }
-    expect(body('hh-lead-tasks')).toMatch(/small, quick fix on its own goes to a member of a turnkey team/);
   });
 
-  it('tells the orchestrator never to start a turn without its mode, which is fixed once the turn starts', () => {
-    expect(body('orch-plan-turn')).toMatch(/plan_turn[^.]*mode[^.]*never without/);
-    expect(body('orch-plan-turn')).toMatch(/mode is fixed once the turn starts[^.]*edit_turn[^.]*planned/);
+  it('names no mode of a turn and no tool to plan one', () => {
+    for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).not.toMatch(/plan_turn|\bmode\b/);
   });
 
   it('tells the member of a turnkey team to carry its task end to end alone, skip per-task run_tests except on a standalone release, and close it with report', () => {

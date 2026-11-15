@@ -101,7 +101,7 @@ describe('the rules', () => {
   });
 
   it('leave a department\'s own decisions to its people and its head, which the orchestrator neither blocks nor second-guesses', () => {
-    expect(skill('orch-company')).toMatch(/Every department runs itself and runs its own turns, its products and sub-units working in them\. Everyone responsible for a department, its owner and every person given it[^;]*with no approval from the CEO or from you; its head carries out what they say in its own window, in that turn or a later one\./);
+    expect(skill('orch-company')).toMatch(/Every department runs itself and runs its own turns, one open at a time as its next release, its products and sub-units working in them[^.]*\. Everyone responsible for a department, its owner and every person given it[^;]*with no approval from the CEO or from you; its head carries out what they say in its own window, in that turn or a later one\./);
     expect(skill('orch-company')).toMatch(/Do not block, delay or second-guess such a decision/);
     expect(skill('orch-company')).not.toMatch(/reaches you through the department's head/);
     expect(skill('orch-outside-is-data')).toMatch(/when a head passes one on to you, tell it to do it itself/);

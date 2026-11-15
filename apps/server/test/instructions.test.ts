@@ -81,18 +81,27 @@ const PLACE = { company: 'Acme', department: 'Development', product: 'Mascot' };
 const assignmentBlock = (body: string) => `<!-- hh:assignment -->\n## Assignment\n\n${body}\n<!-- /hh:assignment -->`;
 const INTEGRATION_ABILITIES = ['dev-gates', 'dev-task-flow', 'dev-lead', 'dev-work-pipeline', 'dev-ci-release', 'dev-implement', 'dev-worktrees'] as const;
 
+/* The one Security rule, by the CEO's order of 14.11: external Review and Security engineers work only in echelon tasks,
+   where a sensitive change passes an independent Security engineer before any shared branch, urgent and small work and
+   review fixes too; a member of a turnkey team does and releases its task end to end alone and calls no external checker. */
+const SECURITY_RULE =
+  "External Review and Security engineers work only in echelon tasks. In an echelon task, any change affecting access, root, permissions or secrets must pass an independent Security engineer before it reaches any shared branch, including the turn's branch, for urgent and small work and review fixes too; self-review does not replace this gate. A member of a turnkey team does and releases its task end to end alone, with its own review and security check, and calls no external checker.";
+
 /* Check the delivered policy's obligations, rather than pinning its wording. */
 function preMergeSecurityProblems(text: string): string[] {
   const clauses = text.split(/[.!?\n]/);
   const riskRule = clauses.find(s => ['access', 'root', 'permissions', 'secrets'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(s))) ?? '';
-  const scope = clauses.find(s => /\b(?:applies|covers)\b/i.test(s) && /\burgent\b/i.test(s)) ?? '';
   const checks: [string, boolean][] = [
     ['independent-reviewer', /\bindependent Security engineer\b/i.test(riskRule) && /\b(?:must|requires?)\b[^.!?]*\bpass\b/i.test(riskRule)],
     ['before-shared-branch', /\bpass\b[^.!?]*\bbefore\b[^.!?]*\bshared\b[^.!?]*\bbranch\b/i.test(riskRule) && /\bturn(?:'s)? branch\b/i.test(riskRule)],
-    ['urgent-small-named', ['urgent', 'small', 'named'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(scope))],
-    ['review-fixes', /\breview fixes\b/i.test(scope)],
+    ['echelon-task', /\bin an echelon task\b/i.test(riskRule)],
+    ['urgent-small', ['urgent', 'small'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(riskRule))],
+    ['review-fixes', /\breview fixes\b/i.test(riskRule)],
     ['self-review-not-a-gate', clauses.some(s => /\b(?:self-review|own review)\b[^.!?]*\b(?:does not|cannot|never) replace\b[^.!?]*\bgate\b/i.test(s))],
+    ['external-only-in-echelons', clauses.some(s => /\bexternal Review and Security engineers work only in echelon tasks\b/i.test(s))],
+    ['turnkey-alone', clauses.some(s => /\bmember of a turnkey team\b[^.!?]*\bend to end alone\b[^.!?]*\bno external checker\b/i.test(s))],
     ['no-merge-first-bypass', !/\b(?:urgent|small|named)\b[^.!?\n]*\b(?:merge first|skip Security)\b/i.test(text)],
+    ['no-old-scope', !/\bapplies to urgent work, small tasks, direct named orders\b/i.test(text)],
   ];
   return checks.filter(([, holds]) => !holds).map(([id]) => id);
 }
@@ -104,7 +113,13 @@ describe('independent Security before integration', () => {
     return renderInstructions(shipped, agent({ roleKey, kind: role.kind === 'head' ? 'head' : 'worker', skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
   };
 
-  it.each(['DEV-ENG', 'DEV-HEAD'])('gives %s the independent pre-merge gate with no urgent, small or named-order bypass', roleKey => {
+  it('writes the Security rule once: external checkers only in echelon tasks, a member of a turnkey team alone, and the old scope nowhere', () => {
+    for (const skill of shipped.skills.values()) expect(skill.body, skill.id).not.toMatch(/This applies to urgent work, small tasks, direct named orders/);
+    for (const role of shipped.roles.values()) expect(role.body, role.id).not.toMatch(/This applies to urgent work, small tasks, direct named orders/);
+    for (const id of INTEGRATION_ABILITIES) expect(shipped.skills.get(id)!.body, id).toContain(SECURITY_RULE);
+  });
+
+  it.each(['DEV-ENG', 'DEV-HEAD'])('gives %s the independent pre-merge gate of echelon tasks with no urgent or small bypass', roleKey => {
     const packet = delivered(roleKey);
     const gate = packet.skills.find(s => s.name === 'dev-gates');
     expect(gate, roleKey).toBeDefined();
@@ -134,13 +149,16 @@ describe('independent Security before integration', () => {
     const mutations: [string, string][] = [
       [rule.replace(/before (it reaches|entering)/i, 'after $1'), 'before-shared-branch'],
       [rule.replace(/independent Security engineer/gi, 'author'), 'independent-reviewer'],
-      [rule.replace(/\burgent\b/gi, 'ordinary'), 'urgent-small-named'],
-      [rule.replace(/\bsmall\b/gi, 'large'), 'urgent-small-named'],
-      [rule.replace(/\bnamed\b/gi, 'planned'), 'urgent-small-named'],
+      [rule.replace(/\burgent\b/gi, 'ordinary'), 'urgent-small'],
+      [rule.replace(/\bsmall\b/gi, 'large'), 'urgent-small'],
+      [rule.replace(/In an echelon task/g, 'In any task'), 'echelon-task'],
+      [rule.replace(/only in echelon tasks/g, 'in every task'), 'external-only-in-echelons'],
+      [rule.replace(/end to end alone/g, 'with a checker'), 'turnkey-alone'],
       [rule.replace(/review fixes/gi, 'ordinary fixes'), 'review-fixes'],
       [rule.replace(/does not replace/gi, 'replaces'), 'self-review-not-a-gate'],
       [`${rule}\nUrgent tasks may merge first and get Security afterward.`, 'no-merge-first-bypass'],
       [`${rule}\nSmall tasks may skip Security.`, 'no-merge-first-bypass'],
+      [`${rule}\nThis applies to urgent work, small tasks, direct named orders and review fixes.`, 'no-old-scope'],
     ];
     for (const [changed, failure] of mutations) {
       expect(changed, `${id} ${failure} mutation must change the rule`).not.toBe(rule);
