@@ -243,7 +243,8 @@ for (const look of LOOKS) {
       await shoot(page, card, info, `card-${host === NODE ? 'node' : host}-${lookName(look)}-${browserName}.png`);
 
       if (host === NODE) {
-        /* The core's command: Copy under each line of it, on the end edge, a button of 44 px. */
+        /* The core's command: Copy under each line of it, and Cancel under it all, each on the end edge, a button of
+           44 px. */
         await owner.getByRole('button', { name: t.machines.makeCore(host), exact: true }).click();
         const shown = card.locator('.add-plan');
         await expect(shown.locator('code').first()).toContainText('--owner-key');
@@ -255,9 +256,13 @@ for (const look of LOOKS) {
           expect(await rowsOffEdge(group)).toEqual([]);
           expect.soft(await offences(line, { danger: [], groups: '.entry-actions' })).toEqual([]);
         }
+        const cancel = shown.locator(':scope > .entry-actions');
+        await expect(cancel.getByRole('button')).toHaveText([t.subs.cancelCommand]);
+        expect(await rowsOffEdge(cancel)).toEqual([]);
+        expect.soft(await offences(shown, { danger: [], groups: ':scope > .entry-actions' })).toEqual([]);
         expect.soft(await spills(card)).toEqual([]);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-        measured.push({ browser: browserName, look: lookName(look), screen: 'core command', sizes: await sizes(shown, { command: '.command', code: '.command code', copy: '.command .entry-actions > .btn' }) });
+        measured.push({ browser: browserName, look: lookName(look), screen: 'core command', sizes: await sizes(shown, { command: '.command', code: '.command code', copy: '.command .entry-actions > .btn', cancel: ':scope > .entry-actions > .btn' }) });
         await shoot(page, shown, info, `command-node-${lookName(look)}-${browserName}.png`);
       }
 

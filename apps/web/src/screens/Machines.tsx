@@ -276,7 +276,7 @@ function PlanPicker({ machine, addable, shown, picking, controls }: { machine: M
       <p className="muted">{t.machines.runOn(machine.hostname)}</p>
       <CommandBox command={shown.command} />
       <CommandLifetime expiresAt={shown.expiresAt} />
-      <div className="actions"><button className="btn small ghost" type="button" onClick={() => controls.cancelAdd(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
+      <div className="entry-actions"><button className="btn ghost" type="button" onClick={() => controls.cancelAdd(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
     </div>
   );
   if (!picking) return null;
@@ -297,7 +297,7 @@ function CoreCommand({ machine, shown, controls }: { machine: MachineView; shown
       <p className="muted">{t.machines.coreRun(machine.hostname)}</p>
       <CommandBox command={shown.command} trust={t.machines.trust} />
       <CommandLifetime expiresAt={shown.expiresAt} />
-      <div className="actions"><button className="btn small ghost" type="button" onClick={() => controls.cancelCore(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
+      <div className="entry-actions"><button className="btn ghost" type="button" onClick={() => controls.cancelCore(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
     </div>
   );
 }

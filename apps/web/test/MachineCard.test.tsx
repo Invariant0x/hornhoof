@@ -31,12 +31,13 @@ const LOWER = {
   ru: ['Сервер и копия данных', 'Система, программы и доступ', 'Настройки и действия', 'Связь с сервером'],
 };
 
-function show(language: 'en' | 'ru' = 'en', machine: MachineView = LAPTOP) {
+function show(language: 'en' | 'ru' = 'en', machine: MachineView = LAPTOP, more: Parameters<typeof mockApi>[0] = {}) {
   localStorage.setItem('hh-lang', language);
   const calls = mockApi({
     'GET /api/subscriptions': [200, { subscriptions: SUBS }],
     'GET /api/machines': [200, { machines: [machine], builtin: null, priority: true }],
     'GET /api/machines/m1/connections': [200, QUIET],
+    ...more,
   });
   render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
   return calls;
@@ -120,6 +121,18 @@ describe("the lower part of a machine's card", () => {
     expect(facts.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect([...group.children].map(button => button.textContent)).toEqual(['Add my plan', 'Make dev-laptop a full machine of the company', 'Disconnect']);
     expect(group.lastElementChild).toHaveClass('danger');
+  });
+
+  it.each(['add', 'core'] as const)('gives Cancel under the %s command a group of its own on the end edge, a button of 44 px', async kind => {
+    const command = { id: 'c1', kind, plans: [], machineId: 'm1', machine: 'dev-laptop', command: 'curl -fsSL https://hq.acme.com/install.sh | bash', expiresAt: UNTIL };
+    show('en', LAPTOP, { 'GET /api/nodes/commands': [200, { commands: [command] }] });
+    /* A machine with a command still open stands open by itself. */
+    const card = await screen.findByRole('article', { name: 'dev-laptop' });
+    const cancel = await within(card).findByRole('button', { name: 'Cancel' });
+    expect(cancel.closest('.add-plan')).not.toBeNull();
+    expect(cancel.parentElement).toHaveClass('entry-actions');
+    expect(cancel).toHaveClass('btn', 'ghost');
+    expect(cancel).not.toHaveClass('small');
   });
 
   it('writes the blocks in plain lines, with no note striped at its side, and gives their buttons a group of their own', async () => {
