@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -1332,5 +1334,54 @@ describe('the filter groups and search of Machines (#1020)', () => {
     onTestFinished(() => { vi.unstubAllGlobals(); });
     showIn(language);
     expect(await screen.findByRole('searchbox')).toHaveAttribute('placeholder', placeholder);
+  });
+
+  it('builds pool figures and row counts from whole parameterized dictionary phrases without piece-by-piece concatenation', () => {
+    const enSource = readFileSync(resolve(process.cwd(), 'src/i18n/en.ts'), 'utf8');
+    const ruSource = readFileSync(resolve(process.cwd(), 'src/i18n/ru.ts'), 'utf8');
+    const machinesSource = readFileSync(resolve(process.cwd(), 'src/screens/Machines.tsx'), 'utf8');
+
+    expect(enSource).not.toMatch(/(machineCount|subscriptionCount)[^\n]*\$\{n\}\s+\$\{plural\(/);
+    expect(ruSource).not.toMatch(/(machineCount|subscriptionCount)[^\n]*\$\{n\}\s+\$\{plural\(/);
+    expect(machinesSource).not.toContain('t.machines.of(String(');
+    expect(machinesSource).not.toMatch(/\$\{busyShare\([^)]*\)\}%\`/);
+
+    expect([1, 3].map(n => en.tables.machineCount(n))).toEqual(['1 machine', '3 machines']);
+    expect([1, 2, 5, 21].map(n => ru.tables.machineCount(n))).toEqual(['1 машина', '2 машины', '5 машин', '21 машина']);
+    expect([1, 3].map(n => en.tables.subscriptionCount(n))).toEqual(['1 subscription', '3 subscriptions']);
+    expect([1, 2, 5, 21].map(n => ru.tables.subscriptionCount(n))).toEqual(['1 подписка', '2 подписки', '5 подписок', '21 подписка']);
+
+    expect(en.machines.of(2, 3)).toBe('2 of 3');
+    expect(ru.machines.of(2, 3)).toBe('2 из 3');
+    expect(en.machines.percent(21)).toBe('21%');
+    expect(ru.machines.percent(21)).toBe('21%');
+  });
+
+  it.each([
+    ['en', ['2 of 3', '12', '8.5 of 20 GB', '21%'], '3 machines', 'Showing 1 of 3', '6 of 12 GB'],
+    ['ru', ['2 из 3', '12', '8,5 из 20 ГБ', '21%'], '3 машины', 'Показано 1 из 3', '6 из 12 ГБ'],
+  ] as const)('isolates whole summary figures and counts in <bdi> in %s under RTL', async (language, poolFigures, totalCount, shownCount, laptopMemory) => {
+    document.documentElement.dir = 'rtl';
+    onTestFinished(() => { document.documentElement.removeAttribute('dir'); });
+    showIn(language);
+    await screen.findByRole('table');
+    const t = { en, ru }[language];
+
+    const pool = screen.getByRole('region', { name: t.machines.pool });
+    const figures = [...pool.querySelectorAll('.pool-facts dd')];
+    expect(figures.map(dd => [dd.children.length, dd.firstElementChild?.tagName, dd.firstElementChild?.textContent])).toEqual(
+      poolFigures.map(text => [1, 'BDI', text]),
+    );
+
+    const statusLine = screen.getByRole('status');
+    expect([statusLine.children.length, statusLine.firstElementChild?.tagName, statusLine.firstElementChild?.textContent]).toEqual([1, 'BDI', totalCount]);
+
+    const laptopRow = screen.getByRole('row', { name: 'dev-laptop' });
+    expect(within(laptopRow).getByText(laptopMemory).tagName).toBe('BDI');
+    expect(within(laptopRow).getByText('25%').tagName).toBe('BDI');
+
+    fireEvent.click(within(screen.getByRole('group', { name: t.tables.provider })).getByRole('button', { name: /^Codex/ }));
+    expect([statusLine.firstElementChild?.tagName, statusLine.firstElementChild?.textContent]).toEqual(['BDI', shownCount]);
+    expect(within(statusLine).getByRole('button', { name: t.tables.clear })).toBeInTheDocument();
   });
 });

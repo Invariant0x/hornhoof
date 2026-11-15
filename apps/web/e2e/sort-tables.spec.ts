@@ -21,6 +21,8 @@ type Look = { lang: 'en' | 'ru'; skin: 'light' | 'cyberpunk'; width: number; dir
 const LOOKS: Look[] = [
   ...(['en', 'ru'] as const).flatMap(lang => (['light', 'cyberpunk'] as const).flatMap(skin => [1440, 375].map(width => ({ lang, skin, width, dir: 'ltr' as const })))),
   { lang: 'en', skin: 'light', width: 1440, dir: 'rtl' },
+  { lang: 'en', skin: 'cyberpunk', width: 375, dir: 'rtl' },
+  { lang: 'ru', skin: 'light', width: 1440, dir: 'rtl' },
   { lang: 'ru', skin: 'cyberpunk', width: 375, dir: 'rtl' },
 ];
 
@@ -143,6 +145,67 @@ async function checkRtlChevron(rowButton: Locator): Promise<void> {
   expect(chevBox.x + chevBox.width).toBeGreaterThanOrEqual(btnBox.x + btnBox.width - 4);
 }
 
+async function checkRtlMachinesPhrases(page: Page, section: Locator, t: Messages, shotPath: string): Promise<void> {
+  const broken = await section.evaluate((root, freeMemoryLabel) => {
+    const out: string[] = [];
+    const checkLeadingNumber = (label: string, container: Element | null, alignStart: boolean) => {
+      if (!container) {
+        out.push(`${label}: missing container`);
+        return;
+      }
+      const bdi = container.querySelector('bdi');
+      if (!bdi) {
+        out.push(`${label}: missing <bdi> around "${(container.textContent ?? '').trim()}"`);
+        return;
+      }
+      const textNode = bdi.firstChild;
+      const text = textNode?.nodeType === Node.TEXT_NODE ? textNode.textContent ?? '' : '';
+      const match = /^(\d+(?:[.,]\d+)?)\s*(\S+)/.exec(text);
+      if (!textNode || !match) {
+        out.push(`${label}: unexpected phrase "${text}"`);
+        return;
+      }
+      const numRange = document.createRange();
+      numRange.setStart(textNode, 0);
+      numRange.setEnd(textNode, match[1]!.length);
+      const tailStart = text.indexOf(match[2]!, match[1]!.length);
+      const tailRange = document.createRange();
+      tailRange.setStart(textNode, tailStart);
+      tailRange.setEnd(textNode, tailStart + match[2]!.length);
+      const numRect = numRange.getBoundingClientRect();
+      const tailRect = tailRange.getBoundingClientRect();
+      if (numRect.right > tailRect.left + 1) {
+        out.push(`${label}: "${text}" reordered in RTL (number x=${Math.round(numRect.left)} stands right of "${match[2]}" x=${Math.round(tailRect.left)})`);
+      }
+      if (alignStart) {
+        const hostRect = container.getBoundingClientRect();
+        const bdiRect = bdi.getBoundingClientRect();
+        if (hostRect.right - bdiRect.right > 2) {
+          out.push(`${label}: "${text}" leaves RTL inline-start edge by ${Math.round(hostRect.right - bdiRect.right)}px`);
+        }
+      }
+    };
+
+    const dds = [...root.querySelectorAll('.pool-facts dd')];
+    checkLeadingNumber('pool online', dds[0] ?? null, true);
+    checkLeadingNumber('pool memory', dds[2] ?? null, true);
+    checkLeadingNumber('pool busy', dds[3] ?? null, true);
+    checkLeadingNumber('result count', root.querySelector('.result'), true);
+    checkLeadingNumber('row memory', root.querySelector(`tr.rm td[data-label="${freeMemoryLabel}"]`), false);
+    return out;
+  }, t.tables.freeMemory);
+  expect(broken).toEqual([]);
+
+  const [poolBox, resultBox] = [await box(section.locator('.pool')), await box(section.locator('.result'))];
+  const width = page.viewportSize()!.width;
+  const y = Math.max(0, poolBox.y - 12);
+  const bottom = resultBox.y + resultBox.height + 12;
+  const size = page.viewportSize()!;
+  if (bottom > size.height) await page.setViewportSize({ width, height: Math.ceil(bottom) });
+  await page.screenshot({ path: shotPath, clip: { x: 0, y, width, height: bottom - y } });
+  if (bottom > size.height) await page.setViewportSize(size);
+}
+
 async function setupRoutes(page: Page, look: Look): Promise<string[]> {
   const errors: string[] = [];
   page.on('pageerror', err => errors.push(err.message));
@@ -192,6 +255,7 @@ async function checkMachines(page: Page, info: TestInfo, t: Messages, tag: strin
   delete allSizes['part width'];
   const measured: Measured = { browser: browserName, look: tag, screen: 'machines', sizes: allSizes };
   await wholePage(page, info.outputPath(`machines-list-${tag}-${browserName}.png`));
+  if (dir === 'rtl') await checkRtlMachinesPhrases(page, section, t, info.outputPath(`machines-rtl-summary-${tag}-${browserName}.png`));
 
   const filterChip = section.locator('.fgroup .chipf').first();
   const sortControl = (await section.locator('thead').isVisible()) ? section.locator('button.sorth').first() : section.locator('button.sortb').first();

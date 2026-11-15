@@ -92,10 +92,10 @@ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: 
         <Facts
           className="pool-facts"
           items={[
-            [t.machines.poolOnline, t.machines.of(String(online), String(all))],
-            [t.machines.poolCores, cores ? String(cores) : t.machines.unknown],
-            [t.machines.poolMemory, loads.length ? t.machines.gbOf(gigabytes(language, sum(l => l.memFree)), gigabytes(language, sum(l => l.memTotal))) : t.machines.unknown],
-            [t.machines.poolBusy, cores ? `${busyShare(sum(l => l.load), cores)}%` : t.machines.unknown],
+            [t.machines.poolOnline, <bdi>{t.machines.of(online, all)}</bdi>],
+            [t.machines.poolCores, cores ? <bdi>{cores}</bdi> : t.machines.unknown],
+            [t.machines.poolMemory, loads.length ? <bdi>{t.machines.gbOf(gigabytes(language, sum(l => l.memFree)), gigabytes(language, sum(l => l.memTotal)))}</bdi> : t.machines.unknown],
+            [t.machines.poolBusy, cores ? <bdi>{t.machines.percent(busyShare(sum(l => l.load), cores))}</bdi> : t.machines.unknown],
           ]}
         />
       </Edge>
@@ -159,8 +159,8 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
     { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OtherBuild row={m} /><BrowserIssue row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
-    { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b>{load(m)}%</b></span> },
-    { key: 'memory', label: t.tables.freeMemory, direction: -1, value: m => m.online ? m.load?.memFree ?? null : null, cell: m => m.online && m.load ? t.machines.gbOf(gigabytes(language, m.load.memFree), gigabytes(language, m.load.memTotal)) : t.machines.unknown },
+    { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b><bdi>{t.machines.percent(load(m)!)}</bdi></b></span> },
+    { key: 'memory', label: t.tables.freeMemory, direction: -1, value: m => m.online ? m.load?.memFree ?? null : null, cell: m => m.online && m.load ? <bdi>{t.machines.gbOf(gigabytes(language, m.load.memFree), gigabytes(language, m.load.memTotal))}</bdi> : t.machines.unknown },
     { key: 'plans', label: t.tables.plans, direction: -1, value: m => m.plans.length, cell: m => <span className="marks">{m.plans.length ? m.plans.map(p => <span key={p.id} className={!m.online || !p.online || p.status !== 'ready' ? 'dim' : undefined}><ProviderMark provider={p.provider} /></span>) : 0}</span> },
     { key: 'agents', label: t.tables.agents, direction: -1, value: m => agentAmounts(m.running.agents), cell: m => <AgentsCell agents={m.running.agents} /> },
     { key: 'tests', label: t.tables.tests, direction: -1, value: m => m.lendsTests === null ? null : Number(m.lendsTests), cell: m => m.lendsTests === null ? null : m.lendsTests ? t.tables.lent : t.tables.notLent },
