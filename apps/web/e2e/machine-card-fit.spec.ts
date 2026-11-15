@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { Language, Messages } from '../src/i18n';
-import type { BuiltinView, MachineView, Org, SubView } from '../src/types';
+import type { BuiltinView, MachineView, Org, ShownCommand, SubView } from '../src/types';
 import { ME, serveApi, serveOwnerKey } from './api';
 
 /* What the CEO saw on Machines at the width of a desk: the open card of a machine of his that joined before machines had the
@@ -34,6 +34,7 @@ const SUBS: SubView[] = [{
 }];
 /* The command the server gives for the core: it joins the machine, so the screen shows it with the owner's key. */
 const CORE = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join DEMO_ONLY_CORE_JOIN_TOKEN_OF_A_LONG_KIND';
+const CORE_SHOWN: ShownCommand = { id: 'c1', kind: 'core', plans: [], machineId: 'm2', machine: HOST, command: CORE, expiresAt: new Date(NOW + 3600_000).toISOString() };
 
 async function messagesFor(language: Language): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${language}.ts`) as Record<string, Messages>;
@@ -50,8 +51,10 @@ async function openMachines(page: Page, language: Language, skin: 'cyberpunk' | 
   await page.route(only('/api/org'), route => route.fulfill({ json: org }));
   await page.route(only('/api/subscriptions'), route => route.fulfill({ json: { subscriptions: SUBS } }));
   await page.route(only('/api/machines'), route => route.fulfill({ json: { machines: MACHINES, builtin: BUILTIN, priority: false, move: null, canMove: false, copies: null } }));
-  await page.route(only('/api/machines/m2/core'), route => route.fulfill({ json: { id: 'c1', command: CORE, expiresAt: new Date(NOW + 3600_000).toISOString() } }));
-  await page.route(only('/api/nodes/commands'), route => route.fulfill({ json: { commands: [] } }));
+  /* Once made, the command is among the shown ones the screen reloads, as the server keeps it. */
+  let made = false;
+  await page.route(only('/api/machines/m2/core'), route => { made = true; return route.fulfill({ json: CORE_SHOWN }); });
+  await page.route(only('/api/nodes/commands'), route => route.fulfill({ json: { commands: made ? [CORE_SHOWN] : [] } }));
   await page.route(only('/api/machines/access'), route => route.fulfill({ json: { views: [] } }));
   await page.addInitScript(({ language, skin }) => { localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', skin); }, { language, skin });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -90,8 +93,9 @@ async function expectInside(card: Locator, element: Locator, place: string, tall
   if (tall) expect(height, `${place}: height`).toBeGreaterThanOrEqual(44);
 }
 
-/* The card is open, the long button shown and pressed, the command shown. */
-async function makeCore(page: Page, t: Messages, wide: boolean) {
+/* The card is open, the long button shown and pressed, the command shown. before: what is done with the card before the
+   button is pressed. */
+async function makeCore(page: Page, t: Messages, wide: boolean, before?: (card: Locator) => Promise<unknown>) {
   const card = page.getByRole('article', { name: HOST });
   const button = card.getByRole('button', { name: t.machines.makeCore(HOST), exact: true });
   const where = wide ? 'desk' : 'phone';
@@ -99,9 +103,12 @@ async function makeCore(page: Page, t: Messages, wide: boolean) {
   await expect(button).toBeVisible();
   if (wide) await expectTable(page, `${where}: card open`);
   for (const act of await card.locator('.machine-actions .act').all()) await expectInside(card, act, `${where}: ${await act.innerText()}`, true);
+  await before?.(card);
   await button.click();
   const command = card.locator('.add-plan');
   await expect(command.locator('code').first()).toContainText('--owner-key');
+  /* The command's own font comes only once a command is shown. */
+  await page.evaluate(() => document.fonts.ready);
   if (wide) await expectTable(page, `${where}: command shown`);
   await expectInside(card, command, `${where}: command`);
   for (const code of await command.locator('code').all()) await expectInside(card, code, `${where}: command line`);
@@ -134,9 +141,10 @@ for (const width of [1440, 375]) {
       test.skip(!process.env.HH_CARD_SHOTS, 'pictures only when asked for');
       await page.setViewportSize({ width, height: width < 600 ? 2600 : 1600 });
       const t = await openMachines(page, language, skin, dir);
-      const card = await makeCore(page, t, width > 600);
+      const name = `${width}-${language}-${skin}-${dir}-${browserName}`;
+      const card = await makeCore(page, t, width > 600, card => card.screenshot({ path: info.outputPath(`machine-card-button-${name}.png`), animations: 'disabled' }));
       await card.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: info.outputPath(`machine-card-${width}-${language}-${skin}-${dir}-${browserName}.png`), fullPage: true, animations: 'disabled' });
+      await page.screenshot({ path: info.outputPath(`machine-card-command-${name}.png`), fullPage: true, animations: 'disabled' });
     });
   }
 }
