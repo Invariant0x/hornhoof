@@ -309,6 +309,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         log,
         remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
         toolsOutside: (key, body, version) => outside.ask(key, body, version),
+        checkStep: key => outside.check(key),
         owner: terminal.owner,
         user: terminal.user,
         fs: terminal.fs,
@@ -441,6 +442,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
+      outside.stop(m.jobId);
       await host?.cancel(m.jobId);
       return;
     }
@@ -461,6 +463,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return host?.opened(m);
       case 'tools.answer':
         return outside.answered(m);
+      case 'tools.checking':
+        return outside.checking(m);
       case 'agent.input_kept':
         return host?.inputKept(m);
       case 'agent.say':

@@ -40,6 +40,12 @@ async function consume(body: ReadableStream<Uint8Array>): Promise<number> {
   } finally { await reader.cancel().catch(() => {}); }
 }
 
+/* The words a refusal gives, as the bridge says why the command may not run now. */
+async function said(response: Response): Promise<string> {
+  const text = (await response.text().catch(() => '')).trim().slice(0, 500);
+  return text ? ` ${text}` : '';
+}
+
 export async function checkCommand(args: string[], env: NodeJS.ProcessEnv): Promise<number> {
   const command = args[0] === '--' ? args.slice(1) : args;
   if (!command.length) throw new Error('Usage: hh-check -- COMMAND [ARGUMENTS]');
@@ -50,7 +56,7 @@ export async function checkCommand(args: string[], env: NodeJS.ProcessEnv): Prom
     const url = new URL(env.HH_BRIDGE); url.pathname = url.pathname.replace('/hook/', '/check/');
     const response = await fetch(url, { method: 'POST', headers: { 'x-hh-pid': String(process.pid) }, signal: stop.signal,
       body: JSON.stringify({ command, cwd: process.cwd(), env, ...(env.HH_CHECK_SLOT ? { lease: env.HH_CHECK_SLOT } : {}) }) });
-    if (!response.ok || !response.body) throw new Error(`The machine check bridge answered ${response.status}.`);
+    if (!response.ok || !response.body) throw new Error(`The machine check bridge answered ${response.status}.${await said(response)}`);
     return await consume(response.body);
   } finally {
     stop.abort(); process.removeListener('SIGINT', abort); process.removeListener('SIGTERM', abort);

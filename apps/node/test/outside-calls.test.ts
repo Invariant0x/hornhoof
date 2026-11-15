@@ -74,3 +74,56 @@ describe("an agent's tool calls with no turn, on the node's link", () => {
     expect(out.sent).toEqual([{ type: 'tools.call', agentKey: AGENT, ref: expect.any(String), body: LIST }]);
   });
 });
+
+const STEP = '3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c';
+
+describe("a check command with no turn, on the node's link", () => {
+  it('asks Hornhoof for a step of its own, and says when the command ended', async () => {
+    const calls = new OutsideCalls(), out = link();
+    calls.opened(out.send, true);
+    const asked = calls.check(AGENT);
+    expect(out.sent).toEqual([{ type: 'tools.check', agentKey: AGENT, ref: expect.any(String) }]);
+    const { ref } = out.sent[0] as { ref: string };
+    /* An answer for another agent is not this one's. */
+    calls.checking({ agentKey: '00000000-0000-4000-8000-000000000002', ref, jobId: 'other' });
+    calls.checking({ agentKey: AGENT, ref, jobId: STEP });
+    const step = await asked;
+    if (!step || 'refused' in step) throw new Error('No step.');
+    expect([step.jobId, step.signal.aborted]).toEqual([STEP, false]);
+    step.end(false);
+    expect(out.sent.slice(1)).toEqual([{ type: 'tools.checked', agentKey: AGENT, jobId: STEP, ok: false }]);
+  });
+
+  it("gives the words Hornhoof would not run it with, and nothing offline or from a Hornhoof before", async () => {
+    const calls = new OutsideCalls(), out = link();
+    expect(await calls.check(AGENT)).toBeNull();
+    calls.opened(out.send, false);
+    expect(await calls.check(AGENT)).toBeNull();
+    expect(out.sent).toEqual([]);
+    calls.opened(out.send, true);
+    const asked = calls.check(AGENT);
+    calls.checking({ agentKey: AGENT, ref: (out.sent[0] as { ref: string }).ref, jobId: null, refused: 'This employee is switched off.' });
+    expect(await asked).toEqual({ refused: 'This employee is switched off.' });
+  });
+
+  it('stops the command at once when Hornhoof stops its step, or the link closes', async () => {
+    const calls = new OutsideCalls(), out = link();
+    calls.opened(out.send, true);
+    const open = async (jobId: string) => {
+      const asked = calls.check(AGENT);
+      calls.checking({ agentKey: AGENT, ref: (out.sent.at(-1) as { ref: string }).ref, jobId });
+      const step = await asked;
+      if (!step || 'refused' in step) throw new Error('No step.');
+      return step;
+    };
+    const first = await open(STEP), second = await open('9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b');
+    calls.stop('not-a-step-of-ours');
+    calls.stop(STEP);
+    expect([first.signal.aborted, second.signal.aborted]).toEqual([true, false]);
+    /* The link closes: the step goes on there no longer, and one asked for has no answer. */
+    const pending = calls.check(AGENT);
+    calls.closed();
+    expect(second.signal.aborted).toBe(true);
+    expect(await pending).toBeNull();
+  });
+});

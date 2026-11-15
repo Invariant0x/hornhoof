@@ -54,10 +54,11 @@ async function assertCommandPolicy(key: string, input: Command, signal: AbortSig
   if (!verdict.allow) throw new Error(refusalText(verdict));
 }
 
-async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse): Promise<void> {
+/* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
+async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined): Promise<boolean> {
   const run = (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
-  if (input.lease) await reuseCheckLease(input.lease, key, signal, run);
-  else await withCheckSlot(run, { agentId: key, label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
+  if (input.lease) return reuseCheckLease(input.lease, key, signal, run);
+  return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
 }
 
 function assertCommandUser(): void {
@@ -70,15 +71,17 @@ function parseCommand(body: Buffer): Command {
   return input;
 }
 
-export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse): Promise<void> {
+/* True when the command ran to its end with code 0. */
+export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse, jobId?: string): Promise<boolean> {
   assertCommandUser();
   const input = parseCommand(body);
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
   try {
     await assertCommandPolicy(key, input, signal);
-    await admitCommand(key, input, signal, res);
+    return await admitCommand(key, input, signal, res, jobId);
   } catch (error) {
     send(res, { type: 'error', message: error instanceof Error ? error.message : 'Check command stopped.' });
+    return false;
   } finally { res.end(); }
 }
 
@@ -94,7 +97,7 @@ function killCommandGroup(pid: number | undefined, signal: NodeJS.Signals): void
   try { if (pid) process.kill(-pid, signal); } catch { /* Already gone. */ }
 }
 
-async function runCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse): Promise<void> {
+async function runCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse): Promise<boolean> {
   signal.throwIfAborted();
   /* The shell changes directory after dropping privileges. The node never opens an agent's cwd as root. */
   const child = spawn('/bin/bash', ['-c', 'cd -- "$1" || exit; shift; exec "$@"', 'hh-check', input.cwd, ...input.command], {
@@ -102,7 +105,7 @@ async function runCommand(key: string, input: Command, signal: AbortSignal, res:
   });
   output(child.stdout, 'stdout', res); output(child.stderr, 'stderr', res);
   const forget = trackCheckProcess(key, child.pid);
-  try { await new Promise<void>((resolve, reject) => {
+  try { return await new Promise<boolean>((resolve, reject) => {
     let killing: NodeJS.Timeout | undefined;
     const kill = (value: NodeJS.Signals) => killCommandGroup(child.pid, value);
     const abort = () => { kill('SIGTERM'); killing ??= setTimeout(() => kill('SIGKILL'), 5000); };
@@ -115,7 +118,7 @@ async function runCommand(key: string, input: Command, signal: AbortSignal, res:
       if (killing) clearTimeout(killing);
       /* A child may have left a compiler in its process group after exiting. */
       kill('SIGKILL');
-      send(res, { type: 'exit', code, signal: exitSignal }); resolve();
+      send(res, { type: 'exit', code, signal: exitSignal }); resolve(code === 0);
     });
     if (signal.aborted) abort();
   }); } finally { forget(); }

@@ -1,5 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
 import { standingPrincipal } from '../src/modules/conversation/decision-context.js';
@@ -68,9 +68,18 @@ async function company() {
     const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: row!.id, subscriptionId: c.sub.id, status: 'ready', keyHash: name, version: '0.6.0' }).returning();
     return { machine: row!, node: node!, identity: nodeIdentity(node!.id) };
   };
+  /* What the node asks as the agent's program runs a check command with no turn running, and what Hornhoof answers. */
+  const check = async (agentId: string, node: NodeIdentity = BUILTIN) => {
+    const ref = `ref-${++refs}`;
+    await handleNodeMessage(c.ctx, node, { type: 'tools.check', agentKey: agentId, ref });
+    const answer = c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'tools.checking' && m.ref === ref);
+    if (answer?.type !== 'tools.checking') throw new Error(`Hornhoof did not answer ${ref}.`);
+    expect(answer.agentKey).toBe(agentId);
+    return answer;
+  };
   const stepsOf = (agentId: string) => c.db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'tools'))).orderBy(asc(jobs.createdAt));
   const turnsOf = (agentId: string) => c.db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation')));
-  return { ...c, orchestrator: orchestrator!, outside, turn, inTurn, stepsOf, turnsOf, machine };
+  return { ...c, orchestrator: orchestrator!, outside, check, turn, inTurn, stepsOf, turnsOf, machine };
 }
 
 describe("an agent's tools with no turn of it running", () => {
@@ -221,5 +230,75 @@ describe('a step of the tools', () => {
     await step(c.agent.id);
     await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.agent.id}`, payload: { on: false }, ...as(c.ceo) });
     expect((await c.db.select({ assignee: tasks.assigneeAgentId }).from(tasks).where(eq(tasks.id, task!.id)))[0]!.assignee).not.toBe(c.agent.id);
+  });
+});
+
+describe('a check command its program runs with no turn running', () => {
+  const journalOf = (c: Awaited<ReturnType<typeof company>>, jobId: string) =>
+    c.db.select({ kind: agentEvents.kind, data: agentEvents.data }).from(agentEvents).where(eq(agentEvents.jobId, jobId)).orderBy(asc(agentEvents.seq));
+
+  it("runs in a step of its own, open while it runs, that the machine's check slot goes to, and ends as the node says it did", async () => {
+    const c = await company();
+    const opened = await c.check(c.agent.id);
+    expect(opened.refused).toBeUndefined();
+    const [step, ...more] = await c.stepsOf(c.agent.id);
+    expect(more).toEqual([]);
+    expect(step).toMatchObject({ id: opened.jobId, kind: 'tools', status: 'running', createdBy: null, prompt: '', toolTokenHash: null });
+    expect(await c.turnsOf(c.agent.id)).toEqual([]);
+    expect(await journalOf(c, step!.id)).toEqual([{ kind: 'tool', data: { name: 'hh-check', input: '' } }]);
+
+    /* The node asks for a slot of the machine's checks for the step, as it does for a turn, with its load just said: a step
+       no running work of the agent's would have its request end at once. */
+    vi.spyOn(c.ctx.hub, 'loadOf').mockReturnValue({ cpus: 4, load: 0, at: Date.now() } as ReturnType<typeof c.ctx.hub.loadOf>);
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'check.acquire', id: 'slot-1', label: 'npx', agentId: c.agent.id, jobId: step!.id });
+    const slot = c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'check.state' && m.id === 'slot-1');
+    expect(['queued', 'running']).toContain(slot?.type === 'check.state' ? slot.state : null);
+    /* One with no step and no turn running gets no slot. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'check.acquire', id: 'slot-2', label: 'npx', agentId: c.head.id });
+    expect(c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'check.state' && m.id === 'slot-2')).toMatchObject({ state: 'ended' });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'check.release', id: 'slot-1' });
+
+    /* A word of the end for another employee changes nothing. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'tools.checked', agentKey: c.head.id, jobId: step!.id, ok: true });
+    expect((await c.stepsOf(c.agent.id))[0]!.status).toBe('running');
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'tools.checked', agentKey: c.agent.id, jobId: step!.id, ok: false });
+    expect((await c.stepsOf(c.agent.id))[0]).toMatchObject({ status: 'done' });
+    expect(await journalOf(c, step!.id)).toEqual([
+      { kind: 'tool', data: { name: 'hh-check', input: '' } },
+      { kind: 'tool_result', data: { ok: false, summary: 'Ran with no turn running.' } },
+    ]);
+    /* Once over, it stays as it ended. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'tools.checked', agentKey: c.agent.id, jobId: step!.id, ok: true });
+    expect(await journalOf(c, step!.id)).toHaveLength(2);
+  });
+
+  it('may not run for one switched off, one that left the company, or one whose program another node runs', async () => {
+    const c = await company();
+    await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.agent.id}`, payload: { on: false }, ...as(c.ceo) });
+    expect(await c.check(c.agent.id)).toMatchObject({ jobId: null, refused: expect.stringContaining('switched off') });
+    await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.watcher.id));
+    expect(await c.check(c.watcher.id)).toMatchObject({ jobId: null, refused: expect.stringContaining('not on this machine') });
+    const other = await c.machine('other');
+    expect(await c.check(c.head.id, other.identity)).toMatchObject({ jobId: null, refused: expect.stringContaining('not on this machine') });
+    for (const agent of [c.agent, c.watcher, c.head]) expect(await c.stepsOf(agent.id)).toEqual([]);
+  });
+
+  it('stops at once when the employee is removed, and when its machine is disconnected', async () => {
+    const c = await company();
+    const rita = await c.hire('Rita', 'worker', 'DEV-BE', c.dev.id);
+    const { jobId } = await c.check(rita.id);
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/agents/${rita.id}`, ...as(c.ceo) })).statusCode).toBe(204);
+    expect((await c.stepsOf(rita.id)).map(s => [s.status, s.error])).toEqual([['failed', 'removed']]);
+    /* The node hears to stop the command now. */
+    expect(c.sent.mock.calls.filter(([, m]) => m.type === 'job.cancel').map(([node, m]) => [node, m])).toEqual([[BUILTIN, { type: 'job.cancel', jobId }]]);
+
+    await c.db.update(subscriptions).set({ kind: 'personal', provider: 'claude' }).where(eq(subscriptions.id, c.sub.id));
+    const { machine, node, identity: laptop } = await c.machine('laptop');
+    await c.db.update(agents).set({ nodeId: node.id }).where(eq(agents.id, c.agent.id));
+    const onLaptop = await c.check(c.agent.id, laptop);
+    expect(onLaptop.jobId).not.toBeNull();
+    await disconnectMachines(c.ctx, [machine.id]);
+    expect((await c.stepsOf(c.agent.id)).map(s => s.status)).toEqual(['failed']);
+    expect(await c.check(c.agent.id, laptop)).toMatchObject({ jobId: null, refused: expect.stringContaining('not on this machine') });
   });
 });

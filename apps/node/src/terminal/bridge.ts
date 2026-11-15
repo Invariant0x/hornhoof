@@ -20,6 +20,11 @@ export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
 export type OutsideAnswer = { status: number; body: string };
 /* Asks Hornhoof over the node's own link, with the protocol version the program asked with. */
 export type Outside = (key: string, body: string, version: string | undefined) => Promise<OutsideAnswer | null>;
+/* The step Hornhoof opened for a check command the agent's program runs with no turn running: signal stops the command when
+   Hornhoof stops the step, and end says it ended, ok with code 0. Or the words the program gets for why it may not run. */
+export type CheckStep = { jobId: string; signal: AbortSignal; end(ok: boolean): void } | { refused: string };
+/* Asks Hornhoof for such a step over the node's own link; null when it cannot be asked. */
+export type OpensCheck = (key: string) => Promise<CheckStep | null>;
 /* The turn a person's words are opening for the agent now, which a tool call waits for; null when none is. */
 export type Opening = (key: string) => Promise<unknown> | null;
 
@@ -56,6 +61,8 @@ export class Bridge {
   private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
   private readonly calls = new HookCalls();
   private readonly checkStops = new Map<string, Set<AbortController>>();
+  /* Check commands that run in a step of their own, with no turn: a turn's token does not stop them. */
+  private readonly stepStops = new Map<string, Set<AbortController>>();
   private readonly failures: HookFailures;
   /* The calls to Hornhoof's tools turned away for want of a turn, said once a minute for each agent and method. */
   private readonly refusals: HookFailures;
@@ -65,7 +72,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening; checkStep?: OpensCheck } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.refusals = new HookFailures(options.refused);
@@ -314,7 +321,7 @@ export class Bridge {
   }
 
   private abortChecks(key?: string): void {
-    const groups = key === undefined ? this.checkStops.values() : [this.checkStops.get(key) ?? new Set<AbortController>()];
+    const groups = key === undefined ? [...this.checkStops.values(), ...this.stepStops.values()] : [this.checkStops.get(key) ?? new Set<AbortController>()];
     for (const stops of groups) for (const stop of stops) stop.abort();
   }
 
@@ -326,13 +333,27 @@ export class Bridge {
     return this.hookCall(req, res, key, event, data);
   }
 
+  /* A check command runs in the agent's turn, or with none in a step Hornhoof opens for it as for a tool call. */
   private async checkCommand(key: string, body: Buffer, res: ServerResponse): Promise<void> {
-    if (!this.tokens.has(key)) return reply(res, 409, 'No Hornhoof turn is running for this agent.');
-    const stop = new AbortController(), stops = this.checkStops.get(key) ?? new Set<AbortController>();
-    this.checkStops.set(key, stops); stops.add(stop);
+    if (this.tokens.has(key)) return void (await this.runCheck(key, body, res, this.checkStops));
+    const step = (await this.options.checkStep?.(key)) ?? null;
+    if (!step) return reply(res, 409, 'No Hornhoof turn is running for this agent.');
+    if ('refused' in step) return reply(res, 409, step.refused);
+    let ok = false;
+    try { ok = await this.runCheck(key, body, res, this.stepStops, step); }
+    finally { step.end(ok); }
+  }
+
+  /* It stops when its program goes, and as its turn's token changes or as Hornhoof stops its step. True when it ran to
+     its end with code 0. */
+  private async runCheck(key: string, body: Buffer, res: ServerResponse, groups: Map<string, Set<AbortController>>, step?: { jobId: string; signal: AbortSignal }): Promise<boolean> {
+    const stop = new AbortController(), stops = groups.get(key) ?? new Set<AbortController>();
+    groups.set(key, stops); stops.add(stop);
     const closed = () => stop.abort(); res.once('close', closed);
-    try { await serveCheckCommand(key, body, stop.signal, res); }
-    finally { res.removeListener('close', closed); stops.delete(stop); }
+    step?.signal.addEventListener('abort', closed, { once: true });
+    if (step?.signal.aborted) stop.abort();
+    try { return await serveCheckCommand(key, body, stop.signal, res, step?.jobId); }
+    finally { res.removeListener('close', closed); step?.signal.removeEventListener('abort', closed); stops.delete(stop); }
   }
 
   /* A slow answer to a request from before counts from when it was asked. */

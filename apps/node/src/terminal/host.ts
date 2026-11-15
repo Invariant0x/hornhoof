@@ -17,7 +17,7 @@ import { machineLoad, programWorkers, type MachineLoad } from '../load.js';
 import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
-import { Bridge, type AgentUrls, type Outside } from './bridge.js';
+import { Bridge, type AgentUrls, type OpensCheck, type Outside } from './bridge.js';
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
 import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type OwnLeft } from './left-input.js';
 import { sendTerminalOutput, ViewHistory } from './view-stream.js';
@@ -259,8 +259,10 @@ type Options = {
   pollMs?: number;
   /* How long a typed turn waits for Hornhoof to open it. */
   openMs?: number;
-  /* Asks Hornhoof over the node's own link what an agent's program sent its tools with no turn running. */
+  /* Asks Hornhoof over the node's own link what an agent's program sent its tools with no turn running, and for a step
+     for a check command it runs then. */
   toolsOutside?: Outside;
+  checkStep?: OpensCheck;
   /* How long a program started with nothing to type gets to connect to its tools. */
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
@@ -421,7 +423,7 @@ export class TerminalHost {
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owner.owns, {
       capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason), unowned: (key, event) => this.unownedHook(key, event),
       refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
-      outside: opts.toolsOutside, opening: key => this.openingTurn(key),
+      outside: opts.toolsOutside, opening: key => this.openingTurn(key), checkStep: opts.checkStep,
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     const set = { ...DEFAULTS, ...defined(opts) };

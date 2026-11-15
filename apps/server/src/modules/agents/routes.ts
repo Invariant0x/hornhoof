@@ -29,6 +29,7 @@ import { releaseLeftProgram } from './left-programs.js';
 import { telegramOf, type TelegramView } from '../telegram/routes.js';
 import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
 import { notStep } from '../tools/steps.js';
+import { stopSteps } from '../tools/outside.js';
 
 export type AgentCard = FailureState & {
   id: string;
@@ -539,17 +540,20 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
       const list = held.map(t => `#${t.number}`).join(', ');
       throw new ApiError(409, 'conflict', `${agent.name} works on ${list}. Wait until they are done or cancel them, then remove ${agent.name}.`, 'agent_has_tasks');
     }
-    await db.transaction(async tx => {
+    const ended = await db.transaction(async tx => {
       await checkRemoval(ctx, tx, agent);
       await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
       /* Its bot goes with it, and with the bot what it still owed to chats. */
       await tx.delete(telegramBots).where(eq(telegramBots.agentId, agent.id));
-      await tx
+      const failed = await tx
         .update(jobs)
         .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
-        .where(and(eq(jobs.agentId, agent.id), or(eq(jobs.status, 'queued'), and(eq(jobs.status, 'running'), eq(jobs.kind, 'tools')))));
+        .where(and(eq(jobs.agentId, agent.id), or(eq(jobs.status, 'queued'), and(eq(jobs.status, 'running'), eq(jobs.kind, 'tools')))))
+        .returning({ id: jobs.id, kind: jobs.kind, subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine });
       await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'removed', before: null, after: null });
+      return failed;
     });
+    await stopSteps(ctx, ended.filter(job => job.kind === 'tools'));
     const left = await leaveWork(ctx, actorOf(me), agent);
     await wakeAll(ctx, left.wakes);
   });

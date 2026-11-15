@@ -3,12 +3,13 @@ import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { jobs } from '../../db/schema.js';
+import { jobs, subscriptions } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { agentOnNode, TURN_TIMEOUT_MS } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { holdsMachine } from '../network/follow.js';
-import type { NodeIdentity } from '../nodes/hub.js';
+import { jobsOf } from '../nodes/messages.js';
+import { identityOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 export { notStep } from './steps.js';
 
 /* An agent's program talks to its tools whenever it likes: as it starts and connects, and when it goes on with work no turn
@@ -19,6 +20,8 @@ export { notStep } from './steps.js';
    this process. */
 
 export type ToolsCall = Extract<NodeMessage, { type: 'tools.call' }>;
+type ToolsCheck = Extract<NodeMessage, { type: 'tools.check' }>;
+type ToolsChecked = Extract<NodeMessage, { type: 'tools.checked' }>;
 type Answer = { status: number; body: string };
 type Rpc = { id?: unknown; method?: unknown; params?: { name?: unknown } };
 
@@ -29,6 +32,9 @@ const TOO_LARGE = "Hornhoof's answer to this call is too large to hand on with n
 const UNREADABLE = 'Hornhoof could not read this message.';
 /* What the journal says of a call, which keeps nothing of what it carried or what came back: either may hold a key. */
 export const OUTSIDE_SUMMARY = 'Called with no turn running.';
+const CHECK_SUMMARY = 'Ran with no turn running.';
+/* The name a check command goes by in the journal, as the agent calls it. */
+const CHECK = 'hh-check';
 /* The one code Hornhoof answers a refusal with, which an MCP client hands its agent as words. */
 const REFUSED = -32001;
 
@@ -60,17 +66,19 @@ function outcomes(all: Rpc[], answer: string): Map<unknown, boolean> {
   return new Map(all.map(m => [m.id, ok.get(m.id) ?? false]));
 }
 
-async function openStep(ctx: Ctx, node: NodeIdentity, target: NonNullable<Awaited<ReturnType<typeof agentOnNode>>>): Promise<{ id: string; token: string } | null> {
-  const token = newToken();
+type Target = NonNullable<Awaited<ReturnType<typeof agentOnNode>>>;
+
+/* A step with a token for /mcp, or with none for a check command, which calls no tool. */
+async function openStep(ctx: Ctx, node: NodeIdentity, target: Target, token: string | null): Promise<{ id: string } | null> {
   const nodeId = node.kind === 'node' ? node.nodeId : null;
   /* A machine that installs its build takes no step, as it takes no turn: asked and written in one transaction. */
   return ctx.db.transaction(async tx => {
     if (await holdsMachine(tx, nodeId)) return null;
     const [row] = await tx
       .insert(jobs)
-      .values({ companyId: target.agent.companyId, subscriptionId: target.sub.id, nodeId, agentId: target.agent.id, kind: 'tools', status: 'running', startedAt: new Date(), prompt: '', timeoutMs: TURN_TIMEOUT_MS, createdBy: null, toolTokenHash: hashToken(token) })
+      .values({ companyId: target.agent.companyId, subscriptionId: target.sub.id, nodeId, builtinMachine: node.kind === 'builtin' ? node.machine : null, agentId: target.agent.id, kind: 'tools', status: 'running', startedAt: new Date(), prompt: '', timeoutMs: TURN_TIMEOUT_MS, createdBy: null, toolTokenHash: token === null ? null : hashToken(token) })
       .returning({ id: jobs.id });
-    return { id: row!.id, token };
+    return { id: row!.id };
   });
 }
 
@@ -84,8 +92,9 @@ async function journal(ctx: Ctx, target: { agent: { id: string; companyId: strin
 }
 
 /* Runs the message through /mcp in a step of the agent's, which ends with it. */
-async function inStep(app: FastifyInstance, ctx: Ctx, node: NodeIdentity, call: ToolsCall, target: NonNullable<Awaited<ReturnType<typeof agentOnNode>>>, all: Rpc[]): Promise<Answer> {
-  const step = await openStep(ctx, node, target);
+async function inStep(app: FastifyInstance, ctx: Ctx, node: NodeIdentity, call: ToolsCall, target: Target, all: Rpc[]): Promise<Answer> {
+  const token = newToken();
+  const step = await openStep(ctx, node, target, token);
   if (!step) return refused(all, INSTALLING);
   const calls = all.filter(m => m.method === 'tools/call');
   try {
@@ -93,7 +102,7 @@ async function inStep(app: FastifyInstance, ctx: Ctx, node: NodeIdentity, call: 
     const res = await app.inject({
       method: 'POST',
       url: '/mcp',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${step.token}`, ...(call.version ? { 'mcp-protocol-version': call.version } : {}) },
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${token}`, ...(call.version ? { 'mcp-protocol-version': call.version } : {}) },
       payload: call.body,
     });
     await journal(ctx, target, step.id, calls, outcomes(calls, res.body));
@@ -121,4 +130,44 @@ export async function answerOutside(app: FastifyInstance, ctx: Ctx, node: NodeId
     return refused(messagesOf(call.body), 'Hornhoof could not answer this call. Try again.');
   });
   ctx.hub.send(node, { type: 'tools.answer', agentKey: call.agentKey, ref: call.ref, ...answer });
+}
+
+/* A check command the agent's program runs with no turn running: it runs in a step of its own, open until the node says
+   it ended or Hornhoof stops it, which the machine's check slot goes to as to a turn. It may run on the same terms as a
+   tool call, and calls no tool, so the step has no token. Null with the words its program gets when it may not run. */
+async function checkStep(ctx: Ctx, node: NodeIdentity, msg: ToolsCheck): Promise<{ jobId: string | null; refused?: string }> {
+  const target = await agentOnNode(ctx, node, msg.agentKey);
+  if (!target) return { jobId: null, refused: NOT_HERE };
+  if (target.agent.switchedOffAt) return { jobId: null, refused: SWITCHED_OFF };
+  const step = await openStep(ctx, node, target, null);
+  if (!step) return { jobId: null, refused: INSTALLING };
+  await appendEvent(ctx, { companyId: target.agent.companyId, agentId: target.agent.id, jobId: step.id, kind: 'tool', data: { name: CHECK, input: '' } });
+  return { jobId: step.id };
+}
+
+export async function openCheck(ctx: Ctx, node: NodeIdentity, msg: ToolsCheck): Promise<void> {
+  const answer = await checkStep(ctx, node, msg).catch((err: unknown) => {
+    ctx.log.warn({ error: loggable(err) }, 'Could not open a step for a check command with no turn running.');
+    return { jobId: null, refused: 'Hornhoof could not start this check. Try again.' };
+  });
+  ctx.hub.send(node, { type: 'tools.checking', agentKey: msg.agentKey, ref: msg.ref, ...answer });
+}
+
+/* The node says the check command of a step of its own ended. */
+export async function closeCheck(ctx: Ctx, node: NodeIdentity, msg: ToolsChecked): Promise<void> {
+  const [step] = await ctx.db
+    .update(jobs)
+    .set({ status: 'done', result: '', finishedAt: new Date() })
+    .where(and(eq(jobs.id, msg.jobId), eq(jobs.agentId, msg.agentKey), eq(jobs.kind, 'tools'), eq(jobs.status, 'running'), jobsOf(node, ctx)))
+    .returning({ companyId: jobs.companyId });
+  if (step) await appendEvent(ctx, { companyId: step.companyId, agentId: msg.agentKey, jobId: msg.jobId, kind: 'tool_result', data: { ok: msg.ok, summary: CHECK_SUMMARY } });
+}
+
+/* Steps Hornhoof ended while their node may still run a check command in them: the node hears to stop it now. */
+export async function stopSteps(ctx: Ctx, steps: { id: string; subscriptionId: string; nodeId: string | null; builtinMachine: string | null }[]): Promise<void> {
+  for (const step of steps) {
+    const [sub] = await ctx.db.select({ kind: subscriptions.kind }).from(subscriptions).where(eq(subscriptions.id, step.subscriptionId));
+    const node = sub ? identityOf(sub, step.nodeId, step.builtinMachine, ownBuiltin(ctx.config)) : null;
+    if (node) ctx.hub.send(node, { type: 'job.cancel', jobId: step.id });
+  }
 }

@@ -600,6 +600,11 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* What the agent's program sent to its tools while no turn of it ran: as it connected, or a call. Hornhoof answers it in
      a step of its own, as tools.answer under the same ref. version: the MCP protocol version the program asked with. */
   z.object({ type: z.literal('tools.call'), agentKey: Id, ref: z.string().min(1).max(64), body: z.string().max(TOOLS_BODY_MAX), version: z.string().max(40).optional() }),
+  /* The agent's program runs a check command while no turn of it runs: Hornhoof opens a step of its tools for it, and says
+     which as tools.checking under the same ref. */
+  z.object({ type: z.literal('tools.check'), agentKey: Id, ref: z.string().min(1).max(64) }),
+  /* The check command of that step ended; ok: with code 0. */
+  z.object({ type: z.literal('tools.checked'), agentKey: Id, jobId: Id, ok: z.boolean() }),
   /* A hook refusal is diagnostic, not an answer or a change to the turn's state. */
   z.object({
     type: z.literal('agent.hook_rejected'),
@@ -773,6 +778,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent.release'), agentKey: Id, jobId: Id }),
   /* Hornhoof's answer to a tools.call, as its /mcp gave it: the HTTP status and the body, empty for a notification. */
   z.object({ type: z.literal('tools.answer'), agentKey: Id, ref: z.string().min(1).max(64), status: z.number().int().min(100).max(599), body: z.string().max(TOOLS_BODY_MAX) }),
+  /* The step a check command of a tools.check runs in, open until the node says it ended or Hornhoof stops it with
+     job.cancel; or, with none, the words its program gets for why it may not run now. */
+  z.object({ type: z.literal('tools.checking'), agentKey: Id, ref: z.string().min(1).max(64), jobId: Id.nullable(), refused: z.string().max(500).optional() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

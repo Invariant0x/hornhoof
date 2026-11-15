@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { MCP_CONNECTING } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Bridge, type OutsideAnswer } from '../src/terminal/bridge.js';
 import { eventually } from '../../../test-support/eventually.mjs';
@@ -93,6 +94,26 @@ describe("the node's bridge with no turn of the agent running", () => {
     const fresh = await bridgeWith({ outside: at.outside });
     expect((await connects(fresh.send, 'agent-1')).map(g => g.status)).toEqual([200, 200, 202, 200]);
     expect(at.asked).toHaveLength(12);
+  });
+
+  it.each(MCP_CONNECTING)('hands %s to Hornhoof for a program that starts, and again for one started again, with nothing turned away', async method => {
+    const at = hornhoof();
+    const message = method.startsWith('notifications/') ? { jsonrpc: '2.0', method } : { jsonrpc: '2.0', id: 5, method };
+    const asks = async (send: (key: string, r: Recorded) => Promise<Response>) => {
+      const res = await send('agent-1', { method: 'POST', headers: { 'content-type': 'application/json', 'mcp-protocol-version': '2025-11-25' }, body: message });
+      const text = await res.text();
+      return { status: res.status, body: text ? JSON.parse(text) : null };
+    };
+    const answered = message.id === undefined ? { status: 202, body: null } : { status: 200, body: { jsonrpc: '2.0', id: 5, result: method === 'tools/list' ? { tools: [{ name: 'company' }] } : { said: method } } };
+    const first = await bridgeWith({ outside: at.outside });
+    expect(await asks(first.send)).toEqual(answered);
+    expect(await asks(first.send)).toEqual(answered);
+    /* The node started again and keeps nothing. */
+    const fresh = await bridgeWith({ outside: at.outside });
+    expect(await asks(fresh.send)).toEqual(answered);
+    expect(at.asked.map(a => JSON.parse(a.body))).toEqual([message, message, message]);
+    expect(first.bridge.toolsRefusedSince('agent-1', 0)).toBe(false);
+    expect(fresh.bridge.toolsRefusedSince('agent-1', 0)).toBe(false);
   });
 
   it('hands a tool call with no turn to Hornhoof, which runs it in a step of its own, and gives the program its answer', async () => {
