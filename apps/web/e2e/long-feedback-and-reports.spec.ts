@@ -260,8 +260,8 @@ const head = await hire('Hana', 'head', 'DEV-HEAD');
 const worker = await hire('Bruno', 'worker', 'DEV-BE');
 const reviewer = await hire('Rita', 'worker', 'DEV-REV');
 const designer = await hire('Interface Designer', 'worker', 'DEV-FE');
-/* Echelons exist only in a turn started in echelons, so the work Review checks is given while this turn runs. */
-await db.insert(schema.turns).values({ companyId: acme.id, departmentId: dev.id, number: 1, goal: 'Checked work', status: 'open', mode: 'echelons', openedAt: new Date() });
+/* No turn is laid out: the team sets the route, so the work of these members goes through the echelons, and the department's
+   open turn opens by itself as a result is accepted into it. */
 fx = { acme, ceo, dev, head, worker, reviewer, designer };
 
 const origin = await app.listen({ host: '127.0.0.1', port: await testPort() });
