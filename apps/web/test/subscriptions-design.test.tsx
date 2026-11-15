@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { SubView } from '../src/types';
 import { ME, mockApi, ORG, SUBS } from './api-mock';
@@ -92,6 +94,51 @@ describe('the Type filter', () => {
     expect(group).toHaveClass('whole');
     expect(decl('.fgroup.whole .chipf', 'min-block-size')).toBe('44px');
     expect(decl('.fgroup.whole .chipf[aria-pressed="true"]', 'border-color')).toBe('var(--cyan-ink)');
+  });
+});
+
+describe('every filter group', () => {
+  /* Two owners, three programs and three states: each group shows, and each starts with All. */
+  const MIXED = [SUBS[0]!, { ...SUBS[1]!, owner: { id: 'p2', name: 'Maria' } }, SUBS[2]!, ROUTER];
+  const groups = (language: 'en' | 'ru') => {
+    const t = { en, ru }[language];
+    return [
+      [t.tables.provider, /^Codex/, 1],
+      [t.tables.owner, /^Maria/, 1],
+      [t.tables.status, new RegExp(`^${t.subs.states.needs_login}`), 1],
+    ] as const;
+  };
+
+  it.each(['en', 'ru'] as const)('in %s starts with All N, pressed until a value is, 44 px high and framed in the ink of a link when chosen', async language => {
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: MIXED }] });
+    show(language);
+    await screen.findByRole('table');
+    const all = { en, ru }[language].tables.all;
+    for (const [label, option, shown] of groups(language)) {
+      const group = screen.getByRole('group', { name: label });
+      const buttons = within(group).getAllByRole('button');
+      expect(group).toHaveClass('whole');
+      expect(buttons[0]).toHaveTextContent(`${all}${MIXED.length}`);
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(within(group).getByRole('button', { name: option }));
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getAllByRole('row').slice(1)).toHaveLength(shown);
+      fireEvent.click(buttons[0]!);
+      expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getAllByRole('row').slice(1)).toHaveLength(MIXED.length);
+    }
+  });
+
+  it("keeps a program's own mark in its button: the sign's lines are for the signs of payment only", async () => {
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: MIXED }] });
+    show();
+    await screen.findByRole('table');
+    const provider = screen.getByRole('group', { name: 'Provider' });
+    expect(provider.querySelector('svg.pm')).not.toBeNull();
+    expect(provider.querySelector('svg.sign')).toBeNull();
+    expect(screen.getByRole('group', { name: 'Type' }).querySelectorAll('svg.sign')).toHaveLength(2);
+    expect(decl('.fgroup.whole .chipf svg', 'fill')).toBeUndefined();
+    expect(decl('.chipf svg.sign', 'fill')).toBe('none');
   });
 });
 
