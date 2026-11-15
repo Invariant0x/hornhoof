@@ -43,35 +43,42 @@ type Place = { kind: 'channel' | 'account' | 'revision'; id: string };
 const TABLE = { channel: outboundChannels, account: outboundAccounts, revision: outboundCatalogRevisions } as const;
 const UNKNOWN = { channel: 'There is no such channel.', account: 'There is no such account here.', revision: 'There is no such catalog revision.' } as const;
 
-export function registerOutboundHeadTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
+type Head = { ctx: Ctx; app: FastifyInstance; job: ToolJob };
+
+/* Whether a channel, an account or a revision is of the head's own department. */
+async function ours({ ctx, job }: Head, { kind, id }: Place): Promise<boolean> {
   const own = job.departmentId;
+  if (!own) return false;
+  const table = TABLE[kind];
+  const [row] = await ctx.db.select({ id: table.id }).from(table).where(and(eq(table.id, id), eq(table.companyId, job.companyId), eq(table.departmentId, own)));
+  return row !== undefined;
+}
 
-  /* Whether a channel, an account or a revision is of the head's own department. */
-  const ours = async ({ kind, id }: Place): Promise<boolean> => {
-    if (!own) return false;
-    const table = TABLE[kind];
-    const [row] = await ctx.db.select({ id: table.id }).from(table).where(and(eq(table.id, id), eq(table.companyId, job.companyId), eq(table.departmentId, own)));
-    return row !== undefined;
-  };
+/* The route the department's screen calls, as the last person who wrote to the head, answered in that route's words. */
+async function call({ ctx, app, job }: Head, url: string, payload: object, after: (body: string) => string = body => body) {
+  const principal = await standingPrincipal(ctx.db, job.id);
+  if (!principal) return say(NO_PRINCIPAL, true);
+  const headers = orchestratorDecisionHeaders({ personId: principal.personId, sourceSeq: principal.sourceSeq, agentId: job.agentId, jobId: job.id });
+  const res = await app.inject({ method: 'POST', url, payload, headers });
+  if (res.statusCode < 400) return say(after(res.body));
+  const { message, reason } = errorOf(res.body);
+  return say(REFUSED[reason ?? ''] ?? message ?? `Hornhoof answered ${res.statusCode}.`, true);
+}
 
-  const call = async (method: 'POST', url: string, payload: object, after: (body: string) => string = body => body) => {
-    const principal = await standingPrincipal(ctx.db, job.id);
-    if (!principal) return say(NO_PRINCIPAL, true);
-    const res = await app.inject({ method, url, payload, headers: orchestratorDecisionHeaders({ personId: principal.personId, sourceSeq: principal.sourceSeq, agentId: job.agentId, jobId: job.id }) });
-    if (res.statusCode < 400) return say(after(res.body));
-    const { message, reason } = errorOf(res.body);
-    return say(REFUSED[reason ?? ''] ?? message ?? `Hornhoof answered ${res.statusCode}.`, true);
-  };
+/* A move on something of the head's own department, or the answer nothing at all would get. */
+async function onOwn(head: Head, place: Place, url: string, payload: object) {
+  return (await ours(head, place)) ? call(head, url, payload) : say(UNKNOWN[place.kind], true);
+}
 
-  /* A move on something of the head's own department, or the answer nothing at all would get. */
-  const onOwn = async (place: Place, url: string, payload: object) => ((await ours(place)) ? call('POST', url, payload) : say(UNKNOWN[place.kind], true));
+async function setupOf({ ctx, job }: Head) {
+  const channels = job.departmentId ? await channelsOfDepartment(ctx.db, job.companyId, job.departmentId) : [];
+  const working = channels.some(c => c.accounts.some(a => a.status === 'active'));
+  return { channels, ...(working ? {} : { noAccount: `Your department has no working account to send from. ${WHERE_ACCOUNTS}` }) };
+}
 
-  const setup = async () => {
-    const channels = own ? await channelsOfDepartment(ctx.db, job.companyId, own) : [];
-    const working = channels.some(c => c.accounts.some(a => a.status === 'active'));
-    return { channels, ...(working ? {} : { noAccount: `Your department has no working account to send from. ${WHERE_ACCOUNTS}` }) };
-  };
+const newChannelNote = (body: string) => `${body}\nIt has no account yet. ${WHERE_ACCOUNTS} Then set its policy with outbound_policy_set and its author with outbound_account_author.`;
 
+function registerChannelTools(server: McpServer, head: Head): void {
   server.registerTool(
     'outbound_setup',
     {
@@ -79,7 +86,7 @@ export function registerOutboundHeadTools(server: McpServer, ctx: Ctx, app: Fast
         'Your department\'s ways out: each channel with its status, its policy (limits, and autoSend: whether a direct message goes without a person\'s yes to each one) and its accounts by name, with who writes from each. ' +
         'Never a setting, password or key. When no account works, it says where a person connects one.',
     },
-    async () => say(JSON.stringify(await setup())),
+    async () => say(JSON.stringify(await setupOf(head))),
   );
 
   server.registerTool(
@@ -91,8 +98,9 @@ export function registerOutboundHeadTools(server: McpServer, ctx: Ctx, app: Fast
       inputSchema: { product: z.uuid().optional(), name: Name, adapter: z.enum(['smtp', 'webhook']), purpose: Name, audience: z.enum(['direct', 'public']) },
     },
     async ({ product, ...rest }) => {
+      const own = head.job.departmentId;
       if (!own) return say('You have no department to make a channel for.', true);
-      return call('POST', '/api/outbound/channels', { departmentId: own, ...(product === undefined ? {} : { productId: product }), ...rest }, body => `${body}\nIt has no account yet. ${WHERE_ACCOUNTS} Then set its policy with outbound_policy_set and its author with outbound_account_author.`);
+      return call(head, '/api/outbound/channels', { departmentId: own, ...(product === undefined ? {} : { productId: product }), ...rest }, newChannelNote);
     },
   );
 
@@ -104,25 +112,27 @@ export function registerOutboundHeadTools(server: McpServer, ctx: Ctx, app: Fast
         'autoSend true lets a direct message go without a person\'s yes to each one; limits, consent, suppression, content checks, price rules and a check that asks for a person still hold. The department\'s log keeps who turned it on or off.',
       inputSchema: { channel: Channel, value: OutboundPolicyValue },
     },
-    ({ channel, value }) => onOwn({ kind: 'channel', id: channel }, `/api/outbound/channels/${channel}/policies`, value),
+    ({ channel, value }) => onOwn(head, { kind: 'channel', id: channel }, `/api/outbound/channels/${channel}/policies`, value),
   );
 
   server.registerTool(
     'outbound_channel_stop',
     { description: 'Stops a channel of your department at once: nothing new goes through it, and what waits stays. What already left cannot be called back.', inputSchema: { channel: Channel } },
-    ({ channel }) => onOwn({ kind: 'channel', id: channel }, `/api/outbound/channels/${channel}/stop`, {}),
+    ({ channel }) => onOwn(head, { kind: 'channel', id: channel }, `/api/outbound/channels/${channel}/stop`, {}),
   );
 
   server.registerTool(
     'outbound_channel_reopen',
     { description: 'Opens a stopped channel of your department, once its check passes, as new: every message is reviewed again and what was admitted before the stop does not go.', inputSchema: { channel: Channel } },
-    ({ channel }) => onOwn({ kind: 'channel', id: channel }, `/api/outbound/channels/${channel}/reopen`, {}),
+    ({ channel }) => onOwn(head, { kind: 'channel', id: channel }, `/api/outbound/channels/${channel}/reopen`, {}),
   );
+}
 
+function registerAccountTools(server: McpServer, head: Head): void {
   server.registerTool(
     'outbound_contact_suppress',
     { description: 'Records that a contact must not be written to, for good: their permissions end and what waits for them is cancelled. evidence: how they said so.', inputSchema: { contact: z.uuid(), evidence: z.string().trim().min(1).max(2000) } },
-    ({ contact, evidence }) => call('POST', `/api/outbound/contacts/${contact}/suppress`, { evidence }),
+    ({ contact, evidence }) => call(head, `/api/outbound/contacts/${contact}/suppress`, { evidence }),
   );
 
   server.registerTool(
@@ -133,19 +143,21 @@ export function registerOutboundHeadTools(server: McpServer, ctx: Ctx, app: Fast
         'One author per account and one account per author; what the last author queued does not move.',
       inputSchema: { account: Account, employee: z.uuid().nullable() },
     },
-    ({ account, employee }) => onOwn({ kind: 'account', id: account }, `/api/outbound/accounts/${account}/${employee === null ? 'release' : 'bind'}`, employee === null ? {} : { agentId: employee }),
+    ({ account, employee }) => onOwn(head, { kind: 'account', id: account }, `/api/outbound/accounts/${account}/${employee === null ? 'release' : 'bind'}`, employee === null ? {} : { agentId: employee }),
   );
 
   server.registerTool(
     'outbound_account_revoke',
     { description: 'Takes an account of your department out of use for good, with its settings: nothing new leaves from it. A new one is connected by a person, as outbound_setup says.', inputSchema: { account: Account } },
-    ({ account }) => onOwn({ kind: 'account', id: account }, `/api/outbound/accounts/${account}/revoke`, {}),
+    ({ account }) => onOwn(head, { kind: 'account', id: account }, `/api/outbound/accounts/${account}/revoke`, {}),
   );
+}
 
+function registerCatalogTools(server: McpServer, head: Head): void {
   server.registerTool(
     'outbound_catalog',
     { description: 'Your department\'s catalog: each entry with every revision, its status (proposed, published or revoked), its words, who wrote and who published it, and current: the revision a message may use now.' },
-    async () => say(JSON.stringify(own ? await catalogOf(ctx.db, job.companyId, own) : [])),
+    async () => say(JSON.stringify(head.job.departmentId ? await catalogOf(head.ctx.db, head.job.companyId, head.job.departmentId) : [])),
   );
 
   server.registerTool(
@@ -156,12 +168,19 @@ export function registerOutboundHeadTools(server: McpServer, ctx: Ctx, app: Fast
         'The department\'s log keeps that you published it and on whose word, and the people who run it see this in its catalog.',
       inputSchema: { revision: Revision },
     },
-    ({ revision }) => onOwn({ kind: 'revision', id: revision }, `/api/outbound/catalog/${revision}/publish`, {}),
+    ({ revision }) => onOwn(head, { kind: 'revision', id: revision }, `/api/outbound/catalog/${revision}/publish`, {}),
   );
 
   server.registerTool(
     'outbound_revoke',
     { description: 'Takes back a published revision of your department\'s catalog: what would use it stops at its last look.', inputSchema: { revision: Revision } },
-    ({ revision }) => onOwn({ kind: 'revision', id: revision }, `/api/outbound/catalog/${revision}/revoke`, {}),
+    ({ revision }) => onOwn(head, { kind: 'revision', id: revision }, `/api/outbound/catalog/${revision}/revoke`, {}),
   );
+}
+
+export function registerOutboundHeadTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
+  const head = { ctx, app, job };
+  registerChannelTools(server, head);
+  registerAccountTools(server, head);
+  registerCatalogTools(server, head);
 }
