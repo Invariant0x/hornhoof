@@ -85,7 +85,8 @@ const HISTORY: Record<string, ConnectionHistory> = {
 
 type Look = { lang: 'en' | 'ru'; dir: 'ltr' | 'rtl'; skin: 'cyberpunk' | 'light'; width: 1440 | 375 };
 const LOOKS: Look[] = (['cyberpunk', 'light'] as const).flatMap(skin => ([1440, 375] as const).flatMap(width => [
-  { lang: 'en' as const, dir: 'ltr' as const, skin, width }, { lang: 'ru' as const, dir: 'ltr' as const, skin, width }, { lang: 'en' as const, dir: 'rtl' as const, skin, width },
+  { lang: 'en' as const, dir: 'ltr' as const, skin, width }, { lang: 'ru' as const, dir: 'ltr' as const, skin, width },
+  { lang: 'en' as const, dir: 'rtl' as const, skin, width }, { lang: 'ru' as const, dir: 'rtl' as const, skin, width },
 ]));
 const lookName = ({ lang, dir, skin, width }: Look) => `${lang}-${dir}-${skin}-${width}`;
 
@@ -145,6 +146,26 @@ async function overlaps(card: Locator): Promise<string[]> {
       const y = Math.min(p.bottom, q.bottom) - Math.max(p.top, q.top);
       if (x > 1 && y > 1) out.push(`${a.className} over ${b.className}`);
     }));
+    return out;
+  });
+}
+
+/* The code of a command reads left to right from its left edge on any page, and no flag of it, like --owner-key, breaks
+   across lines (#1038). */
+async function codeOffences(code: Locator): Promise<string[]> {
+  return code.evaluate(el => {
+    const out: string[] = [];
+    const css = getComputedStyle(el);
+    if (css.direction !== 'ltr') out.push(`direction ${css.direction}`);
+    if (css.textAlign !== 'left') out.push(`text-align ${css.textAlign}`);
+    /* Each line starts at the code's left edge. */
+    const all = document.createRange();
+    all.selectNodeContents(el);
+    const lines = new Map<number, number>();
+    for (const box of all.getClientRects()) lines.set(Math.round(box.bottom), Math.min(lines.get(Math.round(box.bottom)) ?? Infinity, box.left));
+    const edge = el.getBoundingClientRect().left;
+    for (const [bottom, left] of lines) if (Math.abs(left - edge) > 1) out.push(`the line ending at ${bottom} starts ${Math.round(left - edge)}px from the left edge`);
+    for (const flag of el.querySelectorAll('.flag')) if (flag.getClientRects().length !== 1) out.push(`${flag.textContent} breaks across ${flag.getClientRects().length} lines`);
     return out;
   });
 }
@@ -248,9 +269,11 @@ for (const look of LOOKS) {
         await owner.getByRole('button', { name: t.machines.makeCore(host), exact: true }).click();
         const shown = card.locator('.add-plan');
         await expect(shown.locator('code').first()).toContainText('--owner-key');
+        await expect(shown.locator('.flag').filter({ hasText: /^--owner-key$/ })).toHaveCount(2);
         for (const line of await shown.locator('.command').all()) {
           const [code, group] = [line.locator('code'), line.locator('.entry-actions')];
           await expect(group.getByRole('button')).toHaveText([t.common.copy]);
+          expect(await codeOffences(code)).toEqual([]);
           const [codeBox, groupBox] = [(await code.boundingBox())!, (await group.boundingBox())!];
           expect(groupBox.y).toBeGreaterThanOrEqual(codeBox.y + codeBox.height);
           expect(await rowsOffEdge(group)).toEqual([]);

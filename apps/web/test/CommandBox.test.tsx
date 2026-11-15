@@ -4,6 +4,7 @@ import { LanguageProvider } from '../src/i18n';
 import { CommandBox, windowsCommand } from '../src/ui/CommandBox';
 import { mockApi, TEST_KEY, withKey } from './api-mock';
 import { decl } from './css';
+import { commandCode } from './command-code';
 
 const JOIN = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join -Ab3_d-Ef';
 const WINDOWS_JOIN = 'powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://hq.acme.com/install.ps1))) --join -Ab3_d-Ef"';
@@ -37,10 +38,10 @@ describe('an install command on the screen', () => {
     mockApi({});
     render(<LanguageProvider><CommandBox command={JOIN} /></LanguageProvider>);
     const mac = await screen.findByRole('group', { name: unix });
-    expect(within(mac).getByText(withKey(JOIN))).toBeInTheDocument();
+    expect(within(mac).getByText(commandCode(withKey(JOIN)))).toBeInTheDocument();
     expect(within(mac).getByRole('button', { name: copy })).toBeInTheDocument();
     const win = screen.getByRole('group', { name: windows });
-    expect(within(win).getByText(WINDOWS_JOIN_WITH_KEY)).toBeInTheDocument();
+    expect(within(win).getByText(commandCode(WINDOWS_JOIN_WITH_KEY))).toBeInTheDocument();
     expect(within(win).getByRole('button', { name: copy })).toBeInTheDocument();
   });
 
@@ -74,5 +75,29 @@ describe("an install command's Copy", () => {
     expect(decl('.command', 'gap')).toBe('8px');
     expect(decl('.entry-actions', 'justify-content')).toBe('flex-end');
     expect(decl('.entry-actions', 'flex-wrap')).toBe('wrap');
+  });
+});
+
+/* Design (#1038): the code of a command reads left to right on any page, from its left edge, and a flag such as
+   --owner-key never breaks at its hyphens; Copy and the words around it still follow the page. */
+describe('an install command on a right-to-left page', () => {
+  afterEach(() => document.documentElement.removeAttribute('dir'));
+
+  it('sets its code left to right and keeps each flag in one piece, its text as the command is', async () => {
+    document.documentElement.dir = 'rtl';
+    mockApi({});
+    render(<LanguageProvider><CommandBox command={JOIN} /></LanguageProvider>);
+    const mac = await screen.findByRole('group', { name: 'On a Mac or Linux, run this in Terminal:' });
+    const code = mac.querySelector('code')!;
+    expect(code).toHaveAttribute('dir', 'ltr');
+    expect(code.textContent).toBe(withKey(JOIN));
+    const flags = [...code.querySelectorAll('.flag')].map(flag => flag.textContent);
+    expect(flags).toEqual(['-fsSL', '-s', '--join', '--owner-key']);
+    expect(mac.querySelector('.entry-actions')).not.toHaveAttribute('dir');
+  });
+
+  it('aligns the code to the left and lets no flag wrap', () => {
+    expect(decl('.command code', 'text-align')).toBe('left');
+    expect(decl('.command code .flag', 'white-space')).toBe('nowrap');
   });
 });

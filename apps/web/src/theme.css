@@ -228,7 +228,8 @@ select:disabled { opacity: .55; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .command { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: start; min-inline-size: 0; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
-.command code { min-inline-size: 0; font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.command code { min-inline-size: 0; font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; text-align: left; }
+.command code .flag { white-space: nowrap; }
 
 /* Shell: the header floats over the canvas in three glass blocks; there is no bar under it. */
 .shell { position: relative; height: 100%; }

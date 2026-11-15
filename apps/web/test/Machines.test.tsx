@@ -13,6 +13,7 @@ import { keyDefaults } from '../src/owner-key-store';
 import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
 import { decl } from './css';
 import { clock } from '../src/ui/subscription';
+import { commandCode } from './command-code';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const GIB = 1024 ** 3;
@@ -105,12 +106,12 @@ describe('Machines', () => {
     });
     render(<Machines me={ME} />);
     const mac = await screen.findByRole('article', { name: 'dev-laptop' });
-    expect(await within(mac).findByText(withKey(command.command))).toBeInTheDocument();
+    expect(await within(mac).findByText(commandCode(withKey(command.command)))).toBeInTheDocument();
     const update = within(mac).getByRole('button', { name: 'Update programs' });
     await userEvent.setup().click(update);
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/nodes/commands').length).toBeGreaterThanOrEqual(2));
     await vi.waitFor(() => expect(update).toBeEnabled());
-    expect(within(mac).getByText(withKey(command.command))).toBeInTheDocument();
+    expect(within(mac).getByText(commandCode(withKey(command.command)))).toBeInTheDocument();
     expect(calls.some(c => c.path.endsWith('/hide'))).toBe(false);
   });
 
@@ -339,7 +340,7 @@ describe('Machines', () => {
     render(<Machines me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Connect a machine' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/command', body: undefined });
-    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
     expect(screen.getByText(/joins without a plan/)).toBeInTheDocument();
     expect(screen.getByText("Hornhoof will run tests of the company's code on this machine. People with access to this Hornhoof can start them.")).toBeInTheDocument();
     expect(screen.getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
@@ -348,7 +349,7 @@ describe('Machines', () => {
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
-    expect(screen.queryByText(withKey(COMMAND))).not.toBeInTheDocument();
+    expect(screen.queryByText(commandCode(withKey(COMMAND)))).not.toBeInTheDocument();
   });
 
   it("adds one of the person's plans to a machine of theirs and shows the command to run there", async () => {
@@ -367,14 +368,14 @@ describe('Machines', () => {
     expect(screen.queryByRole('button', { name: 'Add Claude to dev-laptop' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Add Kimi to dev-laptop' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m1/plans', body: { subscription: 's-kimi' } });
-    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
     expect(screen.getByText(/^Run this in a terminal on dev-laptop\./)).toBeInTheDocument();
     expect(within(mac).getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
     expect(within(mac).getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
     expect(within(mac).getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     await user.click(within(mac).getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
-    expect(screen.queryByText(withKey(COMMAND))).not.toBeInTheDocument();
+    expect(screen.queryByText(commandCode(withKey(COMMAND)))).not.toBeInTheDocument();
   });
 
   it('keeps machine and add-plan commands visible across tab switches and reloads with expiry, Copy and Cancel, and removes them on join, expiry or Cancel', async () => {
@@ -395,30 +396,30 @@ describe('Machines', () => {
     });
     const user = userEvent.setup();
     const first = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(withKey(machineCmd.command))).toBeInTheDocument();
-    expect(await screen.findByText(withKey(addCmd.command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(machineCmd.command)))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(addCmd.command)))).toBeInTheDocument();
 
     /* Switching tabs and returning, or reloading the page, keeps both commands visible. */
     first.unmount();
     localStorage.setItem('hh-lang', 'ru');
     const inRu = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(withKey(machineCmd.command))).toBeInTheDocument();
-    expect(await screen.findByText(withKey(addCmd.command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(machineCmd.command)))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(addCmd.command)))).toBeInTheDocument();
     expect(screen.getAllByText(/^Действует еще (59 мин|1 ч)\.$/)).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Копировать' })).toHaveLength(4);
     const cancels = screen.getAllByRole('button', { name: 'Отменить' });
     expect(cancels).toHaveLength(2);
     await user.click(cancels[0]!);
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${machineCmd.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(withKey(machineCmd.command))).not.toBeInTheDocument());
-    expect(screen.getByText(withKey(addCmd.command))).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.queryByText(commandCode(withKey(machineCmd.command)))).not.toBeInTheDocument());
+    expect(screen.getByText(commandCode(withKey(addCmd.command)))).toBeInTheDocument();
 
     /* After the machine joins by the add-plan command or it expires, reload hides it too. */
     active = [];
     inRu.unmount();
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    expect(screen.queryByText(withKey(addCmd.command))).not.toBeInTheDocument();
+    expect(screen.queryByText(commandCode(withKey(addCmd.command)))).not.toBeInTheDocument();
   });
 
   it('disconnects a machine after a confirm', async () => {
@@ -1156,7 +1157,7 @@ describe("each machine's place in the company's network", () => {
     expect(within(card('dev-laptop')).queryByRole('button', { name: /full machine|полной машиной/ })).not.toBeInTheDocument();
     await userEvent.setup().click(within(box).getByRole('button', { name: action }));
     expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m2/core', body: undefined });
-    expect(await within(box).findByText(withKey(`${COMMAND}-CORE`))).toBeInTheDocument();
+    expect(await within(box).findByText(commandCode(withKey(`${COMMAND}-CORE`)))).toBeInTheDocument();
     expect(within(box).getByText(run)).toBeInTheDocument();
     expect(within(box).queryByRole('button', { name: action })).not.toBeInTheDocument();
   });
@@ -1165,7 +1166,7 @@ describe("each machine's place in the company's network", () => {
     const shown = { id: '8'.repeat(64), kind: 'core' as const, plans: [], machineId: 'm2', machine: 'build-box', command: `${COMMAND}-CORE`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
     show({ 'GET /api/nodes/commands': [200, { commands: [shown] }] });
     const box = await screen.findByRole('article', { name: 'build-box' });
-    expect(await within(box).findByText(withKey(shown.command))).toBeInTheDocument();
+    expect(await within(box).findByText(commandCode(withKey(shown.command)))).toBeInTheDocument();
     expect(within(box).getByText(/^Run this in a terminal on build-box\. It adds the company's core there/)).toBeInTheDocument();
   });
 
