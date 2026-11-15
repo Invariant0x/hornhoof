@@ -65,7 +65,8 @@ function CommandLine({ command, label }: { command: string; label?: string }) {
   const line = (
     <div className="command">
       <code>{command}</code>
-      <CopyButton text={command} />
+      {/* Copy stands under the command, on the end edge, a button of 44 px at any width (style book, section 6, rule 15). */}
+      <div className="entry-actions"><CopyButton text={command} className="btn ghost" /></div>
     </div>
   );
   if (!label) return line;

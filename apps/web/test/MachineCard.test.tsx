@@ -110,6 +110,18 @@ describe("the lower part of a machine's card", () => {
     expect(within(owner).getByRole('button', { name: 'Yes, disconnect' })).toBeInTheDocument();
   });
 
+  it("puts the owner's buttons in one group under the settings: the main one, the next, Disconnect last (#1036)", async () => {
+    show();
+    const owner = block(await open(), 'Settings and actions');
+    const facts = owner.querySelector('dl.facts')!;
+    const groups = owner.querySelectorAll('.entry-actions');
+    expect(groups).toHaveLength(1);
+    const group = groups[0]!;
+    expect(facts.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect([...group.children].map(button => button.textContent)).toEqual(['Add my plan', 'Make dev-laptop a full machine of the company', 'Disconnect']);
+    expect(group.lastElementChild).toHaveClass('danger');
+  });
+
   it('writes the blocks in plain lines, with no note striped at its side, and gives their buttons a group of their own', async () => {
     show();
     const card = await open();

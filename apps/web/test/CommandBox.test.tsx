@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { CommandBox, windowsCommand } from '../src/ui/CommandBox';
 import { mockApi, TEST_KEY, withKey } from './api-mock';
+import { decl } from './css';
 
 const JOIN = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join -Ab3_d-Ef';
 const WINDOWS_JOIN = 'powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://hq.acme.com/install.ps1))) --join -Ab3_d-Ef"';
@@ -48,5 +49,30 @@ describe('an install command on the screen', () => {
     expect(screen.getByText('curl x')).toBeInTheDocument();
     expect(screen.queryByText(/PowerShell/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(1);
+  });
+});
+
+/* Design's rule 15 of section 6 (#1036): a command with a copy button has the button in the group under the text, on
+   the end edge, from 44 px, at any width. */
+describe("an install command's Copy", () => {
+  it('stands in a group of its own under the command, a button of 44 px', async () => {
+    mockApi({});
+    render(<LanguageProvider><CommandBox command={JOIN} /></LanguageProvider>);
+    await screen.findByRole('group', { name: 'On a Mac or Linux, run this in Terminal:' });
+    for (const copy of screen.getAllByRole('button', { name: 'Copy' })) {
+      const group = copy.parentElement!;
+      expect(group).toHaveClass('entry-actions');
+      expect(group.previousElementSibling?.tagName).toBe('CODE');
+      expect(group.parentElement).toHaveClass('command');
+      expect(copy).toHaveClass('btn', 'ghost');
+      expect(copy).not.toHaveClass('small');
+    }
+  });
+
+  it('lays the command out in one column, the group under it with 8 px between', () => {
+    expect(decl('.command', 'grid-template-columns')).toBe('minmax(0, 1fr)');
+    expect(decl('.command', 'gap')).toBe('8px');
+    expect(decl('.entry-actions', 'justify-content')).toBe('flex-end');
+    expect(decl('.entry-actions', 'flex-wrap')).toBe('wrap');
   });
 });

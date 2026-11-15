@@ -3,15 +3,17 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { BuiltinView, ConnectionHistory, DataView, MachineView, Org } from '../src/types';
-import { ME, serveApi } from './api';
+import type { BuiltinView, ConnectionHistory, DataView, MachineView, Org, ShownCommand, SubView } from '../src/types';
+import { ME, serveApi, serveOwnerKey } from './api';
 import { offences, sizes } from './owner-screens-look';
 import type { Measured } from './owner-screens-sizes';
 
 /* The lower part of a machine's open card (#1027), drawn by each engine: under the top, which stays as it was, a block of
    its own for the server and the data copy, one for the system, the programs and the access, one for the owner's
    settings and actions, then the connection to the server, with its drops in lines and their technical details behind a
-   button. Each look keeps to Design's rules, lets no word out of its card, lays the blocks out without overlap, and leaves
+   button. The owner's buttons stand in one group under the settings, the main one first and Disconnect last, every row
+   of them on the end edge (#1036); the command that brings the core has Copy in a group under it, on the end edge, from
+   44 px. Each look keeps to Design's rules, lets no word out of its card, lays the blocks out without overlap, and leaves
    the sizes of its pieces for a comparison between the engines afterwards. A picture of each card is kept, in the folder
    SHOTS names when it is set. */
 
@@ -39,10 +41,21 @@ const openAccess = (id: string, hostname: string) => ({
   reachable: true, until: new Date(NOW + 20 * 3_600_000).toISOString(), asked: null, canOpen: true, canClose: true, key: 'not_needed',
 });
 
+/* A plan of the CEO's on the server's machine, so the other two offer Add my plan. */
+const PLAN = { id: 's1', provider: 'claude', status: 'ready', online: true } as MachineView['plans'][number];
+const SUBS = [{
+  id: 's1', provider: 'claude', kind: 'personal', label: 'Claude', status: 'ready', online: true, last4: null, owner: { id: 'p1', name: 'Ivan' },
+  place: { kind: 'company', id: null, name: 'Whole company' }, machines: [{ id: 'm1', hostname: SERVER, status: 'ready', online: true }], limits: null,
+  limitsUpdatedAt: null, budget: null, isOrchestrator: false, accounts: [], tier: 'Max', accountsDiffer: false, signedInOnce: true, leaseMachine: null, agents: [],
+}] as unknown as SubView[];
+/* The command the server gives for the core of the node: it joins the machine, so it shows with the owner's key. */
+const CORE = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join DEMO_ONLY_CORE_JOIN_TOKEN_OF_A_LONG_KIND';
+const CORE_SHOWN: ShownCommand = { id: 'c1', kind: 'core', plans: [], machineId: 'm3', machine: NODE, command: CORE, expiresAt: new Date(NOW + 3_600_000).toISOString() };
+
 /* The machine the server runs on, the next in line with an up-to-date copy and its access open, and a node that joined
    before machines had a core. */
 const MACHINES: MachineView[] = [
-  machine('m1', SERVER, { data: placed({ number: 1, why: 'server' }), keepsBackups: true, heldBackups: 0 }),
+  machine('m1', SERVER, { data: placed({ number: 1, why: 'server' }), keepsBackups: true, heldBackups: 0, plans: [PLAN] }),
   machine('m2', BACKUP, { os: 'darwin', arch: 'arm64', data: placed({ number: 2, why: 'always.best_link', copy: { line: 'ready' } }), keepsBackups: true, heldBackups: 3, access: openAccess('m2', BACKUP) as MachineView['access'] }),
   machine('m3', NODE, { data: placed({}), needsCore: true, keepsBackups: null, heldBackups: null }),
 ];
@@ -80,6 +93,7 @@ async function openMachines(page: Page, look: Look): Promise<void> {
   await page.setViewportSize({ width: look.width, height: look.width === 375 ? 2600 : 1400 });
   await page.clock.install({ time: NOW });
   await serveApi(page);
+  await serveOwnerKey(page);
   await page.addInitScript(({ lang, skin, dir }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', skin);
@@ -89,8 +103,11 @@ async function openMachines(page: Page, look: Look): Promise<void> {
   await page.route('**/api/org', route => route.fulfill({ json: org }));
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: MACHINES, builtin: BUILTIN, priority: true, move: null, canMove: true, copies: { leader: SERVER, copies: [{ hostname: BACKUP, sync: true }], onlySince: null } } }));
   await page.route('**/api/machines/*/connections', route => route.fulfill({ json: HISTORY[new URL(route.request().url()).pathname.split('/')[3]!] }));
-  await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [] } }));
-  await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [] } }));
+  await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: SUBS } }));
+  /* Once made, the core's command is among the shown ones the screen reloads, as the server keeps it. */
+  let made = false;
+  await page.route('**/api/machines/m3/core', route => { made = true; return route.fulfill({ json: CORE_SHOWN }); });
+  await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: made ? [CORE_SHOWN] : [] } }));
   await page.route('**/api/machines/access', route => route.fulfill({ json: { views: [] } }));
   await page.goto('/');
   await page.getByRole('navigation').getByRole('button', { name: messages[look.lang].shell.tabs.machines, exact: true }).click();
@@ -129,6 +146,23 @@ async function overlaps(card: Locator): Promise<string[]> {
       if (x > 1 && y > 1) out.push(`${a.className} over ${b.className}`);
     }));
     return out;
+  });
+}
+
+/* A group of buttons that wraps goes on from the same edge: each of its rows ends on the group's end edge. */
+async function rowsOffEdge(group: Locator): Promise<string[]> {
+  return group.evaluate(el => {
+    const rtl = getComputedStyle(el).direction === 'rtl';
+    const edge = el.getBoundingClientRect();
+    const rows = new Map<number, DOMRect[]>();
+    for (const button of el.children) {
+      const box = button.getBoundingClientRect();
+      rows.set(Math.round(box.top), [...(rows.get(Math.round(box.top)) ?? []), box]);
+    }
+    return [...rows].flatMap(([top, boxes]) => {
+      const short = rtl ? Math.min(...boxes.map(b => b.left)) - edge.left : edge.right - Math.max(...boxes.map(b => b.right));
+      return Math.abs(short) > 1 ? [`row at ${top} ends ${Math.round(short)}px before the end`] : [];
+    });
   });
 }
 
@@ -183,8 +217,11 @@ for (const look of LOOKS) {
       await expect(card.locator('.mc-blk .machine-note')).toHaveCount(0);
 
       const owner = card.getByRole('region', { name: c.ownerBlock });
-      await expect(owner.getByRole('button', { name: t.machines.disconnectLabel(host), exact: true })).toBeVisible();
-      if (host === NODE) await expect(owner.getByRole('button', { name: t.machines.makeCore(host), exact: true })).toBeVisible();
+      const actions = owner.locator('.entry-actions');
+      const offered = { [SERVER]: [t.machines.disconnect], [BACKUP]: [t.machines.addPlan, t.machines.disconnect], [NODE]: [t.machines.addPlan, t.machines.makeCore(host), t.machines.disconnect] }[host]!;
+      await expect(actions.getByRole('button')).toHaveText(offered);
+      expect(await actions.evaluate(group => group.previousElementSibling?.matches('dl.facts'))).toBe(true);
+      expect(await rowsOffEdge(actions)).toEqual([]);
       if (host === BACKUP) {
         const server = card.getByRole('region', { name: c.serverBlock });
         await expect(server.getByRole('radiogroup', { name: c.priority })).toBeVisible();
@@ -204,6 +241,25 @@ for (const look of LOOKS) {
       expect(await columns(card)).toBe(look.width === 375 ? 1 : lower.length);
       measured.push({ browser: browserName, look: lookName(look), screen: host === NODE ? 'node' : host, sizes: await lowerSizes(card) });
       await shoot(page, card, info, `card-${host === NODE ? 'node' : host}-${lookName(look)}-${browserName}.png`);
+
+      if (host === NODE) {
+        /* The core's command: Copy under each line of it, on the end edge, a button of 44 px. */
+        await owner.getByRole('button', { name: t.machines.makeCore(host), exact: true }).click();
+        const shown = card.locator('.add-plan');
+        await expect(shown.locator('code').first()).toContainText('--owner-key');
+        for (const line of await shown.locator('.command').all()) {
+          const [code, group] = [line.locator('code'), line.locator('.entry-actions')];
+          await expect(group.getByRole('button')).toHaveText([t.common.copy]);
+          const [codeBox, groupBox] = [(await code.boundingBox())!, (await group.boundingBox())!];
+          expect(groupBox.y).toBeGreaterThanOrEqual(codeBox.y + codeBox.height);
+          expect(await rowsOffEdge(group)).toEqual([]);
+          expect.soft(await offences(line, { danger: [], groups: '.entry-actions' })).toEqual([]);
+        }
+        expect.soft(await spills(card)).toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+        measured.push({ browser: browserName, look: lookName(look), screen: 'core command', sizes: await sizes(shown, { command: '.command', code: '.command code', copy: '.command .entry-actions > .btn' }) });
+        await shoot(page, shown, info, `command-node-${lookName(look)}-${browserName}.png`);
+      }
 
       if (host === BACKUP) {
         /* The technical details of the drops, when asked for, under each line. */
