@@ -95,11 +95,11 @@ async function windowCycle(page: Page) {
   await expect(page.locator('.map .dept')).toHaveCount(COMPANY.departments.length);
 }
 
-/* The company settings open from the account menu and close. */
+/* Settings open from the account menu and close. */
 async function formCycle(page: Page) {
   await page.getByRole('button', { name: 'Account', exact: true }).click();
-  await page.getByRole('button', { name: 'Company settings', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Company settings', exact: true });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);

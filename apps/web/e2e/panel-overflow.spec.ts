@@ -229,7 +229,7 @@ for (const lang of ['en', 'ru'] as const) {
       test(`Settings link and remove actions stay readable: ${look}`, async ({ page }, info) => {
         const errors = await prepareRoutes(page, lang, theme, width);
         await page.route('**/api/link', route => route.fulfill({ json: { link: { name: 'evidence', url: LONG_URL }, domain: 'example.invalid' } }));
-        await page.goto('/settings');
+        await page.goto('/settings/company');
         const dialog = page.getByRole('dialog', { name: m.settings.title, exact: true });
         await expect(dialog).toBeVisible();
         await dialog.getByRole('button', { name: m.settings.remove, exact: true }).click();

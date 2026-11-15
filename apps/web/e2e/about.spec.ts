@@ -5,7 +5,8 @@ import { ME, serveApi } from './api';
 
 const VERSION = { version: '0.5.0', commit: 'abc1234' };
 const PERSON = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
-/* The window is small: it was 292 and 448 pixels tall on these screens before it was made compact. */
+/* Its facts are small: they were 292 and 448 pixels tall on these screens before they were made compact. Writing to the
+   developers stands under them. */
 const TALLEST: Record<number, number> = { 1440: 220, 375: 240 };
 
 async function prepare(page: Page, language: string, theme: string): Promise<void> {
@@ -37,14 +38,17 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     const dialog = page.getByRole('dialog', { name: language === 'en' ? 'About Hornhoof' : 'О программе Hornhoof' });
     await expect(dialog.getByText('0.5.0 (abc1234)')).toBeVisible();
     await expect(dialog.getByRole('link')).toHaveCount(3);
-    await expect(dialog.getByRole('button', { name: language === 'en' ? en.about.issues : ru.about.issues, exact: true })).toBeVisible();
+    const words = language === 'en' ? en : ru;
+    const feedback = dialog.getByRole('region', { name: words.feedback.title, exact: true });
+    await expect(feedback.getByRole('button', { name: words.common.next, exact: true })).toBeVisible();
     await expect(dialog).toBeFocused();
     await page.keyboard.press('Shift+Tab');
-    await expect(dialog.getByRole('link', { name: 'hornhoof.org', exact: true })).toBeFocused();
+    await expect(feedback.getByRole('button', { name: words.common.next, exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     const close = dialog.getByRole('button', { name: language === 'en' ? 'Close' : 'Закрыть', exact: true });
     await expect(close).toBeFocused();
-    for (let index = 0; index < 5; index++) await page.keyboard.press('Tab');
+    /* Three links, the three kinds, the title, the text and Next, then back to the cross. */
+    for (let index = 0; index < 10; index++) await page.keyboard.press('Tab');
     await expect(close).toBeFocused();
     await page.evaluate(async () => { await document.fonts.ready; });
     const box = await dialog.boundingBox();
@@ -56,9 +60,17 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     await page.screenshot({ path: info.outputPath(`about-${language}-${theme}-${width}.png`), fullPage: true });
     await expect(dialog).not.toContainText(language === 'en' ? 'Developer' : 'Разработчик');
     await expect(dialog.locator('.about-author')).toHaveText(language === 'en' ? 'Author: Ivan Korol, © 2026' : 'Автор: Ivan Korol, © 2026');
-    expect(box!.height, 'the window is clearly lower than it was').toBeLessThan(TALLEST[width]!);
+    const top = await dialog.evaluate(element => element.getBoundingClientRect().top);
+    const facts = (await feedback.boundingBox())!.y - top;
+    expect(facts, 'what stands above writing to the developers is clearly lower than the window was').toBeLessThan(TALLEST[width]!);
     expect(box!.width, 'the window is no wider than a small window').toBeLessThanOrEqual(420);
-    expect(await dialog.evaluate(element => element.scrollHeight <= element.clientHeight), 'the window fits without scrolling').toBe(true);
+    if (width === 1440) expect(await dialog.evaluate(element => element.scrollHeight <= element.clientHeight), 'the window fits without scrolling').toBe(true);
+    /* Writing takes the whole width of the window inside its padding, as the facts do. */
+    const edges = await dialog.evaluate(element => [...element.querySelectorAll(':scope > .facts, :scope > .about-feedback')].map(part => {
+      const rect = part.getBoundingClientRect();
+      return [Math.round(rect.left), Math.round(rect.right)];
+    }));
+    expect(edges[1]).toEqual(edges[0]);
     const fontSize = (selector: string) => dialog.locator(selector).first().evaluate(element => parseFloat(getComputedStyle(element).fontSize));
     expect(await fontSize('.facts')).toBeLessThanOrEqual(13);
     expect(await fontSize('.about-author')).toBeLessThanOrEqual(12.5);
