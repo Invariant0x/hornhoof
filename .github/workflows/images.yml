@@ -38,11 +38,13 @@ jobs:
   # Without one, this job chooses the tests, as an author's check does (.hornhoof/author-check.md): those the change since
   # the nearest commit whose tests passed reaches. A change the selector cannot tell, or one that reaches every suite whole,
   # runs the whole suite, and so does a choice that fails.
-  # While the repository is private, the repository variable TESTS_RUNS_ON, a JSON list of runner labels, can send this
-  # job and the tests to our own runners; without it they run on GitHub's machines. Remove the variable before the
-  # repository goes public: a pull request from anyone would otherwise run its code on our machine.
+  # The repository variable TESTS_RUNS_ON, a JSON list of runner labels, can send this job and the tests to our own
+  # runners; without it they run on GitHub's machines. A pull request from a fork runs on GitHub's machines whatever the
+  # variable says, as every job here with a runner from a variable does, so code from outside never runs on ours. A fork
+  # can still change this file in its own pull request, so the repository's settings must also hold the runs of pull
+  # requests from outside until a maintainer approves them.
   mark:
-    runs-on: ${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       statuses: read
@@ -88,7 +90,7 @@ jobs:
     needs: mark
     # A first job that failed leaves no answer, so the whole suite runs.
     if: ${{ !cancelled() && needs.mark.outputs.proved != 'true' }}
-    runs-on: ${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -155,7 +157,7 @@ jobs:
   passed:
     needs: [mark, test]
     if: ${{ needs.test.result == 'success' && github.event_name != 'pull_request' }}
-    runs-on: ${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       statuses: write
@@ -171,10 +173,11 @@ jobs:
   # The tests against real Postgres and against Pebble, Let's Encrypt's test CA, start their servers in Docker and stay
   # out of the suite above. Our own test runners have no Docker daemon, so this job runs only where the repository
   # variable REAL_RUNS_ON names a runner that has one, and is left out while it names none: until then
-  # `npm run test:real` is run by hand before a merge, and its result is named in the pull request.
+  # `npm run test:real` is run by hand before a merge, and its result is named in the pull request. A pull request from a
+  # fork runs it on GitHub's machines, which have Docker.
   test-real:
     if: ${{ vars.REAL_RUNS_ON != '' }}
-    runs-on: ${{ vars.REAL_RUNS_ON && fromJSON(vars.REAL_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.REAL_RUNS_ON && fromJSON(vars.REAL_RUNS_ON) || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -192,10 +195,10 @@ jobs:
     needs: [mark, test]
     # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
-    # While the repository is private, the repository variable BUILD_RUNS_ON can send the image, publish and release jobs
-    # to our own runner, and BUILDKIT_ENDPOINT names the BuildKit those jobs build with there. Remove both before the
-    # repository goes public, together with TESTS_RUNS_ON.
-    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    # The repository variable BUILD_RUNS_ON can send the image, publish and release jobs to our own runner, and
+    # BUILDKIT_ENDPOINT names the BuildKit those jobs build with there. These jobs run only for a push to main or a run by
+    # hand, never for a pull request, and their runner keeps a pull request from a fork on GitHub's machines as well.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -289,7 +292,7 @@ jobs:
     needs: [mark, test, images]
     # Tests the mark left out count as passed here too.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.images.result == 'success' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
-    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -374,7 +377,7 @@ jobs:
     needs: publish
     # Tests skipped further back would skip this job too, so it asks only that the images went out.
     if: ${{ !cancelled() && needs.publish.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: write
       actions: write

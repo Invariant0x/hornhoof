@@ -89,7 +89,7 @@ test('a version is released only after its images went out', () => {
 });
 
 test('the publish job moves tags on the runner and with the BuildKit the build variables name, as the images are built', () => {
-  assert.match(images.publish, /runs-on: \$\{\{ vars\.BUILD_RUNS_ON && fromJSON\(vars\.BUILD_RUNS_ON\) \|\| 'ubuntu-latest' \}\}\n/);
+  assert.match(images.publish, /runs-on: \$\{\{ \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && vars\.BUILD_RUNS_ON && fromJSON\(vars\.BUILD_RUNS_ON\) \|\| 'ubuntu-latest' \}\}\n/);
   assert.match(images.publish, /driver: \$\{\{ vars\.BUILDKIT_ENDPOINT && 'remote' \|\| 'docker-container' \}\}\n\s+endpoint: \$\{\{ vars\.BUILDKIT_ENDPOINT \}\}\n/);
 });
 

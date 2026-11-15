@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -14,9 +14,11 @@ import { listenIn } from '../../../test-support/ports.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const SCRIPT = join(ROOT, 'scripts/tests-mark.mjs');
 const WORKFLOW = readFileSync(join(ROOT, '.github/workflows/images.yml'), 'utf8');
-/* The runners the repository variable names, GitHub's machines without it. */
-const TESTS_RUNS_ON = "${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}";
-const BUILD_RUNS_ON = "${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}";
+/* The runners the repository variable names, GitHub's machines without it, and always for a pull request from a fork. */
+const TRUSTED = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
+const runsOn = (variable: string) => `\${{ ${TRUSTED} && vars.${variable} && fromJSON(vars.${variable}) || 'ubuntu-latest' }}`;
+const TESTS_RUNS_ON = runsOn('TESTS_RUNS_ON');
+const BUILD_RUNS_ON = runsOn('BUILD_RUNS_ON');
 const BUILDER = { driver: "${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}", endpoint: '${{ vars.BUILDKIT_ENDPOINT }}' };
 const run = promisify(execFile);
 const IDENTITY = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' };
@@ -359,7 +361,7 @@ describe('.github/workflows/images.yml', () => {
     for (const name of ['mark', 'passed']) expect(JOBS[name]!['runs-on']).toBe(TESTS_RUNS_ON);
     /* The tests against real Postgres and Pebble start their servers in Docker, which our own test runners lack: they
        run only where a variable of their own names a runner that has a daemon, and are left out while it names none. */
-    expect(JOBS['test-real']!['runs-on']).toBe("${{ vars.REAL_RUNS_ON && fromJSON(vars.REAL_RUNS_ON) || 'ubuntu-latest' }}");
+    expect(JOBS['test-real']!['runs-on']).toBe(runsOn('REAL_RUNS_ON'));
     expect(JOBS['test-real']!.if).toBe("${{ vars.REAL_RUNS_ON != '' }}");
     for (const name of ['images', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
     expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'passed', 'publish', 'release', 'test', 'test-real']);
@@ -381,5 +383,49 @@ describe('.github/workflows/images.yml', () => {
     expect(steps[0]!.with).toEqual({ 'fetch-depth': 0 });
     expect(steps[1]).toEqual({ id: 'mark', env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }, run: 'node scripts/tests-mark.mjs' });
     expect(steps.filter(step => step.env?.GITHUB_TOKEN).map(step => step.id)).toEqual(['mark', 'select']);
+  });
+});
+
+/* Where a job runs, as GitHub reads its runs-on: a property that is not there is null, a variable that is not set is empty. */
+const RUNNER_VARS = ['TESTS_RUNS_ON', 'BUILD_RUNS_ON', 'REAL_RUNS_ON'];
+function runnerOf(expression: string, event_name: string, event: unknown, set: string): unknown {
+  if (!expression.startsWith('${{')) return expression;
+  const body = expression.replace(/^\$\{\{|\}\}$/g, '').trim().replace(/\.(?=[A-Za-z_])/g, '?.');
+  const vars = Object.fromEntries([...RUNNER_VARS, 'BUILDKIT_ENDPOINT'].map(name => [name, RUNNER_VARS.includes(name) ? set : '']));
+  return runInNewContext(body, { github: { event_name, repository: 'acme/shop', event }, vars, fromJSON: (text: string) => JSON.parse(text) as unknown });
+}
+
+const WORKFLOWS = readdirSync(join(ROOT, '.github/workflows')).filter(name => /\.ya?ml$/.test(name)).sort();
+const jobsOf = (name: string) => Object.entries((parse(readFileSync(join(ROOT, '.github/workflows', name), 'utf8')) as { jobs: Record<string, Job> }).jobs);
+const OWN = '["own", "x64"]';
+
+describe('the runners of every workflow', () => {
+  it.each(WORKFLOWS)('%s runs a pull request from a fork on GitHub’s machines, whatever the variables name', name => {
+    for (const [job, { 'runs-on': runs }] of jobsOf(name)) {
+      for (const [what, event] of [['a fork', FROM_FORK], ['a fork that is gone', FROM_GONE_FORK]] as const) {
+        expect(runnerOf(runs, 'pull_request', event, OWN), `${job}, ${what}`).toBe('ubuntu-latest');
+      }
+    }
+  });
+
+  it('sends a push, a run by hand and a pull request from a branch of this repository where the variables say, and to GitHub’s machines without them', () => {
+    for (const name of WORKFLOWS) {
+      for (const [job, { 'runs-on': runs }] of jobsOf(name)) {
+        if (!/vars\./.test(runs)) continue;
+        for (const [event_name, event] of [['push', PUSH], ['workflow_dispatch', PUSH], ['pull_request', FROM_BRANCH]] as const) {
+          expect(runnerOf(runs, event_name, event, OWN), `${name} ${job} ${event_name}`).toEqual(['own', 'x64']);
+          expect(runnerOf(runs, event_name, event, ''), `${name} ${job} ${event_name} without variables`).toBe('ubuntu-latest');
+        }
+      }
+    }
+  });
+
+  it('starts no workflow on pull_request_target or workflow_run, which would run code of a pull request with the rights of this repository', () => {
+    for (const name of WORKFLOWS) {
+      const on = (parse(readFileSync(join(ROOT, '.github/workflows', name), 'utf8')) as { on: unknown }).on;
+      const events = typeof on === 'string' ? [on] : Array.isArray(on) ? on : Object.keys(on as object);
+      expect(events, name).not.toContain('pull_request_target');
+      expect(events, name).not.toContain('workflow_run');
+    }
   });
 });

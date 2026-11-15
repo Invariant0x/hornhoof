@@ -19,7 +19,7 @@ concurrency:
 jobs:
   send:
     # Our build runner, as for the release: its image carries the SSH client this job needs.
-    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     steps:
       - name: Find the latest release
         id: latest
