@@ -2,7 +2,7 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
-import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
+import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import type { JobView, Me, ShownCommand, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { CommandBox, type ActiveCommand } from '../ui/CommandBox';
@@ -18,6 +18,10 @@ import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { LimitCell, LimitMeters } from '../ui/PlanLimits';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
+import { ApiForm } from '../ui/ApiForm';
+import { TokenGauges } from '../ui/Tokens';
+import { tokenCount } from '../ui/token-count';
+import { Edge } from '../ui/Edge';
 import { clock, limitState, planStateOnMachine, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
 import { PlanSteps } from '../ui/PlanSteps';
 import { replaceSubscription } from './subscription-list';
@@ -80,14 +84,47 @@ function SubscriptionStatus({ sub, now, showUntil = false }: { sub: SubView; now
   return <><span className={`status ${state}`}>{state === 'limit' ? t.subs.limitReached(null) : t.subs.states[state]}</span>{at && <small className="until">{t.cards.until(at)}</small>}</>;
 }
 
+/* The sign of how a connection is paid: arrows going round for a subscription, a stack of coins for tokens. */
+function PaySign({ kind }: { kind: SubView['kind'] }) {
+  return <svg className="sign" viewBox="0 0 24 24" aria-hidden="true">{kind === 'api_key'
+    ? <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>
+    : <><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9" /><path d="M20 4v5h-5" /><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15" /><path d="M4 20v-5h5" /></>}</svg>;
+}
+
+/* How the connection is paid: a plan by its subscription, an API by the tokens its agents use. The word and its sign
+   tell it; the mark keeps the ink of the page. */
+function PayBadge({ sub: s }: { sub: SubView }) {
+  const t = useT();
+  return <span className={`badge ctype ${s.kind === 'api_key' ? 'pay-tokens' : 'pay-plan'}`}><PaySign kind={s.kind} />{t.subs.pay[s.kind]}</span>;
+}
+
+/* The mark of the orchestrator's connection, in the quiet ink: it is a role, not an alarm. */
+function OrchestratorBadge() {
+  const t = useT();
+  return <span className="badge orch-role">{t.subs.orchestrator}</span>;
+}
+
+/* What the connection's turns used in 30 days, or nothing from an older server. */
+function TokensCell({ sub: s }: { sub: SubView }) {
+  const { language } = useLanguage();
+  return s.tokens ? <span className="num">{tokenCount(language, s.tokens.month.total)}</span> : null;
+}
+
+/* A limit's column. An API has no plan limits: it says so once across both limit columns, under the name of both. */
+function limitColumn(t: Messages, now: number, key: string): TableColumn<SubView> {
+  const span = key === 'five_hour' ? (s: SubView) => (s.kind === 'api_key' ? { columns: 2, label: t.subs.limits } : null) : undefined;
+  return { key, label: windowName(t, key), direction: -1, value: s => windowUsage(s, key, now), cell: s => <LimitCell sub={s} name={key} now={now} />, span };
+}
+
 function subscriptionColumns(t: Messages, now: number): TableColumn<SubView>[] {
   return [
-    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [subName(t, s), s.owner.name], cell: s => <><span className="nmg"><ProviderMark provider={s.provider} /><span className="nm"><b>{subName(t, s)}</b>{s.tier && <small>{s.tier}</small>}</span></span>{s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>}</> },
+    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [subName(t, s), s.owner.name], cell: s => <><span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><b>{subName(t, s)}</b>{s.tier && <small>{s.tier}</small>}</span></span><PayBadge sub={s} />{s.isOrchestrator && <OrchestratorBadge />}</> },
     { key: 'owner', label: t.tables.owner, direction: 1, value: s => s.owner.name, cell: s => s.owner.name },
     { key: 'status', label: t.tables.status, direction: 1, value: s => STATUS_ORDER.indexOf(stateOf(s, now)), className: 'k-status', cell: s => <SubscriptionStatus sub={s} now={now} showUntil /> },
     { key: 'serves', label: t.tables.serves, direction: 1, value: s => [s.place.kind === 'company' ? 0 : 1, s.place.name], cell: s => s.place.kind === 'company' ? t.people.wholeCompany : s.place.name },
     { key: 'machines', label: t.subs.columns.machine, direction: -1, value: s => s.kind === 'api_key' ? null : s.machines.length, cell: s => <MachinesCell sub={s} /> },
-    ...['five_hour', 'seven_day'].map(key => ({ key, label: windowName(t, key), direction: -1 as const, value: (s: SubView) => windowUsage(s, key, now), cell: (s: SubView) => <LimitCell sub={s} name={key} now={now} /> })),
+    ...['five_hour', 'seven_day'].map(key => limitColumn(t, now, key)),
+    { key: 'tokens', label: t.subs.tokensColumn, direction: -1, value: s => s.tokens?.month.total ?? null, cell: s => <TokensCell sub={s} /> },
     { key: 'agents', label: t.tables.agents, direction: -1, value: s => agentAmounts(s.agents ?? []), cell: s => <AgentsCell agents={s.agents ?? []} /> },
   ];
 }
@@ -152,15 +189,18 @@ function PlanAccount({ sub: s }: { sub: SubView }) {
 
 function subscriptionFilters(t: Messages, now: number, subs: SubView[]): FilterGroup<SubView>[] {
   const labels: Record<string, string> = { ...t.subs.states, limit: t.subs.limitReached(null) };
-  return [
+  const groups: FilterGroup<SubView>[] = [
+    { key: 'pay', label: t.subs.payFilter, values: s => [s.kind], text: kind => t.subs.pay[kind as SubView['kind']] ?? kind, mark: kind => <PaySign kind={kind as SubView['kind']} /> },
     providerFilter(t.tables.provider, s => [s.provider]),
     { key: 'owner', label: t.tables.owner, values: s => [s.owner.id], text: id => subs.find(s => s.owner.id === id)?.owner.name ?? id },
     { key: 'status', label: t.tables.status, values: s => [stateOf(s, now)], text: value => labels[value] ?? value },
   ];
+  /* Each group starts with All, as the Type one does. */
+  return groups.map(group => ({ ...group, all: t.tables.all }));
 }
 
 function subscriptionSearch(t: Messages, language: Language, s: SubView): string {
-  return [subName(t, s), s.last4, PROGRAM_NAMES[s.provider], s.owner.name, s.place.kind === 'company' ? t.people.wholeCompany : s.place.name, s.tier, ...s.accounts.map(a => a.email), ...s.machines.map(m => m.hostname), ...(s.agents ?? []).flatMap(a => [a.name, a.title?.[language]])].join(' ');
+  return [subName(t, s), s.last4, programName(s), s.owner.name, s.place.kind === 'company' ? t.people.wholeCompany : s.place.name, s.tier, ...s.accounts.map(a => a.email), ...s.machines.map(m => m.hostname), ...(s.agents ?? []).flatMap(a => [a.name, a.title?.[language]])].join(' ');
 }
 
 function finished(t: Messages, language: Language, sub: SubView, job: JobView): Test {
@@ -206,6 +246,9 @@ type PlanControls = {
   makeOrchestrator: (sub: SubView) => unknown;
   signIn: (sub: SubView, fresh: boolean) => unknown;
   setKeyFor: (id: string | null) => void;
+  editing: boolean;
+  setEditFor: (id: string | null) => void;
+  saved: (sub: SubView) => void;
   newCommand: (sub: SubView) => unknown;
   setConfirm: (id: string | null) => void;
   remove: (sub: SubView) => unknown;
@@ -252,6 +295,13 @@ function KeyButton({ sub: s, me, controls: c }: PlanProps) {
   return <button className="act" type="button" aria-label={t.subs.pasteKeyLabel(subName(t, s))} onClick={() => c.setKeyFor(s.id)}>{t.subs.pasteKey}</button>;
 }
 
+/* Company scope changes an API connection's name, models and place. */
+function EditButton({ sub: s, me, controls: c }: PlanProps) {
+  const t = useT();
+  if (s.kind !== 'api_key' || me.person.scopeKind !== 'company' || c.editing) return null;
+  return <button className="act" type="button" aria-label={t.subs.editApiLabel(subName(t, s))} onClick={() => c.setEditFor(s.id)}>{t.subs.editApi}</button>;
+}
+
 function RemoveButtons({ sub: s, me, controls: c }: PlanProps) {
   const t = useT();
   const name = subName(t, s);
@@ -262,7 +312,7 @@ function RemoveButtons({ sub: s, me, controls: c }: PlanProps) {
 }
 
 function PlanButtons(props: PlanProps) {
-  return <div className="machine-actions"><TestButtons {...props} /><SignInButton {...props} /><KeyButton {...props} /><RemoveButtons {...props} /></div>;
+  return <div className="machine-actions"><TestButtons {...props} /><EditButton {...props} /><SignInButton {...props} /><KeyButton {...props} /><RemoveButtons {...props} /></div>;
 }
 
 function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
@@ -270,6 +320,7 @@ function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
   return <>
     {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} />}
     {c.keying && isKeyPlan(s.provider) && <KeyForm sub={{ ...s, provider: s.provider }} onDone={c.done} onCancel={() => c.setKeyFor(null)} />}
+    {c.editing && s.kind === 'api_key' && <ApiForm sub={s} onSaved={c.saved} onCancel={() => c.setEditFor(null)} />}
   </>;
 }
 
@@ -347,6 +398,7 @@ function PlanWorking({ sub: s, me, controls, now }: PlanProps & { now: number })
     <section className="blk blk-facts">
       <h4>{t.cards.aboutPlan}</h4>
       <Part title={t.subs.limits}><LimitMeters sub={s} now={now} /></Part>
+      <Part title={t.subs.tokens.title}><TokenGauges sub={s} /></Part>
       <PlanAccount sub={s} />
     </section>
     <RunningNow title={t.cards.agentsOn} label={t.cards.agentsOn} agents={s.agents ?? []} me={me} plan />
@@ -368,7 +420,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   const name = subName(t, s);
   return (
     <CardFrame label={`${name}, ${s.owner.name}`} accent={s.isOrchestrator}
-      head={<CardHead mark={<ProviderMark provider={s.provider} />} name={name} tier={s.tier} badges={s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
+      head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={name} tier={s.tier} badges={<><PayBadge sub={s} />{s.isOrchestrator && <OrchestratorBadge />}</>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
       extra={<PlanExtra sub={s} controls={controls} />}>
       {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>
@@ -387,6 +439,8 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   /* Why the last sign-in of a plan did not finish. */
   const [signNote, setSignNote] = useState<SignNote | null>(null);
   const [keyFor, setKeyFor] = useState<string | null>(null);
+  const [editFor, setEditFor] = useState<string | null>(null);
+  const [connectingApi, setConnectingApi] = useState(false);
   const live = useRef(true);
   const polls = useRef(new Map<ReturnType<typeof setTimeout>, () => void>());
   useEffect(() => {
@@ -487,14 +541,24 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
           <h1>{t.subs.heading}</h1>
           <p className="muted">{t.subs.intro}</p>
         </div>
-        {!connecting && (
+        {(!connecting || !connectingApi) && (
           <div className="head-actions">
-            <button className="btn" type="button" onClick={() => setConnecting(true)}>{t.subs.connect}</button>
+            {!connecting && <button className="btn" type="button" onClick={() => setConnecting(true)}>{t.subs.connect}</button>}
+            {!connectingApi && me.person.scopeKind === 'company' && <button className="btn ghost" type="button" onClick={() => setConnectingApi(true)}>{t.subs.connectApi}</button>}
           </div>
         )}
       </header>
 
       {connecting && <ConnectPanel onCommand={onConnected} onDone={() => setConnecting(false)} onSkip={() => setConnecting(false)} skipLabel={t.common.cancel} />}
+      {connectingApi && (
+        <Edge className="panel form-card" cut={12}>
+          <div className="form-head">
+            <h2 className="form-title">{t.subs.connectApi}</h2>
+            <p className="muted">{t.subs.apiIntro}</p>
+          </div>
+          <ApiForm onSaved={() => { setConnectingApi(false); void load(); }} onCancel={() => setConnectingApi(false)} />
+        </Edge>
+      )}
       <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
@@ -505,7 +569,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
           columns={subscriptionColumns(t, now)}
           name={s => subName(t, s)}
           initialSort={{ key: 'status', direction: 1 }}
-          search={{ placeholder: t.tables.searchSubscriptions, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount }}
+          search={{ placeholder: t.tables.searchSubscriptions, short: t.tables.searchSubscriptionsShort, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount }}
           filters={subscriptionFilters(t, now, subs)}
           card={s => <SubscriptionDetails sub={s} me={me} now={now} controls={{
             command: commands ? commandForPlan(commands, s, now) : undefined,
@@ -513,6 +577,8 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             signing: signing?.subId === s.id ? signing : null,
             note: signNote?.subId === s.id ? signNote : null,
             keying: keyFor === s.id,
+            editing: editFor === s.id, setEditFor,
+            saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); },
             setBudget, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn,
             done: () => { setKeyFor(null); void load(); },
           }} />}

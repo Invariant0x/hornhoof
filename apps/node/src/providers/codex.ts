@@ -2,7 +2,7 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { API_MODELS, type AgentEvent, type ApiEndpoint, type Limits, type ModelOption, type TurnTokens } from '@hornhoof/protocol';
 import { readAccount } from '../account.js';
 import type { JobUser } from '../isolation.js';
 import { toldPlace } from '../program-folder.js';
@@ -11,10 +11,20 @@ import { withProgramExit } from '../program-exit.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine } from './events.js';
 import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 import { CODEX_NO_AUTO_UPDATE } from './session-updates.js';
+import { addTokens, openaiTokens } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
 
-/* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
-type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
+/* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node, or a key of an API by the token at an address
+   in OpenAI's protocol. */
+type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null; api?: ApiEndpoint | null };
+
+/* Codex at an address of OpenAI's protocol, as a provider of its own: it reads the key from the env variable it names,
+   never from the command line, and talks the Responses API, which Codex runs on. */
+const ENDPOINT_KEY = 'HH_API_KEY';
+function endpointArgs(api: ApiEndpoint): string[] {
+  const set = (key: string, value: string) => ['-c', `model_providers.hornhoof.${key}=${JSON.stringify(value)}`];
+  return ['-c', 'model_provider="hornhoof"', ...set('name', 'API'), ...set('base_url', api.baseUrl), ...set('env_key', ENDPOINT_KEY), ...set('wire_api', 'responses')];
+}
 
 /* Codex reads AGENTS.md only up to project_doc_max_bytes, 32 KiB unless set. A mebibyte holds the longest instructions
    at four bytes a character, and the conversation from before that a live session's AGENTS.md carries too. */
@@ -130,12 +140,13 @@ function cachedModels(file: string): ModelOption[] {
 /* Codex lists each level as an object with its name and a description for its picker. */
 const levels = (value: unknown) => (Array.isArray(value) ? value.map(l => (isRecord(l) ? l.effort : null)) : []);
 
-export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), secret = null, mode, user = null }: Options): ProviderAdapter {
+export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), secret = null, mode, user = null, api = null }: Options): ProviderAdapter {
   function env(jobSecret: string | null, toolToken: string | null = null): NodeJS.ProcessEnv {
     const extra: Record<string, string> = { CODEX_HOME: ensureDir(home) };
     /* A job user cannot write the node's own HOME, so its home is the key's folder. */
     if (user) extra.HOME = home;
-    if (mode === 'api_key') extra.CODEX_API_KEY = jobSecret ?? secret ?? '';
+    /* OpenAI's own key would send it to OpenAI, so a key of another address goes in its provider's variable alone. */
+    if (mode === 'api_key') extra[api ? ENDPOINT_KEY : 'CODEX_API_KEY'] = jobSecret ?? secret ?? '';
     if (toolToken) extra.HH_TOOL_TOKEN = toolToken;
     return childEnv(tools, extra);
   }
@@ -147,6 +158,8 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
 
     /* Codex keeps the models a plan offers in its home; the ones its picker shows are visibility "list". */
     async models() {
+      /* An API at an address runs the models its connection was given, which Hornhoof keeps. */
+      if (api) return [];
       if (mode === 'api_key') return API_MODELS.openai_api;
       return cachedModels(join(home, 'models_cache.json'));
     },
@@ -172,7 +185,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
     },
 
     async run(input: RunInput): Promise<RunResult> {
-      const model = [...(input.model ? ['-m', input.model] : []), ...(input.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(input.effort)}`] : [])];
+      const model = [...(api ? endpointArgs(api) : []), ...(input.model ? ['-m', input.model] : []), ...(input.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(input.effort)}`] : [])];
       /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
       const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
       const told = toldPlace('codex', input);
@@ -185,6 +198,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
       let answer = '';
       let completed = false;
       let failure = '';
+      let tokens: TurnTokens | null = null;
       const done = await runProgram({
         bin,
         args,
@@ -194,22 +208,25 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
         signal: input.signal,
         user,
         onLine(line) {
-          const ev = objectLine(line) as { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string } | null;
+          const ev = objectLine(line) as { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string; usage?: unknown } | null;
           if (!ev) return;
           for (const event of codexEvents(ev)) input.onEvent?.(event);
           if (ev.type === 'thread.started' && ev.thread_id) sessionId = ev.thread_id;
           if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') answer = ev.item.text ?? '';
-          if (ev.type === 'turn.completed') completed = true;
+          if (ev.type === 'turn.completed') {
+            completed = true;
+            tokens = addTokens(tokens, openaiTokens(ev.usage));
+          }
           if (ev.type === 'turn.failed') failure = ev.error?.message ?? 'The turn failed.';
           if (ev.type === 'error' && ev.message) failure = ev.message;
         },
       });
 
       const ended = withProgramExit(done.output, done);
-      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null };
-      if (completed && done.code === 0) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null };
+      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
+      if (completed && done.code === 0) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null, tokens };
       const error = SIGNED_OUT.test(failure || done.output) ? 'not_logged_in' : 'agent_failed';
-      return { ok: false, sessionId, result: answer, ...ended, error, limits: null };
+      return { ok: false, sessionId, result: answer, ...ended, error, limits: null, tokens };
     },
 
     async secrets() {

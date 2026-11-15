@@ -27,7 +27,7 @@ describe('shareable workspace', () => {
     fixture();
     render(<Shell me={ME} onSignOut={() => {}} />);
     const user = userEvent.setup();
-    for (const [name, path] of [['Tasks', '/tasks'], ['People', '/people'], ['Subscriptions', '/subscriptions'], ['Machines', '/machines'], ['Map', '/']]) {
+    for (const [name, path] of [['Tasks', '/tasks'], ['People', '/people'], ['Subscriptions & API', '/subscriptions'], ['Machines', '/machines'], ['Map', '/']]) {
       await user.click(tab(name!));
       expect(location.pathname).toBe(path);
     }
@@ -36,7 +36,7 @@ describe('shareable workspace', () => {
   it.each([
     ['/tasks', 'heading', 'Tasks'],
     ['/people', 'heading', 'People'],
-    ['/subscriptions', 'heading', 'Subscriptions'],
+    ['/subscriptions', 'heading', 'Subscriptions & API'],
     ['/machines', 'heading', 'Machines'],
     ['/improvements', 'heading', 'Improvements'],
     ['/versions', 'dialog', 'Versions'],

@@ -10,6 +10,7 @@ import { READY } from '../terminal/program-state.js';
 import { Tmux } from '../terminal/tmux.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
 import { agentDir, childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, runInstaller, runProgram, tokensIn, writePrivate } from './process.js';
+import { agyTokens } from '../turn-tokens.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null; person?: Person };
 
@@ -513,10 +514,12 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
       const final = result as Record<string, unknown> | null;
       const answer = typeof final?.response === 'string' ? final.response.trimEnd() : '';
       const ended = withProgramExit(done.output, done);
-      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null };
-      if (done.code === 0 && final?.status === 'SUCCESS') return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null };
+      /* The result tells what the whole turn used. */
+      const tokens = agyTokens(final?.usage);
+      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null, tokens };
+      if (done.code === 0 && final?.status === 'SUCCESS') return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null, tokens };
       const said = typeof final?.error === 'string' ? final.error : '';
-      return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(`${said}\n${done.output}`) ? 'not_logged_in' : 'agent_failed', limits: null };
+      return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(`${said}\n${done.output}`) ? 'not_logged_in' : 'agent_failed', limits: null, tokens };
     },
 
     async secrets() {

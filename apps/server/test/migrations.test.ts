@@ -348,9 +348,10 @@ describe('migration 0086 composable skills', () => {
       (${C}, 'worker', 'Existing developer', 'DEV-ENG', '', null, '["dev-tdd"]', '{"base":"Existing assignment."}', '{"DEV-ENG":"existing-hash"}', null),
       (${C}, 'worker', 'Other role', 'DEV-BE', '', null, '["dev-tdd"]', '{}', '{}', null),
       (${C}, 'worker', 'No role', null, '', null, '["retired-kept"]', '{"base":"Roleless assignment."}', '{}', null)`);
-    /* Later migrations add the machine of an employee's built-in node and each card's own inbox mode, empty on every row. */
+    /* Later migrations add the machine of an employee's built-in node and each card's own inbox mode, empty on every row,
+       and 0125 the address and protocol of an API connection, empty on every plan. */
     const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key' - 'builtin_machine' - 'inbox_mode')::text as data from agents a order by name`)).rows;
-    const plans = async () => (await db.execute<{ data: string }>(sql`select to_jsonb(s)::text as data from subscriptions s order by id`)).rows;
+    const plans = async () => (await db.execute<{ data: string }>(sql`select (to_jsonb(s) - 'base_url' - 'api_protocol')::text as data from subscriptions s order by id`)).rows;
     const before = { cards: await cards(), plans: await plans() };
 
     await migrate(db, { migrationsFolder: MIGRATIONS });

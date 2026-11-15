@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { toldPlace } from '../program-folder.js';
@@ -15,6 +15,7 @@ import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { machineLoad, programWorkers, type MachineLoad } from '../load.js';
 import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
+import { TurnTally } from '../turn-tokens.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls, type OpensCheck, type Outside } from './bridge.js';
@@ -79,7 +80,7 @@ type Turn = {
   signal?: AbortSignal;
   ref?: string;
   early?: AgentEvent[] | null;
-  over?: { message: string; error: JobError; sessionId: string | null; output: string; programOutput?: ProgramOutput; failure?: Failure } | null;
+  over?: { message: string; error: JobError; sessionId: string | null; output: string; programOutput?: ProgramOutput; failure?: Failure; tokens: TurnTokens | null } | null;
   toolToken?: string;
   opened?: Deferred<void>;
   /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
@@ -190,6 +191,8 @@ type Agent = {
   keep: string | null;
   /* Reads Antigravity's transcript, pairing its calls with their results. */
   agyRead: ReturnType<typeof agySteps> | null;
+  /* What the running turn used, as its program's log tells it. */
+  tally: TurnTally;
   /* The final planner response has no tools; earlier text is not the answer a stop waits for. */
   agyAnswered: boolean;
   /* Diagnostics visible before this invocation cannot classify its failure. */
@@ -572,7 +575,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -1437,7 +1440,7 @@ export class TerminalHost {
     if (job.input.tools && this.bridge.toolsRefusedSince(a.key, a.startedAt)) return await this.withoutTools(a, job);
     /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
     const output = message.trim() ? '' : await this.screen(job.key);
-    return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
+    return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits, tokens: a.tally.tokens() };
   }
 
   /* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
@@ -1527,7 +1530,7 @@ export class TerminalHost {
     if (ended && this.operator?.enabled(a.key)) this.operator.exited(a.key, programExitStatus(ended.programOutput));
     const details = ended?.output ?? output ?? await this.screen(job.key);
     const classified = failedError(error, detail, Boolean(this.operator?.failure(a.key)), ended?.output ?? null, job.signedOut);
-    return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: classified, ...failedDetail(error, detail, Boolean(ended), details), limits: a.limits };
+    return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: classified, ...failedDetail(error, detail, Boolean(ended), details), limits: a.limits, tokens: a.tally.tokens() };
   }
 
   /* While its program runs the host reads the agent's log and reports typed turns, ending them if the program is gone.
@@ -1687,6 +1690,7 @@ export class TerminalHost {
 
   private beginTurn(a: Agent): void {
     this.clearQuestion(a);
+    a.tally.begin();
     a.personWords = false;
     a.ends.begin();
     a.programTurnId = undefined;
@@ -1942,6 +1946,7 @@ export class TerminalHost {
       }
       this.called(a, data);
       if (a.program?.kind === 'claude') {
+        a.tally.claudeLine(data);
         if (wentOn(raw)) a.unanswered = null;
         this.dequeuedPrompt(a, raw);
         if (claudeInterrupted(data) && this.stopCounts(a)) this.interrupted(a);
@@ -1958,6 +1963,7 @@ export class TerminalHost {
         this.kimiNews(a, kimiWire(data), raw);
         continue;
       }
+      a.tally.codexLine(data);
       const news = codexRollout(data);
       if (news.typed !== undefined) this.codexTyped(a, news.typed);
       for (const e of news.events) this.emit(a, e);
@@ -2536,7 +2542,7 @@ export class TerminalHost {
     turn.opened?.resolve();
     /* It ended before Hornhoof named it. */
     if (turn.over) {
-      this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput, turn.over.failure);
+      this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput, turn.over.failure, turn.over.tokens);
     }
   }
 
@@ -2571,14 +2577,15 @@ export class TerminalHost {
     void this.planLimits(a);
     /* Hornhoof has not answered yet: the end goes out with its answer. */
     const detail = error && error !== 'cancelled' ? turn.ending?.failure ?? a.failure ?? failure('unknown', output) : undefined;
-    if (turn.early) turn.over = { message, error, sessionId: a.sessionId, output, programOutput, failure: detail };
-    else this.typedDone(turn, message, error, a.sessionId, output, programOutput, detail);
+    const tokens = a.tally.tokens();
+    if (turn.early) turn.over = { message, error, sessionId: a.sessionId, output, programOutput, failure: detail, tokens };
+    else this.typedDone(turn, message, error, a.sessionId, output, programOutput, detail, tokens);
   }
 
-  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput, failure?: Failure): void {
+  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput, failure?: Failure, tokens: TurnTokens | null = null): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
-    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
+    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, tokens, ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */

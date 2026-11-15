@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type Limits } from '@hornhoof/protocol';
+import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type ApiEndpoint, type Limits, type TurnTokens } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
@@ -11,12 +11,22 @@ import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
+import { anthropicTokens, claudeModel, withModel } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
 export type ClaudeMode = 'plan' | 'api_key' | 'glm';
 
-type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null };
+/* api: an API by the token at an address, in Anthropic's protocol, such as OpenRouter: a key there runs at that address. */
+type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null; api?: ApiEndpoint | null };
+
+/* Claude Code at an address of Anthropic's protocol, as OpenRouter has it run: the key is its bearer token and its own
+   Anthropic key is set empty, so it signs in nowhere else. Every alias names the model the turn runs, as such an API may
+   have none of Anthropic's names. */
+function endpointEnv(api: ApiEndpoint, key: string, model: string | null): Record<string, string> {
+  const aliases: Record<string, string> = model ? { ANTHROPIC_DEFAULT_OPUS_MODEL: model, ANTHROPIC_DEFAULT_SONNET_MODEL: model, ANTHROPIC_DEFAULT_HAIKU_MODEL: model } : {};
+  return { ANTHROPIC_BASE_URL: api.baseUrl, ANTHROPIC_AUTH_TOKEN: key, ANTHROPIC_API_KEY: '', ...aliases };
+}
 
 const GLM_ENV = {
   ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
@@ -45,7 +55,7 @@ export function limitsFrom(info: RateInfo): Limits {
   return { status, windows: windows.slice(0, 8), ...(unified.length ? { complete: true } : {}) };
 }
 
-type Outcome = { text: string; isError: boolean; sessionId: string | null };
+type Outcome = { text: string; isError: boolean; sessionId: string | null; tokens: TurnTokens | null };
 
 const TODO_STATES: Record<string, 'todo' | 'doing' | 'done'> = { pending: 'todo', in_progress: 'doing', completed: 'done' };
 
@@ -78,16 +88,17 @@ export function claudeInterrupted(line: unknown): boolean {
 
 export const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
 
-export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null }: Options): ProviderAdapter {
+export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null, api = null }: Options): ProviderAdapter {
   const keyFile = join(home, 'glm-key');
   /* The agents own the home, so the key is not read through a link they could put there. */
   const glmKey = () => readPrivate(keyFile)?.trim() ?? '';
 
-  function env(jobSecret: string | null): NodeJS.ProcessEnv {
+  function env(jobSecret: string | null, model: string | null = null): NodeJS.ProcessEnv {
     const extra: Record<string, string> = { CLAUDE_CONFIG_DIR: ensureDir(home), ...CLAUDE_NO_AUTO_UPDATE };
     /* A job user cannot write the node's own HOME, so its home is the key's folder. */
     if (user) extra.HOME = home;
-    if (mode === 'api_key') extra.ANTHROPIC_API_KEY = jobSecret ?? secret ?? '';
+    if (mode === 'api_key' && api) Object.assign(extra, endpointEnv(api, jobSecret ?? secret ?? '', model));
+    else if (mode === 'api_key') extra.ANTHROPIC_API_KEY = jobSecret ?? secret ?? '';
     if (mode === 'glm') Object.assign(extra, GLM_ENV, { ANTHROPIC_AUTH_TOKEN: glmKey() });
     /* A plan signed in once on another machine: its long token, which this node was given. */
     const token = mode === 'plan' ? planToken(home) : null;
@@ -102,6 +113,8 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
 
     /* Z.ai maps the aliases to its GLM models, so a GLM plan offers only the default. */
     async models() {
+      /* An API at an address runs the models its connection was given, which Hornhoof keeps. */
+      if (api) return [];
       return mode === 'plan' ? CLAUDE_ALIASES : mode === 'api_key' ? API_MODELS.anthropic_api : [];
     },
 
@@ -159,10 +172,11 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       let sessionId: string | null = input.sessionId;
       let limits: Limits | null = null;
       let signedOut = false;
+      let model: string | null = null;
       const done = await runProgram({
         bin,
         args,
-        env: { ...env(input.secret), ...input.env, ...compact },
+        env: { ...env(input.secret, input.model), ...input.env, ...compact },
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
@@ -171,11 +185,12 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
           const ev = objectLine(line);
           if (!ev) return;
           if (typeof ev.session_id === 'string') sessionId = ev.session_id;
+          model = claudeModel(ev, model);
           if (ev.type === 'assistant' && ev.error === 'authentication_failed') signedOut = true;
           if (ev.type === 'rate_limit_event' && ev.rate_limit_info) limits = limitsFrom(ev.rate_limit_info as RateInfo);
           /* A finished background task adds an empty result after the real one, which must not replace it. */
           const text = String(ev.result ?? '');
-          if (ev.type === 'result' && (text || ev.is_error === true || !result)) result = { text, isError: ev.is_error === true, sessionId };
+          if (ev.type === 'result' && (text || ev.is_error === true || !result)) result = { text, isError: ev.is_error === true, sessionId, tokens: withModel(anthropicTokens(ev.usage), model) };
           for (const event of claudeEvents(ev)) input.onEvent?.(event);
         },
       }).finally(() => {
@@ -185,12 +200,13 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       /* Assigned in onLine, which TypeScript does not follow. */
       const final = result as Outcome | null;
       const ended = withProgramExit(done.output, done);
-      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits };
-      if (final && !final.isError && done.code === 0) return { ok: true, sessionId, result: final.text, output: done.output, error: null, limits };
+      const tokens = final?.tokens ?? null;
+      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits, tokens };
+      if (final && !final.isError && done.code === 0) return { ok: true, sessionId, result: final.text, output: done.output, error: null, limits, tokens };
       const out = signedOut || SIGNED_OUT.test(final?.text ?? '');
       /* A GLM key Z.ai rejects is dropped, so the status says signed out and the next sign-in asks for a new key. */
       if (out && mode === 'glm') rmSync(keyFile, { force: true });
-      return { ok: false, sessionId, result: final?.text ?? '', ...ended, error: out ? 'not_logged_in' : 'agent_failed', limits };
+      return { ok: false, sessionId, result: final?.text ?? '', ...ended, error: out ? 'not_logged_in' : 'agent_failed', limits, tokens };
     },
 
     async secrets() {

@@ -1,11 +1,16 @@
-import { Fragment, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { guardedResizeObserver } from '../guard';
 import { useLanguage, useT } from '../i18n';
 import { Edge } from './Edge';
+import { fitTable } from './fit-table';
 import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
 import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sort';
 
-/* lead: a narrow column that stands before the name. The name is the first column without it, and opens the card. */
-export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string; lead?: true };
+/* lead: a narrow column that stands before the name. The name is the first column without it, and opens the card.
+   span: for a row whose cell says one thing for this column and the next ones, how many it takes and the label it goes by
+   when the table stands as entries. */
+export type ColumnSpan = { columns: number; label: string };
+export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string; lead?: true; span?: (row: T) => ColumnSpan | null };
 type Props<T> = {
   rows: readonly T[];
   columns: TableColumn<T>[];
@@ -40,11 +45,31 @@ function SortBar<T>({ columns, sort, choose }: SortControls<T>) {
   </div>;
 }
 
+type Cell<T> = { column: TableColumn<T>; index: number; colSpan?: number; label?: string };
+
+/* The label a cell goes by as an entry: none for the name and the state, which need none. */
+function entryLabel<T>(column: TableColumn<T>, named: boolean, span: ColumnSpan | null): string | undefined {
+  if (named || column.className === 'k-status') return undefined;
+  return span?.label ?? column.label;
+}
+
+/* The row's cells, each with the column it starts at, how many it takes, and the label it goes by as an entry. */
+function rowCells<T>(row: T, columns: TableColumn<T>[], named: number): Cell<T>[] {
+  const cells: Cell<T>[] = [];
+  for (let index = 0; index < columns.length; ) {
+    const column = columns[index]!;
+    const span = column.span?.(row) ?? null;
+    cells.push({ column, index, colSpan: span?.columns, label: entryLabel(column, index === named, span) });
+    index += Math.max(1, span?.columns ?? 1);
+  }
+  return cells;
+}
+
 function TableRow<T>({ row, columns, name, expanded, toggle }: { row: T; columns: TableColumn<T>[]; name: string; expanded: boolean; toggle: () => void }) {
   const t = useT();
   const named = Math.max(0, columns.findIndex(c => !c.lead));
   return <tr className={`rm${expanded ? ' open' : ''}`} aria-label={name} onClick={() => { if (!window.getSelection()?.toString()) toggle(); }}>
-    {columns.map((c, i) => <td key={c.key} className={i === named ? 'k-name' : c.className} data-label={i === named || c.className === 'k-status' ? undefined : c.label}>
+    {rowCells(row, columns, named).map(({ column: c, index: i, colSpan, label }) => <td key={c.key} className={i === named ? 'k-name' : c.className} colSpan={colSpan} data-label={label}>
       {i === named ? <button className="rowbtn" type="button" aria-expanded={expanded} aria-label={t.tables.openCard(name)}>
         <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>{c.cell(row)}
       </button> : c.cell(row)}
@@ -83,6 +108,31 @@ function useRoutedOpen(selectedId: string | null | undefined, setOpen: Dispatch<
   }, [selectedId, setOpen]);
 }
 
+/* A table that needs more than its frame by whole words stands as entries, as on a phone, before a phone's width:
+   measured again as the frame changes, the rows shown change, and the fonts come. A change of the frame is measured in
+   the next frame: turning into entries inside the observer would change the frame it is watching. */
+function useEntriesFit(frame: RefObject<HTMLDivElement | null>, shown: string) {
+  useLayoutEffect(() => {
+    const host = frame.current;
+    const table = host?.querySelector('table');
+    if (!host || !table) return;
+    const measure = () => fitTable(table);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    let next = 0;
+    const observer = guardedResizeObserver(() => {
+      cancelAnimationFrame(next);
+      next = requestAnimationFrame(measure);
+    }, 'table');
+    observer.observe(host);
+    void document.fonts?.ready.then(measure);
+    return () => {
+      cancelAnimationFrame(next);
+      observer.disconnect();
+    };
+  }, [frame, shown]);
+}
+
 function visibleRows<T extends { id: string }>(rows: readonly T[], selectedId: string | null | undefined, needle: string, search: TableSearch<T> | undefined, language: string, filters: FilterGroup<T>[], selected: Selections): T[] {
   return rows.filter(row => row.id === selectedId || ((!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected)));
 }
@@ -103,6 +153,8 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
   const needle = query.trim().toLocaleLowerCase(language);
   const visible = visibleRows(ordered, selectedId, needle, search, language, filters, selected);
   const filtered = Boolean(needle || Object.values(selected).some(values => values.length));
+  const frame = useRef<HTMLDivElement>(null);
+  useEntriesFit(frame, `${language} ${visible.map(r => r.id).join(' ')}`);
 
   /* Record additions and removals after each refresh, keeping all surviving cards and their places. */
   useEffect(() => {
@@ -137,11 +189,11 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
 
   return <>
     {search && <>
-      <TableTools rows={rows} groups={filters} selected={selected} toggle={toggleFilter} query={query} setQuery={setQuery} placeholder={search.placeholder} />
+      <TableTools rows={rows} groups={filters} selected={selected} toggle={toggleFilter} clear={key => setSelected(previous => ({ ...previous, [key]: [] }))} query={query} setQuery={setQuery} placeholder={search.placeholder} short={search.short} />
       <ResultLine filtered={filtered} count={search.count(rows.length)} shown={visible.length} all={rows.length} clear={() => { setQuery(''); setSelected({}); }} />
     </>}
     {search && visible.length === 0 && <p className="nothing">{t.tables.noMatch}</p>}
-    <Edge className="tbl-frame"><div className="tbl">
+    <Edge className="tbl-frame"><div className="tbl" ref={frame}>
       <SortBar columns={columns} sort={sort} choose={choose} />
       <table className="dt">
         <TableHead columns={columns} sort={sort} choose={choose} />

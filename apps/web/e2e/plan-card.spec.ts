@@ -29,9 +29,9 @@ const EXPIRED: SubView = { ...WAITING, id: 's-glm', provider: 'glm', label: 'GLM
 const installCommand = () => ({ id: 'c'.repeat(64), kind: 'plans', subscriptionIds: [WAITING.id], dismissedSubscriptionIds: [WAITING.id], plans: ['Kimi'], machine: null, command: INSTALL, expiresAt: new Date(Date.now() + 21 * 3600_000 + 60_000).toISOString() });
 
 const WORDS = {
-  en: { tab: 'Subscriptions', open: 'Open the card of ', signIn: 'Sign in to Codex', old: `The nodes on ${MAC} are older`, lifetime: 'Valid for 21 more hours.', fresh: 'New command for GLM',
+  en: { tab: 'Subscriptions & API', open: 'Open the card of ', signIn: 'Sign in to Codex', old: `The nodes on ${MAC} are older`, lifetime: 'Valid for 21 more hours.', fresh: 'New command for GLM',
     setup: 'On node-a, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.' },
-  ru: { tab: 'Подписки', open: 'Открыть карточку ', signIn: 'Войти в Codex', old: `Ноды на ${MAC} старше`, lifetime: 'Действует еще 21 ч.', fresh: 'Новая команда для GLM',
+  ru: { tab: 'Подписки и API', open: 'Открыть карточку ', signIn: 'Войти в Codex', old: `Ноды на ${MAC} старше`, lifetime: 'Действует еще 21 ч.', fresh: 'Новая команда для GLM',
     setup: 'На node-a Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.' },
 };
 

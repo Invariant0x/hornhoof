@@ -99,11 +99,12 @@ import { feedbackRoutes } from './modules/feedback/routes.js';
 import type { RepositoryCreator } from './modules/departments/repo-hosts.js';
 import { googleSheetsRoutes } from './modules/google/routes.js';
 import { createOnGoogleSheets, type SpreadsheetCreator } from './modules/google/sheets.js';
+import { modelsReader, type ModelsReader } from './modules/subscriptions/api-models.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
    from config.templatesDir unless given: a test file reads them once for all its servers. onRoute is called for every
    route before any is added; a test uses it to ask each route what it tells a stranger. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; clock?: () => number; templates?: Templates; released?: readonly Released[] };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; onRoute?: (route: { method: string | string[]; url: string }) => void; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; readBranches?: BranchReader; readMerged?: MergeReader; createRepository?: RepositoryCreator; createSpreadsheet?: SpreadsheetCreator; createIssue?: IssueCreator; readModels?: ModelsReader; clock?: () => number; templates?: Templates; released?: readonly Released[] };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
@@ -122,6 +123,8 @@ export type Ctx = Deps & {
   createIssue: IssueCreator;
   /* What the releases up to this build say about reports installations sent: their issues and the versions that fixed them. */
   released: readonly Released[];
+  /* Asks an API at an address a person gave for its models, never into the internal network the operator did not allow. */
+  readModels: ModelsReader;
   /* The time limits are counted on, which tests move. */
   clock: () => number;
   log: FastifyBaseLogger;
@@ -224,6 +227,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     createRepository: createOnGitHub(),
     createSpreadsheet: createOnGoogleSheets(deps.config.googleTokenUrl, deps.config.googleSheetsUrl, deps.config.googleDriveUrl),
     createIssue: openIssueOnGitHub(),
+    readModels: modelsReader({ allowed: deps.config.apiInternalHosts }),
     clock: Date.now,
     released: RELEASED,
     ...deps,

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type ApiEndpoint, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
@@ -752,14 +752,14 @@ function personal(dir: string, provider: ProviderId, user: JobUser | null = null
 
 /* Each program is installed the first time something needs it. A failed install is tried again next time. */
 const installing = new Map<string, Promise<void>>();
-function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter): Promise<void> {
-  const path = join(tools, 'bin', programFor(provider).bin);
+function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null): Promise<void> {
+  const path = join(tools, 'bin', programFor(provider, api).bin);
   if (existsSync(path)) return Promise.resolve();
-  return updateInstalled(tools, provider, adapter);
+  return updateInstalled(tools, provider, adapter, api);
 }
 
-function updateInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter): Promise<void> {
-  const path = join(tools, 'bin', programFor(provider).bin);
+function updateInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null): Promise<void> {
+  const path = join(tools, 'bin', programFor(provider, api).bin);
   let pending = installing.get(path);
   if (!pending) {
     pending = adapter.install().finally(() => installing.delete(path));
@@ -775,14 +775,15 @@ function managedUpdates(tools: string, programs: { provider: ProviderId; adapter
   }));
 }
 
-function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId): ProviderAdapter {
+/* api: an API by the token at an address runs in the program of its protocol. */
+function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId, api?: ApiEndpoint | null): ProviderAdapter {
   return {
     ...adapter,
     async run(input): Promise<RunResult> {
       try {
-        await ensureInstalled(tools, provider, adapter);
+        await ensureInstalled(tools, provider, adapter, api);
       } catch (err) {
-        const output = `Could not install ${programFor(provider).name}: ${message(err)}`;
+        const output = `Could not install ${programFor(provider, api).name}: ${message(err)}`;
         return { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null };
       }
       return adapter.run(input);
@@ -986,7 +987,7 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   }
   /* Each API key gets its own home and, as root, its own user, so two keys never share settings or files. */
   const builtinPick = builtinAdapters(dir, tools);
-  const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider);
+  const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider, job.api);
   const managed = (['anthropic_api', 'openai_api'] as const).map(provider => ({ provider, adapter: adapterFor(provider, { home: dir, tools }) }));
   const testUser = userFor(dir, 'tests');
   const verifyUser = testUser || agentUser();

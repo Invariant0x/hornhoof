@@ -281,7 +281,7 @@ test('keeps the department choice and the search box inside a 375 px phone scree
   }
 
   /* Subscriptions select.sel */
-  await page.getByRole('button', { name: 'Subscriptions' }).click();
+  await page.getByRole('button', { name: 'Subscriptions & API' }).click();
   await page.getByRole('button', { name: /Claude/ }).click();
   const subSelect = page.locator('select.sel');
   await expectSelectInsideViewport(subSelect, 375);

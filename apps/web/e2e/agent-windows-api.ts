@@ -12,12 +12,12 @@ const NAMES = ['Bruno', 'Clara', 'Dana', 'Egor'];
 
 const WORDS = {
   en: {
-    orchestrator: 'Orchestrator', tabs: ['Map', 'Tasks', 'People', 'Subscriptions', 'Machines'], members: 'Members', tasks: 'Tasks', write: 'Write to the orchestrator',
+    orchestrator: 'Orchestrator', tabs: ['Map', 'Tasks', 'People', 'Subscriptions & API', 'Machines'], members: 'Members', tasks: 'Tasks', write: 'Write to the orchestrator',
     minimize: 'Minimize', close: 'Close', log: 'Chat', terminal: 'Terminal', card: 'Card', task: 'Task', full: 'Full screen', size: 'Restore size',
     openTerminalOf: (name: string) => `Open ${name}'s terminal`, restore: (name: string) => `Restore ${name}`, closeStrip: (name: string) => `Close ${name}`, role: ROLE.en, working: 'Working', sleeping: 'Sleeping', cardOf: (name: string) => `Card: ${name}`,
   },
   ru: {
-    orchestrator: 'Оркестратор', tabs: ['Карта', 'Задачи', 'Люди', 'Подписки', 'Машины'], members: 'Сотрудники', tasks: 'Задачи', write: 'Написать оркестратору',
+    orchestrator: 'Оркестратор', tabs: ['Карта', 'Задачи', 'Люди', 'Подписки и API', 'Машины'], members: 'Сотрудники', tasks: 'Задачи', write: 'Написать оркестратору',
     minimize: 'Свернуть', close: 'Закрыть', log: 'Чат', terminal: 'Терминал', card: 'Карточка', task: 'Задача', full: 'На весь экран', size: 'Обычный размер',
     openTerminalOf: (name: string) => `Открыть терминал: ${name}`, restore: (name: string) => `Развернуть: ${name}`, closeStrip: (name: string) => `Закрыть: ${name}`, role: ROLE.ru, working: 'Работает', sleeping: 'Спит', cardOf: (name: string) => `Карточка: ${name}`,
   },

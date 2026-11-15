@@ -40,6 +40,8 @@ describe('POST /api/subscriptions/:id/test', () => {
     expect(job).toMatchObject({ status: 'queued', result: null, machine: 'dev-mac' });
     const run = await node.next();
     expect(run).toMatchObject({ type: 'job.run', jobId: job.id, subscriptionId, provider: 'claude', prompt: 'Reply with one word: ready', timeoutMs: 120000, secret: null, sessionId: null });
+    /* A plan's program knows where its maker answers. */
+    expect(run).not.toHaveProperty('api');
 
     node.send({ type: 'job.started', jobId: job.id });
     node.send({ type: 'job.done', jobId: job.id, ok: true, sessionId: 's-1', result: 'ready', tail: '', error: null });
@@ -77,7 +79,21 @@ describe('POST /api/subscriptions/:id/test', () => {
     await until(async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.subscription.online === true);
     const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${orchestrator.id}/test`, ...as(ceo) });
     expect(res.statusCode).toBe(201);
-    expect(await builtin.next()).toMatchObject({ type: 'job.run', provider: 'anthropic_api', secret: TEST_API_KEY, subscriptionId: orchestrator.id });
+    expect(await builtin.next()).toMatchObject({ type: 'job.run', provider: 'anthropic_api', secret: TEST_API_KEY, subscriptionId: orchestrator.id, api: { baseUrl: 'https://api.anthropic.com', protocol: 'anthropic' } });
+    builtin.close();
+  });
+
+  it("runs an API by address on the built-in node with its key, address and protocol, on its first model unless a turn names one", async () => {
+    const { app, url, ceo } = await liveCompany({ NODE_KEY });
+    const apiKey = 'llm-key-0123456789abcdef-Q7R8';
+    const models = [{ id: 'llama-4-maverick', name: 'Llama 4 Maverick' }, { id: 'qwen-3-coder', name: 'Qwen 3 Coder' }];
+    const added = await app.inject({ method: 'POST', url: '/api/subscriptions', payload: { kind: 'api_key', provider: 'custom_api', label: 'Acme LLM', apiKey, baseUrl: 'https://llm.acme.example/v1', protocol: 'openai', models, target: { kind: 'any' } }, ...as(ceo) });
+    const { id } = added.json().subscription;
+    const builtin = await connectNode(url, NODE_KEY);
+    builtin.send({ type: 'hello', version: '0.2.0', loggedIn: true, running: [] });
+    await until(async () => (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === id).online === true);
+    expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${id}/test`, ...as(ceo) })).statusCode).toBe(201);
+    expect(await builtin.next()).toMatchObject({ type: 'job.run', provider: 'custom_api', secret: apiKey, subscriptionId: id, model: 'llama-4-maverick', api: { baseUrl: 'https://llm.acme.example/v1', protocol: 'openai' } });
     builtin.close();
   });
 

@@ -104,7 +104,21 @@ export type SubView = {
   leaseMachine: string | null;
   /* Included by the subscriptions list only. Other views of a plan omit its agents. */
   agents?: RunningAgent[];
+  /* Where an API connection's program sends its calls and in which protocol; none for a plan or on an older server. */
+  api?: { baseUrl: string; protocol: 'anthropic' | 'openai' } | null;
+  /* The models it runs: an API connection's own, or the ones its node reported. */
+  models?: ModelOption[];
+  /* The place an API connection was given; none for a plan. */
+  target?: { kind: 'orchestrator' | 'department' | 'team' | 'any'; id: string | null } | null;
+  /* What its turns used, in the list alone, with today counted in UTC: an open card asks for its own day. */
+  tokens?: TokenPeriods;
 };
+
+/* What a subscription's turns used in a period: turns counts them all, noData those whose program told no tokens. */
+export type TokenSum = { input: number; output: number; cacheRead: number; cacheWrite: number; total: number; turns: number; noData: number };
+export type TokenPeriods = { today: TokenSum; week: TokenSum; month: TokenSum; all: TokenSum };
+/* What one model's turns used of a connection in 30 days; model null for the turns that told none. */
+export type ModelTokens = { model: string | null; total: number };
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 

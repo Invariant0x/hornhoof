@@ -69,6 +69,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   person_changes: add('people'),
   node_connections: add('plans'),
   turn_snapshots: add('work'),
+  /* What a turn used, kept once when it ends. */
+  turn_tokens: add('work'),
   test_part_timings: add('work'),
   test_file_results: add('work'),
   test_suite_memory: add('work'),

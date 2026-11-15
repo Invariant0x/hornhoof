@@ -12,6 +12,7 @@ import { buildApp, type Deps } from '../src/app.js';
 import type { CommitMarker } from '../src/modules/testruns/github-status.js';
 import type { RepositoryCreator } from '../src/modules/departments/repo-hosts.js';
 import type { IssueCreator } from '../src/modules/feedback/github-issue.js';
+import type { ModelsReader } from '../src/modules/subscriptions/api-models.js';
 import type { CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, gated, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql, PRE_COMMIT_SETTINGS, RECORD_CALL } from '../src/db/agent-sql.js';
@@ -97,6 +98,8 @@ const markedInTest: CommitMarker = async () => ({ ok: true });
 const noGitHost: RepositoryCreator = async () => ({ problem: 'Tests reach no git host.' });
 /* Nor do they open an issue there: one that does puts its own GitHub here. */
 const noIssues: IssueCreator = async () => ({ problem: 'Tests reach no git host.' });
+/* Nor any API's list of models: a test that loads one answers through ctx.readModels. */
+const noApis: ModelsReader = async () => ({ ok: false, reason: 'unreachable' });
 
 /* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
    still write to it. */
@@ -104,7 +107,7 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   const db = recordSources(drizzle(client, { schema }) as unknown as Db);
   /* Tests never reach the real registry or a real CA unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
-  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), readMerged: async () => null }));
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), readMerged: async () => null }));
   onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
 }

@@ -1,7 +1,7 @@
-import { currentLimits, type Account, type Limits } from '@hornhoof/protocol';
+import { apiEndpoint, currentLimits, modelsFor, type Account, type ApiEndpoint, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { nodeIdentity, ownBuiltin, type NodeIdentity, type NodeHub } from '../nodes/hub.js';
@@ -35,6 +35,13 @@ export type SubView = {
   signedInOnce: boolean;
   /* The machine a Codex plan signed in once runs on now, one at a time. */
   leaseMachine: string | null;
+  /* Where an API connection's program sends its calls and in which protocol; none for a plan. */
+  api: ApiEndpoint | null;
+  /* The models it runs: an API connection's own, or the ones its node reported. */
+  models: ModelOption[];
+  /* The place an API connection was given, which its place shows by department: the orchestrator, any department, or one
+     department or team. None for a plan, which serves wherever its owner works. */
+  target: { kind: (typeof TARGET_KINDS)[number]; id: string | null } | null;
 };
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
@@ -71,6 +78,9 @@ const columns = {
   leaseNodeId: subscriptions.leaseNodeId,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
+  baseUrl: subscriptions.baseUrl,
+  apiProtocol: subscriptions.apiProtocol,
+  models: subscriptions.models,
   ownerId: people.id,
   ownerName: people.name,
   ownerScopeKind: people.scopeKind,
@@ -170,6 +180,9 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       ...accountViews(mine, accountOf, viewer, r.ownerId),
       signedInOnce: r.kind === 'personal' && r.credVersion > 0,
       leaseMachine: (r.leaseNodeId && mine.find(n => n.id === r.leaseNodeId)?.hostname) || null,
+      api: r.kind === 'api_key' ? apiEndpoint(r.provider, { baseUrl: r.baseUrl, protocol: r.apiProtocol }) : null,
+      models: modelsFor(r.provider, r.models),
+      target: r.kind === 'api_key' && r.targetKind ? { kind: r.targetKind, id: r.targetId } : null,
     };
   });
 }

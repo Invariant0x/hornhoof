@@ -4,8 +4,8 @@ import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
-import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, ComputerAccessView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
+import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
+import type { AgentCardView, ComputerAccessView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ProviderId, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
 import { ChatEntry, ChatState, ChatSteps, chatItems, useAgentView } from '../ui/AgentChat';
 import { EventMessage, isMessage, messageKey, partyName, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
@@ -244,6 +244,9 @@ function WindowToolbar({ t, terminal, state, stop, onToggle }: { t: Messages; te
     </>
   );
 }
+
+/* The program the window names: its subscription's, an API's by its protocol, else the one the map knows. */
+const windowProgram = (sub: SubView | null, provider: ProviderId | null | undefined): string => (sub ? programName(sub) : provider ? PROGRAM_NAMES[provider] : 'Claude');
 
 /* The terminal view until the agent's state comes, and of an agent whose terminal cannot show now: a program that sleeps
    wakes when someone writes. */
@@ -542,7 +545,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const terminal = view === 'terminal';
   /* The map already knows an employee's program, before its card comes. */
   const provider = sub?.provider ?? org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.provider;
-  const program = provider ? PROGRAM_NAMES[provider] : 'Claude';
+  const program = windowProgram(sub, provider);
   /* The terminal opens as soon as the agent's state says it can, without waiting for the card. */
   const opens = terminal && state !== null;
   const chat = known && !terminal && historyIn;

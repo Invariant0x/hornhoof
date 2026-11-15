@@ -87,6 +87,14 @@ select:disabled { opacity: .55; }
 .field select { width: 100%; height: 40px; padding: 0 32px 0 12px; }
 .field input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 .field .hint { font-size: 12px; color: var(--muted); }
+/* A typed key and its Show button in one frame of 44 px, so both are targets of 44 px. */
+.keybox { display: flex; min-inline-size: 0; border: 1px solid var(--line2); background: var(--surface2); }
+.keybox:focus-within { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+.keybox input { flex: 1 1 auto; min-inline-size: 0; block-size: auto; min-block-size: 44px; border: 0; background: none; }
+.keybox input:focus { box-shadow: none; }
+.keybox .show { flex: none; min-block-size: 44px; min-inline-size: 44px; padding-inline: 12px; border-inline-start: 1px solid var(--line2); color: var(--ink); font-size: 13px; font-weight: 600; cursor: pointer; }
+.keybox .show:hover { color: var(--cyan-ink); }
+.keybox .show:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -4px; }
 .field .bad { font-size: 12px; color: var(--pink-ink); }
 .alert { padding: 10px 12px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
 .agent-window-error { margin-top: 68px; }
@@ -706,6 +714,18 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .plan-steps li.now > span:first-child { font-weight: 600; }
 .plan-steps li p { margin: 0; }
 .key-form { max-width: 640px; }
+.api-form { max-width: 760px; }
+.api-models .model-list, .api-models .model-found { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; min-width: 0; }
+.api-models .model-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding-block: 4px; border-block-end: 1px solid var(--line); min-width: 0; }
+.api-models .model-list .nm { min-width: 0; overflow-wrap: anywhere; }
+.api-models .model-list small { display: block; color: var(--muted); font-size: 12.5px; }
+.api-models .model-found { max-block-size: 260px; overflow-y: auto; scrollbar-gutter: stable; padding-inline-end: 4px; }
+.api-models .model-found label { display: flex; align-items: flex-start; gap: 8px; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+.api-models .model-found input { flex: none; inline-size: 16px; block-size: 16px; margin-block-start: 2px; padding: 0; border: 0; background: none; accent-color: var(--cyan-ink); }
+.api-models .field { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.api-models .field > :is(label, .label) { padding-block-start: 0; }
+.api-models .model-actions, .api-models .model-add { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.api-models .model-add input { flex: 1 1 12em; min-width: 0; }
 .ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ask span { flex: 1 1 280px; }
 .test { display: grid; gap: 6px; }
@@ -732,6 +752,11 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
 /* A machine whose nodes are not the server's build waits for its owner to update them. */
 .badge.old { color: var(--amber-ink); }
+/* How a connection is paid, in a word and its sign; color tells nothing here. The orchestrator's mark is a role, quiet too. */
+.badge.ctype { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); border-color: var(--line2); white-space: nowrap; }
+.badge.ctype svg.sign, .chipf svg.sign { inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.badge.orch-role { color: var(--muted); border-color: var(--line2); }
+.nmg + .badge { margin-inline-end: 6px; }
 /* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
 .ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; }
 .ast.work { color: var(--cyan-ink); }
@@ -1925,7 +1950,17 @@ th.k-prio .sorth { white-space: nowrap; }
 .g-f b { font-family: var(--f-display); font-size: 22px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .g-f span { font-size: 12.5px; color: var(--muted); }
 .gauge .bar { height: 5px; }
-.g-s { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.g-s { display: flex; flex-wrap: wrap; column-gap: 10px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+/* A connection's 30 days by model: the name, the whole count and its share, over a thin bar of that share. */
+.models { display: grid; gap: 8px; margin-block-start: 4px; }
+.models h6 { margin: 0; font-size: 12.5px; font-weight: 400; }
+.models ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.models li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: 12px; row-gap: 4px; font-size: 13px; }
+.models .mname { flex: 0 1 auto; min-inline-size: 0; overflow-wrap: anywhere; }
+.models .dd { flex: 1 0 auto; text-align: end; font-variant-numeric: tabular-nums; }
+.models .dd small { margin-inline-start: 6px; font-size: 12px; color: var(--muted); }
+.models .bar { flex: 1 0 100%; block-size: 3px; }
+.models .bar i { position: static; display: block; block-size: 100%; background: var(--cyan-ink); }
 .gauge.na .g-f b { font-family: var(--f-body); font-size: 13.5px; font-weight: 500; line-height: 1.45; color: var(--muted); }
 @container card (max-width: 300px) { .gauges { grid-template-columns: minmax(0, 1fr); } }
 
@@ -2026,7 +2061,9 @@ th.k-prio .sorth { white-space: nowrap; }
 .tbl { container: tbl / inline-size; min-width: 0; }
 .dt { width: 100%; border-collapse: collapse; font-size: 13px; }
 .dt > thead > tr > th { text-align: left; vertical-align: bottom; padding: 0; border-bottom: 1px solid var(--line2); }
-.sorth { display: inline-flex; align-items: center; gap: 5px; width: 100%; padding: 11px 10px; border: 0; background: none; font-size: 12px; font-weight: 600; color: var(--muted); text-align: left; cursor: pointer; }
+/* A header breaks only between its words: a button as wide as its cell would let the table squeeze the column below its
+   longest word, so it takes its own width and fills the cell from there. */
+.sorth { display: inline-flex; align-items: center; gap: 5px; min-inline-size: 100%; padding: 11px 10px; border: 0; background: none; font-size: 12px; font-weight: 600; color: var(--muted); text-align: left; cursor: pointer; overflow-wrap: normal; word-break: normal; hyphens: manual; }
 .sorth:hover, .sorth.on { color: var(--ink); }
 .sa-w { display: inline-flex; }
 .sa-w.up { transform: rotate(180deg); }
@@ -2077,6 +2114,24 @@ th.k-prio .sorth { white-space: nowrap; }
   .dt td[data-label] > .cell-lim { flex: 1; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px; }
   .cell-lim .bar { width: 64px; }
 }
+/* The same entries, wider than a phone, for a sorting table that needs more than its frame by whole words (useEntriesFit). */
+.dt[data-fit="entries"] > thead { display: none; }
+.tbl:has(> .dt[data-fit="entries"]) > .sortbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 10px 14px; border-block-end: 1px solid var(--line2); }
+.tbl:has(> .dt[data-fit="entries"]) > .sortbar .lbl { margin-inline-end: 4px; font-size: 12px; color: var(--muted); }
+.dt[data-fit="entries"], .dt[data-fit="entries"] > tbody, .dt[data-fit="entries"] > tbody > tr, .dt[data-fit="entries"] > tbody > tr > td { display: block; inline-size: 100%; }
+.dt[data-fit="entries"] > tbody > tr.rm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px 12px; padding: 12px 14px; border-block-end: 1px solid var(--line); }
+.dt[data-fit="entries"] > tbody > tr.rm.open { border-block-end-color: transparent; background: var(--surface2); }
+.dt[data-fit="entries"] > tbody > tr.rm > td { padding: 0; border: 0; background: none !important; inline-size: auto; }
+.dt[data-fit="entries"] td.k-name { grid-column: 1; grid-row: 1; }
+.dt[data-fit="entries"] td.k-status { grid-column: 1; grid-row: 2; text-align: start; }
+.dt[data-fit="entries"] td[data-label] { grid-column: 1 / -1; display: flex; align-items: baseline; }
+.dt[data-fit="entries"] td[data-label]::before { content: attr(data-label); flex: 0 0 7em; margin-inline-end: 10px; font-size: 12px; color: var(--muted); }
+.dt[data-fit="entries"] td[data-label] > * { min-inline-size: 0; }
+.dt[data-fit="entries"] td.k-prio .pdash { margin: 0; align-self: center; }
+.dt[data-fit="entries"] > tbody > tr.det { border-block-end: 1px solid var(--line); background: var(--surface2); }
+.dt[data-fit="entries"] > tbody > tr.det > td { padding-block: 0 12px; padding-inline: 10px; }
+.dt[data-fit="entries"] td[data-label] > .cell-lim { flex: 1; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px; }
+.dt[data-fit="entries"] .cell-lim .bar { inline-size: 64px; }
 
 .until { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); white-space: normal; }
 .card-t h3, .blk h4, .dg-h h5 { margin: 0; }
@@ -2105,6 +2160,9 @@ th.k-prio .sorth { white-space: nowrap; }
 .chipf:hover { border-color: var(--cyan); }
 .chipf[aria-pressed="true"] { border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
 .chipf .n { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* A group that starts with All: a target of 44 px, the chosen one in the ink of a link. */
+.fgroup.whole .chipf { block-size: auto; min-block-size: 44px; padding-inline: 12px; }
+.fgroup.whole .chipf[aria-pressed="true"] { border-color: var(--cyan-ink); }
 .linkbtn { border: 0; background: none; padding: 0; color: var(--cyan-ink); font-weight: 600; cursor: pointer; text-decoration: underline; }
 .nothing { padding: 18px; border: 1px dashed var(--line2); color: var(--muted); }
 

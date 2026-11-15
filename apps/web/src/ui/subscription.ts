@@ -3,7 +3,8 @@ import type { Language, Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { Limits, PlanStatus, SubView } from '../types';
 
-export const subName = (t: Messages, s: SubView) => s.kind === 'api_key' ? t.subs.keyEnding(PROVIDER_NAMES[s.provider], s.last4 ?? '') : PROVIDER_NAMES[s.provider];
+/* A compatible API goes by the name it was given, as the address it answers at names no product. */
+export const subName = (t: Messages, s: SubView) => s.kind === 'api_key' ? t.subs.keyEnding(s.provider === 'custom_api' ? s.label : PROVIDER_NAMES[s.provider], s.last4 ?? '') : PROVIDER_NAMES[s.provider];
 export const MAIN_WINDOWS = ['five_hour', 'seven_day'];
 /* Plans that sign in once in a terminal on one machine; Hornhoof then passes the sign-in to the owner's others. */
 export const TERMINAL_SIGNIN = new Set(['claude', 'codex']);

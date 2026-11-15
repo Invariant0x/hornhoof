@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it } from 'vitest';
 import { SortTable, type TableColumn } from '../src/ui/SortTable';
+import { decl } from './css';
 
 type Row = { id: string; name: string; load: number | null };
 const rows: Row[] = [{ id: 'a', name: 'Alpha', load: 2 }, { id: 'b', name: 'Beta', load: 8 }, { id: 'c', name: 'Offline', load: null }];
@@ -105,4 +106,37 @@ it('keeps the name the cell that opens the card when a narrow column stands befo
   expect(names()).toEqual(['Alpha', 'Beta', 'Offline']);
   await userEvent.setup().click(cells[0]!);
   expect(screen.getByRole('article', { name: 'Alpha' })).toBeInTheDocument();
+});
+
+/* A frame of 806 px and a table that needs 824 by whole words: wider than a phone, it still stands as entries. */
+function widths(frame: number, table: number) {
+  const sizes: [object, string, number][] = [[HTMLDivElement.prototype, 'clientWidth', frame], [HTMLTableElement.prototype, 'scrollWidth', table]];
+  const restore = sizes.map(([proto, key, value]) => {
+    const before = Object.getOwnPropertyDescriptor(proto, key);
+    Object.defineProperty(proto, key, { configurable: true, get: () => value });
+    return () => (before ? Object.defineProperty(proto, key, before) : Reflect.deleteProperty(proto, key));
+  });
+  return () => restore.forEach(undo => undo());
+}
+
+it('stands as entries where the table does not fit its frame by whole words, and as a table where it does', () => {
+  let undo = widths(806, 824);
+  try {
+    const { unmount } = render(table());
+    expect(screen.getByRole('table')).toHaveAttribute('data-fit', 'entries');
+    unmount();
+  } finally {
+    undo();
+  }
+  undo = widths(806, 806);
+  try {
+    render(table());
+    expect(screen.getByRole('table')).not.toHaveAttribute('data-fit');
+  } finally {
+    undo();
+  }
+  expect(decl('.dt[data-fit="entries"] > thead', 'display')).toBe('none');
+  expect(decl('.tbl:has(> .dt[data-fit="entries"]) > .sortbar', 'display')).toBe('flex');
+  expect(decl('.dt[data-fit="entries"] > tbody > tr.rm', 'display')).toBe('grid');
+  expect(decl('.dt[data-fit="entries"] td[data-label]::before', 'content')).toBe('attr(data-label)');
 });

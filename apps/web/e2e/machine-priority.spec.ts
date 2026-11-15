@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { BuiltinView, DataView, MachineView, MoveView, Org } from '../src/types';
-import { ME, box, serveApi } from './api';
+import { ME, box, brokenHeaderWords, serveApi, tableFits } from './api';
 
 const GIB = 1024 ** 3;
 /* Tall enough at phone width to show the open cards without scrolling under the top bar. */
@@ -87,6 +87,19 @@ const noSideScroll = (page: Page) => page.evaluate(() => document.documentElemen
 async function within(inner: Locator, outer: Locator): Promise<boolean> {
   const [a, b] = [await box(inner), await box(outer)];
   return a.x >= b.x - 1 && a.x + a.width <= b.x + b.width + 1;
+}
+
+/* A header breaks only between its words, and the table stands inside its frame: as a table where it fits by whole
+   words, as entries where it does not. */
+for (const language of ['en', 'ru'] as const) for (const width of [1440, 1024]) {
+  test(`keeps every header word whole and the table inside its frame, ${language} ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await openMachines(page, language, 'light');
+    expect(await brokenHeaderWords(page)).toEqual([]);
+    expect(await tableFits(page)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`table-${language}-${width}.png`), fullPage: true });
+  });
 }
 
 for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const [width, height] of SIZES) {

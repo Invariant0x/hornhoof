@@ -22,7 +22,7 @@ import { resolveStuck } from '../tasks/stuck.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { Answer } from '../tasks/engine.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
-import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
+import { ApiKeyFields, BudgetBody, ConnectBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
 import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffLine, type HireLine } from './staff.js';
 
@@ -259,8 +259,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'add_api_key',
-    'Adds a company API key the CEO gave you: provider anthropic_api or openai_api, a label, the key, and target { kind: orchestrator | any } or { kind: department | team, id }.',
-    SubscriptionBody.omit({ kind: true }).shape,
+    'Adds a company API connection, paid by the token, with a key the CEO gave you: provider anthropic_api, openai_api, openrouter, or custom_api for any API that speaks Anthropic\'s or OpenAI\'s protocol at an address (baseUrl and protocol anthropic | openai, both required for custom_api; protocol optional for openrouter, anthropic by default); a label; the key; models [{ id, name }] it runs, which openrouter and custom_api need; and target { kind: orchestrator | any } or { kind: department | team, id }. The key is stored encrypted and only its last 4 characters are ever shown.',
+    ApiKeyFields.omit({ kind: true }).shape,
     body => ({ method: 'POST', url: '/api/subscriptions', payload: { kind: 'api_key', ...body } }),
   );
   tool(
