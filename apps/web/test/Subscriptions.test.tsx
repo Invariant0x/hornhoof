@@ -15,7 +15,7 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const TRUST = 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.';
-const RUNNING_JOB: JobView = { id: 'j1', status: 'running', result: null, tail: '', error: null, machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: '2026-10-29T10:00:00.500Z', finishedAt: null };
+const RUNNING_JOB: JobView = { id: 'j1', status: 'running', result: null, tail: '', error: null, machine: 'dev-laptop', createdAt: '2026-10-29T10:00:00.000Z', startedAt: '2026-10-29T10:00:00.500Z', finishedAt: null };
 
 const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
 
@@ -53,7 +53,7 @@ describe('Subscriptions', () => {
     expect(machines.textContent).toContain(language === 'en' ? 'laptopIvan, waiting for the login' : 'laptopIvan, ждет входа');
     expect(machines.textContent).toContain(language === 'en' ? 'towerIvan, offline' : 'towerIvan, не в сети');
     const login = rowOf('Codex');
-    expect(login.querySelector('.blk-fix')?.textContent).toContain(language === 'en' ? 'On ivan-mbp. Only Ivan can sign in.' : 'На ivan-mbp. Войти может только владелец: Ivan.');
+    expect(login.querySelector('.blk-fix')?.textContent).toContain(language === 'en' ? 'On dev-laptop. Only Ivan can sign in.' : 'На dev-laptop. Войти может только владелец: Ivan.');
     const waiting = rowOf('Kimi');
     expect(waiting.querySelector('.blk-fix')?.textContent).toContain(language === 'en' ? 'Ivan has not run the install command yet.' : 'Владелец (Ivan) еще не выполнил команду установки.');
     expect(within(screen.getByRole('row', { name: 'Kimi' })).getByText(language === 'en' ? 'No machine yet' : 'Машины пока нет')).toBeInTheDocument();
@@ -63,11 +63,11 @@ describe('Subscriptions', () => {
   });
 
   it.each([
-    ['en', 'Waiting for the first setup', 'a-host, waiting for the first setup', 'On a-host, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.'],
-    ['ru', 'Ждет первой настройки', 'a-host, ждет первой настройки', 'На a-host Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.'],
+    ['en', 'Waiting for the first setup', 'node-a, waiting for the first setup', 'On node-a, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.'],
+    ['ru', 'Ждет первой настройки', 'node-a, ждет первой настройки', 'На node-a Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.'],
   ])("says in %s that a plan waits for its owner to accept its program's terms on the machine", async (language, state, there, fix) => {
     localStorage.setItem('hh-lang', language);
-    const machines = [{ ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const }, { ...MACHINE, id: 'm2', hostname: 'b-host', status: 'ready' as const, online: false }];
+    const machines = [{ ...MACHINE, hostname: 'node-a', status: 'needs_setup' as const }, { ...MACHINE, id: 'm2', hostname: 'node-b', status: 'ready' as const, online: false }];
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     const row = await screen.findByRole('row', { name: /^Antigravity\b/ });
@@ -78,19 +78,19 @@ describe('Subscriptions', () => {
   });
 
   it('names the machine that waits for the first setup when that machine is offline', async () => {
-    const machines = [{ ...MACHINE, id: 'm2', hostname: 'b-host', status: 'needs_login' as const }, { ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const, online: false }];
+    const machines = [{ ...MACHINE, id: 'm2', hostname: 'node-b', status: 'needs_login' as const }, { ...MACHINE, hostname: 'node-a', status: 'needs_setup' as const, online: false }];
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('It needs its first setup on a-host, and the machine is offline.');
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('It needs its first setup on node-a, and the machine is offline.');
   });
 
   it('names the machine online that waits for the first setup before one offline', async () => {
-    const machines = [{ ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const, online: false }, { ...MACHINE, id: 'm2', hostname: 'b-host', status: 'needs_setup' as const }];
+    const machines = [{ ...MACHINE, hostname: 'node-a', status: 'needs_setup' as const, online: false }, { ...MACHINE, id: 'm2', hostname: 'node-b', status: 'needs_setup' as const }];
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('On b-host, Antigravity asks its owner to accept its terms.');
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('On node-b, Antigravity asks its owner to accept its terms.');
   });
 
   it('marks a plan that waits for its first setup in the warning color of one that waits for its login', () => {
@@ -130,7 +130,7 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     await screen.findByRole('row', { name: /^Claude\b/ });
     expect(within(rowOf('Claude')).getByText('Ready')).toBeInTheDocument();
-    expect(within(rowOf('Claude')).getByText('ivan-mbp')).toBeInTheDocument();
+    expect(within(rowOf('Claude')).getByText('dev-laptop')).toBeInTheDocument();
     expect(within(rowOf('Codex')).getByText('Waiting for the login')).toBeInTheDocument();
     expect(within(rowOf('Kimi')).getByText('Waiting for the machine')).toBeInTheDocument();
     expect(within(rowOf('Kimi')).getByText('No machine yet')).toBeInTheDocument();
@@ -191,7 +191,7 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Claude')).getByText(/^Until .+Its agents wait until then\.$/)).toBeInTheDocument();
     expect(rowOf('Claude').querySelector('.card-h .until')).not.toBeInTheDocument();
     expect(within(rowOf('Claude')).getByRole('group', { name: /^Limit reached, resets in / })).toBeInTheDocument();
-    expect(within(rowOf('Codex')).getByText('On ivan-mbp. Only Ivan can sign in.')).toBeInTheDocument();
+    expect(within(rowOf('Codex')).getByText('On dev-laptop. Only Ivan can sign in.')).toBeInTheDocument();
     expect(within(rowOf('Kimi')).getByText('Ivan has not run the install command yet.')).toBeInTheDocument();
     expect(within(rowOf('Claude')).getByRole('heading', { name: 'Owner and account' })).toBeInTheDocument();
   });
@@ -215,13 +215,13 @@ describe('Subscriptions', () => {
   });
 
   it('lists every machine a plan runs on, saying on which it waits', async () => {
-    const laptop = { id: 'm3', hostname: 'ivan-laptop', status: 'needs_login' as const, online: true };
-    const tower = { id: 'm4', hostname: 'ivan-tower', status: 'ready' as const, online: false };
+    const laptop = { id: 'm3', hostname: 'dev-notebook', status: 'needs_login' as const, online: true };
+    const tower = { id: 'm4', hostname: 'work-tower', status: 'ready' as const, online: false };
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, machines: [SUBS[0]!.machines[0]!, laptop, tower] }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     const machines = within(within(rowOf('Claude')).getByRole('list', { name: 'Machines of Claude' })).getAllByRole('listitem');
-    expect(machines.map(m => m.textContent)).toEqual(['ivan-mbpIvan, ready', 'ivan-laptopIvan, waiting for the login', 'ivan-towerIvan, offline']);
+    expect(machines.map(m => m.textContent)).toEqual(['dev-laptopIvan, ready', 'dev-notebookIvan, waiting for the login', 'work-towerIvan, offline']);
   });
 
   it("shows each window of a plan's limits as a bar with its share and when it resets", async () => {
@@ -364,7 +364,7 @@ describe('Subscriptions', () => {
       'en',
       'Not on this plan',
       'Machine offline',
-      'On Marselle. Its agents wait until the machine is back online.',
+      'On workstation-eu. Its agents wait until the machine is back online.',
       'Machine offline, last data from 05:22 PM',
       'Machine offline, no limit data yet',
     ],
@@ -372,7 +372,7 @@ describe('Subscriptions', () => {
       'ru',
       'Нет у этого тарифа',
       'Машина не в сети',
-      'На Marselle. Ее агенты ждут, пока машина снова подключится.',
+      'На workstation-eu. Ее агенты ждут, пока машина снова подключится.',
       'Машина не в сети, последние данные от 17:22',
       'Машина не в сети, данных о лимитах еще не было',
     ],
@@ -381,19 +381,19 @@ describe('Subscriptions', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-13T21:06:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); });
-    const ivanClaude: SubView = {
+    const ownerClaude: SubView = {
       ...SUBS[0]!,
-      id: 's-ivan',
-      machines: [{ id: 'm-ivan', hostname: '0xs-MacBook-Pro.local', status: 'ready', online: true }],
+      id: 's-1',
+      machines: [{ id: 'm-1', hostname: 'work-laptop', status: 'ready', online: true }],
       limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.96, resetsAt: '2026-11-16T21:00:00.000Z' }], complete: true },
       limitsUpdatedAt: '2026-11-13T21:02:00.000Z',
     };
-    const luizaClaude: SubView = {
+    const claraClaude: SubView = {
       ...SUBS[0]!,
-      id: 's-luiza',
-      owner: { id: 'p-luiza', name: 'Luiza' },
+      id: 's-clara',
+      owner: { id: 'p-clara', name: 'Clara' },
       online: false,
-      machines: [{ id: 'm-luiza', hostname: 'Marselle', status: 'ready', online: false }],
+      machines: [{ id: 'm-clara', hostname: 'workstation-eu', status: 'ready', online: false }],
       limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.45, resetsAt: '2026-11-16T21:00:00.000Z' }], complete: true },
       limitsUpdatedAt: '2026-11-13T17:22:00.000Z',
     };
@@ -404,26 +404,26 @@ describe('Subscriptions', () => {
       label: 'Codex',
       owner: { id: 'p-max', name: 'Max' },
       online: false,
-      machines: [{ id: 'm-max', hostname: 'DESKTOP-AB84Q08', status: 'ready', online: false }],
+      machines: [{ id: 'm-max', hostname: 'win-desktop-01', status: 'ready', online: false }],
       limits: null,
       limitsUpdatedAt: null,
     };
-    lists({ 'GET /api/subscriptions': [200, { subscriptions: [ivanClaude, luizaClaude, maxCodex] }] });
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [ownerClaude, claraClaude, maxCodex] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     const rows = await screen.findAllByRole('row');
-    const luizaRow = rows.find(r => r.textContent?.includes('Luiza'))!;
-    expect(within(luizaRow).getByText(offlineState)).toBeInTheDocument();
-    expect(within(luizaRow).getAllByText(offlineWithData)).toHaveLength(2);
-    expect(luizaRow.textContent).not.toMatch(/Unknown,|Неизвестно,/);
+    const claraRow = rows.find(r => r.textContent?.includes('Clara'))!;
+    expect(within(claraRow).getByText(offlineState)).toBeInTheDocument();
+    expect(within(claraRow).getAllByText(offlineWithData)).toHaveLength(2);
+    expect(claraRow.textContent).not.toMatch(/Unknown,|Неизвестно,/);
     const maxRow = rows.find(r => r.textContent?.includes('Max'))!;
     expect(within(maxRow).getAllByText(offlineNoData)).toHaveLength(2);
     const ivanRow = rows.find(r => r.textContent?.includes('Ivan'))!;
     expect(within(ivanRow).getByText(notOnPlan)).toBeInTheDocument();
 
     openCards();
-    const luizaCard = screen.getByRole('article', { name: 'Claude, Luiza' });
-    expect(luizaCard.querySelector('.stline')).toHaveTextContent(`${offlineState}${offlineLine}`);
-    expect(meterRows(luizaCard).map(m => m.textContent)).toEqual([
+    const claraCard = screen.getByRole('article', { name: 'Claude, Clara' });
+    expect(claraCard.querySelector('.stline')).toHaveTextContent(`${offlineState}${offlineLine}`);
+    expect(meterRows(claraCard).map(m => m.textContent)).toEqual([
       `${language === 'en' ? '5 hours' : '5 часов'}${offlineWithData}`,
       `${language === 'en' ? '7 days' : '7 дней'}${offlineWithData}`,
     ]);
@@ -481,7 +481,7 @@ describe('Subscriptions', () => {
   });
 
   it('runs a test and shows the answer', async () => {
-    const job = { id: 'j1', status: 'queued', result: null, tail: '', error: null, machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: null, finishedAt: null };
+    const job = { id: 'j1', status: 'queued', result: null, tail: '', error: null, machine: 'dev-laptop', createdAt: '2026-10-29T10:00:00.000Z', startedAt: null, finishedAt: null };
     let polls = 0;
     const calls = lists({
       'POST /api/subscriptions/s-claude/test': [201, { job }],
@@ -500,7 +500,7 @@ describe('Subscriptions', () => {
     onTestFinished(() => { vi.useRealTimers(); });
     await act(async () => { fireEvent.click(run); });
     await act(() => vi.advanceTimersByTimeAsync(2000));
-    expect(screen.getByText('Answered "ready" in 3.2 s on ivan-mbp.')).toBeInTheDocument();
+    expect(screen.getByText('Answered "ready" in 3.2 s on dev-laptop.')).toBeInTheDocument();
     expect(calls.filter(c => c.path === '/api/jobs/j1')).toHaveLength(2);
   });
 
@@ -548,7 +548,7 @@ describe('Subscriptions', () => {
   });
 
   it('explains a failed test and keeps the output folded', async () => {
-    const job = { id: 'j2', status: 'failed', result: '', tail: 'Error: something broke', error: 'agent_failed', machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: null, finishedAt: '2026-10-29T10:00:01.000Z' };
+    const job = { id: 'j2', status: 'failed', result: '', tail: 'Error: something broke', error: 'agent_failed', machine: 'dev-laptop', createdAt: '2026-10-29T10:00:00.000Z', startedAt: null, finishedAt: '2026-10-29T10:00:01.000Z' };
     lists({ 'POST /api/subscriptions/s-claude/test': [201, { job: { ...job, status: 'queued' } }], 'GET /api/jobs/j2': [200, { job }] });
     render(<Subscriptions me={ME} />);
     await openAll();
@@ -652,7 +652,7 @@ describe('subscription search and filters', () => {
     expect(screen.getByText('Showing 1 of 4')).toBeInTheDocument();
     expect(screen.getByRole('article', { name: 'Claude, Ivan' })).toBeInTheDocument();
     await userEvent.clear(search);
-    await userEvent.type(search, 'ivan-mbp');
+    await userEvent.type(search, 'dev-laptop');
     expect(screen.getByText('Showing 2 of 4')).toBeInTheDocument();
     await userEvent.clear(search);
     await userEvent.type(search, 'missing');
@@ -678,7 +678,7 @@ describe('subscription search and filters', () => {
   });
 
   it('searches key endings, tiers, account addresses and where the plan serves', async () => {
-    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, tier: 'max', accounts: [{ nodeId: 'n1', hostname: 'ivan-mbp', tier: 'max', email: 'private@acme.com' }], place: { kind: 'department', id: 'd1', name: 'Marketing' } }, SUBS[3]!] }] });
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, tier: 'max', accounts: [{ nodeId: 'n1', hostname: 'dev-laptop', tier: 'max', email: 'private@acme.com' }], place: { kind: 'department', id: 'd1', name: 'Marketing' } }, SUBS[3]!] }] });
     render(<Subscriptions me={ME} />);
     await screen.findByRole('table');
     const search = screen.getByRole('searchbox');
@@ -695,13 +695,13 @@ describe('subscription search and filters', () => {
 
 describe('signing in to plans', () => {
   const NODE = '7d1c6a52-2f4e-4c4b-9f55-0d7a3c1e9b10';
-  const LAPTOP = { id: 'm3', hostname: 'ivan-laptop', status: 'ready' as const, online: true };
+  const LAPTOP = { id: 'm3', hostname: 'dev-notebook', status: 'ready' as const, online: true };
   const claude = SUBS[0]!;
   const codex = SUBS[1]!;
   const only = (...subs: typeof SUBS) => ({ 'GET /api/subscriptions': [200, { subscriptions: subs }] as [number, unknown] });
 
   it("says a plan signed in once runs on any of its owner's machines, and how many are online", async () => {
-    mockApi(only({ ...claude, signedInOnce: true, machines: [MACHINE, LAPTOP, { ...LAPTOP, id: 'm4', hostname: 'ivan-tower', online: false }] }));
+    mockApi(only({ ...claude, signedInOnce: true, machines: [MACHINE, LAPTOP, { ...LAPTOP, id: 'm4', hostname: 'work-tower', online: false }] }));
     render(<Subscriptions me={ME} />);
     await openAll();
     expect(within(rowOf('Claude')).getByText("Signed in once, runs on any of Ivan's machines (2 online)")).toBeInTheDocument();
@@ -712,21 +712,21 @@ describe('signing in to plans', () => {
     render(<Subscriptions me={ME} />);
     await openAll();
     const row = rowOf('Claude');
-    expect(within(row).getByText('Signed in on ivan-mbp only')).toBeInTheDocument();
+    expect(within(row).getByText('Signed in on dev-laptop only')).toBeInTheDocument();
     expect(within(row).queryByText(/^Signed in once/)).not.toBeInTheDocument();
   });
 
   it('says a Codex plan signed in once runs on one machine at a time, and on which', async () => {
-    mockApi(only({ ...codex, status: 'ready', signedInOnce: true, leaseMachine: 'ivan-laptop', machines: [MACHINE, LAPTOP] }));
+    mockApi(only({ ...codex, status: 'ready', signedInOnce: true, leaseMachine: 'dev-notebook', machines: [MACHINE, LAPTOP] }));
     render(<Subscriptions me={ME} />);
     await openAll();
     const row = rowOf('Codex');
-    expect(within(row).getByText('Codex runs on one machine at a time; now on ivan-laptop')).toBeInTheDocument();
+    expect(within(row).getByText('Codex runs on one machine at a time; now on dev-notebook')).toBeInTheDocument();
     expect(within(row).queryByText(/^Signed in once/)).not.toBeInTheDocument();
   });
 
   it('names the tier each plan runs on, and what a free Codex plan cannot do', async () => {
-    const free = { ...codex, status: 'ready' as const, tier: 'free', accounts: [{ nodeId: NODE, hostname: 'ivan-mbp', tier: 'free' }] };
+    const free = { ...codex, status: 'ready' as const, tier: 'free', accounts: [{ nodeId: NODE, hostname: 'dev-laptop', tier: 'free' }] };
     mockApi(only({ ...claude, signedInOnce: true }, free));
     render(<Subscriptions me={ME} />);
     await openAll();
@@ -735,43 +735,43 @@ describe('signing in to plans', () => {
   });
 
   it('names a paid tier, and says when machines of one plan are signed in to different accounts', async () => {
-    const pro = { ...codex, status: 'ready' as const, tier: 'pro', accounts: [{ nodeId: NODE, hostname: 'ivan-mbp', tier: 'pro', email: 'ivan@acme.com' }] };
+    const pro = { ...codex, status: 'ready' as const, tier: 'pro', accounts: [{ nodeId: NODE, hostname: 'dev-laptop', tier: 'pro', email: 'ivan@acme.com' }] };
     const accounts = [
-      { nodeId: NODE, hostname: 'ivan-mbp', tier: 'max', email: 'ivan@acme.com' },
-      { nodeId: 'n2', hostname: 'ivan-laptop', tier: 'pro', email: 'ivan@home.org' },
+      { nodeId: NODE, hostname: 'dev-laptop', tier: 'max', email: 'ivan@acme.com' },
+      { nodeId: 'n2', hostname: 'dev-notebook', tier: 'pro', email: 'ivan@acme.example' },
     ];
     mockApi(only({ ...claude, machines: [MACHINE, LAPTOP], accounts, accountsDiffer: true }, pro));
     render(<Subscriptions me={ME} />);
     await openAll();
     expect(within(rowOf('Codex')).getByText('Codex, Pro')).toBeInTheDocument();
-    expect(within(rowOf('Claude')).getByText('ivan-mbp and ivan-laptop are signed in to different accounts')).toBeInTheDocument();
+    expect(within(rowOf('Claude')).getByText('dev-laptop and dev-notebook are signed in to different accounts')).toBeInTheDocument();
   });
 
   it("signs a plan in again with another account in a terminal on the owner's machine, and closes it once signed in", async () => {
     const stream = fakeStream();
-    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...claude, signedInOnce: true }), 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...claude, signedInOnce: true }), 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Claude with another account' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/s-claude/signin', body: { fresh: true } });
-    expect(await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Signing in on dev-laptop' })).toBeInTheDocument();
     expect(screen.getByTestId('live-terminal')).toHaveAttribute('data-path', `/api/subscriptions/s-claude/signin/terminal?nodeId=${NODE}`);
     /* Another plan's or machine's sign-in leaves this one open. */
     stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: true, error: null, owner: 'p1' });
-    expect(screen.getByRole('heading', { name: 'Signing in on ivan-mbp' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Signing in on dev-laptop' })).toBeInTheDocument();
     stream.send({ type: 'subscription.signin', subscriptionId: 's-claude', nodeId: NODE, ok: true, error: null, owner: 'p1' });
-    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on ivan-mbp' })).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on dev-laptop' })).not.toBeInTheDocument());
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
   it('signs in a plan that waits for its login, and says in plain words when the sign-in fails', async () => {
     const stream = fakeStream();
-    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
     expect(calls.find(c => c.method === 'POST')!.body).toEqual({ fresh: false });
-    await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
     stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'tmux: lost server', owner: 'p1' });
     /* Under the plan's row, as a test's result is. */
     expect(await screen.findByText('The sign-in did not finish, so nothing changed. Try again.')).toBeInTheDocument();
@@ -785,31 +785,31 @@ describe('signing in to plans', () => {
     Element.prototype.scrollIntoView = function (this: Element) { shown.push(this); return Promise.resolve() as unknown as void; };
     onTestFinished(() => void (Element.prototype.scrollIntoView = before));
     fakeStream();
-    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...codex, status: 'ready', machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...codex, status: 'ready', machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
-    const heading = await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    const heading = await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
     await vi.waitFor(() => expect(shown.some(node => node.contains(heading))).toBe(true));
     /* Closing it must not trip over what scrolling gave back. */
     await userEvent.click(screen.getByRole('button', { name: 'Stop the sign-in' }));
-    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on ivan-mbp' })).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on dev-laptop' })).not.toBeInTheDocument());
   });
 
   it('says what to do when the machine could not install the program to sign in with', async () => {
     const stream = fakeStream();
-    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
-    await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    await screen.findByRole('heading', { name: 'Signing in on dev-laptop' });
     stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'The program could not be installed on this machine, so nothing changed.', owner: 'p1' });
     expect(await screen.findByText("The program could not be installed on this machine, so nothing changed. Check the machine's internet connection and free disk space, then try again.")).toBeInTheDocument();
   });
 
   it('stops a sign-in half way', async () => {
     fakeStream();
-    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
+    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
@@ -823,9 +823,9 @@ describe('signing in to plans', () => {
   it.each([
     ['no details', undefined],
     ['no machines', { command: 'curl -fsSL https://hq.acme.com/install.sh | bash' }],
-    ['no command', { machines: ['ivan-mbp'] }],
-    ['machines that are not a list', { machines: 'ivan-mbp', command: 'curl -fsSL https://hq.acme.com/install.sh | bash' }],
-    ['a command that is not text', { machines: ['ivan-mbp'], command: { text: 'curl -fsSL https://hq.acme.com/install.sh | bash' } }],
+    ['no command', { machines: ['dev-laptop'] }],
+    ['machines that are not a list', { machines: 'dev-laptop', command: 'curl -fsSL https://hq.acme.com/install.sh | bash' }],
+    ['a command that is not text', { machines: ['dev-laptop'], command: { text: 'curl -fsSL https://hq.acme.com/install.sh | bash' } }],
   ])('says under the plan, in plain words, why a sign-in cannot start, instead of at the top of the page, with %s', async (_, details) => {
     const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
     const unsupported = { error: { code: 'conflict', message: 'The machine of this plan is online, but its node cannot run the sign-in.', reason: 'signin_unsupported', ...(details ? { details } : {}) } };
@@ -844,12 +844,12 @@ describe('signing in to plans', () => {
   });
 
   it.each([
-    ['en', 'Sign in to Codex', 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on ivan-mbp, then sign in again.', 'Copy', 'It moves the Hornhoof nodes on that machine to the new build and keeps their sign-ins and files.'],
-    ['ru', 'Войти в Codex', 'Ноды на ivan-mbp старше, чем нужно для входа из Hornhoof. Чтобы обновить их, выполните эту команду в терминале на ivan-mbp, затем войдите снова.', 'Копировать', 'Она переводит ноды Hornhoof на этой машине на новую сборку, а их вход и файлы сохраняет.'],
+    ['en', 'Sign in to Codex', 'The nodes on dev-laptop are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on dev-laptop, then sign in again.', 'Copy', 'It moves the Hornhoof nodes on that machine to the new build and keeps their sign-ins and files.'],
+    ['ru', 'Войти в Codex', 'Ноды на dev-laptop старше, чем нужно для входа из Hornhoof. Чтобы обновить их, выполните эту команду в терминале на dev-laptop, затем войдите снова.', 'Копировать', 'Она переводит ноды Hornhoof на этой машине на новую сборку, а их вход и файлы сохраняет.'],
   ])('names the machine whose nodes are too old for the sign-in, with the command that updates them to copy, in %s', async (language, signIn, text, copy, trust) => {
     localStorage.setItem('hh-lang', language);
     const update = 'curl -fsSL https://hq.acme.com/install.sh | bash';
-    const old = { error: { code: 'conflict', message: 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs.', reason: 'signin_unsupported', details: { machines: ['ivan-mbp'], command: update } } };
+    const old = { error: { code: 'conflict', message: 'The nodes on dev-laptop are older than the sign-in from Hornhoof needs.', reason: 'signin_unsupported', details: { machines: ['dev-laptop'], command: update } } };
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], ...only({ ...codex, status: 'ready' as const, machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [409, old] });
     const copied: string[] = [];
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
@@ -864,7 +864,7 @@ describe('signing in to plans', () => {
     expect(copied).toEqual([update]);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     /* The next try starts clean: the note and its command go once the sign-in starts. */
-    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], ...only({ ...codex, status: 'ready' as const, machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], ...only({ ...codex, status: 'ready' as const, machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     await userEvent.click(within(card).getByRole('button', { name: signIn }));
     await vi.waitFor(() => expect(within(card).queryByText(update)).not.toBeInTheDocument());
   });
@@ -895,7 +895,7 @@ describe('signing in to plans', () => {
     const kimi = { ...SUBS[2]!, status: 'needs_login' as const, online: true, machines: [{ ...MACHINE, status: 'needs_login' as const }] };
     const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],
       ...only(kimi),
-      'GET /api/subscriptions/s-kimi/recipients': [200, { version: 2, recipients: [{ nodeId: NODE, publicKey: await identityToRecipient(identity), hostname: 'ivan-mbp' }] }],
+      'GET /api/subscriptions/s-kimi/recipients': [200, { version: 2, recipients: [{ nodeId: NODE, publicKey: await identityToRecipient(identity), hostname: 'dev-laptop' }] }],
       'POST /api/subscriptions/s-kimi/credential': [200, { stored: 1 }],
     });
     render(<Subscriptions me={ME} />);
@@ -918,7 +918,7 @@ describe('signing in to plans', () => {
 
   it('says the sign-in lines in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
-    const free = { ...codex, status: 'ready' as const, tier: 'free', signedInOnce: true, leaseMachine: 'ivan-mbp', accounts: [{ nodeId: NODE, hostname: 'ivan-mbp', tier: 'free' }] };
+    const free = { ...codex, status: 'ready' as const, tier: 'free', signedInOnce: true, leaseMachine: 'dev-laptop', accounts: [{ nodeId: NODE, hostname: 'dev-laptop', tier: 'free' }] };
     mockApi(only({ ...claude, signedInOnce: true, machines: [MACHINE, LAPTOP] }, free));
     render(
       <LanguageProvider>
@@ -930,7 +930,7 @@ describe('signing in to plans', () => {
     expect(within(row).getByText('Вход выполнен один раз, работает на любой машине Ivan (на связи: 2)')).toBeInTheDocument();
     expect(within(row).getByText('Claude, вход на год')).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: 'Войти в Claude с другим аккаунтом' })).toHaveTextContent('Войти в другой аккаунт');
-    expect(within(rowOf('Codex')).getByText('Codex работает на одной машине за раз; сейчас на ivan-mbp')).toBeInTheDocument();
+    expect(within(rowOf('Codex')).getByText('Codex работает на одной машине за раз; сейчас на dev-laptop')).toBeInTheDocument();
     expect(within(rowOf('Codex')).getByText('Codex, Free: новым моделям нужен Plus или Pro')).toBeInTheDocument();
   });
 });
@@ -940,8 +940,8 @@ describe('signing in to plans', () => {
 describe('the card of a plan that does not work', () => {
   const [claude, codex, kimi, key] = SUBS as [SubView, SubView, SubView, SubView];
   const UPDATE = 'curl -fsSL https://hq.acme.com/install.sh | bash';
-  const OLD = { error: { code: 'conflict', message: 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs.', reason: 'signin_unsupported', details: { machines: ['ivan-mbp'], command: UPDATE } } };
-  const OLD_TEXT = 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on ivan-mbp, then sign in again.';
+  const OLD = { error: { code: 'conflict', message: 'The nodes on dev-laptop are older than the sign-in from Hornhoof needs.', reason: 'signin_unsupported', details: { machines: ['dev-laptop'], command: UPDATE } } };
+  const OLD_TEXT = 'The nodes on dev-laptop are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on dev-laptop, then sign in again.';
   const only = (...subs: SubView[]) => ({ 'GET /api/nodes/commands': [200, { commands: [] }] as [number, unknown], 'GET /api/subscriptions': [200, { subscriptions: subs }] as [number, unknown] });
   const THREE = ['blk blk-facts', 'blk blk-run', 'blk blk-side'];
   const blocks = (card: HTMLElement) => [...card.querySelectorAll('.blocks > .blk')].map(b => b.className);
@@ -963,17 +963,17 @@ describe('the card of a plan that does not work', () => {
     expect(blocks(card)).toEqual(['blk blk-fix']);
     expect(workingParts(card)).toEqual([]);
     const block = card.querySelector<HTMLElement>('.blk-fix')!;
-    expect(block.firstElementChild).toHaveTextContent('On ivan-mbp. Only Ivan can sign in.');
+    expect(block.firstElementChild).toHaveTextContent('On dev-laptop. Only Ivan can sign in.');
     expect(buttons(block)).toEqual(['Sign in', 'Remove']);
     /* Said once, in the block, and not in the card's head as well. */
-    expect(within(card).getAllByText('On ivan-mbp. Only Ivan can sign in.')).toHaveLength(1);
+    expect(within(card).getAllByText('On dev-laptop. Only Ivan can sign in.')).toHaveLength(1);
     expect(decl('.blk-fix', 'grid-column')).toBe('1 / -1');
     expect(decl('.blk-fix', 'grid-row')).toBe('1 / -1');
   });
 
   it.each([
-    ['en', 'It needs a sign-in on ivan-mbp, and the machine is offline.', 'Remove'],
-    ['ru', 'Нужен вход на ivan-mbp, а машина не в сети.', 'Удалить'],
+    ['en', 'It needs a sign-in on dev-laptop, and the machine is offline.', 'Remove'],
+    ['ru', 'Нужен вход на dev-laptop, а машина не в сети.', 'Удалить'],
   ])('says in %s that a plan waiting for its sign-in has its machine offline, with Remove alone', async (language, words, remove) => {
     localStorage.setItem('hh-lang', language);
     mockApi(only({ ...codex, online: false, machines: [{ ...codex.machines[0]!, online: false }] }));
@@ -1087,7 +1087,7 @@ describe('the card of a plan that does not work', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
     const block = card.querySelector<HTMLElement>('.blk-fix')!;
     await vi.waitFor(() => expect(block.firstElementChild).toHaveTextContent(OLD_TEXT));
-    expect(within(card).queryByText('On ivan-mbp. Only Ivan can sign in.')).not.toBeInTheDocument();
+    expect(within(card).queryByText('On dev-laptop. Only Ivan can sign in.')).not.toBeInTheDocument();
     expect(buttons(block)).toEqual(['Copy', 'Copy', 'Sign in', 'Remove']);
     expect(blocks(card)).toEqual(['blk blk-fix']);
   });

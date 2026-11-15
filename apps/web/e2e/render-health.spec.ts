@@ -134,7 +134,6 @@ const burst = (): unknown[] => [
 
 const report = (label: string, values: unknown) => {
   test.info().annotations.push({ type: label, description: JSON.stringify(values) });
-  console.log(`RENDER-HEALTH ${test.info().project.name} ${label} ${JSON.stringify(values)}`);
 };
 
 test.describe('a 120-agent company in the browser', () => {
@@ -209,9 +208,8 @@ test.describe('a 120-agent company in the browser', () => {
     };
     report('storm', storm);
     expect(errors).toEqual([]);
-    /* Before #877 the 280 messages took about 200 drawings, 81 fetches of the company and 60 of what waits for people. On
-       the paused clock the first 30 come one by one and the rest at the stream's next hand-on, all at once: two requests
-       of each go out at once and the rest of the burst is in their answers. */
+    /* On the paused clock the first 30 messages come one by one and the rest at the stream's next hand-on, all at once:
+       two requests of each go out at once and the rest of the burst is in their answers. */
     expect(storm.orgFetches).toBe(2);
     expect(storm.requestFetches).toBe(2);
     expect(storm.commits).toBeLessThanOrEqual(100);
@@ -336,8 +334,7 @@ test.describe('a 120-agent company in the browser', () => {
     expect(backOnMap.running).toBe(openMap.running);
   });
 
-  /* Design (#874): glass over the moving canvas has no blur under it, only the dense --hud of the skin. Pictures of the map
-     and of a department in every built-in skin go to the report for Design. */
+  /* Glass over the moving canvas has no blur under it, only the dense --hud of the skin. */
   for (const skin of ['cyberpunk', 'light', 'matrix', 'pixel']) {
     test(`draws the map and a department in ${skin} with glass that has no blur under it`, async ({ page }, info) => {
       await page.addInitScript(id => localStorage.setItem('hh-theme', id), skin);
@@ -361,7 +358,7 @@ test.describe('a 120-agent company in the browser', () => {
     });
   }
 
-  /* Design (#888): the plate of a stopped block and the plate of the light mode, in Russian on Cyberpunk at 1440 px. On the
+  /* The plate of a stopped block and the plate of the light mode, in Russian on Cyberpunk at 1440 px. On the
      paused clock 400 keys typed into the head's chat are 400 drawings of its window at one moment, past the guard's bar of
      300 in two seconds: the window stops behind its boundary and the page goes light. */
   test('shows the plates of a stopped block and of the light mode with their roles, words and 44 px buttons', async ({ page }, info) => {

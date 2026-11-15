@@ -8,14 +8,14 @@ import { DEV_ORG, mockApi } from './api-mock';
 const [devBase] = DEV_ORG.departments;
 const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false, turnkey: false };
 const [dana, bruno] = devBase!.employees;
-const simon = { ...bruno!, id: 'b2', name: 'Simon', teamId: 'u1' };
+const sam = { ...bruno!, id: 'b2', name: 'Sam', teamId: 'u1' };
 const loose = { ...bruno!, id: 'b3', name: 'Leo', roleId: 'UNKNOWN-ROLE' };
-const dept = { ...devBase!, teams: [urgent], employees: [dana!, bruno!, simon, loose] };
+const dept = { ...devBase!, teams: [urgent], employees: [dana!, bruno!, sam, loose] };
 
 describe('SubUnits', () => {
   it('groups employees by sub-unit first, then pipeline roles, then others in both languages', () => {
     expect(employeeGroups(dept, 'en', 'Others').map(g => [g.key, g.title, g.members.map(m => m.name)])).toEqual([
-      ['team:u1', 'Urgent fixes', ['Simon']],
+      ['team:u1', 'Urgent fixes', ['Sam']],
       ['DEV-BE', 'Backend engineer', ['Bruno']],
       ['others', 'Others', ['Leo']],
     ]);
@@ -54,7 +54,7 @@ describe('SubUnits', () => {
     await user.selectOptions(within(members).getByLabelText('Sub-unit for Bruno'), 'u1');
     expect(await within(members).findByRole('alert')).toHaveTextContent('This department or team no longer exists. Reload the page and pick again.');
 
-    await user.selectOptions(within(members).getByLabelText('Sub-unit for Simon'), '');
+    await user.selectOptions(within(members).getByLabelText('Sub-unit for Sam'), '');
     expect(within(members).queryByRole('alert')).not.toBeInTheDocument();
     expect(calls.find(c => c.path === '/api/agents/b2')?.body).toEqual({ team: null });
 

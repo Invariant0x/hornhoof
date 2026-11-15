@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Sha256, UtcTime } from './model-check.js';
 
-/* The outbound gateway at its edge (#403, sections 6 and 7). Every object is strict, so a field nobody agreed on is refused:
+/* The outbound gateway at its edge. Every object is strict, so a field nobody agreed on is refused:
    an author passes references, never words, numbers, links or a recipient, and company, author and time come from the
    server. Nothing here has a default, as a limit nobody chose must not look like one somebody did. */
 const Uuid = z.uuid();

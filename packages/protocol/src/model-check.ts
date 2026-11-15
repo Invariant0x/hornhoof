@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { PROVIDER_IDS } from './providers.js';
 
-/* The frozen contract of a check made by a model (#403, section 10). Every object is strict, so a field nobody agreed on
+/* The frozen contract of a check made by a model. Every object is strict, so a field nobody agreed on
    is refused at the edge. Whatever decides anything, like a must-block example or the identity on a receipt, is built by
    the server from what it really called, not read from a model's words. */
 export const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);

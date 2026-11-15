@@ -299,11 +299,11 @@ describe('job.run', () => {
   it("may name the author of the agents' commits, as one plain line and an address", () => {
     const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
     const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: '' };
-    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const author = { name: 'Alex Rivera', email: 'alex@acme.example' };
     const withAuthor = (a: unknown) => parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, author: a } } }));
     expect(withAuthor(author)).toMatchObject({ workspace: { repo: { author } } });
     expect(withAuthor(null)).toMatchObject({ workspace: { repo: { author: null } } });
-    expect(withAuthor({ ...author, name: 'Ivan\n[core]' })).toBeNull();
+    expect(withAuthor({ ...author, name: 'Alex\n[core]' })).toBeNull();
     expect(withAuthor({ ...author, name: '' })).toBeNull();
     expect(withAuthor({ ...author, email: 'not an address' })).toBeNull();
   });

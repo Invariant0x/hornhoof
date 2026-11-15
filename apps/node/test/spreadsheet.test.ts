@@ -221,13 +221,13 @@ describe('built-in spreadsheet builder and hh-xlsx', () => {
     expect(chatOnly.code, chatOnly.err).toBe(0);
     expect(chatOnly.out.trim()).toBe(`${file} att-1`);
 
-    const taskAndChat = await runNode(ATTACH_SCRIPT, ['--task', '#817', '--chat', file], env);
+    const taskAndChat = await runNode(ATTACH_SCRIPT, ['--task', '#42', '--chat', file], env);
     expect(taskAndChat.code, taskAndChat.err).toBe(0);
     expect(taskAndChat.out.trim()).toBe(`${file} att-2`);
 
     expect(got).toEqual([
       '/api/attachments?chat=1&name=contacts.xlsx',
-      '/api/attachments?task=817&chat=1&name=contacts.xlsx',
+      '/api/attachments?task=42&chat=1&name=contacts.xlsx',
     ]);
   });
 });

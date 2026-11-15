@@ -391,7 +391,7 @@ describe("an agent's live terminal in its window", () => {
     await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
   });
 
-  it("looks like Ivan's iTerm2 in dark mode, on a light page too, since the programs inside run their dark theme", async () => {
+  it('uses the dark terminal palette on a light page too, since the programs inside run their dark theme', async () => {
     open();
     await socket();
     const o = terms[0]!.options as { fontFamily: string; fontSize: number; lineHeight: number; cursorStyle: string; cursorBlink: boolean; drawBoldTextInBrightColors: boolean; theme: Record<string, string> };

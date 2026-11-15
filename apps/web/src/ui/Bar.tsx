@@ -1,4 +1,4 @@
-/* How much of something is used: a thin bar that turns amber from 70% and pink from 90%, as in the prototype. */
+/* How much of something is used: a thin bar that turns amber from 70% and pink from 90%. */
 export const fullness = (used: number) => (used >= 0.9 ? ' max' : used >= 0.7 ? ' hi' : '');
 
 export const percent = (used: number) => Math.round(used * 100);

@@ -2,7 +2,7 @@
    Handjet Project Authors (https://github.com/rosettatype/Handjet/), under the SIL Open Font License 1.1 in OFL.txt beside
    this file. Files and ranges unchanged from @fontsource/handjet 5.3.1. A browser fetches a file only when a skin writes
    text in this font.
-   Design chose 600 in #787 and 500 where Firefox runs the dots together (#789): headings and buttons ask for 600 and get
+   Weight 500 avoids Firefox running the dots together at 600: headings and buttons ask for 600 and get
    500 as it is, since the page fakes no weight (theme.css). Handjet's lowercase is 0.86 of Tektur's at the same size:
    drawn 112% larger, it stands as tall as Tektur's at the sizes of a button and a heading in Chromium, Firefox and
    WebKit, so the sizes of the style book stay as they are. */

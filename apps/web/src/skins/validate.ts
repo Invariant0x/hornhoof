@@ -2,7 +2,7 @@ import { readColor, weakPair } from './contrast';
 import { BUILTIN_SKINS, type BuiltinSkin } from './registry';
 import { COLOR_ROLES, CUT_RANGE, FONT_ROLES, GENERIC_FONTS, SCHEMES, type ColorRole, type FontRole, type Scheme, type Skin, type SkinNames } from './roles';
 
-/* The strict check of a skin file a person adds, version 2 of the format Design set in #787, and the file Hornhoof
+/* The strict check of a skin file a person adds, version 2 of the skin format, and the file Hornhoof
    gives out as a sample. A skin is taken only when it is whole and every value is known, safe, of its form and readable;
    the first one that is not names the field to fix. Nothing of the file is kept: the skin is built anew from the values
    that passed. */
@@ -15,7 +15,7 @@ const FIELDS = ['schema_version', 'base', 'name', 'color_scheme', 'colors', 'fon
 const NAME_LANGUAGES = ['ru', 'en'] as const;
 
 /* The fonts a file may name for each role: the ones Hornhoof ships and the common families behind them. With no repeats
-   a list holds at most as many as its role allows, never more than the six Design set. */
+   a list holds at most as many as its role allows, never more than six. */
 export const FILE_FONTS: Readonly<Record<FontRole, readonly string[]>> = {
   display: ['Tektur', 'Handjet', 'Onest', 'system-ui', 'sans-serif'],
   body: ['Onest', 'system-ui', 'sans-serif'],

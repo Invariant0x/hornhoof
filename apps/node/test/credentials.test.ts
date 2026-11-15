@@ -193,7 +193,7 @@ describe('a sign-in its program refused', () => {
     await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === true);
   });
 
-  /* A provider that refuses every sign-in for a while, as on 2026-11-13, must not get a new turn in a terminal every look. */
+  /* A provider that refuses every sign-in for a while must not get a new turn in a terminal every look. */
   it.each([
     ['ended on the sign-in', { error: 'not_logged_in' as const }],
     ['failed on the sign-in', { error: 'agent_failed' as const, failure: { kind: 'auth' as const, text: 'authentication_failed: Please run /login', retryable: false } }],

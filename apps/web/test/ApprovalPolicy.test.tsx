@@ -223,15 +223,15 @@ describe('the words', () => {
     const entry = {
       id: 'ar1',
       taskId: 't1',
-      taskNumber: 858,
+      taskNumber: 12,
       agentId: 'a1',
-      agentName: 'Dozer',
+      agentName: 'Hana',
       commitSha: 'a'.repeat(40),
       baseCommitSha: '1'.repeat(40),
       testRunId: 'tr1',
       testRunNumber: 42,
       reviewerAgentId: 'a2',
-      reviewerName: 'Trinity',
+      reviewerName: 'Rita',
       verdictStage: 'review',
       createdAt: '2026-11-14T12:00:00.000Z',
     };
@@ -251,9 +251,9 @@ describe('the words', () => {
     await waitFor(() =>
       expect(calls.find(c => c.method === 'PUT' && c.path.endsWith('/autonomous-release'))?.body).toEqual({ enabled: true }),
     );
-    expect(await screen.findByText(/Dozer/)).toBeInTheDocument();
-    expect(screen.getByText(/Trinity/)).toBeInTheDocument();
-    expect(screen.getByText(/#858/)).toBeInTheDocument();
+    expect(await screen.findByText(/Hana/)).toBeInTheDocument();
+    expect(screen.getByText(/Rita/)).toBeInTheDocument();
+    expect(screen.getByText(/#12/)).toBeInTheDocument();
     expect(screen.getByText(/42/)).toBeInTheDocument();
     unmount();
 

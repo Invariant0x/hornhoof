@@ -15,26 +15,26 @@ const view = (name: string, over: Partial<Omit<ComputerAccessView, 'machine'>> =
   reachable: true, until: null, asked: null, canOpen: true, canClose: true, key: 'not_needed',
   ...over,
 });
-export const OPEN = view('a-host', { until: UNTIL });
-export const ASKED = view('a-host', { asked: { reason: REASON, at: '2026-11-04T14:30:00.000Z' } });
-export const CLOSED = view('a-host');
-export const SECOND = view('b-host', { until: UNTIL });
+export const OPEN = view('node-a', { until: UNTIL });
+export const ASKED = view('node-a', { asked: { reason: REASON, at: '2026-11-04T14:30:00.000Z' } });
+export const CLOSED = view('node-a');
+export const SECOND = view('node-b', { until: UNTIL });
 export const MANY: ComputerAccessView[] = Array.from({ length: 12 }, (_, i) => view(`host-${i + 1}`, { until: UNTIL }));
 
 export const WORDS = {
   en: {
     orchestrator: 'Orchestrator', write: 'Write to the orchestrator', tasks: 'Tasks',
-    open: 'Access to a-host', asks: 'The orchestrator asks for access to a-host', second: 'Access to b-host',
-    close: 'Close access', openDay: 'Open for a day', notNow: 'Not now', more: 'More about access to a-host',
+    open: 'Access to node-a', asks: 'The orchestrator asks for access to node-a', second: 'Access to node-b',
+    close: 'Close access', openDay: 'Open for a day', notNow: 'Not now', more: 'More about access to node-a',
     others: 'Other machines with access: 1', oneMore: '1 more', decided: 'Decided by the CEO or the CEO delegate.',
-    what: /For a day it runs commands as root on a-host/, until: /Access to a-host is open until/,
+    what: /For a day it runs commands as root on node-a/, until: /Access to node-a is open until/,
   },
   ru: {
     orchestrator: 'Оркестратор', write: 'Написать оркестратору', tasks: 'Задачи',
-    open: 'Доступ к машине a-host', asks: 'Оркестратор просит доступ к машине a-host', second: 'Доступ к машине b-host',
-    close: 'Закрыть доступ', openDay: 'Открыть на сутки', notNow: 'Не сейчас', more: 'Подробнее о доступе к машине a-host',
+    open: 'Доступ к машине node-a', asks: 'Оркестратор просит доступ к машине node-a', second: 'Доступ к машине node-b',
+    close: 'Закрыть доступ', openDay: 'Открыть на сутки', notNow: 'Не сейчас', more: 'Подробнее о доступе к машине node-a',
     others: 'Другие машины с доступом: 1', oneMore: 'еще 1', decided: /заместитель/,
-    what: /На сутки он сможет выполнять команды с полными правами на машине a-host/, until: /Доступ к машине a-host открыт до/,
+    what: /На сутки он сможет выполнять команды с полными правами на машине node-a/, until: /Доступ к машине node-a открыт до/,
   },
 };
 

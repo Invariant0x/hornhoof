@@ -8,8 +8,8 @@ const JOIN = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join -Ab3
 const WINDOWS_JOIN = 'powershell -ExecutionPolicy Bypass -c "& ([scriptblock]::Create((irm https://hq.acme.com/install.ps1))) --join -Ab3_d-Ef"';
 /* A command that joins a machine shows with the key of whoever looks at it, and so does its Windows form. */
 const WINDOWS_JOIN_WITH_KEY = `${WINDOWS_JOIN.slice(0, -1)} --owner-key ${TEST_KEY.publicKey}"`;
-const UPDATE = 'curl -fsSL http://192.168.1.20:8080/install.sh | bash';
-const WINDOWS_UPDATE = 'powershell -ExecutionPolicy Bypass -c "irm http://192.168.1.20:8080/install.ps1 | iex"';
+const UPDATE = 'curl -fsSL http://192.0.2.20:8080/install.sh | bash';
+const WINDOWS_UPDATE = 'powershell -ExecutionPolicy Bypass -c "irm http://192.0.2.20:8080/install.ps1 | iex"';
 
 afterEach(() => { localStorage.clear(); });
 

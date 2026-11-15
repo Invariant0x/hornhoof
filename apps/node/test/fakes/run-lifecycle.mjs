@@ -1,7 +1,7 @@
 import { runNode } from '../../src/main.ts';
 
 const node = await runNode({
-  dir: process.env.TASK187_NODE_DIR,
+  dir: process.env.FAKE_LIFECYCLE_NODE_DIR,
   log: () => {},
   adapter: {
     install: async () => {},

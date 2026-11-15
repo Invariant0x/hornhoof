@@ -26,13 +26,13 @@ const MAX_ME: Me = {
     id: 'p-max',
     companyId: 'c1',
     name: 'Max',
-    email: 'max@arspatially.com',
+    email: 'max@northwind.example',
     title: 'CMO',
     status: 'active',
     scopeKind: 'listed',
     isOwner: false,
   },
-  company: { id: 'c1', name: 'ArSpatially' },
+  company: { id: 'c1', name: 'Northwind' },
   canDecideCompany: false,
 };
 
@@ -125,7 +125,7 @@ const emitLiveBatch = (page: Page, messages: unknown[]) =>
     for (const m of ms) host.__hhLive(m);
   }, messages);
 
-function buildArSpatiallyFixture() {
+function buildNorthwindFixture() {
   const base = bigCompany();
   const ownDeptId = base.departments[0]!.id;
   const headBase = base.departments[0]!.employees[0]!;
@@ -254,7 +254,7 @@ function buildArSpatiallyFixture() {
 }
 
 test('non-CEO department owner answers head in question card, chat and terminal on a 120-agent company without blink or grey screen', async ({ page }, info) => {
-  const fx = buildArSpatiallyFixture();
+  const fx = buildNorthwindFixture();
   const errors: string[] = [];
   const terminalInputs: string[] = [];
   let wsConnections = 0;
@@ -344,7 +344,7 @@ test('non-CEO department owner answers head in question card, chat and terminal 
         echelonFindings: emptyEchelonFindings(),
         ...fx.taskLine,
         status: answered ? 'working' : 'waiting',
-        body: 'Decide Q4 rollout segment for ArSpatially.',
+        body: 'Decide Q4 rollout segment for Northwind.',
         parent: null,
         after: [],
         executor: fx.taskLine.assignee,

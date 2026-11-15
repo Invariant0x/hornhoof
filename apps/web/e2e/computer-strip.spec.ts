@@ -57,7 +57,7 @@ for (const s of SETTINGS) {
     await line.getByRole('button', { name: words.openDay, exact: true }).click();
     await expect(window.getByRole('region', { name: words.open, exact: true })).toBeVisible();
     await expect(line).toHaveCount(0);
-    expect(posts).toEqual(['/api/machines/a-host/access/open']);
+    expect(posts).toEqual(['/api/machines/node-a/access/open']);
     expect(errors).toEqual([]);
   });
 
@@ -69,7 +69,7 @@ for (const s of SETTINGS) {
     await expect(line).toHaveCount(0);
     await expect(strip(window)).toHaveCount(0);
     await expect.poll(async () => (await box(terminal(window))).height).toBeGreaterThan(withStrip.height);
-    expect(posts).toEqual(['/api/machines/a-host/access/decline']);
+    expect(posts).toEqual(['/api/machines/node-a/access/decline']);
     expect(errors).toEqual([]);
   });
 
@@ -84,7 +84,7 @@ for (const s of SETTINGS) {
     await expectFits(page, window);
     await line.getByRole('button', { name: words.close, exact: true }).click();
     await expect(line).toHaveCount(0);
-    expect(posts).toEqual(['/api/machines/a-host/access/close']);
+    expect(posts).toEqual(['/api/machines/node-a/access/close']);
     expect(errors).toEqual([]);
   });
 
@@ -97,13 +97,13 @@ for (const s of SETTINGS) {
     await expect(second).toHaveCount(0);
     await expect(counter).toHaveText(words.oneMore);
     await expectOneLine(page, window, BEFORE.asked[width]);
-    expect(await first.getByText('a-host', { exact: true }).evaluate(name => name.scrollWidth - name.clientWidth)).toBeLessThanOrEqual(0);
+    expect(await first.getByText('node-a', { exact: true }).evaluate(name => name.scrollWidth - name.clientWidth)).toBeLessThanOrEqual(0);
     await counter.click();
     await expect(second).toBeVisible();
     await expectFits(page, window);
     expect((await box(second)).height).toBe((await box(first)).height);
     await second.getByRole('button', { name: words.close, exact: true }).click();
-    await expect.poll(() => posts).toEqual(['/api/machines/b-host/access/close']);
+    await expect.poll(() => posts).toEqual(['/api/machines/node-b/access/close']);
     expect(errors).toEqual([]);
   });
 }

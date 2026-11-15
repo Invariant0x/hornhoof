@@ -270,7 +270,7 @@ describe('reviewed live delivery through program events', () => {
   it.each([1, 3])('delivers %i failed live messages as later turns in the same program', async count => {
     /* Someone looks at the terminal, so the program does not sleep between the turns. */
     const c = await liveTerminal('claude', 'lost', { watched: true });
-    const messages = [TEXT, 'Task #226 is yours.', 'The answer.\nContinue.'].slice(0, count);
+    const messages = [TEXT, 'Task #12 is yours.', 'The answer.\nContinue.'].slice(0, count);
     for (const text of messages) expect(await c.on(c.host.say('receipt', text))).toBe(false);
     expect(c.input()).toBe('');
     c.finish(); await c.on(c.running);

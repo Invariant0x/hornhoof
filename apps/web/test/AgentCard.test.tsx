@@ -46,12 +46,12 @@ describe('AgentCard', () => {
 
   it('lists its turns a node restart cut off, why, where and on which task, in each language', async () => {
     const interrupted = [
-      { job: 'bbbbbbbb-0000-4000-8000-000000000002', at: '2026-11-03T00:20:00.000Z', cause: 'container' as const, node: 'ivan-mbp', task: { id: 't12', number: 12 }, retry: true },
+      { job: 'bbbbbbbb-0000-4000-8000-000000000002', at: '2026-11-03T00:20:00.000Z', cause: 'container' as const, node: 'dev-laptop', task: { id: 't12', number: 12 }, retry: true },
       { job: 'aaaaaaaa-0000-4000-8000-000000000001', at: '2026-11-03T00:11:00.000Z', cause: 'unknown' as const, node: null, task: null, retry: false },
     ];
     for (const [lang, words] of [
-      ['en', { heading: 'Turns cut off by a node restart', latest: ['#12', 'ivan-mbp, ', 'Its container was created again', 'Turn bbbbbbbb.', 'It was a retry.'], earlier: ['The built-in node, ', 'Why it restarted is not known.', 'Turn aaaaaaaa.'] }],
-      ['ru', { heading: 'Ходы, прерванные перезапуском ноды', latest: ['#12', 'ivan-mbp, ', 'Ее контейнер создан заново', 'Ход bbbbbbbb.', 'Это был повтор.'], earlier: ['Встроенная нода, ', 'Причина перезапуска неизвестна.', 'Ход aaaaaaaa.'] }],
+      ['en', { heading: 'Turns cut off by a node restart', latest: ['#12', 'dev-laptop, ', 'Its container was created again', 'Turn bbbbbbbb.', 'It was a retry.'], earlier: ['The built-in node, ', 'Why it restarted is not known.', 'Turn aaaaaaaa.'] }],
+      ['ru', { heading: 'Ходы, прерванные перезапуском ноды', latest: ['#12', 'dev-laptop, ', 'Ее контейнер создан заново', 'Ход bbbbbbbb.', 'Это был повтор.'], earlier: ['Встроенная нода, ', 'Причина перезапуска неизвестна.', 'Ход aaaaaaaa.'] }],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       open({ 'GET /api/agents/b1': [200, { ...CARD, interrupted }] });
@@ -438,8 +438,8 @@ describe('AgentCard', () => {
   });
 
   it('says which machine the employee runs on', async () => {
-    open({ 'GET /api/agents/b1': [200, { ...CARD, subscription: CARD.runsOn[1]!.subscription, machine: { id: 'm2', hostname: 'oleg-tower' } }] });
-    expect(await screen.findByText('Works on the machine oleg-tower')).toBeInTheDocument();
+    open({ 'GET /api/agents/b1': [200, { ...CARD, subscription: CARD.runsOn[1]!.subscription, machine: { id: 'm2', hostname: 'build-tower' } }] });
+    expect(await screen.findByText('Works on the machine build-tower')).toBeInTheDocument();
   });
 
   it('resets to the template after asking', async () => {
@@ -707,27 +707,27 @@ describe('AgentCard assignment', () => {
 
 describe('an employee whose machine is offline', () => {
   const DEV_PLACE = { kind: 'department' as const, id: 'd2', name: 'Development' };
-  const HOME: SubView = { ...SUBS[0]!, id: 's-home', owner: { id: 'p5', name: 'Luiza' }, online: false, place: DEV_PLACE, machines: [{ id: 'm5', hostname: 'Marselle', status: 'ready', online: false }] };
+  const HOME: SubView = { ...SUBS[0]!, id: 's-home', owner: { id: 'p5', name: 'Clara' }, online: false, place: DEV_PLACE, machines: [{ id: 'm5', hostname: 'workstation-eu', status: 'ready', online: false }] };
   const SPARE: SubView = { ...SUBS[0]!, id: 's-spare', owner: { id: 'p6', name: 'Max' }, online: true, place: DEV_PLACE };
   const ASLEEP: SubView = { ...SPARE, id: 's-asleep', owner: { id: 'p7', name: 'Nora' }, online: false };
   const NOT_SIGNED_IN: SubView = { ...SPARE, id: 's-login', owner: { id: 'p8', name: 'Pavel' }, status: 'needs_login' };
   const WHOLE_COMPANY: SubView = { ...SPARE, id: 's-ceo', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Acme' } };
   const SINCE = '2026-11-13T18:07:00.000Z';
   const offlineCard = (runsOn: SubView[] = [HOME, SPARE, ASLEEP, NOT_SIGNED_IN, WHOLE_COMPANY], over: Partial<AgentCardView> = {}): AgentCardView => ({
-    ...CARD, subscription: HOME, offline: { hostname: 'Marselle', since: SINCE }, runsOn: runsOn.map(subscription => ({ subscription, models: [] })), ...over,
+    ...CARD, subscription: HOME, offline: { hostname: 'workstation-eu', since: SINCE }, runsOn: runsOn.map(subscription => ({ subscription, models: [] })), ...over,
   });
   const at = (locale: string) => new Date(SINCE).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   it('says which machine is offline and since when, in English and Russian', async () => {
-    for (const [lang, line] of [['en', `Machine Marselle is offline since ${at('en-GB')}.`], ['ru', `Машина Marselle не в сети с ${at('ru-RU')}.`]] as const) {
+    for (const [lang, line] of [['en', `Machine workstation-eu is offline since ${at('en-GB')}.`], ['ru', `Машина workstation-eu не в сети с ${at('ru-RU')}.`]] as const) {
       localStorage.setItem('hh-lang', lang);
       open({ 'GET /api/agents/b1': [200, offlineCard()] });
       expect(await screen.findByText(line)).toBeInTheDocument();
       cleanup();
       localStorage.removeItem('hh-lang');
     }
-    open({ 'GET /api/agents/b1': [200, { ...offlineCard(), offline: { hostname: 'Marselle', since: null } }] });
-    expect(await screen.findByText('Machine Marselle is offline.')).toBeInTheDocument();
+    open({ 'GET /api/agents/b1': [200, { ...offlineCard(), offline: { hostname: 'workstation-eu', since: null } }] });
+    expect(await screen.findByText('Machine workstation-eu is offline.')).toBeInTheDocument();
   });
 
   it('moves it in one click to a plan of its own department that is online and signed in, and offers no other plan', async () => {
@@ -736,7 +736,7 @@ describe('an employee whose machine is offline', () => {
     expect(moves.map(b => b.textContent)).toEqual(['Move to Claude, Max']);
     await userEvent.click(moves[0]!);
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.body)).toEqual([{ subscription: 's-spare' }]));
-    await vi.waitFor(() => expect(screen.queryByText(/^Machine Marselle is offline/)).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByText(/^Machine workstation-eu is offline/)).not.toBeInTheDocument());
   });
 
   it('says so when no other plan of its department is online, and offers no move to someone who only sees the card', async () => {
@@ -745,7 +745,7 @@ describe('an employee whose machine is offline', () => {
     expect(screen.queryByRole('button', { name: /^Move to / })).not.toBeInTheDocument();
     cleanup();
     open({ 'GET /api/agents/b1': [200, offlineCard(undefined, { canEdit: false })] });
-    expect(await screen.findByText(/^Machine Marselle is offline since/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Machine workstation-eu is offline since/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Move to / })).not.toBeInTheDocument();
     expect(screen.queryByText('No other plan of this department is online now.')).not.toBeInTheDocument();
   });

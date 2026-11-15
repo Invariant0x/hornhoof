@@ -14,7 +14,7 @@ const messages = { en, ru };
 const stalePlan = (): SubView => ({
   id: 's-antigravity', provider: 'antigravity', kind: 'personal', label: 'Antigravity', status: 'ready', online: true,
   last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' },
-  machines: [{ id: 'a-host', hostname: 'a-host', status: 'ready', online: true }],
+  machines: [{ id: 'node-a', hostname: 'node-a', status: 'ready', online: true }],
   limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-03T00:53:03.947Z' }] },
   limitsUpdatedAt: '2026-11-04T21:44:00.000Z', budget: null, isOrchestrator: false,
   accounts: [], tier: null, accountsDiffer: false, signedInOnce: false, leaseMachine: null, agents: [],
@@ -89,7 +89,7 @@ const CLAUDE_NOW = Date.parse('2026-11-13T21:06:00.000Z');
 
 function claudePlans(): SubView[] {
   const agent = {
-    id: 'b1', canOpen: true, name: 'Neo', busy: false,
+    id: 'b1', canOpen: true, name: 'Leo', busy: false,
     title: { en: 'Developer', ru: 'Разработчик' },
     department: { id: 'd2', name: 'Development' },
     provider: 'claude' as const, since: null, task: null, withCeo: false,
@@ -101,20 +101,20 @@ function claudePlans(): SubView[] {
   };
   return [
     {
-      ...base, id: 's-ivan-claude', online: true, owner: { id: 'p1', name: 'Ivan' },
-      machines: [{ id: 'm-ivan', hostname: '0xs-MacBook-Pro.local', status: 'ready', online: true }],
+      ...base, id: 's-1-claude', online: true, owner: { id: 'p1', name: 'Ivan' },
+      machines: [{ id: 'm-1', hostname: 'work-laptop', status: 'ready', online: true }],
       limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.96, resetsAt: '2026-11-18T12:00:00.000Z' }], complete: true },
       limitsUpdatedAt: '2026-11-13T21:02:00.000Z', agents: [agent],
     },
     {
-      ...base, id: 's-luiza-claude', online: false, owner: { id: 'p2', name: 'Luiza' },
-      machines: [{ id: 'm-luiza', hostname: 'Marselle', status: 'ready', online: false }],
+      ...base, id: 's-clara-claude', online: false, owner: { id: 'p2', name: 'Clara' },
+      machines: [{ id: 'm-clara', hostname: 'workstation-eu', status: 'ready', online: false }],
       limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.72, resetsAt: '2026-11-17T12:00:00.000Z' }], complete: true },
       limitsUpdatedAt: '2026-11-13T17:22:00.000Z', agents: [agent],
     },
     {
       ...base, id: 's-max-claude', online: false, owner: { id: 'p3', name: 'Max' },
-      machines: [{ id: 'm-max', hostname: 'DESKTOP-AB84Q08', status: 'ready', online: false }],
+      machines: [{ id: 'm-max', hostname: 'win-desktop-01', status: 'ready', online: false }],
       limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.55, resetsAt: '2026-11-18T00:00:00.000Z' }], complete: true },
       limitsUpdatedAt: '2026-11-13T18:51:00.000Z', agents: [],
     },
@@ -144,37 +144,37 @@ for (const lang of ['en', 'ru'] as const) for (const skin of BUILTIN_SKINS.map(s
     await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
 
     const ivanRow = page.locator('tr.rm', { hasText: 'Ivan' });
-    const luizaRow = page.locator('tr.rm', { hasText: 'Luiza' });
+    const claraRow = page.locator('tr.rm', { hasText: 'Clara' });
     const maxRow = page.locator('tr.rm').filter({ has: page.locator('td', { hasText: /^Max$/ }) });
-    const luizaOffline = t.subs.offlineLimit(lang === 'en' ? '05:22 PM' : '17:22');
+    const claraOffline = t.subs.offlineLimit(lang === 'en' ? '05:22 PM' : '17:22');
     const maxOffline = t.subs.offlineLimit(lang === 'en' ? '06:51 PM' : '18:51');
 
     await expect(ivanRow).toContainText(t.subs.notOnPlan);
     await expect(ivanRow).toContainText('96%');
     await expect(ivanRow).not.toContainText(/Unknown,|Неизвестно,/);
 
-    await expect(luizaRow).toContainText(t.subs.states.offline);
-    await expect(luizaRow).toContainText(luizaOffline);
-    await expect(luizaRow).not.toContainText(/Unknown,|Неизвестно,/);
+    await expect(claraRow).toContainText(t.subs.states.offline);
+    await expect(claraRow).toContainText(claraOffline);
+    await expect(claraRow).not.toContainText(/Unknown,|Неизвестно,/);
 
     await expect(maxRow).toContainText(t.subs.states.offline);
     await expect(maxRow).toContainText(maxOffline);
     await expect(maxRow).not.toContainText(/Unknown,|Неизвестно,/);
 
     await ivanRow.locator('button.rowbtn').click();
-    await luizaRow.locator('button.rowbtn').click();
+    await claraRow.locator('button.rowbtn').click();
 
     const ivanCard = page.getByRole('article', { name: 'Claude, Ivan', exact: true });
-    const luizaCard = page.getByRole('article', { name: 'Claude, Luiza', exact: true });
+    const claraCard = page.getByRole('article', { name: 'Claude, Clara', exact: true });
     await expect(ivanCard).toContainText(t.subs.notOnPlan);
     await expect(ivanCard).toContainText('96%');
     await expect(ivanCard).not.toContainText(/Unknown,|Неизвестно,/);
 
-    await expect(luizaCard).toContainText(t.cards.notes.offline('Marselle'));
-    await expect(luizaCard).toContainText(luizaOffline);
-    await expect(luizaCard).not.toContainText(/Unknown,|Неизвестно,/);
+    await expect(claraCard).toContainText(t.cards.notes.offline('workstation-eu'));
+    await expect(claraCard).toContainText(claraOffline);
+    await expect(claraCard).not.toContainText(/Unknown,|Неизвестно,/);
 
-    for (const card of [ivanCard, luizaCard]) {
+    for (const card of [ivanCard, claraCard]) {
       const blocks = await box(card.locator('.blocks'));
       for (const blk of await card.locator('.blocks > .blk').all()) {
         const own = await box(blk);

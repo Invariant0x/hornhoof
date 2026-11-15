@@ -29,10 +29,10 @@ mutator apps/web/src/screens/Department.tsx --lines 325,553,565 \
   --test-command 'cd apps/web && npx vitest run test/Department.test.tsx -t "lays out the gates|real rework" --maxWorkers=1'
 ```
 
-The example's line numbers belong to turn 5; select the current changed
-lines when checking another revision. This example intentionally bypasses
-coverage to reproduce a known equivalent `useState(0)` to `useState(1)`
-mutation. Normal task checks should reuse their scoped coverage report.
+Select the current changed lines when checking another revision. This example
+intentionally bypasses coverage to reproduce a known equivalent `useState(0)`
+to `useState(1)` mutation. Normal task checks should reuse their scoped
+coverage report.
 
 ## Where a part of a run lies
 

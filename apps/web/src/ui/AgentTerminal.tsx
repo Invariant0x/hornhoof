@@ -11,7 +11,7 @@ import { attachTerminalScroll, restoreLiveTerminal, writeTerminalData } from './
 import { isHidden } from './visibility';
 import { disposeTerminal } from './xterm-release';
 
-/* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
+/* Dark terminal palette repeated on any page: Claude Code and Codex run their dark theme,
    which a light background would wash out. */
 const ANSI = ['#14191e', '#b43c2a', '#00c200', '#c7c400', '#2744c7', '#c040be', '#00c5c7', '#c7c7c7', '#686868', '#dd7975', '#58e790', '#ece100', '#a7abf2', '#e17ee1', '#60fdff', '#ffffff'];
 const NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'] as const;

@@ -17,7 +17,7 @@ const FACTS = { version: '0.18.11', platform: ['darwin arm64', 'linux x64'], err
 const previewOf = (body: Body) => [
   200,
   {
-    report: { kind: body.kind, title: body.title.replace('ivan@acme.example', '[email]'), text: body.text.replace(/ghp_\w+/, '[secret]').replace('/home/ivan/shop', '[path]'), facts: FACTS },
+    report: { kind: body.kind, title: body.title.replace('ivan@acme.example', '[email]'), text: body.text.replace(/ghp_\w+/, '[secret]').replace('/home/alex/shop', '[path]'), facts: FACTS },
     hidden: { secret: body.text.includes('ghp_') ? 1 : 0, email: body.title.includes('@') ? 1 : 0, address: 0, path: body.text.includes('/home/') ? 1 : 0 },
     digest: 'd'.repeat(64),
   },
@@ -59,12 +59,12 @@ describe('the feedback window', () => {
     await user.click(within(kinds).getByRole('button', { name: 'Improvement' }));
     await user.click(within(kinds).getByRole('button', { name: 'Bug' }));
     await user.type(within(box).getByLabelText('Title'), 'Terminal froze for ivan@acme.example');
-    await user.type(within(box).getByLabelText('What happened, or what you would like'), 'In /home/ivan/shop the key ghp_abc123 showed');
+    await user.type(within(box).getByLabelText('What happened, or what you would like'), 'In /home/alex/shop the key ghp_abc123 showed');
     expect(within(box).getByText(/hides keys, passwords, email, addresses and home folder paths/)).toBeInTheDocument();
     await user.click(within(box).getByRole('button', { name: 'Next' }));
 
     const check = await within(box).findByRole('region', { name: 'This goes to Hornhoof developers' });
-    expect(calls.filter(c => c.path === '/api/feedback/preview').map(c => c.body)).toEqual([{ kind: 'bug', title: 'Terminal froze for ivan@acme.example', text: 'In /home/ivan/shop the key ghp_abc123 showed' }]);
+    expect(calls.filter(c => c.path === '/api/feedback/preview').map(c => c.body)).toEqual([{ kind: 'bug', title: 'Terminal froze for ivan@acme.example', text: 'In /home/alex/shop the key ghp_abc123 showed' }]);
     const terms = within(check).getAllByRole('term').map(term => term.textContent);
     const values = within(check).getAllByRole('definition').map(d => d.textContent);
     expect(Object.fromEntries(terms.map((term, i) => [term, values[i]]))).toEqual({
@@ -79,7 +79,7 @@ describe('the feedback window', () => {
 
     await user.click(within(box).getByRole('button', { name: 'Send' }));
     expect(await within(box).findByText('Sent. Thank you, Hornhoof developers will read it.')).toBeInTheDocument();
-    expect(sent(calls).map(c => c.body)).toEqual([{ kind: 'bug', title: 'Terminal froze for ivan@acme.example', text: 'In /home/ivan/shop the key ghp_abc123 showed', digest: 'd'.repeat(64) }]);
+    expect(sent(calls).map(c => c.body)).toEqual([{ kind: 'bug', title: 'Terminal froze for ivan@acme.example', text: 'In /home/alex/shop the key ghp_abc123 showed', digest: 'd'.repeat(64) }]);
     await user.click(within(box).getByRole('button', { name: 'Done' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });

@@ -8,7 +8,7 @@ import { SUB } from './agent-window-api';
 export type Settings = { lang: 'en' | 'ru'; theme: 'light' | 'dark'; width: number };
 export type Agent = 'orchestrator' | 'b1';
 
-/* The plan both agents run on is Ivan's. Lisa is the CEO delegate, and Maria has the Development department. */
+/* Both agents run on the CEO's plan. Lisa is the CEO delegate, and Maria has the Development department. */
 export const VIEWERS = {
   owner: { me: ME, types: true },
   delegate: { me: { ...ME, person: { ...ME.person, id: 'p2', name: 'Lisa', isOwner: false, isCeoDelegate: true }, canDecideCompany: true } satisfies Me, types: false },

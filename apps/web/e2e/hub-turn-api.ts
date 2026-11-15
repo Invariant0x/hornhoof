@@ -33,7 +33,7 @@ const deptId = (i: number) => `d${i + 1}`;
 /* A department that works in turns has no count while no turn is open. */
 function department({ name, roleCode, progress }: Company[number], i: number, open: boolean): Department {
   const id = deptId(i);
-  /* Development has 24 agents, two lines of squares on its card as on Ivan's map; the others fewer. */
+  /* Development has 24 agents, two lines of squares on its card; the others fewer. */
   const employees = Array.from({ length: i ? 4 + ((i * 3) % 7) : 24 }, (_, k) => employee(id, k));
   return {
     id, name, templateKey: null, roleCode, about: '', products: [], teams: [], people: [], roles: [], employees,

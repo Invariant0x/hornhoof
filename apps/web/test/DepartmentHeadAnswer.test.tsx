@@ -22,7 +22,7 @@ const EVENTS_REPLY: [number, unknown] = [
 
 const DEPT_OWNER_ME: Me = {
   person: { id: 'p-max', companyId: 'c1', name: 'Max', email: 'max@acme.com', title: 'CMO', status: 'active', scopeKind: 'listed', isOwner: false },
-  company: { id: 'c1', name: 'ArSpatially' },
+  company: { id: 'c1', name: 'Northwind' },
   canDecideCompany: false,
 };
 

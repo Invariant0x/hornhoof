@@ -8,7 +8,7 @@ import { declarations, type Skin, type SkinLook, type SkinNames } from '../skins
 import { addSkin, chooseSkin, removeSkin, restoreSkin, skinsState, subscribeSkins, type Removal } from '../skins/store';
 import { builtinFile, parseSkin, SEE_THROUGH, SKIN_FILE_LIMIT, skinText, type SkinError } from '../skins/validate';
 
-/* The Themes section of a person's settings, after the reference of Design (#787): a card for every built-in skin and
+/* The Themes section of a person's settings: a card for every built-in skin and
    every one of their own, one click to apply one, a file to add, any skin to download as a sample, and the guide to
    making one. Anyone signed in has it: what it changes stays in this browser. */
 

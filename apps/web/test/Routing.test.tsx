@@ -42,7 +42,7 @@ describe('shareable workspace', () => {
     ['/versions', 'dialog', 'Versions'],
     ['/tasks/t12', 'complementary', '#12 Checkout API'],
     ['/people/p2', 'heading', 'Edit Maria'],
-    ['/machines/m1', 'article', 'ivan-mbp'],
+    ['/machines/m1', 'article', 'dev-laptop'],
     ['/departments/d2', 'heading', 'Development'],
     ['/profile', 'dialog', 'Settings'],
     ['/about', 'dialog', 'About Hornhoof'],
@@ -184,9 +184,9 @@ describe('shareable workspace', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(location.pathname).toBe('/people');
     await user.click(tab('Machines'));
-    await user.click(await screen.findByRole('button', { name: 'Open the card of ivan-mbp' }));
+    await user.click(await screen.findByRole('button', { name: 'Open the card of dev-laptop' }));
     expect(location.pathname).toBe('/machines/m1');
-    await user.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    await user.click(screen.getByRole('button', { name: 'Open the card of dev-laptop' }));
     expect(location.pathname).toBe('/machines');
   });
 
@@ -234,7 +234,7 @@ describe('shareable workspace', () => {
     history.replaceState(null, '', '/machines/m1');
     render(<Shell me={ME} onSignOut={() => {}} />);
     const user = userEvent.setup();
-    await screen.findByRole('article', { name: 'ivan-mbp' });
+    await screen.findByRole('article', { name: 'dev-laptop' });
     await user.click(screen.getByRole('button', { name: 'Open the card of build-box' }));
     await user.type(screen.getByRole('searchbox'), 'build-box');
     await act(async () => {
@@ -243,7 +243,7 @@ describe('shareable workspace', () => {
       await popped;
     });
     expect(location.pathname).toBe('/machines/m1');
-    expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBeVisible();
+    expect(screen.getByRole('article', { name: 'dev-laptop' })).toBeVisible();
   });
 
   it('closes a revisited account dialog to the section stored in that history entry', async () => {

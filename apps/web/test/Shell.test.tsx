@@ -70,7 +70,7 @@ describe('Shell', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(tab('Machines'));
     expect(await screen.findByRole('heading', { name: 'Machines' })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Open the card of ivan-mbp' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Open the card of dev-laptop' })).toBeInTheDocument();
     expect(tab('Machines')).toHaveAttribute('aria-current', 'page');
   });
 
@@ -104,7 +104,7 @@ describe('Shell', () => {
   });
 
   describe('at a machine of the company', () => {
-    const closed = accessView('ivan-mbp', { machine: { id: 'm1' } });
+    const closed = accessView('dev-laptop', { machine: { id: 'm1' } });
     const menu = async (here: object | null, extra: Parameters<typeof mockApi>[0] = {}) => {
       const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/machines/here': [200, here ?? { machine: null, view: null }], ...extra });
       const user = userEvent.setup();
@@ -116,7 +116,7 @@ describe('Shell', () => {
 
     it('offers its owner to give the orchestrator access to it, and closes the menu once it is open', async () => {
       const { calls, user } = await menu({ machine: closed.machine, view: closed }, { 'POST /api/machines/m1/access/open': [200, { ...closed, until: '2099-01-01T00:00:00.000Z' }] });
-      await user.click(await screen.findByRole('button', { name: 'Give the orchestrator access to this machine (ivan-mbp)' }));
+      await user.click(await screen.findByRole('button', { name: 'Give the orchestrator access to this machine (dev-laptop)' }));
       await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m1/access/open', body: {} }));
       await waitFor(() => expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument());
     });
@@ -140,7 +140,7 @@ describe('Shell', () => {
     it('offers it in Russian', async () => {
       localStorage.setItem('hh-lang', 'ru');
       await menu({ machine: closed.machine, view: closed });
-      expect(await screen.findByRole('button', { name: 'Дать оркестратору доступ к этой машине (ivan-mbp)' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Дать оркестратору доступ к этой машине (dev-laptop)' })).toBeInTheDocument();
     });
   });
 

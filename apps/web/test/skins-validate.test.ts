@@ -38,7 +38,7 @@ describe('a skin file of version 2', () => {
     expect(skinText(SAMPLE).endsWith('}\n')).toBe(true);
   });
 
-  it('takes the file Design attached to #787 as it is', () => {
+  it('takes a valid custom pixel skin file as it is', () => {
     const example = {
       schema_version: 2, base: 'pixel', name: { ru: 'Моя пиксельная тема', en: 'My pixel theme' }, color_scheme: 'dark', colors: { ...SAMPLE.colors },
       fonts: { display: ['Handjet', 'Onest', 'sans-serif'], body: ['Onest', 'sans-serif'], mono: ['ui-monospace', 'monospace'] }, cut: 1,

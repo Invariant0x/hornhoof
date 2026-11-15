@@ -10,7 +10,7 @@ const QUESTION: Question = {
   since: '2026-11-12T14:02:30.000Z',
   leader: { networkId: A, host: 'rack-01', heard: '2026-11-12T14:02:00.000Z' },
   copies: [
-    { networkId: B, host: 'ivan-studio', number: 2, reach: '2026-11-12T14:01:40.000Z', self: true },
+    { networkId: B, host: 'dev-studio', number: 2, reach: '2026-11-12T14:01:40.000Z', self: true },
     { networkId: C, host: LONG, number: 3, reach: '2026-11-12T14:01:00.000Z', self: false },
     { networkId: D, host: 'lab-nuc', number: null, reach: null, self: false },
   ],

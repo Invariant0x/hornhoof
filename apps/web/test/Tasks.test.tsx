@@ -372,19 +372,19 @@ describe('the decisions of one person', () => {
 
   it('show a card for each machine the orchestrator asks for, and answer each on its own machine', async () => {
     const user = userEvent.setup();
-    const mac = accessView('marat-mac', { asked: { reason: 'Clean Docker images.', at: AT }, machine: { os: 'darwin' } });
+    const mac = accessView('office-pc', { asked: { reason: 'Clean Docker images.', at: AT }, machine: { os: 'darwin' } });
     const calls = shell({
-      'GET /api/requests': [200, decisions([], { machineAccess: [COMPUTER, { ...COMPUTER, id: 'm-marat-mac', view: mac }] })],
-      'POST /api/machines/m-marat-mac/access/decline': [200, { ...mac, asked: null }],
+      'GET /api/requests': [200, decisions([], { machineAccess: [COMPUTER, { ...COMPUTER, id: 'm-office-pc', view: mac }] })],
+      'POST /api/machines/m-office-pc/access/decline': [200, { ...mac, asked: null }],
     });
     await openTasks(user);
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toHaveTextContent('Inspect disk space.');
-    const second = within(waiting).getByRole('region', { name: 'The orchestrator asks for access to marat-mac' });
+    const second = within(waiting).getByRole('region', { name: 'The orchestrator asks for access to office-pc' });
     expect(second).toHaveTextContent('Clean Docker images.');
     expect(second).toHaveTextContent("On a Mac this reaches Docker's Linux system, not macOS itself.");
     await user.click(within(second).getByRole('button', { name: 'Not now' }));
-    await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-marat-mac/access/decline', body: undefined }));
+    await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-office-pc/access/decline', body: undefined }));
     expect(calls.some(call => call.path.startsWith('/api/machines/m-server/access'))).toBe(false);
   });
 

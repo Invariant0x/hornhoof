@@ -4,7 +4,7 @@ import { EnvironmentSnapshot, RuntimeCapability, runsInClass, runtimeClass, type
 
 const commit = 'a'.repeat(40);
 const x64 = { os: 'linux', arch: 'x64', libc: 'glibc' };
-/* The runtimes a node of the builds home-api and a-host run on names, and another build of them, as an arm64 Mac's. */
+/* The runtimes a Linux x64 node names, and another build of them, as on an arm64 machine. */
 const described: Runtime[] = [
   { id: 'node', version: '22.23.4', fingerprint: '1'.repeat(64), platform: x64 },
   { id: 'postgres', version: '17.11', fingerprint: '2'.repeat(64), platform: x64 },

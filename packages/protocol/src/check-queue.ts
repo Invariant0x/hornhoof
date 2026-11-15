@@ -12,7 +12,7 @@ export const CheckQueueReply = z.object({
 }).refine(reply => reply.state === 'queued' ? reply.position > 0 : reply.position === 0);
 export type CheckQueueReply = z.infer<typeof CheckQueueReply>;
 
-/* The task-356 probe passed two concurrent checks on nine CPUs and failed at four.
+/* Benchmarks passed two concurrent checks on nine CPUs and failed at four.
    Reserve five CPU equivalents per unbounded check, falling back to one while load is high.
    An active check is never killed when a newer load measurement reduces admission. */
 export function checkCapacity(cpus: number, load: number): number {

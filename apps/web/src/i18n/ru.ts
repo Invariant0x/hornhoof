@@ -1114,7 +1114,7 @@ export const ru: Messages = {
     products: 'Продукты',
     withPeople: 'Сразу нанять в каждый отдел сотрудников по его шаблону. Кому пока не подходит ни одна подписка, тот ждет ее.',
   },
-  /* Предохранитель, который останавливает бесконечно перерисовывающийся блок и выключает тяжелые эффекты, пока страница тормозит. */
+  /* The guard that stops a block stuck redrawing and turns heavy effects off while the page is slow. */
   guard: {
     stopped: 'Этот блок остановлен: он мешал работе экрана.',
     failed: 'Этот блок остановлен: в нем произошла ошибка.',
@@ -1161,7 +1161,7 @@ export const ru: Messages = {
       limitIs: (limit, unit) => `Без одобрения до ${limit}${unit ? ` ${unit}` : ''}`,
       channels: { message: 'Сообщения', price: 'Цены', publication: 'Публикации', commit: 'Коммиты', spend: 'Расходы', other: 'Все остальное' },
       autonomousRelease: 'Автономный выпуск',
-      autonomousReleaseHint: 'Когда включен, точный коммит для main проходит без карточки одобрения, если на нем завершен зеленый полный прогон run_tests, есть независимый вердикт PASS не от автора и путь от main идет через fast-forward. Включает и выключает только CEO.',
+      autonomousReleaseHint: 'Когда включен, точный коммит для main проходит без карточки одобрения, если на нем завершен зеленый полный прогон тестов, есть независимый вердикт PASS не от автора и путь от main идет через fast-forward. Включает и выключает только CEO.',
       autonomousReleaseState: on => (on ? 'Автономный выпуск: включен (меняет только CEO).' : 'Автономный выпуск: выключен (меняет только CEO).'),
       autonomousJournalTitle: 'Журнал автономного выпуска',
       autonomousJournalEmpty: 'Автоматически одобренных коммитов пока нет.',
@@ -1436,7 +1436,7 @@ export const ru: Messages = {
     default: 'По умолчанию',
     subUnit: 'Подотдел',
     inPipeline: 'В конвейере',
-    /* Насколько усердно модель думает перед ответом. */
+    /* How hard the model thinks before answering. */
     effort: 'Усилие',
     defaultEffort: (level: string) => `По умолчанию (${level.toLowerCase()})`,
     efforts: { none: 'Без размышлений', minimal: 'Минимальное', low: 'Низкое', medium: 'Среднее', high: 'Высокое', xhigh: 'Очень высокое', max: 'Максимальное', ultra: 'Предельное' } as Record<string, string>,

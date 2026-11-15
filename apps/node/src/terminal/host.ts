@@ -742,7 +742,7 @@ export class TerminalHost {
   }
 
   /* agy 1.4.12 connects to the MCP servers of its folder only once it takes its first input or opens its /mcp panel, and
-     the turn whose input made it connect works without their tools (seen on a-host, #226). So an agy that has not listed
+     the turn whose input made it connect works without their tools. So an agy that has not listed
      Hornhoof's tools through the bridge since it started opens that panel before Hornhoof's prompt goes in, whether this
      turn started it or a person's window did. A turn whose agy lists none there, or does not come back to its prompt,
      ends saying so. */

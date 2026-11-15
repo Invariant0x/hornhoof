@@ -6,7 +6,7 @@ const lists = { common: z.array(MaterialInput).max(MATERIAL_LIMITS.perList), opt
 const Result = z.strictObject({ presentation: z.literal('result'), ...lists }).refine(value =>
   value.options.length ? value.options.every(materials => materials.length > 0) : value.common.length > 0,
   'materials_required: Attach a material to each result option, or to the common result when there are no options.');
-/* B matches this positional array to the actual source options and forces result
+/* The server matches this positional array to the actual source options and forces result
    for ready_result/exact commits; action is never an authority/legacy waiver. */
 export const QuestionMaterials = z.discriminatedUnion('presentation', [Result, z.strictObject({ presentation: z.literal('action'), ...lists })])
   .refine(materialMetadataFits, 'Oversized material metadata.');
@@ -62,7 +62,7 @@ const Classification = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('human_only_action'), actionBinding: HumanActionBinding }),
 ]);
 /* The client selects the result/action. It never selects a recipient, authority
-   digest or purpose. B derives those from current native rights in its tx. */
+   digest or purpose. The server derives those from current native rights in its tx. */
 export const QuestionClassificationInput = z.strictObject({
   ...QuestionMutationGuard.shape, classification: Classification, humanEnvelope: HumanEnvelope,
 }).refine(materialMetadataFits, 'Oversized classification metadata.');
@@ -110,7 +110,7 @@ function snapshotPurposeFits(value: Snapshot): boolean {
   return purpose.kind !== 'decision' && purpose.kind === value.classification.actionBinding.kind
     && purpose.resourceId === value.classification.actionBinding.resourceId;
 }
-/* PRIVATE consistency metadata only. B seals the digest, verifies actual source
+/* PRIVATE consistency metadata only. The server seals the digest, verifies actual source
    and resource rights in its tx, and compares current bindings on every use.
    A parsed digest/task capture is never proof of a current assignment or grant. */
 export const QuestionClassificationSnapshot = snapshotShape

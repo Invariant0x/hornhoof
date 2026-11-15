@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { ConnectionHistory, MachineView, SubView } from '../src/types';
 import { serveApi } from './api';
 
-const HOST = 'home-api';
+const HOST = 'build-node';
 const GIB = 1024 ** 3;
 const NOW = Date.now();
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();

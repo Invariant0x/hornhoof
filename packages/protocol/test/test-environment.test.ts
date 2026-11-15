@@ -46,7 +46,7 @@ const python = () => ({
 });
 
 describe('canonical TestEnvironmentV1', () => {
-  it('accepts the frozen Hornhoof manifest from slice B, including service-root artifacts and file reset', () => {
+  it('accepts the frozen Hornhoof manifest, including service-root artifacts and file reset', () => {
     const manifest: unknown = JSON.parse(readFileSync(new URL('./fixtures/hornhoof-test-environment-v1.json', import.meta.url), 'utf8'));
     expect(environment.safeParse(manifest)).toMatchObject({ success: true, data: manifest });
   });

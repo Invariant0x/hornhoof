@@ -2,7 +2,7 @@ import { isStaged } from '@hornhoof/protocol/echelons';
 import type { Department, DeptRole, Employee, Team } from '../types';
 import type { Point } from '../ui/wires';
 
-/* A department's schema in world pixels, laid out like the prototype. From the top: the head with the people who reach the
+/* A department's schema in world pixels. From the top: the head with the people who reach the
    department at its right, the bus from the head to every frame, the pipeline between stages with a numbered gate before each
    check, then a frame per role. Work goes left to right: design, ordinary work, each check in order, then the final check.
    Only sub-units and observers stand apart from the pipeline. */
@@ -244,7 +244,7 @@ export function stepPaths(s: Schema) {
   };
 }
 
-/* The arrowhead at the end of a line, as in the prototype. */
+/* The arrowhead at the end of a line. */
 export function arrowD(pts: Point[]): string {
   const b = pts[pts.length - 1]!, a = pts[pts.length - 2]!;
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;

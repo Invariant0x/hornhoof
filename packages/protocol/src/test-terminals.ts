@@ -124,7 +124,7 @@ export const TestTerminalClose = z.discriminatedUnion('code', [
 ]);
 export type TestTerminalClose = z.infer<typeof TestTerminalClose>;
 
-/* B supplies genuine current metadata. A matching comparison is never a grant. */
+/* The server supplies genuine current metadata. A matching comparison is never a grant. */
 export const TestViewBindingContext = z.strictObject({
   viewId: UUID, nonceId: UUID, origin: TestTerminalOrigin, leaseId: UUID, leaseRevision: Revision,
   registrationId: UUID, identityDigest: Digest, currentConnectionBinding: boundedText(256).min(1),

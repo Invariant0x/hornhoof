@@ -75,7 +75,7 @@ function stubFetchRoutes(routes: Record<string, MockReply | ((body: unknown) => 
   return calls;
 }
 
-describe('long 12,000-character feedback, answers, and full report reading (#424)', () => {
+describe('long 12,000-character feedback, answers, and full report reading', () => {
   afterEach(() => {
     cleanup();
     localStorage.removeItem('hh-lang');

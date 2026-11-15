@@ -49,7 +49,7 @@ class AgyTerminal {
   }
 
   /* agy 1.4.12 connects to the MCP servers of its folder only once it takes its first input or opens its /mcp panel, never
-     on its own, and the turn whose input made it connect works without their tools (seen on a-host, #226).
+     on its own, and the turn whose input made it connect works without their tools.
      FAKE_MCP_LIST_MS: how long listing them takes; FAKE_AGY_NO_TOOLS: it never gets them. */
   tools = false;
 

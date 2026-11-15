@@ -86,20 +86,20 @@ describe('Machines', () => {
     localStorage.setItem('hh-lang', language);
     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }] });
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     expect(within(mac).getByRole('heading', { name: heading })).toBeInTheDocument();
     expect(fact(mac, 'Claude Code')).toBe('2.1.0');
   });
 
   it('retains an active add-plan command after refreshing program versions', async () => {
-    const command = { id: '3'.repeat(64), kind: 'add', plans: ['Kimi'], machineId: 'm1', machine: 'ivan-mbp', command: `${COMMAND}-ADD`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
+    const command = { id: '3'.repeat(64), kind: 'add', plans: ['Kimi'], machineId: 'm1', machine: 'dev-laptop', command: `${COMMAND}-ADD`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
     const calls = lists({
       'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }],
       'GET /api/nodes/commands': [200, { commands: [command] }],
       'POST /api/machines/m1/programs/update': [202, { updating: true }],
     });
     render(<Machines me={ME} />);
-    const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
+    const mac = await screen.findByRole('article', { name: 'dev-laptop' });
     expect(await within(mac).findByText(withKey(command.command))).toBeInTheDocument();
     const update = within(mac).getByRole('button', { name: 'Update programs' });
     await userEvent.setup().click(update);
@@ -124,9 +124,9 @@ describe('Machines', () => {
   ])('shows read-only priority on the joined server machine only in %s', async (language, title, line, builtinName) => {
     localStorage.setItem('hh-lang', language);
     let joined = true;
-    lists({ 'GET /api/machines': () => [200, { machines: MACHINES, builtin: { ...BUILTIN, machine: joined ? { id: 'm1', hostname: 'ivan-mbp' } : null } }] });
+    lists({ 'GET /api/machines': () => [200, { machines: MACHINES, builtin: { ...BUILTIN, machine: joined ? { id: 'm1', hostname: 'dev-laptop' } : null } }] });
     const view = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     const priority = within(mac).getByRole('heading', { name: title }).closest('section')!;
     expect(priority.textContent).toBe(`${title}1${line}`);
     expect(priority.querySelector('button, input, select')).toBeNull();
@@ -135,7 +135,7 @@ describe('Machines', () => {
     joined = false;
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await openCard(builtinName);
-    card('ivan-mbp');
+    card('dev-laptop');
     card('build-box');
     expect(screen.queryByRole('heading', { name: title })).not.toBeInTheDocument();
   });
@@ -148,7 +148,7 @@ describe('Machines', () => {
     const limits = { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 80 * 60_000).toISOString() }] };
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, tier: 'Max', limits }, ...SUBS.slice(1)] }] });
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     const plans = mac.querySelector('.plist')!;
     expect(within(plans as HTMLElement).getAllByRole('listitem').map(item => item.querySelector('.nm')?.textContent)).toEqual([
       expect.stringMatching(new RegExp(`^Claude Max${limited}`)), `Codex${login}`,
@@ -169,7 +169,7 @@ describe('Machines', () => {
   it('shows each machine with its owner, system, processor, memory, load and disk', async () => {
     lists();
     render(<Machines me={ME} />);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     expect(within(mac).getByText('Online')).toBeInTheDocument();
     expect(fact(mac, 'Owner')).toBe('Ivan');
     expect(fact(mac, 'System')).toBe('macOS, arm64');
@@ -195,8 +195,8 @@ describe('Machines', () => {
     fixedAt();
     lists();
     render(<Machines me={ME} />);
-    const mac = await openCard('ivan-mbp');
-    const now = within(mac).getByRole('region', { name: 'What runs on ivan-mbp now' });
+    const mac = await openCard('dev-laptop');
+    const now = within(mac).getByRole('region', { name: 'What runs on dev-laptop now' });
     expect(within(now).getByRole('region', { name: 'Development' })).toHaveTextContent('Bruno');
     expect(within(now).getByTitle('Checkout API')).toHaveTextContent('#12');
     expect(within(now).getByText('12 min')).toBeInTheDocument();
@@ -231,20 +231,20 @@ describe('Machines', () => {
 
   /* The server on a computer that joined as a machine too: one computer, one card. */
   it('shows the machine the built-in node runs on as one card, with what runs on either', async () => {
-    lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } });
+    lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'dev-laptop' } });
     render(<Machines me={ME} />);
     const pool = await screen.findByRole('region', { name: 'All machines together' });
     expect(fact(pool, 'Machines online')).toBe('1 of 2');
     expect(fact(pool, 'Processor cores')).toBe('8');
     expect(fact(pool, 'Free memory')).toBe('6 of 12 GB');
     expect(fact(pool, 'Busy now')).toBe('25%');
-    const mac = card('ivan-mbp');
+    const mac = card('dev-laptop');
     expect(mac.querySelector('.machine')).toHaveClass('accent');
     expect(mac.querySelector('.corner')).toBeInTheDocument();
-    expect(within(screen.getByRole('button', { name: 'Open the card of ivan-mbp' })).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
+    expect(within(screen.getByRole('button', { name: 'Open the card of dev-laptop' })).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
     expect(within(screen.getByRole('row', { name: 'build-box' })).queryByTitle('The company server runs on this machine now')).not.toBeInTheDocument();
     expect(within(mac).getByText("The server runs here too, with its built-in node for the company's keys and test runs.")).toBeInTheDocument();
-    expect(within(within(mac).getByRole('region', { name: 'What runs on ivan-mbp now' })).getByText('Orchestrator')).toBeInTheDocument();
+    expect(within(within(mac).getByRole('region', { name: 'What runs on dev-laptop now' })).getByText('Orchestrator')).toBeInTheDocument();
     expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(2);
     expect(within(card('build-box')).queryByText(/built-in node/)).not.toBeInTheDocument();
     expect(within(mac).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
@@ -255,7 +255,7 @@ describe('Machines', () => {
     const machine = { ...MACHINES[0]!, online: false, load: null, browserError: 'machine browser reason', drain: { state: 'restarting' as const, since: '2026-11-04T17:00:00.000Z' } };
     lists({ 'GET /api/machines': [200, { machines: [machine], builtin: { ...BUILTIN, machine: { id: machine.id, hostname: machine.hostname }, browserError: 'builtin browser reason', drain: { state: 'postponed', turnsLeft: 2, partsLeft: 0, retryAt: '2026-11-04T18:00:00.000Z' } } }] });
     render(<Machines me={ME} />);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     expect(fact(await screen.findByRole('region', { name: 'All machines together' }), 'Machines online')).toBe('1 of 1');
     expect(meter(mac, 'Processor')).toHaveTextContent('4 cores');
     expect(within(mac).getByText('Online', { selector: '.status' })).toBeInTheDocument();
@@ -270,7 +270,7 @@ describe('Machines', () => {
     const merged = { ...MACHINES[0]!, running: { agents: [...BUILTIN.running.agents, ...MACHINES[0]!.running.agents], parts: MACHINES[0]!.running.parts } };
     lists({ 'GET /api/machines': [200, { machines: [merged], builtin: { ...BUILTIN, machine: { id: merged.id, hostname: merged.hostname } } }] });
     render(<Machines me={ME} />);
-    const running = within(await openCard('ivan-mbp')).getByRole('region', { name: 'What runs on ivan-mbp now' });
+    const running = within(await openCard('dev-laptop')).getByRole('region', { name: 'What runs on dev-laptop now' });
     expect(within(running).getByText('3 agents, 1 working, 1 test run')).toBeInTheDocument();
     expect(within(running).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['Company', 'Development', 'Test runs']);
     expect(within(running).getAllByText('Orchestrator')).toHaveLength(1);
@@ -291,12 +291,12 @@ describe('Machines', () => {
     await screen.findByRole('table');
     expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(3);
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
-    await userEvent.click(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByText('Ivan'));
-    expect(screen.getByRole('button', { name: 'Open the card of ivan-mbp' })).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(within(screen.getByRole('row', { name: 'dev-laptop' })).getByText('Ivan'));
+    expect(screen.getByRole('button', { name: 'Open the card of dev-laptop' })).toHaveAttribute('aria-expanded', 'true');
     await userEvent.click(screen.getByRole('button', { name: 'Open the card of build-box' }));
     expect(screen.getAllByRole('article')).toHaveLength(2);
-    await userEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
-    expect(screen.queryByRole('article', { name: 'ivan-mbp' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of dev-laptop' }));
+    expect(screen.queryByRole('article', { name: 'dev-laptop' })).not.toBeInTheDocument();
   });
 
   it('keeps a card and its row order through the five second refresh and sorts unknown loads last both ways', async () => {
@@ -305,21 +305,21 @@ describe('Machines', () => {
     let calls = 0;
     lists({ 'GET /api/machines': () => [200, { machines: ++calls === 1 ? MACHINES : MACHINES.map(m => ({ ...m, online: !m.online })), builtin: BUILTIN }] });
     render(<Machines me={ME} />);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
     const before = order();
     await act(() => vi.advanceTimersByTimeAsync(5000));
     expect(order()).toEqual(before);
-    expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBe(mac);
-    await userEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    expect(screen.getByRole('article', { name: 'dev-laptop' })).toBe(mac);
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of dev-laptop' }));
     expect(order()[0]).toBe('build-box');
     const load = within(screen.getByRole('columnheader', { name: 'Load' })).getByRole('button');
     await userEvent.click(load);
     expect(load.closest('th')).toHaveAttribute('aria-sort', 'descending');
-    expect(order().at(-1)).toBe('ivan-mbp');
+    expect(order().at(-1)).toBe('dev-laptop');
     await userEvent.click(load);
     expect(load.closest('th')).toHaveAttribute('aria-sort', 'ascending');
-    expect(order().at(-1)).toBe('ivan-mbp');
+    expect(order().at(-1)).toBe('dev-laptop');
   });
 
   it('connects a machine without a plan and shows its command', async () => {
@@ -354,15 +354,15 @@ describe('Machines', () => {
     });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     expect(within(card('build-box')).queryByRole('button', { name: /^Add my plan/ })).not.toBeInTheDocument();
-    await user.click(within(mac).getByRole('button', { name: 'Add my plan to ivan-mbp' }));
-    expect(screen.getByText('Which of your plans should run on ivan-mbp too?')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add Claude to ivan-mbp' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Add Kimi to ivan-mbp' }));
+    await user.click(within(mac).getByRole('button', { name: 'Add my plan to dev-laptop' }));
+    expect(screen.getByText('Which of your plans should run on dev-laptop too?')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add Claude to dev-laptop' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add Kimi to dev-laptop' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m1/plans', body: { subscription: 's-kimi' } });
     expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
-    expect(screen.getByText(/^Run this in a terminal on ivan-mbp\./)).toBeInTheDocument();
+    expect(screen.getByText(/^Run this in a terminal on dev-laptop\./)).toBeInTheDocument();
     expect(within(mac).getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
     expect(within(mac).getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
     expect(within(mac).getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
@@ -374,7 +374,7 @@ describe('Machines', () => {
   it('keeps machine and add-plan commands visible across tab switches and reloads with expiry, Copy and Cancel, and removes them on join, expiry or Cancel', async () => {
     const expiresAt = new Date(Date.now() + 3600_000).toISOString();
     const machineCmd = { id: '1'.repeat(64), kind: 'machine' as const, plans: [], machineId: null, machine: null, command: `${COMMAND}-MACHINE`, expiresAt };
-    const addCmd = { id: '2'.repeat(64), kind: 'add' as const, plans: ['Kimi'], machineId: 'm1', machine: 'ivan-mbp', command: `${COMMAND}-ADD`, expiresAt };
+    const addCmd = { id: '2'.repeat(64), kind: 'add' as const, plans: ['Kimi'], machineId: 'm1', machine: 'dev-laptop', command: `${COMMAND}-ADD`, expiresAt };
     let active = [machineCmd, addCmd];
     const calls = lists({
       'GET /api/nodes/commands': () => [200, { commands: active }],
@@ -429,7 +429,7 @@ describe('Machines', () => {
     const calls = lists({ 'PATCH /api/machines/m1': [200, { lendsTests: false }] });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
-    const lend = within(await openCard('ivan-mbp')).getByRole('checkbox', { name: "Lend ivan-mbp to the company's test runs" });
+    const lend = within(await openCard('dev-laptop')).getByRole('checkbox', { name: "Lend dev-laptop to the company's test runs" });
     expect(lend).toBeChecked();
     expect(within(card('build-box')).getByRole('checkbox')).not.toBeChecked();
     await user.click(lend);
@@ -441,8 +441,8 @@ describe('Machines', () => {
     const calls = mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: withCore, builtin: BUILTIN }], 'PATCH /api/machines/m1': [200, { lendsTests: true, keepsBackups: false }] });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
-    const mine = await openCard('ivan-mbp');
-    const keep = within(mine).getByRole('checkbox', { name: "Keep the company's backups on ivan-mbp" });
+    const mine = await openCard('dev-laptop');
+    const keep = within(mine).getByRole('checkbox', { name: "Keep the company's backups on dev-laptop" });
     expect(keep).toBeChecked();
     expect(fact(mine, 'Backups')).toContain('Keep company backups');
     expect(within(mine).getByText('Backups held: 2')).toBeInTheDocument();
@@ -463,7 +463,7 @@ describe('Machines', () => {
     const maria = await openCard('build-box');
     expect(within(maria).queryByRole('checkbox')).not.toBeInTheDocument();
     expect(within(maria).getByText('Keeps company backups')).toBeInTheDocument();
-    expect(within(card('ivan-mbp')).getByText('Keeps no company backups')).toBeInTheDocument();
+    expect(within(card('dev-laptop')).getByText('Keeps no company backups')).toBeInTheDocument();
   });
 
   it("shows another person's machine as lent or not, without the switch", async () => {
@@ -473,7 +473,7 @@ describe('Machines', () => {
     const maria = await openCard('build-box');
     expect(within(maria).queryByRole('checkbox')).not.toBeInTheDocument();
     expect(within(maria).getByText('Not lent to test runs')).toBeInTheDocument();
-    expect(within(card('ivan-mbp')).getByRole('checkbox')).toBeChecked();
+    expect(within(card('dev-laptop')).getByRole('checkbox')).toBeChecked();
   });
 
   it.each([
@@ -486,9 +486,9 @@ describe('Machines', () => {
     lists({ 'GET /api/machines': () => [200, { machines: [{ ...MACHINES[0]!, otherBuild: { server, nodes } }, { ...MACHINES[1]!, otherBuild: null }], builtin: BUILTIN }] });
     const view = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    expect(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByTitle(note)).toHaveTextContent(mark);
+    expect(within(screen.getByRole('row', { name: 'dev-laptop' })).getByTitle(note)).toHaveTextContent(mark);
     expect(within(screen.getByRole('row', { name: 'build-box' })).queryByText(mark)).not.toBeInTheDocument();
-    const mac = card('ivan-mbp');
+    const mac = card('dev-laptop');
     expect(within(mac).getByText(note, { selector: 'p' })).toBeInTheDocument();
     expect(within(card('build-box')).queryByText(mark)).not.toBeInTheDocument();
     /* A node from before builds says none. */
@@ -496,13 +496,13 @@ describe('Machines', () => {
     nodes = [null];
     const again = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    expect(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByTitle(older)).toHaveTextContent(mark);
+    expect(within(screen.getByRole('row', { name: 'dev-laptop' })).getByTitle(older)).toHaveTextContent(mark);
     /* Two nodes of two builds name both. */
     again.unmount();
     nodes = ['3fe094e'.padEnd(40, '1'), null];
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    expect(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByTitle(note.replace('3fe094e', `3fe094e, ${language === 'en' ? 'an older one' : 'старая'}`))).toHaveTextContent(mark);
+    expect(within(screen.getByRole('row', { name: 'dev-laptop' })).getByTitle(note.replace('3fe094e', `3fe094e, ${language === 'en' ? 'an older one' : 'старая'}`))).toHaveTextContent(mark);
   });
 
   it.each([
@@ -515,7 +515,7 @@ describe('Machines', () => {
     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, plans: macPlans, browserError: 'libnss3.so missing' }, { ...MACHINES[1]!, browserError: null }, offlineWithPlan], builtin: { ...BUILTIN, browserError: 'libnss3.so missing' } }] });
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    const row = screen.getByRole('row', { name: 'ivan-mbp' });
+    const row = screen.getByRole('row', { name: 'dev-laptop' });
     expect(within(row).getByTitle(note)).toHaveTextContent(mark);
     const marks = row.querySelectorAll('.marks > span');
     expect(marks[0]).not.toHaveClass('dim');
@@ -525,12 +525,12 @@ describe('Machines', () => {
     expect(screen.getByRole('row', { name: 'build-box' }).querySelector('.marks')).toHaveTextContent(/^0$/);
     expect(within(screen.getByRole('row', { name: 'build-box' })).queryByText(mark)).not.toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: builtinName })).getByTitle(note)).toHaveTextContent(mark);
-    expect(within(card('ivan-mbp')).getByText(note, { selector: 'p' })).toBeInTheDocument();
+    expect(within(card('dev-laptop')).getByText(note, { selector: 'p' })).toBeInTheDocument();
     const plansSort = within(screen.getByRole('columnheader', { name: plansHeader })).getByRole('button');
     await userEvent.click(plansSort);
     expect(plansSort.closest('th')).toHaveAttribute('aria-sort', 'descending');
     const order = screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
-    expect(order[0]).toBe('ivan-mbp');
+    expect(order[0]).toBe('dev-laptop');
     expect(order.at(-1)).toBe('build-box');
   });
 
@@ -552,18 +552,18 @@ describe('Machines', () => {
     const pool = await screen.findByRole('region', { name: 'Все машины вместе' });
     expect(fact(pool, 'Машин в сети')).toBe('2 из 3');
     expect(fact(pool, 'Свободно памяти')).toBe('8,5 из 20 ГБ');
-    const mac = card('ivan-mbp');
+    const mac = card('dev-laptop');
     expect(meter(mac, 'Процессор').textContent).toBe('Процессор8 ядерApple M2 Pro, у машины 10');
     expect(meter(mac, 'Память').textContent).toBe('Память6ГБ свободноиз 12 ГБ, у машины 32 ГБ');
     expect(within(mac).getByText('Docker на этом Mac настроен меньше самого Mac, поэтому Hornhoof использует только часть.')).toBeInTheDocument();
     expect(meter(mac, 'Диск').textContent).toBe('Диск120ГБ свободноиз 460 ГБ');
-    expect(within(mac).getByRole('region', { name: 'Что сейчас идет на ivan-mbp' })).toHaveTextContent('Тесты задачи 12, часть 1 из 2');
+    expect(within(mac).getByRole('region', { name: 'Что сейчас идет на dev-laptop' })).toHaveTextContent('Тесты задачи 12, часть 1 из 2');
     expect(within(card('build-box')).getByText('Неизвестно, пока машина не в сети.')).toBeInTheDocument();
     expect(meter(card('Встроенная нода'), 'Процессор').querySelector('.g-f')).toHaveTextContent('4 ядра');
     expect(within(screen.getByRole('group', { name: 'Тесты' })).getByRole('button', { name: /^Отдана под тесты/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();
-    expect(within(mac).getByRole('button', { name: 'Добавить мою подписку на ivan-mbp' })).toBeInTheDocument();
-    expect(within(mac).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
+    expect(within(mac).getByRole('button', { name: 'Добавить мою подписку на dev-laptop' })).toBeInTheDocument();
+    expect(within(mac).getByRole('checkbox', { name: 'Отдавать dev-laptop под прогоны тестов компании' })).toBeChecked();
   });
 
   const shown = (language: string, machines: unknown[], routes: Parameters<typeof mockApi>[0] = {}) => {
@@ -575,7 +575,7 @@ describe('Machines', () => {
 
   it.each([['en', 'Copy: being made, 40%'], ['ru', 'Копия: создается, 40%']])("writes a copy's line in %s", async (language, line) => {
     shown(language, [{ ...MACHINES[0]!, data: held({ number: 2, copy: { line: 'making', progress: 40 } }) }]);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     expect(within(mac).getByText(line)).toBeInTheDocument();
     /* Its place stands in the same part, above the line. */
     expect(within(within(mac).getByText(line).closest('section')!).getByText('2')).toBeInTheDocument();
@@ -622,7 +622,7 @@ describe('Machines', () => {
     render(<Machines me={{ ...ME, person: { ...ME.person, isOwner: false, scopeKind: 'listed' } }} />);
     await screen.findByRole('table');
     expect(screen.queryByRole('columnheader', { name: /Priority/ })).not.toBeInTheDocument();
-    expect(within(card('ivan-mbp')).queryByRole('heading', { name: 'Priority' })).not.toBeInTheDocument();
+    expect(within(card('dev-laptop')).queryByRole('heading', { name: 'Priority' })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -828,7 +828,7 @@ describe('Machines', () => {
     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[1]!, serverInstall: true }, MACHINES[0]!], builtin: null }] });
     render(<Machines me={ME} />);
     expect(within(await openCard('build-box')).queryByRole('button', { name: 'Disconnect build-box' })).not.toBeInTheDocument();
-    expect(within(card('ivan-mbp')).getByRole('button', { name: 'Disconnect ivan-mbp' })).toBeInTheDocument();
+    expect(within(card('dev-laptop')).getByRole('button', { name: 'Disconnect dev-laptop' })).toBeInTheDocument();
   });
 
   it.each([
@@ -873,9 +873,9 @@ describe('Machines', () => {
 
   it("shows the server's machine as 1", async () => {
     /* The card of the computer the server runs on says 1, whatever its own row says. */
-    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, data: held({ number: null }) }], builtin: { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } }, priority: true }] });
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, data: held({ number: null }) }], builtin: { ...BUILTIN, machine: { id: 'm1', hostname: 'dev-laptop' } }, priority: true }] });
     const view = render(<Machines me={ME} />);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     const part = within(mac).getByRole('heading', { name: 'Priority' }).closest('section')!;
     expect(part.textContent).toBe('Priority1The company server runs hereIf machine 1 goes away, machine 2 takes the server, then 3.');
     expect(within(mac).queryByRole('radio')).not.toBeInTheDocument();
@@ -910,7 +910,7 @@ describe('Machines', () => {
   ])('tells the CEO a machine left in %s', async (language, line) => {
     const leftAt = '2026-11-10T09:30:00.000Z';
     shown(language, [{ ...MACHINES[0]!, data: held({ leftAt }) }]);
-    expect(within(await openCard('ivan-mbp')).getByText(line(new Date(leftAt).toLocaleDateString(language)))).toBeInTheDocument();
+    expect(within(await openCard('dev-laptop')).getByText(line(new Date(leftAt).toLocaleDateString(language)))).toBeInTheDocument();
   });
 
   it.each([
@@ -932,7 +932,7 @@ describe('Machines', () => {
 
   it('says nothing of copies where the server tells none', async () => {
     shown('en', [MACHINES[0]!]);
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     expect(within(mac).queryByText(/^Copy: /)).not.toBeInTheDocument();
     expect(within(mac).queryByText(/^Holds no copy: /)).not.toBeInTheDocument();
     expect(screen.queryByText(/ leads\. /)).not.toBeInTheDocument();
@@ -940,15 +940,15 @@ describe('Machines', () => {
 
   it('says in Russian that the server runs on a machine that joined', async () => {
     localStorage.setItem('hh-lang', 'ru');
-    lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } });
+    lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'dev-laptop' } });
     render(
       <LanguageProvider>
         <Machines me={ME} />
       </LanguageProvider>,
     );
     expect(fact(await screen.findByRole('region', { name: 'Все машины вместе' }), 'Машин в сети')).toBe('1 из 2');
-    expect(within(card('ivan-mbp')).getByText('Здесь же работает сервер и его встроенная нода: ключи компании и прогоны тестов.')).toBeInTheDocument();
-    expect(within(card('ivan-mbp')).getByTitle('Сервер компании сейчас работает на этой машине')).toHaveTextContent('Здесь сервер компании');
+    expect(within(card('dev-laptop')).getByText('Здесь же работает сервер и его встроенная нода: ключи компании и прогоны тестов.')).toBeInTheDocument();
+    expect(within(card('dev-laptop')).getByTitle('Сервер компании сейчас работает на этой машине')).toHaveTextContent('Здесь сервер компании');
     expect(within(card('build-box')).queryByText('Здесь сервер компании')).not.toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Встроенная нода' })).not.toBeInTheDocument();
   });
@@ -957,12 +957,12 @@ describe('Machines', () => {
     render(<Machines me={ME} />);
     expect(await screen.findByText('3 machines')).toBeInTheDocument();
     const search = screen.getByRole('searchbox', { name: 'Search' });
-    await userEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
-    for (const query of ['BRUNO', 'Backend engineer', 'Development', 'ivan-mbp']) {
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of dev-laptop' }));
+    for (const query of ['BRUNO', 'Backend engineer', 'Development', 'dev-laptop']) {
       await userEvent.clear(search);
       await userEvent.type(search, query);
       expect(screen.getByText('Showing 1 of 3')).toBeInTheDocument();
-      expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBeInTheDocument();
+      expect(screen.getByRole('article', { name: 'dev-laptop' })).toBeInTheDocument();
     }
     await userEvent.clear(search);
     await userEvent.type(search, 'missing machine');
@@ -970,7 +970,7 @@ describe('Machines', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(search).toHaveValue('');
     expect(screen.getByText('3 machines')).toBeInTheDocument();
-    expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'dev-laptop' })).toBeInTheDocument();
   });
 
   it('widens matches inside one filter group and narrows across groups, counting keys by their program', async () => {
@@ -1013,7 +1013,7 @@ describe('Machines', () => {
     const restarting = { state: 'restarting' as const, since: at(21, 0) };
     const onMachine = (drain: unknown, over: Partial<(typeof MACHINES)[number]> = {}): [number, unknown] => [200, { machines: [{ ...MACHINES[0]!, ...over, drain }], builtin: null }];
     /* The table's own row, not the row its open card sits in. */
-    const macRow = () => screen.getAllByRole('row', { name: 'ivan-mbp' }).find(row => row.getAttribute('aria-label') === 'ivan-mbp')!;
+    const macRow = () => screen.getAllByRole('row', { name: 'dev-laptop' }).find(row => row.getAttribute('aria-label') === 'dev-laptop')!;
 
     it.each([
       ['en', 'Waiting for agents to finish before the update: 3 turns left, until 21:30', 'Waiting to update'],
@@ -1022,7 +1022,7 @@ describe('Machines', () => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(waiting(3)) });
       render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-      const mac = await openCard('ivan-mbp');
+      const mac = await openCard('dev-laptop');
       expect(within(mac).getByText(line)).toBeInTheDocument();
       expect(within(macRow()).getByText(mark)).toBeInTheDocument();
     });
@@ -1040,7 +1040,7 @@ describe('Machines', () => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(waiting(turns, parts)) });
       render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-      expect(within(await openCard('ivan-mbp')).getByText(line)).toBeInTheDocument();
+      expect(within(await openCard('dev-laptop')).getByText(line)).toBeInTheDocument();
     });
 
     it('follows the count by itself and drops the line when the wait is over', async () => {
@@ -1049,7 +1049,7 @@ describe('Machines', () => {
       let drain: unknown = waiting(3);
       lists({ 'GET /api/machines': () => onMachine(drain) });
       render(<Machines me={ME} />);
-      const mac = await openCard('ivan-mbp');
+      const mac = await openCard('dev-laptop');
       expect(within(mac).getByText(/3 turns left/)).toBeInTheDocument();
       drain = waiting(1);
       await act(() => vi.advanceTimersByTimeAsync(5000));
@@ -1067,7 +1067,7 @@ describe('Machines', () => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(postponed) });
       render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-      const mac = await openCard('ivan-mbp');
+      const mac = await openCard('dev-laptop');
       expect(within(mac).getByText(line)).toBeInTheDocument();
       expect(within(macRow()).getByText(mark)).toBeInTheDocument();
     });
@@ -1079,7 +1079,7 @@ describe('Machines', () => {
       localStorage.setItem('hh-lang', language);
       lists({ 'GET /api/machines': onMachine(restarting, { online: false, lastSeenAt: at(20, 59) }) });
       render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
-      const mac = await openCard('ivan-mbp');
+      const mac = await openCard('dev-laptop');
       expect(within(mac).getByText(line)).toBeInTheDocument();
       expect(within(mac).queryByText(/last seen|был на связи|минут/i)).not.toBeInTheDocument();
       expect(within(macRow()).getByText(mark)).toBeInTheDocument();
@@ -1088,7 +1088,7 @@ describe('Machines', () => {
     it.each([[null], [undefined]])('says nothing of an update while there is no wait (%s)', async drain => {
       lists({ 'GET /api/machines': onMachine(drain) });
       render(<Machines me={ME} />);
-      const mac = await openCard('ivan-mbp');
+      const mac = await openCard('dev-laptop');
       expect(within(mac).queryByText(/before the update|postponed|Updating now/)).not.toBeInTheDocument();
       expect(within(macRow()).queryByText('Waiting to update')).not.toBeInTheDocument();
     });
@@ -1097,13 +1097,13 @@ describe('Machines', () => {
       lists({}, { ...BUILTIN, drain: waiting(2) } as BuiltinView);
       render(<Machines me={ME} />);
       expect(within(await openCard('Built-in node')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
-      expect(within(card('ivan-mbp')).queryByText(/before the update/)).not.toBeInTheDocument();
+      expect(within(card('dev-laptop')).queryByText(/before the update/)).not.toBeInTheDocument();
     });
 
     it('shows the wait of the built-in node on the machine it runs on', async () => {
-      lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' }, drain: waiting(2) } as BuiltinView);
+      lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'dev-laptop' }, drain: waiting(2) } as BuiltinView);
       render(<Machines me={ME} />);
-      expect(within(await openCard('ivan-mbp')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
+      expect(within(await openCard('dev-laptop')).getByText(/2 turns left, until 21:30/)).toBeInTheDocument();
     });
   });
 });
@@ -1112,7 +1112,7 @@ describe("each machine's place in the company's network", () => {
   const SERVER_BOX = { ...MACHINES[1]!, id: 'm3', hostname: 'debian', owner: { id: 'p1', name: 'Ivan' }, online: true };
   const WORKER = { ...MACHINES[0]!, core: { webPort: 8081, path: 'relay' as const }, needsCore: false };
   const OLD = { ...MACHINES[1]!, owner: { id: 'p1', name: 'Ivan' }, core: null, needsCore: true };
-  const server: BuiltinView = { ...BUILTIN, machine: { id: 'm3', hostname: 'debian' }, webPort: 8080, refusedBy: ['ivan-mbp'] };
+  const server: BuiltinView = { ...BUILTIN, machine: { id: 'm3', hostname: 'debian' }, webPort: 8080, refusedBy: ['dev-laptop'] };
   const show = (extra: Parameters<typeof mockApi>[0] = {}, machines = [WORKER, OLD, SERVER_BOX]) => {
     const calls = lists({ 'GET /api/machines': [200, { machines, builtin: server }], ...extra });
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
@@ -1120,8 +1120,8 @@ describe("each machine's place in the company's network", () => {
   };
 
   it.each([
-    ['en', 'Company server here', 'Open here', 'debian does not take connections from ivan-mbp. If debian is a Mac with its firewall on, allow incoming connections there for Docker (com.docker.backend), or for ssh when it runs Colima.'],
-    ['ru', 'Здесь сервер компании', 'Открыть здесь', 'debian не принимает подключения от ivan-mbp. Если на машине debian стоит macOS с включенным файрволом, разрешите на ней входящие подключения для Docker (com.docker.backend) или, если там Colima, для ssh.'],
+    ['en', 'Company server here', 'Open here', 'debian does not take connections from dev-laptop. If debian is a Mac with its firewall on, allow incoming connections there for Docker (com.docker.backend), or for ssh when it runs Colima.'],
+    ['ru', 'Здесь сервер компании', 'Открыть здесь', 'debian не принимает подключения от dev-laptop. Если на машине debian стоит macOS с включенным файрволом, разрешите на ней входящие подключения для Docker (com.docker.backend) или, если там Colima, для ssh.'],
   ])('shows in %s where the company opens on each machine, and whom the server could not take', async (language, badge, openHere, refusal) => {
     localStorage.setItem('hh-lang', language);
     show();
@@ -1129,7 +1129,7 @@ describe("each machine's place in the company's network", () => {
     expect(within(debian).getByText(badge)).toBeInTheDocument();
     expect(fact(debian, openHere)).toBe('localhost:8080');
     expect(within(debian).getByText(refusal)).toBeInTheDocument();
-    const mac = card('ivan-mbp');
+    const mac = card('dev-laptop');
     expect(fact(mac, openHere)).toBe('localhost:8081');
     expect(within(mac).queryByText(refusal)).not.toBeInTheDocument();
     /* A machine with no core has no address of its own for the company. */
@@ -1145,7 +1145,7 @@ describe("each machine's place in the company's network", () => {
     const calls = show({ 'POST /api/machines/m2/core': [201, { id, command: `${COMMAND}-CORE`, expiresAt: new Date(Date.now() + 3600_000).toISOString() }] });
     const box = await openCard('build-box');
     /* Only a machine that needs it is offered it. */
-    expect(within(card('ivan-mbp')).queryByRole('button', { name: /full machine|полной машиной/ })).not.toBeInTheDocument();
+    expect(within(card('dev-laptop')).queryByRole('button', { name: /full machine|полной машиной/ })).not.toBeInTheDocument();
     await userEvent.setup().click(within(box).getByRole('button', { name: action }));
     expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m2/core', body: undefined });
     expect(await within(box).findByText(withKey(`${COMMAND}-CORE`))).toBeInTheDocument();
@@ -1168,7 +1168,7 @@ describe("each machine's place in the company's network", () => {
     localStorage.setItem('hh-lang', language);
     show();
     const user = userEvent.setup();
-    const mac = await openCard('ivan-mbp');
+    const mac = await openCard('dev-laptop');
     await user.click(within(mac).getByRole('button', { name: new RegExp(`^${disconnect}`) }));
     expect(within(mac).getByText(new RegExp(claude.replaceAll('.', '\\.')))).toBeInTheDocument();
     const box = card('build-box');
@@ -1186,8 +1186,8 @@ describe("each machine's place in the company's network", () => {
 
 describe("computer access on a machine's card", () => {
   const UNTIL = new Date(Date.now() + 86_400_000).toISOString();
-  /* Ivan's Mac with the company's core, which holds his key, and the server on a machine of his that told its name. */
-  const mac = (over: Parameters<typeof accessView>[1] = {}) => ({ ...MACHINES[0]!, core: { webPort: 8081, path: 'direct' as const }, access: accessView('ivan-mbp', { key: 'held', ...over, machine: { id: 'm1', os: 'darwin', ...over.machine } }) });
+  /* Primary laptop with the company's core, which holds the owner's key, and the server on a machine that told its name. */
+  const mac = (over: Parameters<typeof accessView>[1] = {}) => ({ ...MACHINES[0]!, core: { webPort: 8081, path: 'direct' as const }, access: accessView('dev-laptop', { key: 'held', ...over, machine: { id: 'm1', os: 'darwin', ...over.machine } }) });
   const box = () => ({ ...MACHINES[1]!, id: 'm3', hostname: 'debian', owner: { id: 'p1', name: 'Ivan' }, online: true });
   const server = (over: Parameters<typeof accessView>[1] = {}): BuiltinView => ({ ...BUILTIN, machine: { id: 'm3', hostname: 'debian' }, access: accessView('debian', { ...over, machine: { id: 'm-server', role: 'data', data: true, ...over.machine } }) });
   const show = (machines: ReturnType<typeof mac>[], builtin: BuiltinView, extra: Parameters<typeof mockApi>[0] = {}) => {
@@ -1212,22 +1212,22 @@ describe("computer access on a machine's card", () => {
     const sent = made.find(call => call.method === 'PUT')!.body as { publicKey: string; wrapped: string; salt: string; iv: string; iterations: number };
     await keyDefaults.store.clear();
     const stored = { publicKey: sent.publicKey, wrapped: sent.wrapped, salt: sent.salt, iv: sent.iv, iterations: sent.iterations };
-    const calls = show([mac()], server(), { 'GET /api/me/key': [200, { key: stored }], 'POST /api/machines/m1/access/open': [200, accessView('ivan-mbp', { until: UNTIL })] });
-    const card_ = await openCard('ivan-mbp');
+    const calls = show([mac()], server(), { 'GET /api/me/key': [200, { key: stored }], 'POST /api/machines/m1/access/open': [200, accessView('dev-laptop', { until: UNTIL })] });
+    const card_ = await openCard('dev-laptop');
     /* On a Mac the access reaches Docker's own system. */
     expect(within(card_).getByText("On a Mac this reaches Docker's Linux system, not macOS itself.")).toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(within(card_).getByRole('button', { name: 'Open access to ivan-mbp for a day' }));
+    await user.click(within(card_).getByRole('button', { name: 'Open access to dev-laptop for a day' }));
     await user.type(await within(card_).findByLabelText('Password'), 'right{Enter}');
     await vi.waitFor(() => expect(calls.some(call => call.path === '/api/machines/m1/access/open')).toBe(true));
     const body = calls.find(call => call.path === '/api/machines/m1/access/open')!.body as { grant: { payload: string } };
-    expect(JSON.parse(body.grant.payload)).toMatchObject({ v: 1, machine: 'n-ivan-mbp' });
+    expect(JSON.parse(body.grant.payload)).toMatchObject({ v: 1, machine: 'n-dev-laptop' });
   });
 
   it('says until when a machine is open to everyone who sees its card, and lets only who may close it', async () => {
     const calls = show([mac({ until: UNTIL, canOpen: false, canClose: false })], server({ until: UNTIL }), { 'POST /api/machines/m-server/access/close': [200, accessView('debian')] });
-    const others = await openCard('ivan-mbp');
-    expect(within(others).getByText(/^Access to ivan-mbp is open until .+\.$/)).toBeInTheDocument();
+    const others = await openCard('dev-laptop');
+    expect(within(others).getByText(/^Access to dev-laptop is open until .+\.$/)).toBeInTheDocument();
     expect(within(others).queryByRole('button', { name: 'Close access' })).not.toBeInTheDocument();
     const own = card('debian');
     await userEvent.setup().click(within(own).getByRole('button', { name: 'Close access' }));
@@ -1236,7 +1236,7 @@ describe("computer access on a machine's card", () => {
 
   it('gives no button for a machine that is not theirs, cannot be reached, or holds no key of theirs', async () => {
     show([mac({ canOpen: false, canClose: false })], server({ reachable: false }));
-    const others = await openCard('ivan-mbp');
+    const others = await openCard('dev-laptop');
     expect(within(others).queryByText('Computer access')).not.toBeInTheDocument();
     expect(within(others).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
     const own = card('debian');
@@ -1247,8 +1247,8 @@ describe("computer access on a machine's card", () => {
   it('tells its owner in Russian what stands in the way, and what opening gives', async () => {
     localStorage.setItem('hh-lang', 'ru');
     show([mac({ key: 'not_held' })], server({ machine: { os: null } }));
-    const mine = await openCard('ivan-mbp');
-    expect(within(mine).getByText('Машина ivan-mbp пока не хранит ваш ключ. Выполните на ней новую команду из «Подключить машину»: ключ она берет только оттуда.')).toBeInTheDocument();
+    const mine = await openCard('dev-laptop');
+    expect(within(mine).getByText('Машина dev-laptop пока не хранит ваш ключ. Выполните на ней новую команду из «Подключить машину»: ключ она берет только оттуда.')).toBeInTheDocument();
     expect(within(mine).queryByRole('button', { name: /Открыть доступ/ })).not.toBeInTheDocument();
     const own = card('debian');
     expect(within(own).getByRole('button', { name: 'Открыть доступ к машине debian на сутки' })).toBeInTheDocument();

@@ -7,7 +7,7 @@ import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 import { checkPage, open, ORCHESTRATOR, ORCHESTRATOR_CARD, shot, VIEWERS, watchErrors, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
 const ASKED: ComputerAccessView = {
-  machine: { id: 'a-host', networkId: 'n-a-host', name: 'a-host', hostname: 'a-host', personId: 'p1', role: 'worker', os: 'linux', data: false },
+  machine: { id: 'node-a', networkId: 'n-node-a', name: 'node-a', hostname: 'node-a', personId: 'p1', role: 'worker', os: 'linux', data: false },
   reachable: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-04T14:30:00.000Z' }, canOpen: true, canClose: true, key: 'not_needed',
 };
 

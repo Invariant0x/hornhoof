@@ -2,8 +2,8 @@ import * as protocol from '../src/index.js';
 import type { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 
-/* Namespace lookup lets the initial RED report a missing public contract as an
-   assertion, rather than failing the test loader on a nonexistent export. */
+/* Namespace lookup reports a missing public contract as an assertion rather
+   than failing the test loader on a nonexistent export. */
 function accepts(name: string, input: unknown): boolean {
   const schema = Reflect.get(protocol, name) as z.ZodType | undefined;
   expect(schema, `Missing public ${name}`).toBeDefined();

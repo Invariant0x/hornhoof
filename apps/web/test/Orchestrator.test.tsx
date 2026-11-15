@@ -309,22 +309,22 @@ describe('AgentWindow', () => {
 
   it('names the machine he runs on', async () => {
     const plan = { ...SUBS[0]!, owner: { id: 'p1', name: 'Ivan' } };
-    open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'ivan-laptop' } } });
-    expect((await screen.findAllByText(/, ivan-laptop$/)).length).toBeGreaterThan(0);
+    open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'work-laptop' } } });
+    expect((await screen.findAllByText(/, work-laptop$/)).length).toBeGreaterThan(0);
   });
 
   it('shows the CEO alone the machine command he asked Hornhoof for, next to his terminal, until the CEO closes it', async () => {
     const user = userEvent.setup();
     const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
-    const shown: ShownCommand = { id: 'a'.repeat(64), kind: 'add', plans: ['Claude'], machine: 'ivan-laptop', command, expiresAt: '2026-11-02T10:00:00Z' };
+    const shown: ShownCommand = { id: 'a'.repeat(64), kind: 'add', plans: ['Claude'], machine: 'work-laptop', command, expiresAt: '2026-11-02T10:00:00Z' };
     const { calls } = open({
       [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
       'GET /api/nodes/commands': [200, { commands: [shown] }],
       [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
     });
-    const card = await screen.findByRole('region', { name: 'Command to add Claude to ivan-laptop' });
+    const card = await screen.findByRole('region', { name: 'Command to add Claude to work-laptop' });
     expect(await within(card).findByText(withKey(command))).toBeInTheDocument();
-    expect(within(card).getByText(/^Run this in a terminal on ivan-laptop\./)).toBeInTheDocument();
+    expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Done' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
@@ -335,10 +335,10 @@ describe('AgentWindow', () => {
     localStorage.setItem('hh-lang', 'ru');
     try {
       const made = (id: string, kind: ShownCommand['kind'], plans: string[], machine: string | null): ShownCommand => ({ id: id.repeat(64), kind, plans, machine, command: `curl ${id}`, expiresAt: '2026-11-02T10:00:00Z' });
-      open({ 'GET /api/nodes/commands': [200, { commands: [made('a', 'machine', [], null), made('b', 'plans', ['Claude', 'Codex'], null), made('c', 'add', ['Kimi'], 'ivan-laptop')] }] });
+      open({ 'GET /api/nodes/commands': [200, { commands: [made('a', 'machine', [], null), made('b', 'plans', ['Claude', 'Codex'], null), made('c', 'add', ['Kimi'], 'work-laptop')] }] });
       expect(await screen.findByRole('region', { name: 'Команда для подключения машины' })).toBeInTheDocument();
       expect(screen.getByRole('region', { name: 'Команда для подключения: Claude, Codex' })).toBeInTheDocument();
-      expect(screen.getByRole('region', { name: 'Команда, чтобы добавить Kimi на ivan-laptop' })).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Команда, чтобы добавить Kimi на work-laptop' })).toBeInTheDocument();
       expect(screen.getAllByText('Оркестратор попросил эту команду у Hornhoof, и видите ее только вы. Она работает один раз, 24 часа.')).toHaveLength(3);
     } finally {
       localStorage.removeItem('hh-lang');
@@ -453,7 +453,7 @@ describe('AgentWindow', () => {
               ev(2, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN }),
               ev(3, 'computer', { state: 'closed' }, { person: IVAN }),
               ev(4, 'computer', { state: 'declined' }, { person: IVAN }),
-              ev(5, 'computer', { state: 'refused', machine: 'marat-mac' }),
+              ev(5, 'computer', { state: 'refused', machine: 'office-pc' }),
             ],
             state: READY,
           },
@@ -463,7 +463,7 @@ describe('AgentWindow', () => {
       expect(screen.getByText(/^Ivan opened access to the server's computer until .+$/)).toBeInTheDocument();
       expect(screen.getByText("Ivan closed access to the server's computer")).toBeInTheDocument();
       expect(screen.getByText("Ivan did not open access to the server's computer")).toBeInTheDocument();
-      expect(screen.getByText('marat-mac did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
+      expect(screen.getByText('office-pc did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
     });
 
     /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its line names it. */
@@ -784,7 +784,7 @@ describe('AgentWindow', () => {
 
 describe('messages between agents and people', () => {
   type Party = NonNullable<EventView['message']>['from'];
-  const DAVID: Party = { kind: 'person', id: 'p2', name: 'David AI', role: { en: 'CEO assistant', ru: 'Помощник CEO' }, department: null };
+  const ASSISTANT: Party = { kind: 'person', id: 'p2', name: 'Nora', role: { en: 'CEO assistant', ru: 'Помощник CEO' }, department: null };
   const PEOPLE: Party = { kind: 'person', id: null, name: '', role: null, department: null };
   const HORNHOOF: Party = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
   const ORCH: Party = { kind: 'agent', id: 'a1', name: 'Orchestrator', role: null, department: null, agentKind: 'orchestrator' };
@@ -807,8 +807,8 @@ describe('messages between agents and people', () => {
   }
 
   const ORCHESTRATOR_LOG = [
-    msg(1, 'in', DAVID, ORCH, 'Take #78 into work.\nService: answer in Russian.'),
-    msg(2, 'in', HORNHOOF, ORCH, 'David AI took an improvement into work.'),
+    msg(1, 'in', ASSISTANT, ORCH, 'Take #78 into work.\nService: answer in Russian.'),
+    msg(2, 'in', HORNHOOF, ORCH, 'Nora took an improvement into work.'),
     msg(3, 'in', DANA, ORCH, '#49 is blocked.'),
     msg(4, 'out', ORCH, DANA, 'Give #78 to a developer.'),
     ev(5, 'text', { kind: 'text', text: 'Handed #78 to development.' }),
@@ -817,9 +817,9 @@ describe('messages between agents and people', () => {
   it("shows a person's words to the orchestrator whole, and every other message as one line naming who wrote to whom, the text folded and opened by a click", async () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     /* Nothing is hidden: the service lines are in the person's words too. */
-    const david = (await screen.findByText(/Take #78 into work\.\s+Service: answer in Russian\./)).closest('article')!;
-    expect(within(david).getByText('David AI (CEO assistant)')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
+    const nora = (await screen.findByText(/Take #78 into work\.\s+Service: answer in Russian\./)).closest('article')!;
+    expect(within(nora).getByText('Nora (CEO assistant)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Message from Nora (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
     const dana = screen.getByRole('button', { name: 'Message from Dana (Head of development) to the orchestrator' });
     expect(screen.getByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
@@ -839,7 +839,7 @@ describe('messages between agents and people', () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     ctrlO();
-    for (const text of [/Take #78 into work/, /David AI took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
+    for (const text of [/Take #78 into work/, /Nora took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
     ctrlO(screen.getByRole('textbox', { name: 'Write to the orchestrator' }));
     expect(screen.queryByText(/#49 is blocked/)).not.toBeInTheDocument();
     expect(screen.getByText('Handed #78 to development.')).toBeInTheDocument();
@@ -886,7 +886,7 @@ describe('messages between agents and people', () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Messages' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Message from Nora (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
     /* Nothing over the terminal folds, so the window takes no Ctrl+O for itself. */
     expect(ctrlO()).toBe(true);
     expect(ctrlO(screen.getByRole('textbox', { name: 'Terminal input' }))).toBe(true);

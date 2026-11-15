@@ -14,7 +14,7 @@ const conflict = (over: Partial<MergeConflict>): MergeConflict => ({
 const CONFLICTS = [
   conflict({}),
   conflict({ id: 'c2', what: 'Zed (zed@acme.test)', cols: ['status'], here: { status: '"active"' }, there: { status: '"disabled"' } }),
-  conflict({ id: 'c3', table: 'machines', topic: 'machines', what: 'marat-mac', kind: 'changed_removed', cols: [], here: null, there: { hostname: '"marat-mac"' } }),
+  conflict({ id: 'c3', table: 'machines', topic: 'machines', what: 'office-pc', kind: 'changed_removed', cols: [], here: null, there: { hostname: '"office-pc"' } }),
 ];
 const PICKED = { settled: 1, here: 0, there: 1, refused: [], tasks: [] };
 
@@ -41,7 +41,7 @@ describe("the CEO's card of a merge", () => {
     expect(within(maria).getByRole('row', { name: 'password_hash (hidden) (hidden)' })).toBeInTheDocument();
     /* A row only one side has. */
     const machines = within(card).getByRole('group', { name: 'Machines' });
-    expect(within(machines).getByRole('row', { name: 'hostname nothing "marat-mac"' })).toBeInTheDocument();
+    expect(within(machines).getByRole('row', { name: 'hostname nothing "office-pc"' })).toBeInTheDocument();
     await user.click(within(maria).getByRole('button', { name: 'Take there' }));
     await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/merges/pick', body: { ids: ['c1'], take: 'there' } }));
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
@@ -63,8 +63,8 @@ describe("the CEO's card of a merge", () => {
       'POST /api/merges/pick': [200, { settled: 0, here: 0, there: 0, refused: [{ id: 'c1', why: "Only the machine's owner opens computer access, on its card." }], tasks: [] }],
     });
     const user = userEvent.setup();
-    shown({ ...MERGE, label: 'marat-mac', after: null, open: 1 });
-    const card = await screen.findByRole('region', { name: 'marat-mac' });
+    shown({ ...MERGE, label: 'office-pc', after: null, open: 1 });
+    const card = await screen.findByRole('region', { name: 'office-pc' });
     expect(card).toHaveTextContent('1 change about people, access, plans, machines or protected records needs you.');
     await user.click(await within(card).findByRole('button', { name: 'Take there' }));
     expect(await within(card).findByText("1 could not be taken and stays as it is here. Only the machine's owner opens computer access, on its card.")).toBeInTheDocument();

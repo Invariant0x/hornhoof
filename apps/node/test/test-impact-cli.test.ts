@@ -13,7 +13,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 function project() {
   const root = mkdtempSync(join(tmpdir(), 'hh-impact-cli-')); roots.push(root);
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe' }).trim();
-  git('init', '-q', '--initial-branch=fixture'); git('config', 'user.name', 'Ivan Korol'); git('config', 'user.email', 'invariant0x@icloud.com');
+  git('init', '-q', '--initial-branch=fixture'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test');
   writeFileSync(join(root, 'prices.py'), 'value = 7\n'); writeFileSync(join(root, 'labels.py'), "value = 'basket'\n");
   writeFileSync(join(root, 'test_prices.py'), 'from prices import value\ndef test_prices():\n    assert value >= 7\n');
   writeFileSync(join(root, 'test_labels.py'), "from labels import value\ndef test_labels():\n    assert value == 'basket'\n");
