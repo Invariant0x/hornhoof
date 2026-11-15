@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
@@ -18,8 +18,8 @@ const Answer = z.object({ ok: z.boolean(), text: z.string(), data: z.unknown().o
 /* Whether the assistant whose own agent this is has a skills address now: only then is persona_call among its agent's tools
    and in its instructions. */
 export async function hasSkills(db: Ctx['db'], agentId: string): Promise<boolean> {
-  const [row] = await db.select({ url: assistants.skillsUrl }).from(assistants).where(eq(assistants.agentId, agentId));
-  return Boolean(row?.url);
+  const [row] = await db.select({ agentId: assistants.agentId }).from(assistants).where(and(eq(assistants.agentId, agentId), isNotNull(assistants.skillsUrl), ne(assistants.skillsUrl, '')));
+  return row !== undefined;
 }
 
 type Called = { ok: boolean; text: string };

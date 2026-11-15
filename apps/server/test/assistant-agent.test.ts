@@ -6,6 +6,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
 import { agentEvents, agents, assistantEvents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { ASSISTANT_WITHOUT_SKILLS, instructionsOf } from '../src/modules/agents/instructions.js';
 import { putOnPlan } from '../src/modules/assistants/setup.js';
 import { appendEvent, publishWorking } from '../src/modules/events/store.js';
 import { placeWaiting } from '../src/modules/subscriptions/waiting.js';
@@ -315,6 +316,14 @@ describe('persona_call', () => {
     expect(next.instructions).toContain('persona_call');
     expect(next.instructions).toContain('hh-attach --chat');
     expect(next.sessionId).toBeNull();
+  });
+
+  it('is not in the instructions of an own agent whose assistant is gone, which speaks for its owner with no names', async () => {
+    const c = await company();
+    const [left] = await c.db.insert(agents).values({ companyId: c.owner.companyId, name: 'Left', kind: 'assistant', model: '', subscriptionId: c.plan }).returning();
+    const told = await instructionsOf(c.app.ctx, left!);
+    expect(told.text).toContain(`You are Left, the personal assistant of your owner at the company.\n\n${ASSISTANT_WITHOUT_SKILLS}`);
+    expect(told.text).not.toContain('persona_call');
   });
 
   it("asks the assistant's program at its skills address, signed, with the message that started the turn, and gives its answer", async () => {
