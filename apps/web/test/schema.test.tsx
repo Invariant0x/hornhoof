@@ -196,14 +196,14 @@ describe('the department schema', () => {
 
   it('hangs a sub-unit frame on the head\'s bus like a stage frame, outside any stage or gate', () => {
     const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false, turnkey: false };
-    const simon = { ...emp('simon', 'DEV-BE'), teamId: 'u1' };
-    const d: Department = { ...dept([...TEAM, simon], ROLES), teams: [urgent] };
+    const sam = { ...emp('sam', 'DEV-BE'), teamId: 'u1' };
+    const d: Department = { ...dept([...TEAM, sam], ROLES), teams: [urgent] };
     const s = schemaLayout(d, 0);
     const unit = s.frames[0]!;
     expect(unit.team?.name).toBe('Urgent fixes');
     expect(unit.stage).toBe(-1);
-    expect(unit.members.map(m => m.e.id)).toEqual(['simon']);
-    expect(s.stages.flat().some(f => f.members.some(m => m.e.id === 'simon'))).toBe(false);
+    expect(unit.members.map(m => m.e.id)).toEqual(['sam']);
+    expect(s.stages.flat().some(f => f.members.some(m => m.e.id === 'sam'))).toBe(false);
     /* The head stands over the middle of all the frames, and the sub-unit's spine drops from the one bus. */
     expect(s.hx).toBe(s.w / 2);
     const placed = unit.members[0]!;
@@ -212,15 +212,15 @@ describe('the department schema', () => {
     expect(s.vias).toContainEqual([unit.x + 10, BUS]);
     expect(s.lines.some(l => (l.cls === 'pl' || l.cls === 'gate') && l.pts.some(p => p[0] < s.stages[0]![0]!.x))).toBe(false);
     const p = stepPaths(s);
-    expect(p.toMember('simon')).toEqual([
+    expect(p.toMember('sam')).toEqual([
       [s.hx, HH - 30],
       [s.hx, BUS],
       [unit.x + 10, BUS],
       [unit.x + 10, placed.cy],
       [placed.x + 14, placed.cy],
     ]);
-    expect(p.onward('simon')).toEqual([...p.toMember('simon')!].reverse());
-    expect(p.way('simon', 'hana')).toEqual(p.onward('simon'));
+    expect(p.onward('sam')).toEqual([...p.toMember('sam')!].reverse());
+    expect(p.way('sam', 'hana')).toEqual(p.onward('sam'));
   });
 
   it('with many sub-units leads them all from the head\'s bottom: one drop to the bus, a spine down each frame, nothing from its left edge', () => {

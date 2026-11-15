@@ -101,8 +101,8 @@ function claudePlans(): SubView[] {
   };
   return [
     {
-      ...base, id: 's-ivan-claude', online: true, owner: { id: 'p1', name: 'Ivan' },
-      machines: [{ id: 'm-ivan', hostname: 'work-laptop', status: 'ready', online: true }],
+      ...base, id: 's-1-claude', online: true, owner: { id: 'p1', name: 'Ivan' },
+      machines: [{ id: 'm-1', hostname: 'work-laptop', status: 'ready', online: true }],
       limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.96, resetsAt: '2026-11-18T12:00:00.000Z' }], complete: true },
       limitsUpdatedAt: '2026-11-13T21:02:00.000Z', agents: [agent],
     },

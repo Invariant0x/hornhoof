@@ -914,9 +914,9 @@ describe('Department view', () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
     const [dana, bruno] = dev!.employees;
-    const simon = { ...bruno!, id: 'b2', name: 'Simon', teamId: 'u1' };
+    const sam = { ...bruno!, id: 'b2', name: 'Sam', teamId: 'u1' };
     const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false, turnkey: false };
-    let org: Org = { ...DEV_ORG, departments: [{ ...dev!, teams: [urgent], employees: [dana!, bruno!, simon] }] };
+    let org: Org = { ...DEV_ORG, departments: [{ ...dev!, teams: [urgent], employees: [dana!, bruno!, sam] }] };
     const calls = shell(
       {
         'GET /api/org': () => [200, org],
@@ -938,7 +938,7 @@ describe('Department view', () => {
       [...g.querySelectorAll('li b')].map(b => b.textContent),
     ]);
     expect(groups).toEqual([
-      ['Urgent fixes', ['Simon']],
+      ['Urgent fixes', ['Sam']],
       ['Backend engineer', ['Bruno']],
     ]);
 

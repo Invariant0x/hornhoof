@@ -381,10 +381,10 @@ describe('Subscriptions', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-13T21:06:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); });
-    const ivanClaude: SubView = {
+    const ownerClaude: SubView = {
       ...SUBS[0]!,
-      id: 's-ivan',
-      machines: [{ id: 'm-ivan', hostname: 'work-laptop', status: 'ready', online: true }],
+      id: 's-1',
+      machines: [{ id: 'm-1', hostname: 'work-laptop', status: 'ready', online: true }],
       limits: { status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.96, resetsAt: '2026-11-16T21:00:00.000Z' }], complete: true },
       limitsUpdatedAt: '2026-11-13T21:02:00.000Z',
     };
@@ -408,7 +408,7 @@ describe('Subscriptions', () => {
       limits: null,
       limitsUpdatedAt: null,
     };
-    lists({ 'GET /api/subscriptions': [200, { subscriptions: [ivanClaude, claraClaude, maxCodex] }] });
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [ownerClaude, claraClaude, maxCodex] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     const rows = await screen.findAllByRole('row');
     const claraRow = rows.find(r => r.textContent?.includes('Clara'))!;

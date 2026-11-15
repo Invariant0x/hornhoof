@@ -784,7 +784,7 @@ describe('AgentWindow', () => {
 
 describe('messages between agents and people', () => {
   type Party = NonNullable<EventView['message']>['from'];
-  const DAVID: Party = { kind: 'person', id: 'p2', name: 'David AI', role: { en: 'CEO assistant', ru: 'Помощник CEO' }, department: null };
+  const ASSISTANT: Party = { kind: 'person', id: 'p2', name: 'Nora', role: { en: 'CEO assistant', ru: 'Помощник CEO' }, department: null };
   const PEOPLE: Party = { kind: 'person', id: null, name: '', role: null, department: null };
   const HORNHOOF: Party = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
   const ORCH: Party = { kind: 'agent', id: 'a1', name: 'Orchestrator', role: null, department: null, agentKind: 'orchestrator' };
@@ -807,8 +807,8 @@ describe('messages between agents and people', () => {
   }
 
   const ORCHESTRATOR_LOG = [
-    msg(1, 'in', DAVID, ORCH, 'Take #78 into work.\nService: answer in Russian.'),
-    msg(2, 'in', HORNHOOF, ORCH, 'David AI took an improvement into work.'),
+    msg(1, 'in', ASSISTANT, ORCH, 'Take #78 into work.\nService: answer in Russian.'),
+    msg(2, 'in', HORNHOOF, ORCH, 'Nora took an improvement into work.'),
     msg(3, 'in', DANA, ORCH, '#49 is blocked.'),
     msg(4, 'out', ORCH, DANA, 'Give #78 to a developer.'),
     ev(5, 'text', { kind: 'text', text: 'Handed #78 to development.' }),
@@ -817,9 +817,9 @@ describe('messages between agents and people', () => {
   it("shows a person's words to the orchestrator whole, and every other message as one line naming who wrote to whom, the text folded and opened by a click", async () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     /* Nothing is hidden: the service lines are in the person's words too. */
-    const david = (await screen.findByText(/Take #78 into work\.\s+Service: answer in Russian\./)).closest('article')!;
-    expect(within(david).getByText('David AI (CEO assistant)')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
+    const nora = (await screen.findByText(/Take #78 into work\.\s+Service: answer in Russian\./)).closest('article')!;
+    expect(within(nora).getByText('Nora (CEO assistant)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Message from Nora (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
     const dana = screen.getByRole('button', { name: 'Message from Dana (Head of development) to the orchestrator' });
     expect(screen.getByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
@@ -839,7 +839,7 @@ describe('messages between agents and people', () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     ctrlO();
-    for (const text of [/Take #78 into work/, /David AI took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
+    for (const text of [/Take #78 into work/, /Nora took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
     ctrlO(screen.getByRole('textbox', { name: 'Write to the orchestrator' }));
     expect(screen.queryByText(/#49 is blocked/)).not.toBeInTheDocument();
     expect(screen.getByText('Handed #78 to development.')).toBeInTheDocument();
@@ -886,7 +886,7 @@ describe('messages between agents and people', () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Messages' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Message from Nora (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
     /* Nothing over the terminal folds, so the window takes no Ctrl+O for itself. */
     expect(ctrlO()).toBe(true);
     expect(ctrlO(screen.getByRole('textbox', { name: 'Terminal input' }))).toBe(true);
