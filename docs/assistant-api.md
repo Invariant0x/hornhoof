@@ -33,10 +33,10 @@ An assistant may have an agent of its own in Hornhoof that thinks for it. A prog
 * Only the owner picks the plan the agent thinks on, on the assistant's card in People, and only one of the owner's own personal plans. The first plan picked makes the agent; another plan moves it there. With "No plan" it stays without one and cannot answer.
 * Only the owner sees the agent and writes to it, in its window or through the assistant. Nobody else does, the CEO included, and the orchestrator does not change it. It is not an employee: it has no department or role, takes no tasks and is not counted on the map.
 * Its card in Hornhoof cannot be edited, reset or removed (`409 assistant_agent_card`). Its plan changes on the assistant's card.
-* It reads a message exactly as the program sends it, with nothing added. It keeps its conversation from one message to the next, so `text` need carry only the new words. With each message the program may also send `freshText`, its whole conversation: the persona, the facts about the owner and everything said so far. The agent reads `freshText` in place of `text` only when its turn starts a new session, for example its first turn, after it moved to another plan or machine, or after its owner cleared its conversation in its window; otherwise Hornhoof leaves it aside. A machine whose Hornhoof node is older than the server does not tell a cleared conversation, and its agent reads `text` then. Its window shows `text`.
+* It reads a message exactly as the program sends it, with nothing added. It keeps its conversation from one message to the next, so `text` need carry only the new words. With each message the program may also send `freshText`, its whole conversation: the persona, the facts about the owner and everything said so far. The agent reads `freshText` in place of `text` only when its turn starts a new session, for example its first turn, after it moved to another plan or machine, after its skills address was set or cleared (see "Skills"), or after its owner cleared its conversation in its window; otherwise Hornhoof leaves it aside. A machine whose Hornhoof node is older than the server does not tell a cleared conversation, and its agent reads `text` then. Its window shows `text`.
 * Its answer is the text for the owner, in the `reply` and `reply_end` events of the message, as for any agent.
 * Its owner may also write to it in its window, and its answer to that stays in the window. When the owner asks there to be written to in their chat, the agent sends those words with the tool `tell_owner` (`text`, 1 to 50000 characters): Hornhoof keeps each call's words as one `reply` with `messageId` `null` and no `reply_end`, and wakes the program as for any event. The program shows these words to the owner, and never sends them back as a turn.
-* In Hornhoof it acts with the owner's rights, through the tools in "MCP" below; `send_message` does not write to itself. It asks the program for the program's own skills with `persona_call`: see "Skills".
+* In Hornhoof it acts with the owner's rights, through the tools in "MCP" below; `send_message` does not write to itself. While the assistant's card has a skills address, it asks the program for the program's own skills with `persona_call`, and gives the program files by their ids: see "Skills" and "GET /api/assistant/attachments/:id".
 
 ## Calls
 
@@ -71,6 +71,7 @@ An error answers with a status and this body:
 | 403 | `decision_not_allowed` | The owner does not take this decision. |
 | 404 | `agent_unknown` | There is no such agent in the company, or it was removed. |
 | 404 | `request_unknown` | There is no such request in the company. |
+| 404 | `attachment_unknown` | There is no such file of the assistant's own agent: see "GET /api/assistant/attachments/:id". |
 | 409 | `orchestrator_not_ready`, `agent_not_ready` | The agent cannot answer right now, for example while it has no plan to run on, or the message has no `agentId` and the assistant has no agent of its own yet. Try again later. |
 | 409 | `request_closed` | The request is answered already. |
 | 400 | `task_invalid` | The answer does not fit the request: see "Answer a request". |
@@ -236,6 +237,32 @@ No other field is allowed. Answers `200`:
 
 `status` is `answered`, `approved` or `declined`; `picked` is the option's number for a pick. A `request_closed` event follows. Refusals: `403 decision_not_allowed` when the owner does not take this decision, `409 request_closed` when it is answered already, `400 task_invalid` when the answer does not fit the kind (for example `approve` on a question, or a `pick` that is not an option).
 
+### GET /api/assistant/attachments/:id
+
+Downloads a file the assistant's own agent put in Hornhoof, by the id its agent got for it: see "Skills" for how the id comes to the program. The call carries the key as every call does.
+
+```
+GET /api/assistant/attachments/3f0c9a6e-…
+Authorization: Bearer hha_…
+```
+
+Answers `200` with the file's bytes exactly as the agent sent them, and these headers:
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/octet-stream
+Content-Length: 512
+Content-Disposition: attachment; filename="_____ ___ cafe.pdf"; filename*=UTF-8''%D0%9E%D1%82%D1%87%D0%B5%D1%82%20%D0%BC%D0%B0%D0%B9%20caf%C3%A9.pdf
+X-Content-Type-Options: nosniff
+Content-Security-Policy: default-src 'none'
+```
+
+* `Content-Type` is the type Hornhoof kept the file with: `image/png`, `image/jpeg` or `image/webp` for a picture, `application/octet-stream` for any other file.
+* `Content-Disposition` carries the file's name twice. `filename*` is the whole name in UTF-8, percent-encoded (RFC 5987); take it. `filename` is the same name in plain ASCII for a program that does not read `filename*`: a letter with marks goes without them, and any other letter, a quote, a backslash or a line break goes as `_`.
+* The same file downloads as often as the program asks for it, with the same bytes. Downloading it removes nothing; Hornhoof keeps it 30 days after the agent put it.
+* Only a file the assistant's own agent put there itself with `hh-attach` downloads, by this assistant's key. A file of any other agent of the company, another assistant's own agent among them, a picture or file a person sent, a file of another company, an id nothing has and something that is no id at all all answer the same `404 attachment_unknown`, with the same body and headers, so the answer never tells whether such a file exists.
+* No key, a key in another form, a replaced or revoked key, or an assistant that is switched off answer `401 assistant_key_invalid`, as for every call, before the id is looked at; an owner who is switched off or gone `403 assistant_owner_inactive`.
+
 ## MCP
 
 A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or Codex, may take the calls above as MCP tools instead of making them itself.
@@ -256,11 +283,17 @@ A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or 
 * `send_message` also gives `next`: the number of the assistant's newest event before the message. Its answer comes after it, so `read_events` with `after` set to `next` reads the answer.
 * A refusal comes back as a tool error (`isError: true`) whose text is the call's error body, `{ "error": { "code", "message", "reason" } }`, with the same `reason`. Arguments that do not fit the tool's schema are refused in words before the call.
 * `read_events` with a `wait` holds the tool call as the long poll holds the call, for up to 50 seconds. Give tool calls at least 60 seconds in the program's settings.
-* The assistant's own agent has these tools inside Hornhoof, with two more: `persona_call` (`name`, `arguments`), see "Skills", and `tell_owner` (`text`), see "The assistant's own agent". The address `/api/assistant/mcp` offers neither.
+* The assistant's own agent has these tools inside Hornhoof, with two more: `tell_owner` (`text`), see "The assistant's own agent", and, only while the assistant's card has a skills address, `persona_call` (`name`, `arguments`), see "Skills". The address `/api/assistant/mcp` offers neither.
 
 ## Skills
 
-When the assistant's card has a skills address, the assistant's own agent asks the program to do what only the program can do, for example to look at the owner's calendar, with the tool `persona_call`. The program tells the agent which skills there are and what they take, in its messages; Hornhoof does not check the names. Hornhoof sends each call as this POST and holds the tool call until the answer:
+When the assistant's card has a skills address, the assistant's own agent asks the program to do what only the program can do, for example to look at the owner's calendar, with the tool `persona_call`. The program tells the agent which skills there are and what they take, in its messages; Hornhoof does not check the names.
+
+* The agent has `persona_call` among its tools, and its instructions tell it of the tool, only while the card has a skills address. Without one it neither sees the tool nor hears of it, and is told to promise no skill of the program and to ask its owner to set nothing up for one. The list of tools is made anew from the card as it is at each request for it, so the next list after the address is set or cleared shows the change.
+* The agent's program reads the list as it connects to Hornhoof's tools. Setting or clearing the address changes the agent's instructions too, so its next turn starts its program anew in a new session, which reads the list again, and reads the message's `freshText` when the program sends one. A change from one address to another changes nothing of that: the agent goes on in its session, and its calls go to the new address.
+* A call of `persona_call` while the card has no skills address, for example from a list read before the address was cleared, is refused in words the agent reads (`This assistant has no skills address, …`), and nothing is sent.
+
+Hornhoof sends each call as this POST and holds the tool call until the answer:
 
 ```
 POST <skills address>
@@ -282,6 +315,16 @@ X-Hornhoof-Signature: sha256=<64 hex characters>
 * The agent reads `text`, followed by `data` as JSON when there is `data`. With `ok` false, it reads `text` as a failure of the skill.
 * Any other status, a redirect, no answer within 120 seconds, a bigger answer or a body without `ok` and `text` is a failure the agent reads in words. Hornhoof does not try a call again; the agent decides.
 * The skills address is an `http` or `https` address of at most 500 characters. Use `https` unless the program runs on the same machine or network as Hornhoof.
+
+### A file for a skill
+
+A skill may take a file the agent makes or has, for example a report to send in the owner's chat. The file goes by its id:
+
+1. In its turn, the agent puts the file in Hornhoof with `hh-attach --chat FILE` (any file up to 50 MB), which prints the file's name and its id. Its instructions tell it to.
+2. The agent calls `persona_call` with that id in the skill's arguments, under the name the program's message gives for it, for example `{"name":"send_file","arguments":{"attachmentId":"3f0c9a6e-…"}}`.
+3. The program downloads the file with `GET /api/assistant/attachments/3f0c9a6e-…` and its key, takes the name from `Content-Disposition`, and answers the skill's call.
+
+The program may download the file again, for example when it tries again. Hornhoof keeps the file 30 days after the agent put it, as every file of an agent's chat.
 
 ## Wake
 
@@ -432,6 +475,7 @@ The `platforms` part is there only when the card has an events address. Hermes' 
 | Events address | `http` or `https`, at most 500 characters |
 | Skills address | `http` or `https`, at most 500 characters |
 | Skill call | 120 seconds to answer, at most 100 KB |
+| A file of the own agent | up to 50 MB, from `hh-attach --chat`, kept 30 days |
 | Key and signing secret | `hha_` and `hhs_`, each followed by 43 base64url characters |
 
 ## Example session

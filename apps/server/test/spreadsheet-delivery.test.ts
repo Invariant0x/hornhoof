@@ -448,11 +448,11 @@ describe('1c. Google Sheets integration and clear .xlsx fallback when Google is 
     expect(fallback.isError).toBeFalsy();
     const fallbackData = JSON.parse(fallback.content[0]!.text) as { connected: boolean; setup: string; fallback: string };
     expect(fallbackData.connected).toBe(false);
-    expect(fallbackData.setup).toContain('Company settings');
+    expect(fallbackData.setup).toContain('Settings -> Integrations -> Google Sheets');
     expect(fallbackData.fallback).toContain('hh-xlsx');
     expect(fallbackData.fallback).toContain('hh-attach');
 
-    /* CEO connects Google Sheets in Company settings; raw private key is never returned. */
+    /* CEO connects Google Sheets in Settings, under Integrations; raw private key is never returned. */
     const saved = await c.app.inject({
       method: 'PUT',
       url: '/api/google-sheets',

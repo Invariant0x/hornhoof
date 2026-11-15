@@ -33,7 +33,7 @@ import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerBriefingTool } from '../briefings/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
-import { registerOutboundControlTools, registerOutboundTools } from '../outbound/extension.js';
+import { registerOutboundControlTools, registerOutboundHeadTools, registerOutboundTools } from '../outbound/extension.js';
 import { assistantAgentTools } from '../assistants/mcp.js';
 import { registerAssignmentTools } from '../agents/assignment.js';
 import { registerProgramAccessTools } from '../program-operator/tools.js';
@@ -87,6 +87,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
       registerAssignmentTools(server, ctx, job);
       registerDepartmentControlTools(server, ctx, app, job);
       registerHeadPolicyTools(server, ctx, app, job);
+      registerOutboundHeadTools(server, ctx, app, job);
     }
     if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
     if (job.agentKind === 'head' && job.roleKey !== null && DATABASE_ROLES.includes(job.roleKey)) registerDatabaseTool(server, ctx, job, 'read');
@@ -200,7 +201,7 @@ export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* An assistant's own agent works for its owner alone, with the owner's assistant tools, never the company's; on a
        machine that only reads it waits, as its tools keep what they do. */
     if (reading && job.agentKind === 'assistant') throw paused();
-    const server = job.agentKind === 'assistant' ? assistantAgentTools(ctx, job) : toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
+    const server = job.agentKind === 'assistant' ? await assistantAgentTools(ctx, job, callName(req.body)) : toolsFor(ctx, app, job, reading ? null : await invocationOf(req, ctx.config), reading);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

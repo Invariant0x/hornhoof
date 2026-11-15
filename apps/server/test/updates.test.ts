@@ -360,7 +360,7 @@ describe('updates', () => {
       await db.execute(sql`UPDATE net.merges SET status = ${status}`);
       const refused = await update();
       expect([status, refused.statusCode, refused.json().error.reason, refused.json().error.message]).toEqual([
-        status, 409, 'merge_pending', 'A database from before a restore is still being brought back. Wait for it, or leave it out in Company settings.',
+        status, 409, 'merge_pending', 'A database from before a restore is still being brought back. Wait for it, or leave it out in Settings, under Company & access.',
       ]);
       expect(app.ctx.updater.claimed()).toBeNull();
     }

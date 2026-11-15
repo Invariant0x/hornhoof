@@ -83,7 +83,7 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     expect(csvDownload).toHaveAttribute('download', 'contacts.csv');
   });
 
-  it('shows and saves Google Sheets connection in Company settings in both English and Russian', async () => {
+  it('shows Google Sheets as a card under Integrations in Settings, connects it and says it is connected, in English and Russian', async () => {
     const user = userEvent.setup();
     localStorage.setItem('hh-lang', 'en');
     const calls = mockApi({
@@ -104,16 +104,20 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     });
     const first = render(
       <LanguageProvider>
-        <Settings me={ME} onClose={() => {}} />
+        <Settings me={ME} group="integrations" onClose={() => {}} />
       </LanguageProvider>,
     );
-    const dialog = await screen.findByRole('dialog', { name: 'Company settings' });
-    const part = await within(dialog).findByRole('region', { name: 'Google Sheets' });
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    const part = await within(dialog).findByRole('article', { name: 'Google Sheets' });
+    expect(part).toHaveClass('integration');
+    expect(within(part).getByText('Not connected')).toHaveAttribute('data-connected', 'false');
+    expect(within(dialog).getByRole('button', { name: 'Integrations' })).toHaveAttribute('aria-current', 'page');
     await user.click(within(part).getByRole('button', { name: 'Connect Google Sheets' }));
     await user.type(within(part).getByLabelText('Google key JSON'), '{{"type":"service_account"}');
     await user.type(within(part).getByLabelText('Share new spreadsheets with'), 'ivan@acme.com');
     await user.click(within(part).getByRole('button', { name: 'Save' }));
     expect(await within(part).findByText(/sheets-bot@acme\.iam\.gserviceaccount\.com/)).toBeInTheDocument();
+    expect(within(part).getByText('Connected')).toHaveAttribute('data-connected', 'true');
     expect(calls.find(c => c.method === 'PUT' && c.path === '/api/google-sheets')).toEqual({
       method: 'PUT',
       path: '/api/google-sheets',
@@ -129,11 +133,13 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     });
     render(
       <LanguageProvider>
-        <Settings me={ME} onClose={() => {}} />
+        <Settings me={ME} group="integrations" onClose={() => {}} />
       </LanguageProvider>,
     );
-    const ruDialog = await screen.findByRole('dialog', { name: 'Настройки компании' });
-    expect(await within(ruDialog).findByRole('region', { name: 'Google Таблицы' })).toBeInTheDocument();
+    const ruDialog = await screen.findByRole('dialog', { name: 'Настройки' });
+    const ruPart = await within(ruDialog).findByRole('article', { name: 'Google Таблицы' });
+    expect(within(ruPart).getByText('Не подключено')).toBeInTheDocument();
+    expect(within(ruDialog).getByRole('button', { name: 'Интеграции' })).toHaveAttribute('aria-current', 'page');
     localStorage.removeItem('hh-lang');
   });
 
@@ -153,10 +159,10 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
       });
       const shown = render(
         <LanguageProvider>
-          <Settings me={ME} onClose={() => {}} />
+          <Settings me={ME} group="integrations" onClose={() => {}} />
         </LanguageProvider>,
       );
-      const part = await screen.findByRole('region', { name: lang === 'en' ? 'Google Sheets' : 'Google Таблицы' });
+      const part = await screen.findByRole('article', { name: lang === 'en' ? 'Google Sheets' : 'Google Таблицы' });
       await user.click(within(part).getByRole('button', { name: lang === 'en' ? 'Connect Google Sheets' : 'Подключить Google Таблицы' }));
       await user.type(within(part).getByLabelText(lang === 'en' ? 'Google key JSON' : 'JSON-ключ Google'), '{{"type":"service_account"}');
       await user.click(within(part).getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить' }));

@@ -1,5 +1,5 @@
 {
-  "id": "dd001d51-0946-43aa-8242-74ba0399accf",
+  "id": "fa2ed2b9-0deb-407d-a49d-92404be74884",
   "prevId": "95df5ff8-61aa-42d0-9663-31131cb6138a",
   "version": "7",
   "dialect": "postgresql",
@@ -2938,13 +2938,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
-        },
-        "autonomous_release": {
-          "name": "autonomous_release",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -9808,6 +9801,185 @@
         "outbound_sampling_counters_values": {
           "name": "outbound_sampling_counters_values",
           "value": "\"outbound_sampling_counters\".\"next\" > 0 AND \"outbound_sampling_counters\".\"clean_outcomes\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_setup_events": {
+      "name": "outbound_setup_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department_id": {
+          "name": "department_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject_id": {
+          "name": "subject_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detail": {
+          "name": "detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "outbound_setup_events_department": {
+          "name": "outbound_setup_events_department",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "department_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "outbound_setup_events_company_id_companies_id_fk": {
+          "name": "outbound_setup_events_company_id_companies_id_fk",
+          "tableFrom": "outbound_setup_events",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_setup_events_person_id_people_id_fk": {
+          "name": "outbound_setup_events_person_id_people_id_fk",
+          "tableFrom": "outbound_setup_events",
+          "tableTo": "people",
+          "columnsFrom": [
+            "person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_setup_events_agent_id_agents_id_fk": {
+          "name": "outbound_setup_events_agent_id_agents_id_fk",
+          "tableFrom": "outbound_setup_events",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_setup_events_place": {
+          "name": "outbound_setup_events_place",
+          "tableFrom": "outbound_setup_events",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "department_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_setup_events_channel": {
+          "name": "outbound_setup_events_channel",
+          "tableFrom": "outbound_setup_events",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "outbound_setup_events_kind": {
+          "name": "outbound_setup_events_kind",
+          "value": "\"outbound_setup_events\".\"kind\" IN ('channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released')"
         }
       },
       "isRLSEnabled": false

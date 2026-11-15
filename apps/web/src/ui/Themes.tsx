@@ -22,12 +22,6 @@ const useSkins = () => useSyncExternalStore(subscribeSkins, skinsState);
 const nameIn = (names: SkinNames, language: Language) => (language === 'ru' ? names.ru : names.en);
 const builtinNames = (id: BuiltinSkinId): SkinNames => ({ ru: ru.skins.names[id], en: en.skins.names[id] });
 
-/* The name people see: a built-in skin's in the language of the page, one's own as its file names it. */
-function skinName(t: Messages, language: Language, id: string, custom: readonly CustomSkin[]): string {
-  const own = custom.find(entry => entry.id === id);
-  return own ? nameIn(own.skin.name, language) : t.skins.names[id as BuiltinSkinId];
-}
-
 /* The tokens of a skin on its own preview only, so each card shows its skin in the same drawing. */
 const previewStyle = (look: SkinLook) => Object.fromEntries(declarations(look).filter(([property]) => property.startsWith('--'))) as CSSProperties;
 
@@ -44,23 +38,6 @@ async function readSkin(file: File): Promise<Skin | Problem> {
   } catch {
     return { code: 'read_failed' };
   }
-}
-
-/* One row of the account menu: where the themes are, and which one is on. */
-export function ThemesMenuItem({ onOpen }: { onOpen: () => void }) {
-  const t = useT();
-  const { language } = useLanguage();
-  const { active, custom } = useSkins();
-  const name = skinName(t, language, active, custom);
-  return (
-    <button className="menu-link" type="button" aria-label={t.skins.go(name)} onClick={onOpen}>
-      <span>{t.skins.title}</span>
-      <span className="menu-value">
-        {name}
-        <span className="menu-arrow" aria-hidden="true">›</span>
-      </span>
-    </button>
-  );
 }
 
 /* Two labels in one place, the other one hidden but holding its room, so a button keeps its size when its label changes. */

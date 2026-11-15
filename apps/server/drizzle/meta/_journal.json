@@ -887,8 +887,15 @@
     {
       "idx": 127,
       "version": "7",
-      "when": 1794743480350,
-      "tag": "0127_department_autonomous_release",
+      "when": 1794743626293,
+      "tag": "0127_outbound_setup_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1794749608751,
+      "tag": "0128_department_autonomous_release",
       "breakpoints": true
     }
   ]

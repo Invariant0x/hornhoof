@@ -14,6 +14,7 @@ import { agentState } from '../conversation/queue.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
 import { AnswerBody, answerRequest } from '../tasks/routes.js';
+import { fileFor } from './files.js';
 import { sendForOwner } from './messages.js';
 import { waitingFor } from './requests.js';
 
@@ -119,7 +120,8 @@ export function answerFor(ctx: Ctx, me: Person, params: unknown, body: unknown) 
 }
 
 /* What a person's assistant does for them, with its key: reads who it is for and whom it may write to, writes to agents,
-   reads what happened since, and answers what waits for its owner, all with the owner's rights. */
+   reads what happened since, answers what waits for its owner, all with the owner's rights, and downloads the files its own
+   agent put for it. */
 export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -143,4 +145,6 @@ export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/assistant/requests', async req => requestsFor(ctx, await requireAssistant(req, db)));
 
   app.post('/api/assistant/requests/:id/answer', async req => answerFor(ctx, await requireAssistant(req, db), req.params, req.body));
+
+  app.get('/api/assistant/attachments/:id', async (req, reply) => fileFor(ctx, await requireAssistant(req, db), req.params, reply));
 }

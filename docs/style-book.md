@@ -277,7 +277,7 @@ The record of section 6 now stands in the notebook, people, requests, confirmati
 |---|---|---|
 | `.notebook li` | Grid `auto 1fr auto auto auto`, text and buttons are siblings | `ui/Notebook.tsx` |
 | `.ask` | Question and buttons are siblings in a wrapping row | `ui/Ask.tsx`, `screens/Machines.tsx` |
-| `.settings-actions` | Row that may mix text and buttons | `screens/Settings.tsx`, `screens/Profile.tsx` |
+| `.settings-actions` | Row that may mix text and buttons | `screens/Settings.tsx` |
 | `.ac-actions` | Row of buttons with a top line | `ui/AgentCard.tsx`, `ui/TaskPanel.tsx` |
 | `.repo-actions`, `.machine-actions`, `.req-actions`, `.req-options` | Groups of buttons | `ui/RepoSettings.tsx`, `screens/Machines.tsx`, `ui/Requests.tsx` |
 | `.row-actions` | Buttons of a table row, at the end of the row | `screens/People.tsx` |

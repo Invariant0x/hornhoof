@@ -3,17 +3,18 @@ import { and, eq, inArray, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requirePerson, type Person } from '../../auth/session.js';
+import { requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundChannels } from '../../db/schema.js';
+import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, type OutboundSetupKind } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { mayChangeRules } from '../departments/approval-policy.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf } from './checks.js';
 import { settleAttempt } from './core.js';
 import { isOneAddress } from './delivery.js';
 import { channelIn, type Channel } from './policies.js';
+import { requireRunner } from './runner.js';
+import { logSetup } from './setup-log.js';
 import { endpointOf } from './webhook.js';
 
 /* The accounts messages leave from. A person gives an account's settings once, over a protected route, and nothing reads them
@@ -200,27 +201,35 @@ function settingsFrom(ctx: Ctx, row: { configEnc: string; adapter: Channel['adap
 export const markInvalid = (ctx: Ctx, accountId: string, configGeneration: number, now = new Date()) =>
   ctx.db.update(outboundAccounts).set({ status: 'invalid', updatedAt: now }).where(and(eq(outboundAccounts.id, accountId), eq(outboundAccounts.configGeneration, configGeneration), eq(outboundAccounts.status, 'active')));
 
+/* A setting and its secret never pass through a model, a head's included: only a person gives them, on their own screen. */
 function refuseModel(me: Person): void {
-  if (me.via) throw notYours('Only a person does this: settings and who sends never pass through a model.');
+  if (me.via) throw notYours('Only a person does this: settings never pass through a model.');
 }
 
-async function requireRunner(ctx: Ctx, me: Person, departmentId: string): Promise<void> {
-  if (!(await mayChangeRules(ctx.db, me, departmentId))) throw notYours('Only this department\'s owner, the CEO or the CEO delegate does this.');
+/* Who writes from an account is the decision of a person who runs the department, which its head may carry out. The
+   orchestrator never moves it. */
+function refuseOrchestrator(me: Person): void {
+  if (viaOrchestrator(me)) throw notYours('Only a person who runs this department, or its head carrying out their word, does this.');
 }
 
 const idOf = (req: FastifyRequest): string => IdParams.parse(req.params).id;
+const unknownChannel = () => new ApiError(404, 'not_found', 'There is no such channel.', 'outbound_unknown');
 
 async function runnableAccount(ctx: Ctx, me: Person, id: string): Promise<Account> {
   const account = await accountIn(ctx, me.companyId, id);
-  await requireRunner(ctx, me, account.departmentId);
+  await requireRunner(ctx.db, me, account.departmentId, unknownAccount);
   return account;
 }
 
 async function runnableChannel(ctx: Ctx, me: Person, id: string): Promise<Channel> {
   const channel = await channelIn(ctx.db, me.companyId, id);
-  await requireRunner(ctx, me, channel.departmentId);
+  await requireRunner(ctx.db, me, channel.departmentId, unknownChannel);
   return channel;
 }
+
+/* What the department's log keeps of a change of an account: its name and generation, never a setting. */
+const logAccount = (ctx: Ctx, me: Person, account: Pick<Account, 'companyId' | 'departmentId' | 'channelId'>, kind: OutboundSetupKind, view: ReturnType<typeof viewOf>) =>
+  logSetup(ctx.db, me, { companyId: account.companyId, departmentId: account.departmentId, channelId: account.channelId, kind, subjectId: view.accountId, detail: { label: view.label, configGeneration: view.configGeneration, agentId: view.binding?.agentId ?? null } });
 
 const logged = (req: FastifyRequest, me: Person, accountId: string, did: string) => req.log.info({ accountId, did, personId: me.id }, 'outbound account changed');
 
@@ -248,7 +257,9 @@ export function accountRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     refuseModel(me);
     const body = SetupBody.parse(req.body);
-    const made = await setupAccount(ctx, await runnableChannel(ctx, me, body.channelId), { label: body.label, config: body.config, createdBy: me.id });
+    const channel = await runnableChannel(ctx, me, body.channelId);
+    const made = await setupAccount(ctx, channel, { label: body.label, config: body.config, createdBy: me.id });
+    await logAccount(ctx, me, { ...channel, channelId: channel.id }, 'account_set_up', made);
     logged(req, me, made.accountId, 'set up');
     return made;
   });
@@ -263,6 +274,7 @@ export function accountRoutes(app: FastifyInstance, ctx: Ctx): void {
     refuseModel(me);
     const account = await runnableAccount(ctx, me, idOf(req));
     const rotated = await rotateAccount(ctx, account, RotateBody.parse(req.body).config);
+    await logAccount(ctx, me, account, 'account_rotated', rotated);
     logged(req, me, account.id, 'rotated');
     return rotated;
   });
@@ -271,15 +283,17 @@ export function accountRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const account = await runnableAccount(ctx, me, idOf(req));
     const revoked = await revokeAccount(ctx, account);
+    await logAccount(ctx, me, account, 'account_revoked', revoked);
     logged(req, me, account.id, 'revoked');
     return revoked;
   });
 
   app.post('/api/outbound/accounts/:id/bind', async req => {
     const me = await requirePerson(req, db);
-    refuseModel(me);
+    refuseOrchestrator(me);
     const account = await runnableAccount(ctx, me, idOf(req));
     const bound = await bindAccount(ctx, account, { agentId: BindBody.parse(req.body).agentId, createdBy: me.id });
+    await logAccount(ctx, me, account, 'account_bound', bound);
     logged(req, me, account.id, 'bound');
     return bound;
   });
@@ -288,6 +302,7 @@ export function accountRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const account = await runnableAccount(ctx, me, idOf(req));
     const released = await releaseAccount(ctx, account);
+    await logAccount(ctx, me, account, 'account_released', released);
     logged(req, me, account.id, 'released');
     return released;
   });

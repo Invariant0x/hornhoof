@@ -7,8 +7,8 @@ import { COLOR_TOKENS, type Skin } from '../src/skins/roles';
 import { builtinFile, parseSkin, skinText } from '../src/skins/validate';
 import { serveApi } from './api';
 
-/* The Themes section of a person's settings and its row in the account menu, in every built-in skin and one of a
-   person's own: what each looks like, that switching moves no block among skins written in the same fonts, that text
+/* The Themes part of Settings, under Appearance & language, and the account menu without a row of its own, in every
+   built-in skin and one of a person's own: what each looks like, that switching moves no block among skins written in the same fonts, that text
    stays readable, that nothing runs off the screen, also mirrored right to left, and that the chosen skin is on the page
    before the app starts. Its files are added, refused in plain words, downloaded as samples, removed and put back. */
 const CYBERPUNK = builtinSkin('cyberpunk')!;
@@ -31,7 +31,6 @@ const fontsOf = (choice: string) => {
   return `${fonts.display[0]} ${fonts.body[0]}`;
 };
 const nameOf = (words: Messages, language: Language, choice: string) => (builtinSkin(choice) ? words.skins.names[choice as BuiltinSkinId] : OWN.name[language]);
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function messagesFor(locale: Language): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${locale}.ts`) as Record<string, Messages>;
@@ -73,8 +72,9 @@ function watchProblems(page: Page): string[] {
 
 async function openThemes(page: Page, words: Messages): Promise<Locator> {
   await page.getByRole('button', { name: words.shell.account, exact: true }).click();
-  await page.getByRole('button', { name: new RegExp(`^${escape(words.skins.go(''))}`) }).click();
-  const dialog = page.getByRole('dialog', { name: words.profile.title });
+  await page.getByRole('button', { name: words.settings.menu, exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: words.settings.title });
+  await expect(dialog.getByRole('button', { name: words.settings.groups.appearance, exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(dialog.getByRole('region', { name: words.skins.catalog })).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
   return dialog;
@@ -212,19 +212,6 @@ async function lowercaseHeight(page: Page, font: string): Promise<number> {
   return (Math.max(...rows) - Math.min(...rows) + 1) / (await page.evaluate(() => devicePixelRatio));
 }
 
-/* Where an angle quote points: to the side its middle stands out to, against its top. */
-async function pointing(page: Page, arrow: Locator): Promise<'left' | 'right'> {
-  const marks = await inkOf(page, await arrow.screenshot());
-  const rows = marks.map(([, y]) => y);
-  const [top, bottom] = [Math.min(...rows), Math.max(...rows)];
-  const third = (bottom - top + 1) / 3;
-  const across = (from: number, to: number) => {
-    const xs = marks.filter(([, y]) => y >= from && y < to).map(([x]) => x);
-    return xs.reduce((sum, x) => sum + x, 0) / xs.length;
-  };
-  return across(top + third, bottom + 1 - third) > across(top, top + third) ? 'right' : 'left';
-}
-
 /* Applies a skin with a click on its card and waits until the page and the line under the heading say so. */
 async function pick(page: Page, dialog: Locator, words: Messages, language: Language, choice: string) {
   const name = nameOf(words, language, choice);
@@ -235,7 +222,7 @@ async function pick(page: Page, dialog: Locator, words: Messages, language: Lang
   await page.evaluate(async () => { await document.fonts.ready; });
 }
 
-test('the Themes section and its menu row keep every block in place in each skin, on the longest and the shortest language and right to left', async ({ page, browserName }, info) => {
+test('the Themes part and the account menu keep every block in place in each skin, on the longest and the shortest language and right to left', async ({ page, browserName }, info) => {
   test.setTimeout(0);
   const problems = watchProblems(page);
   await prepare(page, 'en', null);
@@ -267,7 +254,8 @@ test('the Themes section and its menu row keep every block in place in each skin
     }
     await dialog.getByRole('button', { name: words.common.done, exact: true }).click();
     await page.getByRole('button', { name: words.shell.account, exact: true }).click();
-    await expect(page.getByRole('button', { name: words.skins.go(OWN.name[language]), exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: words.shell.logOut, exact: true })).toBeVisible();
+    await expect(page.locator('.account-menu').getByText(words.skins.title, { exact: true }), 'the menu has no themes row').toHaveCount(0);
     const lowest = await lowestContrast(page);
     (report.contrast as Record<string, unknown>)[`${label}-menu`] = lowest;
     expect(lowest.ratio, `${label} menu ${lowest.what}`).toBeGreaterThanOrEqual(4.5);
@@ -367,22 +355,6 @@ test('Pixel lowercase stands as tall as Tektur, within a pixel, at the size of a
   expect(problems).toEqual([]);
 });
 
-test('the arrow of the Themes row in the account menu points to the end of the line, left to right and right to left', async ({ page }) => {
-  const problems = watchProblems(page);
-  await prepare(page, 'en', null, false);
-  const words = await messagesFor('en');
-  for (const skin of ['cyberpunk', 'pixel'] as const) for (const [dir, end] of [['ltr', 'right'], ['rtl', 'left']] as const) {
-    await page.goto('/');
-    await page.evaluate(choice => localStorage.setItem('hh-theme', choice), skin);
-    await page.reload();
-    await page.evaluate(direction => { document.documentElement.dir = direction; }, dir);
-    await page.getByRole('button', { name: words.shell.account, exact: true }).click();
-    const row = page.getByRole('button', { name: words.skins.go(words.skins.names[skin]), exact: true });
-    expect(await pointing(page, row.locator('.menu-arrow')), `${skin} ${dir}`).toBe(end);
-  }
-  expect(problems).toEqual([]);
-});
-
 test('a skin file is added beside the others, a bad one is refused in plain words, any skin downloads as a sample, and a removed one can be put back', async ({ page }) => {
   const problems = watchProblems(page);
   await prepare(page, 'en', 'matrix', false);
@@ -416,7 +388,7 @@ test('a skin file is added beside the others, a bad one is refused in plain word
   /* The window has its own address, so it opens again with the page. */
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'custom-2');
-  const again = page.getByRole('dialog', { name: words.profile.title });
+  const again = page.getByRole('dialog', { name: words.settings.title });
   await again.getByRole('button', { name: 'Remove: Dawn', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'cyberpunk');
   await expect(again.getByRole('button', { name: 'Applied: Cyberpunk', exact: true })).toHaveAttribute('aria-pressed', 'true');

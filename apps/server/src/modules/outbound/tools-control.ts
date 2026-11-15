@@ -8,7 +8,8 @@ import { decisionPrincipal, withInputLock } from '../conversation/decision-conte
 import type { ToolJob } from '../tools/job.js';
 
 /* What the orchestrator does for the person its turn answers, through the route the screen calls and within what that person
-   may. There is deliberately no tool here to publish a word, add an address or read one: those stay with people. */
+   may. There is deliberately no tool here to publish a word, add an address or read one: a department publishes its own
+   words, its people or its head on their word, and addresses stay with people. */
 
 const NO_PERSON = 'This turn answers no person who may change this: the last message in it came from an employee or from Hornhoof. Nothing was changed. Ask the department\'s owner, the CEO or the CEO delegate.';
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
