@@ -146,26 +146,34 @@ async function isLiveAgentId(db: Ctx['db'], agentId: string | null): Promise<boo
   return Boolean(live);
 }
 
+function turnkeyReportFields(task: Task, report: { agentId: string | null; data: Record<string, unknown> } | undefined): { commit: string; turnkeyAgentId: string | null } {
+  if (!report) return { commit: '', turnkeyAgentId: task.executorAgentId };
+  const integration = report.data.integration as { commit?: string } | undefined;
+  return { commit: integration?.commit ?? '', turnkeyAgentId: report.agentId ?? task.executorAgentId };
+}
+
 async function acceptedTurnkeyResult(db: Ctx['db'], task: Task, report: { agentId: string | null; data: Record<string, unknown> } | undefined): Promise<Accepted> {
-  const integration = report?.data.integration as { commit?: string } | undefined;
-  const turnkeyAgentId = report?.agentId ?? task.executorAgentId ?? null;
+  const { commit, turnkeyAgentId } = turnkeyReportFields(task, report);
   const turnkeyLive = await isLiveAgentId(db, turnkeyAgentId);
-  return { task, commit: integration?.commit ?? '', candidate: null, verdicts: [], checkersLive: false, turnkey: true, turnkeyAgentId, turnkeyLive };
+  return { task, commit, candidate: null, verdicts: [], checkersLive: false, turnkey: true, turnkeyAgentId, turnkeyLive };
+}
+
+function completedCheckOwners(route: typeof taskRoutes.$inferSelect | undefined): string[] {
+  const stages = route ? route.state.stages : [];
+  return stages.filter(s => (s.stage === 'review' || s.stage === 'security') && s.status === 'complete' && Boolean(s.ownerAgentId)).map(s => s.ownerAgentId!);
 }
 
 async function liveStageCheckers(db: Ctx['db'], candidate: EchelonCandidate | null, route: typeof taskRoutes.$inferSelect | undefined): Promise<boolean> {
-  const stages = (route?.state.stages ?? []).filter(step => (step.stage === 'review' || step.stage === 'security') && step.status === 'complete');
-  if (!candidate || !stages.length) return false;
-  const owners = stages.flatMap(step => (step.ownerAgentId ? [step.ownerAgentId] : []));
-  if (owners.some(id => id === candidate.producedBy.agentId)) return false;
+  const owners = completedCheckOwners(route);
+  if (!candidate || !owners.length || owners.includes(candidate.producedBy.agentId)) return false;
   const live = await db.select({ id: agents.id }).from(agents).where(and(inArray(agents.id, owners), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   return live.length === new Set(owners).size;
 }
 
 function reportedCommitOf(report: { data: Record<string, unknown> } | undefined): { candidateId: string | null; commit: string } {
-  const accepted = report?.data.acceptedCandidate as { candidateId?: string; commit?: string } | undefined;
-  const integration = report?.data.integration as { commit?: string } | undefined;
-  return { candidateId: accepted?.candidateId ?? null, commit: accepted?.commit ?? integration?.commit ?? '' };
+  if (!report) return { candidateId: null, commit: '' };
+  const accepted = report.data.acceptedCandidate as { candidateId: string; commit: string } | undefined;
+  return accepted ? { candidateId: accepted.candidateId, commit: accepted.commit } : { candidateId: null, commit: '' };
 }
 
 async function acceptedCandidateResult(
@@ -207,14 +215,6 @@ async function passingVerdicts(db: Ctx['db'], task: Task, candidate: EchelonCand
   return rows.map(row => String(row.id));
 }
 
-async function turnkeyCommits(ctx: Reader, repo: Repo, turn: Turn, base: string, head: string) {
-  const direct = await commitsBetween(ctx, repo, base, head);
-  if (direct) return direct;
-  const start = turn.baseCommit ?? turn.startCommit;
-  if (!start || start === base || !(await branchHolds(ctx, repo, base, start))) return null;
-  return commitsBetween(ctx, repo, start, head);
-}
-
 async function activeTurnkeyReleaseHolder(ctx: Reader, repo: Repo, releaseTask: Task, agentId: string, commit: string): Promise<boolean> {
   const [route] = await ctx.db.select().from(taskRoutes).where(eq(taskRoutes.taskId, releaseTask.id));
   if (route?.state.resultKind !== 'turnkey' || !(await turnkeyTeamOf(ctx.db, releaseTask.companyId, agentId))) return false;
@@ -222,21 +222,24 @@ async function activeTurnkeyReleaseHolder(ctx: Reader, repo: Repo, releaseTask: 
   return Boolean(live) && (await headOf(ctx, repo, `task-${releaseTask.number}`)) === commit;
 }
 
-async function turnkeyResultCoverage(ctx: Reader, repo: Repo, turn: Turn, base: string, result: Accepted, checked: Set<string>): Promise<string | null> {
+async function turnkeyResultCoverage(ctx: Reader, repo: Repo, base: string, result: Accepted, checked: Set<string>): Promise<string | null> {
   if (!result.commit || !result.turnkeyLive) return `#${result.task.number}: the turnkey executor of ${result.commit || 'its result'} is off or removed.`;
-  const own = await turnkeyCommits(ctx, repo, turn, base, result.commit);
+  const own = await commitsBetween(ctx, repo, base, result.commit);
   if (!own) return `The commits of #${result.task.number} could not all be read.`;
   for (const c of own) checked.add(c.sha);
   return null;
 }
 
+function candidateCheckerFlaw(result: Accepted, commit: string): string | null {
+  if (result.verdicts.length && result.checkersLive) return null;
+  return `#${result.task.number}: a checker of ${commit} is off, removed or its author, or passed no verdict on it.`;
+}
+
 async function candidateResultCoverage(ctx: Reader, repo: Repo, result: Accepted, checked: Set<string>): Promise<string | null> {
   if (!result.candidate) return `#${result.task.number} has no checked candidate.`;
-  const flaw = !result.verdicts.length || !result.checkersLive
-    ? `#${result.task.number}: a checker of ${result.candidate.commit} is off, removed or its author, or passed no verdict on it.`
-    : null;
+  const flaw = candidateCheckerFlaw(result, result.candidate.commit);
   const own = await commitsBetween(ctx, repo, result.candidate.baseCommit, result.candidate.commit);
-  if (!own) return flaw ? `${flaw} The commits of #${result.task.number} could not all be read.` : `The commits of #${result.task.number} could not all be read.`;
+  if (!own) return [flaw, `The commits of #${result.task.number} could not all be read.`].filter(Boolean).join(' ');
   for (const c of own) checked.add(c.sha);
   return flaw;
 }
@@ -251,7 +254,6 @@ function extraneousCommitNotes(extra: Array<{ sha: string; parents: string[] }>)
 async function coverage(
   ctx: Reader,
   repo: Repo,
-  turn: Turn,
   releaseTask: Task,
   agentId: string,
   base: string,
@@ -263,7 +265,7 @@ async function coverage(
   const uncovered: string[] = [];
   const checked = new Set<string>();
   for (const result of results) {
-    const flaw = result.turnkey ? await turnkeyResultCoverage(ctx, repo, turn, base, result, checked) : await candidateResultCoverage(ctx, repo, result, checked);
+    const flaw = result.turnkey ? await turnkeyResultCoverage(ctx, repo, base, result, checked) : await candidateResultCoverage(ctx, repo, result, checked);
     if (flaw) uncovered.push(flaw);
   }
   const extra = brought.filter(c => !checked.has(c.sha));
@@ -356,7 +358,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   const base = await requireReleaseCommits(ctx, scope.target, input.commit);
   await requireFullRun(ctx.db, scope.turn, scope.target.branch, scope.turn.departmentId!, input.runId, input.commit);
   const results = await acceptedResults(ctx.db, scope.turn);
-  const { uncovered, releaseHolderId } = await coverage(ctx, scope.target.repo, scope.turn, scope.task, agentId, base, input.commit, results);
+  const { uncovered, releaseHolderId } = await coverage(ctx, scope.target.repo, scope.task, agentId, base, input.commit, results);
   const released = toReleasedTasks(results);
   /* A person's approval stands first; without one, autonomous release approves only what was checked whole. */
   await ensureReleaseAuthorization(ctx, scope, input.commit, uncovered);
@@ -443,7 +445,7 @@ export async function autonomousTurnReleaseReady(
   const ready = await readyTurnScopeAndRun(ctx, task, agentId, commit);
   if (!ready) return null;
   const results = await acceptedResults(ctx.db, ready.scope.turn);
-  const { uncovered, releaseHolderId } = await coverage(ctx, ready.scope.target.repo, ready.scope.turn, task, agentId, ready.base, commit, results);
+  const { uncovered, releaseHolderId } = await coverage(ctx, ready.scope.target.repo, task, agentId, ready.base, commit, results);
   if (uncovered.length) return null;
   const live = await liveCheckers(ctx.db, ready.scope.turn.companyId, toReleasedTasks(results), releaseHolderId);
   return live ? { turnNumber: ready.scope.turn.number, runId: ready.run.id, runNumber: ready.run.number } : null;
