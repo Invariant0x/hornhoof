@@ -243,6 +243,7 @@ function buildNorthwindFixture() {
     commit: null,
     baseVersion: null,
     departmentId: ownDeptId,
+    releases: true,
     messages: [],
     taskId: taskLine.id,
     startedAt: AT,

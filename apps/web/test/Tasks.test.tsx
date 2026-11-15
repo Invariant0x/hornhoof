@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { ComputerAccessDecision, Me, Org, ProposalDecision } from '../src/types';
-import { accessView, CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
+import { accessView, CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, REQUESTS, ROSTER, TASK_DETAIL, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 import { taskRoute } from './task-route';
 
@@ -61,7 +61,7 @@ describe('the tracker', () => {
     shell({ 'GET /api/turns': [200, { turns: [] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
     await openTasks(user);
     expect(await screen.findByText(/Nothing is in progress here/)).toBeInTheDocument();
-    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
+    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
     expect(screen.getByText(/No turns and no tasks yet/)).toBeInTheDocument();
   });
 
@@ -458,22 +458,192 @@ describe('decisions read failure', () => {
   });
 });
 
-describe('turns as releases', () => {
+/* The screen answers at a glance where the person is needed (the Design department's review of the tracker, #889). */
+describe('the tracker at a glance', () => {
   it.each([
-    ['en', 'Tasks', 'By turn and release', 'Turn 2: release v1.2.0', 'Went into the release: 1', 'Turn 3: getting ready for release', 'Ready for release: 2'],
-    ['ru', 'Задачи', 'По ходам и выпускам', 'Ход 2: выпуск v1.2.0', 'Вошло в выпуск: 1', 'Ход 3: готовится к выпуску', 'Готово к выпуску: 2'],
-  ])('names a released turn by its version and counts what each turn holds for its release, with no bar of a share (%s)', async (lang, tasks, releases, released, went, preparing, ready) => {
+    ['en', /^Tasks/, 'At a glance', ['1 Waiting for your answer', '1 Going on now', '2 Ready for release']],
+    ['ru', /^Задачи/, 'Коротко', ['1 Ждут вашего ответа', '1 Идут сейчас', '2 Готово к выпуску']],
+  ])('counts under the heading what waits for the answer of the person, what goes on now and what is ready for release (%s)', async (lang, tasks, label, tiles) => {
     localStorage.setItem('hh-lang', lang);
     try {
       const user = userEvent.setup();
       shell({});
+      await user.click(await screen.findByRole('button', { name: tasks }));
+      const summary = await screen.findByRole('list', { name: label });
+      await waitFor(() => expect(within(summary).getAllByRole('listitem').map(tile => tile.textContent)).toEqual(tiles));
+      expect(within(summary).getAllByRole('listitem')[0]).toHaveClass('you');
+      expect(within(summary).getAllByRole('listitem')[0]).not.toHaveClass('calm');
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it.each([
+    ['en', /^Tasks/, 'At a glance', '0 Nothing waits for your answer'],
+    ['ru', /^Задачи/, 'Коротко', '0 Вашего ответа ничего не ждет'],
+  ])('says calmly when nothing waits for the answer of the person (%s)', async (lang, tasks, label, calm) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      shell({ 'GET /api/requests': [200, decisions([])] });
+      await user.click(await screen.findByRole('button', { name: tasks }));
+      const first = within(await screen.findByRole('list', { name: label })).getAllByRole('listitem')[0]!;
+      await waitFor(() => expect(first).toHaveTextContent(calm));
+      expect(first).toHaveClass('calm');
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it.each([
+    ['en', /^Tasks/, 'Work of the departments', 'Waiting for your answer', 'Open task', 'Waiting for you'],
+    ['ru', /^Задачи/, 'Работа отделов', 'Ждет вашего ответа', 'Открыть задачу', 'Ждут вас'],
+  ])('puts first the goal that waits for the answer of the person, framed and marked, with a way to open it and its question only in what waits for the person (%s)', async (lang, tasks, board, mark, open, waiting) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      shell({ 'GET /api/tasks/t9': [200, { task: { ...TASK_DETAIL, id: 't9', number: 9, title: 'Pick a payment provider', parentId: null } }] });
+      await user.click(await screen.findByRole('button', { name: tasks }));
+      const work = await screen.findByRole('region', { name: board });
+      const cards = await within(work).findAllByRole('article');
+      expect(cards[0]).toHaveAccessibleName('#9 Pick a payment provider');
+      expect(cards[0]).toHaveClass('you');
+      expect(cards[0]).toHaveTextContent(mark);
+      expect(cards[0]).not.toHaveTextContent('Stripe or Adyen?');
+      expect(within(cards[0]!).queryByRole('group')).not.toBeInTheDocument();
+      expect(screen.getByRole('region', { name: waiting })).toHaveTextContent('Stripe or Adyen?');
+      expect(within(cards[1]!).queryByRole('button', { name: open })).not.toBeInTheDocument();
+      await user.click(within(cards[0]!).getByRole('button', { name: open }));
+      expect(await screen.findByRole('complementary', { name: '#9 Pick a payment provider' })).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('frames a goal whose related task asks the person, and opens that task to answer', async () => {
+    const user = userEvent.setup();
+    const onSub = { ...REQUESTS[0]!, id: 'r3', text: 'Which card brands?', task: { id: 't13', number: 13, title: 'Card form', department: { id: 'd2', name: 'Development' } } };
+    const calls = shell({ 'GET /api/requests': [200, decisions([onSub])], 'GET /api/tasks/t13': [200, { task: { ...TASK_DETAIL, id: 't13', number: 13, title: 'Card form' } }] });
+    await openTasks(user);
+    const cards = await within(await screen.findByRole('region', { name: 'Work of the departments' })).findAllByRole('article');
+    expect(cards[0]).toHaveAccessibleName('#12 Checkout API');
+    expect(cards[0]).toHaveTextContent('Waiting for your answer');
+    expect(cards[0]).not.toHaveTextContent('Which card brands?');
+    await user.click(within(cards[0]!).getByRole('button', { name: 'Open task' }));
+    await waitFor(() => expect(calls.some(call => call.path === '/api/tasks/t13')).toBe(true));
+  });
+
+  it.each([
+    ['en', /^Tasks/, 'Work of the departments', '0 of 1 done', 'Related tasks: 0 of 1 done', 'Not started yet', 'Assignee: Bruno', 'Open task'],
+    ['ru', /^Задачи/, 'Работа отделов', 'Готово 0 из 1', 'Сопутствующие задачи: 0 из 1 готово', 'Еще не начата', 'Исполнитель: Bruno', 'Открыть задачу'],
+  ])('counts the progress of a goal in its related tasks and unfolds them as short rows, the next level not unfolded (%s)', async (lang, tasks, board, done, related, notStarted, assignee, open) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      const GRAND = { ...SUBTASK, id: 't15', number: 15, title: 'Card brands', parentId: 't13' };
+      shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, { ...SUBTASK, brief: 'Enter the card.' }, GRAND, PLANNED] }] });
+      await user.click(await screen.findByRole('button', { name: tasks }));
+      const work = await screen.findByRole('region', { name: board });
+      const checkout = await within(work).findByRole('article', { name: '#12 Checkout API' });
+      expect(within(checkout).getByRole('progressbar', { name: done })).toHaveAttribute('aria-valuemax', '1');
+      expect(within(checkout).getByRole('progressbar', { name: done })).toHaveAttribute('aria-valuenow', '0');
+      expect(within(work).queryByText(/%/)).not.toBeInTheDocument();
+      expect(within(within(work).getByRole('article', { name: '#11 Cart page' })).queryByRole('progressbar')).not.toBeInTheDocument();
+      await user.click(within(checkout).getByRole('button', { name: related }));
+      const row = within(checkout).getByRole('listitem', { name: '#13 Card form' });
+      expect(row).toHaveTextContent(notStarted);
+      expect(row).toHaveTextContent(assignee);
+      expect(row).not.toHaveTextContent('Enter the card.');
+      expect(within(row).queryByRole('progressbar')).not.toBeInTheDocument();
+      expect(within(row).queryByRole('button', { name: /Related tasks|Сопутствующие/ })).not.toBeInTheDocument();
+      expect(within(row).getByRole('button', { name: open })).toBeInTheDocument();
+      expect(within(checkout).queryByText('Card brands')).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('picks a department only where the work is grouped by department or by release, not on what is in progress', async () => {
+    const user = userEvent.setup();
+    shell({});
+    await openTasks(user);
+    await screen.findByRole('region', { name: 'Work of the departments' });
+    expect(screen.queryByRole('combobox', { name: 'Department' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'By department' }));
+    expect(screen.getByRole('combobox', { name: 'Department' })).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
+    expect(screen.getByRole('combobox', { name: 'Department' })).toBeInTheDocument();
+  });
+
+  it('folds what is done and cancelled at the bottom of what is in progress', async () => {
+    const user = userEvent.setup();
+    shell({});
+    await openTasks(user);
+    const work = await screen.findByRole('region', { name: 'Work of the departments' });
+    const fold = await within(work).findByRole('button', { name: 'Done and cancelled: 1' });
+    expect(within(work).queryByRole('article', { name: '#8 Login page' })).not.toBeInTheDocument();
+    await user.click(fold);
+    expect(within(work).getByRole('article', { name: '#8 Login page' })).toBeInTheDocument();
+  });
+});
+
+describe('turns as releases', () => {
+  const DONE_IN_TURN = { ...TASKS[1]!, id: 't16', number: 16, title: 'Price list', brief: '', status: 'done' as const, turn: 3, parentId: null };
+  it.each([
+    ['en', 'Tasks', 'Turns and releases', 'A turn is everything that goes into one release of the program.', 'Getting ready: turn 3, the release after v1.2.0', '1 of 5 goals done', 'Closed releases', 'Turn 2: release v1.2.0', 'tasks: 1', 'Open task'],
+    ['ru', 'Задачи', 'Ходы и выпуски', 'Ход: все, что войдет в один выпуск программы.', 'Готовится: ход 3, выпуск после v1.2.0', 'Готово 1 из 5 целей', 'Закрытые выпуски', 'Ход 2: выпуск v1.2.0', 'задач: 1', 'Открыть задачу'],
+  ])('gets the next release ready, counted in goals, and folds the closed releases with their tasks (%s)', async (lang, tasks, releases, why, preparing, goalsDone, closedHeading, released, count, open) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      const calls = shell({
+        [`GET ${ALL}`]: [200, { tasks: [...TASKS, SUBTASK, PLANNED, DONE_IN_TURN, { ...CLOSED_TASKS[0]!, turn: 2 }] }],
+        'GET /api/tasks/t9': [200, { task: { ...TASK_DETAIL, id: 't9', number: 9, title: 'Pick a payment provider', parentId: null } }],
+      });
       await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
       await user.click(screen.getByRole('radio', { name: releases }));
-      expect(await screen.findByRole('heading', { name: preparing })).toBeInTheDocument();
-      expect(screen.getByText(ready)).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: released }));
-      expect(await screen.findByText(went)).toBeInTheDocument();
-      expect(screen.queryByRole('progressbar', { name: /2 of 5|2 из 5/ })).not.toBeInTheDocument();
+      expect(await screen.findByText(new RegExp(`^${why}`))).toBeInTheDocument();
+      const next = screen.getByRole('region', { name: preparing });
+      expect(within(next).getByRole('progressbar', { name: goalsDone })).toHaveAttribute('aria-valuenow', '1');
+      expect(within(next).getByRole('progressbar', { name: goalsDone })).toHaveAttribute('aria-valuemax', '5');
+      expect(within(next).getByRole('button', { name: /Price list/ })).toBeInTheDocument();
+      expect(within(next).getByRole('button', { name: /Pick a payment provider/ })).toBeInTheDocument();
+      /* The line that waits for the person's answer opens its task like the lines with work under them; a line with neither
+         opens from its title alone. */
+      expect(within(within(next).getByRole('listitem', { name: '#16 Price list' })).queryByRole('button', { name: open })).not.toBeInTheDocument();
+      const closed = screen.getByRole('region', { name: closedHeading });
+      /* Every closed release starts folded to its line. */
+      expect(within(closed).getAllByRole('button').map(fold => fold.getAttribute('aria-expanded'))).toEqual(['false']);
+      expect(within(closed).queryAllByRole('listitem')).toHaveLength(0);
+      expect(within(closed).queryByRole('button', { name: /Login page/ })).not.toBeInTheDocument();
+      await user.click(within(within(next).getByRole('listitem', { name: '#9 Pick a payment provider' })).getByRole('button', { name: open }));
+      await waitFor(() => expect(calls.some(call => call.path === '/api/tasks/t9')).toBe(true));
+      await user.click(within(closed).getByRole('button', { name: new RegExp(`${released}.*${count}`) }));
+      expect(await within(closed).findByRole('button', { name: /Login page/ })).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it.each([
+    ['en', 'Turns and releases', 'Show', 'Outside releases', 'Releases', 'Getting ready: turn 3, the release after v1.2.0'],
+    ['ru', 'Ходы и выпуски', 'Показать', 'Задачи вне выпуска', 'Выпуски', 'Готовится: ход 3, выпуск после v1.2.0'],
+  ])('shows the work outside every release apart, on its own choice (%s)', async (lang, releases, show, outside, back, preparing) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      const sales = { ...PLANNED, id: 't17', number: 17, title: 'Spring mailing', department: { id: 'd3', name: 'Sales' } };
+      shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, sales] }] });
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await user.click(screen.getByRole('radio', { name: releases }));
+      const choice = await screen.findByRole('group', { name: show });
+      expect(screen.getByRole('region', { name: preparing })).toBeInTheDocument();
+      expect(screen.queryByRole('article', { name: '#17 Spring mailing' })).not.toBeInTheDocument();
+      await user.click(within(choice).getByRole('radio', { name: outside }));
+      expect(await screen.findByRole('article', { name: '#17 Spring mailing' })).toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: preparing })).not.toBeInTheDocument();
+      await user.click(within(choice).getByRole('radio', { name: back }));
+      expect(await screen.findByRole('region', { name: preparing })).toBeInTheDocument();
     } finally {
       localStorage.removeItem('hh-lang');
     }
@@ -503,21 +673,21 @@ describe('turns as releases', () => {
     const launch = { ...TURN, id: 'u5', number: 5, title: 'Spring launch', goal: 'Tell people.', departmentId: 'd3', messages: [] };
     shell({ 'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, launch] }] });
     await openTasks(user);
-    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
-    expect(await screen.findByText('Spring launch')).toBeInTheDocument();
-    expect(screen.getByText('Payments')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
+    expect(await screen.findByText(/turn 5/)).toBeInTheDocument();
+    expect(screen.getByText(/turn 3/)).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Department' }), 'Development');
-    expect(screen.getByText('Payments')).toBeInTheDocument();
-    expect(screen.queryByText('Spring launch')).not.toBeInTheDocument();
+    expect(screen.getByText(/turn 3/)).toBeInTheDocument();
+    expect(screen.queryByText(/turn 5/)).not.toBeInTheDocument();
   });
 
   it('shows the version a turn came out as, and no way to pick how a turn runs, as each is the next release of its department', async () => {
     const user = userEvent.setup();
     shell({});
     await openTasks(user);
-    await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
-    await user.click(await screen.findByRole('button', { name: 'Turn 2: release v1.2.0' }));
-    expect(await screen.findByText('Went into the release: 1')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
+    await user.click(await screen.findByRole('button', { name: /Turn 2: release v1\.2\.0/ }));
+    expect(await screen.findByRole('button', { name: /Login page/ })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'How the turn runs' })).not.toBeInTheDocument();
     expect(screen.queryByText(/How the turn runs/)).not.toBeInTheDocument();
   });
@@ -534,7 +704,7 @@ describe('turns as releases', () => {
         'POST /api/departments/d2/backlog/schedule': [200, { tasks: [{ id: 't20', number: 20 }] }],
       });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await user.click(screen.getByRole('radio', { name: lang === 'en' ? 'By turn and release' : 'По ходам и выпускам' }));
+      await user.click(screen.getByRole('radio', { name: lang === 'en' ? 'Turns and releases' : 'Ходы и выпуски' }));
       await user.selectOptions(screen.getByRole('combobox', { name: lang === 'en' ? 'Department' : 'Отдел' }), lang === 'en' ? 'Development' : 'Разработка');
       await user.click(await screen.findByRole('checkbox', { name: choose }));
       expect(screen.queryByRole('combobox', { name: lang === 'en' ? 'How the next turn runs' : 'Как пойдет следующий ход' })).not.toBeInTheDocument();
@@ -558,9 +728,9 @@ describe('cards for the person', () => {
 
   it.each([
     ['en', 'A version was marked without a release', 'Version v1.7.0 was marked in the code, but its release was not recorded and approved beforehand. So the tasks of Turn 24 are not counted as released, and the turn stays open. The head of the department was told.',
-      'Version v1.7.1 was marked in the code, but the full check or the approval its release relied on no longer holds.', 'Turn 23 is over', 'Turn 23 came out as version v1.6.0. What went into it is under “By turn and release”.', 'Open task'],
+      'Version v1.7.1 was marked in the code, but the full check or the approval its release relied on no longer holds.', 'Turn 23 is over', 'Turn 23 came out as version v1.6.0. What went into it is under “Turns and releases”.', 'Open task'],
     ['ru', 'Версия отмечена без записи выпуска', 'Версия v1.7.0 отмечена в коде, но ее выпуск не был записан и одобрен заранее. Поэтому задачи хода 24 не считаются выпущенными, и ход остается открытым. Глава отдела уже знает.',
-      'Версия v1.7.1 отмечена в коде, но полная проверка или одобрение, на которых держался ее выпуск, больше не действуют.', 'Ход 23 закончен', 'Ход 23 вышел версией v1.6.0. Что в него вошло, видно в разделе «По ходам и выпускам».', 'Открыть задачу'],
+      'Версия v1.7.1 отмечена в коде, но полная проверка или одобрение, на которых держался ее выпуск, больше не действуют.', 'Ход 23 закончен', 'Ход 23 вышел версией v1.6.0. Что в него вошло, видно в разделе «Ходы и выпуски».', 'Открыть задачу'],
   ])('shows a version marked without a release and a turn that is over in plain words, and opens the task (%s)', async (lang, tagTitle, tagWords, staleWords, summaryTitle, summaryWords, open) => {
     localStorage.setItem('hh-lang', lang);
     try {

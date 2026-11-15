@@ -982,6 +982,7 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     await expect(pickCard).toBeHidden();
 
     /* Open the first task's detail panel in the real UI and verify neutral answered state and text. */
+    await page.locator('.board-views label').filter({ hasText: ru.tasks.board.views.departments }).click();
     await page.getByRole('combobox', { name: ru.tasks.department }).selectOption({ label: ru.templates.development.name });
     await openTaskCard(page, srv.freeTaskNumber);
     const panel = page.locator('aside');

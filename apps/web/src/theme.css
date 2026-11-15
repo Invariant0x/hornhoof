@@ -1440,8 +1440,11 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .goal-meta > * { min-width: 0; overflow-wrap: anywhere; }
 .goal-meta > .badge { white-space: normal; }
 .goal-meta > .badge.urgent { color: var(--amber-ink); }
-.goal-meta > .goal-progress { flex: 1 1 200px; max-width: 280px; }
+/* A department names where a goal is, so its badge stays neutral: the colour of attention is for what needs the person. */
+.goal-meta > .badge.goal-place { color: var(--muted); border-color: var(--line2); }
 .goal-progress { display: grid; grid-template-columns: minmax(0, 1fr) 8em; align-items: center; gap: 10px; max-width: 360px; font-size: 12.5px; }
+/* A release counts its goals in longer words: they keep their own width beside a wider bar. */
+.goal-progress.wide { grid-template-columns: minmax(0, 1fr) auto; max-width: 480px; }
 .goal-progress small { font-size: inherit; color: var(--muted); overflow-wrap: anywhere; }
 .goal-fold { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; margin: 0; padding: 4px 0; border: 0; background: none; color: var(--cyan-ink); font: inherit; font-size: 13px; font-weight: 600; text-align: start; cursor: pointer; }
 .goal-fold > span { min-width: 0; overflow-wrap: anywhere; }
@@ -1452,6 +1455,42 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .goal-fold:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .goal-subs { display: grid; gap: 6px; margin: 0; padding: 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--line2); list-style: none; min-width: 0; }
 .goal-closed { display: grid; gap: 8px; min-width: 0; }
+/* At a glance under the heading: three numbers, what waits for the person's answer first and framed in the colour of
+   attention while anything does. */
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.sum { display: grid; gap: 4px; min-width: 0; padding: 12px 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.sum b { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1.15; }
+.sum span { color: var(--muted); overflow-wrap: anywhere; }
+.sum.you:not(.calm) { box-shadow: inset 0 0 0 2px var(--pink); }
+.sum.you:not(.calm) b { color: var(--pink-ink); }
+.sum.you:not(.calm) span { color: var(--ink); font-weight: 600; }
+/* A goal whose work waits for the person's answer: framed, its state marked, a button to the task that asks. */
+.goal.you { border: 2px solid var(--pink); box-shadow: inset 4px 0 0 var(--pink); }
+[dir="rtl"] .goal.you { box-shadow: inset -4px 0 0 var(--pink); }
+.goal .tstate, .goal-row .tstate { display: inline-flex; align-items: center; gap: 6px; }
+.goal .tstate.you, .goal-row .tstate.you { color: var(--on-pink); background: var(--pink); border-color: var(--pink); }
+.goal-answer { justify-self: start; }
+/* Related tasks and the goals of a release in one short line each: state, title, who has it. */
+.goal-rows { display: grid; margin: 0; padding: 0; list-style: none; min-width: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.goal-subs > .goal-row { padding-inline: 8px; }
+.goal-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 10px; min-width: 0; min-height: 44px; padding: 6px 12px; }
+.goal-row.on { box-shadow: inset 3px 0 0 var(--cyan); }
+[dir="rtl"] .goal-row.on { box-shadow: inset -3px 0 0 var(--cyan); }
+.goal-row > .tstate { grid-row: span 2; }
+.goal-row-title { justify-self: start; color: var(--ink); font-weight: 500; text-align: start; overflow-wrap: anywhere; }
+.goal-row-title:hover { color: var(--cyan-ink); }
+.goal-row-who { grid-column: 2; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.goal-row-open { grid-column: 2; justify-self: start; color: var(--cyan-ink); font-size: 12.5px; font-weight: 600; }
+.goal-row-title:focus-visible, .goal-row-open:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* Turns and releases: releases or the work outside them, and the closed releases as one folded line each. */
+/* The three views as three equal tabs on any screen, a long name wrapping inside its own tab. */
+.board-views { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.board-views label { min-width: 0; min-height: 44px; padding: 6px 8px; text-align: center; line-height: 1.25; overflow-wrap: anywhere; }
+.rel-show { max-width: 420px; }
+.rel-show > legend { margin-block-end: 6px; padding: 0; font-size: 13px; font-weight: 600; }
+.release-fold { display: grid; gap: 6px; min-width: 0; }
+.release-fold .goal-fold > span { display: flex; flex-wrap: wrap; gap: 0 8px; }
+.release-fold .goal-fold b { color: var(--ink); }
 .waiting { display: grid; gap: 10px; }
 .machine-away { display: grid; gap: 4px; padding: 8px 12px; border-left: 2px solid var(--amber); }
 .machine-away h3 { font-size: 14px; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byDepartment, byRelease, goals, goalStatus, humanStatus, inDepartment, inProgress, split, type Goal } from '../src/task-board';
+import { askingTask, byDepartment, byRelease, goals, goalStatus, humanStatus, inDepartment, inProgress, split, summaryOf, type Goal } from '../src/task-board';
 import type { TaskLine, TurnView } from '../src/types';
 import { taskRoute } from './task-route';
 
@@ -12,7 +12,7 @@ const task = (over: Partial<TaskLine> & Pick<TaskLine, 'id' | 'number'>): TaskLi
 });
 
 const turn = (over: Partial<TurnView> & Pick<TurnView, 'id' | 'number' | 'status'>): TurnView => ({
-  title: `Turn ${over.number}`, goal: '', version: null, commit: null, baseVersion: null, departmentId: 'd2', messages: [], taskId: null, startedAt: '2026-11-14T07:00:00.000Z',
+  title: `Turn ${over.number}`, goal: '', version: null, commit: null, baseVersion: null, departmentId: 'd2', releases: true, messages: [], taskId: null, startedAt: '2026-11-14T07:00:00.000Z',
   openedAt: null, closedAt: null, tasks: { total: 0, done: 0 }, ...over,
 });
 
@@ -158,24 +158,76 @@ describe('the department filter and the sections of the tracker', () => {
     expect(closed.map(g => g.task.id)).toEqual(['e', 'd']);
   });
 
-  it('shows what is getting ready for release, the work in no turn yet and what came out, by turn', () => {
+  it("gets each releasing department's next release ready from its goals still going and those in its turn, keeps the rest outside releases and lists what came out", () => {
     const turns = [
       turn({ id: 'u2', number: 2, status: 'closed', version: 'v1.2.0' }),
       turn({ id: 'u3', number: 3, status: 'open' }),
-      turn({ id: 'u5', number: 5, status: 'open', departmentId: 'd3' }),
+      turn({ id: 'u5', number: 5, status: 'open', departmentId: 'd3', releases: false }),
       turn({ id: 'u1', number: 1, status: 'closed' }),
     ];
-    const sections = byRelease(work, turns);
-    expect(sections.map(s => [s.kind, s.turn?.number ?? null, s.split.open.map(g => g.task.id), s.split.closed.map(g => g.task.id)])).toEqual([
-      ['preparing', 3, ['a'], []],
-      ['preparing', 5, ['b'], []],
-      ['outside', null, ['c'], ['d']],
-      ['released', 2, [], ['e']],
-    ]);
+    const tasks = [
+      task({ id: 'a', number: 1, turn: null }),
+      task({ id: 'a1', number: 2, parentId: 'a', turn: null }),
+      task({ id: 'r', number: 3, turn: 3, status: 'done' }),
+      task({ id: 'x', number: 4, turn: null, status: 'cancelled' }),
+      task({ id: 'b', number: 5, department: SALES, turn: null }),
+      task({ id: 'c', number: 6, department: null, turn: null }),
+      task({ id: 'e', number: 7, turn: 2, status: 'done' }),
+    ];
+    const { preparing, outside, released } = byRelease(tasks, turns);
+    expect(preparing.map(p => [p.turn.number, p.going.map(g => g.task.id), p.done.map(g => g.task.id)])).toEqual([[3, ['a'], ['r']]]);
+    expect([outside.open.map(g => g.task.id), outside.closed.map(g => g.task.id)]).toEqual([['c', 'b'], []]);
+    expect(released.map(r => [r.turn.number, r.goals.map(g => g.task.id)])).toEqual([[2, ['e']]]);
   });
 
-  it("keeps a running turn of the shown department with nothing in it yet, and leaves out a finished one with nothing to show", () => {
-    const sections = byRelease([], [turn({ id: 'u3', number: 3, status: 'open' }), turn({ id: 'u2', number: 2, status: 'closed' })]);
-    expect(sections.map(s => [s.kind, s.turn?.number ?? null])).toEqual([['preparing', 3]]);
+  it('keeps an open turn of a releasing department with nothing in it yet, and leaves out a released one with nothing to show', () => {
+    const { preparing, released } = byRelease([], [turn({ id: 'u3', number: 3, status: 'open' }), turn({ id: 'u2', number: 2, status: 'closed' })]);
+    expect(preparing.map(p => [p.turn.number, p.going.length, p.done.length])).toEqual([[3, 0, 0]]);
+    expect(released).toEqual([]);
+  });
+});
+
+/* Where the person's answer is needed: on the goal itself or on any task under it, as long as that one is not closed. */
+describe("the person's part in the work", () => {
+  const tree = () => goals([
+    task({ id: 'g', number: 1 }),
+    task({ id: 'c', number: 2, parentId: 'g' }),
+    task({ id: 'l', number: 3, parentId: 'c' }),
+    task({ id: 'z', number: 4, parentId: 'g', status: 'done' }),
+  ])[0]!;
+
+  it('finds the task of a goal that asks the person, the goal itself first, then deep down, never a closed one', () => {
+    expect(askingTask(tree(), id => id === 'g')?.id).toBe('g');
+    expect(askingTask(tree(), id => id === 'l')?.id).toBe('l');
+    expect(askingTask(tree(), id => id === 'z')).toBeNull();
+    expect(askingTask(tree(), () => false)).toBeNull();
+    expect(askingTask(tree())).toBeNull();
+  });
+
+  it('puts first the goals whose work waits for the answer of the person, a question deep under them too', () => {
+    const tree = goals([
+      task({ id: 'q', number: 1, status: 'waiting' }),
+      task({ id: 'w', number: 2, status: 'working' }),
+      task({ id: 'w1', number: 3, parentId: 'w', status: 'working' }),
+    ]);
+    expect(split(tree, id => id === 'w1').open.map(g => g.task.id)).toEqual(['w', 'q']);
+    expect(inProgress([task({ id: 'q', number: 1, status: 'waiting' }), task({ id: 'w', number: 2 })], id => id === 'w').open.map(g => g.task.id)).toEqual(['w', 'q']);
+  });
+
+  it('counts the goals that wait for the person, those going on now, and what the next releases hold', () => {
+    const tasks = [
+      task({ id: 'q', number: 1, status: 'waiting' }),
+      task({ id: 'w', number: 2, status: 'working' }),
+      task({ id: 'w2', number: 3, status: 'working' }),
+      task({ id: 'r', number: 4, status: 'review' }),
+      task({ id: 'd', number: 5, status: 'done', turn: 3 }),
+    ];
+    const turns = [
+      turn({ id: 'u3', number: 3, status: 'open', tasks: { total: 4, done: 4 } }),
+      turn({ id: 'u5', number: 5, status: 'open', departmentId: 'd3', releases: false, tasks: { total: 2, done: 2 } }),
+      turn({ id: 'u2', number: 2, status: 'closed', tasks: { total: 9, done: 9 } }),
+    ];
+    expect(summaryOf(tasks, turns, id => id === 'q')).toEqual({ waitingYou: 1, working: 2, ready: 4 });
+    expect(summaryOf(tasks, turns)).toEqual({ waitingYou: 0, working: 2, ready: 4 });
   });
 });

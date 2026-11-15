@@ -4,7 +4,7 @@ import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { placeName, useTaskDepartments, useTasks, useTurns, useWaitCards } from '../tasks';
 import { searchTasks } from '../task-search';
-import { ALL_DEPARTMENTS, byDepartment, byRelease, goals, inDepartment, indexGoals, inProgress, NO_DEPARTMENT, type ReleaseSection } from '../task-board';
+import { ALL_DEPARTMENTS, byDepartment, byRelease, goals, inDepartment, indexGoals, inProgress, NO_DEPARTMENT, summaryOf, type Asks, type Preparing, type Released } from '../task-board';
 import type { ComputerAccessDecision, Decisions, MachineAwayCard, MergeDecision, Org, ProposalDecision, TaskDepartments, TaskLine, TurnView } from '../types';
 import { Backlog } from '../ui/Backlog';
 import { ComputerCard } from '../ui/ComputerCard';
@@ -15,7 +15,7 @@ import { MachineAway } from '../ui/MachineAway';
 import { Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
-import { BoardSection, GoalList, SplitGoals, type CardRows } from '../ui/TaskBoard';
+import { BoardSection, Fold, GoalList, GoalRows, Progress, SplitGoals, type CardRows } from '../ui/TaskBoard';
 import { WaitCards } from '../ui/WaitCards';
 
 type Props = {
@@ -95,15 +95,13 @@ function ViewPicker({ value, onChange }: { value: View; onChange: (view: View) =
   );
 }
 
-/* What a turn is for, what it holds for its release, and the words it came from on click. Every result in a turn is accepted
-   into its branch, so it counts them, not a share done. */
+/* What a turn is for and the words it came from on click. */
 function TurnAbout({ turn }: { turn: TurnView }) {
   const t = useT();
   return (
     <div className="grp-head">
       <b className="grp-title">{turn.title}</b>
       {turn.goal && turn.goal !== turn.title && <span className="muted">{turn.goal}</span>}
-      <span className="muted">{turn.status === 'open' ? t.tasks.board.readyForRelease(turn.tasks.done) : t.tasks.board.inRelease(turn.tasks.done)}</span>
       {turn.messages.length > 0 && (
         <details className="turn-words">
           <summary>{t.tasks.words(turn.messages.length)}</summary>
@@ -119,28 +117,87 @@ function TurnAbout({ turn }: { turn: TurnView }) {
   );
 }
 
-const releaseHeading = (t: Messages, section: ReleaseSection) => {
-  if (!section.turn) return t.tasks.board.outside;
-  const { number, version } = section.turn;
-  return section.kind === 'preparing' ? t.tasks.board.preparing(number) : t.tasks.board.released(number, version);
-};
+/* The next release of a department: what it is, how many of its goals are done, and its goals in short lines. Its version is
+   set by the tag it comes out with, so until then it names the release it follows. */
+function NextRelease({ next, rows }: { next: Preparing; rows: CardRows }) {
+  const t = useT();
+  const { turn, going, done } = next;
+  const total = going.length + done.length;
+  return (
+    <BoardSection heading={t.tasks.board.preparing(turn.number, turn.baseVersion)}>
+      <p className="muted">{t.tasks.board.nextWhy}</p>
+      <TurnAbout turn={turn} />
+      {total > 0 && <Progress done={done.length} total={total} label={t.tasks.board.goalsDone(done.length, total)} wide />}
+      {total > 0 ? <GoalRows goals={[...going, ...done]} rows={rows} /> : <p className="muted">{t.tasks.board.noneInTurn}</p>}
+    </BoardSection>
+  );
+}
 
-/* By turn and release: what gets ready for release, what waits for its turn, the work outside every turn and what came out,
-   folded; and the list for later turns of a department of the person's own. */
+/* A release out already, folded to one line with how many tasks went into it. */
+function ReleasedTurn({ release, rows }: { release: Released; rows: CardRows }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const { turn, goals: went } = release;
+  return (
+    <div className="release-fold">
+      <Fold open={open} onToggle={() => setOpen(!open)}>
+        <b>{t.tasks.board.released(turn.number, turn.version)}</b> <span className="muted">{t.tasks.board.relCount(went.length)}</span>
+      </Fold>
+      {open && <GoalRows goals={went} rows={rows} />}
+    </div>
+  );
+}
+
+const SHOWS = ['releases', 'outside'] as const;
+type Show = (typeof SHOWS)[number];
+
+/* Releases, or the work outside every release. */
+function ShowPicker({ value, onChange }: { value: Show; onChange: (show: Show) => void }) {
+  const t = useT();
+  const name = useId();
+  const label = { releases: t.tasks.board.showReleases, outside: t.tasks.board.showOutside };
+  return (
+    <fieldset className="segments rel-show">
+      <legend>{t.tasks.board.show}</legend>
+      {SHOWS.map(show => (
+        <label key={show} className={show === value ? 'on' : ''}>
+          <input type="radio" name={name} value={show} checked={show === value} onChange={() => onChange(show)} />
+          {label[show]}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+/* Turns and releases: what a turn is, the next release of each department getting ready with its goals counted, and the
+   releases out already, folded; or, on its own choice, the work outside every release. Then the list for later turns of a
+   department of the person's own. */
 function Releases({ tasks, turns, rows, department, places }: { tasks: TaskLine[]; turns: TurnView[]; rows: CardRows; department: string; places: TaskDepartments | undefined }) {
   const t = useT();
-  const sections = byRelease(tasks, turns);
+  const [show, setShow] = useState<Show>('releases');
+  const { preparing, outside, released } = byRelease(tasks, turns, rows.asksYou);
   const mine = places?.departments.filter(d => d.mine) ?? [];
   return (
     <>
-      {!sections.length && <p className="muted">{t.tasks.board.nothingYet}</p>}
-      {sections.map(section => (
-        <BoardSection key={section.key} heading={releaseHeading(t, section)} folded={section.kind === 'released'}>
-          {section.turn ? <TurnAbout turn={section.turn} /> : <p className="muted">{t.tasks.board.outsideAbout}</p>}
-          <SplitGoals split={section.split} rows={rows} empty={section.turn ? t.tasks.board.noneInTurn : undefined} />
-        </BoardSection>
-      ))}
-      {mine.some(d => d.id === department) ? <Backlog departmentId={department} /> : mine.length > 0 && <p className="muted">{t.tasks.board.pickDepartment}</p>}
+      <p className="muted">{t.tasks.board.relsWhy}</p>
+      <ShowPicker value={show} onChange={setShow} />
+      {show === 'outside' ? (
+        <>
+          <p className="muted">{t.tasks.board.outsideAbout}</p>
+          <SplitGoals split={outside} rows={rows} empty={t.tasks.board.noneOutside} />
+        </>
+      ) : (
+        <>
+          {!preparing.length && !released.length && <p className="muted">{t.tasks.board.nothingYet}</p>}
+          {preparing.map(next => <NextRelease key={next.turn.id} next={next} rows={rows} />)}
+          {released.length > 0 && (
+            <BoardSection heading={t.tasks.board.closedReleases}>
+              {released.map(release => <ReleasedTurn key={release.turn.id} release={release} rows={rows} />)}
+            </BoardSection>
+          )}
+          {mine.some(d => d.id === department) ? <Backlog departmentId={department} /> : mine.length > 0 && <p className="muted">{t.tasks.board.pickDepartment}</p>}
+        </>
+      )}
     </>
   );
 }
@@ -150,7 +207,7 @@ function Departments({ tasks, rows, order, label }: { tasks: TaskLine[]; rows: C
   const t = useT();
   return (
     <>
-      {byDepartment(tasks, order).map(section => (
+      {byDepartment(tasks, order, rows.asksYou).map(section => (
         <BoardSection key={section.id} heading={label(section.id)}>
           <p className="muted">{t.tasks.board.inProgress(section.split.open.length)}</p>
           <SplitGoals split={section.split} rows={rows} empty={t.tasks.board.noneInDepartment} />
@@ -168,7 +225,9 @@ function Board({ tasks, turns, places, rows }: { tasks: TaskLine[] | undefined; 
   const [picked, setPicked] = useState(ALL_DEPARTMENTS);
   const [query, setQuery] = useState('');
   const choices = choicesOf(t, places);
-  const department = choices.some(c => c.id === picked) ? picked : ALL_DEPARTMENTS;
+  /* What is in progress is every department's: picking one is for the views by department and by release. */
+  const picking = view !== 'active' && choices.length > 1;
+  const department = picking && choices.some(c => c.id === picked) ? picked : ALL_DEPARTMENTS;
   const shown = inDepartment(tasks ?? [], department);
   const shownTurns = (turns ?? []).filter(turn => department === ALL_DEPARTMENTS || turn.departmentId === department);
   const order = (places?.departments ?? []).map(d => d.id).filter(id => department === ALL_DEPARTMENTS || id === department);
@@ -180,7 +239,7 @@ function Board({ tasks, turns, places, rows }: { tasks: TaskLine[] | undefined; 
     <section className="board" aria-label={t.tasks.board.label}>
       <ViewPicker value={view} onChange={setView} />
       <div className="board-tools">
-        {choices.length > 1 && <DepartmentPicker choices={choices} value={department} onChange={setPicked} />}
+        {picking && <DepartmentPicker choices={choices} value={department} onChange={setPicked} />}
         <TaskSearch query={query} onChange={setQuery} />
       </div>
       {found ? (
@@ -189,12 +248,27 @@ function Board({ tasks, turns, places, rows }: { tasks: TaskLine[] | undefined; 
         </BoardSection>
       ) : ready && (
         <>
-          {view === 'active' && <SplitGoals split={inProgress(shown)} rows={rows} empty={t.tasks.board.noneActive} />}
+          {view === 'active' && <SplitGoals split={inProgress(shown, rows.asksYou)} rows={rows} empty={t.tasks.board.noneActive} />}
           {view === 'departments' && <Departments tasks={shown} rows={rows} order={order} label={label} />}
           {view === 'releases' && <Releases tasks={shown} turns={shownTurns} rows={rows} department={department} places={places} />}
         </>
       )}
     </section>
+  );
+}
+
+/* Under the heading, at a glance: how many goals wait for the person's answer, how many go on now, and how many results
+   the next releases already hold. */
+function AtAGlance({ tasks, turns, asksYou }: { tasks: TaskLine[]; turns: TurnView[]; asksYou: Asks }) {
+  const t = useT();
+  const words = t.tasks.board.summary;
+  const { waitingYou, working, ready } = summaryOf(tasks, turns, asksYou);
+  return (
+    <ul className="summary" aria-label={words.label}>
+      <li className={`sum you${waitingYou ? '' : ' calm'}`}><b>{waitingYou}</b> <span>{waitingYou ? words.you : words.youNone}</span></li>
+      <li className="sum"><b>{working}</b> <span>{words.running}</span></li>
+      <li className="sum"><b>{ready}</b> <span>{words.ready}</span></li>
+    </ul>
   );
 }
 
@@ -331,11 +405,12 @@ export function Tasks({ decisions, decisionsFailure, onDecisionsChanged, personI
           <p className="muted">{t.tasks.intro}</p>
         </div>
         {onOpenOrchestrator && (
-          <button className="btn" type="button" onClick={onOpenOrchestrator}>
+          <button className="btn ghost" type="button" onClick={onOpenOrchestrator}>
             {t.tasks.writeOrchestrator}
           </button>
         )}
       </header>
+      {tasks && turns && <AtAGlance tasks={tasks} turns={turns} asksYou={rows.asksYou!} />}
 
       <WaitingForYou
         decisions={decisions}

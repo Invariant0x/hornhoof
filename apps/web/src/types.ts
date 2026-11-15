@@ -672,6 +672,9 @@ export type TurnView = {
   baseVersion: string | null;
   /* The department whose turn it is; none only for a closed turn of a department that was removed. */
   departmentId: string | null;
+  /* Whether that department keeps a repository, so the turn comes out as a release; the work of one without stays outside
+     releases. */
+  releases: boolean;
   messages: { by: string; text: string; at: string }[];
   taskId: string | null;
   startedAt: string;
