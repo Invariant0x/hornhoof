@@ -15,6 +15,7 @@ body {
   font-family: var(--f-body);
   font-size: 14px;
   line-height: 1.45;
+  text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
 }
 h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; line-height: 1.15; }
@@ -24,6 +25,9 @@ p { margin: 0; }
 a { color: var(--cyan-ink); }
 button, input, select, textarea { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* A number is typed as any text, with no arrows of the browser, so its field is the same in every browser. */
+input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+input[type='number']::-webkit-outer-spin-button, input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); }
 
@@ -54,14 +58,15 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
 .btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); clip-path: none; }
 .btn.ghost:hover { box-shadow: inset 0 0 0 1px var(--cyan); }
 .btn.small { min-height: 30px; padding: 0 12px; font-size: 13px; }
-/* A row's small action; a danger one turns pink on hover. */
+/* A row's small action. */
 .act { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-display); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color .15s, color .15s; }
 .act:hover { border-color: var(--cyan); color: var(--cyan-ink); }
 .act:disabled { opacity: .45; cursor: not-allowed; border-color: var(--line2); color: var(--ink); }
-.act.danger:hover { border-color: var(--pink); color: var(--pink-ink); }
-/* A secondary button that stops or takes back: pink words, and a pink frame on hover. */
-.btn.ghost.danger { color: var(--pink-ink); }
+/* A secondary button or a row's action that removes, stops or takes back: pink words with no fill at rest, and a pink
+   frame on hover. */
+:is(.btn.ghost, .act).danger { background: transparent; color: var(--pink-ink); }
 .btn.ghost.danger:hover { box-shadow: inset 0 0 0 1px var(--pink); }
+.act.danger:hover { border-color: var(--pink); }
 
 /* Form fields */
 select {
@@ -98,6 +103,15 @@ select:disabled { opacity: .55; }
 .keybox .show { flex: none; min-block-size: 44px; min-inline-size: 44px; padding-inline: 12px; border-inline-start: 1px solid var(--line2); color: var(--ink); font-size: 13px; font-weight: 600; cursor: pointer; }
 .keybox .show:hover { color: var(--cyan-ink); }
 .keybox .show:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -4px; }
+/* A box to tick (ui/TickBox), drawn by us and so the same in every browser: a 1px frame, and ticked the ink of a link
+   with a tick of ours. */
+.tick-box { position: relative; display: block; flex: none; width: 16px; height: 16px; }
+.tick-box input[type='checkbox'] { -webkit-appearance: none; appearance: none; display: block; box-sizing: border-box; width: 16px; height: 16px; margin: 0; padding: 0; border: 1px solid var(--line2); border-radius: 0; background: var(--surface2); cursor: pointer; }
+.tick-box input[type='checkbox']:checked { border-color: var(--cyan-ink); background: var(--cyan-ink); }
+.tick-box input[type='checkbox']:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.tick-box input[type='checkbox']:disabled { cursor: not-allowed; opacity: .55; }
+.tick-box svg { position: absolute; inset: 0; width: 16px; height: 16px; fill: none; stroke: var(--surface2); stroke-width: 2; visibility: hidden; pointer-events: none; }
+.tick-box input:checked + svg { visibility: visible; }
 .field .bad { font-size: 12px; color: var(--pink-ink); }
 .alert { padding: 10px 12px; border-inline-start: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
 .agent-window-error { margin-top: 68px; }
@@ -223,13 +237,15 @@ select:disabled { opacity: .55; }
 .glass { background: var(--hud); border: 1px solid var(--line); }
 .tb-brand { justify-self: start; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
 .tb-brand svg { width: 24px; height: 24px; flex: none; }
+/* The strip's frame is drawn over its tabs rather than around them, so each tab is a target of the strip's whole 44px. */
 .tabs { display: flex; height: 44px; box-sizing: border-box; padding: 0; }
+.tabs.glass { border: 0; outline: 1px solid var(--line); outline-offset: -1px; }
 .tabs button {
   height: 100%; padding: 0 14px; border: 0; background: none; cursor: pointer;
   font-family: var(--f-display); font-size: 14px; font-weight: 600; color: var(--muted);
   box-shadow: inset 0 -2px 0 transparent;
 }
-.tabs button + button { border-left: 1px solid var(--line); }
+.tabs button + button { border-inline-start: 1px solid var(--line); }
 .tabs button:hover { color: var(--ink); }
 .tabs button.on { color: var(--cyan-ink); background: var(--glow); box-shadow: inset 0 -2px 0 var(--cyan); }
 .tb-right { justify-self: end; display: flex; align-items: center; gap: 8px; }
@@ -428,12 +444,8 @@ select:disabled { opacity: .55; }
 .outbound-numbers > legend { float: inline-start; inline-size: 100%; margin: 0; padding: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: break-word; }
 .outbound-numbers-body { clear: both; display: grid; gap: 10px; min-width: 0; padding-block-start: 4px; }
 .outbound-numbers-body > .hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
-/* The box of sending without a yes, drawn by us and so the same in every browser. */
-.tick-box { position: relative; display: block; width: 16px; height: 16px; margin-block-start: 2px; }
-.check-card .tick-box input { appearance: none; display: block; box-sizing: border-box; width: 16px; height: 16px; margin: 0; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; }
-.check-card .tick-box input:checked { border-color: var(--cyan-ink); background: var(--cyan-ink); }
-.tick-box svg { position: absolute; inset: 0; width: 16px; height: 16px; fill: none; stroke: var(--surface2); stroke-width: 2; visibility: hidden; pointer-events: none; }
-.tick-box input:checked + svg { visibility: visible; }
+/* The box of sending without a yes stands at the first line of its words. */
+.check-card > .tick-box { margin-block-start: 2px; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; gap: 8px; }
@@ -824,8 +836,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .api-models .model-list .nm { min-width: 0; overflow-wrap: anywhere; }
 .api-models .model-list small { display: block; color: var(--muted); font-size: 12.5px; }
 .api-models .model-found { max-block-size: 260px; overflow-y: auto; scrollbar-gutter: stable; padding-inline-end: 4px; }
-.api-models .model-found label { display: flex; align-items: flex-start; gap: 8px; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
-.api-models .model-found input { flex: none; inline-size: 16px; block-size: 16px; margin-block-start: 2px; padding: 0; border: 0; background: none; accent-color: var(--cyan-ink); }
+.api-models .model-found label { display: flex; align-items: flex-start; gap: 8px; min-width: 0; min-block-size: 44px; padding-block: 12px; overflow-wrap: anywhere; cursor: pointer; }
+.api-models .model-found .tick-box { margin-block-start: 2px; }
 .api-models .field { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .api-models .field > :is(label, .label) { padding-block-start: 0; }
 .api-models .model-actions, .api-models .model-add { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
@@ -873,6 +885,18 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .facts dd small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .machine-note { font-size: 12.5px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
 .machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Subscriptions & API: every button, field and list is a target of 44px, and a card's actions end at its end edge. */
+.subs .btn { min-height: 44px; }
+.subs .act { height: auto; min-height: 44px; padding: 8px 12px; line-height: 1.4; white-space: normal; text-align: center; justify-content: center; }
+.subs .field-control > :is(input, select), .subs .model-add > input, .subs .blk select { height: 44px; }
+.subs .search { height: 44px; }
+.subs .sortb { height: auto; min-height: 44px; padding: 8px 12px; }
+.subs .machine-actions { justify-content: flex-end; }
+/* On a phone its two ways to connect stand one under the other across the width, rather than side by side when they
+   just fit and apart when they do not, which differ by a pixel between browsers. */
+@media (max-width: 420px) {
+  .subs .people-head > .head-actions { flex: 1 1 100%; flex-direction: column; align-items: stretch; }
+}
 .machine-actions .lend { margin-right: 4px; }
 @media (max-width: 760px) {
   .pool-facts { grid-template-rows: repeat(4, auto); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-columns: auto; }
@@ -890,15 +914,15 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .about-feedback { display: grid; gap: 10px; min-width: 0; margin-block-start: 6px; padding-block-start: 12px; border-block-start: 1px solid var(--line); }
 .about-feedback h3 { margin: 0; font-size: 15px; overflow-wrap: break-word; }
 
-/* On a phone the header stays one row: the mark gives its place to the tabs, which get tighter instead of wrapping,
-   and on the narrowest screens scroll inside their strip, so the account button stays in view and the page itself
-   never scrolls sideways. */
+/* On a phone the header stays one row: the mark gives its place to the tabs, which get tighter and put a name of
+   several words on two lines, each word whole, so every tab stands whole in the strip, the account button stays in view
+   and the page itself never scrolls sideways. A strip still too long, of a longer language, scrolls inside itself. */
 @media (max-width: 420px) {
   .topbar { left: 12px; right: 12px; gap: 6px; grid-template-columns: minmax(0, 1fr) auto; }
   .tb-brand { display: none; }
   .tabs { justify-self: start; max-width: 100%; min-width: 0; padding: 0; overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
-  .tabs button { flex: none; padding: 0 6px; font-size: 12px; white-space: nowrap; }
+  .tabs button { flex: 0 1 auto; min-width: min-content; padding: 0 6px; font-size: 12px; line-height: 1.2; white-space: normal; overflow-wrap: normal; }
 }
 
 /* The structure card in the orchestrator's window. */
@@ -1341,6 +1365,10 @@ button.shead:focus-visible, button.schip:focus-visible { outline: 2px solid var(
 .dv-acts .btn { min-height: 44px; }
 /* The actions take the corner the version sits in on the map. */
 body:has(.dview) .version-mark { display: none; }
+/* Nor does the version lie over a form's buttons, or over anything on a phone, where every corner holds something to
+   press; About names the version there. */
+body:has(.form-foot) .version-mark { display: none; }
+@media (max-width: 760px) { .version-mark { display: none; } }
 /* The line of what changed sits between the zoom and the actions. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
 .dv-drawer { position: absolute; z-index: 4; }
@@ -1400,15 +1428,19 @@ body:has(.dview) .version-mark { display: none; }
 .appr-rule { min-width: 0; margin: 0; padding: 8px 10px 10px; border: 1px solid var(--line); background: var(--surface); font-size: 13px; }
 .appr-rule legend { padding: 0 4px; font-weight: 600; }
 .appr-form { display: grid; gap: 8px; min-width: 0; }
-.appr-form > select { width: 100%; height: 40px; padding: 0 32px 0 12px; }
-.appr-limit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; }
+/* Its fields and lists are targets of 44px; a limit's fields stand one under the other, so a label never balances on the
+   edge of a line in one browser and not in another, and Save ends the group at the end edge. */
+.appr-form > select { width: 100%; height: 44px; padding: 0 32px 0 12px; }
+.appr .field-control > :is(input, select) { height: 44px; }
+.appr-limit { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .appr-limit .field { min-width: 0; }
 .appr-limit input { width: 100%; box-sizing: border-box; }
-.appr-limit .btn { grid-column: 1 / -1; justify-self: start; }
+.appr-limit .btn { justify-self: end; min-height: 44px; }
 .appr-auto { display: grid; gap: 6px; min-width: 0; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-.appr-auto-toggle { display: flex; gap: 8px; align-items: start; font-size: 13px; cursor: pointer; min-width: 0; }
-.appr-auto-toggle input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--cyan); }
-.appr-auto-toggle span { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+/* The switch of autonomous release is a line of 44px in a frame: the box, its name and its state in a word. */
+.appr-auto-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); background: var(--surface2); font-size: 13px; cursor: pointer; }
+.appr-auto-name { min-width: 0; overflow-wrap: break-word; font-weight: 500; }
+.appr-auto-toggle .status { flex: none; }
 .appr-auto-journal { display: grid; gap: 4px; min-width: 0; margin-top: 2px; }
 .appr-auto-journal ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); min-width: 0; }
 .appr-auto-journal li { min-width: 0; overflow-wrap: anywhere; }

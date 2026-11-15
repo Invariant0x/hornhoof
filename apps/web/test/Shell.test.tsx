@@ -36,7 +36,8 @@ describe('Shell', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions & API', 'Machines']);
-    expect(decl('.tabs button + button', 'border-left')).toBe('1px solid var(--line)');
+    /* Tabs stand apart by a line at their start, on the right in a right-to-left language. */
+    expect(decl('.tabs button + button', 'border-inline-start')).toBe('1px solid var(--line)');
     expect(decl('.tabs button.on', 'background')).toBe('var(--glow)');
     await user.click(screen.getByRole('button', { name: 'Subscriptions & API' }));
     expect(await screen.findByRole('heading', { name: 'Subscriptions & API' })).toBeInTheDocument();

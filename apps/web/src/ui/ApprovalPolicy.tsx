@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { ApprovalMode, ApprovalPolicyView, ApprovalRule, AutonomousReleaseEntry } from '../types';
 import { Field } from './Field';
+import { TickBox } from './TickBox';
 
 type Props = {
   departmentId: string;
@@ -73,7 +74,7 @@ function RuleForm({ path, rule, modes, onSaved }: { path: string; rule: Approval
         <div className="appr-limit">
           <Field label={t.limit}>{p => <input {...p} type="number" min={0} step="any" value={draft.limit} onChange={e => setDraft({ ...draft, limit: e.target.value })} />}</Field>
           <Field label={t.unit}>{p => <input {...p} value={draft.unit} maxLength={16} placeholder={t.unitPlaceholder} onChange={e => setDraft({ ...draft, unit: e.target.value })} />}</Field>
-          <button className="btn small" type="button" disabled={busy || !body} onClick={() => body && void save(body)}>{tt.common.save}</button>
+          <button className="btn" type="button" disabled={busy || !body} onClick={() => body && void save(body)}>{tt.common.save}</button>
         </div>
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(tt, failure)}</p>}
@@ -181,17 +182,12 @@ function AutonomousToggleOrState({
 }) {
   const t = useT().dept.approvals;
   if (!canSet) return <p className="muted">{t.autonomousReleaseState(enabled)}</p>;
+  /* Its state is said in a word beside the box, in a frame, not by the box alone. */
   return (
     <label className="appr-auto-toggle">
-      <input
-        type="checkbox"
-        role="switch"
-        aria-label={t.autonomousRelease}
-        checked={enabled}
-        disabled={busy}
-        onChange={e => onToggle(e.target.checked)}
-      />
-      <span>{t.autonomousRelease}</span>
+      <TickBox role="switch" aria-label={t.autonomousRelease} checked={enabled} disabled={busy} onChange={e => onToggle(e.target.checked)} />
+      <span className="appr-auto-name">{t.autonomousRelease}</span>
+      <span className={enabled ? 'status active' : 'status'}>{t.autonomousReleaseWord(enabled)}</span>
     </label>
   );
 }

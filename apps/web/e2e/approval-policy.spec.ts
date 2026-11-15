@@ -1,8 +1,12 @@
+/// <reference types="node" />
+import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { ApprovalPolicyView, AutonomousReleaseEntry, Org } from '../src/types';
 import { ME, serveApi } from './api';
+import { around, focusRing, heights, offences } from './owner-screens-look';
+import type { Measured } from './owner-screens-sizes';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const ORG: Org = {
@@ -49,13 +53,15 @@ const POLICY: ApprovalPolicyView = {
   ],
 };
 
-/* The department's panel as a person meets it, with what the page logs. Every change is answered as the server would. */
-async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', width: number, policy = POLICY) {
+/* The department's panel as a person meets it, with what the page logs. Every change is answered as the server would.
+   A theme is a skin's id; dark, a name no skin has, is Cyberpunk. Right to left as a shipped RTL language would set it. */
+async function open(page: Page, lang: 'en' | 'ru', theme: string, width: number, policy = POLICY, dir: 'ltr' | 'rtl' = 'ltr') {
   await page.setViewportSize({ width, height: 900 });
-  await page.addInitScript(({ lang, theme }) => {
+  await page.addInitScript(({ lang, theme, dir }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
-  }, { lang, theme });
+    if (dir === 'rtl') document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = 'rtl'; });
+  }, { lang, theme, dir });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -69,6 +75,8 @@ async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', widt
     if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-355' }, available: false, latest: null, updater: { status: null, waiting: null } } });
     if (url.pathname === '/api/departments/d2/approval-policy') return route.fulfill({ json: shown });
     if (url.pathname === '/api/autonomous-releases') return route.fulfill({ json: { entries: JOURNAL } });
+    /* The panel also holds the department's outbound setup, here with nothing set up. */
+    if (url.pathname === '/api/outbound') return route.fulfill({ json: { channels: [], messages: [], escalations: [], approvals: [], departments: [] } });
     if (url.pathname === '/api/departments/d2/approval-policy/autonomous-release') {
       const body = route.request().postDataJSON() as { enabled: boolean };
       puts.push({ url: url.pathname, body });
@@ -154,27 +162,6 @@ for (const lang of ['en', 'ru'] as const) {
         expect(errors.filter(e => !/400/.test(e))).toEqual([]);
       });
 
-      test(`the person who runs the department, not the CEO, switches its autonomous release, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
-        const t = MESSAGES[lang];
-        const { errors, puts } = await open(page, lang, theme, width, {
-          ...POLICY,
-          owner: { id: 'p2', name: 'Dana Abramovna Konstantinopolskaya' },
-          canSetOwner: false,
-          candidates: [],
-        });
-        const part = section(page, t);
-        const own = part.getByRole('switch', { name: t.dept.approvals.autonomousRelease, exact: true });
-        await expect(own).not.toBeChecked();
-        await expect(part.getByText(t.dept.approvals.autonomousReleaseHint)).toBeVisible();
-        await own.click();
-        await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/autonomous-release', body: { enabled: true } });
-        await expect(own).toBeChecked();
-        await expect(part.getByText('d7a1eb2b34edb970a2c5abbaadf25e50d4dc4031')).toBeVisible();
-        await fitsTheScreen(page, width);
-        await part.screenshot({ path: info.outputPath(`approvals-owner-${width}-${lang}-${theme}.png`) });
-        expect(errors).toEqual([]);
-      });
-
       test(`someone with access reads the rules and changes nothing, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
         const { errors } = await open(page, lang, theme, width, {
@@ -201,4 +188,61 @@ for (const lang of ['en', 'ru'] as const) {
       });
     }
   }
+}
+
+/* The person who runs the department, not the CEO, in both skins, both languages, at a desk and on a phone, and right to
+   left: the switch says its state in a word beside it, Design's rules hold, and the panel is drawn whole for Design. */
+type Look = { lang: 'en' | 'ru'; skin: 'light' | 'cyberpunk'; width: number; dir: 'ltr' | 'rtl' };
+const OWNER_LOOKS: Look[] = [
+  ...(['en', 'ru'] as const).flatMap(lang => (['light', 'cyberpunk'] as const).flatMap(skin => [1440, 375].map(width => ({ lang, skin, width, dir: 'ltr' as const })))),
+  { lang: 'en', skin: 'light', width: 1440, dir: 'rtl' },
+  { lang: 'ru', skin: 'cyberpunk', width: 375, dir: 'rtl' },
+];
+const PIECES = { owner: '.appr-owner', rules: '.appr-rules', rule: '.appr-rule', limit: '.appr-limit', release: '.appr-auto' };
+
+for (const { lang, skin, width, dir } of OWNER_LOOKS) {
+  const mode = skin === 'light' ? 'light' : `dark ${skin}`;
+  const look = `${lang}-${skin}-${width}-${dir}`;
+  test(`the person who runs the department, not the CEO, switches its autonomous release, in ${lang}, ${mode}, at ${width}px${dir === 'rtl' ? ', right to left' : ''}`, async ({ page, browserName }, info) => {
+    const t = MESSAGES[lang];
+    const a = t.dept.approvals;
+    const { errors, puts } = await open(page, lang, skin, width, {
+      ...POLICY,
+      owner: { id: 'p2', name: 'Dana Abramovna Konstantinopolskaya' },
+      canSetOwner: false,
+      candidates: [],
+    }, dir);
+    const part = section(page, t);
+    const own = part.getByRole('switch', { name: a.autonomousRelease, exact: true });
+    const line = part.locator('.appr-auto-toggle');
+    await expect(own).not.toBeChecked();
+    /* Off, said in a word beside the box, not by the box alone. */
+    await expect(line).toContainText(a.autonomousReleaseWord(false));
+    await expect(part.getByText(a.autonomousReleaseHint)).toBeVisible();
+    await fitsTheScreen(page, width);
+    const words = { danger: [], groups: '.appr-limit' };
+    expect.soft(await offences(part, words)).toEqual([]);
+    const measured: Measured[] = [{ browser: browserName, look, screen: 'approvals', heights: await heights(part, PIECES) }];
+    await page.locator('.dv-drawer').screenshot({ path: info.outputPath(`approvals-panel-off-${look}-${browserName}.png`) });
+
+    /* The keyboard reaches the switch and shows where it is. */
+    await own.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(own).toBeFocused();
+    expect(await focusRing(page)).toBe('ring');
+    await around(page, line, info.outputPath(`approvals-focus-${look}-${browserName}.png`));
+
+    await own.click();
+    await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/autonomous-release', body: { enabled: true } });
+    await expect(own).toBeChecked();
+    await expect(line).toContainText(a.autonomousReleaseWord(true));
+    await expect(part.getByText('d7a1eb2b34edb970a2c5abbaadf25e50d4dc4031')).toBeVisible();
+    await fitsTheScreen(page, width);
+    expect.soft(await offences(part, words)).toEqual([]);
+    measured.push({ browser: browserName, look, screen: 'approvals on', heights: await heights(part, PIECES) });
+    writeFileSync(info.outputPath('heights.json'), JSON.stringify(measured));
+    await page.locator('.dv-drawer').screenshot({ path: info.outputPath(`approvals-panel-on-${look}-${browserName}.png`) });
+    expect(errors).toEqual([]);
+  });
 }
