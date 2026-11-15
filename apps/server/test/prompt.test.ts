@@ -138,10 +138,10 @@ describe('orchestrator instructions', () => {
   it('lays the work out in turns he plans and fills himself', () => {
     expect(steady.skills.map(f => f.name)).toContain('orch-plan-turn');
     const plan = ability('orch-plan-turn');
-    for (const words of ['plan_turn', 'add_tasks', 'turns', 'Turn N, task #M', 'head']) expect(plan).toContain(words);
-    expect(plan).toMatch(/next starts automatically when its predecessor closes[\s\S]*explicit authorized hold/i);
+    for (const words of ['add_tasks', 'turns', 'release_turn', 'task #M', 'head']) expect(plan).toContain(words);
+    expect(plan).not.toContain('plan_turn');
+    expect(plan).toMatch(/tag[^.]*closes the turn by itself[^.]*next turn, which opens at once/i);
     expect(plan).toMatch(/never tell people to start or close a turn manually/i);
-    expect(plan).toMatch(/never[\s\S]*close the last task when doing so would violate an explicit hold/i);
     /* Heads give out tasks with create_task; he lays out turns, and only the skill every head shares names it. */
     expect(own).not.toContain('"create_task"');
     expect(carried).not.toContain('later version');
