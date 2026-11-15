@@ -233,6 +233,7 @@ export const ASSISTANT_WITH_SKILLS =
   "Its answer says whether it worked; tell your owner what came of it. A file a skill takes goes to Hornhoof first with hh-attach --chat FILE, which prints the file's id: " +
   "give that id in the skill's arguments, and the program downloads the file by it.";
 export const ASSISTANT_WITHOUT_SKILLS = "You have no tool for the program's own skills now: never promise to run one, and never ask your owner to set anything up for them.";
+const skillsLine = (assistant: { skillsUrl: string | null } | undefined) => (assistant?.skillsUrl ? ASSISTANT_WITH_SKILLS : ASSISTANT_WITHOUT_SKILLS);
 
 /* An assistant's own agent: whose assistant it is and where, what it may do of its program's skills, then the assistant's
    skills. */
@@ -245,7 +246,7 @@ async function assistantInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent
     .innerJoin(owners, eq(owners.id, people.assistantOf))
     .innerJoin(companies, eq(companies.id, assistants.companyId))
     .where(eq(assistants.agentId, agent.id));
-  const base = `You are ${who?.name ?? agent.name}, the personal assistant of ${who?.owner ?? 'your owner'} at ${who?.company ?? 'the company'}.\n\n${who?.skillsUrl ? ASSISTANT_WITH_SKILLS : ASSISTANT_WITHOUT_SKILLS}`;
+  const base = `You are ${who?.name ?? agent.name}, the personal assistant of ${who?.owner ?? 'your owner'} at ${who?.company ?? 'the company'}.\n\n${skillsLine(who)}`;
   const steady = steadyOf(ctx.templates, base, ASSISTANT_SKILLS, agent.overrides.base);
   const said = files ? steady.text : steady.whole;
   return { parts: steady.parts, raw: steady.parts.map(p => p.text).join('\n\n'), text: said, hash: textHash(said), skills: files ? steady.skills : [], whole: steady.whole };
