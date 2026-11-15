@@ -32,6 +32,8 @@ describe('the tables of test harnesses', () => {
     await db.execute(sql`insert into harness_products (department_id, company_id) select id, company_id from departments`);
     await db.execute(sql`insert into harness_builds (company_id, department_id, key, version, unit, platform, commit_sha) select company_id, id, 'k', 'v', 'dependencies', 'linux-arm64', 'c' from departments`);
     expect((await db.execute(sql`select status, failures, copies from harness_builds`)).rows).toEqual([{ status: 'building', failures: 0, copies: [] }]);
+    /* The migrations gave the department its open turn; removing a department closes its turns first. */
+    await db.execute(sql`delete from turns`);
     await db.execute(sql`delete from departments`);
     expect((await db.execute(sql`select count(*)::int as n from harness_builds`)).rows).toEqual([{ n: 0 }]);
     expect((await db.execute(sql`select count(*)::int as n from harness_products`)).rows).toEqual([{ n: 0 }]);

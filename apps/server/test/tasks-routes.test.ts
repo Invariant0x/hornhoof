@@ -67,7 +67,8 @@ describe('tasks for people', () => {
     const made = await post(oleg, '/api/tasks', { title: 'Payments', brief: 'Take card payments.', body: 'Stripe.', department: dev.id });
     expect(made.statusCode).toBe(201);
     expect(made.json().task).toMatchObject({ number: 1, assignee: { name: 'Hana' } });
-    expect((await post(oleg, '/api/tasks', { title: 'Leads', brief: '', body: '', department: sales.id })).statusCode).toBe(404);
+    const elsewhere = await post(oleg, '/api/tasks', { title: 'Leads', brief: '', body: '', department: sales.id });
+    expect([elsewhere.statusCode, elsewhere.json().error.reason]).toEqual([403, 'not_your_department']);
     expect((await post(ceo, '/api/tasks', { title: 'Leads', brief: '', body: '', department: sales.id })).json().error.reason).toBe('no_head');
     expect((await post(oleg, '/api/tasks', { title: 'Plan', brief: '', body: '' })).json().error.reason).toBe('company_scope_only');
     expect((await post(ceo, '/api/tasks', { title: 'Plan', brief: '', body: '' })).json().task.assignee.name).toBe('Orchestrator');

@@ -87,7 +87,7 @@ describe('the map while departments work in the turn', () => {
   const working = (progress: Department['turnProgress']): Org => ({
     ...ORG4,
     turn: { id: 'u3', number: 3, goal: 'Ship payments' },
-    departments: ORG4.departments.map((d, i) => ({ ...d, workMode: i === 1 ? 'continuous' as const : 'turns' as const, turnProgress: i === 0 ? progress : null })),
+    departments: ORG4.departments.map((d, i) => ({ ...d, turnProgress: i === 0 ? progress : null })),
   });
 
   it('gives every card room for its turn strip while any department works in the turn, and keeps the people clear above', () => {

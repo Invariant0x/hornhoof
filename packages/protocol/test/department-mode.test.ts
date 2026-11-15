@@ -1,29 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '../src/index.js';
-import { defaultDepartmentWorkMode, DepartmentTurnProgress, DepartmentWorkMode, DepartmentWorkModeChange } from '../src/department-mode.js';
+import { DEPARTMENT_TEMPLATES } from '../src/index.js';
+import * as departmentMode from '../src/department-mode.js';
 
-describe('department work mode contract', () => {
-  it.each(['turns', 'continuous'])('accepts %s without caller authority', workMode => {
-    expect(DepartmentWorkMode.parse(workMode)).toBe(workMode);
-    expect(DepartmentWorkModeChange.parse({ workMode })).toEqual({ workMode });
-  });
-  it.each(['weekly', '', null, true, 1, {}])('rejects unknown mode %#', value => {
-    expect(DepartmentWorkMode.safeParse(value).success).toBe(false);
-  });
-  it.each([
-    {}, { mode: 'turns' }, { workMode: 'turns', canChange: true },
-    { workMode: 'continuous', ownerPersonId: '00000000-0000-4000-8000-000000000001' },
-  ])('rejects forged settings fields %#', value => {
-    expect(DepartmentWorkModeChange.safeParse(value).success).toBe(false);
-  });
-  it('uses the Operations template default and a turns default for custom departments', () => {
-    expect(defaultDepartmentWorkMode('operations')).toBe('continuous');
-    expect(defaultDepartmentWorkMode(null)).toBe('turns');
-    expect(DEPARTMENT_TEMPLATES).toContainEqual(expect.objectContaining({ key: 'operations', workMode: 'continuous' }));
-  });
-  it.each(TEMPLATE_KEYS.filter(key => key !== 'operations'))('keeps %s turn-based by template', key => {
-    expect(defaultDepartmentWorkMode(key)).toBe('turns');
-    expect(DEPARTMENT_TEMPLATES).toContainEqual(expect.objectContaining({ key, workMode: 'turns' }));
+const { DepartmentTurnProgress } = departmentMode;
+
+/* Every department works in one flow of tasks, its turn being its next release: no template or setting picks how it works. */
+describe('no department work mode', () => {
+  it('leaves the work mode out of every template and of the contract', () => {
+    for (const template of DEPARTMENT_TEMPLATES) expect(template).not.toHaveProperty('workMode');
+    expect(Object.keys(departmentMode).filter(name => /WorkMode/i.test(name))).toEqual([]);
   });
 });
 

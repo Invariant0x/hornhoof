@@ -1,5 +1,6 @@
 import { notificationMessage } from '../events/notifications.js';
-import { defaultDepartmentWorkMode, DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
+import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
+import { ensureOpenTurn } from '../tasks/turn-department.js';
 import { and, asc, eq, inArray, isNotNull, isNull, max, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -27,7 +28,6 @@ import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensur
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { repoHostRoutes } from './repo-hosts.js';
 import { waitPolicyRoutes } from './wait-policy-routes.js';
-import { workModeRoutes } from './work-mode.js';
 import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { checkFolderFree, repoView } from './repository.js';
@@ -300,8 +300,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (isNew(item)) {
           const [dept] = await tx
             .insert(departments)
-            .values({ companyId: me.companyId, templateKey: item.template, workMode: defaultDepartmentWorkMode(item.template), name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
+            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
             .returning();
+          await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, me.companyId)).for('no key update');
+          await ensureOpenTurn(tx, me.companyId, dept!.id);
           await addProducts(dept!, item.products ?? []);
           await applyTeams(tx, me, dept!.id, item.teams);
           if (item.staff) hired.push(...(await hireTemplate(tx, dept!)));
@@ -325,7 +327,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           await tx.update(tasks).set({ productId: null }).where(and(inPlaces(me.companyId, dept, inside), inArray(tasks.productId, inside)));
           await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
-          /* Its turns end with it and stay in the history without it: one that ran as it ran, a planned one never started. */
+          /* Its turns end with it and stay in the history without it: its open one as it got its release ready. */
           await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.departmentId, dept.id), ne(turns.status, 'closed')));
           await tx.delete(departments).where(eq(departments.parentId, dept.id));
           await tx.delete(departments).where(eq(departments.id, dept.id));
@@ -554,6 +556,5 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   approvalPolicyRoutes(app, ctx);
   repoHostRoutes(app, ctx);
   waitPolicyRoutes(app, ctx);
-  workModeRoutes(app, ctx);
   modelCheckRoutes(app, ctx);
 }

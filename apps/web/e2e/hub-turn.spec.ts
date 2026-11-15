@@ -78,7 +78,7 @@ for (const lang of ['en', 'ru'] as const) {
     for (const width of [1440, 375, 360]) {
       test(`each department working in the turn shows it in its card and on the hub in ${lang} ${theme} ${width}`, async ({ page }, info) => {
         const t = MESSAGES[lang];
-        const label = (done: number, total: number) => t.tasks.turnProgress(done, total);
+        const label = (done: number) => t.map.readyForRelease(done);
         const shot = (name: string) => page.screenshot({ path: info.outputPath(`hub-${name}-${lang}-${theme}-${width}.png`), animations: 'disabled' });
         const { live, errors, failures } = await open(page, lang, theme, width);
         const initialDocument = await page.evaluateHandle(() => document);
@@ -89,12 +89,12 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(page.locator('.hub-turn')).toHaveCount(0);
         await expect(page.locator('.hub-lbl')).toHaveCount(0);
         const dev = bar(page, 'Development');
-        await expect(dev).toHaveAttribute('aria-label', label(3, 17));
+        await expect(dev).toHaveAttribute('aria-label', label(3));
         await expect(dev).toHaveAttribute('aria-valuenow', '18');
         await expect(dev.locator('i')).toHaveCount(20);
         await expect(dev.locator('i.on')).toHaveCount(4);
         await expect(card(page, 'Development').locator('.dt-turn')).toHaveText(t.tasks.turn(3));
-        await expect(card(page, 'Development').locator('.dt-cnt')).toHaveText(label(3, 17));
+        await expect(card(page, 'Development').locator('.dt-cnt')).toHaveText(label(3));
         await expect(card(page, 'Operations').locator('.dept-turn')).toHaveCount(0);
         await expect(hub.locator('.hub-hz')).toHaveAttribute('d', 'M 64 120 L 176 120');
         await expect(hub.locator('.hub-eq')).toHaveCount(1);
@@ -112,9 +112,10 @@ for (const lang of ['en', 'ru'] as const) {
         await looksRight(page);
         await shot('one');
 
-        /* The Tasks screen keeps the whole turn's progress as it was. */
+        /* The Tasks screen counts the same, by turn and release: what the turn has ready for its release. */
         await page.getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
-        await expect(page.getByRole('progressbar', { name: label(3, 17) })).toHaveAttribute('aria-valuenow', '18');
+        await page.getByRole('radio', { name: t.tasks.board.views.releases, exact: true }).check({ force: true });
+        await expect(page.getByText(label(3), { exact: true })).toBeVisible();
         await page.getByRole('button', { name: t.shell.tabs.map, exact: true }).click();
         await expect(dev).toHaveAttribute('aria-valuenow', '18');
 
@@ -123,7 +124,7 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(dev).toHaveAttribute('aria-valuenow', '24');
         await expect(dev.locator('i.on')).toHaveCount(5);
         await live.show(with_(ONE, 'Development', [1000, 1000]));
-        await expect(dev).toHaveAttribute('aria-label', label(1000, 1000));
+        await expect(dev).toHaveAttribute('aria-label', label(1000));
         await expect(dev).toHaveAttribute('aria-valuenow', '100');
         await expect(dev.locator('i.on')).toHaveCount(20);
         await expect(hub.locator('.turn-sec-fill')).toHaveAttribute('pathLength', '19.72');
@@ -170,37 +171,4 @@ for (const lang of ['en', 'ru'] as const) {
       });
     }
   }
-}
-
-for (const [lang, theme, width] of [['en', 'light', 1440], ['ru', 'dark', 375]] as const) {
-  test(`a department switched to work all the time leaves the turn on the map in ${lang} ${theme} ${width}`, async ({ page }, info) => {
-    const t = MESSAGES[lang];
-    const { live, errors, failures } = await open(page, lang, theme, width);
-    await expect(bar(page, 'Development')).toHaveAttribute('aria-valuenow', '18');
-    await card(page, 'Development').click();
-    await page.getByRole('button', { name: t.dept.about, exact: true }).click();
-    const how = page.getByRole('region', { name: t.dept.workMode.title, exact: true });
-    const turns = how.getByRole('radio', { name: t.dept.workMode.turns, exact: true });
-    const always = how.getByRole('radio', { name: t.dept.workMode.continuous, exact: true });
-    await expect(turns).toBeChecked();
-    await expect(how).toContainText(t.dept.workMode.turnsHint);
-    await expect(how).toContainText(t.dept.workMode.continuousHint);
-    expect(await page.evaluate(() => {
-      const drawer = document.querySelector('.dv-drawer')!;
-      return document.documentElement.scrollWidth <= innerWidth && drawer.scrollWidth <= drawer.clientWidth;
-    })).toBe(true);
-    await how.screenshot({ path: info.outputPath(`work-mode-${lang}-${theme}-${width}.png`) });
-    await page.screenshot({ path: info.outputPath(`work-mode-page-${lang}-${theme}-${width}.png`) });
-
-    await always.check();
-    await expect(always).toBeChecked();
-    expect(live.puts).toEqual([{ workMode: 'continuous' }]);
-    await page.getByRole('button', { name: t.dept.close, exact: true }).click();
-    await page.getByRole('button', { name: t.dept.back, exact: true }).click();
-    await expect(card(page, 'Development')).toBeVisible();
-    await expect(page.locator('.dept-turn')).toHaveCount(0);
-    await expect(page.locator('.hub .turn-sec, .hub .hub-eq, .hub .hub-focus-tag')).toHaveCount(0);
-    expect(failures).toEqual([]);
-    expect(errors).toEqual([]);
-  });
 }

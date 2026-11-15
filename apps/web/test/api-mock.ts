@@ -15,7 +15,7 @@ function taskDepartments(routes: Record<string, Route>): Route {
     const org = routes['GET /api/org'];
     const reply = typeof org === 'function' ? await org(undefined) : org;
     const departments = (reply?.[1] as Partial<Org> | undefined)?.departments ?? [];
-    return [200, { whole: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) }];
+    return [200, { whole: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: true })) }];
   };
 }
 
@@ -307,9 +307,10 @@ export const TURN: TurnView = {
   title: 'Payments',
   goal: 'Take card payments in the shop.',
   status: 'open',
-  mode: 'echelons',
+  version: null,
+  commit: null,
+  baseVersion: 'v1.2.0',
   departmentId: 'd2',
-  canChangeMode: true,
   messages: [{ by: 'Ivan', text: 'We need card payments.\nStripe is fine.', at: '2026-10-30T06:50:00.000Z' }],
   taskId: null,
   startedAt: '2026-10-30T07:00:00.000Z',
@@ -317,8 +318,7 @@ export const TURN: TurnView = {
   closedAt: null,
   tasks: { total: 5, done: 2 },
 };
-export const PLANNED_TURN: TurnView = { ...TURN, id: 'u4', number: 4, title: 'Refunds', goal: 'Money goes back.', status: 'planned', messages: [], openedAt: null, tasks: { total: 1, done: 0 } };
-export const FINISHED_TURN: TurnView = { ...TURN, id: 'u2', number: 2, title: 'Login', goal: 'People sign in.', status: 'closed', messages: [], closedAt: '2026-10-29T20:00:00.000Z', tasks: { total: 1, done: 1 } };
+export const FINISHED_TURN: TurnView = { ...TURN, id: 'u2', number: 2, title: 'Login', goal: 'People sign in.', status: 'closed', version: 'v1.2.0', commit: 'c'.repeat(40), baseVersion: 'v1.1.0', messages: [], closedAt: '2026-10-29T20:00:00.000Z', tasks: { total: 1, done: 1 } };
 
 
 /* The approved example, timed from 09:00 on one day. TREE_ORG adds its other employees to Development. */

@@ -168,32 +168,20 @@ describe('giving work to agents that are on', () => {
     expect((await row(db, task.id)).assigneeAgentId).toBe(bruno.id);
   });
 
-  it('gives no turn work to a department whose head is off, or whose employees are all off', async () => {
+  it('gives no work to a department whose head is off, or whose employees are all off', async () => {
     const { dev, hana, bruno, bea, rita, rex, orchestrator, off, tools, db } = await company();
     const boss = await tools(orchestrator);
     await off(hana.id);
-    const headless = await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const headless = await call(boss, 'add_tasks', { tasks: [work(dev.id, 'Checkout')] });
     expect(headless.isError).toBe(true);
     expect(text(headless)).toContain('switched off');
     await db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, hana.id));
     await off(bruno.id, bea.id, rita.id, rex.id);
-    const empty = await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const empty = await call(boss, 'add_tasks', { tasks: [work(dev.id, 'Checkout')] });
     expect(empty.isError).toBe(true);
     expect(text(empty)).toContain('switched off');
     await db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, rex.id));
-    expect((await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] })).isError).toBeFalsy();
-  });
-
-  it("holds a planned task whose department's head was switched off before its turn, and tells the orchestrator", async () => {
-    const { db, dev, hana, orchestrator, off, tools, jobsOf } = await company();
-    const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
-    await off(hana.id);
-    await call(boss, 'cancel_task', { task: 1, why: 'Not needed.' });
-    expect((await db.select().from(tasks).where(eq(tasks.title, 'Refund button')))[0]).toMatchObject({ status: 'blocked', assigneeAgentId: null });
-    const waiting = (await jobsOf(orchestrator.id)).filter(j => j.status === 'queued');
-    expect(waiting.some(j => j.prompt.includes('switched off'))).toBe(true);
+    expect((await call(boss, 'add_tasks', { tasks: [work(dev.id, 'Checkout')] })).isError).toBeFalsy();
   });
 });
 

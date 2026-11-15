@@ -668,7 +668,7 @@ describe('a turn the queue takes', () => {
 describe('the lines of a company with a long history', () => {
   const HEAD_TURNS = 300;
 
-  /* 50 closed turns with 2000 tasks of the department, some still blocked or planned; 500 finished turns of each employee
+  /* 50 closed turns with 2000 tasks of the department, some still blocked or open; 500 finished turns of each employee
      and 300 of the head; and the lines of 30 employees who left. */
   async function history(c: Awaited<ReturnType<typeof company>>) {
     const { db, acme, sub, dev, hana, bruno, felix, rita, hire } = c;
@@ -676,7 +676,7 @@ describe('the lines of a company with a long history', () => {
       .insert(turns)
       .values(Array.from({ length: 50 }, (_, i) => ({ companyId: acme.id, number: i + 100, goal: `Goal ${i + 100}`, status: 'closed' as const })))
       .returning({ id: turns.id });
-    const statusOf = (i: number): 'blocked' | 'planned' | 'done' | 'cancelled' => (i % 50 === 0 ? 'blocked' : i % 50 === 1 ? 'planned' : i % 2 ? 'done' : 'cancelled');
+    const statusOf = (i: number): 'blocked' | 'open' | 'done' | 'cancelled' => (i % 50 === 0 ? 'blocked' : i % 50 === 1 ? 'open' : i % 2 ? 'done' : 'cancelled');
     for (let from = 0; from < 2000; from += 500) {
       await db.insert(tasks).values(
         Array.from({ length: 500 }, (_, k) => {

@@ -1,4 +1,5 @@
-import { defaultDepartmentWorkMode, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
+import { ensureOpenTurn } from '../tasks/turn-department.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -109,8 +110,9 @@ async function templateDepartments(ctx: Ctx, tx: Tx, companyId: string, personId
     const roleCode = roleCodeOf(dept.template);
     const [row] = await tx
       .insert(departments)
-      .values({ companyId, templateKey: dept.template, workMode: defaultDepartmentWorkMode(dept.template), name: dept.name ?? null, roleCode, position: position++ })
+      .values({ companyId, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++ })
       .returning();
+    await ensureOpenTurn(tx, companyId, row!.id);
     for (const product of dept.products ?? []) {
       await tx.insert(departments).values({ companyId, name: product, parentId: row!.id, roleCode, position: position++ });
     }

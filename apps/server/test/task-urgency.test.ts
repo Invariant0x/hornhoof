@@ -170,21 +170,21 @@ describe('the task route', () => {
 describe('the orchestrator', () => {
   const item = (c: Awaited<ReturnType<typeof company>>, title: string, urgent?: boolean) => ({ department: c.dev.id, title, brief: '', body: '', ...(urgent === undefined ? {} : { urgent }) });
 
-  it('lays out urgent tasks only in a turn that answers the CEO or the department\'s owner', async () => {
+  it('gives out urgent tasks only in a turn that answers the CEO or the department\'s owner', async () => {
     const c = await company();
     const woken = await c.tools(c.orchestrator);
-    const refused = await call(woken, 'plan_turn', { mode: 'echelons', title: 'Fix', goal: 'Fix it.', tasks: [item(c, 'Forged', true)] });
+    const refused = await call(woken, 'add_tasks', { tasks: [item(c, 'Forged', true)] });
     expect(text(refused)).toBe(ONLY_DEPARTMENT_OWNER);
     expect(await c.db.select().from(tasks).where(eq(tasks.title, 'Forged'))).toEqual([]);
-    const plain = await call(woken, 'plan_turn', { mode: 'echelons', title: 'Plain', goal: 'Plain work.', tasks: [item(c, 'Plain work')] });
+    const plain = await call(woken, 'add_tasks', { tasks: [item(c, 'Plain work')] });
     expect(plain.isError, text(plain)).toBeFalsy();
     const answering = await c.tools(c.orchestrator, true);
-    const urgent = await call(answering, 'add_tasks', { turn: 1, tasks: [item(c, 'Real', true)] });
+    const urgent = await call(answering, 'add_tasks', { tasks: [item(c, 'Real', true)] });
     expect(urgent.isError, text(urgent)).toBeFalsy();
     const rows = await c.db.select().from(tasks);
     expect(rows.find(t => t.title === 'Real')!.urgent).toBe(true);
     expect(rows.find(t => t.title === 'Plain work')!.urgent).toBe(false);
-    expect(text(await call(woken, 'add_tasks', { turn: 1, tasks: [item(c, 'Forged again', true)] }))).toBe(ONLY_DEPARTMENT_OWNER);
+    expect(text(await call(woken, 'add_tasks', { tasks: [item(c, 'Forged again', true)] }))).toBe(ONLY_DEPARTMENT_OWNER);
   });
 
   it('alone has set_urgent, and set_team_urgent_only beside heads, who mark their own sub-units', async () => {
@@ -539,20 +539,21 @@ describe('work for someone in a team that takes only urgent work', () => {
       expect(await made(c, 'Examples')).toBeUndefined();
     });
 
-    it('when work is placed with a head in such a team, in a new turn or an open one', async () => {
+    it('when work is given to a head in such a team', async () => {
       const c = await only();
       await c.db.update(agents).set({ teamId: c.quick.id }).where(eq(agents.id, c.head.id));
       const item = (title: string, urgent?: boolean) => ({ department: c.dev.id, title, brief: '', body: '', ...(urgent === undefined ? {} : { urgent }) });
       const client = await c.tools(c.orchestrator, true);
-      const plain = await call(client, 'plan_turn', { mode: 'echelons', title: 'Plain', goal: 'Plain work.', tasks: [item('Plain')] });
+      const plain = await call(client, 'add_tasks', { tasks: [item('Plain')] });
       expect(plain.isError, text(plain)).toBe(true);
       expect(text(plain)).toContain(TAKES_ONLY_URGENT);
-      expect(await c.db.select().from(turns)).toEqual([]);
-      const urgent = await call(client, 'plan_turn', { mode: 'echelons', title: 'Fix', goal: 'Fix it.', tasks: [item('Real', true)] });
+      expect(await made(c, 'Plain')).toBeUndefined();
+      const urgent = await call(client, 'add_tasks', { tasks: [item('Real', true)] });
       expect(urgent.isError, text(urgent)).toBeFalsy();
-      const added = await call(client, 'add_tasks', { turn: 1, tasks: [item('Plain again')] });
-      expect(added.isError, text(added)).toBe(true);
+      const mixed = await call(client, 'add_tasks', { tasks: [item('Real again', true), item('Plain again')] });
+      expect(mixed.isError, text(mixed)).toBe(true);
       expect(await made(c, 'Plain again')).toBeUndefined();
+      expect(await made(c, 'Real again')).toBeUndefined();
     });
 
     it('on the web route, with names only for someone who sees everyone', async () => {

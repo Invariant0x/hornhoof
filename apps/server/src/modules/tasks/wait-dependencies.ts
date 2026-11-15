@@ -14,7 +14,7 @@ async function unavailableEmployee(ctx: Ctx, companyId: string, id: string): Pro
 
 /* A dependency that cannot take work gives the waiting holder a turn to choose another way forward. */
 export async function checkWaitDependencies(ctx: Ctx): Promise<void> {
-  const waiting = await ctx.db.select().from(tasks).where(and(isNotNull(tasks.externalWait), notInArray(tasks.status, ['planned', ...CLOSED])));
+  const waiting = await ctx.db.select().from(tasks).where(and(isNotNull(tasks.externalWait), notInArray(tasks.status, [...CLOSED])));
   for (const task of waiting) {
     const on = task.externalWait?.on;
     if (on?.kind !== 'employee') continue;

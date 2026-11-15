@@ -107,7 +107,7 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   const db = recordSources(drizzle(client, { schema }) as unknown as Db);
   /* Tests never reach the real registry or a real CA unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
-  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), readMerged: async () => null }));
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, createRepository: noGitHost, createIssue: noIssues, readModels: noApis, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }), readBranches: async () => ({ heads: {} }), readTags: async () => ({ tags: {} }), readMerged: async () => null }));
   onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
 }
@@ -125,15 +125,19 @@ export async function approvalAsked(app: FastifyInstance) {
 }
 
 /* Moves these agents onto a new plan of this person's own: to see an agent one must own its plan and reach its department. */
-/* Echelons exist only in a turn started in echelons, so work a test sends through them is given while such a turn runs: one
-   for each top-level department of the company that runs none, numbered on in the order of the departments. Gives the
-   first. */
+/* The open turn every top-level department runs, for departments a test made straight in the database: one for each that
+   runs none, numbered on in the order of the departments. Gives the first. */
 export async function echelonsTurn(db: Db, companyId: string): Promise<typeof schema.turns.$inferSelect> {
   const [last] = await db.select({ number: schema.turns.number }).from(schema.turns).where(eq(schema.turns.companyId, companyId)).orderBy(desc(schema.turns.number)).limit(1);
   const running = new Set((await db.select({ id: schema.turns.departmentId }).from(schema.turns).where(and(eq(schema.turns.companyId, companyId), eq(schema.turns.status, 'open')))).map(t => t.id));
   const tops = (await db.select().from(schema.departments).where(and(eq(schema.departments.companyId, companyId), isNull(schema.departments.parentId))).orderBy(asc(schema.departments.position), asc(schema.departments.createdAt), asc(schema.departments.id))).filter(d => !running.has(d.id));
-  if (!tops.length) throw new Error('A turn belongs to a top-level department: make one before opening a turn.');
-  const opened = await db.insert(schema.turns).values(tops.map((d, i) => ({ companyId, departmentId: d.id, number: (last?.number ?? 0) + 1 + i, goal: 'Checked work', status: 'open' as const, mode: 'echelons' as const, openedAt: new Date() }))).returning();
+  if (!tops.length) {
+    /* Departments made through the API got their open turn as they were made. */
+    const [open] = await db.select().from(schema.turns).where(and(eq(schema.turns.companyId, companyId), eq(schema.turns.status, 'open'))).orderBy(asc(schema.turns.number)).limit(1);
+    if (open) return open;
+    throw new Error('A turn belongs to a top-level department: make one before opening a turn.');
+  }
+  const opened = await db.insert(schema.turns).values(tops.map((d, i) => ({ companyId, departmentId: d.id, number: (last?.number ?? 0) + 1 + i, goal: 'Checked work', status: 'open' as const, openedAt: new Date() }))).returning();
   return opened.sort((a, b) => a.number - b.number)[0]!;
 }
 

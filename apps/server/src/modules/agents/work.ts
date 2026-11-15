@@ -50,7 +50,7 @@ function doing(agent: Agent, facts: Facts): Work {
 /* The map and the agent API read the same work state; neither derives a task from the map's visible employees. */
 export async function agentWork(db: Db, companyId: string) {
   const openTasks = await db.select().from(tasks)
-    .where(and(eq(tasks.companyId, companyId), notInArray(tasks.status, ['done', 'cancelled', 'planned'])))
+    .where(and(eq(tasks.companyId, companyId), notInArray(tasks.status, ['done', 'cancelled'])))
     .orderBy(desc(tasks.number));
   const running = await db.select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
     .from(jobs).where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), notStep));

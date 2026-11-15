@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, backlogItems, companies, departments, jobs, people, subscriptions, tasks, teams, turns } from '../src/db/schema.js';
+import { agents, backlogItems, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 /* Development with Hana at its head and Bruno in it, Sales with Sara at its head, and Dora, who has Development only. */
@@ -62,7 +62,7 @@ describe("a department's tasks and its list for later turns", () => {
     const { db, ceoToken, dora, dev, sales, send, put, listed } = await company();
     const [salesItem] = await put(ceoToken, sales.id, 'Call the new leads');
     const picked = (await send(dora, 'GET', '/api/task-departments')).json();
-    expect(picked).toEqual({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development' }, { id: sales.id, name: null, templateKey: 'sales' }] });
+    expect(picked).toEqual({ whole: false, departments: [{ id: dev.id, name: null, templateKey: 'development', mine: true }, { id: sales.id, name: null, templateKey: 'sales', mine: false }] });
     expect((await send(dora, 'GET', `/api/tasks?department=${dev.id}`)).statusCode).toBe(200);
     expect((await send(dora, 'GET', `/api/tasks?department=${sales.id}`)).statusCode).toBe(200);
     expect((await send(dora, 'GET', `/api/departments/${dev.id}/backlog`)).statusCode).toBe(200);
@@ -100,47 +100,30 @@ describe("a department's tasks and its list for later turns", () => {
     const stale = await send(dora, 'PUT', `/api/departments/${dev.id}/backlog/order`, { ids: [a, b] });
     expect([stale.statusCode, stale.json().error.reason]).toEqual([409, 'backlog_changed']);
 
-    /* No turn runs, so the next turn is a new one and starts at once: its task goes to the head. */
+    /* The chosen item goes to the head at once as a task of the department, in no turn. */
     const first = await send(dora, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [c] });
     expect(first.statusCode).toBe(200);
     expect(await listed(dora, dev.id)).toEqual(['A', 'B']);
     const [started] = await db.select().from(tasks);
-    expect(started).toMatchObject({ title: 'C', body: 'C: what to do.', brief: 'C: what to do.', departmentId: dev.id, status: 'open', assigneeAgentId: hana.id, createdByAgentId: orchestrator.id });
-    const [open] = await db.select().from(turns);
-    expect(open).toMatchObject({ status: 'open', goal: 'C' });
-    expect(first.json()).toEqual({ turn: { number: open!.number }, tasks: [{ id: started!.id, number: started!.number }] });
-
-    /* A turn runs: the next turn is planned after it and holds the task until it starts. */
-    await send(ceoToken, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [b] });
-    const planned = await db.select().from(turns).where(eq(turns.status, 'planned'));
-    expect(planned).toMatchObject([{ number: open!.number + 1, goal: 'B' }]);
-    /* A planned turn is there: the next item joins it. */
-    await send(ceoToken, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [a] });
-    const later = await db.select().from(tasks).where(eq(tasks.turnId, planned[0]!.id)).orderBy(asc(tasks.number));
-    expect(later.map(t => [t.title, t.status, t.createdByPersonId])).toEqual([['B', 'planned', ceo.id], ['A', 'planned', ceo.id]]);
+    expect(started).toMatchObject({ title: 'C', body: 'C: what to do.', brief: 'C: what to do.', departmentId: dev.id, status: 'open', assigneeAgentId: hana.id, createdByAgentId: orchestrator.id, turnId: null });
+    expect(first.json()).toEqual({ tasks: [{ id: started!.id, number: started!.number }] });
+    await send(ceoToken, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [b, a] });
+    const later = (await db.select().from(tasks).orderBy(asc(tasks.number))).slice(1);
+    expect(later.map(t => [t.title, t.status, t.assigneeAgentId, t.turnId, t.createdByPersonId])).toEqual([['B', 'open', hana.id, null, ceo.id], ['A', 'open', hana.id, null, ceo.id]]);
+    expect(await db.select().from(turns)).toEqual([]);
     expect(await listed(dora, dev.id)).toEqual([]);
     expect(await db.select().from(backlogItems)).toEqual([]);
   });
 
-  it('put the chosen items into the next turn of the mode the person picks, and refuse a turnkey turn with no turnkey team', async () => {
-    const { db, companyId, ceoToken, dora, dev, bruno, send, put } = await company();
-    const [a, b, c] = await put(dora, dev.id, 'A', 'B', 'C');
-    const schedule = (ids: string[], mode?: string) => send(dora, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids, ...(mode ? { mode } : {}) });
-    const refused = await schedule([a!], 'turnkey');
-    expect([refused.statusCode, refused.json().error.message]).toEqual([409, expect.stringMatching(/no turnkey team/)]);
-    expect(await db.select().from(turns)).toEqual([]);
-
-    const [team] = await db.insert(teams).values({ companyId, departmentId: dev.id, name: 'Lane', turnkey: true }).returning();
-    await db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, bruno.id));
-    expect((await schedule([a!], 'turnkey')).statusCode).toBe(200);
-    /* The turnkey turn runs, so work in stages waits in a turn of its own, and later turnkey work in another one. */
-    expect((await schedule([b!])).statusCode).toBe(200);
-    expect((await send(ceoToken, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [c], mode: 'turnkey' })).statusCode).toBe(200);
-    const rows = await db.select({ n: turns.number, mode: turns.mode, status: turns.status, goal: turns.goal }).from(turns).orderBy(asc(turns.number));
-    expect(rows.map(t => [t.n, t.mode, t.status, t.goal])).toEqual([[1, 'turnkey', 'open', 'A'], [2, 'echelons', 'planned', 'B'], [3, 'turnkey', 'planned', 'C']]);
+  it('take no mode for the chosen items: whoever does a task goes the route of its team', async () => {
+    const { db, dora, dev, send, put } = await company();
+    const [a] = await put(dora, dev.id, 'A');
+    const refused = await send(dora, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [a], mode: 'turnkey' });
+    expect([refused.statusCode, refused.json().error.message]).toEqual([400, expect.stringMatching(/mode/)]);
+    expect(await db.select().from(tasks)).toEqual([]);
   });
 
-  it('are no work for agents: nobody is woken, no task shows them, members do not list them, and the head of the department or the orchestrator takes them into a turn', async () => {
+  it('are no work for agents: nobody is woken, no task shows them, members do not list them, and the head of the department or the orchestrator gives them out', async () => {
     const { db, ceoToken, orchestrator, hana, bruno, dev, tools, put } = await company();
     const [item] = await put(ceoToken, dev.id, 'Write the price page');
     expect(await db.select().from(jobs)).toEqual([]);
@@ -151,17 +134,17 @@ describe("a department's tasks and its list for later turns", () => {
       expect(await call(client, 'task', { task: item })).toMatchObject({ isError: true });
     }
     expect(await names(await tools(bruno))).not.toContain('backlog');
-    /* The head lays out the turns of its own department, so it reads its list too. */
+    /* The head gives out the work of its own department, so it reads its list too. */
     expect(JSON.parse(text(await call(await tools(hana), 'backlog')))).toMatchObject([{ department: { id: dev.id }, items: [{ id: item }] }]);
 
     const boss = await tools(orchestrator);
     const lists = JSON.parse(text(await call(boss, 'backlog')));
     expect(lists).toMatchObject([{ department: { id: dev.id }, items: [{ id: item, title: 'Write the price page', text: 'Write the price page: what to do.', by: 'Ivan' }] }]);
-    const planned = await call(boss, 'plan_turn', { mode: 'echelons', title: 'Prices', goal: 'Show the prices.', tasks: [], backlog: [item] });
-    expect(planned.isError).toBeFalsy();
+    const given = await call(boss, 'add_tasks', { tasks: [], backlog: [item] });
+    expect(given.isError, text(given)).toBeFalsy();
     const [task] = await db.select().from(tasks);
-    expect(task).toMatchObject({ title: 'Write the price page', status: 'open', assigneeAgentId: hana.id, createdByAgentId: orchestrator.id });
+    expect(task).toMatchObject({ title: 'Write the price page', status: 'open', assigneeAgentId: hana.id, createdByAgentId: orchestrator.id, turnId: null });
     expect(await db.select().from(backlogItems)).toEqual([]);
-    expect(await call(boss, 'add_tasks', { turn: 1, tasks: [], backlog: [item] })).toMatchObject({ isError: true });
+    expect(await call(boss, 'add_tasks', { tasks: [], backlog: [item] })).toMatchObject({ isError: true });
   });
 });

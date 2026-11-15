@@ -8,7 +8,7 @@ import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Decisions, Org, WaitingRequest } from '../src/types';
-import { box, ME, openTaskRow, serveApi, TASKS } from './api';
+import { box, ME, openTaskCard, serveApi, TASKS } from './api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -218,7 +218,7 @@ async function fulfillShellRequestsRoute(route: Route, getRequests: () => Waitin
     await route.fulfill({ json: { machines: [] } });
     return true;
   }
-  if (url.pathname === '/api/tasks' && url.search === '?status=all&department=d2') {
+  if (url.pathname === '/api/tasks' && url.search === '?status=all') {
     await route.fulfill({ json: { tasks: TASKS.slice(0, 2) } });
     return true;
   }
@@ -955,8 +955,8 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     });
 
     await page.goto('/tasks');
-    const freeCard = page.getByRole('article', { name: new RegExp(`^#${srv.freeTaskNumber} `) });
-    const pickCard = page.getByRole('article', { name: new RegExp(`^#${srv.pickTaskNumber} `) });
+    const freeCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${srv.freeTaskNumber} `) });
+    const pickCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${srv.pickTaskNumber} `) });
     await expect(freeCard).toBeVisible();
     await expect(pickCard).toBeVisible();
     await expect(freeCard).toHaveAttribute('aria-busy', 'false');
@@ -982,8 +982,8 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     await expect(pickCard).toBeHidden();
 
     /* Open the first task's detail panel in the real UI and verify neutral answered state and text. */
-    await page.getByRole('group', { name: ru.tasks.department }).locator('label', { hasText: ru.templates.development.name }).click();
-    await openTaskRow(page, srv.freeTaskNumber);
+    await page.getByRole('combobox', { name: ru.tasks.department }).selectOption({ label: ru.templates.development.name });
+    await openTaskCard(page, srv.freeTaskNumber);
     const panel = page.locator('aside');
     await expect(panel).toContainText(freeFeedback);
     await expect(panel).toContainText(ru.tasks.requestStates.answered);

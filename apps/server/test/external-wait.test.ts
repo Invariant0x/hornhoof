@@ -217,12 +217,12 @@ describe('external task wait', () => {
     }
   });
 
-  it('refuses another holder and closed or planned tasks', async () => {
+  it('refuses another holder and closed tasks', async () => {
     const c = await fixture();
     const task = await c.task();
     const until = new Date(Date.now() + 60_000).toISOString();
     expect((await c.wait(task.number, 'Images', until, c.peer.id)).isError).toBe(true);
-    for (const status of ['done', 'cancelled', 'planned'] as const) {
+    for (const status of ['done', 'cancelled'] as const) {
       await c.db.update(tasks).set({ status, closedAt: new Date() }).where(eq(tasks.id, task.id));
       expect((await c.wait(task.number, 'Images', until)).isError).toBe(true);
       expect((await c.read(task.id)).externalWait).toBeNull();

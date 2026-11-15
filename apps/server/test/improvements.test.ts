@@ -202,9 +202,9 @@ describe('improvements', () => {
       publish(companyId, message);
     };
     const orch = await mcp(app, TOKENS.orchestrator);
-    const planned = await call(orch, 'plan_turn', { mode: 'echelons', title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer'), work(dev.id, 'Add coverage')] });
+    const planned = await call(orch, 'add_tasks', { improvement: id, tasks: [work(dev.id, 'Write installer'), work(dev.id, 'Add coverage')] });
     expect(planned.isError).toBeFalsy();
-    const added = await call(orch, 'add_tasks', { turn: 1, improvement: id, tasks: [work(dev.id, 'Document jq')] });
+    const added = await call(orch, 'add_tasks', { improvement: id, tasks: [work(dev.id, 'Document jq')] });
     expect(added.isError).toBeFalsy();
     app.ctx.bus.publish = publish;
     const list = async () => (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
@@ -225,11 +225,11 @@ describe('improvements', () => {
     const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', change: 'Agents looked for jq.' })).content[0]!.text);
     await instruct(app, db, ceo, orchestrator.id);
     const orch = await mcp(app, TOKENS.orchestrator);
-    expect((await call(orch, 'plan_turn', { mode: 'echelons', title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer')] })).isError).toBeFalsy();
+    expect((await call(orch, 'add_tasks', { improvement: id, tasks: [work(dev.id, 'Write installer')] })).isError).toBeFalsy();
     expect((await call(orch, 'close_improvement', { improvement: id, done: true, text: 'Installed and documented.' })).isError).toBeFalsy();
     const closed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements.find((i: { id: string }) => i.id === id);
     expect(closed).toMatchObject({ status: 'done', result: 'Installed and documented.', tasks: [{ id: expect.any(String), number: 1, title: 'Write installer' }] });
-    const rejected = await call(orch, 'plan_turn', { mode: 'echelons', title: 'Done already', goal: 'Reject more work.', improvement: id, tasks: [work(dev.id, 'Duplicate')] });
+    const rejected = await call(orch, 'add_tasks', { improvement: id, tasks: [work(dev.id, 'Duplicate')] });
     expect(rejected.isError).toBe(true);
     expect(await db.select().from(tasks)).toHaveLength(1);
   });
@@ -238,12 +238,12 @@ describe('improvements', () => {
     const { app, db, ceo, orchestrator, dev } = await company();
     const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', change: 'Agents looked for jq.' })).content[0]!.text);
     const orch = await mcp(app, TOKENS.orchestrator);
-    const unauthorized = await call(orch, 'plan_turn', { mode: 'echelons', title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer')] });
+    const unauthorized = await call(orch, 'add_tasks', { improvement: id, tasks: [work(dev.id, 'Write installer')] });
     expect(unauthorized.isError).toBe(true);
     expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]).toMatchObject({ status: 'open', decidedBy: null });
     expect(await db.select().from(tasks)).toEqual([]);
     await instruct(app, db, ceo, orchestrator.id);
-    const refused = await call(orch, 'plan_turn', { mode: 'echelons', title: 'Bad task', goal: 'Fail before taking.', improvement: id, tasks: [work('00000000-0000-4000-8000-000000000099', 'Unknown department')] });
+    const refused = await call(orch, 'add_tasks', { improvement: id, tasks: [work('00000000-0000-4000-8000-000000000099', 'Unknown department')] });
     expect(refused.isError).toBe(true);
     expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]).toMatchObject({ status: 'open', decidedBy: null });
     expect(await db.select().from(tasks)).toEqual([]);
@@ -255,7 +255,7 @@ describe('improvements', () => {
     const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const [foreign] = await db.insert(improvements).values({ companyId: other!.id, agentId: wendy.id, title: 'Foreign', text: 'Not yours.' }).returning();
     await instruct(app, db, ceo, orchestrator.id);
-    const refused = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { mode: 'echelons', title: 'Foreign', goal: 'Reject foreign work.', improvement: foreign!.id, tasks: [work(dev.id, 'Write installer')] });
+    const refused = await call(await mcp(app, TOKENS.orchestrator), 'add_tasks', { improvement: foreign!.id, tasks: [work(dev.id, 'Write installer')] });
     expect(refused.isError).toBe(true);
     expect((await db.select().from(improvements).where(eq(improvements.id, foreign!.id)))[0]!.status).toBe('open');
     expect(await db.select().from(tasks)).toEqual([]);
@@ -353,7 +353,7 @@ describe('findings about Hornhoof itself', () => {
     const taken = await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
     expect([taken.statusCode, taken.json().error.reason]).toEqual([409, 'improvement_platform_elsewhere']);
     await instruct(app, db, ceo, orchestrator.id);
-    const planned = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { mode: 'echelons', title: 'Install git-lfs', goal: 'Have git-lfs.', improvement: id, tasks: [work(dev.id, 'Change the node image')] });
+    const planned = await call(await mcp(app, TOKENS.orchestrator), 'add_tasks', { improvement: id, tasks: [work(dev.id, 'Change the node image')] });
     expect(planned.isError).toBe(true);
     expect(await db.select().from(tasks)).toEqual([]);
     expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]).toMatchObject({ status: 'open', decidedBy: null });
@@ -367,7 +367,7 @@ describe('findings about Hornhoof itself', () => {
     expect((await app.inject({ method: 'POST', url: `/api/improvements/${first}/take`, ...as(ceo) })).statusCode).toBe(200);
     const second = JSON.parse((await call(wendy, 'propose_improvement', { ...ON_NODE, title: 'Install jq too', scope: 'platform' })).content[0]!.text).improvement;
     await instruct(app, db, ceo, orchestrator.id);
-    const planned = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { mode: 'echelons', title: 'Install jq', goal: 'Have jq.', improvement: second, tasks: [work(dev.id, 'Change the node image')] });
+    const planned = await call(await mcp(app, TOKENS.orchestrator), 'add_tasks', { improvement: second, tasks: [work(dev.id, 'Change the node image')] });
     expect(planned.isError).toBeFalsy();
     expect((await db.select().from(improvements).where(eq(improvements.id, second)))[0]).toMatchObject({ status: 'taken' });
   });

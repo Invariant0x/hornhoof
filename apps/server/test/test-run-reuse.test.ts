@@ -1,7 +1,7 @@
 import type { TestEnvironmentV1, TestUnit } from '@hornhoof/protocol';
 import { PREPARATION_UNIT } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { chooseRunMode, decideReuse, fullRunDue, partFileResults, reuseLines } from '../src/modules/testruns/reuse.js';
+import { chooseRunMode, decideReuse, partFileResults, reuseLines } from '../src/modules/testruns/reuse.js';
 
 describe('what a result came to', () => {
   it('stays with the green file and is shown with the run', () => {
@@ -11,48 +11,33 @@ describe('what a result came to', () => {
   });
 });
 
-describe('when the full run is due', () => {
-  it.each([
-    { turn: 5, everyTurns: 5, lastFullTurn: null, due: true, why: 'on a multiple of the interval' },
-    { turn: 10, everyTurns: 5, lastFullTurn: 5, due: true, why: 'on the next multiple' },
-    { turn: 4, everyTurns: 5, lastFullTurn: null, due: false, why: 'not before the first multiple' },
-    { turn: 6, everyTurns: 5, lastFullTurn: 5, due: false, why: 'not the turn after one' },
-    { turn: 5, everyTurns: 5, lastFullTurn: 5, due: false, why: 'not twice in one turn' },
-    { turn: 7, everyTurns: 5, lastFullTurn: 2, due: true, why: 'when a multiple went by without one' },
-    { turn: 3, everyTurns: 3, lastFullTurn: null, due: true, why: 'at another interval' },
-    { turn: null, everyTurns: 5, lastFullTurn: null, due: false, why: 'not without a turn' },
-  ])('$why: turn $turn', ({ due, ...input }) => {
-    expect(fullRunDue(input)).toBe(due);
-  });
-});
-
-const fullRun = { everyTurns: 5, replaces: 'final', profile: 'full' };
+const fullRun = { replaces: 'final', profile: 'full' };
 const manifest = (full?: object) => ({ defaultProfile: 'fast', execution: { version: 2, ...(full ? { fullRun: full } : {}) } }) as unknown as TestEnvironmentV1;
 
+/* No turn makes a run the full run: only asking for the full profile by name does, as every release needs one on its commit. */
 describe('how a run chooses', () => {
   it('keeps to itself where the manifest declares no full run: nothing is reused without one', () => {
-    expect(chooseRunMode(manifest(), {}, true, true)).toBeNull();
-    expect(chooseRunMode({ defaultProfile: 'fast' } as unknown as TestEnvironmentV1, {}, true, true)).toBeNull();
+    expect(chooseRunMode(manifest(), {}, true)).toBeNull();
+    expect(chooseRunMode({ defaultProfile: 'fast' } as unknown as TestEnvironmentV1, {}, true)).toBeNull();
   });
 
-  it('takes the full profile for the profile it replaces on a due turn', () => {
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, true, true)).toEqual({ mode: 'full', profile: 'full' });
+  it('reuses nothing when asked for the full profile by name, with fingerprints or without', () => {
+    expect(chooseRunMode(manifest(fullRun), { profile: 'full' }, true)).toEqual({ mode: 'full', profile: 'full' });
+    expect(chooseRunMode(manifest(fullRun), { profile: 'full' }, false)).toEqual({ mode: 'full', profile: 'full' });
   });
 
-  it('stays cached before that turn, for other profiles and for one suite', () => {
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, false, true)).toEqual({ mode: 'cached', profile: 'final' });
-    expect(chooseRunMode(manifest(fullRun), {}, true, true)).toEqual({ mode: 'cached', profile: 'fast' });
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final', suite: 'unit' }, true, true)).toEqual({ mode: 'cached', profile: 'final' });
-    expect(chooseRunMode(manifest(fullRun), { profile: 'full', suite: 'unit' }, false, true)).toEqual({ mode: 'cached', profile: 'full' });
+  it('keeps the profile the full run covers a run of its own, which reuses what it may', () => {
+    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, true)).toEqual({ mode: 'cached', profile: 'final' });
   });
 
-  it('reuses nothing when asked for the full profile by name', () => {
-    expect(chooseRunMode(manifest(fullRun), { profile: 'full' }, false, true)).toEqual({ mode: 'full', profile: 'full' });
+  it('stays cached for other profiles and for one suite, even under the full profile', () => {
+    expect(chooseRunMode(manifest(fullRun), {}, true)).toEqual({ mode: 'cached', profile: 'fast' });
+    expect(chooseRunMode(manifest(fullRun), { profile: 'final', suite: 'unit' }, true)).toEqual({ mode: 'cached', profile: 'final' });
+    expect(chooseRunMode(manifest(fullRun), { profile: 'full', suite: 'unit' }, true)).toEqual({ mode: 'cached', profile: 'full' });
   });
 
-  it('turns off without fingerprints, and a due full run stays a full run', () => {
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, false, false)).toEqual({ mode: 'off', profile: 'final' });
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, true, false)).toEqual({ mode: 'full', profile: 'full' });
+  it('turns off without fingerprints', () => {
+    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, false)).toEqual({ mode: 'off', profile: 'final' });
   });
 });
 

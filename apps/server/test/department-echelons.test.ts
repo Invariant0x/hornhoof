@@ -73,12 +73,13 @@ describe('the stages of a department other than Development', () => {
     expect(await f.echelons(task.id)).toMatchObject({ phase: 'done' });
   });
 
-  it('waits for the head where nobody carries the skill of the check', async () => {
+  it('skips a check nobody in the department carries the skill of, and hands the result to the head to accept', async () => {
     const f = await fixture('marketing', { head: 'MKT-HEAD', author: 'MKT-WRITE' }, ['dev-review-diff']);
     const { task } = await f.create();
     const handed = await submit(f.ctx, f.author.id, task.id, { summary: 'The launch text.', evidence: 'Read it against the brief.', review: { baseCommit: BASE } });
-    expect(handed.task).toMatchObject({ status: 'waiting', assigneeAgentId: null });
-    expect(handed.wakes).toEqual([expect.objectContaining({ agentId: f.head.id, why: 'blocked' })]);
+    expect(handed.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    expect(handed.wakes).toEqual([expect.objectContaining({ agentId: f.head.id, why: 'reviewed' })]);
+    expect((await f.echelons(task.id)).stages.find(step => step.stage === 'review')).toMatchObject({ status: 'skipped', reason: 'no_department_checker' });
   });
 
   it('refuses a stage the route of the department does not have', async () => {
@@ -187,9 +188,10 @@ describe('a department that keeps no repository', () => {
     expect((await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Wrote the launch text.' })).task).toMatchObject({ status: 'done' });
   });
 
-  it('works as before outside a turn, and in a department whose route has no check', async () => {
+  it('takes the work through its stages with an open turn or none, and as before in a department whose route has no check', async () => {
+    /* The team of who does it decides, never a turn. */
     const outside = await office(['hh-check-work'], { turn: false });
-    expect(await outside.echelons((await outside.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'coordination' });
+    expect(await outside.echelons((await outside.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'document', stage: 'development', abilities: { review: 'hh-check-work' } });
     const home = await fixture('household', { head: 'HHD-HEAD', author: 'HHD-BILLS' }, ['hh-check-work'], { repo: false });
     expect(await home.echelons((await home.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'coordination' });
   });

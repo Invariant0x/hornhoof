@@ -21,7 +21,7 @@ describe('whether a department has work', () => {
     expect(await departmentHasWork(c.app.ctx, c.companyId, c.dev.id)).toBe(true);
   });
 
-  it.each(['planned', 'done', 'cancelled'] as const)('does not count a task that is %s', async status => {
+  it.each(['done', 'cancelled'] as const)('does not count a task that is %s', async status => {
     const c = await company();
     await setStatus(c, status);
     expect(await departmentHasWork(c.app.ctx, c.companyId, c.dev.id)).toBe(false);

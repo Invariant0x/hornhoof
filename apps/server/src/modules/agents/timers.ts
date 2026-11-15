@@ -17,6 +17,7 @@ import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
 import { outboundRounds, reconcileOutbound } from '../outbound/extension.js';
+import { releaseRound } from '../tasks/releases.js';
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
 /* Hornhoof looks for due rounds this often. */
@@ -32,7 +33,7 @@ const timed = and(isNotNull(agents.timerMinutes), isNotNull(agents.subscriptionI
 /* What a timer for work looks at: a task open in the company that waits for nobody and nothing it named, or a turn that
    failed since the last round. A task that waits on purpose goes on by itself when what it waits for comes. */
 async function workFor(ctx: Ctx, a: AgentRow): Promise<boolean> {
-  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, a.companyId), notInArray(tasks.status, ['planned', 'done', 'cancelled'])));
+  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, a.companyId), notInArray(tasks.status, ['done', 'cancelled'])));
   for (const task of open) if (!task.externalWait && !(await waitsOnPurpose(ctx, task))) return true;
   const [failed] = await ctx.db
     .select({ id: jobs.id })
@@ -110,7 +111,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 }
 
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
-   their agent is free, files of turns closed a month ago, the old history of node connections, test run times, Codex plans to
+   their agent is free, department turns their release tags close, files of turns closed a month ago, the old history of node connections, test run times, Codex plans to
    move and model checks to run. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
@@ -120,6 +121,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
+    releaseRound(ctx).catch(failed('closing turns by the tags of their releases failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),

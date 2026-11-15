@@ -4,11 +4,18 @@ import { bodyWithin } from './bounded.js';
 
 /* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
 export type OmittedPatch = { path: string; additions: number; deletions: number };
-export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[] } | { complete: false; reason: string };
+/* A commit between the two, with the commits it was made on: a merge has two or more. */
+export type ComparedCommit = { sha: string; parents: string[] };
+export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string };
 export type CompareReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<CompareResult>;
 const Sha = z.string().regex(/^[a-f0-9]{40}$/);
 const File = z.object({ filename: z.string().min(1), previous_filename: z.string().optional(), patch: z.string().optional(), additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative() });
-const Comparison = z.object({ base_commit: z.object({ sha: Sha }), commits: z.array(z.object({ sha: Sha })), total_commits: z.number().int().nonnegative(), status: z.enum(['ahead', 'behind', 'diverged', 'identical']), files: z.array(File).max(299) });
+const Commit = z.object({ sha: Sha, parents: z.array(z.object({ sha: Sha })).default([]) });
+const Comparison = z.object({ base_commit: z.object({ sha: Sha }), commits: z.array(Commit), total_commits: z.number().int().nonnegative(), status: z.enum(['ahead', 'behind', 'diverged', 'identical']), files: z.array(File).max(299) });
+const MoreCommits = z.object({ commits: z.array(Commit), total_commits: z.number().int().nonnegative() });
+/* GitHub lists at most this many commits on a page of a comparison, and the server reads no more pages than this. */
+const COMMITS_PER_PAGE = 250;
+const COMMIT_PAGES = 20;
 
 function trustedHost(at: URL): boolean {
   return at.protocol === 'https:' && at.host === 'github.com' && !at.username && !at.password && !at.search && !at.hash;
@@ -53,7 +60,8 @@ function parsedComparison(body: unknown): CompareResult {
   const headSha = comparisonHead(data);
   if (!headSha) return { complete: false, reason: 'incomplete-comparison' };
   const omitted = data.files.filter(file => file.patch === undefined).map(file => ({ path: file.filename, additions: file.additions, deletions: file.deletions }));
-  return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(patchOrName).join('\n'), omitted };
+  return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(patchOrName).join('\n'), omitted,
+    commits: data.commits.map(commit => ({ sha: commit.sha, parents: commit.parents.map(parent => parent.sha) })) };
 }
 
 /* GitHub's answers are read no further than this, as a repository's refs are: a larger one is too large to take. */
@@ -78,12 +86,31 @@ async function githubJson(repo: RepoAddress, path: string, timeoutMs: number): P
   return { body: JSON.parse(body.toString('utf8')) as unknown };
 }
 
+/* The commits of the pages after the first, as GitHub gives a long comparison: the files come only with the first page. */
+async function laterCommits(repo: RepoAddress, path: string, first: z.infer<typeof Comparison>, timeoutMs: number): Promise<z.infer<typeof Commit>[] | null> {
+  const commits = [...first.commits];
+  for (let page = 2; commits.length < first.total_commits; page++) {
+    if (page > COMMIT_PAGES) return null;
+    const answer = await githubJson(repo, `${path}&page=${page}`, timeoutMs);
+    const more = answer ? MoreCommits.safeParse(answer.body) : null;
+    if (!more?.success || !more.data.commits.length || more.data.total_commits !== first.total_commits) return null;
+    commits.push(...more.data.commits);
+  }
+  return commits;
+}
+
 /* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or
-   missing lines mean unknown, never a clean diff. */
+   missing lines mean unknown, never a clean diff. Every commit between the two is read, page by page. */
 export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000) => {
   try {
-    const answer = await githubJson(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}`, timeoutMs);
-    return answer ? parsedComparison(answer.body) : { complete: false, reason: 'unsupported-repository' };
+    const path = `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}?per_page=${COMMITS_PER_PAGE}`;
+    const answer = await githubJson(repo, path, timeoutMs);
+    if (!answer) return { complete: false, reason: 'unsupported-repository' };
+    const first = Comparison.safeParse(answer.body);
+    /* Only a full first page has more after it; a short one that counts more is no whole inventory. */
+    if (!first.success || first.data.commits.length < COMMITS_PER_PAGE || first.data.total_commits <= first.data.commits.length) return parsedComparison(answer.body);
+    const commits = await laterCommits(repo, path, first.data, timeoutMs);
+    return commits ? parsedComparison({ ...first.data, commits }) : { complete: false, reason: 'incomplete-comparison' };
   } catch (error) { return failed(error, 'compare'); }
 };
 

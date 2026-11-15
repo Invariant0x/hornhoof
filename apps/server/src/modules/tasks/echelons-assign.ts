@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
-import { agents, subscriptions } from '../../db/schema.js';
+import { agents, departments, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 import type { Route } from './echelons-store.js';
@@ -38,6 +38,23 @@ export async function hasChecker(db: Reader['db'], author: Pick<typeof agents.$i
   const staff = await db.select({ id: agents.id, kind: agents.kind, skills: agents.skills }).from(agents)
     .where(and(eq(agents.companyId, author.companyId), eq(agents.departmentId, author.departmentId!), isNull(agents.teamId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   return staff.some(agent => agent.id !== author.id && agent.kind !== 'head' && agent.skills.includes(ability));
+}
+
+/* Why a check is skipped where nobody in its department can do it. */
+export const NO_DEPARTMENT_CHECKER = 'no_department_checker';
+
+/* Whether a check of a department other than Development is skipped, as nobody there carries its skill, and the head
+   accepts the result in its place. Development keeps every check, a Security the task's risk asks for waits for its
+   checker, and so does work its head wrote, as a head accepts no work of its own. */
+export async function uncheckable(db: Reader['db'], task: Pick<Task, 'companyId' | 'departmentId' | 'executorAgentId' | 'assigneeAgentId'>, stage: string, ability: string, security: Route['state']['security']): Promise<boolean> {
+  if (stage === 'security' && security.required) return false;
+  const authorId = task.executorAgentId ?? task.assigneeAgentId;
+  if (!task.departmentId || !authorId) return false;
+  const [department] = await db.select({ key: departments.templateKey }).from(departments).where(and(eq(departments.id, task.departmentId), eq(departments.companyId, task.companyId)));
+  if (!department?.key || department.key === 'development') return false;
+  const [author] = await db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, authorId), eq(agents.companyId, task.companyId)));
+  if (!author || author.kind === 'head') return false;
+  return !(await hasChecker(db, { id: authorId, companyId: task.companyId, departmentId: task.departmentId }, ability));
 }
 
 /* A head checks only where it is named: picked by itself, it would take a stage from its department's employees. */

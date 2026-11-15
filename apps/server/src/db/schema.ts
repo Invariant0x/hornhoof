@@ -280,8 +280,6 @@ export const departments = pgTable('departments', {
   companyId: companyId(),
   name: text('name'),
   templateKey: text('template_key', { enum: TEMPLATE_KEYS }),
-  /* New departments receive their template's mode through their creation path. */
-  workMode: text('work_mode', { enum: ['turns', 'continuous'] }).notNull().default('turns'),
   /* The delivery of its employees whose own card says none; none takes the company's. */
   inboxMode: text('inbox_mode', { enum: INBOX_MODES }),
   parentId: uuid('parent_id').references((): AnyPgColumn => departments.id),
@@ -306,7 +304,7 @@ export const departments = pgTable('departments', {
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 
 /* A key of a git host Hornhoof creates repositories with, for now GitHub's: its token, encrypted with the server's secret and
    shown by its last 4 characters, and the user or organization the repositories go to. The company keeps one, and a
@@ -970,11 +968,9 @@ export const proposals = pgTable('proposals', {
   check('proposals_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
 ]);
 
-/* A cycle of one top-level department with a goal; each department has one open at a time, numbered across the company. */
-export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
-/* How a turn's work runs, chosen as it starts: through the echelons, or by one member of a turnkey team alone. */
-export const TURN_MODES = ['echelons', 'turnkey'] as const;
-export type TurnMode = (typeof TURN_MODES)[number];
+/* A release of one top-level department: its open turn gathers the results accepted into its branch turn-<number>, and the
+   tag of its recorded release closes it. Each department has one open at a time, numbered across the company. */
+export const TURN_STATUSES = ['open', 'closed'] as const;
 /* id is the message's agent event; words kept before it was recorded have none. */
 export type TurnMessage = { id?: string; by: string; text: string; at: string };
 
@@ -990,10 +986,15 @@ export const turns = pgTable(
     /* A short name and the main point in a line or two. */
     title: text('title').notNull().default(''),
     goal: text('goal').notNull(),
-    /* A department's planned turns wait in number order; the lowest opens when its open one closes. */
     status: text('status', { enum: TURN_STATUSES }).notNull().default('open'),
-    /* Fixed once the turn opens, so no turn runs half in each mode. */
-    mode: text('mode', { enum: TURN_MODES }).notNull().default('echelons'),
+    /* The tag vX.Y.Z and the commit it closed on; none while it is open, or on a turn closed before turns were releases. */
+    version: text('version'),
+    commit: text('commit'),
+    /* The release it goes on from: the tag before it and its commit. None until the server first looked at the tags. */
+    baseVersion: text('base_version'),
+    baseCommit: text('base_commit'),
+    /* The head of the turn before it as that one closed: its branch starts there, so no result of that turn is lost. */
+    startCommit: text('start_commit'),
     /* The people's own words the turn was laid out from, as they wrote them. */
     messages: jsonb('messages').$type<TurnMessage[]>().notNull().default([]),
     /* The orchestrator's task for a turn started by a person, from before he laid turns out himself. */
@@ -1009,6 +1010,39 @@ export const turns = pgTable(
     unique('turns_company_id').on(t.companyId, t.id),
     uniqueIndex('turns_one_open').on(t.companyId, t.departmentId).where(sql`status = 'open'`),
     check('turns_department', sql`${t.status} = 'closed' OR ${t.departmentId} IS NOT NULL`),
+    check('turns_status', sql`${t.status} IN ('open', 'closed')`),
+    uniqueIndex('turns_department_version').on(t.companyId, t.departmentId, t.version).where(sql`version IS NOT NULL`),
+  ],
+);
+
+/* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, the full run on it,
+   the results it brings with the verdicts on them, and who approved it. Only the tag of a release kept here closes a turn. */
+export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[] };
+export const turnReleases = pgTable(
+  'turn_releases',
+  {
+    id: id(),
+    companyId: companyId(),
+    turnId: uuid('turn_id').notNull().references(() => turns.id),
+    commit: text('commit').notNull(),
+    baseCommitSha: text('base_commit_sha').notNull(),
+    runId: uuid('run_id').references((): AnyPgColumn => testRuns.id),
+    tasks: jsonb('tasks').$type<ReleasedTask[]>().notNull().default([]),
+    /* The release task it was asked on, and what approved its commit: a person there, or, with autonomous release on and
+       every commit of it checked, the entry of the autonomous release log. One of the two, never both. */
+    taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
+    approvalRequestId: uuid('approval_request_id').references((): AnyPgColumn => requests.id),
+    autonomousReleaseId: uuid('autonomous_release_id').references((): AnyPgColumn => autonomousReleases.id),
+    requestedByAgentId: uuid('requested_by_agent_id').references((): AnyPgColumn => agents.id),
+    /* Whether every commit it brings is of a candidate whose checkers passed it, and what is not. */
+    covered: boolean('covered').notNull(),
+    uncovered: jsonb('uncovered').$type<string[]>().notNull().default([]),
+    createdAt: createdAt(),
+  },
+  t => [
+    index('turn_releases_turn_id').on(t.turnId),
+    check('turn_releases_commit', sql`${t.commit} ~ '^[0-9a-f]{40}$' AND ${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
+    check('turn_releases_approved_once', sql`(${t.approvalRequestId} IS NULL) <> (${t.autonomousReleaseId} IS NULL)`),
   ],
 );
 
@@ -1026,7 +1060,7 @@ export const turnSnapshots = pgTable(
   t => [index('turn_snapshots_company_id').on(t.companyId)],
 );
 
-export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
+export const TASK_STATUSES = ['open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type { ExternalWait } from '@hornhoof/protocol/waits';
 /* Who stopped the work and why; root is the task the pause was placed on, which the work under it shares. */
@@ -1087,6 +1121,7 @@ export const tasks = pgTable(
     index('tasks_external_wait_until').on(sql`(${t.externalWait}->>'until')`).where(sql`${t.externalWait} IS NOT NULL`),
     check('tasks_counts', sql`${t.silent} >= 0`),
     check('tasks_closed_at', sql`${t.status} NOT IN ('done', 'cancelled') OR ${t.closedAt} IS NOT NULL`),
+    check('tasks_status', sql`${t.status} IN ('open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled')`),
     check('tasks_not_own_parent', sql`${t.parentId} IS NULL OR ${t.parentId} <> ${t.id}`),
     check('tasks_work_kind', sql`${t.workKind} IS NULL OR ${t.workKind} IN ('bug', 'known_behavior', 'unknown_path', 'legacy_code')`),
     check('tasks_risk_class', sql`${t.riskClass} IS NULL OR ${t.riskClass} IN ('money', 'access', 'security', 'data', 'none')`),

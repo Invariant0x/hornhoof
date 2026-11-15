@@ -18,17 +18,17 @@ const print = (name: string) => name.repeat(64).slice(0, 64);
 const PRINTS = { 'test/a.test.ts': print('a'), 'test/b.test.ts': print('b'), 'test/c.test.ts': print('c') } as Record<string, string>;
 const fingerprints = (over: Record<string, string> = {}) => FILES.map(file => ({ suiteId: 'unit', file, fingerprint: over[file] ?? PRINTS[file]! }));
 
-const manifest = (everyTurns = 5, preparation = false) => parseTestEnvironment({
+const manifest = (preparation = false) => parseTestEnvironment({
   version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
   profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'final', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
   dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
   suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, keep: ['.metrics/mutate'] }],
   impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
   mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
-  execution: { version: 2, fullRun: { everyTurns, replaces: 'final', profile: 'full' }, ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
+  execution: { version: 2, fullRun: { replaces: 'final', profile: 'full' }, ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
 });
 
-async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
+async function fixture(turnNumber = 3, preparation = false) {
   const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' }), url = await listen(app);
   await setUpCompany(app);
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
@@ -53,7 +53,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
       environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }) }).returning();
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
-    const value = manifest(everyTurns, preparation), manifestSource = JSON.stringify(value);
+    const value = manifest(preparation), manifestSource = JSON.stringify(value);
     const description = { version: 1 as const, repositoryScope: scope, commitSha: TEST_COMMIT, manifestSource, manifest: value, manifestHash: await hashTestEnvironment(manifestSource), inputDigests: [], inventory: FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: described };
     const reply: TestsDescribed = { type: 'tests.described', requestId: stored!.environmentRequest!.requestId!, commitSha: TEST_COMMIT, result: { status: 'ready', description, ...(prints ? { fingerprints: prints } : {}) } };
     await acceptDescription(app.ctx, BUILTIN, reply);
@@ -103,7 +103,7 @@ function marked(f: Awaited<ReturnType<typeof fixture>>): { commit: string; state
 
 describe('reusing green test results', () => {
   it('revalidates files executed in shared preparation and refuses a source that lost its assigned selection', async () => {
-    const f = await fixture(3, 5, true);
+    const f = await fixture(3, true);
     const id = await f.start({ profile: 'final' });
     await f.finish(id);
     const source = await f.runOf(id), scope = source.environmentSnapshot!.description.repositoryScope;
@@ -162,28 +162,31 @@ describe('reusing green test results', () => {
     expect((await f.runOf(second)).status).toBe('passed');
   });
 
-  it('runs everything on the fifth turn, whatever is green, then goes back to reusing', async () => {
-    const f = await fixture(5);
-    const before = await f.start({ profile: 'fast' });
-    await f.finish(before);
-    const full = await f.start({ profile: 'final' });
+  /* No turn makes a run the full run: every release asks for one on its exact commit, by the full profile's name. */
+  it.each([3, 5, 10])('runs everything only when the full profile is named, on turn %i as on any, then goes back to reusing', async number => {
+    const f = await fixture(number);
+    await f.finish(await f.start({ profile: 'fast' }));
+    const release = await f.start({ profile: 'final' });
+    expect(await f.ranFiles(release)).toEqual([]);
+    expect((await f.runOf(release)).fileCache).toMatchObject({ mode: 'cached', turn: number, reused: 3 });
+    const full = await f.start({ profile: 'full' });
     expect(await f.ranFiles(full)).toEqual(FILES);
     const run = await f.runOf(full);
     expect(run.environmentSnapshot!.profile).toBe('full');
-    expect(run.fileCache).toMatchObject({ mode: 'full', turn: 5, reused: 0 });
+    expect(run.fileCache).toMatchObject({ mode: 'full', turn: number, reused: 0 });
     await f.finish(full);
-    await until(async () => (await f.told()).includes('Test run 2 passed'));
-    expect(await f.told()).toContain('This was the full run of turn 5: nothing was reused.');
+    await until(async () => (await f.told()).includes('Test run 3 passed'));
+    expect(await f.told()).toContain(`This was the full run of turn ${number}: nothing was reused.`);
     const next = await f.start({ profile: 'final' });
     expect(await f.ranFiles(next)).toEqual([]);
-    expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: 5, reused: 3 });
+    expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: number, reused: 3 });
   });
 
-  it('counts a task without a turn by the turn open now, and runs no full run with none open', async () => {
+  it('counts a task without a turn by the turn open now, and by none with none open', async () => {
     const f = await fixture(5);
     await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
     await f.finish(await f.start({ profile: 'fast' }));
-    const full = await f.start({ profile: 'final' });
+    const full = await f.start({ profile: 'full' });
     expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
     await f.finish(full);
     await f.db.update(turns).set({ status: 'closed' }).where(eq(turns.companyId, f.companyId));
@@ -195,22 +198,17 @@ describe('reusing green test results', () => {
     const one = await f.start({ profile: 'full', suite: 'unit' });
     expect((await f.runOf(one)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
     await f.finish(one);
-    const full = await f.start({ profile: 'final' });
+    const full = await f.start({ profile: 'full' });
     expect(await f.ranFiles(full)).toEqual(FILES);
     expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
   });
 
-  it('runs everything again after a full run with a part that said nothing of its files, not after one that named what failed', async () => {
+  it('does not make the next run a full run after a full run that failed', async () => {
     const f = await fixture(5);
     await f.finish(await f.start({ profile: 'fast' }));
-    await f.finish(await f.start({ profile: 'final' }), { ok: false });
-    const again = await f.start({ profile: 'final' });
-    expect(await f.ranFiles(again)).toEqual(FILES);
-    expect((await f.runOf(again)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
-    await f.finish(again, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' }] });
+    await f.finish(await f.start({ profile: 'full' }), { ok: false });
     const next = await f.start({ profile: 'final' });
     expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
-    expect(await f.ranFiles(next)).toEqual(['test/a.test.ts']);
   });
 
   /* The fingerprints name the runtimes of the machine that described the run. A part that ran on a machine of other runtimes
@@ -300,16 +298,15 @@ describe('reusing green test results', () => {
       expect((await f.greenRows()).map(row => row.note)).toEqual(['from the turn', 'from the turn', 'from the turn']);
     });
 
-    it('runs the full run on the turn\'s branch alone, and a run of a task branch does not stand in for it', async () => {
+    it('keeps a full run of a task branch off the turn\'s line, and a run of the turn\'s branch is no full run until it names the full profile', async () => {
       const f = await fixture(5);
-      const onTask = await f.start({ profile: 'final' }, undefined, TASK_BRANCH);
-      expect((await f.runOf(onTask)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
-      await f.finish(onTask);
       const named = await f.start({ profile: 'full' }, undefined, TASK_BRANCH);
-      expect((await f.runOf(named)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
+      expect((await f.runOf(named)).fileCache).toMatchObject({ mode: 'full', turn: 5, mainLine: false });
       await f.finish(named);
-      const full = await f.start({ profile: 'final' });
-      expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
+      const release = await f.start({ profile: 'final' });
+      expect((await f.runOf(release)).fileCache).toMatchObject({ mode: 'cached', turn: 5, mainLine: true });
+      const full = await f.start({ profile: 'full' });
+      expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5, mainLine: true });
       expect(await f.ranFiles(full)).toEqual(FILES);
     });
 
@@ -323,13 +320,6 @@ describe('reusing green test results', () => {
       await rememberKept(f.app.ctx, onTurn, { commit: TEST_COMMIT, kept });
       expect((await f.db.select().from(testSuiteMemory)).map(row => row.files)).toEqual([kept[0]!.files]);
     });
-  });
-
-  it('runs everything sooner at a lower number from the manifest', async () => {
-    const f = await fixture(3, 3);
-    const first = await f.start({ profile: 'fast' });
-    await f.finish(first);
-    expect(await f.ranFiles(await f.start({ profile: 'final' }))).toEqual(FILES);
   });
 
   it('keeps no result of a file that failed and keeps those that passed beside it', async () => {
@@ -355,7 +345,7 @@ describe('reusing green test results', () => {
   it('shows a mismatch when a file green at its fingerprint fails in the full run, and stops trusting that result', async () => {
     const f = await fixture(5);
     await f.finish(await f.start({ profile: 'fast' }));
-    const full = await f.start({ profile: 'final' });
+    const full = await f.start({ profile: 'full' });
     await f.finish(full, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' }] });
     const run = await f.runOf(full);
     expect(run.fileCache!.mismatches).toEqual([{ suiteId: 'unit', file: 'test/a.test.ts' }]);
@@ -484,7 +474,7 @@ describe('reusing green test results', () => {
 
 describe('zero-part product reuse receipts', () => {
   it.each([false, true])('accepts complete server reuse after closeFileCache, preparation=%s', async preparation => {
-    const f = await fixture(3, 5, preparation);
+    const f = await fixture(3, preparation);
     const verifies = async () => verifiedReuse(await f.runOf(id));
     await f.finish(await f.start({ profile: 'final' }));
     const id = await f.start({ profile: 'final' }), ended = await f.runOf(id);

@@ -19,6 +19,7 @@ import { isAutonomousReleaseEnabled, tryAutonomousCommitApproval } from '../task
 import { decisionPerson } from '../tasks/decisions.js';
 import { ask, comment, mayAsk, refuse, taskSpot, type Ask, type Task } from '../tasks/engine.js';
 import { TURN_QUESTIONS } from '../tasks/tools.js';
+import { openTurnOf } from '../tasks/turn-department.js';
 import { taskByRef } from '../tasks/views.js';
 import { openGoal, resolveGoal, reviseGoal, type GoalImpact, type GoalRef } from '../tasks/wait-goals.js';
 import { wakeAll } from '../tasks/wake.js';
@@ -41,11 +42,13 @@ const readable = async (fn: () => Promise<ReturnType<typeof say>>) => {
 
 const GoalOn = z.enum(['task', 'turn']).default('task');
 
-/* The goal a report is about, by what it stands on rather than by its words. */
-function goalRefOf(task: Task, on: 'task' | 'turn'): GoalRef {
+/* The goal a report is about, by what it stands on rather than by its words: the task, or the release it goes into, the
+   turn it joined or else its department's open turn. */
+async function goalRefOf(ctx: Pick<Ctx, 'db'>, task: Task, on: 'task' | 'turn'): Promise<GoalRef> {
   if (on === 'task') return { kind: 'task', id: task.id };
-  if (!task.turnId) throw refuse(400, 'task_invalid', `#${task.number} is in no turn.`);
-  return { kind: 'turn', id: task.turnId };
+  const turnId = task.turnId ?? (await openTurnOf(ctx.db, task.companyId, task.departmentId))?.id;
+  if (!turnId) throw refuse(400, 'task_invalid', `#${task.number} is in no turn, and its department has no open turn.`);
+  return { kind: 'turn', id: turnId };
 }
 
 type Asked = {
@@ -162,7 +165,7 @@ async function readPolicy(ctx: Pick<Ctx, 'db'>, job: ToolJob, department: string
 /* A goal in danger, as a head or the orchestrator says it: a new episode, or what this adds to the one that is open. */
 async function escalateGoal(ctx: Ctx, job: ToolJob, ref: number | string, said: { goal: string; why: string; impact: GoalImpact; on: 'task' | 'turn' }) {
   const task = await heldTask(ctx, job, ref);
-  const goalRef = goalRefOf(task, said.on);
+  const goalRef = await goalRefOf(ctx, task, said.on);
   const open = await openGoal(ctx.db, task.companyId, goalRef);
   if (open) return say(await reviseGoal(ctx, { agentId: job.agentId }, open, said.impact) ? 'The CEO is told it is now missed.' : `The CEO has this already, on the question in #${task.number}. Nothing changed.`);
   try {
@@ -182,7 +185,7 @@ async function endGoalRisk(ctx: Ctx, job: ToolJob, ref: number | string, why: st
   if (!task) return say(`There is no task ${ref}. Call tasks for yours.`, true);
   const [me] = await ctx.db.select({ kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, job.agentId));
   if (me?.kind !== 'orchestrator' && me?.departmentId !== task.departmentId) return say(`#${task.number} is not of your department.`, true);
-  await resolveGoal(ctx, { agentId: job.agentId }, job.companyId, goalRefOf(task, on), why);
+  await resolveGoal(ctx, { agentId: job.agentId }, job.companyId, await goalRefOf(ctx, task, on), why);
   return say('Recorded: the goal is out of danger.');
 }
 

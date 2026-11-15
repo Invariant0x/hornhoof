@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, departments, people, requests, tasks, taskEvents, turns, waitNotices, waitPolicies, taskWaits } from '../src/db/schema.js';
 import { answer, ask, createTask, report, type Task } from '../src/modules/tasks/engine.js';
-import { settle } from '../src/modules/tasks/turns.js';
 import { sweepWaits } from '../src/modules/tasks/wait-escalation.js';
 import * as goals from '../src/modules/tasks/wait-goals.js';
 import { deliverWaitNotices } from '../src/modules/tasks/wait-notices.js';
@@ -164,10 +163,15 @@ describe('the summary of a turn', () => {
     const silent = await c.held('Closed with no word');
     return { ...c, turn: turn!, reported, silent };
   };
+  /* Both results go into the turn as they are accepted, and the tag of its release closes it, as releaseRound does. */
   const close = async (c: Awaited<ReturnType<typeof inTurn>>) => {
-    const moved = await report(c.ctx, c.head.id, c.reported.id, { done: true, summary: 'Shipped.' });
+    await report(c.ctx, c.head.id, c.reported.id, { done: true, summary: 'Shipped.' });
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.silent.id));
-    return settle(c.ctx, moved.task);
+    await c.db.update(tasks).set({ turnId: c.turn.id }).where(inArray(tasks.id, [c.reported.id, c.silent.id]));
+    await c.db.transaction(async tx => {
+      const [released] = await tx.update(turns).set({ status: 'closed', closedAt: new Date(), version: 'v1.0.0' }).where(eq(turns.id, c.turn.id)).returning();
+      await goals.recordTurnSummary(tx, released!);
+    });
   };
 
   it('tells the CEO once what is on record of it, and calls nothing a success that has no result', async () => {
@@ -186,13 +190,19 @@ describe('the summary of a turn', () => {
     expect(await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.reported.id), eq(taskEvents.kind, 'wait_card')))).toHaveLength(1);
   });
 
-  it('says which goal risks are still open as it closes', async () => {
+  it('says which goal risks are still open as it closes, of the work it took in and of the release itself', async () => {
     const c = await inTurn();
     await c.say(c.silent, { impact: 'at_risk' });
+    /* Said of the release by work that is still going and was not in it. */
+    const going = await c.held('Still going');
+    await c.say(going, { on: 'turn', impact: 'missed' });
+    const later = await c.held('Later work');
+    await c.say(later, { impact: 'at_risk' });
     await close(c);
     await deliverWaitNotices(c.ctx);
     const summary = (await c.cardsOf()).find(card => card.about === 'turn_summary')!;
-    expect(summary.words).toContain(`Goal risks still open: #${c.silent.number} at risk.`);
+    expect(summary.words).toContain(`Goal risks still open: #${c.silent.number} at risk, #${going.number} missed.`);
+    expect(summary.words).not.toContain(`#${later.number}`);
   });
 
   it('is kept while the card waits to be seen, and goes when it is acknowledged, deciding nothing', async () => {

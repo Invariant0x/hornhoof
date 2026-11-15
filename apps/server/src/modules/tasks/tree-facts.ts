@@ -3,7 +3,7 @@ import { and, asc, eq, gte, inArray, isNotNull, notInArray, or, sql } from 'driz
 import { unionAll } from 'drizzle-orm/pg-core';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import type { Task, Tx } from './engine.js';
+import { CLOSED, type Task, type Tx } from './engine.js';
 import { NUDGES, treeOwnerSince, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
 import { routeSnapshots } from './echelons-store.js';
@@ -11,7 +11,7 @@ import { countedFindings } from './review-findings.js';
 import type { EchelonsSnapshot, EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import { readTurnHistory, upTo } from './tree-history.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
-import { openTurnOf } from './turn-department.js';
+import { openTurnOf, workOfOpenTurn } from './turn-department.js';
 
 type Reader = Db | Tx;
 
@@ -171,7 +171,7 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
   const turnTasks = await db
     .select()
     .from(tasks)
-    .where(and(eq(tasks.companyId, companyId), eq(tasks.turnId, turn.id), eq(tasks.departmentId, departmentId)))
+    .where(and(eq(tasks.companyId, companyId), eq(tasks.departmentId, departmentId), until ? eq(tasks.turnId, turn.id) : or(eq(tasks.turnId, turn.id), and(workOfOpenTurn(turn.id), notInArray(tasks.status, [...CLOSED])))))
     .orderBy(asc(tasks.createdAt), asc(tasks.number));
   if (!turnTasks.length) return emptyFacts(repository, turn);
 

@@ -1,6 +1,8 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, or, type SQL } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { departments, turns } from '../../db/schema.js';
+import { departments, tasks, turns } from '../../db/schema.js';
+import type { Tx } from './engine.js';
+import { lastTurnNumber } from './numbers.js';
 
 type Reader = Pick<Db, 'select'>;
 type Department = typeof departments.$inferSelect;
@@ -25,4 +27,18 @@ export async function openTurnOf(db: Reader, companyId: string, departmentId: st
   if (!top || top.companyId !== companyId) return null;
   const [turn] = await db.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.departmentId, top.id), eq(turns.status, 'open')));
   return turn ?? null;
+}
+
+/* The work of a department's open turn: the results accepted into it and the work going on that is in no turn yet, as
+   every task joins the open turn only as its result is accepted. */
+export const workOfOpenTurn = (turnId: string): SQL => or(eq(tasks.turnId, turnId), isNull(tasks.turnId))!;
+
+/* The open turn of a top-level department, opened with the next number of the company when it has none: every department
+   always gets a release ready. Under the company row, as every turn number is given. */
+export async function ensureOpenTurn(tx: Tx, companyId: string, departmentId: string, from: Pick<typeof turns.$inferInsert, 'baseVersion' | 'baseCommit' | 'startCommit'> = {}): Promise<typeof turns.$inferSelect> {
+  const [open] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.departmentId, departmentId), eq(turns.status, 'open')));
+  if (open) return open;
+  const number = (await lastTurnNumber(tx, companyId)) + 1;
+  const [opened] = await tx.insert(turns).values({ companyId, departmentId, number, goal: 'The next release.', status: 'open', openedAt: new Date(), ...from }).returning();
+  return opened!;
 }

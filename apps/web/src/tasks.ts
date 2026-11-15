@@ -4,7 +4,7 @@ import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { refetcher } from './refetch';
 import { deptLabel, type Messages } from './i18n';
-import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDepartments, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
+import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDepartments, TaskDetail, TaskLine, TaskPlace, TurnView, WaitCard } from './types';
 import { everyVisible } from './guard';
 
 const hasBody = <B,>(body: B | null | undefined, fresh: () => boolean): body is B => body !== null && body !== undefined && fresh();
@@ -59,10 +59,10 @@ export function useLive<T>(path: string | null, pick: (body: never) => T, wanted
   return { data, failure, load };
 }
 
-/* department: one of the person's own, or none for the work given to the orchestrator itself. */
-export type TaskFilter = { status: 'open' | 'closed' | 'all'; department: string };
+/* department: any of the company's, or none for the work given to the orchestrator itself; left out, all the person reads. */
+export type TaskFilter = { status: 'open' | 'closed' | 'all'; department?: string };
 
-export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}&department=${f.department}`;
+export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}${f.department ? `&department=${f.department}` : ''}`;
 
 const taskSource = (filter: TaskFilter, enabled: boolean): string | null => enabled ? tasksPath(filter) : null;
 
@@ -92,13 +92,22 @@ export function useDecisions() {
   return { decisions: data, failure, load };
 }
 
+/* The cards kept for this person, newest first, fetched again when what waits for people may have changed. */
+export function useWaitCards() {
+  const { data, failure, load } = useLive('/api/wait-cards', (b: { cards: WaitCard[] }) => b.cards, m => m.type === 'requests');
+  return { cards: data, failure, load };
+}
+
+/* The person says they saw their card. It decides nothing. */
+export const sawCard = (id: string) => api.post<{ ok: true }>(`/api/wait-cards/${id}/ack`);
+
 /* What employees found to improve, for people who see the whole company; nothing is fetched for others. */
 export function useImprovements(company: boolean) {
   const { data, failure, load } = useLive(company ? '/api/improvements' : null, (b: { improvements: Improvement[] }) => b.improvements, m => m.type === 'improvements');
   return { improvements: data, failure, load };
 }
 
-/* The turns of the company's departments: the last finished ones, the running ones and the planned ones, in number order. */
+/* The turns of the company's departments: the last released ones and the open ones, in number order. */
 export function useTurns(enabled = true) {
   const { data, failure, load } = useLive(enabled ? '/api/turns' : null, (b: { turns: TurnView[] }) => b.turns, m => m.type === 'org' || m.type === 'task');
   return { turns: data, failure, load };

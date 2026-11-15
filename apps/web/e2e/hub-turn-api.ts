@@ -4,7 +4,7 @@ import { ME, serveApi } from './api';
 
 /* Development's open turn as the Tasks screen reads it. */
 export const HUB_TURN: TurnView = {
-  id: 'u3', number: 3, title: 'Payment rollout', goal: 'Ship payments', status: 'open', mode: 'echelons', departmentId: 'd1', canChangeMode: true, messages: [], taskId: null,
+  id: 'u3', number: 3, title: 'Payment rollout', goal: 'Ship payments', status: 'open', version: null, commit: null, baseVersion: null, departmentId: 'd1', messages: [], taskId: null,
   startedAt: '2026-11-04T10:00:00.000Z', openedAt: '2026-11-04T10:00:00.000Z', closedAt: null,
   tasks: { done: 3, total: 17 },
 };
@@ -39,7 +39,6 @@ function department({ name, roleCode, progress }: Company[number], i: number, op
     id, name, templateKey: null, roleCode, about: '', products: [], teams: [], people: [], roles: [], employees,
     agents: { total: employees.length, working: employees.filter(e => e.status === 'working').length },
     current: { id: `${id}-t`, number: 40 + i, title: `${name} work for the payment rollout` },
-    workMode: progress ? 'turns' : 'continuous',
     turnProgress: open && progress ? { turnNumber: HUB_TURN.number, done: progress[0], total: progress[1] } : null,
   };
 }
@@ -84,12 +83,10 @@ export async function taskStream(page: Page) {
   });
 }
 
-/* The company as the server counts it for the map, changed as tasks close, departments join and the turn closes. A department
-   switched to work all the time drops out of the turn, and the server tells the page the company changed. */
+/* The company as the server counts it for the map, changed as tasks close, departments join and the turn closes. */
 export async function serveHubTurn(page: Page, start: Company = ONE) {
   let company = start;
   let open = true;
-  const puts: unknown[] = [];
   await taskStream(page);
   await serveApi(page);
   await page.route('**/api/**', async route => {
@@ -98,26 +95,13 @@ export async function serveHubTurn(page: Page, start: Company = ONE) {
     if (url.pathname === '/api/turns') return route.fulfill({ json: { turns: open ? [HUB_TURN] : [] } });
     if (url.pathname === '/api/version') return route.fulfill({ json: { version: '0.18.7', commit: 'hub-turns' } });
     if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.18.7', commit: 'hub-turns' }, available: false, latest: null, updater: { status: null, waiting: null } } });
-    /* The department's About shows its approvals and briefing beside its work mode. */
+    /* The department's About shows its approvals and briefing. */
     const about = /^\/api\/departments\/(d\d+)\/(approval-policy|briefing)$/.exec(url.pathname);
     if (about?.[2] === 'approval-policy') return route.fulfill({ json: policy(about[1]!) });
     if (about) return route.fulfill({ json: BRIEFING });
-    const mode = /^\/api\/departments\/(d\d+)\/work-mode$/.exec(url.pathname);
-    if (mode) {
-      const i = company.findIndex((_, k) => deptId(k) === mode[1]);
-      if (route.request().method() === 'PUT') {
-        const body = route.request().postDataJSON() as { workMode: 'turns' | 'continuous' };
-        puts.push(body);
-        if (body.workMode === 'continuous') company = company.map((d, k) => (k === i ? { ...d, progress: null } : d));
-        await route.fulfill({ json: { departmentId: mode[1], workMode: body.workMode, canChangeWorkMode: true } });
-        return page.evaluate(() => window.hubTaskEvent('org'));
-      }
-      return route.fulfill({ json: { departmentId: mode[1], workMode: company[i]?.progress ? 'turns' : 'continuous', canChangeWorkMode: true } });
-    }
     return route.fallback();
   });
   return {
-    puts,
     /* The company now: the page hears that tasks moved and fetches it again. */
     show: async (next: Company) => {
       company = next;

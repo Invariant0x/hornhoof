@@ -12,4 +12,7 @@ export type WaitNoticeGuard = {
   waitOn?: { taskId: string; employee: string; episode: number };
   /* The turn a summary is of, and the task its log line goes on. */
   turn?: { id: string; taskId: string };
+  /* A version tag that released none of that turn: what it is named, the commit it is on, and why: no release of it was
+     recorded before main moved, or what its record relied on no longer stands. */
+  tag?: { version: string; commit: string; why: 'unrecorded' | 'stale' };
 };

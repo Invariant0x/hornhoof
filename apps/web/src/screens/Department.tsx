@@ -11,7 +11,6 @@ import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, Zoo
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { ApprovalPolicy } from '../ui/ApprovalPolicy';
-import { WorkMode } from '../ui/WorkMode';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { Repositories } from '../ui/RepoSettings';
@@ -149,19 +148,6 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
     <section aria-labelledby={`${id}-approvals`}>
       <h3 id={`${id}-approvals`}>{t.dept.approvals.title}</h3>
       <ApprovalPolicy departmentId={department.id} ownerPersonId={department.ownerPersonId} />
-    </section>
-  );
-}
-
-/* Whether the department works in turns of its own or all the time, for people with access to the department itself. */
-function DeptWorkMode({ department, shown }: { department: Department; shown: boolean }) {
-  const t = useT();
-  const id = useId();
-  if (!shown) return null;
-  return (
-    <section aria-labelledby={`${id}-work-mode`}>
-      <h3 id={`${id}-work-mode`}>{t.dept.workMode.title}</h3>
-      <WorkMode departmentId={department.id} workMode={department.workMode} />
     </section>
   );
 }
@@ -610,7 +596,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               <>
                 <DeptEmployeeList department={d} company={runs} />
                 <DeptSubUnits department={d} company={runs} />
-                <DeptWorkMode department={d} shown={canGive} />
                 <DeptApprovals department={d} shown={canGive} />
                 {reaches && (
                   <section aria-labelledby={`${id}-briefing`}>

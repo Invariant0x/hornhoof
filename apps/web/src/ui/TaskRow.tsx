@@ -3,7 +3,7 @@ import type { TaskLine, TaskStatus } from '../types';
 import { stageName } from './stage-name';
 
 /* What needs people first, then what moves, then what has not started and what waits for its turn; closed tasks after. */
-export const ORDER: TaskStatus[] = ['waiting', 'blocked', 'review', 'working', 'open', 'planned', 'done', 'cancelled'];
+export const ORDER: TaskStatus[] = ['waiting', 'blocked', 'review', 'working', 'open', 'done', 'cancelled'];
 
 /* Tasks in that order, the newest first within a state. */
 export const byState = (a: TaskLine, b: TaskLine) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || b.number - a.number;

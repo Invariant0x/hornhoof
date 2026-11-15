@@ -72,7 +72,8 @@ describe('the move path in a company with a long history', () => {
     const schema = await c.member('Database schema', c.bruno.id);
     const docs = await c.member('Docs', c.tess.id, [api.id]);
     const e2e = await c.member('End-to-end tests', c.tess.id, [api.id, schema.id]);
-    expect(api.turnId).toBe(c.open.id);
+    /* Work joins the open turn as its result is accepted into the turn branch, not as it is given. */
+    expect(api.turnId).toBeNull();
 
     /* The named checker owns this candidate regardless of the old closed history. */
     const handed = await submit(c.ctx, c.bruno.id, api.id, { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
@@ -85,6 +86,7 @@ describe('the move path in a company with a long history', () => {
     expect(checked.wakes.filter(wake => wake.why === 'assigned').map(wake => [wake.agentId, wake.taskId])).toEqual([[c.tess.id, api.id]]);
     expect(await c.started(docs.id)).toEqual([]);
     const passed = await c.accept(api.id);
+    expect(passed.task.turnId).toBe(c.open.id);
     expect(passed.wakes.map(w => [w.agentId, w.taskId, w.why])).toContainEqual([c.tess.id, docs.id, 'assigned']);
     expect(passed.wakes.filter(w => w.why === 'assigned').map(w => w.taskId)).toEqual([docs.id]);
     expect(await c.started(docs.id)).toEqual([`#${api.number} is done, so it starts now.`]);

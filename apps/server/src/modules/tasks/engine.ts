@@ -10,7 +10,8 @@ import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { takeMainAtTests } from './echelons-main.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
-import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
+import { openTurnOf } from './turn-department.js';
+import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, skippedData, type Route } from './echelons-store.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
@@ -19,7 +20,7 @@ import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArr
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, jobs, people, requests, subscriptions, taskEvents, tasks, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
@@ -40,7 +41,6 @@ import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
 import { bindAfter, bindRequest, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 import { stuckRecipient } from './stuck-route.js';
-import { topDepartment } from './turn-department.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -119,18 +119,15 @@ function checkAfterPlans(after: string[], plans: AfterPlans | undefined): void {
   if (Object.keys(plans ?? {}).some(id => !after.includes(id))) throw refuse(400, 'task_invalid', 'A plan names a task this one does not come after.');
 }
 
-/* What a task comes after: tasks of the company, each once and none cancelled. One of another turn, or of none, has
-   started already: a planned task waits for its turn to open, and work waiting on it would hold its own turn open as long,
-   as a turn of one department may wait for another's. hold: they stay as read until the transaction ends, so none is done
-   meanwhile unseen. */
-async function checkAfter(db: Db | Tx, companyId: string, turnId: string | null, ids: string[], hold = false): Promise<Task[]> {
+/* What a task comes after: tasks of the company, each once and none cancelled. hold: they stay as read until the
+   transaction ends, so none is done meanwhile unseen. */
+async function checkAfter(db: Db | Tx, companyId: string, ids: string[], hold = false): Promise<Task[]> {
   if (new Set(ids).size !== ids.length) throw refuse(400, 'task_invalid', 'A task it comes after is listed twice.');
   const read = db.select().from(tasks).where(inArray(tasks.id, ids));
   const rows = ids.length ? await (hold ? read.orderBy(asc(tasks.id)).for('share') : read) : [];
   for (const id of ids) {
     const t = rows.find(r => r.id === id);
     if (!t || t.companyId !== companyId) throw refuse(400, 'task_invalid', `There is no task ${id} to come after.`);
-    if (t.turnId !== turnId && t.status === 'planned') throw refuse(400, 'task_invalid', `#${t.number} waits for its turn to start. A task comes after a task of another turn only once that one has started.`);
     if (t.status === 'cancelled') throw refuse(400, 'task_invalid', `#${t.number} is cancelled, so nothing can come after it.`);
   }
   return rows;
@@ -256,7 +253,9 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
        is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
-    if (n.data?.turnCleanup || n.data?.independentPart) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+    /* A result joins a turn as a release closes the turn: the company goes first, then the task rows, as in every move of
+       turns, so the release sees it or it sees the release. */
+    if (n.data?.turnCleanup || n.data?.independentPart || set.turnId) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
     if (set.after?.length) await lockMovePrerequisites(tx, task, set.after);
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
@@ -386,7 +385,6 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
   const [child] = await tx.insert(tasks).values({
     companyId: parent.companyId,
     number: last + 1,
-    turnId: parent.turnId,
     parentId: parent.id,
     departmentId: parent.departmentId,
     productId: parent.productId,
@@ -405,8 +403,8 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
   }).returning();
   /* A part of the same work may touch what its whole may, as the head approved it there. */
   const whole = await routeOf(tx, parent);
-  await createRoute(tx, child!, { paths: whole.paths, ...(whole.state.resultKind === 'document' ? { resultKind: 'document' } : {}) }, plan);
-  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id } });
+  const skipped = await createRoute(tx, child!, { paths: whole.paths, ...(whole.state.resultKind === 'document' ? { resultKind: 'document' } : {}) }, plan);
+  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id, ...skippedData(skipped) } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
   return { child: child!, wake };
@@ -472,11 +470,10 @@ function independentData(declaration: IndependentDeclaration | null): Record<str
   return {};
 }
 
-function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTaskSetup, position: { urgent: boolean; turnId: string | null; number: number }): typeof tasks.$inferInsert {
+function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
   return {
         companyId: assignee.companyId,
         number: position.number,
-        turnId: position.turnId,
         parentId: parent?.id ?? null,
         departmentId: input.departmentId,
         productId: input.productId ?? null,
@@ -498,18 +495,8 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTa
 
 type CreatedTask = Moved & { independent: Task | null };
 
-/* The turn a new task belongs to: its parent's, or else the turn its department runs now, if any. A department that works
-   all the time keeps its new work outside turns. */
-export async function turnForNewTask(tx: Db | Tx, companyId: string, parent: Task | null, departmentId: string | null): Promise<string | null> {
-  if (parent) return parent.turnId;
-  const top = await topDepartment(tx, departmentId);
-  if (!top || top.companyId !== companyId || top.workMode === 'continuous') return null;
-  const [turn] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.departmentId, top.id), eq(turns.status, 'open')));
-  return turn?.id ?? null;
-}
-
-async function afterForNewTask(tx: Tx, companyId: string, turnId: string | null, parent: Task | null, input: NewTask): Promise<Task[]> {
-  const after = await checkAfter(tx, companyId, turnId, input.after ?? [], true);
+async function afterForNewTask(tx: Tx, companyId: string, parent: Task | null, input: NewTask): Promise<Task[]> {
+  const after = await checkAfter(tx, companyId, input.after ?? [], true);
   await refuseAbove(tx, parent?.id ?? null, input.after ?? []);
   return after;
 }
@@ -525,20 +512,20 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
   const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent, input.departmentId);
   const last = await lastTaskNumber(tx, assignee.companyId);
-  const turnId = await turnForNewTask(tx, assignee.companyId, parent, input.departmentId ?? null);
   /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
      whether it waits: that one is done after the task is made, and starts it. */
-  const after = await afterForNewTask(tx, assignee.companyId, turnId, parent, input);
+  const after = await afterForNewTask(tx, assignee.companyId, parent, input);
   const waits = after.some(t => t.status !== 'done');
   const [row] = await tx
     .insert(tasks)
-    .values(newTaskValues(actor, input, setup, { urgent, turnId, number: last + 1 }))
+    .values(newTaskValues(actor, input, setup, { urgent, number: last + 1 }))
     .returning();
-  await createRoute(tx, row!, input, plan);
+  const skipped = await createRoute(tx, row!, input, plan);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
     assignee: assignee.id,
     after: row!.after,
     ...independentData(declaration),
+    ...skippedData(skipped),
   } });
   await bindAfter(tx, row!, after, input.afterPlans, actor);
   if (declaration?.kind === 'part') {
@@ -553,16 +540,15 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   return { task: row!, wakes, independent };
 }
 
-/* Whether work of a department with no repository goes through its stages as a document: in a turn run in echelons, from
-   an employee outside the turnkey teams, where the route of the department has a check and somebody else there carries
-   its skill. Anywhere else such work is done as before, by its holder alone. */
+/* Whether work of a department with no repository goes through its stages as a document: from an employee outside the
+   turnkey teams, where the route of the department has a check and somebody else there carries its skill. Anywhere else such
+   work is done as before, by its holder alone. */
 async function handsInDocument(ctx: Ctx, input: NewTask): Promise<boolean> {
   const check = documentCheck(await departmentStages(ctx, input.departmentId));
   if (!check) return false;
   const author = await workingAgent(ctx.db, null, input.assigneeAgentId);
   if (!(await hasChecker(ctx.db, author, check))) return false;
-  const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
-  return wouldGoThroughEchelons(ctx.db, { companyId: author.companyId, turnId: await turnForNewTask(ctx.db, author.companyId, parent, input.departmentId ?? null), holderId: author.id });
+  return wouldGoThroughEchelons(ctx.db, { companyId: author.companyId, holderId: author.id });
 }
 
 async function executorResult(ctx: Ctx, input: NewTask): Promise<NonNullable<NewTask['resultKind']>> {
@@ -643,7 +629,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...skippedData(next.skipped) },
   }, async tx => {
     if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);
@@ -826,7 +812,7 @@ function releasedRoute(route: Route, agentId: string, current: boolean): Route['
 
 /* Leaving an assignment never skips the stage or erases an immutable candidate. */
 export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[] }> {
-  const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned']))).orderBy(asc(tasks.id));
+  const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.id));
   const wakes: Wake[] = [], handed: string[] = [];
   for (const row of rows) await onFresh(ctx, row, async task => {
     const route = await routeOf(ctx.db, task);
@@ -881,15 +867,22 @@ async function relabelWorkKind(ctx: Live, agentId: string, task: Task, workKind:
 }
 
 /* Head revisions preserve the current stage and its immutable candidate. */
-function requireTurnCleanupDecision(task: Task, change: TaskChange): void {
-  if (change.cleanupForTurn && (change.cleanup === undefined || !task.turnId)) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
+function requireTurnCleanupDecision(change: TaskChange): void {
+  if (change.cleanupForTurn && change.cleanup === undefined) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
+}
+
+/* The turn a head's Cleanup decision for the department holds in: its open turn, until its next release. */
+async function cleanupTurn(db: Db, task: Task): Promise<string> {
+  const turn = await openTurnOf(db, task.companyId, task.departmentId);
+  if (!turn) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
+  return turn.id;
 }
 
 export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   await requireTaskHead(ctx, task, agentId);
-  requireTurnCleanupDecision(task, c);
+  requireTurnCleanupDecision(c);
   const route = await routeOf(ctx.db, task);
   if (c.workKind !== undefined && Object.keys(c).every(key => key === 'workKind')) return relabelWorkKind(ctx, agentId, task, c.workKind);
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);
@@ -904,11 +897,11 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   let changed: Task[] = [];
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;
   const wakes: Wake[] = [];
-  const policy = c.cleanupForTurn ? { turnId: task.turnId, departmentId: task.departmentId, enabled: c.cleanup } : undefined;
+  const policy = c.cleanupForTurn ? { turnId: await cleanupTurn(ctx.db, task), departmentId: task.departmentId, enabled: c.cleanup } : undefined;
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields: Object.keys(c), ...independentData(declaration), ...(policy ? { turnCleanup: policy } : {}) } }, async (tx, row) => {
-    if (c.cleanupForTurn) changed = await applyTurnCleanup(tx, task, agentId, c.cleanup!, wakes);
+    if (policy) changed = await applyTurnCleanup(tx, task, policy.turnId, agentId, c.cleanup!, wakes);
     await changeRoute(tx, route, revised.state, revised.paths);
-    if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, task.turnId, set.after), c.afterPlans, { agentId });
+    if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, set.after), c.afterPlans, { agentId });
     independent = await insertIndependentChange(tx, row, agentId, independentChange, wakes);
     await wakeUpdatedHolder(tx, task, row, set, holder, wakes);
     await endFormerOwnerTurns(tx, task, set);
@@ -936,7 +929,7 @@ async function changePrerequisites(ctx: Ctx, task: Task, route: Route, change: T
   if (change.after === undefined) return;
   if (isStaged(route.state.resultKind) && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking result cannot acquire unfinished prerequisites.');
   checkAfterPlans(change.after, change.afterPlans);
-  await checkAfter(ctx.db, task.companyId, task.turnId, change.after);
+  await checkAfter(ctx.db, task.companyId, change.after);
   await refuseAbove(ctx.db, task.parentId, change.after);
   await refuseBelow(ctx.db, task, change.after);
   set.after = change.after;

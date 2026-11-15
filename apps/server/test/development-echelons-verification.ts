@@ -53,7 +53,7 @@ export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>
     if (options.cache) {
       manifest.profiles.push({ id: 'full', requiredSuiteIds: ['vitest'] });
       manifest.suites[0]!.profiles.push('full');
-      manifest.execution.fullRun = { everyTurns: 5, replaces: 'fast', profile: 'full' };
+      manifest.execution.fullRun = { replaces: 'fast', profile: 'full' };
     }
     if (options.suitesOnly) delete manifest.execution;
     const profile = options.cache ? 'full' : 'fast';

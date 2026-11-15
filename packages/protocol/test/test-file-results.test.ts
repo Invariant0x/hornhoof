@@ -15,23 +15,22 @@ const fullRun = (value: object) => manifest({ version: 2, fullRun: value });
 const digest = 'a'.repeat(64);
 
 describe('the full run of a manifest', () => {
-  it('names how often and which profile takes the place of which', () => {
-    const parsed = TestEnvironmentV1.parse(fullRun({ everyTurns: 5, replaces: 'final', profile: 'full' }));
-    expect(parsed.execution?.fullRun).toEqual({ everyTurns: 5, replaces: 'final', profile: 'full' });
+  it('names which profile runs everything and which one it covers, and no interval: every release runs it', () => {
+    const parsed = TestEnvironmentV1.parse(fullRun({ replaces: 'final', profile: 'full' }));
+    expect(parsed.execution?.fullRun).toEqual({ replaces: 'final', profile: 'full' });
   });
 
   it.each([
-    ['an unknown profile', { everyTurns: 5, replaces: 'final', profile: 'whole' }],
-    ['an unknown profile it replaces', { everyTurns: 5, replaces: 'last', profile: 'full' }],
-    ['the same profile twice', { everyTurns: 5, replaces: 'final', profile: 'final' }],
-    ['no turns', { everyTurns: 0, replaces: 'final', profile: 'full' }],
-    ['a part of a turn', { everyTurns: 1.5, replaces: 'final', profile: 'full' }],
+    ['an unknown profile', { replaces: 'final', profile: 'whole' }],
+    ['an unknown profile it covers', { replaces: 'last', profile: 'full' }],
+    ['the same profile twice', { replaces: 'final', profile: 'final' }],
+    ['a number of turns, as no release goes without it', { everyTurns: 5, replaces: 'final', profile: 'full' }],
   ])('refuses %s', (_name, value) => {
     expect(TestEnvironmentV1.safeParse(fullRun(value)).success).toBe(false);
   });
 
-  it('refuses a full profile that leaves out a suite of what it replaces', () => {
-    const value = fullRun({ everyTurns: 5, replaces: 'final', profile: 'full' }) as ReturnType<typeof manifest>;
+  it('refuses a full profile that leaves out a suite of what it covers', () => {
+    const value = fullRun({ replaces: 'final', profile: 'full' }) as ReturnType<typeof manifest>;
     value.suites.push({ id: 'more', root: '.', files: ['more/*.ts'], run: command, split: { kind: 'argv-files' }, profiles: ['final'] });
     value.profiles[1]!.requiredSuiteIds.push('more');
     expect(TestEnvironmentV1.safeParse(value).success).toBe(false);

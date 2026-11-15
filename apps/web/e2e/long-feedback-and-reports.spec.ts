@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { openTaskRow } from './api';
+import { openTaskCard } from './api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_CWD = process.env.HH_E2E_SERVER_CWD ?? resolve(HERE, '../../server');
@@ -260,8 +260,8 @@ const head = await hire('Hana', 'head', 'DEV-HEAD');
 const worker = await hire('Bruno', 'worker', 'DEV-BE');
 const reviewer = await hire('Rita', 'worker', 'DEV-REV');
 const designer = await hire('Interface Designer', 'worker', 'DEV-FE');
-/* Echelons exist only in a turn started in echelons, so the work Review checks is given while this turn runs. */
-await db.insert(schema.turns).values({ companyId: acme.id, departmentId: dev.id, number: 1, goal: 'Checked work', status: 'open', mode: 'echelons', openedAt: new Date() });
+/* No turn is laid out: the team sets the route, so the work of these members goes through the echelons, and the department's
+   open turn opens by itself as a result is accepted into it. */
 fx = { acme, ceo, dev, head, worker, reviewer, designer };
 
 const origin = await app.listen({ host: '127.0.0.1', port: await testPort() });
@@ -385,7 +385,7 @@ for (const lang of LANGUAGES) {
         await proxyRealApi(page, srv.origin);
         await page.goto('/tasks');
 
-        const card = page.getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) });
+        const card = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) });
         await expect(card).toBeVisible();
 
         const noteField = card.getByLabel(t.tasks.choiceNote);
@@ -396,8 +396,8 @@ for (const lang of LANGUAGES) {
         await expect(card).toBeHidden();
 
         /* Open the task in TaskPanel to read full 12,000-char inline feedback, files, and full 12,400-char verdict. */
-        await page.getByRole('group', { name: t.tasks.department }).locator('label', { hasText: t.templates.development.name }).click();
-        await openTaskRow(page, sc.taskNumber);
+        await page.getByRole('combobox', { name: t.tasks.department }).selectOption({ label: t.templates.development.name });
+        await openTaskCard(page, sc.taskNumber);
         const panel = page.locator('aside');
         await expect(panel).toBeVisible();
 
@@ -512,7 +512,7 @@ test('preserves 12,000-char input on refusal, supports pick: 0 + 12k comment and
   });
 
   await page.goto('/tasks');
-  const readOnlyCard = page.getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) });
+  const readOnlyCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) });
   await expect(readOnlyCard).toBeVisible();
   await expect(readOnlyCard).toContainText(ru.tasks.decidedByCeo);
   await expect(readOnlyCard.getByRole('textbox')).toHaveCount(0);
@@ -529,8 +529,8 @@ test('preserves 12,000-char input on refusal, supports pick: 0 + 12k comment and
   await page.context().addCookies([{ name: 'hh_session', value: srv.ceoSession, url: webOrigin }]);
   await page.reload();
 
-  const freeCard = page.getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) });
-  const pickCard = page.getByRole('article', { name: new RegExp(`^#${sc.pickTaskNumber} `) });
+  const freeCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${sc.taskNumber} `) });
+  const pickCard = page.locator('.waiting').getByRole('article', { name: new RegExp(`^#${sc.pickTaskNumber} `) });
   await expect(freeCard).toBeVisible();
   await expect(pickCard).toBeVisible();
 
@@ -562,8 +562,8 @@ test('preserves 12,000-char input on refusal, supports pick: 0 + 12k comment and
   expect(pickReqState.request).toMatchObject({ status: 'answered', picked: 0, answer: pickComment12k });
 
   /* 5. Post a 12,000-character task comment in TaskPanel and expand both submit evidence and the new comment. */
-  await page.getByRole('group', { name: ru.tasks.department }).locator('label', { hasText: ru.templates.development.name }).click();
-  await openTaskRow(page, sc.taskNumber);
+  await page.getByRole('combobox', { name: ru.tasks.department }).selectOption({ label: ru.templates.development.name });
+  await openTaskCard(page, sc.taskNumber);
   const panel = page.locator('aside');
   await expect(panel).toBeVisible();
 

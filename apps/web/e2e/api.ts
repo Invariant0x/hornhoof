@@ -1,8 +1,6 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from '../test/task-route';
 import type { Locator, Page } from '@playwright/test';
-import { en } from '../src/i18n/en';
-import { ru } from '../src/i18n/ru';
 import type { AgentCardView, BackupsView, Briefing, Decisions, Improvement, Me, Org, SwitchWord, TaskDetail, TaskLine, TokenPeriods, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
@@ -39,7 +37,7 @@ const ORG: Org = {
 const DECISIONS: Decisions = { requests: [], proposals: [], machineAccess: [], counts: { byPerson: {}, byAgent: {}, total: 0 } };
 
 const TURN: TurnView = {
-  id: 'u3', number: 3, title: 'Payments', goal: 'Take card payments in the shop.', status: 'open', mode: 'echelons', departmentId: DEV.id, canChangeMode: true, messages: [], taskId: null,
+  id: 'u3', number: 3, title: 'Payments', goal: 'Take card payments in the shop.', status: 'open', version: null, commit: null, baseVersion: null, departmentId: DEV.id, messages: [], taskId: null,
   startedAt: '2026-10-30T07:00:00.000Z', openedAt: '2026-10-30T07:00:00.000Z', closedAt: null, tasks: { total: 30, done: 0 },
 };
 
@@ -78,6 +76,8 @@ const ROUTES: Record<string, unknown> = {
   '/api/me': ME,
   '/api/org': ORG,
   '/api/requests': DECISIONS,
+  /* No card is kept for the person. */
+  '/api/wait-cards': { cards: [], next: null },
   '/api/nodes/commands': { commands: [] },
   '/api/machines/access': { views: [] },
   /* What the CEO's reminder of the recovery file asks at the start: nothing to remind of. */
@@ -92,8 +92,8 @@ const ROUTES: Record<string, unknown> = {
   '/api/link': { link: null, domain: 'hornhoof.org' },
   '/api/backups': { last: null, recovery: null, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [] } satisfies BackupsView,
   '/api/turns': { turns: [TURN] },
-  '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null }] },
-  '/api/tasks?status=all&department=d2': { tasks: TASKS },
+  '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null, mine: true }] },
+  '/api/tasks?status=all': { tasks: TASKS },
   '/api/departments/d2/backlog': { items: [] },
   '/api/departments/d2/briefing': { briefing: { text: '', repositories: [], connected: null, updatedAt: null, by: null } satisfies Briefing },
   '/api/improvements': { improvements: [IMPROVEMENT] },
@@ -122,9 +122,6 @@ export async function serveApi(page: Page) {
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));
     if (/^\/api\/subscriptions\/[^/]+\/tokens(\?|$)/.test(path)) return route.fulfill(json({ tokens: NO_TOKENS }));
-    /* A department works in turns unless a test says otherwise, and the person may change it. */
-    const workMode = /^\/api\/departments\/([^/]+)\/work-mode$/.exec(path);
-    if (workMode) return route.fulfill(json({ departmentId: workMode[1], workMode: 'turns', canChangeWorkMode: true }));
     /* A department has no task branch outside main unless a test says otherwise. */
     if (/^\/api\/departments\/[^/]+\/branches$/.test(path)) return route.fulfill(json({ branches: [], problem: null }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
@@ -160,12 +157,8 @@ export const brokenHeaderWords = (page: Page) => page.evaluate(() => {
 /* Whether a sorting table stands inside its frame. */
 export const tableFits = (page: Page) => page.locator('.tbl').evaluate(el => el.scrollWidth <= el.clientWidth + 1);
 
-const OPEN_TASK = new RegExp(`^(${en.tasks.table.open}|${ru.tasks.table.open})$`);
-
-/* A task opens from the table of the Tasks screen: its row unfolds, and the button in what it shows opens the panel. */
-export async function openTaskRow(page: Page, number: number) {
-  const row = page.getByRole('row', { name: new RegExp(`^#${number} `) });
-  const card = row.getByRole('button');
-  if ((await card.getAttribute('aria-expanded')) !== 'true') await card.click();
-  await row.locator('xpath=following-sibling::tr[1]').getByRole('button', { name: OPEN_TASK }).click();
+/* A task opens from the Tasks board, not from a request above it that names the same number: the title of its card
+   opens the panel. */
+export async function openTaskCard(page: Page, number: number) {
+  await page.locator('.board').getByRole('article', { name: new RegExp(`^#${number} `) }).first().locator('.goal-title button').click();
 }

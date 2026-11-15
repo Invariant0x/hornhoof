@@ -100,11 +100,11 @@ const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
   return [120 + 103 * Math.cos(a), 120 + 103 * Math.sin(a)];
 });
 
-/* The turn inside a department's card: its number, the tasks done out of all, and twenty squares lit from the left. It is part
-   of the card's one button, which opens the department. */
+/* The turn inside a department's card: its number, what it has ready for release, and twenty squares lit from the left by the
+   share of its tasks done. It is part of the card's one button, which opens the department. */
 function DeptTurn({ turn }: { turn: WorkingTurn }) {
   const t = useT();
-  const label = t.tasks.turnProgress(turn.done, turn.total);
+  const label = t.map.readyForRelease(turn.done);
   const lit = litSquares(turn.done, turn.total);
   return (
     <span className="dept-turn">

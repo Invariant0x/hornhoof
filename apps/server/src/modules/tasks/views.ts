@@ -18,8 +18,7 @@ import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
 
 /* Task log text and its automatic files have the same agent readership. */
 export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Pick<Task, 'status' | 'departmentId' | 'assigneeAgentId' | 'executorAgentId'>): boolean {
-  return agent.kind === 'orchestrator' || (task.status !== 'planned' &&
-    ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id));
+  return agent.kind === 'orchestrator' || (agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id;
 }
 
 export type AgentRef = { id: string; name: string; kind: AgentKind; role: Lang | null };

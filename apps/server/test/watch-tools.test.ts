@@ -155,7 +155,6 @@ describe('tools a skill grants', () => {
       { companyId: acme.id, departmentId: dev.id, number: 10, title: 'Private dependency title', body: 'Private dependency body' },
       { companyId: acme.id, departmentId: dev.id, number: 11, title: 'Done dependency', status: 'done', closedAt },
       { companyId: acme.id, departmentId: dev.id, number: 12, title: 'Cancelled dependency', status: 'cancelled', closedAt },
-      { companyId: acme.id, departmentId: dev.id, number: 13, title: 'Planned dependency', status: 'planned' },
       { companyId: acme.id, departmentId: ops.id, number: 14, title: 'Other department dependency' },
       { companyId: foreign!.id, number: 15, title: 'Foreign dependency' },
       { companyId: acme.id, number: 16, title: 'Departmentless dependency' },

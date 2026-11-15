@@ -1046,7 +1046,7 @@ describe('Map', () => {
     ...ORG,
     turn: { id: TURN.id, number: 3, goal: TURN.goal },
     departments: Object.entries(progress).map(([id, p]) =>
-      dept({ id, name: id, roleCode: id.slice(0, 3).toUpperCase(), workMode: p ? 'turns' : 'continuous', turnProgress: p && { turnNumber: 3, done: p[0], total: p[1] } }),
+      dept({ id, name: id, roleCode: id.slice(0, 3).toUpperCase(), turnProgress: p && { turnNumber: 3, done: p[0], total: p[1] } }),
     ),
   });
   const card = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}`) });
@@ -1059,7 +1059,7 @@ describe('Map', () => {
     onTestFinished(() => localStorage.removeItem('hh-lang'));
     const calls = mockApi({ 'GET /api/org': [200, turnOrg({ Operations: null, Development: [3, 17], Sales: [0, 4] })] });
     const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
-    const label = language === 'en' ? '3 of 17 tasks done' : 'Готово 3 из 17 задач';
+    const label = language === 'en' ? 'Ready for release: 3' : 'Готово к выпуску: 3';
     const bar = await screen.findByRole('progressbar', { name: label });
     const dev = strip('Development')!;
     expect(dev).toContainElement(bar);
@@ -1086,7 +1086,7 @@ describe('Map', () => {
   it('runs one working department along the lower half of the hub in twenty segments, its turn always named', async () => {
     mockApi({ 'GET /api/org': [200, turnOrg({ Operations: null, Development: [3, 17] })] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    await screen.findByRole('progressbar', { name: 'Ready for release: 3' });
     const hub = container.querySelector('.hub')!;
     expect(hub.querySelectorAll('.turn-sec-bg')).toHaveLength(1);
     expect(hub.querySelector('.turn-sec-bg')).toHaveAttribute('d', `M ${arcEnd(174)} A 103 103 0 0 0 ${arcEnd(6)}`);
@@ -1105,7 +1105,7 @@ describe('Map', () => {
     org.departments[1] = { ...org.departments[1]!, turnProgress: { turnNumber: 5, done: 1, total: 4 } };
     mockApi({ 'GET /api/org': [200, org] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    await screen.findByRole('progressbar', { name: 'Ready for release: 3' });
     expect(strip('Development')!.querySelector('.dt-turn')).toHaveTextContent('Turn 3');
     expect(strip('Sales')!.querySelector('.dt-turn')).toHaveTextContent('Turn 5');
     /* The hub holds every running turn together, a sector for each. */
@@ -1117,7 +1117,7 @@ describe('Map', () => {
   it('gives each working department a sector of its own, lit when its card is pointed at or focused', async () => {
     mockApi({ 'GET /api/org': [200, turnOrg({ Development: [3, 17], Operations: null, Sales: [4, 4], Marketing: [1, 2] })] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    await screen.findByRole('progressbar', { name: 'Ready for release: 3' });
     const hub = container.querySelector('.hub')!;
     const sectors = [...hub.querySelectorAll('.turn-sec')];
     expect(sectors.map(s => s.getAttribute('data-dept'))).toEqual(['Development', 'Sales', 'Marketing']);
@@ -1160,15 +1160,15 @@ describe('Map', () => {
     let progress: [number, number] | null = [3, 17];
     mockApi({ 'GET /api/org': () => [200, turnOrg({ Development: progress, Operations: null })] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByRole('progressbar', { name: '3 of 17 tasks done' });
+    await screen.findByRole('progressbar', { name: 'Ready for release: 3' });
     progress = [4, 17];
     stream.send({ type: 'task' });
-    const bar = await screen.findByRole('progressbar', { name: '4 of 17 tasks done' });
+    const bar = await screen.findByRole('progressbar', { name: 'Ready for release: 4' });
     expect(bar).toHaveAttribute('aria-valuenow', '24');
     expect(lit(bar).filter(Boolean)).toHaveLength(5);
     progress = [1000, 1000];
     stream.send({ type: 'task' });
-    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 tasks done' })).toHaveAttribute('aria-valuenow', '100');
+    expect(await screen.findByRole('progressbar', { name: 'Ready for release: 1000' })).toHaveAttribute('aria-valuenow', '100');
     expect(container.querySelector('.turn-sec-fill')).toHaveAttribute('pathLength', '19.72');
     progress = null;
     stream.send({ type: 'org' });

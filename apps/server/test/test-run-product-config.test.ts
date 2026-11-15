@@ -34,9 +34,9 @@ describe('canonical versioned product configuration', () => {
     expect(current.suites.find(suite => suite.id === 'release-scripts')!.run).toEqual(original().suites.find(suite => suite.id === 'release-scripts')!.run);
     expect(existsSync(new URL('../../../vitest.product.config.mjs', import.meta.url))).toBe(true);
   });
-  it('runs one look and mutation at a release, and everything in the full run every five turns', () => {
+  it('runs one look and mutation at a release, and everything in the full run of every release', () => {
     const current = manifest(), suitesOf = (profile: string) => current.profiles.find(item => item.id === profile)!.requiredSuiteIds;
-    expect(current.execution?.fullRun).toEqual({ everyTurns: 5, replaces: 'final', profile: 'full' });
+    expect(current.execution?.fullRun).toEqual({ replaces: 'final', profile: 'full' });
     for (const heavy of ['browser', 'browser-matrix', 'mutation']) expect(suitesOf('fast')).not.toContain(heavy);
     expect(suitesOf('final')).toEqual(expect.arrayContaining(['browser', 'mutation']));
     expect(suitesOf('final')).not.toContain('browser-matrix');

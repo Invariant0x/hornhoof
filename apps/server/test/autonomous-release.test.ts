@@ -4,7 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, departments, jobs, people, requests, taskEvents, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, people, requests, taskEvents, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { BUILTIN } from './builtin.js';
 import { createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { acceptDescription, noteTestCapabilities } from '../src/modules/testruns/describe.js';
@@ -20,14 +20,19 @@ const OTHER_SHA = '9'.repeat(40);
 
 type ToolRes = { content: { type: string; text: string }[]; isError?: boolean };
 
-async function releaseFixture() {
+async function releaseFixture(options: { product?: boolean } = {}) {
   const f = await fixture({ turn: null });
   await listen(f.app);
-  /* Outside a turn, echelons code tasks integrate to main; we still drive full echelons + MCP tools on the repository. */
+  /* A product of the department that keeps a repository of its own has no turn: its echelons code tasks integrate to its
+     main line straight, each with an approval of its own. We still drive full echelons + MCP tools on the repository. */
   const { app, ctx, db, ceoToken, head, author, reviewer, tester } = f;
   const [ceo] = await db.select().from(people);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const departmentId = head.departmentId!;
+  /* Without the product, the work is of the department itself, which releases turns: its main approval comes at the release. */
+  const [product] = options.product === false ? [] : await db.insert(departments).values({ companyId: head.companyId, name: 'Shop app', parentId: departmentId, roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop-app.git' }).returning();
+  const productId = product?.id ?? null;
+  if (productId) await db.update(tasks).set({ productId }).where(eq(tasks.id, f.task.id));
 
   let mainCommit = MAIN_BASE;
   let branchCommit = CANDIDATE;
@@ -51,14 +56,16 @@ async function releaseFixture() {
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' };
   };
 
-  /* Create an echelons code task with turnId = null (integrating to main) by opening an echelons turn, creating the task, then clearing turnId and closing the helper turn. */
-  const { echelonsTurn } = await import('./helpers.js');
-  const openEchelonsTurn = () => echelonsTurn(db, head.companyId);
+  /* A running coordination task of the product over the task with the verdict: its parent, the one coordination task that
+     may ask for that task's commit besides the task itself. */
+  const coordinating = async (title: string, over: { id: string }) => {
+    const { task: coordination } = await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId, productId, assigneeAgentId: head.id, resultKind: 'coordination' });
+    await db.update(tasks).set({ parentId: coordination.id }).where(eq(tasks.id, over.id));
+    return coordination;
+  };
+  /* An echelons code task of the product, integrating to its main line. */
   const createMainCodeTask = async (changes: Parameters<typeof f.create>[0] = {}) => {
-    const tempTurn = await openEchelonsTurn();
-    const created = (await f.create({ small: true, paths: ['logic/totals.ts'], ...changes })).task;
-    await db.update(tasks).set({ turnId: null }).where(eq(tasks.id, created.id));
-    await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, tempTurn.id));
+    const created = (await f.create({ small: true, paths: ['logic/totals.ts'], productId, ...changes })).task;
     return (await loadTask(db, created.id));
   };
   const task = await createMainCodeTask();
@@ -156,7 +163,7 @@ async function releaseFixture() {
       { ...manifest.suites[0]!, id: 'vitest', profiles: ['fast', 'full'], finalChecks: [] },
       { ...manifest.suites[0]!, id: 'e2e', files: ['test/e2e.test.ts'], profiles: ['full'], finalChecks: [] },
     ];
-    manifest.execution = { version: 2, fullRun: { everyTurns: 5, replaces: 'fast', profile: 'full' } };
+    manifest.execution = { version: 2, fullRun: { replaces: 'fast', profile: 'full' } };
     description.repositoryScope = request.repositoryScope;
     description.commitSha = sha;
     description.inventory = [
@@ -288,9 +295,10 @@ async function releaseFixture() {
     ceo: ceo!,
     orchestrator: orchestrator!,
     departmentId,
+    productId,
     task,
     openTools,
-    openEchelonsTurn,
+    coordinating,
     createMainCodeTask,
     setAutonomous,
     policy,
@@ -340,13 +348,7 @@ describe('autonomous release for exact commits to main', () => {
 
     /* ask_person with commit opens a waiting human card while off. */
     f.setMain(MAIN_BASE);
-    const releaseTask = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Release 0.23.7', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const releaseTask = (await f.coordinating('Release 0.23.7', f.task));
     const asked = await headCall('ask_person', { task: releaseTask.number, question: 'Approve release?', commit: CANDIDATE });
     expect(asked.isError).toBe(false);
     expect(asked.text).toContain('waits for a person');
@@ -365,13 +367,7 @@ describe('autonomous release for exact commits to main', () => {
     const { acceptance } = await f.verifyThroughEchelons();
     const fullRun = await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
 
-    const releaseTask = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Release 0.23.7', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const releaseTask = (await f.coordinating('Release 0.23.7', f.task));
     const { call: headCall } = await f.openTools(f.head);
     const mcpPolicy = JSON.parse((await headCall('approval_policy', { department: f.departmentId })).text);
     expect(mcpPolicy.autonomousRelease).toBe(true);
@@ -385,13 +381,7 @@ describe('autonomous release for exact commits to main', () => {
     expect(await f.db.select().from(requests).where(eq(requests.taskId, releaseTask.id))).toEqual([]);
 
     /* request_approval on channel commit with exact commit also auto-approves without opening a card. */
-    const reqTask = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Publish commit', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const reqTask = (await f.coordinating('Publish commit', f.task));
     const autoReq = await headCall('request_approval', {
       task: reqTask.number,
       channel: 'commit',
@@ -505,13 +495,7 @@ describe('autonomous release for exact commits to main', () => {
 
     const expectNeedsCard = async (label: string, sha = CANDIDATE) => {
       const { call: headCall } = await f.openTools(f.head);
-      const t = (
-        await createTask(
-          f.ctx,
-          { agentId: f.head.id },
-          { title: label, brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-        )
-      ).task;
+      const t = (await f.coordinating(label, f.task));
       const res = await headCall('ask_person', { task: t.number, question: `Release (${label})?`, commit: sha });
       expect(res.isError, label).toBe(false);
       expect(res.text, label).toContain('waits for a person');
@@ -561,13 +545,7 @@ describe('autonomous release for exact commits to main', () => {
 
     const checkRequiresCard = async (title: string) => {
       const { call: turnCall } = await f.openTools(f.head);
-      const rel = (
-        await createTask(
-          f.ctx,
-          { agentId: f.head.id },
-          { title, brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-        )
-      ).task;
+      const rel = (await f.coordinating(title, f.task));
       const res = await turnCall('ask_person', { task: rel.number, question: title, commit: CANDIDATE });
       expect(res.text, title).toContain('waits for a person');
       expect((await loadTask(f.db, rel.id)).status, title).toBe('waiting');
@@ -610,24 +588,12 @@ describe('autonomous release for exact commits to main', () => {
     await f.runProductSuite({ commit: OTHER_SEC_SHA, branch: `task-${secTask.number}`, profile: 'full' });
     await submit(f.ctx, f.author.id, secTask.id, { summary: 'Auth change.', evidence: 'Checks.', review: { baseCommit: BASE } });
     await verdict(f.ctx, f.reviewer.id, secTask.id, { pass: true, comment: 'Review ok.', reviewedCommit: OTHER_SEC_SHA });
-    const beforeSec = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'missing-sec-pass', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const beforeSec = (await f.coordinating('missing-sec-pass', secTask));
     const { call: secHeadCall } = await f.openTools(f.head);
     const beforeSecRes = await secHeadCall('ask_person', { task: beforeSec.number, question: 'Ship before security?', commit: OTHER_SEC_SHA });
     expect(beforeSecRes.text).toContain('waits for a person');
     await verdict(f.ctx, f.security.id, secTask.id, { pass: true, comment: 'Security ok.', reviewedCommit: OTHER_SEC_SHA });
-    const afterSec = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'after-sec-pass', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const afterSec = (await f.coordinating('after-sec-pass', secTask));
     const afterSecRes = await secHeadCall('ask_person', { task: afterSec.number, question: 'Ship after security.', commit: OTHER_SEC_SHA });
     expect(afterSecRes.text).not.toContain('waits for a person');
   });
@@ -641,13 +607,7 @@ describe('autonomous release for exact commits to main', () => {
 
     /* Diverged / behind origin/main (not fast-forward). */
     f.setFastForward(false);
-    const divergedTask = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Diverged release', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const divergedTask = (await f.coordinating('Diverged release', f.task));
     const diverged = await headCall('ask_person', { task: divergedTask.number, question: 'Ship diverged?', commit: CANDIDATE });
     expect(diverged.text).toContain('waits for a person');
     expect((await loadTask(f.db, divergedTask.id)).status).toBe('waiting');
@@ -655,13 +615,7 @@ describe('autonomous release for exact commits to main', () => {
     /* Compare unavailable also falls back to a human card rather than guessing fast-forward. */
     f.setFastForward(true);
     f.setCompareProblem('GitHub compare timed out.');
-    const blindTask = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Blind compare', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const blindTask = (await f.coordinating('Blind compare', f.task));
     const blind = await headCall('ask_person', { task: blindTask.number, question: 'Ship blind?', commit: CANDIDATE });
     expect(blind.text).toContain('waits for a person');
     expect((await f.journal()).json().entries).toEqual([]);
@@ -751,13 +705,7 @@ describe('autonomous release for exact commits to main', () => {
     await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
 
     const { call: headCall } = await f.openTools(f.head);
-    const firstRel = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'First auto release', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const firstRel = (await f.coordinating('First auto release', f.task));
     const first = await headCall('ask_person', { task: firstRel.number, question: 'Auto ship 1', commit: CANDIDATE });
     expect(first.text).not.toContain('waits for a person');
     expect((await f.journal()).json().entries).toHaveLength(1);
@@ -768,13 +716,7 @@ describe('autonomous release for exact commits to main', () => {
     expect(off.json().autonomousRelease).toBe(false);
 
     /* Immediately requires a card again, even for the exact same verified commit! */
-    const secondRel = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Second release after off', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const secondRel = (await f.coordinating('Second release after off', f.task));
     const second = await headCall('ask_person', { task: secondRel.number, question: 'Ship after off?', commit: CANDIDATE });
     expect(second.text).toContain('waits for a person');
     expect((await loadTask(f.db, secondRel.id)).status).toBe('waiting');
@@ -809,24 +751,18 @@ describe('autonomous release for exact commits to main', () => {
     await net.runProductSuite({ commit: NET_SHA, branch: 'network-1', profile: 'full' });
     net.setBranchHead('network-1', NET_SHA);
     const { call: netHeadCall } = await net.openTools(net.head);
-    const netRel = (
-      await createTask(
-        net.ctx,
-        { agentId: net.head.id },
-        { title: 'Try network-1 ship', brief: '', body: '', departmentId: net.departmentId, assigneeAgentId: net.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const netRel = (await net.coordinating('Try network-1 ship', netTask));
     const netAsked = await netHeadCall('ask_person', { task: netRel.number, question: 'Push network-1 to main?', commit: NET_SHA });
     expect(netAsked.text).toContain('waits for a person');
     expect((await net.journal()).json().entries).toEqual([]);
 
-    /* 2. Feature task inside an open turn (turnId != null, candidate on task-N integrating to turn-M rather than main) is refused. */
-    const inTurn = await releaseFixture();
+    /* 2. A feature task of the department itself, whose results join its open turn rather than main, is refused: main moves
+       for that department only by the release of its turn. */
+    const inTurn = await releaseFixture({ product: false });
     expect((await inTurn.setAutonomous(inTurn.ceoToken, true)).statusCode).toBe(200);
-    await inTurn.openEchelonsTurn();
     const FEAT_SHA = '4'.repeat(40);
     inTurn.setBranch(FEAT_SHA);
-    const featTask = (await inTurn.create({ small: true, title: 'Feature in turn only', paths: ['logic/totals.ts'] })).task;
+    const featTask = (await inTurn.create({ small: true, productId: inTurn.productId, title: 'Feature in turn only', paths: ['logic/totals.ts'] })).task;
     await submit(inTurn.ctx, inTurn.author.id, featTask.id, {
       summary: 'Turn feature.',
       evidence: 'Checks.',
@@ -839,13 +775,7 @@ describe('autonomous release for exact commits to main', () => {
     });
     await inTurn.runProductSuite({ commit: FEAT_SHA, branch: `task-${featTask.number}`, profile: 'full' });
     const { call: turnHeadCall } = await inTurn.openTools(inTurn.head);
-    const turnCoord = (
-      await createTask(
-        inTurn.ctx,
-        { agentId: inTurn.head.id },
-        { title: 'Turn coord', brief: '', body: '', departmentId: inTurn.departmentId, assigneeAgentId: inTurn.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const turnCoord = (await inTurn.coordinating('Turn coord', featTask));
     const featAsked = await turnHeadCall('ask_person', { task: turnCoord.number, question: 'Push unmerged turn feature to main?', commit: FEAT_SHA });
     expect(featAsked.text).toContain('waits for a person');
     expect((await inTurn.journal()).json().entries).toEqual([]);
@@ -855,7 +785,7 @@ describe('autonomous release for exact commits to main', () => {
     expect((await nonMainRepo.setAutonomous(nonMainRepo.ceoToken, true)).statusCode).toBe(200);
     await nonMainRepo.verifyThroughEchelons();
     await nonMainRepo.runProductSuite({ commit: CANDIDATE, profile: 'full' });
-    await nonMainRepo.db.update(departments).set({ repoBranch: 'network-1' }).where(eq(departments.id, nonMainRepo.departmentId));
+    await nonMainRepo.db.update(departments).set({ repoBranch: 'network-1' }).where(eq(departments.id, nonMainRepo.productId!));
     nonMainRepo.setBranchHead('network-1', MAIN_BASE);
     const { call: repoHeadCall } = await nonMainRepo.openTools(nonMainRepo.head);
     const repoAsked = await repoHeadCall('ask_person', { task: nonMainRepo.task.number, question: 'Push to network-1 repo?', commit: CANDIDATE });
@@ -882,13 +812,7 @@ describe('autonomous release for exact commits to main', () => {
       review: { baseCommit: MAIN_BASE },
     });
     const { call: movedHeadCall } = await moved.openTools(moved.head);
-    const staleAskTask = (
-      await createTask(
-        moved.ctx,
-        { agentId: moved.head.id },
-        { title: 'Ship superseded SHA?', brief: '', body: '', departmentId: moved.departmentId, assigneeAgentId: moved.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const staleAskTask = (await moved.coordinating('Ship superseded SHA?', moved.task));
     const staleAsked = await movedHeadCall('ask_person', { task: staleAskTask.number, question: 'Ship old SHA?', commit: OLD_SHA });
     expect(staleAsked.text).toContain('waits for a person');
     expect((await moved.journal()).json().entries).toEqual([]);
@@ -907,7 +831,7 @@ describe('autonomous release for exact commits to main', () => {
       await createTask(
         f.ctx,
         { agentId: f.head.id },
-        { title: 'network-1: unrelated fix', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: solo.id, executor: true },
+        { title: 'network-1: unrelated fix', brief: '', body: '', departmentId: f.departmentId, productId: f.productId, assigneeAgentId: solo.id, executor: true },
       )
     ).task;
     const { call: soloCall } = await f.openTools(solo);
@@ -926,8 +850,7 @@ describe('autonomous release for exact commits to main', () => {
     });
     expect(codeAsked.text).toContain('waits for a person');
 
-    /* 2c. Coordination task inside a different open turn cannot ask for an outside-turn candidate. */
-    await f.openEchelonsTurn();
+    /* 2c. A coordination task of the department itself, outside the product's repository, cannot ask for its candidate. */
     const otherTurnCoord = (
       await createTask(
         f.ctx,
@@ -941,13 +864,12 @@ describe('autonomous release for exact commits to main', () => {
     expect((await f.journal()).json().entries).toEqual([]);
   });
 
-  it('auto-approves a turn release candidate on release-X.Y.Z when asked by the release task or its turn coordination task', async () => {
+  it('auto-approves a release candidate of the product on release-X.Y.Z when a coordination task of the product asks', async () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
-    await f.openEchelonsTurn();
     const REL_SHA = '6'.repeat(40);
     f.setBranchHead('release-0.24.0', REL_SHA);
-    const relCodeTask = (await f.create({ small: true, title: 'Prepare release 0.24.0', paths: ['logic/totals.ts'] })).task;
+    const relCodeTask = (await f.create({ small: true, productId: f.productId, title: 'Prepare release 0.24.0', paths: ['logic/totals.ts'] })).task;
     await submit(f.ctx, f.author.id, relCodeTask.id, {
       summary: 'Assemble turn release 0.24.0.',
       evidence: 'Checks.',
@@ -961,13 +883,7 @@ describe('autonomous release for exact commits to main', () => {
     await f.runProductSuite({ commit: REL_SHA, branch: 'release-0.24.0', profile: 'full' });
     f.setBranchHead('release-0.24.0', REL_SHA);
 
-    const turnCoord = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Turn 0.24.0 release', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const turnCoord = (await f.coordinating('Turn 0.24.0 release', relCodeTask));
     const { call: headCall } = await f.openTools(f.head);
     const coordAsked = await headCall('ask_person', { task: turnCoord.number, question: 'Publish 0.24.0 to main.', commit: REL_SHA });
     expect(coordAsked.isError).toBe(false);
@@ -980,66 +896,61 @@ describe('autonomous release for exact commits to main', () => {
     });
   });
 
-  it('C1 (wrong turn): refuses auto-approval when the PASS verdict comes from another turn', async () => {
+  it('C1 (a department that releases turns): never auto-approves a commit of the department itself, which reaches main only by the release of its turn', async () => {
+    const f = await releaseFixture({ product: false });
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    const { acceptance } = await f.verifyThroughEchelons();
+    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    const coord = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Ship the change', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
+      )
+    ).task;
+    const { call: headCall } = await f.openTools(f.head);
+    expect((await headCall('ask_person', { task: coord.number, question: 'Push the checked change to main?', commit: CANDIDATE })).text).toContain('waits for a person');
+    /* Its head, who holds it after Tests, asking on the task itself. */
+    expect((await headCall('ask_person', { task: f.task.number, question: 'Push the checked change to main?', commit: CANDIDATE })).text).toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([]);
+    /* Its result goes into the open turn instead, with no approval of its own. */
+    const accepted = await report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Into the turn.', acceptance });
+    expect(accepted.task.turnId).not.toBeNull();
+  });
+
+  it('C1 (kinship): only the task with the verdict or a coordination task above it by its parents asks, never another coordination task of the same repository', async () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
-    const outCoord = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Outside turn coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
-
-    const turn1 = await f.openEchelonsTurn();
-    const TURN1_SHA = '8'.repeat(40);
-    f.setBranchHead('release-0.24.0', TURN1_SHA);
-    const relTask1 = (await f.create({ small: true, title: 'Turn 1 release', paths: ['logic/totals.ts'] })).task;
-    await submit(f.ctx, f.author.id, relTask1.id, {
-      summary: 'Turn 1 release candidate.',
-      evidence: 'Checks.',
-      review: { baseCommit: MAIN_BASE, branch: 'release-0.24.0' },
-    });
-    await verdict(f.ctx, f.reviewer.id, relTask1.id, {
-      pass: true,
-      comment: 'Turn 1 verified.',
-      reviewedCommit: TURN1_SHA,
-    });
-    await f.runProductSuite({ commit: TURN1_SHA, branch: 'release-0.24.0', profile: 'full' });
-    f.setBranchHead('release-0.24.0', TURN1_SHA);
-
+    await f.verifyThroughEchelons();
+    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    const coordination = (title: string) => createTask(f.ctx, { agentId: f.head.id }, { title, brief: '', body: '', departmentId: f.departmentId, productId: f.productId, assigneeAgentId: f.head.id, resultKind: 'coordination' }).then(made => made.task);
     const { call: headCall } = await f.openTools(f.head);
-    /* Out-of-turn task (turnId = null) asking while Turn 1 is open is refused. */
-    const outAsked = await headCall('ask_person', { task: outCoord.number, question: 'Out-of-turn ask for Turn 1 SHA?', commit: TURN1_SHA });
-    expect(outAsked.text).toContain('waits for a person');
 
-    /* Close Turn 1 and open Turn 2: Turn 2 coordination task (turn2.id != turn1.id) asking for Turn 1 SHA is refused. */
-    await f.db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turn1.id));
-    const turn2 = await f.openEchelonsTurn();
-    expect(turn2.id).not.toBe(turn1.id);
-    const turn2Coord = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Turn 2 coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
-    const turn2Asked = await headCall('ask_person', { task: turn2Coord.number, question: 'Turn 2 ask for Turn 1 SHA?', commit: TURN1_SHA });
-    expect(turn2Asked.text).toContain('waits for a person');
+    /* A running coordination task of the same product, related to the verdict task by nothing, is refused. */
+    const stranger = await coordination('Another release');
+    expect((await headCall('ask_person', { task: stranger.number, question: 'Ship a commit of a task I do not coordinate?', commit: CANDIDATE })).text).toContain('waits for a person');
     expect((await f.journal()).json().entries).toEqual([]);
+
+    /* One above it by its parents, two levels up, asks for it. */
+    const release = await coordination('Release 0.23.7');
+    const batch = await coordination('Totals batch');
+    await f.db.update(tasks).set({ parentId: release.id }).where(eq(tasks.id, batch.id));
+    await f.db.update(tasks).set({ parentId: batch.id }).where(eq(tasks.id, f.task.id));
+    const asked = await headCall('ask_person', { task: release.number, question: 'Ship the checked change of the batch.', commit: CANDIDATE });
+    expect(asked.text).not.toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([expect.objectContaining({ taskNumber: release.number, commitSha: CANDIDATE })]);
   });
 
   it('C1 (PASS on another SHA): refuses auto-approval when PASS was given on an ancestor or another commit rather than the asked SHA', async () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
-    await f.openEchelonsTurn();
 
     /* 1. PASS was recorded on ANCESTOR_SHA; candidate then advances via takeMainAtTests to DESCENDANT_SHA with green full run_tests on DESCENDANT_SHA.
        Asking for DESCENDANT_SHA must open a human card because reviewedCommit != DESCENDANT_SHA. */
     const ANCESTOR_SHA = 'c'.repeat(40);
     const DESCENDANT_SHA = 'd'.repeat(40);
     f.setBranchHead('release-0.24.1', ANCESTOR_SHA);
-    const relTask = (await f.create({ small: true, title: 'Release 0.24.1', paths: ['logic/totals.ts'] })).task;
+    const relTask = (await f.create({ small: true, productId: f.productId, title: 'Release 0.24.1', paths: ['logic/totals.ts'] })).task;
     await submit(f.ctx, f.author.id, relTask.id, {
       summary: 'Initial release candidate.',
       evidence: 'Checks.',
@@ -1069,13 +980,7 @@ describe('autonomous release for exact commits to main', () => {
     expect(onDescendantSelf.text).toContain('waits for a person');
 
     const { call: headCall } = await f.openTools(f.head);
-    const turnCoord = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Coord ask on descendant', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const turnCoord = (await f.coordinating('Coord ask on descendant', relTask));
     const onDescendantCoord = await headCall('ask_person', {
       task: turnCoord.number,
       question: 'Coord ship descendant after PASS on ancestor?',
@@ -1086,7 +991,7 @@ describe('autonomous release for exact commits to main', () => {
     /* 2. Even if an earlier verdict on a candidate had reviewedCommit = EXACT_SHA, a newer verdict on that candidate with another SHA or pass=false invalidates it. */
     const EXACT_SHA = 'e'.repeat(40);
     f.setBranchHead('release-0.24.2', EXACT_SHA);
-    const relTask2 = (await f.create({ small: true, title: 'Release 0.24.2', paths: ['logic/totals.ts'] })).task;
+    const relTask2 = (await f.create({ small: true, productId: f.productId, title: 'Release 0.24.2', paths: ['logic/totals.ts'] })).task;
     await submit(f.ctx, f.author.id, relTask2.id, {
       summary: 'Candidate 0.24.2.',
       evidence: 'Checks.',
@@ -1109,13 +1014,7 @@ describe('autonomous release for exact commits to main', () => {
     await f.runProductSuite({ commit: EXACT_SHA, branch: 'release-0.24.2', profile: 'full' });
     f.setBranchHead('release-0.24.2', EXACT_SHA);
 
-    const turnCoord2 = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Coord ask after superseded verdict', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const turnCoord2 = (await f.coordinating('Coord ask after superseded verdict', relTask2));
     const supersededAsk = await headCall('ask_person', {
       task: turnCoord2.number,
       question: 'Ship after superseded verdict?',
@@ -1125,21 +1024,20 @@ describe('autonomous release for exact commits to main', () => {
     expect((await f.journal()).json().entries).toEqual([]);
   });
 
-  it('C1 (base from network-1): refuses auto-approval in the same turn when review.baseCommit is not an ancestor of origin/main', async () => {
+  it('C1 (base from network-1): refuses auto-approval when review.baseCommit is not an ancestor of origin/main', async () => {
     const f = await releaseFixture();
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
-    const turn = await f.openEchelonsTurn();
 
     /* Graph: MAIN_BASE -> NETWORK_BASE (network-1, ahead of origin/main) -> NET_TURN_SHA.
-       NET_TURN_SHA is a fast-forward descendant of MAIN_BASE and is in the same open turn, with PASS on NET_TURN_SHA
+       NET_TURN_SHA is a fast-forward descendant of MAIN_BASE, with PASS on NET_TURN_SHA
        and a green full run, yet review.baseCommit = NETWORK_BASE is NOT an ancestor of origin/main (MAIN_BASE). */
     const NETWORK_BASE = 'c'.repeat(40);
     const NET_TURN_SHA = 'd'.repeat(40);
     f.markNonMainBase(NETWORK_BASE, [NET_TURN_SHA]);
     f.setBranchHead('release-0.24.0', NET_TURN_SHA);
 
-    const netTurnTask = (await f.create({ small: true, title: 'Branch from network-1 in same turn', paths: ['logic/totals.ts'] })).task;
-    expect(netTurnTask.turnId).toBe(turn.id);
+    const netTurnTask = (await f.create({ small: true, productId: f.productId, title: 'Branch from network-1 in same turn', paths: ['logic/totals.ts'] })).task;
+    expect(netTurnTask.turnId).toBeNull();
     await submit(f.ctx, f.author.id, netTurnTask.id, {
       summary: 'Built on network-1 base.',
       evidence: 'Checks.',
@@ -1153,14 +1051,8 @@ describe('autonomous release for exact commits to main', () => {
     await f.runProductSuite({ commit: NET_TURN_SHA, branch: 'release-0.24.0', profile: 'full' });
     f.setBranchHead('release-0.24.0', NET_TURN_SHA);
 
-    const turnCoord = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Same-turn release coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
-    expect(turnCoord.turnId).toBe(turn.id);
+    const turnCoord = (await f.coordinating('Same-turn release coord', netTurnTask));
+    expect(turnCoord.turnId).toBeNull();
 
     const { call: headCall } = await f.openTools(f.head);
     const coordAsked = await headCall('ask_person', {
@@ -1205,13 +1097,7 @@ describe('autonomous release for exact commits to main', () => {
     });
     await f.runProductSuite({ commit: NET_OUT_SHA, branch: `task-${outVerdictTask.number}`, profile: 'full' });
 
-    const outRelTask = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Out-of-turn release coord', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const outRelTask = (await f.coordinating('Out-of-turn release coord', outVerdictTask));
     expect(outRelTask.turnId).toBeNull();
 
     const { call: headCall } = await f.openTools(f.head);
@@ -1253,13 +1139,7 @@ describe('autonomous release for exact commits to main', () => {
     });
     await f.runProductSuite({ commit: DESCENDANT_SHA, branch: `task-${outMainTask.number}`, profile: 'full' });
 
-    const outRelTask2 = (
-      await createTask(
-        f.ctx,
-        { agentId: f.head.id },
-        { title: 'Out-of-turn release coord 2', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: f.head.id, resultKind: 'coordination' },
-      )
-    ).task;
+    const outRelTask2 = (await f.coordinating('Out-of-turn release coord 2', outMainTask));
     const ancestorAsked = await headCall('ask_person', {
       task: outRelTask2.number,
       question: 'Ship descendant when PASS was on ancestor?',

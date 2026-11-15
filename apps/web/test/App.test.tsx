@@ -26,7 +26,7 @@ const TRACKER: Record<string, Reply> = {
   'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
   'GET /api/requests': [200, decisions(REQUESTS)],
   'GET /api/turns': [200, { turns: [TURN] }],
-  'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS }],
+  'GET /api/tasks?status=all': [200, { tasks: TASKS }],
 };
 
 async function answerField(user: ReturnType<typeof userEvent.setup>) {

@@ -14,6 +14,7 @@ import { passedProductPart } from '../testruns/receipts.js';
 import { reusableUnits } from '../testruns/reuse-evidence.js';
 import { unitKey } from '../testruns/plan-environment.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
+import { goesStraightToMain } from './turn-integration.js';
 
 export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).max(100).default([]) }).strict();
 export type Verification = z.input<typeof Verification>;
@@ -173,9 +174,11 @@ async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId:
   return { task: row, wakes };
 }
 
+/* A result that joins its department's open turn is checked by named local checks here: the release runs the full suite
+   once on its exact commit. One that goes to its own main line straight needs its completed candidate runs. */
 async function verifiedRunEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[], testedRevision = route.revision) {
   if (!ids.length) {
-    if (!task.turnId) throw refuse(409, 'task_invalid', 'Direct main integration needs completed candidate run_tests evidence.');
+    if (await goesStraightToMain(db, task)) throw refuse(409, 'task_invalid', 'Direct main integration needs completed candidate run_tests evidence.');
     return [];
   }
   return candidateRunEvidence(db, task, route, ids, testedRevision);
@@ -213,7 +216,7 @@ function matchesTestsReport(proof: z.infer<typeof Verified>, eventAgent: string 
 
 /* What Tests proved of the candidate; nothing where the route of its department has no Tests. */
 export async function testedEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {
-  return route.state.stages.some(step => step.stage === 'tests') ? verifiedCandidateEvidence(db, task, route, candidate, verifiedRevision) : [];
+  return route.state.stages.some(step => step.stage === 'tests' && step.status !== 'skipped') ? verifiedCandidateEvidence(db, task, route, candidate, verifiedRevision) : [];
 }
 
 export async function verifiedCandidateEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {

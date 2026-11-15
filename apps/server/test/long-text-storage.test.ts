@@ -242,14 +242,3 @@ it('keeps automatic private log files out of another department while preserving
   expect(ordinary.statusCode).toBe(200);
   expect(ordinary.body).toBe('An ordinary shared file.');
 });
-
-it('keeps automatic text of a planned task hidden from its future executor', async () => {
-  const c = await fixture();
-  await comment(c.app.ctx, { personId: c.ceo.id }, c.task.id, WORDS);
-  const [file] = await c.files();
-  await c.db.update(tasks).set({ status: 'planned' }).where(eq(tasks.id, c.task.id));
-  const fetched = await c.app.inject({ url: `/api/attachments/file?task=${c.task.number}&file=${file!.id}`, headers: { authorization: `Bearer ${c.token}` } });
-  expect(fetched.statusCode).toBe(404);
-  const alias = await c.app.inject({ url: `/api/attachments/file?task=message&file=${file!.id}`, headers: { authorization: `Bearer ${c.token}` } });
-  expect(alias.statusCode).toBe(404);
-});
