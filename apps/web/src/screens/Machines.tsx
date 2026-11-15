@@ -183,15 +183,20 @@ function machineSearch(t: Messages, language: Language, subs: SubView[], row: Ma
    says, and none for a machine that takes no part. */
 const placeOf = (row: MachineRow): number | null => (row.server ? 1 : row.data?.number ?? null);
 
-/* The number in its box, the server's filled; or a dash that says why there is none, with the reason the card gives
-   where there is one. */
+/* Why a machine has no number: left out by its owner, the reason the card gives where there is one, or that it cannot
+   take the server. */
+function dashWhy(t: Messages, row: MachineRow): string {
+  const p = t.machines.priority, unfit = row.data?.unfit ?? null;
+  if (row.data?.pin === 'none') return p.out;
+  return unfit ? p.unfit.lead(unfitText(t, unfit, row.hostname)) : p.cannot;
+}
+
+/* The number in its box, the server's filled; or a dash that says why there is none. */
 function PriorityCell({ row }: { row: MachineRow }) {
   const t = useT();
-  const p = t.machines.priority;
   const number = placeOf(row);
-  if (number !== null) return <span className={number === 1 ? 'pn one' : 'pn'} title={!row.server && typeof row.data?.pin === 'number' ? p.why.pinned : undefined}>{number}</span>;
-  const unfit = row.data?.unfit ?? null;
-  const why = row.data?.pin === 'none' ? p.out : unfit ? p.unfit.lead(unfitText(t, unfit, row.hostname)) : p.cannot;
+  if (number !== null) return <span className={number === 1 ? 'pn one' : 'pn'} title={!row.server && typeof row.data?.pin === 'number' ? t.machines.priority.why.pinned : undefined}>{number}</span>;
+  const why = dashWhy(t, row);
   return <><span className="pdash" title={why} aria-hidden="true" /><span className="sr">{why}</span></>;
 }
 
