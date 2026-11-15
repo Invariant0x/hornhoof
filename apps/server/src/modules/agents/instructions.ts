@@ -225,17 +225,27 @@ async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, ag
   return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills, whole: steady.whole };
 }
 
-/* An assistant's own agent: whose assistant it is and where, then the assistant's skills. */
+/* What an assistant's own agent is told of its program's skills: how to run them while its assistant has a skills address,
+   and otherwise that it has none to run, so it promises none. Its instructions differ between the two, so setting or
+   clearing the address starts its program anew, with the tools it has then. */
+export const ASSISTANT_WITH_SKILLS =
+  "Your assistant's program has skills of its own, such as reminders, files or search: run one with persona_call, by the skill's name and with its arguments, as the message lists them. " +
+  "Its answer says whether it worked; tell your owner what came of it. A file a skill takes goes to Hornhoof first with hh-attach --chat FILE, which prints the file's id: " +
+  "give that id in the skill's arguments, and the program downloads the file by it.";
+export const ASSISTANT_WITHOUT_SKILLS = "You have no tool for the program's own skills now: never promise to run one, and never ask your owner to set anything up for them.";
+
+/* An assistant's own agent: whose assistant it is and where, what it may do of its program's skills, then the assistant's
+   skills. */
 async function assistantInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow, files: boolean): Promise<Rendered> {
   const owners = alias(people, 'owners');
   const [who] = await ctx.db
-    .select({ name: people.name, owner: owners.name, company: companies.name })
+    .select({ name: people.name, owner: owners.name, company: companies.name, skillsUrl: assistants.skillsUrl })
     .from(assistants)
     .innerJoin(people, eq(people.id, assistants.personId))
     .innerJoin(owners, eq(owners.id, people.assistantOf))
     .innerJoin(companies, eq(companies.id, assistants.companyId))
     .where(eq(assistants.agentId, agent.id));
-  const base = `You are ${who?.name ?? agent.name}, the personal assistant of ${who?.owner ?? 'your owner'} at ${who?.company ?? 'the company'}.`;
+  const base = `You are ${who?.name ?? agent.name}, the personal assistant of ${who?.owner ?? 'your owner'} at ${who?.company ?? 'the company'}.\n\n${who?.skillsUrl ? ASSISTANT_WITH_SKILLS : ASSISTANT_WITHOUT_SKILLS}`;
   const steady = steadyOf(ctx.templates, base, ASSISTANT_SKILLS, agent.overrides.base);
   const said = files ? steady.text : steady.whole;
   return { parts: steady.parts, raw: steady.parts.map(p => p.text).join('\n\n'), text: said, hash: textHash(said), skills: files ? steady.skills : [], whole: steady.whole };

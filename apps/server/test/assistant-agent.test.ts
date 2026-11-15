@@ -1,11 +1,11 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
-import { agentEvents, agents, assistantEvents, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, assistantEvents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { putOnPlan } from '../src/modules/assistants/setup.js';
 import { appendEvent, publishWorking } from '../src/modules/events/store.js';
 import { placeWaiting } from '../src/modules/subscriptions/waiting.js';
@@ -65,6 +65,15 @@ async function runWith(node: FakeNode, words: string): Promise<Run> {
     if (message.type === 'job.run' && message.prompt.includes(words)) return message;
   }
 }
+
+/* The node ends the turn, in this session. */
+const finish = (c: Company, run: Run, sessionId: string | null) => {
+  c.node.send({ type: 'job.started', jobId: run.jobId });
+  c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: '', tail: '', error: null });
+};
+const idle = (c: Company, agentId: string) => until(async () => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, agentId))).every(j => j.status === 'done'));
+const skillsAt = (c: Company, assistantId: string, skillsUrl: string | null) =>
+  c.app.inject({ method: 'PATCH', url: `/api/people/${assistantId}/assistant`, payload: { skillsUrl }, ...as(c.ceo) });
 
 /* The CEO's assistant on his plan, its own agent ready, and the turn its first message started. */
 async function talking(c: Company, words = 'Who writes to me today?') {
@@ -143,7 +152,7 @@ describe("an assistant's own agent", () => {
     const { run } = await talking(c);
     const client = await mcp(c.app, run.toolToken!);
     const names = (await client.listTools()).tools.map(t => t.name).sort();
-    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'persona_call', 'read_events', 'send_message', 'tell_owner', 'who_am_i']);
+    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'read_events', 'send_message', 'tell_owner', 'who_am_i']);
   });
 });
 
@@ -268,6 +277,46 @@ describe('persona_call', () => {
 
   const said = (result: unknown) => (result as { content: { text: string }[]; isError?: boolean });
 
+  it('is among its tools only while the assistant has a skills address, as the address is at each list, and a call by name without one says so', async () => {
+    const c = await company();
+    const { ava, run } = await talking(c);
+    const client = await mcp(c.app, run.toolToken!);
+    const listed = async () => (await client.listTools()).tools.map(t => t.name);
+    expect(await listed()).not.toContain('persona_call');
+    const at = await program({ ok: true, text: 'Reminder set.' });
+    expect((await skillsAt(c, ava.id, at.url)).statusCode).toBe(200);
+    expect(await listed()).toContain('persona_call');
+    expect(said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } })).content[0]!.text).toBe('Reminder set.');
+    expect((await skillsAt(c, ava.id, null)).statusCode).toBe(200);
+    expect(await listed()).not.toContain('persona_call');
+    const stale = said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } }));
+    expect(stale.isError).toBe(true);
+    expect(stale.content[0]!.text).toContain('no skills address');
+    expect(at.calls).toHaveLength(1);
+  });
+
+  it('is in its instructions only while there is a skills address, and a change of that starts its program anew', async () => {
+    const c = await company();
+    const { ava, agent, run } = await talking(c);
+    expect(run.instructions).toContain('You are Ava');
+    expect(run.instructions).not.toContain('persona_call');
+    expect(run.instructions).not.toMatch(/skills address/);
+    finish(c, run, 's1');
+    await idle(c, agent.id);
+    expect((await write(c, ava.key, { text: 'Same as before' })).statusCode).toBe(202);
+    const same = await runWith(c.node, 'Same as before');
+    expect(same.sessionId).toBe('s1');
+    finish(c, same, 's1');
+    await idle(c, agent.id);
+    const at = await program({ ok: true, text: 'Done.' });
+    expect((await skillsAt(c, ava.id, at.url)).statusCode).toBe(200);
+    expect((await write(c, ava.key, { text: 'Remind me at 9' })).statusCode).toBe(202);
+    const next = await runWith(c.node, 'Remind me at 9');
+    expect(next.instructions).toContain('persona_call');
+    expect(next.instructions).toContain('hh-attach --chat');
+    expect(next.sessionId).toBeNull();
+  });
+
   it("asks the assistant's program at its skills address, signed, with the message that started the turn, and gives its answer", async () => {
     const c = await company();
     const { ava, message, run } = await talking(c);
@@ -321,6 +370,115 @@ describe('persona_call', () => {
     const broken = said(await client.callTool({ name: 'persona_call', arguments: { name: 'remind', arguments: {} } }));
     expect(broken.isError).toBe(true);
     expect(broken.content[0]!.text).toContain("The assistant's program stopped in the middle of its answer.");
+  });
+});
+
+describe('GET /api/assistant/attachments/:id', () => {
+  /* What hh-attach --chat FILE sends from the turn: the file's bytes with the turn's token, to POST /api/attachments. */
+  async function attach(c: Company, token: string, name: string, bytes: Buffer): Promise<string> {
+    const res = await c.app.inject({ method: 'POST', url: `/api/attachments?chat=1&name=${encodeURIComponent(name)}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, payload: bytes });
+    expect(res.statusCode).toBe(201);
+    return res.json().id;
+  }
+  const download = (c: Company, key: string | null, id: string) => c.app.inject({ url: `/api/assistant/attachments/${id}`, ...(key ? bearer(key) : {}) });
+  /* Every byte value, so nothing on the way reads the file as text. */
+  const BYTES = Buffer.from(Array.from({ length: 512 }, (_, i) => i % 256));
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('rest of a picture')]);
+
+  it('gives a file its own agent put with hh-attach --chat, by the id hh-attach printed, its exact bytes under its type and name, as often as asked', async () => {
+    const c = await company();
+    const { ava, agent, run } = await talking(c);
+    const id = await attach(c, run.toolToken!, 'report.bin', BYTES);
+    const [kept] = await c.db.select({ agentId: attachments.agentId, jobId: attachments.jobId, personId: attachments.personId }).from(attachments).where(eq(attachments.id, id));
+    expect(kept).toEqual({ agentId: agent.id, jobId: run.jobId, personId: null });
+    for (const _ of [1, 2, 3]) {
+      const got = await download(c, ava.key, id);
+      expect(got.statusCode).toBe(200);
+      expect(got.rawPayload.equals(BYTES)).toBe(true);
+      expect(got.headers).toMatchObject({
+        'content-type': 'application/octet-stream',
+        'content-length': '512',
+        'content-disposition': `attachment; filename="report.bin"; filename*=UTF-8''report.bin`,
+        'x-content-type-options': 'nosniff',
+      });
+    }
+    const picture = await download(c, ava.key, await attach(c, run.toolToken!, 'shot.png', PNG));
+    expect(picture.headers['content-type']).toBe('image/png');
+    expect(picture.rawPayload.equals(PNG)).toBe(true);
+  });
+
+  it('names a file of any letters as UTF-8 in filename*, and in plain ASCII in filename', async () => {
+    const c = await company();
+    const { ava, run } = await talking(c);
+    const got = await download(c, ava.key, await attach(c, run.toolToken!, 'Отчет май caf\u00e9.pdf', BYTES));
+    expect(got.statusCode).toBe(200);
+    expect(got.headers['content-disposition']).toBe(`attachment; filename="_____ ___ cafe.pdf"; filename*=UTF-8''%D0%9E%D1%82%D1%87%D0%B5%D1%82%20%D0%BC%D0%B0%D0%B9%20caf%C3%A9.pdf`);
+  });
+
+  it('keeps a name with quotes, a backslash or line breaks inside its one header, so no other header comes of it', async () => {
+    const c = await company();
+    const { ava, agent, run } = await talking(c);
+    const quoted = await download(c, ava.key, await attach(c, run.toolToken!, `say "hi" (it's).txt`, BYTES));
+    expect(quoted.headers['content-disposition']).toBe(`attachment; filename="say _hi_ (it's).txt"; filename*=UTF-8''say%20%22hi%22%20%28it%27s%29.txt`);
+    /* hh-attach keeps no backslash or line break in a name; one already in the database still goes out escaped. */
+    const [odd] = await c.db
+      .insert(attachments)
+      .values({ companyId: c.owner.companyId, jobId: run.jobId, agentId: agent.id, name: 'a\\b\r\nX-Injected: 1\u2028\ud800.txt', mediaType: 'application/octet-stream', bytes: BYTES, size: BYTES.length })
+      .returning();
+    const got = await download(c, ava.key, odd!.id);
+    expect(got.statusCode).toBe(200);
+    expect(got.headers['x-injected']).toBeUndefined();
+    expect(got.headers['content-disposition']).toBe(`attachment; filename="a_b__X-Injected: 1__.txt"; filename*=UTF-8''a%5Cb%0D%0AX-Injected%3A%201%E2%80%A8%EF%BF%BD.txt`);
+    expect(got.rawPayload.equals(BYTES)).toBe(true);
+  });
+
+  it("opens with the assistant's own key alone, as every assistant call: 401 with none, a wrong one, a turn's token or a revoked key", async () => {
+    const c = await company();
+    const { ava, run } = await talking(c);
+    const id = await attach(c, run.toolToken!, 'report.bin', BYTES);
+    const refusal = (await c.app.inject({ url: '/api/assistant/me' })).json();
+    expect(refusal.error.reason).toBe('assistant_key_invalid');
+    const tries = [await download(c, null, id), await download(c, `hha_${'x'.repeat(43)}`, id), await download(c, run.toolToken!, id)];
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/people/${ava.id}/key`, ...as(c.ceo) })).statusCode).toBe(200);
+    tries.push(await download(c, ava.key, id), await download(c, ava.key, 'not-a-uuid'));
+    for (const got of tries) {
+      expect(got.statusCode).toBe(401);
+      expect(got.json()).toEqual(refusal);
+    }
+  });
+
+  it('answers a file it may not have exactly as one that is not there: of another agent, of a person, of another company, or no id at all', async () => {
+    const c = await company();
+    const { ava, agent, run } = await talking(c);
+    const turnOf = async (agentId: string, companyId = c.owner.companyId, subscriptionId = c.plan) =>
+      (await c.db.insert(jobs).values({ companyId, subscriptionId, agentId, kind: 'conversation', prompt: 'Hi', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 }).returning())[0]!.id;
+    const file = async (values: Partial<typeof attachments.$inferInsert>) =>
+      (await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, name: 'file.bin', mediaType: 'application/octet-stream', bytes: BYTES, size: BYTES.length, ...values }).returning())[0]!.id;
+    const bo = await assistantOf(c, c.ceo, c.owner.id, 'Bo');
+    expect((await pick(c, c.ceo, bo.id, c.plan)).statusCode).toBe(200);
+    const boAgent = await ownAgent(c, bo.id);
+    const [other] = await c.db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
+    const [otherPerson] = await c.db.insert(people).values({ companyId: other!.id, name: 'Other person', email: 'other@example.test', status: 'active', scopeKind: 'company' }).returning();
+    const [otherPlan] = await c.db.insert(subscriptions).values({ companyId: other!.id, ownerPersonId: otherPerson!.id, provider: 'claude', kind: 'personal', label: 'Other plan', status: 'ready' }).returning();
+    const [otherAgent] = await c.db.insert(agents).values({ companyId: other!.id, name: 'Other orchestrator', kind: 'orchestrator', model: '', subscriptionId: otherPlan!.id }).returning();
+    const refused = {
+      'an id nothing has': randomUUID(),
+      'no id at all': 'not-a-uuid',
+      "the orchestrator's file": await file({ agentId: c.orchestrator.id, jobId: await turnOf(c.orchestrator.id) }),
+      "another assistant's agent's file": await file({ agentId: boAgent.id, jobId: await turnOf(boAgent.id) }),
+      'a picture its owner sent its agent': await file({ personId: c.owner.id, name: 'mine.png', mediaType: 'image/png' }),
+      "Hornhoof's picture of its agent's program": await file({ jobId: run.jobId, name: null, mediaType: 'image/png' }),
+      "another company's file": await file({ companyId: other!.id, agentId: otherAgent!.id, jobId: await turnOf(otherAgent!.id, other!.id, otherPlan!.id) }),
+    };
+    const seen = (got: Awaited<ReturnType<typeof download>>) => {
+      const { date: _, ...headers } = got.headers;
+      return { status: got.statusCode, body: got.body, headers };
+    };
+    const unknown = seen(await download(c, ava.key, randomUUID()));
+    expect(unknown.status).toBe(404);
+    expect(JSON.parse(unknown.body).error).toMatchObject({ code: 'not_found', reason: 'attachment_unknown' });
+    for (const [what, id] of Object.entries(refused)) expect(seen(await download(c, ava.key, id)), what).toEqual(unknown);
+    expect((await download(c, ava.key, await attach(c, run.toolToken!, 'own.bin', BYTES))).statusCode).toBe(200);
   });
 });
 
@@ -406,12 +564,6 @@ describe('freshText', () => {
     await until(async () => (await me(c, ava.key)).assistant.agentReady === true);
     return { ava, agent: await ownAgent(c, ava.id) };
   }
-  /* The node ends the turn, in this session. */
-  const finish = (c: Company, run: Run, sessionId: string | null) => {
-    c.node.send({ type: 'job.started', jobId: run.jobId });
-    c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: '', tail: '', error: null });
-  };
-  const idle = (c: Company, agentId: string) => until(async () => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, agentId))).every(j => j.status === 'done'));
 
   it('takes text of 1 to 50000 characters and freshText of up to 200000 after trimming, and cuts nothing: more is refused', async () => {
     const c = await company();

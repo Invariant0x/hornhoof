@@ -8,7 +8,7 @@ import type { Person } from '../../auth/session.js';
 import { ApiError, refusal } from '../../errors.js';
 import { lastSeqOf } from './events.js';
 import { tellOwner } from './replies.js';
-import { callSkill } from './skills.js';
+import { callSkill, hasSkills } from './skills.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, writeFor } from './routes.js';
 
 /* What the program's model reads first: what Hornhoof is to it, and how the tools go together. */
@@ -104,8 +104,8 @@ function registerTools(server: McpServer, ctx: Ctx, actor: () => Promise<Person>
 }
 
 /* What an assistant's own agent works with: its owner's assistant tools, the program's skills, and words for its owner's
-   chat with the program. */
-export function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string }): McpServer {
+   chat with the program. called: the tool this request calls, if it calls one. */
+export async function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string }, called: string | null): Promise<McpServer> {
   let actor: Promise<Person> | undefined;
   const owner = () => (actor ??= assistantOfAgent(ctx.db, job.agentId));
   const server = new McpServer({ name: 'hornhoof', version: ctx.config.version });
@@ -125,6 +125,14 @@ export function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string
         return { passedOn: true };
       }),
   );
+  /* The program's skills are among the tools only while the assistant's card has a skills address, as it is at this
+     request, so the next list after a change shows it. A call by name from a list read before still gets its refusal in
+     words. */
+  if (called === 'persona_call' || (await hasSkills(ctx.db, job.agentId))) registerSkills(server, ctx, job);
+  return server;
+}
+
+function registerSkills(server: McpServer, ctx: Ctx, job: { id: string; agentId: string }): void {
   server.registerTool(
     'persona_call',
     {
@@ -140,7 +148,6 @@ export function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string
       return { content: [{ type: 'text' as const, text: done.text }], ...(done.ok ? {} : { isError: true }) };
     },
   );
-  return server;
 }
 
 /* The assistant API over MCP, for a program that is an MCP client: Streamable HTTP without sessions, every POST with the

@@ -161,10 +161,10 @@ function personDownloadType(found: { name: string | null; mediaType?: string }):
 }
 
 /* A file's name as a header carries it: every character past plain letters and digits encoded. */
-const headerName = (name: string) => encodeURIComponent(name).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+export const headerName = (name: string) => encodeURIComponent(name).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 /* A file's bytes a piece at a time, each read as it goes out. */
-async function* filePieces(db: Db, id: string, length: number) {
+export async function* filePieces(db: Db, id: string, length: number) {
   for (let at = 0; at < length; at += PIECE_BYTES) {
     const [piece] = await db
       .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })

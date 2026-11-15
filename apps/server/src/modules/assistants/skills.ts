@@ -15,6 +15,13 @@ export const skillSignature = (secret: string, stamp: string, body: string): str
 
 const Answer = z.object({ ok: z.boolean(), text: z.string(), data: z.unknown().optional() });
 
+/* Whether the assistant whose own agent this is has a skills address now: only then is persona_call among its agent's tools
+   and in its instructions. */
+export async function hasSkills(db: Ctx['db'], agentId: string): Promise<boolean> {
+  const [row] = await db.select({ url: assistants.skillsUrl }).from(assistants).where(eq(assistants.agentId, agentId));
+  return Boolean(row?.url);
+}
+
 type Called = { ok: boolean; text: string };
 const failed = (text: string): Called => ({ ok: false, text });
 const timedOut = (err: unknown) => err instanceof Error && err.name === 'TimeoutError';
