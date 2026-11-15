@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { guardedResizeObserver } from '../guard';
 import { useLanguage, useT } from '../i18n';
 import { Edge } from './Edge';
+import { fitTable } from './fit-table';
 import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
 import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sort';
 
@@ -106,6 +108,31 @@ function useRoutedOpen(selectedId: string | null | undefined, setOpen: Dispatch<
   }, [selectedId, setOpen]);
 }
 
+/* A table that needs more than its frame by whole words stands as entries, as on a phone, before a phone's width:
+   measured again as the frame changes, the rows shown change, and the fonts come. A change of the frame is measured in
+   the next frame: turning into entries inside the observer would change the frame it is watching. */
+function useEntriesFit(frame: RefObject<HTMLDivElement | null>, shown: string) {
+  useLayoutEffect(() => {
+    const host = frame.current;
+    const table = host?.querySelector('table');
+    if (!host || !table) return;
+    const measure = () => fitTable(table);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    let next = 0;
+    const observer = guardedResizeObserver(() => {
+      cancelAnimationFrame(next);
+      next = requestAnimationFrame(measure);
+    }, 'table');
+    observer.observe(host);
+    void document.fonts?.ready.then(measure);
+    return () => {
+      cancelAnimationFrame(next);
+      observer.disconnect();
+    };
+  }, [frame, shown]);
+}
+
 function visibleRows<T extends { id: string }>(rows: readonly T[], selectedId: string | null | undefined, needle: string, search: TableSearch<T> | undefined, language: string, filters: FilterGroup<T>[], selected: Selections): T[] {
   return rows.filter(row => row.id === selectedId || ((!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected)));
 }
@@ -126,6 +153,8 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
   const needle = query.trim().toLocaleLowerCase(language);
   const visible = visibleRows(ordered, selectedId, needle, search, language, filters, selected);
   const filtered = Boolean(needle || Object.values(selected).some(values => values.length));
+  const frame = useRef<HTMLDivElement>(null);
+  useEntriesFit(frame, `${language} ${visible.map(r => r.id).join(' ')}`);
 
   /* Record additions and removals after each refresh, keeping all surviving cards and their places. */
   useEffect(() => {
@@ -164,7 +193,7 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
       <ResultLine filtered={filtered} count={search.count(rows.length)} shown={visible.length} all={rows.length} clear={() => { setQuery(''); setSelected({}); }} />
     </>}
     {search && visible.length === 0 && <p className="nothing">{t.tables.noMatch}</p>}
-    <Edge className="tbl-frame"><div className="tbl">
+    <Edge className="tbl-frame"><div className="tbl" ref={frame}>
       <SortBar columns={columns} sort={sort} choose={choose} />
       <table className="dt">
         <TableHead columns={columns} sort={sort} choose={choose} />

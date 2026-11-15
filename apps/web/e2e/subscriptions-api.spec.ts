@@ -92,6 +92,8 @@ function watch(page: Page) {
 }
 
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+/* A box's height in whole pixels: Firefox lays out in sixtieths of a pixel, so 44 px can come as 43.99997. */
+const tall = async (locator: Locator) => Math.round((await box(locator)).height);
 
 /* The words of the table's headers that stand on more than one line: a word broken in its middle. */
 const brokenHeaderWords = (page: Page) => page.evaluate(() => {
@@ -179,7 +181,7 @@ for (const { lang, skin, width } of LOOKS) {
     const all = type.getByRole('button', { name: new RegExp(`^${t.subs.payAll}`) });
     await expect(all).toHaveText(`${t.subs.payAll}4`);
     await expect(all).toHaveAttribute('aria-pressed', 'true');
-    for (const button of await type.getByRole('button').all()) expect((await box(button)).height).toBeGreaterThanOrEqual(44);
+    for (const button of await type.getByRole('button').all()) expect(await tall(button)).toBeGreaterThanOrEqual(44);
     await type.getByRole('button', { name: new RegExp(`^${t.subs.pay.api_key}`) }).click();
     await expect(rows).toHaveCount(3);
     await expect(row('Max')).toHaveCount(0);
@@ -234,8 +236,8 @@ for (const { lang, skin, width } of LOOKS) {
     await expect(key).toHaveAttribute('type', 'text');
     await form.getByRole('button', { name: t.subs.hideTypedKey.label, exact: true }).click();
     await expect(key).toHaveAttribute('type', 'password');
-    expect((await box(key)).height).toBeGreaterThanOrEqual(44);
-    expect((await box(form.getByRole('button', { name: t.subs.showTypedKey.label, exact: true }))).height).toBeGreaterThanOrEqual(44);
+    expect(await tall(key)).toBeGreaterThanOrEqual(44);
+    expect(await tall(form.getByRole('button', { name: t.subs.showTypedKey.label, exact: true }))).toBeGreaterThanOrEqual(44);
     await form.getByLabel(t.subs.apiName, { exact: true }).fill('Router 2');
     await expect(form.getByLabel(t.subs.apiAddress, { exact: true })).toHaveCount(0);
     await form.getByRole('button', { name: t.subs.loadModels, exact: true }).click();
@@ -266,6 +268,31 @@ for (const { lang, skin, width } of LOOKS) {
     expect(errors).toEqual([]);
   });
 }
+
+/* Wider than a phone, a table that needs more than its frame by whole words stands as entries; wider still, as a table. */
+test('Subscriptions & API: entries where the table does not fit by whole words, ru light 830 and 1440', async ({ page }) => {
+  const errors = watch(page);
+  await page.clock.install({ time: NOW });
+  await page.addInitScript(() => {
+    localStorage.setItem('hh-lang', 'ru');
+    localStorage.setItem('hh-theme', 'light');
+  });
+  await serveSection(page, []);
+  await page.setViewportSize({ width: 830, height: 900 });
+  await page.goto('/');
+  await page.getByRole('navigation').getByRole('button', { name: ru.shell.tabs.subscriptions, exact: true }).click();
+  const table = page.locator('.dt');
+  await expect(table).toHaveAttribute('data-fit', 'entries');
+  await expect(page.locator('.dt > thead')).toBeHidden();
+  await expect(page.getByRole('group', { name: ru.tables.sortBy })).toBeVisible();
+  expect(await page.locator('.tbl').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(table).not.toHaveAttribute('data-fit');
+  await expect(page.locator('.dt > thead')).toBeVisible();
+  expect(await brokenHeaderWords(page)).toEqual([]);
+  expect(await fits(page)).toBe(true);
+  expect(errors).toEqual([]);
+});
 
 for (const lang of ['en', 'ru'] as const) for (const width of [1440, 375]) {
   test(`An employee's card runs on an API connection and one of its models: ${lang} ${width}`, async ({ page }, info) => {

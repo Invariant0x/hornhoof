@@ -2114,6 +2114,24 @@ th.k-prio .sorth { white-space: nowrap; }
   .dt td[data-label] > .cell-lim { flex: 1; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px; }
   .cell-lim .bar { width: 64px; }
 }
+/* The same entries, wider than a phone, for a sorting table that needs more than its frame by whole words (useEntriesFit). */
+.dt[data-fit="entries"] > thead { display: none; }
+.tbl:has(> .dt[data-fit="entries"]) > .sortbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 10px 14px; border-block-end: 1px solid var(--line2); }
+.tbl:has(> .dt[data-fit="entries"]) > .sortbar .lbl { margin-inline-end: 4px; font-size: 12px; color: var(--muted); }
+.dt[data-fit="entries"], .dt[data-fit="entries"] > tbody, .dt[data-fit="entries"] > tbody > tr, .dt[data-fit="entries"] > tbody > tr > td { display: block; inline-size: 100%; }
+.dt[data-fit="entries"] > tbody > tr.rm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px 12px; padding: 12px 14px; border-block-end: 1px solid var(--line); }
+.dt[data-fit="entries"] > tbody > tr.rm.open { border-block-end-color: transparent; background: var(--surface2); }
+.dt[data-fit="entries"] > tbody > tr.rm > td { padding: 0; border: 0; background: none !important; inline-size: auto; }
+.dt[data-fit="entries"] td.k-name { grid-column: 1; grid-row: 1; }
+.dt[data-fit="entries"] td.k-status { grid-column: 1; grid-row: 2; text-align: start; }
+.dt[data-fit="entries"] td[data-label] { grid-column: 1 / -1; display: flex; align-items: baseline; }
+.dt[data-fit="entries"] td[data-label]::before { content: attr(data-label); flex: 0 0 7em; margin-inline-end: 10px; font-size: 12px; color: var(--muted); }
+.dt[data-fit="entries"] td[data-label] > * { min-inline-size: 0; }
+.dt[data-fit="entries"] td.k-prio .pdash { margin: 0; align-self: center; }
+.dt[data-fit="entries"] > tbody > tr.det { border-block-end: 1px solid var(--line); background: var(--surface2); }
+.dt[data-fit="entries"] > tbody > tr.det > td { padding-block: 0 12px; padding-inline: 10px; }
+.dt[data-fit="entries"] td[data-label] > .cell-lim { flex: 1; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px; }
+.dt[data-fit="entries"] .cell-lim .bar { inline-size: 64px; }
 
 .until { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); white-space: normal; }
 .card-t h3, .blk h4, .dg-h h5 { margin: 0; }
