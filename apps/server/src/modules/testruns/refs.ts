@@ -45,12 +45,15 @@ function commitIn(refs: Map<string, string>, want: CommitWanted): CommitAt {
   return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}. Push it, or name the branch to test.` };
 }
 
-function refsAddress(url: string, service = 'git-upload-pack'): URL {
+/* An address of git's smart HTTP beside the repository: the refs it advertises for a service, or where a push goes. */
+function gitAddress(url: string, path: string, search = ''): URL {
   const at = new URL(url);
-  at.pathname = `${at.pathname.replace(/\/+$/, '')}/info/refs`;
-  at.search = `?service=${service}`;
+  at.pathname = `${at.pathname.replace(/\/+$/, '')}/${path}`;
+  at.search = search;
   return at;
 }
+
+const refsAddress = (url: string, service = 'git-upload-pack'): URL => gitAddress(url, 'info/refs', `?service=${service}`);
 
 /* The token goes as git sends it from a node. fetch drops it when a redirect leaves the repository's host. */
 const headersFor = (token: string, accept = ADVERTISEMENT): Record<string, string> => ({
@@ -169,13 +172,6 @@ function pushRefused(lines: string[], ref: string): string | null {
   return refused ? `it refused: ${refused.replace(`ng ${ref} `, '')}` : 'its answer says nothing of the branch';
 }
 
-function pushAddress(url: string): URL {
-  const at = new URL(url);
-  at.pathname = `${at.pathname.replace(/\/+$/, '')}/git-receive-pack`;
-  at.search = '';
-  return at;
-}
-
 /* Makes the branch at the commit, only where the repository has no branch of that name: a push git itself takes, as a node's
    would, its old value none, so a branch that is there, or one made meanwhile by another, is never moved. Git's own protocol
    over HTTP, as the server's image has no git. It says what went wrong rather than throw, and never with the token. It follows
@@ -189,7 +185,7 @@ export const createBranch: BranchCreator = async (repo, branch, commit, timeoutM
     const advertised = await answerOf(refsAddress(repo.url, 'git-receive-pack'), { headers: headersFor(repo.token, RECEIVE_ADVERTISEMENT), signal }, RECEIVE_ADVERTISEMENT, REFS_MAX_BYTES);
     if (typeof advertised === 'string') return cannot(advertised);
     if (advertisedRefs(advertised).has(ref)) return cannot('it has that branch already');
-    const pushed = await answerOf(pushAddress(repo.url), {
+    const pushed = await answerOf(gitAddress(repo.url, 'git-receive-pack'), {
       method: 'POST', redirect: 'manual', signal, body: new Uint8Array(pushOf(ref, commit)),
       headers: { ...headersFor(repo.token, RECEIVE_RESULT), 'content-type': 'application/x-git-receive-pack-request' },
     }, RECEIVE_RESULT, RESULT_MAX_BYTES);
