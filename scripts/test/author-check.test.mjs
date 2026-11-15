@@ -608,11 +608,15 @@ test('a policy and a changed node-test file select the same package only once', 
   assert.deepEqual(result.packages[0].units, [UNITS[1]]);
 });
 
-test('a selection of the whole suite stays unavailable until it is asked for', async () => {
-  const whole = { packages: ['node', 'scripts', 'ruby'].map(packageId => ({ packageId, mode: 'whole-package', units: [] })) };
+test('a whole-suite selection defers to leftToFullRun locally, runs when asked for, and stays unavailable for external everyReached checks', async () => {
+  const whole = { packages: [{ packageId: 'node', mode: 'whole-package', units: [UNITS[0]] }, { packageId: 'scripts', mode: 'whole-package', units: [UNITS[1]] }, { packageId: 'ruby', mode: 'whole-package', units: [] }] };
   const changes = [{ path: 'package.json', kind: 'modified' }];
-  assert.equal((await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false }, selector(whole))).unavailable, 'selection_is_whole_suite');
+  const local = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false }, selector(whole));
+  assert.equal(local.unavailable, undefined);
+  assert.deepEqual(local.packages.map(item => item.packageId), ['ruby']);
+  assert.deepEqual(local.leftToFullRun, [UNITS[0].file, UNITS[1].file]);
   assert.equal((await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: true }, selector(whole))).packages.length, 3);
+  assert.equal((await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false, everyReached: true }, selector(whole))).unavailable, 'selection_is_whole_suite');
 });
 
 test('a problem of the selection makes tests unavailable, and a migration without a check is only a note', async () => {
@@ -915,4 +919,144 @@ test('a worktree of another lockfile, a clone itself or one whose clone installe
     rmSync(join(same.clone, 'node_modules/.package-lock.json'));
     assert.equal(cloneWithModules(same.tree, same.git), null, 'a clone whose install did not finish');
   } finally { for (const { top } of [other, same]) rmSync(top, { recursive: true, force: true }); }
+});
+
+const manyUnits = (suiteId, prefix, count, ext = 'test.ts') => Array.from({ length: count }, (_, index) => {
+  const file = `${prefix}/t-${String(index).padStart(3, '0')}.${ext}`;
+  return { suiteId, file, selectionUnit: file };
+});
+
+test('a Dockerfile or migration change with no near tests runs no local tests of a 374-file package, fills leftToFullRun, and runs other stages without empty_test_selection', async () => {
+  const nodeUnits = manyUnits('node', 'apps/node/test', 374);
+  const wholeNode = { packages: [{ packageId: 'node', mode: 'whole-package', units: nodeUnits, reasons: [{ code: 'full_package_rule', path: 'apps/node/Dockerfile' }] }] };
+  for (const path of ['apps/node/Dockerfile', 'apps/server/drizzle/0076_check.sql']) {
+    const picked = await selectTests({ changes: [{ path, kind: 'modified' }], manifest: MANIFEST, tracked: [], allowWhole: false }, { ...selector(wholeNode), listTestUnits: () => nodeUnits });
+    assert.equal(picked.unavailable, undefined, path);
+    assert.deepEqual(picked.packages, [], path);
+    assert.equal(picked.leftToFullRun.length, 374, path);
+    const ports = fake();
+    const ran = await runStages(given({ changes: [{ path, kind: 'modified' }, { path: 'apps/node/src/a.ts', kind: 'modified' }], selection: picked, scripts: { 'format:check': 'x' } }), ports);
+    assert.deepEqual(ran.stages.map(item => [item.name, item.status]), [
+      ['format', 'passed'], ['lint', 'passed'], ['types', 'passed'], ['tests', 'unavailable'], ['crapper', 'passed'], ['dryer', 'passed'],
+    ]);
+    assert.ok(isLine(ports, /^STAGE tests unavailable .*reason=nothing_selected/));
+    assert.equal(isLine(ports, /empty_test_selection/), false);
+    assert.equal(exitCodeOf(ran.stages), 0);
+    assert.equal(ran.record.scope.leftToFullRun.length, 374);
+  }
+});
+
+test('a whole-package rule without --allow-whole runs only near tests locally and keeps the whole package only with --allow-whole or everyReached', async () => {
+  const rest = manyUnits('node', 'apps/node/test', 375);
+  const all = [near, namedTest, changedTest, ...rest];
+  const texts = { [near.file]: "import { a } from '../src/a.js';", [changedTest.file]: "import { b } from '../src/b.js';" };
+  const ports = {
+    ...selector({ packages: [{ packageId: 'node', mode: 'whole-package', units: all, reasons: [{ code: 'schema', path: 'apps/node/src/a.ts' }] }] }),
+    listTestUnits: () => all,
+    namedAfter: (testFile, source) => testFile === namedTest.file && source === 'apps/node/src/a.ts',
+    read: path => texts[path] ?? null,
+  };
+  const changes = [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: changedTest.file, kind: 'modified' }];
+  const local = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(local.packages.map(item => [item.packageId, item.mode, item.units.map(each => each.file)]), [['node', 'related', [near.file, namedTest.file, changedTest.file]]]);
+  assert.equal(local.leftToFullRun.length, 375);
+  const whole = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: true }, ports);
+  assert.equal(whole.packages[0].mode, 'whole-package');
+  assert.equal(whole.packages[0].units.length, 378);
+  assert.deepEqual(whole.leftToFullRun, []);
+  const external = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false, everyReached: true }, ports);
+  assert.equal(external.packages[0].mode, 'whole-package');
+  assert.equal(external.packages[0].units.length, 378);
+  const moved = await selectTests({ changes: [{ kind: 'renamed', previousPath: 'apps/node/src/a.ts', path: 'apps/web/e2e/moved.ts' }], manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(moved.packages.map(item => [item.packageId, item.units.map(each => each.file)]), [['node', [near.file, namedTest.file]]]);
+});
+
+test('a branch of 520 files across every package runs only near tests without selection_is_whole_suite and puts the rest in leftToFullRun', async () => {
+  const fastManifest = { ...MANIFEST, profiles: [{ id: 'fast', requiredSuiteIds: ['node', 'scripts'] }] };
+  const nodeUnits = [near, namedTest, ...manyUnits('node', 'apps/node/test', 380)];
+  const scriptUnits = [{ suiteId: 'scripts', file: 'scripts/test/changed.test.mjs', selectionUnit: 'scripts/test/changed.test.mjs' }, ...manyUnits('scripts', 'scripts/test', 40, 'test.mjs')];
+  const allUnits = [...nodeUnits, ...scriptUnits];
+  const wholePackages = [
+    { packageId: 'node', mode: 'whole-package', units: nodeUnits, reasons: [{ code: 'configuration', path: 'package.json' }] },
+    { packageId: 'scripts', mode: 'whole-package', units: scriptUnits, reasons: [{ code: 'configuration', path: 'package.json' }] },
+  ];
+  const sources = Array.from({ length: 518 }, (_, index) => ({ path: `apps/node/src/f-${index}.ts`, kind: 'modified' }));
+  const changes = [{ path: 'package.json', kind: 'modified' }, { path: 'apps/node/src/a.ts', kind: 'modified' }, { path: 'scripts/test/changed.test.mjs', kind: 'modified' }, ...sources];
+  const ports = {
+    ...selector({ packages: wholePackages }),
+    listTestUnits: () => allUnits,
+    namedAfter: (testFile, source) => testFile === namedTest.file && source === 'apps/node/src/a.ts',
+    read: path => (path === near.file ? "import '../src/a.js';" : null),
+  };
+  const result = await selectTests({ changes, manifest: fastManifest, tracked: [], allowWhole: false }, ports);
+  assert.equal(result.unavailable, undefined);
+  assert.deepEqual(result.packages.map(item => [item.packageId, item.mode, item.units.map(each => each.file)]), [
+    ['node', 'related', [near.file, namedTest.file]],
+    ['scripts', 'related', ['scripts/test/changed.test.mjs']],
+  ]);
+  assert.equal(result.leftToFullRun.length, 420);
+  const external = await selectTests({ changes, manifest: fastManifest, tracked: [], allowWhole: false, everyReached: true }, ports);
+  assert.equal(external.unavailable, 'selection_is_whole_suite');
+});
+
+test('stages batch 520 paths across eslint, argv-files tests, crapper and dryer while preserving counts, merged coverage and CRAP failures', async () => {
+  const sources = Array.from({ length: 520 }, (_, index) => `apps/node/src/f-${String(index).padStart(3, '0')}.ts`);
+  const testUnits = manyUnits('node', 'apps/node/test', 520);
+  const hunks = { [sources[0]]: [[1, 2]] };
+  const changes = [...sources, ...testUnits.map(item => item.file)].map(path => ({ path, kind: 'modified' }));
+  const selection = { packages: [{ packageId: 'node', mode: 'whole-package', units: testUnits }], notes: [], leftToFullRun: [] };
+  const restLcov = sources.slice(1).map(path => `SF:${path.slice('apps/node/'.length)}\nDA:1,1\nend_of_record\n`).join('');
+  const ports = fake((program, args) => {
+    const outArg = args.find(arg => arg.startsWith('--outputFile.json='));
+    if (outArg) {
+      const reportPath = outArg.slice('--outputFile.json='.length);
+      const firstBatch = reportPath.endsWith('tests-node.json');
+      ports.write(reportPath, JSON.stringify({ numTotalTests: 3, numPassedTests: 2, numFailedTests: 0, numPendingTests: 1, numTodoTests: 0 }));
+      ports.write(LCOV, firstBatch ? 'SF:src/f-000.ts\nDA:1,2\nDA:2,0\nBRDA:1,0,0,1\nBRDA:1,0,1,-\nend_of_record\n' : `SF:src/f-000.ts\nDA:1,0\nDA:2,3\nBRDA:1,0,0,0\nBRDA:1,0,1,2\nend_of_record\n${restLcov}`);
+    }
+    if (program === 'crapper') {
+      const hasFirst = args.includes('src/f-000.ts');
+      ports.write(CRAP, hasFirst ? edn(['bad', 'a', 12, 40, 43.1]) : edn(['clean', 'a', 2, 100, 2]));
+    }
+    if (program === 'dryer') return { code: 0, output: 'DUPLICATE score=0.95\n  a\n  b\n' };
+    return undefined;
+  }, {});
+  const result = await runStages(given({ changes, selection, hunks, grown: grownIn('apps/node', 'bad', 12) }), ports);
+  for (const call of ports.calls) assert.ok(call.args.length <= 220, `${call.program} got ${call.args.length} args`);
+  const eslintCalls = named(ports, 'npx').filter(call => call.args.includes('eslint'));
+  const vitestCalls = named(ports, 'npx').filter(call => call.args.includes('vitest'));
+  const crapperCalls = named(ports, 'crapper');
+  const dryerCalls = named(ports, 'dryer');
+  assert.ok(eslintCalls.length >= 5);
+  assert.ok(vitestCalls.length >= 3);
+  assert.ok(vitestCalls[0].args.includes('--coverage.include=src/**'));
+  assert.ok(crapperCalls.length >= 3);
+  assert.ok(dryerCalls.length >= 5);
+  assert.deepEqual(result.numbers.tests, { passed: vitestCalls.length * 2, failed: 0, skipped: vitestCalls.length, total: vitestCalls.length * 3 });
+  assert.deepEqual(result.numbers.changedLines, { covered: 2, total: 2 });
+  assert.match(ports.read(LCOV), new RegExp(`BRDA:1,0,0,1[\\s\\S]*BRDA:1,0,1,${(vitestCalls.length - 1) * 2}`));
+  assert.equal(stage(result, 'crapper').status, 'failed');
+  assert.equal(result.numbers.worstCrap, 43.1);
+  assert.equal(result.numbers.dryerFlags, dryerCalls.length);
+});
+
+test('vitest-shard suites pass 520 test files through HH_TEST_FILES in one run, and root-level sources compact coverage includes when over limit', async () => {
+  const shardSuite = { ...vitestSuite, split: { kind: 'vitest-shard' } };
+  const rootSources = Array.from({ length: 250 }, (_, index) => `apps/node/r-${index}.ts`);
+  const testUnits = manyUnits('node', 'apps/node/test', 520);
+  const ports = fake(undefined, { ...FILES, [CRAP]: edn(['a', 'a', 2, 100, 2]) });
+  const selection = { packages: [{ packageId: 'node', mode: 'whole-package', units: testUnits }], notes: [], leftToFullRun: [] };
+  const result = await runStages(given({ changes: rootSources.map(path => ({ path, kind: 'modified' })), suites: [shardSuite], selection, hunks: {} }), ports);
+  const vitestCalls = named(ports, 'npx').filter(call => call.args.includes('vitest'));
+  assert.equal(vitestCalls.length, 1);
+  assert.ok(vitestCalls[0].args.length <= 20);
+  assert.ok(vitestCalls[0].args.includes('--coverage.include=**'));
+  assert.equal(JSON.parse(ports.read('/tmp/check/files-node.json')).length, 520);
+  assert.equal(stage(result, 'tests').status, 'passed');
+
+  const longPaths = Array.from({ length: 120 }, (_, index) => `${'long-folder-'.repeat(15)}f-${index}.mjs`);
+  const bytePorts = fake();
+  await runStages(given({ changes: longPaths.map(path => ({ path, kind: 'modified' })), selection: { packages: [], notes: [] }, hunks: {} }), bytePorts);
+  const byteLint = named(bytePorts, 'npx').filter(call => call.args.includes('eslint'));
+  assert.ok(byteLint.length >= 2);
 });

@@ -26,7 +26,9 @@ before(async () => {
 });
 
 const select = (changes, added = []) => selectTests({ changes, manifest, tracked: [...trackedIn(root), ...added], allowWhole: false }, ports);
+const selectFull = (changes, added = []) => selectTests({ changes, manifest, tracked: [...trackedIn(root), ...added], allowWhole: false, everyReached: true }, ports);
 const runs = path => select([{ path, kind: 'modified' }]);
+const runsFull = path => selectFull([{ path, kind: 'modified' }]);
 const suites = selection => (selection.packages ?? []).map(item => item.packageId).sort();
 
 for (const [group, path, expected] of [
@@ -51,8 +53,8 @@ for (const [group, path, expected] of [
   ['the compose file', 'compose.yaml', ['release-scripts', 'server']],
   ['a browser scenario', 'apps/web/e2e/about.spec.ts', []],
 ]) {
-  test(`a change of ${group} runs ${expected.join(', ') || 'no suite'}`, { timeout: 60_000 }, async () => {
-    const selection = await runs(path);
+  test(`a change of ${group} reaches ${expected.join(', ') || 'no suite'}`, { timeout: 60_000 }, async () => {
+    const selection = await runsFull(path);
     assert.equal(selection.unavailable, undefined);
     assert.deepEqual(suites(selection), expected);
   });
@@ -100,10 +102,14 @@ test('a change of the templates beside a test runs that test and the readers of 
   assert.ok(filesOf(selection).includes(test) && filesOf(selection).includes('apps/server/test/templates.test.ts'));
 });
 
-test('a fixture of the shared protocol runs its own package and only the server test that reads it', { timeout: 60_000 }, async () => {
-  const selection = await runs('packages/protocol/test/fixtures/hornhoof-test-environment-v1.json');
-  assert.deepEqual(chosen(selection), [['protocol', 'whole-package'], ['server', 'related']]);
-  assert.deepEqual(selection.packages[1].units.map(unit => unit.file), ['apps/server/test/test-run-product-config.test.ts']);
+test('a fixture of the shared protocol reaches its own package and only the server test that reads it, leaving protocol to leftToFullRun locally', { timeout: 60_000 }, async () => {
+  const full = await runsFull('packages/protocol/test/fixtures/hornhoof-test-environment-v1.json');
+  assert.deepEqual(chosen(full), [['protocol', 'whole-package'], ['server', 'related']]);
+  assert.deepEqual(full.packages[1].units.map(unit => unit.file), ['apps/server/test/test-run-product-config.test.ts']);
+  const local = await runs('packages/protocol/test/fixtures/hornhoof-test-environment-v1.json');
+  assert.deepEqual(chosen(local), [['server', 'related']]);
+  assert.deepEqual(local.packages[0].units.map(unit => unit.file), ['apps/server/test/test-run-product-config.test.ts']);
+  assert.ok(local.leftToFullRun.some(file => file.startsWith('packages/protocol/test/')));
 });
 
 test('a change a person sees names the browser scenarios of its screen, says when it has none, and a scenario names itself alone', { timeout: 60_000 }, async () => {
@@ -147,14 +153,34 @@ test('a new test only the final profile runs does not stop the check, and says w
   assert.deepEqual(selection.notes, [`runs in the final profile: ${path}`]);
 });
 
-test('the shared protocol takes every suite without being asked, unless another path asks for everything by itself', { timeout: 60_000 }, async () => {
+test('the shared protocol takes every suite in everyReached mode unless another path asks for everything, while local author check keeps only near tests and leftToFullRun', { timeout: 60_000 }, async () => {
   const modified = path => ({ path, kind: 'modified' });
-  assert.deepEqual(suites(await select(['packages/protocol/src/index.ts', 'apps/server/drizzle/0075_internal_first_questions.sql'].map(modified))), ALL);
+  assert.deepEqual(suites(await selectFull(['packages/protocol/src/index.ts', 'apps/server/drizzle/0075_internal_first_questions.sql'].map(modified))), ALL);
   for (const paths of [['Dockerfile', 'packages/protocol/src/index.ts'], ['packages/protocol/src/index.ts', 'Dockerfile'], ['apps/node/src/test-impact.ts', 'packages/protocol/src/index.ts']]) {
-    assert.deepEqual(suites(await select(paths.map(modified))), ALL, paths.join(' + '));
+    assert.deepEqual(suites(await selectFull(paths.map(modified))), ALL, paths.join(' + '));
   }
-  assert.equal((await select(['package.json', 'packages/protocol/package.json'].map(modified))).unavailable, 'selection_is_whole_suite');
-  assert.equal((await runs('package.json')).unavailable, 'selection_is_whole_suite');
+  assert.equal((await selectFull(['package.json', 'packages/protocol/package.json'].map(modified))).unavailable, 'selection_is_whole_suite');
+  assert.equal((await runsFull('package.json')).unavailable, 'selection_is_whole_suite');
+
+  for (const path of ['Dockerfile', 'apps/server/drizzle/0075_internal_first_questions.sql']) {
+    const local = await runs(path);
+    assert.equal(local.unavailable, undefined, path);
+    assert.deepEqual(suites(local), [], path);
+    assert.ok(local.leftToFullRun.filter(file => file.startsWith('apps/server/test/')).length >= 370, path);
+  }
+  const nodeDocker = await runs('apps/node/Dockerfile');
+  assert.equal(nodeDocker.unavailable, undefined);
+  assert.deepEqual(suites(nodeDocker), []);
+  assert.ok(nodeDocker.leftToFullRun.some(file => file.startsWith('apps/node/test/')));
+
+  const wide = await select([
+    'package.json', 'packages/protocol/src/index.ts', 'apps/node/Dockerfile',
+    'apps/server/drizzle/0075_internal_first_questions.sql', 'scripts/test/author-check.test.mjs',
+  ].map(modified));
+  assert.equal(wide.unavailable, undefined);
+  assert.deepEqual(suites(wide), ['protocol', 'release-scripts']);
+  assert.deepEqual(wide.packages.find(item => item.packageId === 'release-scripts').units.map(unit => unit.file), ['scripts/test/author-check.test.mjs']);
+  assert.ok(wide.leftToFullRun.length >= 450);
 });
 
 /* The real command of a real suite: the fake ports of the check's own tests cannot tell that its config asks for more. */
