@@ -3,7 +3,7 @@ import { taskRoute } from '../test/task-route';
 import type { Locator, Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { AgentCardView, BackupsView, Briefing, Decisions, Improvement, Me, Org, SwitchWord, TaskDetail, TaskLine, TurnView } from '../src/types';
+import type { AgentCardView, BackupsView, Briefing, Decisions, Improvement, Me, Org, SwitchWord, TaskDetail, TaskLine, TokenPeriods, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
 export const ME: Me = {
@@ -69,6 +69,10 @@ const IMPROVEMENT: Improvement = {
 
 const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+/* What a subscription's turns used, as its open card asks for it: nothing yet. */
+const NO_TURNS = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, turns: 0, noData: 0 };
+const NO_TOKENS: TokenPeriods = { today: NO_TURNS, week: NO_TURNS, month: NO_TURNS, all: NO_TURNS };
+
 const ROUTES: Record<string, unknown> = {
   '/api/setup': { needed: false },
   '/api/me': ME,
@@ -117,6 +121,7 @@ export async function serveApi(page: Page) {
     if (path === '/api/stream') return;
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));
+    if (/^\/api\/subscriptions\/[^/]+\/tokens(\?|$)/.test(path)) return route.fulfill(json({ tokens: NO_TOKENS }));
     /* A department works in turns unless a test says otherwise, and the person may change it. */
     const workMode = /^\/api\/departments\/([^/]+)\/work-mode$/.exec(path);
     if (workMode) return route.fulfill(json({ departmentId: workMode[1], workMode: 'turns', canChangeWorkMode: true }));
