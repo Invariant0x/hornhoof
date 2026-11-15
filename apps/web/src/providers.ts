@@ -1,5 +1,5 @@
 import { effortFor, effortsOf } from '@hornhoof/protocol/efforts';
-import type { ModelOption, ProviderId } from './types';
+import type { ModelOption, ProviderId, SubView } from './types';
 
 /* Product names stay as they are in every language. */
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
@@ -12,6 +12,10 @@ export const PROGRAM_NAMES: Record<ProviderId, string> = {
   claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity', anthropic_api: 'Claude', openai_api: 'Codex',
   openrouter: 'Claude', custom_api: 'Claude',
 };
+
+/* An API connection runs in the program of its protocol: Claude Code for Anthropic's, Codex for OpenAI's. */
+const PROTOCOL_PROGRAMS = { anthropic: 'Claude', openai: 'Codex' } as const;
+export const programName = (s: Pick<SubView, 'provider' | 'api'>): string => (s.api ? PROTOCOL_PROGRAMS[s.api.protocol] : PROGRAM_NAMES[s.provider]);
 
 /* Plans a person connects on their own machine. */
 export const PLAN_PROVIDERS = ['claude', 'codex', 'kimi', 'glm', 'antigravity'] as const;

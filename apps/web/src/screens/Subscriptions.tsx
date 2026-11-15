@@ -2,7 +2,7 @@ import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
-import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
+import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
 import type { JobView, Me, ShownCommand, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { CommandBox, type ActiveCommand } from '../ui/CommandBox';
@@ -97,7 +97,7 @@ function TokensCell({ sub: s }: { sub: SubView }) {
 
 function subscriptionColumns(t: Messages, now: number): TableColumn<SubView>[] {
   return [
-    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [subName(t, s), s.owner.name], cell: s => <><span className="nmg"><ProviderMark provider={s.provider} /><span className="nm"><b>{subName(t, s)}</b>{s.tier && <small>{s.tier}</small>}</span></span><PayBadge sub={s} />{s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>}</> },
+    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [subName(t, s), s.owner.name], cell: s => <><span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><b>{subName(t, s)}</b>{s.tier && <small>{s.tier}</small>}</span></span><PayBadge sub={s} />{s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>}</> },
     { key: 'owner', label: t.tables.owner, direction: 1, value: s => s.owner.name, cell: s => s.owner.name },
     { key: 'status', label: t.tables.status, direction: 1, value: s => STATUS_ORDER.indexOf(stateOf(s, now)), className: 'k-status', cell: s => <SubscriptionStatus sub={s} now={now} showUntil /> },
     { key: 'serves', label: t.tables.serves, direction: 1, value: s => [s.place.kind === 'company' ? 0 : 1, s.place.name], cell: s => s.place.kind === 'company' ? t.people.wholeCompany : s.place.name },
@@ -177,7 +177,7 @@ function subscriptionFilters(t: Messages, now: number, subs: SubView[]): FilterG
 }
 
 function subscriptionSearch(t: Messages, language: Language, s: SubView): string {
-  return [subName(t, s), s.last4, PROGRAM_NAMES[s.provider], s.owner.name, s.place.kind === 'company' ? t.people.wholeCompany : s.place.name, s.tier, ...s.accounts.map(a => a.email), ...s.machines.map(m => m.hostname), ...(s.agents ?? []).flatMap(a => [a.name, a.title?.[language]])].join(' ');
+  return [subName(t, s), s.last4, programName(s), s.owner.name, s.place.kind === 'company' ? t.people.wholeCompany : s.place.name, s.tier, ...s.accounts.map(a => a.email), ...s.machines.map(m => m.hostname), ...(s.agents ?? []).flatMap(a => [a.name, a.title?.[language]])].join(' ');
 }
 
 function finished(t: Messages, language: Language, sub: SubView, job: JobView): Test {
@@ -397,7 +397,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   const name = subName(t, s);
   return (
     <CardFrame label={`${name}, ${s.owner.name}`} accent={s.isOrchestrator}
-      head={<CardHead mark={<ProviderMark provider={s.provider} />} name={name} tier={s.tier} badges={<><PayBadge sub={s} />{s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>}</>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
+      head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={name} tier={s.tier} badges={<><PayBadge sub={s} />{s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>}</>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
       extra={<PlanExtra sub={s} controls={controls} />}>
       {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>

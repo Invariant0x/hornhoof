@@ -83,12 +83,16 @@ export function LogoMark({ className }: { className?: string }) {
 }
 
 type Program = 'claude' | 'codex' | 'kimi' | 'glm' | 'antigravity';
+type Protocol = 'anthropic' | 'openai';
 
 /* Company keys run in the program of their maker: Anthropic keys in Claude Code, OpenAI keys in Codex. */
 const PROGRAM: Record<ProviderId, Program> = {
   claude: 'claude', anthropic_api: 'claude', codex: 'codex', openai_api: 'codex', kimi: 'kimi', glm: 'glm', antigravity: 'antigravity', openrouter: 'claude', custom_api: 'claude',
 };
+/* OpenRouter and a compatible API run in the program of the protocol they were given. */
+const PROTOCOL_PROGRAM: Record<Protocol, Program> = { anthropic: 'claude', openai: 'codex' };
 const PROGRAM_NAMES: Record<Program, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' };
+const programOf = (provider: ProviderId, protocol?: Protocol | null): Program => (protocol ? PROTOCOL_PROGRAM[protocol] : PROGRAM[provider]);
 const MARKS: Record<Program, ReactNode> = {
   claude: <path d="M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5" />,
   codex: (
@@ -108,9 +112,10 @@ const MARKS: Record<Program, ReactNode> = {
 };
 
 /* The program an agent works in, next to its name; the name is its label and tooltip. */
-export function ProviderMark({ provider }: { provider: ProviderId | null }) {
+/* protocol: an API connection's, which decides its program. */
+export function ProviderMark({ provider, protocol }: { provider: ProviderId | null; protocol?: Protocol | null }) {
   if (!provider) return null;
-  const program = PROGRAM[provider];
+  const program = programOf(provider, protocol);
   return (
     <svg className={`pm ${program}`} viewBox="0 0 16 16" role="img" aria-label={PROGRAM_NAMES[program]}>
       <title>{PROGRAM_NAMES[program]}</title>
