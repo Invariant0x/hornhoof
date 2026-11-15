@@ -1892,6 +1892,10 @@ export const en = {
   /* A bug, an improvement or an idea for Hornhoof's developers: what a person writes, what goes and what came of it. */
   feedback: {
     title: 'Write to Hornhoof developers',
+    /* Its part of About: closed to one sentence and a button until the person opens it. */
+    section: 'Feedback',
+    intro: 'Report a bug or suggest an improvement. Before anything leaves, you see exactly what goes to Hornhoof developers.',
+    write: 'Write to developers',
     close: 'Close',
     kind: 'What is it',
     kinds: { bug: 'Bug', improvement: 'Improvement', idea: 'Idea' },

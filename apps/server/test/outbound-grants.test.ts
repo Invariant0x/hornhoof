@@ -10,7 +10,7 @@ const GATEWAY = [
   'model_check_certificates', 'model_check_datasets', 'model_check_evaluations', 'model_check_revisions', 'model_checks',
   'outbound_accounts', 'outbound_approvals', 'outbound_attempts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_channels',
   'outbound_contact_events', 'outbound_contacts', 'outbound_daily_usage', 'outbound_events', 'outbound_message_revisions', 'outbound_messages',
-  'outbound_permissions', 'outbound_policies', 'outbound_review_receipts', 'outbound_sampling_counters', 'support_classifications', 'support_tickets',
+  'outbound_permissions', 'outbound_policies', 'outbound_review_receipts', 'outbound_sampling_counters', 'outbound_setup_events', 'support_classifications', 'support_tickets',
 ];
 const PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
 const SEALED = ['outbound_accounts.config_enc', 'outbound_contacts.address_enc', 'outbound_message_revisions.sealed_enc', 'support_tickets.text_enc'];

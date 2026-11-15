@@ -27,8 +27,10 @@ test('mirrors writing to the developers in About and the inbox for a language wr
     expect((await kinds.nth(0).boundingBox())!.x, 'Bug, the first kind, is on the right').toBeGreaterThan((await kinds.nth(2).boundingBox())!.x);
     const frame = (await box.boundingBox())!;
     const main = (await box.getByRole('button', { name: words.common.next, exact: true }).boundingBox())!;
-    await expect(box.getByRole('button', { name: words.common.cancel, exact: true }), 'About has its own close, so no Cancel').toHaveCount(0);
+    const cancel = (await box.getByRole('button', { name: words.common.cancel, exact: true }).boundingBox())!;
     expect(main.x - frame.x, 'Next stands at the end, the left edge').toBeLessThan(frame.width / 2);
+    expect(Math.abs(cancel.x - frame.x), 'Cancel, the last of the foot, ends on the left edge').toBeLessThanOrEqual(1);
+    expect(cancel.x, 'Next stands to the right of Cancel').toBeLessThan(main.x);
     expect(await whole(page, box)).toEqual([]);
     await box.screenshot({ path: info.outputPath(`${browserName}/rtl-${width}-feedback-write.png`), animations: 'disabled' });
 
