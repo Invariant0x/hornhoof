@@ -125,7 +125,7 @@ describe('reporting the node lifecycle', () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
     const start = () => {
-      const child = spawn(process.execPath, ['--import', 'tsx', join(import.meta.dirname, 'fakes', 'run-lifecycle.mjs')], { env: { TASK187_NODE_DIR: dir, PATH: process.env.PATH }, stdio: 'ignore' });
+      const child = spawn(process.execPath, ['--import', 'tsx', join(import.meta.dirname, 'fakes', 'run-lifecycle.mjs')], { env: { FAKE_LIFECYCLE_NODE_DIR: dir, PATH: process.env.PATH }, stdio: 'ignore' });
       onTestFinished(() => { child.kill('SIGKILL'); });
       return child;
     };

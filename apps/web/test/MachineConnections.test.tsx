@@ -45,7 +45,7 @@ const PATH = '/api/machines/m1/connections';
 
 function show(language: 'en' | 'ru' = 'en', online = true) {
   localStorage.setItem('hh-lang', language);
-  return render(<LanguageProvider><MachineConnections id="m1" hostname="ivan-mbp" online={online} /></LanguageProvider>);
+  return render(<LanguageProvider><MachineConnections id="m1" hostname="dev-laptop" online={online} /></LanguageProvider>);
 }
 
 const heading = { en: 'Connection to the server', ru: 'Связь с сервером' };
@@ -171,7 +171,7 @@ describe('the drops the card of a machine lists', () => {
   it('names its list by the machine', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history()] });
     show();
-    expect(await screen.findByRole('list', { name: 'Latest drops of ivan-mbp' })).toBeInTheDocument();
+    expect(await screen.findByRole('list', { name: 'Latest drops of dev-laptop' })).toBeInTheDocument();
   });
 
   it.each([
@@ -403,7 +403,7 @@ describe('how the card of a machine keeps its history fresh', () => {
     const calls = mockApi({ [`GET ${PATH}`]: [200, history()] });
     const view = show();
     await screen.findByRole('list');
-    view.rerender(<LanguageProvider><MachineConnections id="m1" hostname="ivan-mbp" online={false} /></LanguageProvider>);
+    view.rerender(<LanguageProvider><MachineConnections id="m1" hostname="dev-laptop" online={false} /></LanguageProvider>);
     await act(async () => {});
     expect(calls.filter(c => c.path === PATH)).toHaveLength(2);
   });
@@ -496,8 +496,8 @@ describe('the machines screen and the history of a machine', () => {
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
     expect(calls.filter(c => c.path === PATH)).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
-    const card = screen.getByRole('article', { name: 'ivan-mbp' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open the card of dev-laptop' }));
+    const card = screen.getByRole('article', { name: 'dev-laptop' });
     expect(await within(card).findByText(/^5 drops in the last 24 hours/)).toBeInTheDocument();
     expect(within(card).getByRole('heading', { name: heading.en })).toBeInTheDocument();
     expect(calls.filter(c => c.path === PATH)).toHaveLength(1);
@@ -509,7 +509,7 @@ describe('the machines screen and the history of a machine', () => {
     const calls = lists({ 'GET /api/machines': () => [200, { machines: MACHINES.map(m => ({ ...m, online: m.id === 'm1' ? online : m.online })), builtin: BUILTIN }] });
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    fireEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open the card of dev-laptop' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(calls.filter(c => c.path === PATH)).toHaveLength(1);
     online = false;

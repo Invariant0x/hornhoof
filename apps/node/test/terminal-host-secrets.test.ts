@@ -68,8 +68,8 @@ describe('a view of an agent at work', () => {
     const t = await liveTerminal('claude', 'queued');
     await t.on(t.host.open({ type: 'term.open', termId: 'v4', agentKey: 'receipt', cols: 80, rows: 24, write: true }));
     expect(t.attach).toHaveBeenCalledWith(expect.any(String), expect.any(Number), expect.any(Number), true);
-    t.host.input({ type: 'term.input', termId: 'v4', data: 'typed by Ivan' });
-    await t.until(() => t.views[0]!.view.typed() === 'typed by Ivan');
+    t.host.input({ type: 'term.input', termId: 'v4', data: 'typed by Alex' });
+    await t.until(() => t.views[0]!.view.typed() === 'typed by Alex');
   });
 });
 

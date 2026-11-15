@@ -80,9 +80,7 @@ this sample; the Python regression fixtures check those outcomes separately.
 | `redact.ts:15`, comparator returns undefined | No such operator | Survived | Replacement order is untested. |
 
 Other Stryker operators account for its remaining kills; the JSON report lists
-all 22 mutants and their exact replacements. This task records the gaps;
-changes to the product's redaction tests belong to their author and are not
-part of this tooling patch.
+all 22 mutants and their exact replacements.
 
 Input hashes:
 

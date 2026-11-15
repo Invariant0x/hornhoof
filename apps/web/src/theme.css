@@ -1,4 +1,4 @@
-/* Tokens from prototype v4. Their values come from the skin on the page: src/skins/registry.ts for the built-in skins
+/* Design tokens. Their values come from the skin on the page: src/skins/registry.ts for the built-in skins
    and a person's own skins, set on the root by the script at the top of index.html before the page draws. A skin sets
    only colours, fonts and --cut-k, how far corners are cut (0 square, 1 the usual cut), and on the root data-cut, the
    shape of the cut. Sizes and gaps stay the same in every skin, so this file keeps them and no value of a skin. */
@@ -54,7 +54,7 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
 .btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); clip-path: none; }
 .btn.ghost:hover { box-shadow: inset 0 0 0 1px var(--cyan); }
 .btn.small { min-height: 30px; padding: 0 12px; font-size: 13px; }
-/* A row's small action, framed like the prototype's small buttons; a danger one turns pink on hover. */
+/* A row's small action; a danger one turns pink on hover. */
 .act { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-display); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color .15s, color .15s; }
 .act:hover { border-color: var(--cyan); color: var(--cyan-ink); }
 .act:disabled { opacity: .45; cursor: not-allowed; border-color: var(--line2); color: var(--ink); }
@@ -199,7 +199,7 @@ select:disabled { opacity: .55; }
 .command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
 .command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
-/* Shell: the header floats over the canvas in three glass blocks, as in the prototype; there is no bar under it. */
+/* Shell: the header floats over the canvas in three glass blocks; there is no bar under it. */
 .shell { position: relative; height: 100%; }
 .topbar {
   position: absolute; z-index: 10; top: 12px; left: 16px; right: 16px;
@@ -208,7 +208,7 @@ select:disabled { opacity: .55; }
 }
 .topbar > * { pointer-events: auto; }
 /* Glass floats over the canvas, whose dots and signals move every frame: a blur under it is drawn again every frame and
-   stalled the page (Design, #874). The dense --hud of every skin stands in for it. */
+   stalls the page. The dense --hud of every skin stands in for it. */
 .glass { background: var(--hud); border: 1px solid var(--line); }
 .tb-brand { justify-self: start; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
 .tb-brand svg { width: 24px; height: 24px; flex: none; }
@@ -344,7 +344,7 @@ select:disabled { opacity: .55; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; }
   .settings-nav .btn { flex: 1 1 auto; }
 }
-/* Themes, after the reference of Design (#787): the heading with Add from file at its end, the line of what was done,
+/* Themes: the heading with Add from file at its end, the line of what was done,
    the catalog of cards and the guide. Its buttons are 44 px targets that grow with their words. */
 .skins { display: grid; gap: 24px; min-width: 0; }
 .skins :is(p, h3, h4, h5) { margin: 0; overflow-wrap: anywhere; }
@@ -443,7 +443,7 @@ select:disabled { opacity: .55; }
 .dept-chips > li { position: absolute; }
 .dept-chips .chip > .edge-in { gap: 8px; padding: 0 10px; }
 .dept-chips .chip .ic { width: 16px; height: 16px; }
-/* The orchestrator hub from the prototype: a turning dashed ring, a half gauge of 24 segments and the share of agents at work. */
+/* The orchestrator hub: a turning dashed ring, a half gauge of 24 segments and the share of agents at work. */
 .hub { color: var(--ink); border-radius: 50%; }
 .hub > .hub-art { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .hub-bg { fill: var(--bg); }
@@ -475,7 +475,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .hub.on .hub-ring { stroke: var(--cyan); }
 .start { position: absolute; width: 520px; box-sizing: border-box; padding: 16px 18px 18px; display: grid; justify-items: center; gap: 14px; text-align: center; border: 1px dashed var(--line2); background: var(--surface); }
 .start p { margin: 0; color: var(--muted); }
-/* A department card as in the prototype: name and agents at work, code and products, then what goes on. */
+/* A department card: name and agents at work, code and products, then what goes on. */
 .dept > .edge { height: 100%; }
 .dept .edge-in { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
 .edge > .corner { position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-left: 2px solid var(--cyan); border-top: 2px solid var(--cyan); pointer-events: none; }
@@ -501,7 +501,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cnt b { color: var(--ink); font-weight: 600; }
-/* Zoom bottom left and the orchestrator's line bottom middle, as in the prototype. */
+/* Zoom bottom left and the orchestrator's line bottom middle. */
 .zoom { position: absolute; left: 16px; bottom: 16px; display: flex; align-items: center; }
 /* A block's grip over its top left corner, 44 px to touch at any zoom: nothing drawn, only the pointer shows it, and the ring of
    the keyboard's focus; the map's corners are not mirrored. */
@@ -552,7 +552,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .people-head > div { display: grid; gap: 6px; max-width: 60ch; }
 .panel > .edge-in { padding: 20px; display: grid; gap: 14px; }
 .panel .actions { display: flex; justify-content: flex-end; }
-/* A card with a form, as Design drew it for people, assistants, hiring and plans: 24 px inside and 16 px between blocks, 16
+/* A card with a form for people, assistants, hiring and plans: 24 px inside and 16 px between blocks, 16
    and 14 where the card itself is narrow. Its head is the heading with its icon and a line under it. Only sizes and gaps are
    set here, so every theme lays it out the same. */
 .panel.form-card { container: form-card / inline-size; }
@@ -1077,7 +1077,7 @@ button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
   button.chip-btn.attn > .edge { background: var(--amber); }
 }
 
-/* Inside a department: its schema from the prototype, over the map. */
+/* Inside a department: its schema over the map. */
 .dview { position: absolute; inset: 0; z-index: 2; background-color: var(--bg); animation: dvin .25s ease-out; }
 @keyframes dvin { from { opacity: 0; } }
 .dcanvas {
@@ -2240,7 +2240,7 @@ th.k-prio .sorth { white-space: nowrap; }
 
 /* The guard. A block it stopped stands in its place with a button that draws it anew; one that floats, as an agent's
    window does, keeps to the corner of the page. */
-/* Design (#888): one line and one button of 44 px on the second surface with the strong line; logical sides, so a
+/* Guard plate: one line and one button of 44 px on the second surface with the strong line; logical sides, so a
    right-to-left page mirrors them. A plate that floats stands above the bottom row of the map and the department, so it
    hides none of their controls. */
 .guard-stop, .light-note { display: flex; align-items: center; gap: 12px; padding-block: 8px; padding-inline: 14px 8px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-size: 14px; }

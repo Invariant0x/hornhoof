@@ -13,9 +13,9 @@ const messages = { en, ru };
 const SINCE = '2026-11-13T18:07:00.000Z';
 const at = (lang: 'en' | 'ru') => new Date(SINCE).toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC' });
 const DEV_PLACE = { kind: 'department' as const, id: 'd2', name: 'Development' };
-const HOME: SubView = { ...SUB, id: 's-home', provider: 'claude', kind: 'personal', label: 'Claude', status: 'ready', online: false, owner: { id: 'p5', name: 'Luiza' }, place: DEV_PLACE, machines: [{ id: 'm5', hostname: 'Marselle', status: 'ready', online: false }] };
-const SPARE: SubView = { ...HOME, id: 's-spare', online: true, owner: { id: 'p6', name: 'Maximilian Konstantinopolsky' }, machines: [{ id: 'm6', hostname: 'DESKTOP-AB84Q08', status: 'ready', online: true }] };
-const OFFLINE = { hostname: 'Marselle', since: SINCE };
+const HOME: SubView = { ...SUB, id: 's-home', provider: 'claude', kind: 'personal', label: 'Claude', status: 'ready', online: false, owner: { id: 'p5', name: 'Clara' }, place: DEV_PLACE, machines: [{ id: 'm5', hostname: 'workstation-eu', status: 'ready', online: false }] };
+const SPARE: SubView = { ...HOME, id: 's-spare', online: true, owner: { id: 'p6', name: 'Maximilian Konstantinopolsky' }, machines: [{ id: 'm6', hostname: 'win-desktop-01', status: 'ready', online: true }] };
+const OFFLINE = { hostname: 'workstation-eu', since: SINCE };
 const offlineCard: AgentCardView = { ...CARD, subscription: HOME, offline: OFFLINE, canEdit: true, runsOn: [HOME, SPARE].map(subscription => ({ subscription, models: [] })) };
 const movedCard: AgentCardView = { ...offlineCard, subscription: SPARE, offline: null };
 
@@ -33,7 +33,7 @@ const ORG: Org = {
   people: [],
   departments: [{
     id: 'd2', name: 'Development', templateKey: null, roleCode: 'CTO', about: '', agents: { total: 1, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [],
-    repository: { url: 'https://github.com/acme/spatially-marketing.git', branch: 'main', tokenLast4: '1234' },
+    repository: { url: 'https://github.com/acme/acme-marketing.git', branch: 'main', tokenLast4: '1234' },
   }],
 };
 
@@ -69,8 +69,8 @@ async function brunoCard(page: Page, look: Look, browser: string) {
   } };
 }
 
-/* WebKit on the test machines never sees a button of the department page hold still (seen on main d62d1daa as well, in
-   subscription-limits.spec.ts): there the click goes without waiting for it to stop moving. */
+/* WebKit never sees a button of the department page hold still: there the click goes without waiting for it to stop
+   moving. */
 const press = (locator: Locator, browser: string) => locator.click(browser === 'webkit' ? { force: true } : {});
 
 async function noSideScroll(page: Page) {
@@ -92,7 +92,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       return route.fulfill({ json: offlineCard });
     });
     const card = await open();
-    const line = card.getByText(t.agent.offlineSince('Marselle', at(lang)), { exact: true });
+    const line = card.getByText(t.agent.offlineSince('workstation-eu', at(lang)), { exact: true });
     await expect(line).toBeVisible();
     const move = card.getByRole('button', { name: t.agent.moveTo('Claude, Maximilian Konstantinopolsky'), exact: true });
     await expect(move).toBeVisible();
@@ -116,7 +116,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await page.goto('/tasks/t1');
     const task = page.getByRole('complementary', { name: `#${DETAIL.number} ${DETAIL.title}`, exact: true });
     await expect(task).toBeVisible();
-    await expect(task.getByText(t.agent.offlineSince('Marselle', at(lang)), { exact: true })).toBeVisible();
+    await expect(task.getByText(t.agent.offlineSince('workstation-eu', at(lang)), { exact: true })).toBeVisible();
     await noSideScroll(page);
     await page.screenshot({ path: info.outputPath(`task-card-offline-${lang}-${theme}-${width}.png`), fullPage: true });
     expect(errors).toEqual([]);

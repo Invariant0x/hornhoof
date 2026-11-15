@@ -127,7 +127,7 @@ function inRussian(node: ReactNode) {
   }
 }
 
-describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', () => {
+describe('Outbound screen, bound Requests snapshot, and routing', () => {
   afterEach(() => {
     localStorage.removeItem('hh-lang');
     history.replaceState(null, '', '/');

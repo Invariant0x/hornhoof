@@ -51,7 +51,7 @@ const SETUP = {
 };
 const MADE = { key: KEY, signingSecret: SECRET, address: 'https://acme.hornhoof.app', setup: SETUP, person: PEOPLE[3] };
 const INVITE = 'https://hq.acme.com/invite/hh_inv_98f2c4a17b0e4d12a9c3f0e6b5d7a8c1';
-const MACHINE = { id: 'm1', hostname: 'ivan-mbp', status: 'needs_login' as const, online: true };
+const MACHINE = { id: 'm1', hostname: 'dev-laptop', status: 'needs_login' as const, online: true };
 const KIMI: SubView = {
   kind: 'personal', last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, limits: null, budget: null, isOrchestrator: false,
   accounts: [], tier: null, accountsDiffer: false, signedInOnce: false, leaseMachine: null, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'needs_login', online: true, machines: [MACHINE],

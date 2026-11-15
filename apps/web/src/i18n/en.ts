@@ -1147,7 +1147,7 @@ export const en = {
       limitIs: (limit: number, unit: string) => `No approval up to ${limit}${unit ? ` ${unit}` : ''}`,
       channels: { message: 'Messages', price: 'Prices', publication: 'Publications', commit: 'Commits', spend: 'Spending', other: 'Everything else' },
       autonomousRelease: 'Autonomous release',
-      autonomousReleaseHint: 'When on, an exact commit for main passes without a card if it has a green full test run, an independent PASS verdict from another employee and a fast-forward path from main. Only the CEO toggles this.',
+      autonomousReleaseHint: 'When on, an exact commit for main passes without an approval card if it has a green full test run, an independent PASS verdict from another employee and a fast-forward path from main. Only the CEO toggles this.',
       autonomousReleaseState: (on: boolean): string => (on ? 'Autonomous release: on (CEO only).' : 'Autonomous release: off (CEO only).'),
       autonomousJournalTitle: 'Autonomous release log',
       autonomousJournalEmpty: 'No commits have been auto-approved yet.',

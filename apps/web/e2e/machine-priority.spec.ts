@@ -44,7 +44,7 @@ const machine = (id: string, hostname: string, data: DataView): MachineView => (
 const MACHINES: MachineView[] = [
   machine('m4', 'lab-nuc', placed({ number: 4, why: 'next' })),
   machine('m6', 'marat-pc', placed({ unfit: { why: 'scope', person: 'Marat', departments: 2 } })),
-  machine('m2', 'ivan-studio', placed({ number: 2, why: 'always.best_link', copy: { line: 'ready' } })),
+  machine('m2', 'dev-studio', placed({ number: 2, why: 'always.best_link', copy: { line: 'ready' } })),
   machine('m5', 'olga-air', placed({ why: 'out', pin: 'none' })),
   machine('m1', 'rack-01', placed({ number: 1, why: 'server' })),
   machine('m3', LONG, placed({ number: 3, why: 'pinned', pin: 3, copy: { line: 'making', progress: 40 } })),
@@ -68,7 +68,7 @@ async function openMachines(page: Page, language: 'en' | 'ru', theme: 'light' | 
     sent.push({ path: new URL(route.request().url()).pathname, body: route.request().method() });
     return refuse ? route.fulfill({ status: refuse.status, json: { error: { code: 'conflict', reason: refuse.reason, message: 'Refused.' } } }) : route.fulfill({ status: 202, json: { state: 'preparing' } });
   });
-  await page.route('**/api/machines', route => route.fulfill({ json: { machines, builtin: BUILTIN, priority: true, move, canMove: true, copies: { leader: 'rack-01', copies: [{ hostname: 'ivan-studio', sync: true }, { hostname: LONG, sync: false }], onlySince: null } } }));
+  await page.route('**/api/machines', route => route.fulfill({ json: { machines, builtin: BUILTIN, priority: true, move, canMove: true, copies: { leader: 'rack-01', copies: [{ hostname: 'dev-studio', sync: true }, { hostname: LONG, sync: false }], onlySince: null } } }));
   await page.route('**/api/machines/*/priority', route => {
     sent.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() });
     return refuse ? route.fulfill({ status: refuse.status, json: { error: { code: 'conflict', reason: refuse.reason, message: 'Refused.' } } }) : route.fulfill({ status: 204 });
@@ -101,7 +101,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await openMachines(page, language, theme);
     const rows = page.locator('tr.rm');
     await expect(rows).toHaveCount(6);
-    expect(await rows.evaluateAll(all => all.map(row => row.getAttribute('aria-label')))).toEqual(['rack-01', 'ivan-studio', LONG, 'lab-nuc', 'marat-pc', 'olga-air']);
+    expect(await rows.evaluateAll(all => all.map(row => row.getAttribute('aria-label')))).toEqual(['rack-01', 'dev-studio', LONG, 'lab-nuc', 'marat-pc', 'olga-air']);
     /* On a wide screen the column's header stands on one line, as tall as the others. */
     if (width > 780) expect(new Set(await page.locator('table.dt thead th button').evaluateAll(all => all.map(one => Math.round(one.getBoundingClientRect().height)))).size).toBe(1);
     /* The number's box is as tall in every row, and the server's is filled. */
@@ -137,8 +137,8 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     }
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('pinned')), fullPage: true });
-    await open(page, 'ivan-studio');
-    await expect(card(page, 'ivan-studio').getByText(w.best)).toBeVisible();
+    await open(page, 'dev-studio');
+    await expect(card(page, 'dev-studio').getByText(w.best)).toBeVisible();
     await open(page, 'olga-air');
     await expect(card(page, 'olga-air').getByText(w.out)).toBeVisible();
     await expect(card(page, 'olga-air').getByRole('radio', { name: w.outChoice })).toBeChecked();
@@ -216,10 +216,10 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await expect(note).toBeVisible();
     await expect(here).toBeVisible();
     for (const one of [note, here]) expect(await within(one, old)).toBe(true);
-    await open(page, 'ivan-studio');
-    const saving = card(page, 'ivan-studio').getByText(w.saving, { exact: true });
+    await open(page, 'dev-studio');
+    const saving = card(page, 'dev-studio').getByText(w.saving, { exact: true });
     await expect(saving).toBeVisible();
-    expect(await within(saving, card(page, 'ivan-studio'))).toBe(true);
+    expect(await within(saving, card(page, 'dev-studio'))).toBe(true);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('move-led')), fullPage: true });
   });
@@ -227,11 +227,11 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
   test(`sends the CEO's choice and words a refusal, ${place}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height });
     const sent = await openMachines(page, language, theme, { status: 409, reason: 'only_copy' });
-    await open(page, 'ivan-studio');
-    const copy = card(page, 'ivan-studio');
+    await open(page, 'dev-studio');
+    const copy = card(page, 'dev-studio');
     await copy.getByRole('radio', { name: w.outChoice }).click();
     const refusal = copy.getByRole('alert');
-    await expect(refusal).toHaveText(w.onlyCopy('ivan-studio'));
+    await expect(refusal).toHaveText(w.onlyCopy('dev-studio'));
     expect(sent).toEqual([{ path: '/api/machines/m2/priority', body: { pin: 'none' } }]);
     expect(await within(refusal, copy)).toBe(true);
     expect(await noSideScroll(page)).toBe(true);

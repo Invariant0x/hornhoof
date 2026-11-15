@@ -222,7 +222,6 @@ async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
 for (const width of [375, 1280]) {
   for (const theme of ['light', 'cyberpunk'] as const) {
     test(`assignment card flow and geometry at ${width}px in ${theme}`, async ({ page, browser }, info) => {
-      console.log('BROWSER_RUNTIME', JSON.stringify({ engine: info.project.use.browserName, version: browser.version() }));
       const state: FixtureState = { assignment: LEGACY_ASSIGNMENT, skill: DEFAULT_SKILL, canEdit: true, patches: [], resets: 0, apiRequests: [] };
       const errors: string[] = [];
       const geometry: Geometry[] = [];

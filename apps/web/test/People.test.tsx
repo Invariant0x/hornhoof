@@ -31,20 +31,20 @@ describe('People', () => {
     mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const view = render(<People me={ME} />);
     await screen.findByRole('cell', { name: 'Ivan' });
-    view.rerender(<People me={{ ...ME, person: { ...ME.person, name: 'Ivan K' } }} />);
-    expect(screen.getByRole('cell', { name: 'Ivan K' })).toBeInTheDocument();
+    view.rerender(<People me={{ ...ME, person: { ...ME.person, name: 'Ivan R' } }} />);
+    expect(screen.getByRole('cell', { name: 'Ivan R' })).toBeInTheDocument();
     expect(screen.queryByRole('cell', { name: 'Ivan' })).not.toBeInTheDocument();
     expect(within(rowOf('Maria')).getByRole('cell', { name: 'Deputy CEO' })).toBeInTheDocument();
     expect(within(rowOf('Sasha')).getByRole('cell', { name: 'SMM' })).toBeInTheDocument();
   });
 
   it('keeps the loaded names when your identity changes with the same name', async () => {
-    const people = [{ ...PEOPLE[0]!, name: 'Ivan K' }, ...PEOPLE.slice(1)];
+    const people = [{ ...PEOPLE[0]!, name: 'Ivan R' }, ...PEOPLE.slice(1)];
     mockApi({ 'GET /api/people': [200, { people }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const view = render(<People me={ME} />);
-    await screen.findByRole('cell', { name: 'Ivan K' });
+    await screen.findByRole('cell', { name: 'Ivan R' });
     view.rerender(<People me={{ ...ME, person: { ...ME.person, id: 'p2' } }} />);
-    expect(screen.getByRole('cell', { name: 'Ivan K' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Ivan R' })).toBeInTheDocument();
     expect(screen.queryByRole('cell', { name: 'Ivan' })).not.toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'Maria' })).toBeInTheDocument();
   });
@@ -56,7 +56,7 @@ describe('People', () => {
       'GET /api/org': [200, ORG_WITH_TEAMS],
     });
     const view = render(<People me={ME} />);
-    view.rerender(<People me={{ ...ME, person: { ...ME.person, name: 'Ivan K' } }} />);
+    view.rerender(<People me={{ ...ME, person: { ...ME.person, name: 'Ivan R' } }} />);
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     await act(async () => { finish([200, { people: PEOPLE }]); });
     expect(await screen.findByRole('cell', { name: 'Ivan' })).toBeInTheDocument();
@@ -287,11 +287,11 @@ describe('the name in the edit form', () => {
   });
 
   it('shows the deputy the field on the CEO too, as the server lets them, with nothing else to change', async () => {
-    const { calls, user } = await open(DEPUTY, 'Ivan', { 'PATCH /api/people/p1': [200, { person: { ...PEOPLE[0], name: 'Ivan K' } }] });
+    const { calls, user } = await open(DEPUTY, 'Ivan', { 'PATCH /api/people/p1': [200, { person: { ...PEOPLE[0], name: 'Ivan R' } }] });
     expect(screen.queryByRole('checkbox', { name: 'Whole company' })).not.toBeInTheDocument();
-    await retype(user, 'Name', 'Ivan K');
+    await retype(user, 'Name', 'Ivan R');
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(patched(calls)!.body).toEqual({ name: 'Ivan K', title: 'CEO' });
+    expect(patched(calls)!.body).toEqual({ name: 'Ivan R', title: 'CEO' });
   });
 
   it('lets someone with a narrow reach change their own name, and tells the shell', async () => {
@@ -380,13 +380,13 @@ describe('a person\'s Telegram in the edit form', () => {
   };
 
   it('lets you set your own Telegram, and sends it only when it changed', async () => {
-    const { calls, user } = await open(ME, 'Ivan', PEOPLE, { 'PATCH /api/people/p1': [200, { person: { ...PEOPLE[0], telegram: { username: 'ivan_k', id: null } } }] });
+    const { calls, user } = await open(ME, 'Ivan', PEOPLE, { 'PATCH /api/people/p1': [200, { person: { ...PEOPLE[0], telegram: { username: 'ivan_ops', id: null } } }] });
     const field = screen.getByLabelText('Telegram');
     expect(field).toHaveValue('');
     expect(screen.getByText(/bots/, { selector: 'small, p, span' })).toBeInTheDocument();
-    await user.type(field, '@Ivan_K');
+    await user.type(field, '@ivan_ops');
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p1', body: { title: 'CEO', telegram: '@Ivan_K' } });
+    expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p1', body: { title: 'CEO', telegram: '@ivan_ops' } });
   });
 
   it('shows the Telegram a person has and leaves it out of Save when untouched', async () => {

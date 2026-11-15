@@ -13,7 +13,7 @@ const KEPT: Briefing = {
     { url: 'https://github.com/acme/shop-design.git', branch: 'main', rules: 'Design files only.', author: { name: 'Ada', email: 'ada@acme.dev' } },
     { url: 'https://github.com/acme/shop.git', branch: 'release', rules: 'Run npm test first.', author: null },
   ],
-  connected: { url: 'https://github.com/acme/shop.git', branch: 'release', author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } },
+  connected: { url: 'https://github.com/acme/shop.git', branch: 'release', author: { name: 'Alex Rivera', email: 'alex@acme.example' } },
   updatedAt: '2026-11-09T12:00:00.000Z',
   by: { name: 'Maria', byOrchestrator: false },
 };

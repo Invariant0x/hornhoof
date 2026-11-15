@@ -102,15 +102,15 @@ describe("an agent's folder and its repository", () => {
 
   it("sets the commit author Hornhoof names in the clone on every turn, and leaves the clone's own otherwise", async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-ws-'));
-    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const author = { name: 'Alex Rivera', email: 'alex@acme.example' };
     const first = fakeGit();
     await runJob(fakeAdapter(), job({ workspace: { key: AGENT, repo: { ...REPO, author } } }), dir, { git: first.git });
     const clone = join(dir, 'work', 'agents', AGENT, 'shop');
     const sets = [
-      ['config', '--', 'user.name', 'Ivan Korol'],
-      ['config', '--', 'user.email', 'ivan@acme.dev'],
-      ['config', '--', 'hornhoof.username', 'Ivan Korol'],
-      ['config', '--', 'hornhoof.useremail', 'ivan@acme.dev'],
+      ['config', '--', 'user.name', 'Alex Rivera'],
+      ['config', '--', 'user.email', 'alex@acme.example'],
+      ['config', '--', 'hornhoof.username', 'Alex Rivera'],
+      ['config', '--', 'hornhoof.useremail', 'alex@acme.example'],
     ];
     expect(first.calls.slice(1).map(c => [c.args, c.cwd])).toEqual(sets.map(args => [args, clone]));
     const again = fakeGit();
@@ -125,15 +125,15 @@ describe("an agent's folder and its repository", () => {
     const origin = join(dir, 'shop');
     mkdirSync(origin);
     git(['init', '--quiet', '-b', 'main'], origin);
-    git(['-c', 'user.name=Seed', '-c', 'user.email=seed@acme.dev', 'commit', '--quiet', '--allow-empty', '-m', 'Start'], origin);
+    git(['-c', 'user.name=Seed', '-c', 'user.email=seed@acme.example', 'commit', '--quiet', '--allow-empty', '-m', 'Start'], origin);
     const work = join(dir, 'work');
     mkdirSync(work);
-    const repo = { url: origin, branch: 'main', token: '', author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } };
+    const repo = { url: origin, branch: 'main', token: '', author: { name: 'Alex Rivera', email: 'alex@acme.example' } };
     const owner = { user: null, home: dir };
     const clone = join(work, 'shop');
     const local = (key: string) => git(['config', '--local', '--get', key], clone).stdout.trim() || null;
     await prepareRepo(work, repo, owner);
-    expect([local('user.name'), local('user.email')]).toEqual(['Ivan Korol', 'ivan@acme.dev']);
+    expect([local('user.name'), local('user.email')]).toEqual(['Alex Rivera', 'alex@acme.example']);
     await prepareRepo(work, { ...repo, author: null }, owner);
     expect([local('user.name'), local('user.email'), local('hornhoof.username')]).toEqual([null, null, null]);
     git(['config', 'user.name', 'Maria'], clone);

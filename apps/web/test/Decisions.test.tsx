@@ -284,7 +284,7 @@ describe('the deputy CEO on People', () => {
     expect(screen.getByRole('switch', { name: 'Заместитель CEO' })).toHaveAccessibleDescription('Принимает решения за CEO и видит всю компанию. Его доступ, статус и вход меняете только вы.');
   });
 
-  /* The CEO's choice for the window (#166): switching the deputy on gives the whole company and hides the departments, and
+  /* Switching the deputy on gives the whole company and hides the departments, and
      taking the whole company off switches the deputy off. Save sends only what the server keeps: a deputy with the whole
      company. */
   describe.each([

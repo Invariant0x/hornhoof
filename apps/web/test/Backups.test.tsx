@@ -11,7 +11,7 @@ const OTHER = '0f0f0f0f-0000-4000-8000-00000000000b';
 const DUMPED = '2026-11-10T08:00:00.000Z';
 const bundle = (over: Partial<BackupBundle> = {}): BackupBundle => ({
   id: ID, dumpedAt: DUMPED, reason: 'timer', size: 5 * 1024 * 1024, recovery: 'current',
-  where: [{ machine: null, name: 'this server', online: true }, { machine: 'm1', name: 'marat-mac', online: true }, { machine: 'm2', name: 'office-mini', online: false }], restorable: true, why: null, ...over,
+  where: [{ machine: null, name: 'this server', online: true }, { machine: 'm1', name: 'office-pc', online: true }, { machine: 'm2', name: 'office-mini', online: false }], restorable: true, why: null, ...over,
 });
 const viewOf = (over: Partial<BackupsView> = {}): BackupsView => ({ last: DUMPED, recovery: { madeAt: '2026-11-09T10:00:00.000Z', madeBy: 'Ivan' }, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [bundle()], ...over });
 const status = (over: Partial<RestoreStatus>): RestoreStatus => ({ attempt: 'a1', id: ID, state: 'running', step: 'fetch', line: 'Getting the backup.', at: DUMPED, kept: null, ...over });
@@ -27,7 +27,7 @@ describe('Backups in Settings', () => {
     expect(screen.queryByText('The last backup is older than 12 hours. Check that this server has free disk.')).not.toBeInTheDocument();
     /* Each backup: when and why it was made, how big it is, and who holds it. */
     expect(screen.getByText(/every 6 hours/)).toHaveTextContent('5 MB');
-    expect(screen.getByText('Held by: this server, marat-mac, office-mini (offline)')).toBeInTheDocument();
+    expect(screen.getByText('Held by: this server, office-pc, office-mini (offline)')).toBeInTheDocument();
   });
 
   it('warns about an old backup, and says so when there is none', async () => {
@@ -82,7 +82,7 @@ describe('Backups in Settings', () => {
     let restore: RestoreStatus | null = null;
     const calls = mockApi({
       'GET /api/backups': () => [200, viewOf({ restore })],
-      [`GET /api/backups/${ID}/warning`]: [200, { machines: [{ name: 'new-mac', owner: 'Maria' }, { name: 'lab', owner: 'Ivan' }], people: ['Sasha'] }],
+      [`GET /api/backups/${ID}/warning`]: [200, { machines: [{ name: 'new-pc', owner: 'Maria' }, { name: 'lab', owner: 'Ivan' }], people: ['Sasha'] }],
       [`POST /api/backups/${ID}/restore`]: () => {
         restore = status({ step: 'open', line: 'Opening the backup.' });
         return [202, { attempt: 'a1' }];
@@ -100,7 +100,7 @@ describe('Backups in Settings', () => {
     expect(within(ask).getByText(/^The database from before is saved as an encrypted backup for 30 days, then removed from this machine\. What came after .+ does not come back\.$/)).toBeInTheDocument();
     expect(within(ask).queryByText(/comes back as additions/)).not.toBeInTheDocument();
     await user.click(bring);
-    expect(screen.getByText('These machines joined later and must be connected again: new-mac, lab.')).toBeInTheDocument();
+    expect(screen.getByText('These machines joined later and must be connected again: new-pc, lab.')).toBeInTheDocument();
     expect(screen.getByText('These people were added later and must be invited again: Sasha.')).toBeInTheDocument();
     expect(screen.getByText('Everyone signs in again afterwards.')).toBeInTheDocument();
     expect(screen.getByText('Access to machines is closed on every machine; their owners open it again.')).toBeInTheDocument();

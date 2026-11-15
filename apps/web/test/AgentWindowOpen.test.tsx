@@ -22,7 +22,7 @@ const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('
 
 async function openList(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(tab(name));
-  await user.click(await screen.findByRole('button', { name: name === 'Subscriptions' ? 'Open the card of Claude' : 'Open the card of ivan-mbp' }));
+  await user.click(await screen.findByRole('button', { name: name === 'Subscriptions' ? 'Open the card of Claude' : 'Open the card of dev-laptop' }));
 }
 
 describe("an employee's inbox in its window", () => {

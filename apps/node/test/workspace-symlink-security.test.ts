@@ -37,10 +37,10 @@ const NEVER_MS = 2_147_483_647;
 afterEach(() => { vi.restoreAllMocks(); if (root) rmSync(root, { recursive: true, force: true }); });
 
 it('never publishes node-only bytes when the job swaps a checked source ancestor before copying', async () => {
-  root = mkdtempSync(join(tmpdir(), 'hh-667-security-'));
+  root = mkdtempSync(join(tmpdir(), 'hh-symlink-security-'));
   const outside = join(root, 'node-only');
   mkdirSync(join(outside, 'nested'), { recursive: true, mode: 0o700 });
-  writeFileSync(join(outside, 'nested', 'private.txt'), 'FICTIONAL_NODE_ONLY_VALUE_667', { mode: 0o600 });
+  writeFileSync(join(outside, 'nested', 'private.txt'), 'FICTIONAL_NODE_ONLY_VALUE', { mode: 0o600 });
   race.protectedRoot = outside; race.stopped = join(root, 'stopped'); race.fired = false;
   const server = join(root, 'server.cjs');
   writeFileSync(server, "const fs=require('node:fs'),p=require('node:path');fs.writeFileSync(p.join(process.env.HH_SERVICE_STATE,'data/nested/private.txt'),'PUBLIC_SERVICE_STATE');process.on('SIGTERM',()=>{fs.writeFileSync(" + JSON.stringify(race.stopped) + ",'yes');process.exit(0)});setInterval(()=>{},100)");
@@ -59,6 +59,6 @@ it('never publishes node-only bytes when the job swaps a checked source ancestor
   });
   expect(race.fired).toBe(true);
   const published = readFileSync(join(artifacts.paths.worker!, 'data', 'nested', 'private.txt'), 'utf8');
-  expect(published).not.toContain('FICTIONAL_NODE_ONLY_VALUE_667');
+  expect(published).not.toContain('FICTIONAL_NODE_ONLY_VALUE');
   expect(published).toBe('PUBLIC_SERVICE_STATE');
 });

@@ -336,7 +336,6 @@ const SPECS: Spec[] = [
   },
 ];
 
-/* Fix capitalization on Grant and give distinct first name Nina/Hannah/Paula -> Tessa/Paula for biz-analyst. */
 SPECS.find(s => s.id === 'biz-head')!.name = 'Grant';
 SPECS.find(s => s.id === 'biz-analyst')!.name = 'Paula';
 

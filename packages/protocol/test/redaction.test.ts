@@ -22,11 +22,11 @@ describe('a diagnostic cleaned for a reader who may not read where it comes from
 
   it('hides paths in a home or user folder, and keeps the rest', () => {
     const cases: [string, string][] = [
-      ['Cannot load /home/ivan/project/.env', `Cannot load ${HIDDEN}`],
-      ['open "/Users/luisa/keys/id_rsa" failed', `open "${HIDDEN}" failed`],
+      ['Cannot load /home/alex/project/.env', `Cannot load ${HIDDEN}`],
+      ['open "/Users/maya/keys/id_rsa" failed', `open "${HIDDEN}" failed`],
       ['in /root/.npmrc', `in ${HIDDEN}`],
       ['HOME=/data/home/agent and /var/home/x', `HOME=${HIDDEN} and ${HIDDEN}`],
-      ['at C:\\Users\\ivan\\.ssh\\id_rsa', `at ${HIDDEN}`],
+      ['at C:\\Users\\alex\\.ssh\\id_rsa', `at ${HIDDEN}`],
       ['the home of /home', `the home of ${HIDDEN}`],
     ];
     for (const [text, clean] of cases) expect(cleanDiagnostic(text), text).toBe(clean);
@@ -41,8 +41,8 @@ describe('a diagnostic cleaned for a reader who may not read where it comes from
   });
 
   it('keeps each list to its own kind, so the node log hides credentials and leaves its paths', () => {
-    expect(hiddenBy('token=abc in /home/ivan/x', CREDENTIALS)).toBe(`token=${HIDDEN} in /home/ivan/x`);
-    expect(hiddenBy('token=abc in /home/ivan/x', PRIVATE_PATHS)).toBe(`token=abc in ${HIDDEN}`);
+    expect(hiddenBy('token=abc in /home/alex/x', CREDENTIALS)).toBe(`token=${HIDDEN} in /home/alex/x`);
+    expect(hiddenBy('token=abc in /home/alex/x', PRIVATE_PATHS)).toBe(`token=abc in ${HIDDEN}`);
     expect(hiddenBy('nothing here', [])).toBe('nothing here');
   });
 

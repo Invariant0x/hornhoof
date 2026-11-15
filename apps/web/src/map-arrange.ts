@@ -6,12 +6,12 @@ import type { Org } from './types';
 import { along, orthoRoute, orthoThrough, type Rect } from './ui/ortho';
 import type { Point } from './ui/wires';
 
-/* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
+/* World coordinates: people on top, the orchestrator in the middle, departments in two columns around him. */
 export const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
 export const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
 /* A card grows by its turn strip while any department works in the turn, so every card of the map stays the same size. */
 export const DEPT_W = 280, DEPT_H = 160, DEPT_H_TURN = 196;
-/* Up to two rows sit at the prototype's corners; more rows stack evenly around the hub, this far apart, and never closer than
+/* Up to two rows sit at the four corners; more rows stack evenly around the hub, this far apart, and never closer than
    ROW_GAP between the cards. */
 const CORNER = 220, ROW = 220, ROW_GAP = 32;
 /* Room between the people and the top row, and above whatever comes below the hub or the lowest row. */

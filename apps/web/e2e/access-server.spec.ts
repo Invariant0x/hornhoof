@@ -89,15 +89,13 @@ async function startServer(webDist: string): Promise<Server> {
 }
 
 const test = base.extend<{}, { server: Server }>({
-  server: [async ({}, use, info) => {
+  server: [async ({}, use) => {
     const webDist = builtWebApp();
     const server = await startServer(webDist);
-    console.log('HH_ACCESS_WORKER', JSON.stringify({ action: 'start', worker: info.workerIndex, pid: server.child.pid, prepared: Boolean(process.env.HH_PGLITE_TEMPLATE) }));
     try { await use(server); }
     finally {
       await server.stop();
       rmSync(webDist, { recursive: true, force: true });
-      console.log('HH_ACCESS_WORKER', JSON.stringify({ action: 'stop', worker: info.workerIndex, pid: server.child.pid }));
     }
   }, { scope: 'worker' }],
 });

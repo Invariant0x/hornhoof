@@ -289,7 +289,7 @@ describe('the frame budget', () => {
   });
 });
 
-/* The two plates of the guard as Design set them (#888): one line and one button each, on the theme's tokens. */
+/* The two plates of the guard: one line and one button each, on the theme's tokens. */
 describe('the plates of the guard', () => {
   it('say in Russian that the block stopped and that the effects are off, each with its role and its button', () => {
     localStorage.setItem('hh-lang', 'ru');
@@ -338,7 +338,7 @@ describe('the plates of the guard', () => {
       expect(decl(`${plate} .btn`, 'min-block-size'), plate).toBe('44px');
     }
     expect(decl('.guard-stop', 'border-inline-start')).toBe('3px solid var(--pink-ink)');
-    /* Turning the effects back on is the second choice (Design, #888): a ghost button, framed by a border rather than the
+    /* Turning the effects back on is the second choice: a ghost button, framed by a border rather than the
        ghost's shadow, which the light mode it stands in takes away. */
     expect(decl('.light-note .btn.ghost', 'border')).toBe('1px solid var(--line2)');
     expect(decl('.light-note .btn.ghost', 'box-shadow')).toBe('none');

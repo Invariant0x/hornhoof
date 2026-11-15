@@ -74,7 +74,7 @@ export const MaterialManifest = z.strictObject({
 }).refine(materialMetadataFits, 'Oversized material metadata.');
 export type MaterialManifest = z.infer<typeof MaterialManifest>;
 
-/* Private service DTOs. B seals exact bytes, appends immutable versions and
+/* Private service DTOs. The server seals exact bytes, appends immutable versions and
    validates ownership, current revisions and disclosure provenance. Never accept
    these as caller input or serialize them through a public row projection. */
 export type MaterialDisclosureBinding = {

@@ -22,7 +22,7 @@ const inside = (root: string, path: string): boolean => {
   return way !== '..' && !way.startsWith(`..${sep}`) && !isAbsolute(way);
 };
 
-/* Bridge has already checked the process owner and current turn. Only the node's legacy C supplies this bound. */
+/* Bridge has already checked the process owner and current turn; resolve the real agent workspace root here. */
 async function commandContext(dir: string, key: string, requestedCwd: string): Promise<Pick<CommandInput, 'cwd' | 'workspaceRoot'> | null> {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(key) || !isAbsolute(requestedCwd)) return null;
   const parent = await localCommandFiles.realpath(join(dir, 'work', 'agents'));

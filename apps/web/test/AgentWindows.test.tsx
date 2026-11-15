@@ -31,7 +31,7 @@ const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('
 async function openMachines(user: ReturnType<typeof userEvent.setup>) {
   render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
   await user.click(tab('Machines'));
-  await user.click(await screen.findByRole('button', { name: 'Open the card of ivan-mbp' }));
+  await user.click(await screen.findByRole('button', { name: 'Open the card of dev-laptop' }));
 }
 
 describe('agent windows', () => {

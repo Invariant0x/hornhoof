@@ -91,7 +91,7 @@ describe('the steps to connect a personal plan', () => {
       'В терминале ниже откройте ссылку, войдите в Claude, скопируйте код, вставьте его в терминал через Ctrl+V или Cmd+V и нажмите Enter. Делайте это здесь или в окне установки, но не в обоих местах.', 'Войти в Claude'],
   ])('leads the owner through the sign-in on an online computer, and into the terminal once it opens, in %s', async (language, words, press, terminal, button) => {
     fakeStream();
-    view([plan('claude', 'needs_login', [WAITS])], { language, extra: { 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] } });
+    view([plan('claude', 'needs_login', [WAITS])], { language, extra: { 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] } });
     const box = await card('Claude');
     const list = within(box).getByRole('list', { name: words.label });
     expect(read(list)).toEqual({ texts: [words.steps[0] + words.done, words.steps[1] + words.done, words.steps[2] + press, words.steps[3]], current: 2 });
@@ -102,8 +102,8 @@ describe('the steps to connect a personal plan', () => {
 
   it.each([
     ['a key', plan('kimi', 'needs_login', [WAITS]), 'Kimi', 'Paste your Kimi key', 'Press "Paste the key" below and paste your Kimi key there.'],
-    ['the install window', plan('antigravity', 'needs_login', [WAITS]), 'Antigravity', 'Sign in to Antigravity', 'Sign in to Antigravity in the install window on ivan-mbp.'],
-    ["its program's terms", plan('codex', 'needs_setup', [{ ...MACHINE, status: 'needs_setup' }]), 'Codex', 'Sign in to Codex', 'Codex on ivan-mbp asks you to accept its terms: run the install command on that computer again and accept them.'],
+    ['the install window', plan('antigravity', 'needs_login', [WAITS]), 'Antigravity', 'Sign in to Antigravity', 'Sign in to Antigravity in the install window on dev-laptop.'],
+    ["its program's terms", plan('codex', 'needs_setup', [{ ...MACHINE, status: 'needs_setup' }]), 'Codex', 'Sign in to Codex', 'Codex on dev-laptop asks you to accept its terms: run the install command on that computer again and accept them.'],
   ])('says how a plan signs in with %s', async (_, sub, name, step, now) => {
     view([sub]);
     const list = within(await card(name)).getByRole('list', { name: `Steps to connect ${name}` });

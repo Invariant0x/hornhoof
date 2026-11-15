@@ -2,8 +2,7 @@ import type { FontRole, Skin, SkinLook } from './roles';
 
 /* The built-in skins, each a whole look of its own, in the order the Themes section shows them. A new skin is one more
    entry here and its name and description in each language of i18n: no screen changes. Cyberpunk comes first and is on
-   until a person picks another. The values are the sheets of Design (#787 on themes 1.0 and #777); theme.css keeps none
-   of them. */
+   until a person picks another; theme.css keeps none of the skin values. */
 
 /* The fonts of most skins. One set for them keeps text and blocks in place when the skin changes. */
 const FONTS: Record<FontRole, readonly string[]> = {
@@ -66,7 +65,7 @@ export const BUILTIN_SKINS = [
     },
   },
   /* A warm retro console: cream text on night violet, a yellow accent, dotted letters in headings and buttons, and
-     corners cut in two square steps. Approved for release by the CEO. */
+     corners cut in two square steps. */
   {
     id: 'pixel',
     scheme: 'dark',

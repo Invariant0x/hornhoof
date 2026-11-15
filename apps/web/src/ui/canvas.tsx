@@ -81,7 +81,7 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
   return { view, setView, zoomAt, handlers, dragged, touched };
 }
 
-/* Zoom out, the scale, zoom in and Fit, bottom left as in the prototype. */
+/* Zoom out, the scale, zoom in and Fit, bottom left. */
 export function ZoomBar({ k, onZoom, onFit, step = 1.2 }: { step?: number; k: number; onZoom(factor: number): void; onFit(): void }) {
   const t = useT();
   return (

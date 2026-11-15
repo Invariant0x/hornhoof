@@ -59,8 +59,8 @@ const STAFF: Employee[] = [
   employee('sam', 'Sam', 'DEV-SEC'),
   employee('tom', 'Tom', 'DEV-TEST'),
   employee('pat', 'Pat', 'DEV-PERF'),
-  employee('neo', 'Neo', 'DEV-ENG', 'worker', 'matrix'),
-  employee('trin', 'Trinity', 'DEV-ENG', 'worker', 'matrix'),
+  employee('leo', 'Leo', 'DEV-ENG', 'worker', 'core'),
+  employee('nora', 'Nora', 'DEV-ENG', 'worker', 'core'),
 ];
 
 /* Task #12 stands at review: Rita leads that stage, Bruno who made it only refers to it. */
@@ -78,7 +78,7 @@ function org(employees: Employee[]): Org {
     about: '',
     agents: { total: employees.length, working: employees.filter(e => e.status === 'working').length },
     products: [],
-    teams: [{ id: 'matrix', name: 'Matrix', about: '', stage: 0, gate: false, turnkey: false }],
+    teams: [{ id: 'core', name: 'Core', about: '', stage: 0, gate: false, turnkey: false }],
     people: [],
     employees,
     roles: ROLES,
@@ -145,15 +145,15 @@ for (const look of [
       await expect(page.locator('.dview .wires .gd')).toHaveCount(3);
       await expect(page.locator('.dview .wires .rl')).toHaveCount(0);
 
-      /* Everyone stays in its role's frame; only Matrix and the observer stand apart, left of the pipeline. */
+      /* Everyone stays in its role's frame; only Core and the observer stand apart, left of the pipeline. */
       const frame = (id: string) => page.getByRole('group', { name: title(id, look.lang), exact: true });
       for (const [id, who] of [['DEV-ARCH', 'Ada'], ['DEV-ENG', 'Bruno'], ['DEV-ENG', 'Dina'], ['DEV-REV', 'Rita'], ['DEV-REV', 'Roma'], ['DEV-SEC', 'Sam'], ['DEV-TEST', 'Tom'], ['DEV-PERF', 'Pat']] as const) {
         await expect(frame(id).getByRole('button', { name: new RegExp(who) })).toBeVisible();
       }
-      const matrix = page.getByRole('group', { name: 'Matrix', exact: true });
-      await expect(matrix.getByRole('button', { name: /Neo/ })).toBeVisible();
-      await expect(matrix.getByRole('button', { name: /Trinity/ })).toBeVisible();
-      expect(await left(page, 'Matrix')).toBeLessThan(xs[0]!);
+      const core = page.getByRole('group', { name: 'Core', exact: true });
+      await expect(core.getByRole('button', { name: /Leo/ })).toBeVisible();
+      await expect(core.getByRole('button', { name: /Nora/ })).toBeVisible();
+      expect(await left(page, 'Core')).toBeLessThan(xs[0]!);
       expect(await left(page, title('DEV-PERF', look.lang))).toBeLessThan(xs[0]!);
 
       /* Who leads a stage now is marked in its own frame, and only there. */

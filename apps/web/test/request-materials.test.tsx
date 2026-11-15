@@ -81,7 +81,7 @@ function chunkedStream(chunks: Uint8Array[], failAfter?: number): ReadableStream
   });
 }
 
-describe('separate question materials preview and explicit answering (#512)', () => {
+describe('separate question materials preview and explicit answering', () => {
   afterEach(() => {
     cleanup();
     forgetRequestDrafts();

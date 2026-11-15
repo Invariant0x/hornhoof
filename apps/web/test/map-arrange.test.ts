@@ -33,19 +33,19 @@ const crossesOthers = (arr: MapArrangement, pts: Point[], ends: string[]) =>
 /* Every line on the map: the traces of departments, the people's row and their own lines, and the department people's wires. */
 const lines = (arr: MapArrangement) => [...arr.depts.map(d => d.path), ...arr.top.map(t => t.path), ...(arr.bus ? [...arr.bus.lines, arr.bus.drop] : []), ...arr.people.wires.map(w => w.pts), ...arr.people.routes.map(r => r.pts)];
 
-/* Ivan's map: six departments, three people with the whole company, Dan beside Sales and four people who look after several
+/* Six departments, three people with the whole company, Dan beside Sales and four people who look after several
    departments each from the strip under them. */
 const SIX = ['Sales', 'Development', 'Design', 'Finance', 'Support', 'Marketing'].map((name, i) => ({ id: `00000000-0000-4000-8000-0000000001${i}0`, name }));
 const deputy = (id: string, name: string, of: number[]) => ({
   ...PEOPLE[2]!, id, name, title: '', status: 'active' as const, deputy: true, departments: of.map(i => SIX[i]!.id),
   access: { whole: false, departments: of.map(i => SIX[i]!), teams: [] },
 });
-const IVANS: Org = {
+const SIX_ORG: Org = {
   ...ORG,
   people: [...ORG.people, { ...PEOPLE[1]!, id: 'p9', name: 'Alex' }, deputy(ID(6), 'Oleg', [0, 4]), deputy('n1', 'Nina', [1, 2, 5]), deputy('n2', 'Petr', [1, 3]), deputy('n3', 'Lena', [0, 1])],
   departments: SIX.map((d, i) => dept({ ...d, people: i ? [] : [dan] })),
 };
-const IVANS_MOVES = { [deptKey(SIX[1]!.id)]: { x: 860, y: 980 }, [personKey('n1')]: { x: 1200, y: 600 } };
+const SIX_MOVES = { [deptKey(SIX[1]!.id)]: { x: 860, y: 980 }, [personKey('n1')]: { x: 1200, y: 600 } };
 
 /* Each line the map draws, with the blocks it joins when it joins two. */
 const ways = (arr: MapArrangement): { pts: Point[]; ends?: string[] }[] => [
@@ -76,7 +76,7 @@ describe('the map as nobody moved it', () => {
     expect(arr.depts.map(d => [d.x, d.y, d.path])).toEqual(spots.map(s => [s.x, s.y, s.path]));
     expect(arr.people).toEqual(peopleLayout(ORG4.departments.map((d, i) => ({ id: d.id, ...spots[i]! })), departmentPeople(ORG4)));
     expect(arr.hub).toEqual({ x: 480, y: 300, w: 240, h: 240 });
-    /* Ivan's way runs from the top of the hub up to the bus and across to his card, as before. */
+    /* The first person's way runs from the top of the hub up to the bus and across to the card, as before. */
     expect(arr.top[0]!.path.slice(0, 2)).toEqual([[600, 300], [600, arr.bus!.via[1]]]);
   });
 });
@@ -215,10 +215,10 @@ describe('a block moved on the map', () => {
   });
 
   it('joins the lines of people who look after several departments into roads, as laid out and wherever blocks are put', () => {
-    /* As laid out, as Ivan arranged it, with the hub and Oleg moved, and with Development put down below and on the right. */
+    /* As laid out, with two blocks moved, with the hub and Oleg moved, and with Development put down below and on the right. */
     const dragged = [{ x: 560, y: 1010 }, { x: 900, y: 800 }].map(at => ({ [deptKey(SIX[1]!.id)]: at }));
-    for (const placed of [{}, IVANS_MOVES, { [HUB_KEY]: { x: 420, y: 330 }, [personKey(OLEG)]: { x: 40, y: 1000 } }, ...dragged]) {
-      const arr = arrangeMap(IVANS, placed);
+    for (const placed of [{}, SIX_MOVES, { [HUB_KEY]: { x: 420, y: 330 }, [personKey(OLEG)]: { x: 40, y: 1000 } }, ...dragged]) {
+      const arr = arrangeMap(SIX_ORG, placed);
       const all = ways(arr);
       expect(sideBySide(all, arr.blocks.map(b => b.rect)), JSON.stringify(placed)).toEqual([]);
       for (const { pts, ends } of all) {
@@ -232,15 +232,15 @@ describe('a block moved on the map', () => {
     }
   });
 
-  it("joins the lines that ran 28 and 46 apart on Ivan's map as he arranged it, and none of them runs through a card", () => {
-    const arr = arrangeMap(IVANS, IVANS_MOVES);
+  it('joins the lines that ran 28 and 46 apart on the six-department map, and none of them runs through a card', () => {
+    const arr = arrangeMap(SIX_ORG, SIX_MOVES);
     const all = ways(arr);
     expect(sideBySide(all, arr.blocks.map(b => b.rect), 47)).toEqual([]);
     for (const { pts, ends } of all) if (ends) expect(crossesOthers(arr, pts, ends), JSON.stringify(pts)).toBe(false);
   });
 
   it('marks where a road forks with a dot, outside the blocks', () => {
-    const arr = arrangeMap(IVANS);
+    const arr = arrangeMap(SIX_ORG);
     expect(arr.forks.length).toBeGreaterThan(0);
     for (const [x, y] of arr.forks) expect(arr.blocks.some(({ rect: r }) => x > r.x && x < right(r) && y > r.y && y < bottom(r))).toBe(false);
   });
@@ -313,14 +313,14 @@ describe('a line a person bent', () => {
     expect(pulsePath({ kind: 'department', id: D1 }, { kind: 'person', id: OLEG }, ORG4, arr)).toEqual(route);
   });
 
-  it("brings the people's row down to the hub through its bends, and Ivan's way with it", () => {
+  it("brings the people's row down to the hub through its bends, and the CEO's way with it", () => {
     const arr = arrangeMap(ORG4, {}, { [PEOPLE_LINE]: [[520, 200]] });
     expect(passes(arr.bus!.drop, [520, 200])).toBe(true);
     expect(square(arr.bus!.drop)).toBe(true);
     expect(arr.bus!.drop[arr.bus!.drop.length - 1]).toEqual([600, 420]);
-    const ivan = arr.top.find(t => t.id === 'p1')!.path;
-    expect(passes(ivan, [520, 200])).toBe(true);
-    expect(pulsePath({ kind: 'orchestrator' }, { kind: 'person', id: 'p1' }, ORG4, arr)).toEqual(ivan);
+    const ceo = arr.top.find(t => t.id === 'p1')!.path;
+    expect(passes(ceo, [520, 200])).toBe(true);
+    expect(pulsePath({ kind: 'orchestrator' }, { kind: 'person', id: 'p1' }, ORG4, arr)).toEqual(ceo);
   });
 
   it('changes nothing for the bends of a line that is not on the map', () => {

@@ -45,7 +45,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
 ];
 
 /* Glass is see-through: muted text on it stands on the glass over whatever the page shows under it, held here over a white
-   page and over a black one (Design, #874). */
+   page and over a black one. */
 export const GLASS_PAIR: ContrastPair = { text: 'muted', on: 'hud', least: 4.5, kind: 'text' };
 const UNDER_GLASS: readonly Rgba[] = [{ r: 255, g: 255, b: 255, a: 1 }, { r: 0, g: 0, b: 0, a: 1 }];
 

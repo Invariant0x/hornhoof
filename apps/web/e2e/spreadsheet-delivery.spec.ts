@@ -209,7 +209,7 @@ for (const lang of ['en', 'ru'] as const) {
         await fits(page, '.dialog', width);
 
         await part.getByLabel(t.googleSheets.keyLabel).fill('{"type":"service_account"}');
-        await part.getByLabel(t.googleSheets.shareLabel).fill('ivan.korol.very.long.address@acme-enterprise-domain.example.com');
+        await part.getByLabel(t.googleSheets.shareLabel).fill('alex.rivera.very.long.address@acme-enterprise-domain.example.com');
         await part.getByRole('button', { name: t.common.save, exact: true }).click();
         await expect(part.getByText(/sheets-service-account-with-very-long-identifier/)).toBeVisible();
         await fits(page, '.dialog', width);

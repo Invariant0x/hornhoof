@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { Org, PersonView } from '../src/types';
 import { box, ME, serveApi } from './api';
 
-/* Two departments and Oleg, who runs both from the strip under them, as on Ivan's map. */
+/* Two departments and Oleg, who runs both from the strip under them. */
 const SALES = '00000000-0000-4000-8000-000000000001', DEV = '00000000-0000-4000-8000-000000000002';
 const OLEG = '00000000-0000-4000-8000-000000000006';
 const IVAN: PersonView = { id: ME.person.id, name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', isOwner: true, access: { whole: true, departments: [], teams: [] } };
@@ -12,7 +12,7 @@ const ORG: Org = {
   agents: { total: 0, working: 0 },
   people: [
     IVAN,
-    { ...IVAN, id: OLEG, name: 'Oleg Tikhonov', email: 'oleg@acme.com', title: '', isOwner: false, deputy: true, departments: [SALES, DEV], access: { whole: false, departments: [{ id: SALES, name: 'Sales' }, { id: DEV, name: 'Development' }], teams: [] } },
+    { ...IVAN, id: OLEG, name: 'Oleg Morozov', email: 'oleg@acme.com', title: '', isOwner: false, deputy: true, departments: [SALES, DEV], access: { whole: false, departments: [{ id: SALES, name: 'Sales' }, { id: DEV, name: 'Development' }], teams: [] } },
   ],
   departments: [SALES, DEV].map((id, i) => ({ id, name: ['Sales', 'Development'][i]!, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] })),
 };
@@ -71,13 +71,13 @@ test.describe('arranging the company map', () => {
   test('a block taken by the grip at its top left corner goes where it is put, stays there, and its lines follow at right angles', async ({ page }) => {
     const { kept, writes } = await serveMap(page);
     const errors = await open(page);
-    const oleg = page.locator('.dept-chips li', { hasText: 'Oleg Tikhonov' });
+    const oleg = page.locator('.dept-chips li', { hasText: 'Oleg Morozov' });
     const before = await worldOf(oleg);
     const world = await page.locator('.world').getAttribute('style');
     const k = await scaleOf(page);
 
     /* The grip stands over the card's corner, its middle on it, and is 44 px to touch on the screen. */
-    const grip = page.getByRole('button', { name: 'Move Oleg Tikhonov' });
+    const grip = page.getByRole('button', { name: 'Move Oleg Morozov' });
     const g = await box(grip), card = await box(oleg);
     expect(Math.round(g.width)).toBe(44);
     expect(Math.round(g.height)).toBe(44);

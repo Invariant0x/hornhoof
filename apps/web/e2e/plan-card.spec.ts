@@ -7,7 +7,7 @@ import { box, serveApi, serveOwnerKey, withKey } from './api';
    its owner to accept its program's terms on the machine, or for its machine is that block from the start, the last with
    its install command. A working plan keeps its three blocks. In a real browser, as jsdom lays out nothing. */
 
-const MAC = '0xs-MacBook-Pro.local';
+const MAC = 'work-laptop';
 const UPDATE = 'curl -fsSL https://hq.acme.com/install.sh | bash';
 const OLD = { error: { code: 'conflict', message: `The nodes on ${MAC} are older than the sign-in from Hornhoof needs.`, reason: 'signin_unsupported', details: { machines: [MAC], command: UPDATE } } };
 
@@ -20,7 +20,7 @@ const READY: SubView = {
 };
 const LOGIN: SubView = { ...READY, id: 's-claude', provider: 'claude', label: 'Claude', status: 'needs_login', tier: null, accounts: [], machines: [{ id: 'm2', hostname: MAC, status: 'needs_login', online: true }] };
 /* Signed in on a new machine, where agy asks its owner to accept its terms. */
-const SETUP: SubView = { ...READY, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', tier: null, accounts: [], machines: [{ id: 'm3', hostname: 'a-host', status: 'needs_setup', online: true }] };
+const SETUP: SubView = { ...READY, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', tier: null, accounts: [], machines: [{ id: 'm3', hostname: 'node-a', status: 'needs_setup', online: true }] };
 /* Connected a moment ago: its install command has not been run yet, and Done has closed the block at the top. */
 const WAITING: SubView = { ...READY, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'waiting_machine', online: false, tier: null, accounts: [], machines: [] };
 const INSTALL = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join DEMO_ONLY';
@@ -30,9 +30,9 @@ const installCommand = () => ({ id: 'c'.repeat(64), kind: 'plans', subscriptionI
 
 const WORDS = {
   en: { tab: 'Subscriptions', open: 'Open the card of ', signIn: 'Sign in to Codex', old: `The nodes on ${MAC} are older`, lifetime: 'Valid for 21 more hours.', fresh: 'New command for GLM',
-    setup: 'On a-host, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.' },
+    setup: 'On node-a, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.' },
   ru: { tab: 'Подписки', open: 'Открыть карточку ', signIn: 'Войти в Codex', old: `Ноды на ${MAC} старше`, lifetime: 'Действует еще 21 ч.', fresh: 'Новая команда для GLM',
-    setup: 'На a-host Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.' },
+    setup: 'На node-a Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.' },
 };
 
 async function servePlans(page: Page) {

@@ -309,22 +309,22 @@ describe('AgentWindow', () => {
 
   it('names the machine he runs on', async () => {
     const plan = { ...SUBS[0]!, owner: { id: 'p1', name: 'Ivan' } };
-    open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'ivan-laptop' } } });
-    expect((await screen.findAllByText(/, ivan-laptop$/)).length).toBeGreaterThan(0);
+    open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'work-laptop' } } });
+    expect((await screen.findAllByText(/, work-laptop$/)).length).toBeGreaterThan(0);
   });
 
   it('shows the CEO alone the machine command he asked Hornhoof for, next to his terminal, until the CEO closes it', async () => {
     const user = userEvent.setup();
     const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
-    const shown: ShownCommand = { id: 'a'.repeat(64), kind: 'add', plans: ['Claude'], machine: 'ivan-laptop', command, expiresAt: '2026-11-02T10:00:00Z' };
+    const shown: ShownCommand = { id: 'a'.repeat(64), kind: 'add', plans: ['Claude'], machine: 'work-laptop', command, expiresAt: '2026-11-02T10:00:00Z' };
     const { calls } = open({
       [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
       'GET /api/nodes/commands': [200, { commands: [shown] }],
       [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
     });
-    const card = await screen.findByRole('region', { name: 'Command to add Claude to ivan-laptop' });
+    const card = await screen.findByRole('region', { name: 'Command to add Claude to work-laptop' });
     expect(await within(card).findByText(withKey(command))).toBeInTheDocument();
-    expect(within(card).getByText(/^Run this in a terminal on ivan-laptop\./)).toBeInTheDocument();
+    expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Done' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
@@ -335,10 +335,10 @@ describe('AgentWindow', () => {
     localStorage.setItem('hh-lang', 'ru');
     try {
       const made = (id: string, kind: ShownCommand['kind'], plans: string[], machine: string | null): ShownCommand => ({ id: id.repeat(64), kind, plans, machine, command: `curl ${id}`, expiresAt: '2026-11-02T10:00:00Z' });
-      open({ 'GET /api/nodes/commands': [200, { commands: [made('a', 'machine', [], null), made('b', 'plans', ['Claude', 'Codex'], null), made('c', 'add', ['Kimi'], 'ivan-laptop')] }] });
+      open({ 'GET /api/nodes/commands': [200, { commands: [made('a', 'machine', [], null), made('b', 'plans', ['Claude', 'Codex'], null), made('c', 'add', ['Kimi'], 'work-laptop')] }] });
       expect(await screen.findByRole('region', { name: 'Команда для подключения машины' })).toBeInTheDocument();
       expect(screen.getByRole('region', { name: 'Команда для подключения: Claude, Codex' })).toBeInTheDocument();
-      expect(screen.getByRole('region', { name: 'Команда, чтобы добавить Kimi на ivan-laptop' })).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Команда, чтобы добавить Kimi на work-laptop' })).toBeInTheDocument();
       expect(screen.getAllByText('Оркестратор попросил эту команду у Hornhoof, и видите ее только вы. Она работает один раз, 24 часа.')).toHaveLength(3);
     } finally {
       localStorage.removeItem('hh-lang');
@@ -453,7 +453,7 @@ describe('AgentWindow', () => {
               ev(2, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN }),
               ev(3, 'computer', { state: 'closed' }, { person: IVAN }),
               ev(4, 'computer', { state: 'declined' }, { person: IVAN }),
-              ev(5, 'computer', { state: 'refused', machine: 'marat-mac' }),
+              ev(5, 'computer', { state: 'refused', machine: 'office-pc' }),
             ],
             state: READY,
           },
@@ -463,7 +463,7 @@ describe('AgentWindow', () => {
       expect(screen.getByText(/^Ivan opened access to the server's computer until .+$/)).toBeInTheDocument();
       expect(screen.getByText("Ivan closed access to the server's computer")).toBeInTheDocument();
       expect(screen.getByText("Ivan did not open access to the server's computer")).toBeInTheDocument();
-      expect(screen.getByText('marat-mac did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
+      expect(screen.getByText('office-pc did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
     });
 
     /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its line names it. */

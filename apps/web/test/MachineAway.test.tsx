@@ -6,7 +6,7 @@ import { MachineAway } from '../src/ui/MachineAway';
 
 const AWAY: MachineAwayCard = {
   id: 'm1',
-  hostname: 'MacBook Air',
+  hostname: 'studio-laptop',
   owner: { id: 'p1', name: 'Lisa' },
   since: '2026-11-06T08:32:00.000Z',
   back: null,
@@ -24,7 +24,7 @@ afterEach(() => {
 describe('a machine that has gone away, as its people read it', () => {
   it('says which and whose, how many agents, who matters and what to do', () => {
     shown([AWAY]);
-    const card = screen.getByRole('region', { name: 'Machine MacBook Air (Lisa) is offline' });
+    const card = screen.getByRole('region', { name: 'Machine studio-laptop (Lisa) is offline' });
     expect(within(card).getByText(/^Offline since .+\. Agents on it: 11\.$/)).toBeInTheDocument();
     expect(within(card).getByText('Among them: orchestrator Olaf, head Hana.')).toBeInTheDocument();
     expect(within(card).getByText('What to do: switch it on and plug it in, sign in to the account, check that Docker has started.')).toBeInTheDocument();
@@ -33,7 +33,7 @@ describe('a machine that has gone away, as its people read it', () => {
   it('says the same in Russian', () => {
     localStorage.setItem('hh-lang', 'ru');
     shown([AWAY]);
-    const card = screen.getByRole('region', { name: 'Машина MacBook Air (Lisa) не на связи' });
+    const card = screen.getByRole('region', { name: 'Машина studio-laptop (Lisa) не на связи' });
     expect(within(card).getByText(/^Не на связи с .+\. Агентов на ней: 11\.$/)).toBeInTheDocument();
     expect(within(card).getByText('Среди них: оркестратор Olaf, руководитель Hana.')).toBeInTheDocument();
     expect(within(card).getByText('Что сделать: включите ее и поставьте на зарядку, войдите в учетную запись, проверьте, что Docker запустился.')).toBeInTheDocument();
@@ -41,20 +41,20 @@ describe('a machine that has gone away, as its people read it', () => {
 
   it('names no owner when it has none, and leaves out who matters when nobody on it does', () => {
     shown([{ ...AWAY, owner: null, important: [] }]);
-    const card = screen.getByRole('region', { name: 'Machine MacBook Air is offline' });
+    const card = screen.getByRole('region', { name: 'Machine studio-laptop is offline' });
     expect(within(card).queryByText(/^Among them/)).not.toBeInTheDocument();
   });
 
   it('shrinks to one line once the machine is back', () => {
     shown([{ ...AWAY, back: '2026-11-06T10:16:00.000Z' }]);
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
-    expect(screen.getByText(/^Machine MacBook Air is back: .+\.$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Machine studio-laptop is back: .+\.$/)).toBeInTheDocument();
     expect(screen.queryByText(/What to do/)).not.toBeInTheDocument();
   });
 
   it('says the line in Russian', () => {
     localStorage.setItem('hh-lang', 'ru');
     shown([{ ...AWAY, back: '2026-11-06T10:16:00.000Z' }]);
-    expect(screen.getByText(/^Машина MacBook Air вернулась: .+\.$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Машина studio-laptop вернулась: .+\.$/)).toBeInTheDocument();
   });
 });

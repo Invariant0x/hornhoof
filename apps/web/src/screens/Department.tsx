@@ -76,7 +76,7 @@ type Props = {
 /* The agent window is on the right, settings and task details on the left. */
 const COVER = { window: 688, task: LEFT_PANEL_COVER } as const;
 const MIN_K = 0.15, MAX_K = 2;
-/* Below this scale the schema shows colors instead of text, as in the prototype. */
+/* Below this scale the schema shows colors instead of text. */
 const FAR_K = 0.55;
 /* The schema opens at least this large, from its left edge, when it does not fit the screen. */
 const START_K = 0.62;
@@ -328,7 +328,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K });
   const covered = panel ? COVER[panel] : 0;
 
-  /* Opens at a readable size from the left when the schema is wider than the screen, as the prototype does; Fit shows all of it. */
+  /* Opens at a readable size from the left when the schema is wider than the screen; Fit shows all of it. */
   const place = useCallback(
     (whole: boolean) => {
       const el = box.current;

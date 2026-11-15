@@ -18,7 +18,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.route('**/api/version', route => route.fulfill({ json: { version: '0.6.1', commit: 'task-241' } }));
     await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.6.1', commit: 'task-241' }, available: false, latest: null, updater: { status: null, waiting: null } } }));
     const employee = 'Hana with a long employee name for acceptance';
-    let wait: ExternalWait | null = { reason: 'Acceptance on a-host', since: '2026-11-04T16:00:00Z', until: '2026-11-04T16:30:00Z', on: { kind: 'employee', employee: 'head', name: employee } };
+    let wait: ExternalWait | null = { reason: 'Acceptance on node-a', since: '2026-11-04T16:00:00Z', until: '2026-11-04T16:30:00Z', on: { kind: 'employee', employee: 'head', name: employee } };
     const detail = (): TaskDetail => ({ ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), body: 'Check acceptance and submit the work.', parent: null, after: [], executor: TASKS[0]!.assignee, createdBy: null, subtasks: [], requests: [], log: [], externalWait: wait });
     await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: detail() } }));
     await page.route('**/api/tasks/t1/comments', route => {
@@ -29,7 +29,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.getByRole('button', { name: language === 'en' ? /^Tasks/ : /^Задачи/ }).click();
     await openTaskRow(page, 1);
     const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
-    const text = language === 'en' ? `waits for ${employee}: Acceptance on a-host, until 16:30` : `ждет: Acceptance on a-host; сотрудник: ${employee}, до 16:30`;
+    const text = language === 'en' ? `waits for ${employee}: Acceptance on node-a, until 16:30` : `ждет: Acceptance on node-a; сотрудник: ${employee}, до 16:30`;
     await expect(panel.getByText(text, { exact: true })).toBeVisible();
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

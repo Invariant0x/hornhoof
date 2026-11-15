@@ -35,7 +35,7 @@ const SUB: SubView = {
   accountsDiffer: false,
   signedInOnce: true,
   leaseMachine: null,
-  machines: [{ id: 'm1', hostname: 'ivan-mbp', status: 'ready', online: true }],
+  machines: [{ id: 'm1', hostname: 'dev-laptop', status: 'ready', online: true }],
   agents: [],
 };
 

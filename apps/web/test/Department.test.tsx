@@ -783,7 +783,7 @@ describe('Department view', () => {
   it("names who the agents' commits are by once both fields are filled", async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
-    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const author = { name: 'Alex Rivera', email: 'alex@acme.example' };
     const calls = shell(
       { [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/d2/repository': [200, { repository: { ...REPO, author } }] },
       { ...DEV_ORG, departments: [{ ...dev!, repository: REPO }] },
@@ -793,9 +793,9 @@ describe('Department view', () => {
     const repo = screen.getByRole('region', { name: 'Repositories' });
     expect(repo).not.toHaveTextContent('Commits as');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
-    await user.type(within(repo).getByLabelText('Commit author'), 'Ivan Korol');
+    await user.type(within(repo).getByLabelText('Commit author'), 'Alex Rivera');
     expect(within(repo).getByRole('button', { name: 'Save' })).toBeDisabled();
-    await user.type(within(repo).getByLabelText('Author email'), 'ivan@acme.dev');
+    await user.type(within(repo).getByLabelText('Author email'), 'alex@acme.example');
     await user.click(within(repo).getByRole('button', { name: 'Save' }));
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', author }));
   });
@@ -805,14 +805,14 @@ describe('Department view', () => {
     const [dev] = DEV_ORG.departments;
     const calls = shell(
       { [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/d2/repository': [200, { repository: { ...REPO, author: null } }] },
-      { ...DEV_ORG, departments: [{ ...dev!, repository: { ...REPO, author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } } }] },
+      { ...DEV_ORG, departments: [{ ...dev!, repository: { ...REPO, author: { name: 'Alex Rivera', email: 'alex@acme.example' } } }] },
     );
     await flyIn(user);
     await drawer(user, 'About the department');
     const repo = screen.getByRole('region', { name: 'Repositories' });
-    expect(repo).toHaveTextContent('Commits as Ivan Korol <ivan@acme.dev>');
+    expect(repo).toHaveTextContent('Commits as Alex Rivera <alex@acme.example>');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
-    expect(within(repo).getByLabelText('Commit author')).toHaveValue('Ivan Korol');
+    expect(within(repo).getByLabelText('Commit author')).toHaveValue('Alex Rivera');
     await user.clear(within(repo).getByLabelText('Commit author'));
     await user.clear(within(repo).getByLabelText('Author email'));
     await user.click(within(repo).getByRole('button', { name: 'Save' }));
@@ -884,12 +884,12 @@ describe('Department view', () => {
     await user.type(within(again).getByLabelText('Name'), 'Server');
     await user.type(within(again).getByLabelText('Address'), 'https://github.com/acme/api.git');
     expect(within(again).getByLabelText('Name')).toHaveValue('Server');
-    await user.type(within(again).getByLabelText('Commit author'), 'Ivan Korol');
+    await user.type(within(again).getByLabelText('Commit author'), 'Alex Rivera');
     expect(within(again).getByRole('button', { name: 'Add' })).toBeDisabled();
-    await user.type(within(again).getByLabelText('Author email'), 'ivan@acme.dev');
+    await user.type(within(again).getByLabelText('Author email'), 'alex@acme.example');
     await user.click(within(again).getByRole('button', { name: 'Add' }));
     await vi.waitFor(() =>
-      expect(calls.filter(c => c.method === 'POST' && c.path === '/api/departments/d2/repositories').map(c => c.body)[1]).toEqual({ name: 'Server', url: 'https://github.com/acme/api.git', branch: 'main', author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } }),
+      expect(calls.filter(c => c.method === 'POST' && c.path === '/api/departments/d2/repositories').map(c => c.body)[1]).toEqual({ name: 'Server', url: 'https://github.com/acme/api.git', branch: 'main', author: { name: 'Alex Rivera', email: 'alex@acme.example' } }),
     );
   });
 

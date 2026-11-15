@@ -4,7 +4,7 @@ import { ROAD } from '../src/map-roads';
 import { box, ME, serveApi } from './api';
 
 /* Six departments, three people with the whole company on top, Dan beside Sales and four people who each look after several
-   departments from the strip under them, as on Ivan's map. */
+   departments from the strip under them. */
 const NAMES = ['Sales', 'Development', 'Design', 'Finance', 'Support', 'Marketing'];
 const ID = (n: number) => `00000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`;
 const D = NAMES.map((_, i) => ID(i + 1));

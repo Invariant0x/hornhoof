@@ -378,7 +378,7 @@ describe('connect', () => {
       url: `ws://127.0.0.1:${port}`,
       key: 'node-secret-key-abcdef',
       monitorMs: 60_000,
-      addresses: () => 'eth0:10.0.0.1',
+      addresses: () => 'eth0:192.0.2.1',
       handshakeTimeoutMs: NEVER,
       random: () => samples[idx++ % samples.length]!,
       scheduleRetry: (fn, delayMs) => {
@@ -449,7 +449,7 @@ describe('connect', () => {
       socket.on('message', data => received.push({ conn: current, msg: JSON.parse(String(data)) as Record<string, unknown> }));
     });
 
-    let netAddr = 'wlan0:192.168.1.10';
+    let netAddr = 'wlan0:198.51.100.10';
 
     fakeTime();
     const conn = connect({
@@ -481,7 +481,7 @@ describe('connect', () => {
 
     /* Jump 50_000 ms (jumpMs = 50_000 - 15 = 49_985); even though 50_000 > silenceMs (4_000), probeWindowMs (400 ms) holds open! */
     sleeping = true;
-    netAddr = 'wlan0:10.0.0.24';
+    netAddr = 'wlan0:203.0.113.24';
     clockMs = 62_015;
     await vi.advanceTimersByTimeAsync(15);
     expect(pingSpy).toHaveBeenCalledTimes(1);
@@ -678,7 +678,7 @@ describe('connect', () => {
     const blackholePort = (blackhole.address() as AddressInfo).port;
 
     let attempts = 0;
-    let netAddr = 'eth0:192.168.0.5';
+    let netAddr = 'eth0:198.51.100.5';
     let clockMs = 1_000;
     let closes = 0;
     const logs: string[] = [];
@@ -701,7 +701,7 @@ describe('connect', () => {
       lookup: ((_hostname, lookupOpts, cb) => {
         const current = ++attempts;
         if (current === 1) {
-          netAddr = 'eth0:10.0.0.9';
+          netAddr = 'eth0:203.0.113.9';
           const err = Object.assign(new Error('getaddrinfo ENOTFOUND hornhoof-test.invalid'), { code: 'ENOTFOUND' });
           cb(err, '', 4);
           return;
@@ -760,9 +760,9 @@ describe('connect', () => {
       networkSnapshot(() => ({
         wlan0: undefined,
         lo: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', mac: '00:00:00:00:00:00', internal: true, cidr: '127.0.0.1/8' }],
-        eth0: [{ address: '10.1.2.3', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:55', internal: false, cidr: '10.1.2.3/24' }],
+        eth0: [{ address: '192.0.2.3', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:55', internal: false, cidr: '192.0.2.3/24' }],
       })),
-    ).toBe('eth0:10.1.2.3');
+    ).toBe('eth0:192.0.2.3');
     expect(
       networkSnapshot(() => {
         throw new Error('sandbox denied');
@@ -782,7 +782,7 @@ describe('connect', () => {
     });
 
     let clockMs = 1_700_000_000_000;
-    let netAddr = 'eth0:10.0.0.1';
+    let netAddr = 'eth0:192.0.2.1';
     let createCalls = 0;
     let closes = 0;
     let pongs = 0;
@@ -833,7 +833,7 @@ describe('connect', () => {
 
     /* Clock jumps 10 s + network changes while server auto-pongs: probe succeeds, socket stays open, flags clear. One tick of the
        monitor (15 ms of fake time) probes; after the pong, the tick at the end of the probe window (120 ms) finds no silence. */
-    netAddr = 'eth0:10.0.0.2';
+    netAddr = 'eth0:192.0.2.2';
     clockMs += 10_000;
     await vi.advanceTimersByTimeAsync(15);
     await eventually(() => pongs === 1);
