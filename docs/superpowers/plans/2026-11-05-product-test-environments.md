@@ -64,7 +64,7 @@ does not establish equivalent execution, cache behavior or isolation.
 - Never execute repository commands as the cache owner or send Git credentials to commands, manifests, snapshots or receipts.
 - No hardlinks/alternates into a shared mirror or cache. Dependency key B never changes key A. READY requires complete validated fsynced publication.
 - Respect B's files, #391's 0065 migration and #392's template/task files. Do not edit test/helpers.ts or the queue implementation.
-- Generate 0066 only after coordinating the unchanged 0065 snapshot/journal with b30ac28f. Do not merge 0066 into turn-8 before 0065.
+- Generate 0066 only after coordinating the unchanged 0065 snapshot/journal with the developer who holds 0065. Do not merge 0066 into turn-8 before 0065.
 - Only targeted tests and compiler/lint/coverage/crapper/dryer checks. No root npm test, full remote run or mutation run. Do not raise test timeouts.
 - English repository text, the repository's author, no commit trailers, no main merge or release workflow.
 
@@ -127,7 +127,7 @@ does not establish equivalent execution, cache behavior or isolation.
 
 ## Task 5: Atomic run completion against wait_for
 
-**Files:** apps/server/src/modules/tasks/external-wait.ts, testruns/runs.ts and targeted test-runs/external-wait tests. engine.ts remains owned by cc79818e; coordinate before editing it.
+**Files:** apps/server/src/modules/tasks/external-wait.ts, testruns/runs.ts and targeted test-runs/external-wait tests. engine.ts remains owned by another developer; coordinate before editing it.
 
 - [x] Read the head's #399 addendum and current turn-8 implementation. Reproduce unreadMessage=false -> run end with no wait -> stale move(wait) using an explicit barrier, for tests/work.
 - [x] Apply the smallest atomic fix, preserving foreign waits and closed tasks; no timer-based repair or uncontrolled reread.
@@ -141,7 +141,7 @@ does not establish equivalent execution, cache behavior or isolation.
 - [ ] Measure identical pinned fixture/workload on a documented turn-7 preparation path and the new cold/warm paths; retain runtime/machine identity, test counts, phase samples and computed percentages. Identify a missing historical baseline explicitly rather than inventing one.
 - [ ] Run all affected targeted tests with fresh coverage, protocol/app builds, typecheck:tests, scoped ESLint, package-scoped crapper --use-existing-coverage (existing CC no increase, new<10) and dryer.
 - [ ] Request one fresh read-only whole-branch review; one RED/GREEN fix pass for material findings. Record review exclusions and rulings.
-- [ ] Verify current0065/0066 journal order with b30ac28f, commit/push task-399 and submit report/raw evidence. Main and release remain outside scope.
+- [ ] Verify current0065/0066 journal order with the developer who holds 0065, commit/push task-399 and submit report/raw evidence. Main and release remain outside scope.
 
 ## Ledger
 
@@ -150,7 +150,7 @@ does not establish equivalent execution, cache behavior or isolation.
 - Ruling: version:1 supersedes schemaVersion; split/profiles/artifact/fullPackageGlobs use the frozen baseline, not historical Kimi illustration shapes.
 - Resolved by the head at2026-11-05T15:10:33.690Z: reset uses suite-scoped records; fixture command:null requires nonempty inputs. The rewritten task was reread before implementation.
 - B API and manifest downloaded from task389; service path '.' is relative to artifacts.paths.pg, file paths are repo-relative. This interpretation was sent to B.
-- b30ac28f reserves0065; journal/snapshot are in origin/task-391@6a0eb1c3.0066 must not enter turn-8 before0065.
+- Another developer reserves0065; journal/snapshot are in origin/task-391@6a0eb1c3.0066 must not enter turn-8 before0065.
 - Inline execution chosen for shared protocol/caller dependencies. One fresh whole-branch review remains required at completion.
 
 - Protocol primitive increment:8/8 new tests failed on undefined exports, then passed against strict Command and RepositoryScope. Whole protocol226/226; build, test typecheck, scoped ESLint, package-scoped crapper existing coverage and dryer all exit0. No canonical manifest acceptance is claimed yet.
@@ -181,9 +181,9 @@ does not establish equivalent execution, cache behavior or isolation.
 - Server runtime/receipt checks reject missing or mismatched success evidence, persist snapshot before parts, maintain scope/host/runtime owner hints, recover persisted describe requests, and fail unanswered descriptions once. Metadata reading itself needs no execution runtime; execution waits for an eligible node. Product mode rejects64-character pins, preserving legacy manual support.
 - On infrastructure recovery inventory, task-399 HEAD40ca2a6c and all working edits remained. The old /tmp/task-399-evidence folder was absent; fresh evidence is now under .superpowers/evidence/task-399. Historical RED observations remain in the task log/ledger; their lost raw files are not represented as newly verified final logs.
 - Head added407 runNode complexity validation. Reproduced source CC166 atb8769b5f and168 at5c67fb00; literal origin/main64472f8c has173. Current399 test-message extraction gives161 with affected main tests. Integration/source+coverage verification after the hotfix remains pending.
-- Urgent CEO464/task466 gives Simon619a0e6a exclusive delivery/assignment ownership. task-399@40ca2a6c was pushed/read back; committed and working interface patches plus the handoff inventory were uploaded/read back on399 and reported on466. Shared main/protocol/server-node-message edits and turn-8 integration wait for the exact handoff and authorized hotfix. No terminal host/routes/hook or job runner edits here.
+- Urgent CEO464/task466 gives one developer exclusive delivery/assignment ownership. task-399@40ca2a6c was pushed/read back; committed and working interface patches plus the handoff inventory were uploaded/read back on399 and reported on466. Shared main/protocol/server-node-message edits and turn-8 integration wait for the exact handoff and authorized hotfix. No terminal host/routes/hook or job runner edits here.
 - Measured replay still waits for the real shared coordinator: the compiled check CLI /bin/true probe again returned404 after recovery. The head explicitly rejected a private substitute. Native UID/PG/image remain NOT_RUN. This is not final acceptance of399.
-- Head later clarified466 through Simon: he uses his own main-based clone; independent399 main/protocol/server-node-message edits need not wait. The broad handoff freeze is lifted; concrete hotfix inclusion/conflicts will be coordinated through the head, with no parallel delivery implementation.
+- Head later clarified466 through that developer: it uses its own main-based clone; independent399 main/protocol/server-node-message edits need not wait. The broad handoff freeze is lifted; concrete hotfix inclusion/conflicts will be coordinated through the head, with no parallel delivery implementation.
 - Additional product result regression reproduced exitCode7 becoming null, then preserved the selected command's real exit status. Repository reconfiguration after metadata was also reproduced: queued product parts must refuse the changed scope instead of sending a pinned snapshot with a replacement repository. Both have RED/GREEN checks in persistent evidence.
 - Controlled shared-UID race RED: with a second machine slot granted, runPart entered twice while the cancelled first part was still in cleanup. A per-node disposable-user resource mutex now runs INSIDE the already granted machine slot, with started emitted only after its admission. It uses the existing portable FIFO primitive, never calls withCheckSlot again, reports resource wait, and aborts a waiter with its original reason. Cleanup retains the machine lease.
 - Metadata interruption RED: a cancelled reader failed the entire run immediately. Cancellation, timeout and commit_unavailable replies now retry with a fresh request ID at the SAME pinned SHA/scope, up to three assignments. Explicit run cancellation still ignores late replies; permanent manifest problems remain fatal. Retry/exhaustion GREEN records one final part/result.
