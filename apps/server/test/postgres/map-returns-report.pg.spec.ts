@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
-import { agentEvents, agents, jobs, machines, mapReturns, nodes, people, programDeliveries, subscriptions, tasks } from '../../src/db/schema.js';
+import { agentEvents, agents, jobs, machines, mapReturns, nodes, people, programDeliveries, subscriptions, tasks, teams } from '../../src/db/schema.js';
 import { appendTurnEvent } from '../../src/modules/events/store.js';
 import { workStarts } from '../../src/modules/org/map-state.js';
 import { reserveDelivery } from '../../src/modules/program-operator/deliveries.js';
@@ -27,6 +27,17 @@ async function installReportAndEventBarriers(pg: Awaited<ReturnType<typeof priva
     CREATE TRIGGER zz_turn_event_company_barrier BEFORE INSERT ON agent_events FOR EACH ROW EXECUTE FUNCTION turn_event_company_barrier()`);
 }
 
+/* Waits for a state while the work it races still runs: when that work ends first, as when the report is refused, the test
+   fails at once with what ended it instead of waiting for a state that can no longer come. */
+async function whileRunning(running: Promise<unknown>, check: () => Promise<boolean>): Promise<void> {
+  let ended: { error: unknown } | null = null;
+  void running.then(() => { ended = { error: new Error('The report and the event ended before the barrier held them.') }; }, (error: unknown) => { ended = { error }; });
+  await until(async () => {
+    if (ended) throw ended.error;
+    return check();
+  });
+}
+
 it('commits the first subtask report in a running turn alongside its live tool event without deadlocking on map_returns', async () => {
   const pg = await privatePostgres();
   const fixture = await runFixture(pg);
@@ -39,6 +50,9 @@ it('commits the first subtask report in a running turn alongside its live tool e
   const { task: parent } = await createTask(actorA.ctx, { agentId: head!.id }, {
     title: 'Parent goal', brief: 'Coordinate', body: 'Coordinate', departmentId: fixture.departmentId, assigneeAgentId: head!.id, resultKind: 'coordination',
   });
+  /* Its holder is in a turnkey team, so the subtask closes with its own report, not through Review and Tests. */
+  const [team] = await pg.db.insert(teams).values({ companyId: fixture.companyId, departmentId: fixture.departmentId, name: 'Lane', turnkey: true }).returning();
+  await pg.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, actorA.job.agentId));
   const { task: child } = await createTask(actorA.ctx, { agentId: head!.id }, {
     title: 'Child turnkey fix', brief: 'Fix bug', body: 'Fix bug', departmentId: fixture.departmentId, parentId: parent.id, assigneeAgentId: actorA.job.agentId, executor: true, small: true,
   });
@@ -58,12 +72,12 @@ it('commits the first subtask report in a running turn alongside its live tool e
       appendTurnEvent(actorB.ctx, actorA.job.id, { kind: 'tool', name: 'report', input: '{"task":4}' }, sql`true`),
     ]);
     void pending.catch(() => {});
-    await until(async () => (await pg.admin.query<{ pid: number }>(
+    await whileRunning(pending, async () => (await pg.admin.query<{ pid: number }>(
       "SELECT pid FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock' AND wait_event = 'advisory'",
       [[pidA, pidB]],
     )).rows.length === 2);
     await barrier.query('SELECT pg_advisory_unlock(885, 2)');
-    await until(async () => (await pg.admin.query<{ waiting: boolean }>(
+    await whileRunning(pending, async () => (await pg.admin.query<{ waiting: boolean }>(
       "SELECT (wait_event_type = 'Lock' AND wait_event = 'advisory') AS waiting FROM pg_stat_activity WHERE pid = $1",
       [pidA],
     )).rows[0]?.waiting !== true);
