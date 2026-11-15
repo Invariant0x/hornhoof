@@ -200,11 +200,11 @@ describe('Backups in Settings', () => {
     expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Backups' })).not.toBeInTheDocument();
     /* The link and the key of the git host are asked for, the backups never. */
-    expect(calls.map(call => call.path).sort()).toEqual(['/api/link', '/api/repo-host']);
+    expect(calls.map(call => call.path).sort()).toEqual(['/api/google-sheets', '/api/link', '/api/repo-host']);
   });
 
   it('shows nothing of them on a server that knows none yet', async () => {
-    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/repo-host': [200, { host: null }] });
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'GET /api/repo-host': [200, { host: null }], 'GET /api/google-sheets': [200, { google: null }] });
     render(<Settings me={ME} onClose={() => {}} />);
     expect(await screen.findByRole('link', { name: 'https://acme.hornhoof.org' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Backups' })).not.toBeInTheDocument();
