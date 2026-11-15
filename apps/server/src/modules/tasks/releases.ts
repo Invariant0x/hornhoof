@@ -397,7 +397,7 @@ function isOpenReleaseTaskFor(task: Task, agentId: string): boolean {
   return task.status !== 'done' && task.status !== 'cancelled';
 }
 
-async function matchesTurnDepartment(db: Ctx['db'], agentId: string, turn: Turn, target: IntegrationTarget | null): Promise<target is IntegrationTarget> {
+async function matchesTurnDepartment(db: Ctx['db'], agentId: string, turn: Turn, target: IntegrationTarget | null): Promise<boolean> {
   if (!target?.turn || target.turn.id !== turn.id) return false;
   const [agent] = await db.select({ departmentId: agents.departmentId }).from(agents).where(eq(agents.id, agentId));
   return agent?.departmentId === turn.departmentId;
@@ -408,7 +408,7 @@ async function openTurnScopeFor(ctx: Reader, task: Task, agentId: string): Promi
   const turn = await openTurnOf(ctx.db, task.companyId, task.departmentId);
   if (!turn) return null;
   const target = await integrationTarget(ctx, task);
-  if (!(await matchesTurnDepartment(ctx.db, agentId, turn, target))) return null;
+  if (!target || !(await matchesTurnDepartment(ctx.db, agentId, turn, target))) return null;
   return (await autonomousOn(ctx.db, turn.departmentId!, target.repo)) ? { task, target, turn } : null;
 }
 
