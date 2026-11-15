@@ -72,9 +72,10 @@ function remainingWork(input: ReusingInput) {
   };
 }
 /* A full run's parts share the part count with its preparation and final checks. */
-function withinBudget(spread: PartSpread, budget: number): PartSpread {
+function spreadWithin(spread: PartSpread | undefined, budget: number): { spread?: PartSpread } {
+  if (!spread) return {};
   const max = Math.max(1, Math.min(spread.max, budget));
-  return { ...spread, max, min: Math.min(spread.min, max) };
+  return { spread: { ...spread, max, min: Math.min(spread.min, max) } };
 }
 /* Plans what is left to run. No file proves a final check, so it stays; a reused preparation leaves nothing for the rest to wait for. */
 export async function planProductParts(input: ReusingInput): Promise<ProductPlan> {
@@ -84,7 +85,7 @@ export async function planProductParts(input: ReusingInput): Promise<ProductPlan
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');
   const availableMachines = Math.min(input.availableMachines, Math.max(0, budget)), { preparationMs, spread, ...rest } = input;
-  const planned = await remainingPlan({ ...rest, availableMachines, ...(preparation && preparationMs ? { preparationMs } : {}), ...(spread ? { spread: withinBudget(spread, budget) } : {}) }, remaining);
+  const planned = await remainingPlan({ ...rest, availableMachines, ...(preparation && preparationMs ? { preparationMs } : {}), ...spreadWithin(spread, budget) }, remaining);
   const leaves = preparationLeaves(input, preparation, planned);
   leaves.push(...batchLeaves(input, planned));
   leaves.push(...finalLeaves(leaves, finals, preparation?.suiteIds ?? []));

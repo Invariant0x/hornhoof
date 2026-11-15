@@ -143,6 +143,19 @@ function spreadReason(spread: PartSpread, least: number, most: number, best: Alt
   const fits = best.partMs <= spread.ceilingMs ? '' : `; no count fits that, so its longest part is estimated at ${best.partMs} ms`;
   return ` A full run takes ${least} to ${most} parts of at most ${spread.ceilingMs} ms each${fits}.`;
 }
+type Choice = { single: Alternative; options: Alternative[]; best: Alternative; note: string };
+/* The layouts a run may take and the one it takes: the cheapest, or for a full run the cheapest that fits its ceiling. */
+function choose(groups: Group[], machines: MachinePace[], input: TestPartPlanInput, paced: boolean): Choice {
+  const preparationMs = input.preparationMs ?? 0, single = alternative(groups, machines.slice(0, 1), input.costs, paced, preparationMs);
+  if (!input.spread) {
+    const limit = Math.min(MAX_TEST_PARTS, machines.length, groups.length);
+    const options = [single, ...Array.from({ length: limit - 1 }, (_, index) => alternative(groups, machines.slice(0, index + 2), input.costs, paced, preparationMs))];
+    return { single, options, best: cheapest(options), note: '' };
+  }
+  const { options, least, most } = spreadOptions(groups, machines, input, paced, input.spread);
+  const best = withinCeiling(options, input.spread.ceilingMs);
+  return { single, options, best, note: spreadReason(input.spread, least, most, best) };
+}
 function reasonFor(input: TestPartPlanInput, best: Alternative, oneMachineMs: number, unknown: number): string {
   const capacity = input.availableMachines ? `Selected ${best.parts.length} parts from ${input.availableMachines} free compatible machines.`
     : 'No compatible machine is free; queue one part.';
@@ -156,17 +169,13 @@ export function planTestParts(input: TestPartPlanInput): TestPartPlan {
   validInput(input);
   const timed = timedUnits(input), groups = groupsOf(timed), machines = pacesOf(input);
   const paced = machines[machines.length - 1]!.pace / machines[0]!.pace >= ONE_PACE;
-  const limit = Math.min(MAX_TEST_PARTS, machines.length, groups.length);
-  const preparationMs = input.preparationMs ?? 0, { spread } = input;
-  const single = alternative(groups, machines.slice(0, 1), input.costs, paced, preparationMs);
-  const spreading = spread && spreadOptions(groups, machines, input, paced, spread);
-  const options = spreading ? spreading.options : [single, ...Array.from({ length: limit - 1 }, (_, index) => alternative(groups, machines.slice(0, index + 2), input.costs, paced, preparationMs))];
-  const best = spread ? withinCeiling(options, spread.ceilingMs) : cheapest(options), bound = best.parts.some(part => part.machine);
+  const preparationMs = input.preparationMs ?? 0, { single, options, best, note } = choose(groups, machines, input, paced);
+  const bound = best.parts.some(part => part.machine);
   /* At one pace any machine takes any part: the part laid out beside the preparation goes last, for the machine it frees. */
   const parts = preparationMs && !bound && best.parts.length === best.estimate.parts ? [...best.parts.slice(1), best.parts[0]!] : best.parts;
   const unknownUnits = timed.filter(item => item.unknown).map(item => item.unit);
   const oneMachineMs = single.estimate.estimatedWallMs;
-  const reason = reasonFor(input, best, oneMachineMs, unknownUnits.length) + (spreading ? spreadReason(spread, spreading.least, spreading.most, best) : '');
+  const reason = reasonFor(input, best, oneMachineMs, unknownUnits.length) + note;
   return { parts, oneMachineMs, estimatedWallMs: best.estimate.estimatedWallMs,
     costAdjustedMs: best.estimate.costAdjustedMs, alternatives: options.map(option => option.estimate), unknownUnits,
     waitingForCapacity: input.availableMachines === 0, reason,
