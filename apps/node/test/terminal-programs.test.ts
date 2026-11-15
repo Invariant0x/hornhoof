@@ -57,7 +57,7 @@ describe('Claude Code in a terminal', () => {
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(arg(command, '--session-id')).toBe(sessionId);
     expect(command).toContain('--dangerously-skip-permissions');
-    expect(command).toContain('--strict-mcp-config');
+    expect(command).not.toContain('--strict-mcp-config');
     expect(JSON.parse(arg(command, '--mcp-config')!)).toEqual({ mcpServers: { hornhoof: { type: 'http', url: URLS.mcpUrl } } });
     const settings = JSON.parse(arg(command, '--settings')!);
     expect(settings.hooks.Stop[0].hooks[0].command).toBe('hh-hook stop');
