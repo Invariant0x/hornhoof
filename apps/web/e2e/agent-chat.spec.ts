@@ -118,7 +118,9 @@ test('the chat says that an agent with nothing to do sleeps until its next task,
   await expect(window.locator('.xterm-screen')).toHaveCount(0);
 });
 
-/* The switch to the terminal says its word beside its icon in every window, awake or asleep, at every width. */
+/* The switch to the terminal says its word beside its icon in every window, awake or asleep, at every width; on a phone a
+   window with an inbox gives the word's room to the inbox's icon, as Design set it in #869, and the switch keeps its icon
+   and its name. */
 for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
   const settings = { lang, theme, width };
   test(`the terminal switch says its word for an agent awake and asleep, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
@@ -132,10 +134,13 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     };
+    const phone = width === 375;
     const says = async (label: string) => {
       const button = window.getByRole('button', { name: label, exact: true });
       await expect(button.locator('span')).toHaveText(label);
-      await expect(button.locator('span')).toBeVisible();
+      if (phone) await expect(window.locator('.t-bar [data-panel="inbox"]')).toBeVisible();
+      await expect(button.locator('span')).toBeVisible({ visible: !phone });
+      await expect(button).toHaveAttribute('title', label);
       await expect(button.locator('svg')).toBeVisible();
       return button;
     };
