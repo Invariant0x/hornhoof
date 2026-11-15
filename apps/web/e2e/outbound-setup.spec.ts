@@ -83,6 +83,15 @@ async function fits(page: Page, panel: Locator) {
   expect(await panel.evaluate(el => [...el.querySelectorAll('.imp, .repo-actions, .imp-meta, li, h3, h4, p')].filter(n => (n as HTMLElement).scrollWidth > (n as HTMLElement).clientWidth + 1).length)).toBe(0);
 }
 
+/* Every field, list and button of the part is a touch target of 44px, as in the Settings window: what is smaller. */
+async function small(panel: Locator) {
+  return panel.evaluate(root => [...root.querySelectorAll('input:not([type=checkbox]), select, button')].flatMap(el => {
+    const high = Math.round(el.getBoundingClientRect().height);
+    const fits = el.tagName === 'BUTTON' ? high >= 44 : high === 44;
+    return fits ? [] : [`${el.tagName} ${(el.textContent ?? '').trim()} ${high}`];
+  }));
+}
+
 /* What a person sees with this part of the panel scrolled into view. */
 async function shot(page: Page, what: Locator, file: string) {
   await what.evaluate(el => el.scrollIntoView({ block: 'start' }));
@@ -112,8 +121,11 @@ for (const look of LOOKS) {
 
     await part.getByRole('button', { name: t.outboundSetup.changePolicy }).click();
     await part.getByRole('button', { name: t.outboundSetup.connectHook }).click();
+    await part.getByRole('button', { name: t.outboundSetup.newChannel }).click();
     const policy = part.getByRole('form', { name: t.outboundSetup.policyTitle });
     await expect(policy.getByRole('checkbox')).toBeChecked();
+    await expect(part.getByRole('form', { name: t.outboundSetup.newChannel }).getByRole('combobox')).toHaveCount(2);
+    expect(await small(part)).toEqual([]);
     await fits(page, part);
     await shot(page, policy, `settings-policy-form-${browserName}-${name}`);
     await shot(page, part.getByRole('form', { name: t.outboundSetup.connectHook }), `settings-account-form-${browserName}-${name}`);
@@ -130,6 +142,7 @@ for (const look of LOOKS) {
     await expect(own.getByRole('heading', { name: t.outboundSetup.channelsTitle })).toBeVisible();
     await fits(page, own);
     await shot(page, own.getByRole('heading', { name: t.settings.groups.messaging }), `department-${browserName}-${name}`);
+    expect(await small(own)).toEqual([]);
     expect(errors).toEqual([]);
   });
 }
