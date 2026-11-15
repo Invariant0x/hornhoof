@@ -75,12 +75,18 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
   return eligible.find(identity => identity.provider !== producer.provider) ?? eligible[0] ?? null;
 }
 
-/* Assigns an eligible Security checker as soon as the task's risk requires Security, so it does not wait after submission. */
-export async function initialSecurityOwner(db: Reader['db'], task: Task, ability: string | undefined, producer?: CheckerIdentity | null): Promise<string | null> {
-  if (!ability || !task.departmentId) return null;
+async function securityOrigin(db: Reader['db'], task: Task, producer?: CheckerIdentity | null): Promise<CheckerIdentity | null> {
+  if (producer) return producer;
   const authorId = task.executorAgentId ?? task.assigneeAgentId;
-  const origin = producer ?? (authorId ? await agentIdentity(db, task.companyId, authorId) : null);
-  return origin ? (await checkerFor({ db }, task, origin, ability, null))?.agentId ?? null : null;
+  return authorId ? agentIdentity(db, task.companyId, authorId) : null;
+}
+
+/* Assigns an eligible Security checker as soon as the task's risk requires Security, so it does not wait after submission. */
+export async function initialSecurityOwner(db: Reader['db'], task: Task, ability: string, producer?: CheckerIdentity | null): Promise<string | null> {
+  if (!task.departmentId) return null;
+  const origin = await securityOrigin(db, task, producer);
+  const checker = origin ? await checkerFor({ db }, task, origin, ability, null) : null;
+  return checker ? checker.agentId : null;
 }
 
 export async function populateSecurityOwner(db: Reader['db'], task: Task, state: Route['state'], producer?: CheckerIdentity | null): Promise<Route['state']> {

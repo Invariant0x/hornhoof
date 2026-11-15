@@ -92,8 +92,13 @@ function samePaths(left: string[], right: string[]): boolean {
   return a.length === b.length && a.every((path, index) => path === b[index]);
 }
 
+function matchingCompareHead(picked: CompareResult | null, headSha: string, baseSha?: string): picked is CompleteCompare {
+  if (!picked || !picked.complete || picked.headSha !== headSha) return false;
+  return baseSha === undefined || picked.baseSha === baseSha;
+}
+
 function sameComparedPatch(picked: CompareResult | null, headSha: string, compared: CompleteCompare, baseSha?: string): boolean {
-  if (!picked?.complete || picked.headSha !== headSha || (baseSha !== undefined && picked.baseSha !== baseSha)) return false;
+  if (!matchingCompareHead(picked, headSha, baseSha)) return false;
   return (picked.omitted ?? []).length === 0 && samePaths(picked.paths, compared.paths) && picked.diff === compared.diff;
 }
 
@@ -103,9 +108,14 @@ async function matchesPickOrigin(ctx: Reader, repo: RepoAddress, commit: string,
   catch { return false; }
 }
 
+function singlePickMessage(compared: CompleteCompare): string {
+  const commits = compared.commits ?? [];
+  return commits.length === 1 ? commits[0]!.message ?? '' : '';
+}
+
 function trailerOriginSha(compared: CompleteCompare, commit: string): string | null {
-  if (compared.commits?.length !== 1) return null;
-  const sha = CHERRY_PICK_TRAILER.exec(compared.commits[0]?.message ?? '')?.[1]?.toLowerCase() ?? null;
+  const match = CHERRY_PICK_TRAILER.exec(singlePickMessage(compared));
+  const sha = match ? match[1]!.toLowerCase() : null;
   return sha && sha !== commit ? sha : null;
 }
 

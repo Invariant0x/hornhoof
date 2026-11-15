@@ -17,19 +17,31 @@ function isDocsOnly(paths: readonly string[]): boolean {
   return paths.length > 0 && paths.every(path => posix.matchesGlob(path, 'docs/**'));
 }
 
+function recordPassedAt(commit: string, record?: Review['quality']['record']): record is NonNullable<Review['quality']['record']> {
+  return Boolean(record && record.checkCommit === commit);
+}
+
+function crapUnderTen(crap: number | null): boolean {
+  return crap !== null && crap < 10;
+}
+
 function passedCodeQuality(commit: string, review?: Review): boolean {
-  const record = review?.quality.record, crap = record?.numbers.worstCrap ?? null;
-  return review?.quality.status === 'passed' && record?.checkCommit === commit && crap !== null && crap < 10;
+  if (!review || review.quality.status !== 'passed') return false;
+  return recordPassedAt(commit, review.quality.record) && crapUnderTen(review.quality.record.numbers.worstCrap);
 }
 
 function passedReceiptPart(commit: string, part: NonNullable<Review['quality']['record']>['receipt']['parts'][number]): boolean {
   return part.status === 'passed' && part.commit === commit && part.exitCode === 0 && !part.hasError;
 }
 
+function allStagesClear(stages: NonNullable<Review['quality']['record']>['stages']): boolean {
+  return stages.length === 6 && stages.every(stage => stage.status === 'passed' || stage.status === 'unavailable');
+}
+
 function passedDocsReceipt(commit: string, record: NonNullable<Review['quality']['record']>): boolean {
-  const partsOk = record.receipt.parts.length > 0 && record.receipt.parts.every(part => passedReceiptPart(commit, part));
-  const stagesOk = record.stages.length === 6 && record.stages.every(stage => stage.status === 'passed' || stage.status === 'unavailable');
-  return record.checkCommit === commit && record.receipt.status === 'passed' && partsOk && stagesOk && (record.numbers.worstCrap === null || record.numbers.worstCrap < 10);
+  const { receipt, stages, numbers } = record;
+  const partsOk = receipt.status === 'passed' && receipt.parts.length > 0 && receipt.parts.every(part => passedReceiptPart(commit, part));
+  return record.checkCommit === commit && partsOk && allStagesClear(stages) && (numbers.worstCrap === null || numbers.worstCrap < 10);
 }
 
 function passedDocsQuality(commit: string, review?: Review): boolean {
@@ -38,11 +50,14 @@ function passedDocsQuality(commit: string, review?: Review): boolean {
   return review?.quality.status === 'partial' && Boolean(record && passedDocsReceipt(commit, record));
 }
 
+function lowRiskCodeChange(task: Task, review?: Review): boolean {
+  return Boolean(task.small || (review?.source && review.source.cleanCherryPick));
+}
+
 function shouldSkipCodeReview(task: Task, route: Route, candidate: HandedCandidate, review?: Review): boolean {
   if (route.state.resultKind !== 'code' || route.state.stage !== 'development' || !isCodeCandidate(candidate)) return false;
   if (isDocsOnly(candidate.paths)) return passedDocsQuality(candidate.commit, review);
-  const lowRiskCode = task.small || review?.source?.cleanCherryPick === true;
-  return lowRiskCode && passedCodeQuality(candidate.commit, review);
+  return lowRiskCodeChange(task, review) && passedCodeQuality(candidate.commit, review);
 }
 
 function advancedSteps(route: Route, next: EchelonStep, owner: CheckerIdentity | null, candidateId: string): EchelonStep[] {
@@ -76,6 +91,24 @@ async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, cand
 /* skipped: the checks passed over on the way, as nobody in the department can do them or author-check cleared Review. */
 type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[]; skipped: SkippedCheck[] };
 
+function markStageSkipped(stages: EchelonStep[], stage: EchelonStage, reason: EchelonStep['reason']): EchelonStep[] {
+  return stages.map(step => step.stage === stage ? { ...step, status: 'skipped', reason, ownerAgentId: null } : step);
+}
+
+async function chosenNextOwner(
+  ctx: Pick<Ctx, 'db'>,
+  task: Task,
+  route: Route,
+  candidate: HandedCandidate,
+  next: EchelonStep,
+): Promise<{ skipped: true } | { skipped: false; owner: CheckerIdentity | null }> {
+  const ability = route.state.abilities[next.stage];
+  if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
+  const owner = await checkerFor(ctx, task, candidate.producedBy, ability, next.ownerAgentId);
+  if (!owner && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) return { skipped: true };
+  return { skipped: false, owner };
+}
+
 export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate, review?: Review): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   const ahead = route.state.stages.slice(at + 1).filter(step => step.status !== 'skipped');
@@ -84,23 +117,21 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
   let stages = route.state.stages;
   for (const next of ahead) {
     if (next.stage === 'review' && shouldSkipCodeReview(task, route, candidate, review)) {
-      stages = stages.map(step => step.stage === 'review' ? { ...step, status: 'skipped', reason: AUTHOR_CHECK_PASSED, ownerAgentId: null } : step);
+      stages = markStageSkipped(stages, 'review', AUTHOR_CHECK_PASSED);
       skipped.push({ stage: 'review', reason: AUTHOR_CHECK_PASSED });
       continue;
     }
-    const ability = route.state.abilities[next.stage];
-    if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
-    const owner = await checkerFor(ctx, task, candidate.producedBy, ability, next.ownerAgentId);
-    if (!owner && await uncheckable(ctx.db, task, next.stage, ability, route.state.security)) {
-      stages = stages.map(step => step.stage === next.stage ? { ...step, status: 'skipped', reason: NO_DEPARTMENT_CHECKER, ownerAgentId: null } : step);
+    const chosen = await chosenNextOwner(ctx, task, route, candidate, next);
+    if (chosen.skipped) {
+      stages = markStageSkipped(stages, next.stage, NO_DEPARTMENT_CHECKER);
       skipped.push(next.stage);
       continue;
     }
     const current: Route = { ...route, state: { ...route.state, stages } };
-    const state: Route['state'] = { ...route.state, stage: next.stage, phase: owner ? 'active' : 'waiting', candidateId: candidate.id, assignment: owner,
-      stages: advancedSteps(current, next, owner, candidate.id),
+    const state: Route['state'] = { ...route.state, stage: next.stage, phase: chosen.owner ? 'active' : 'waiting', candidateId: candidate.id, assignment: chosen.owner,
+      stages: advancedSteps(current, next, chosen.owner, candidate.id),
     };
-    return { state, set: handoffTask(next.stage, owner), wakes: [await handoffWake(ctx, task, next.stage, owner)], skipped };
+    return { state, set: handoffTask(next.stage, chosen.owner), wakes: [await handoffWake(ctx, task, next.stage, chosen.owner)], skipped };
   }
   return { ...(await readyHandoff(ctx, task, { ...route, state: { ...route.state, stages } }, candidate)), skipped };
 }

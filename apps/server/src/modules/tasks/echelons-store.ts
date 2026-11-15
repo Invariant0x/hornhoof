@@ -46,22 +46,51 @@ const documentStages = (plan: StageRoute): StageRoute => ({ ...plan, stages: pla
 /* The skill of the first check a document meets in a department, or null where its route checks none. */
 export const documentCheck = (plan: StageRoute): string | null => documentStages(plan).stages.find(step => step.ability)?.ability ?? null;
 
+function initialCodeStage(plan: StageRoute, small: boolean, collapsed: boolean): 'architecture' | 'development' {
+  return plan.stages.some(step => step.stage === 'architecture') && !small && !collapsed ? 'architecture' : 'development';
+}
+
+function stageAbilities(plan: StageRoute): Route['state']['abilities'] {
+  return Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : []));
+}
+
+function developmentOwner(task: Task, resultKind: 'code' | 'document'): string | null {
+  return resultKind === 'document' ? (task.executorAgentId ?? task.assigneeAgentId) : task.executorAgentId;
+}
+
+function stageStepMap(
+  task: Task,
+  input: RouteInput,
+  cleanup: boolean,
+  stage: EchelonStep['stage'],
+  archOwner: string | null,
+  devOwner: string | null,
+  collapsed: boolean,
+  security: EchelonStep,
+): Record<EchelonStep['stage'], EchelonStep | null> {
+  return {
+    architecture: architectureStep(task, archOwner, collapsed, stage),
+    development: routeStep('development', stage, devOwner),
+    review: routeStep('review', stage, input.reviewerAgentId ?? null),
+    cleanup: cleanup ? routeStep('cleanup', stage) : null,
+    security,
+    tests: routeStep('tests', stage, input.testsAgentId ?? null),
+  };
+}
+
 function stagedState(task: Task, input: RouteInput, cleanup: boolean, plan: StageRoute, resultKind: 'code' | 'document'): Route['state'] {
   requireStages(task, plan, input, cleanup);
-  const has = (name: EchelonStep['stage']) => plan.stages.some(step => step.stage === name);
   const archOwner = input.architectAgentId ?? task.assigneeAgentId;
-  const devOwner = resultKind === 'document' ? (task.executorAgentId ?? task.assigneeAgentId) : task.executorAgentId;
+  const devOwner = developmentOwner(task, resultKind);
   const collapsed = !task.small && archOwner !== null && archOwner === devOwner;
-  const stage = has('architecture') && !task.small && !collapsed ? 'architecture' : 'development';
+  const stage = initialCodeStage(plan, task.small, collapsed);
   const { step: security, security: policy } = securityState(task, input, stage);
-  const steps: Record<EchelonStep['stage'], EchelonStep | null> = {
-    architecture: architectureStep(task, archOwner, collapsed, stage), development: routeStep('development', stage, devOwner),
-    review: routeStep('review', stage, input.reviewerAgentId ?? null), cleanup: cleanup ? routeStep('cleanup', stage) : null,
-    security, tests: routeStep('tests', stage, input.testsAgentId ?? null),
-  };
-  return { kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
-    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : [])),
-    security: has('security') ? policy : NO_SECURITY,
+  const steps = stageStepMap(task, input, cleanup, stage, archOwner, devOwner, collapsed, security);
+  const hasSecurity = plan.stages.some(step => step.stage === 'security');
+  return {
+    kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
+    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: stageAbilities(plan),
+    security: hasSecurity ? policy : NO_SECURITY,
   };
 }
 

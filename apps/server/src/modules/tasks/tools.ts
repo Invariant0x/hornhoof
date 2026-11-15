@@ -312,8 +312,22 @@ class TaskTools {
     if (products.length) throw refuse(400, 'task_invalid', `Name the product whose repository the change goes to: the code of your department lives in the repositories of its products (${products.map(product => `${product.name ?? 'unnamed'} (${product.id}): ${product.url}`).join('; ')}). Without one the task has no repository and closes by a report.`);
   }
 
-  private async createdTaskText(task: Task, executor: Agent): Promise<string> {
-    return `Created #${task.number} for ${executor.name}.${await this.waiting(task)}`;
+  private async optionalMember(head: Agent, id: string | undefined): Promise<Agent | null> {
+    return id ? this.member(head, id) : null;
+  }
+
+  private async checkCreatedScope(agent: Agent, executor: Agent, input: { product?: string; resultKind?: 'code' | 'document' | 'coordination'; paths?: string[] }): Promise<void> {
+    if (input.resultKind === 'document' && input.paths?.length) {
+      throw refuse(400, 'task_invalid', 'A document has no paths: its holder attaches files to the task. Leave paths out, or make it a code task.');
+    }
+    if (input.resultKind !== 'coordination' && input.resultKind !== 'document' && await echelonsFor(this.db, { companyId: agent.companyId, holderId: executor.id })) {
+      await this.checkCodeScope(agent, input);
+    }
+  }
+
+  private async createdTaskText(task: Task, executor: Agent, architect: Agent | null = null): Promise<string> {
+    const holder = architect && task.assigneeAgentId === architect.id ? architect : executor;
+    return `Created #${task.number} for ${holder.name}.${await this.waiting(task)}`;
   }
 
   private registerTasks(): void {
@@ -598,15 +612,14 @@ class TaskTools {
           const agent = await this.me();
           await this.underCap(agent);
           const executor = await this.member(agent, input.executor);
-          const architect = input.architectAgentId ? await this.member(agent, input.architectAgentId) : null;
+          const architect = await this.optionalMember(agent, input.architectAgentId);
           if (input.independentPart) await this.member(agent, input.independentPart.executor);
           await this.checkProduct(agent, input.product);
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
-          if (input.resultKind === 'document' && input.paths?.length) throw refuse(400, 'task_invalid', 'A document has no paths: its holder attaches files to the task. Leave paths out, or make it a code task.');
-          if (input.resultKind !== 'coordination' && input.resultKind !== 'document' && await echelonsFor(this.db, { companyId: agent.companyId, holderId: executor.id })) await this.checkCodeScope(agent, input);
+          await this.checkCreatedScope(agent, executor, input);
           const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
-          return { text: await this.createdTaskText(moved.task, moved.task.assigneeAgentId === architect?.id ? architect : executor), moved };
+          return { text: await this.createdTaskText(moved.task, executor, architect), moved };
         }),
     );
   }

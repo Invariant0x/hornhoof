@@ -288,15 +288,28 @@ async function returnCandidateToExecutor(ctx: Reader, task: Task, route: Route, 
   return { task: row, wakes };
 }
 
+function parseTestsVerification(route: Route, value: Verification | undefined): z.output<typeof Verification> {
+  const input = Verification.safeParse(value);
+  if (!input.success || input.data.candidateId !== route.state.candidateId || input.data.revision !== route.revision) {
+    throw refuse(409, 'task_changed', 'Name the exact current candidate and route revision.');
+  }
+  return input.data;
+}
+
+function nonPassingTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: z.output<typeof Verification>): Promise<Moved> {
+  return input.delta !== undefined
+    ? returnCandidateToExecutor(ctx, task, route, agentId, summary, { ...input, delta: input.delta })
+    : failedTestsReport(ctx, task, route, agentId, summary, input);
+}
+
 export async function testsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: Verification | undefined, done = true): Promise<Moved> {
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
-  const input = Verification.safeParse(value);
-  if (!input.success || input.data.candidateId !== route.state.candidateId || input.data.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact current candidate and route revision.');
+  const input = parseTestsVerification(route, value);
   await requireTestsIdentity(ctx.db, task, route);
-  if (done && input.data.delta !== undefined) throw refuse(400, 'task_invalid', 'A passing Tests report cannot carry a return delta.');
-  if (!done) return input.data.delta !== undefined ? returnCandidateToExecutor(ctx, task, route, agentId, summary, { ...input.data, delta: input.data.delta }) : failedTestsReport(ctx, task, route, agentId, summary, input.data);
+  if (!done) return nonPassingTestsReport(ctx, task, route, agentId, summary, input);
+  if (input.delta !== undefined) throw refuse(400, 'task_invalid', 'A passing Tests report cannot carry a return delta.');
   const headId = await departmentHead(ctx.db, task);
-  const evidence = await verifiedRunEvidence(ctx.db, task, route, input.data.runIds);
+  const evidence = await verifiedRunEvidence(ctx.db, task, route, input.runIds);
   const candidate = await currentCandidate(ctx.db, task, route);
   const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };
@@ -304,7 +317,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
     kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } }, returned: true,
   }, async tx => {
     await heldCheckingIdentity(tx, task, route, candidate);
-    await verifiedRunEvidence(tx, task, route, input.data.runIds);
+    await verifiedRunEvidence(tx, task, route, input.runIds);
     await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };
