@@ -18,6 +18,7 @@ import * as schema from '../../src/db/schema.js';
 import { createRoute } from '../../src/modules/tasks/echelons-store.js';
 import type { ToolJob } from '../../src/modules/tools/job.js';
 import { listenIn } from '../../../../test-support/ports.mjs';
+import { ENDLESS_LEASE } from '../prepare-environment.js';
 
 type Cleanup = () => Promise<unknown>;
 export type PgDb = NodePgDatabase<typeof schema>;
@@ -99,7 +100,11 @@ export async function privatePostgres(options: { migrate?: boolean } = {}): Prom
   const pool = (label: string) => ownedPool(url.toString(), `${name}_${label}`, cleanups);
   const admin = pool('admin');
   const db = drizzle(admin, { schema });
-  if (options.migrate !== false) await migrateCandidate(db);
+  if (options.migrate !== false) {
+    await migrateCandidate(db);
+    /* The lease every PGlite test database holds too (prepare-environment.ts): agent SQL writes only under one. */
+    await admin.query(ENDLESS_LEASE);
+  }
   return { name, url: url.toString(), db, admin, pool, cleanup: close => { cleanups.push(close); } };
 }
 
