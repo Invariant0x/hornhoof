@@ -128,6 +128,21 @@ describe("the node's bridge with no turn of the agent running", () => {
     expect(at.asked).toHaveLength(1);
   });
 
+  it('counts a program Hornhoof turned away as it connected as one with no tools, and keeps nothing of that answer', async () => {
+    let installs = true;
+    const at = hornhoof(msg => (installs ? { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32001, message: 'This machine installs a new build of Hornhoof now.' } }) } : null));
+    const { bridge, send } = await bridgeWith({ outside: at.outside });
+    const since = Date.now();
+    const list = { method: 'POST' as const, headers: { 'content-type': 'application/json' }, body: { id: 2, method: 'tools/list' } };
+    expect(await (await send('agent-1', list)).json()).toMatchObject({ id: 2, error: { message: 'This machine installs a new build of Hornhoof now.' } });
+    /* Its next turn starts it again in its session, as one turned away by the node. */
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(true);
+    expect(bridge.listedSince('agent-1', since)).toBe(false);
+    /* Hornhoof cannot be asked now: the node has no list of the agent's tools to give from that refusal. */
+    installs = false;
+    expect(await (await send('agent-1', list)).json()).toMatchObject({ id: 2, error: { code: -32001, message: expect.stringContaining('No Hornhoof turn') } });
+  });
+
   it('keeps to what it remembers and to its refusal when Hornhoof cannot be asked over the link', async () => {
     const at = hornhoof(() => null);
     const refused: [string | null, string, string][] = [];

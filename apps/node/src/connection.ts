@@ -1,4 +1,4 @@
-import { ACKS_HEADER, cut, parseServerMessage, type NodeDisconnectCause, type NodeReconnect } from '@hornhoof/protocol';
+import { ACKS_HEADER, cut, TOOLS_HEADER, parseServerMessage, type NodeDisconnectCause, type NodeReconnect } from '@hornhoof/protocol';
 import { OperatorDeliveryMetadata, OperatorServerMessage, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
@@ -34,8 +34,9 @@ export type ConnectOptions = {
   url: string;
   key: string;
   log?(line: string): void;
-  /* acks: the server says in its upgrade answer that it confirms numbered messages. */
-  onOpen(send: (m: ProgramNodeMessage) => boolean, acks: boolean): void;
+  /* acks: the server says in its upgrade answer that it confirms numbered messages; tools: that it answers agents' tools
+     with no turn running. */
+  onOpen(send: (m: ProgramNodeMessage) => boolean, acks: boolean, tools: boolean): void;
   onMessage(m: ProgramServerMessage): void;
   onClose?(): void;
   /* Hornhoof does not know this key any more: the machine was disconnected there. */
@@ -62,8 +63,9 @@ type Attempt = {
   healthyOpen: boolean;
   watchdog: boolean;
   handshakeTimedOut: boolean;
-  /* The server's upgrade answer said it confirms numbered messages. */
+  /* The server's upgrade answer said it confirms numbered messages, and that it answers agents' tools with no turn. */
   acks: boolean;
+  tools: boolean;
   errorCause: NodeDisconnectCause | null;
   errorCode: string | null;
   error: string | null;
@@ -250,6 +252,7 @@ const newAttempt = (startedAt: number): Attempt => ({
   watchdog: false,
   handshakeTimedOut: false,
   acks: false,
+  tools: false,
   errorCause: null,
   errorCode: null,
   error: null,
@@ -455,7 +458,7 @@ class ConnectionSession {
   private invokeOnOpen(attempt: Attempt, send: (m: ProgramNodeMessage) => boolean): boolean {
     let ok = true;
     safeCall(
-      () => this.opts.onOpen(send, attempt.acks),
+      () => this.opts.onOpen(send, attempt.acks, attempt.tools),
       err => {
         ok = false;
         attempt.errorCause = 'abnormal_close';
@@ -563,6 +566,7 @@ class ConnectionSession {
     this.connectingTimer = setTimeout(() => this.abortConnecting(ws, attempt), this.timings.handshakeTimeoutMs);
     ws.on('upgrade', res => {
       attempt.acks = res.headers[ACKS_HEADER] === '1';
+      attempt.tools = res.headers[TOOLS_HEADER] === '1';
       res.socket.setKeepAlive(true, this.timings.keepAliveMs);
     });
     ws.on('ping', () => this.isCurrent(ws) && this.touchInbound());

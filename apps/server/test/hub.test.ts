@@ -93,6 +93,31 @@ describe('the node hub', () => {
     expect(handled).toEqual(['agent.said', 'status']);
   });
 
+  it('takes a tool call made with no turn running at once, and the messages after it do not wait for its answer', async () => {
+    let heard!: () => void;
+    const statusCame = new Promise<void>(done => (heard = done));
+    const handled: string[] = [];
+    const hub = new NodeHub({
+      pingMs: NO_PING_MS,
+      onClose: async () => {},
+      onMessage: async (_id, msg: NodeMessage) => {
+        /* As a tool that waits for what the node says next, the end of a job it restarts or a check it asked for. */
+        if (msg.type === 'tools.call') await statusCame;
+        if (msg.type === 'status') heard();
+        handled.push(msg.type);
+      },
+    });
+    onTestFinished(() => hub.stop());
+    const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
+    hub.attach(BUILTIN, socket as unknown as WebSocket);
+    socket.emit('message', JSON.stringify({ type: 'tools.call', agentKey: '00000000-0000-4000-8000-000000000001', ref: 'r1', body: '{"jsonrpc":"2.0","id":1,"method":"tools/call"}' }));
+    socket.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null }));
+    /* A node whose messages waited behind a long call would stay silent to Hornhoof for as long as the call runs. */
+    await statusCame;
+    await until(() => handled.length === 2);
+    expect(handled).toEqual(['status', 'tools.call']);
+  });
+
   it('says since when a node is away: from its socket closing, else from the first time it is asked', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     onTestFinished(() => { vi.useRealTimers(); });

@@ -35,6 +35,7 @@ import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
 import { SCREEN_SIGNED_OUT as KIMI_SIGNED_OUT } from './providers/kimi.js';
 import { childEnv, firstLine } from './providers/process.js';
 import { TerminalHost } from './terminal/host.js';
+import { OutsideCalls } from './terminal/outside-calls.js';
 import { agyProgram, claudeProgram, codexProgram, kimiProgram, type TermProgram } from './terminal/programs.js';
 import { Tmux } from './terminal/tmux.js';
 import { procOwner, type OwnerFactory } from './terminal/peer.js';
@@ -296,6 +297,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   await learn();
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
+  /* What agents' programs send their tools with no turn running goes on the link as it is now, and waits for no other. */
+  const outside = new OutsideCalls();
   const host = terminal
     ? new TerminalHost({
         tmux: terminal.tmux,
@@ -305,6 +308,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         secrets: () => [...known],
         log,
         remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
+        toolsOutside: (key, body, version) => outside.ask(key, body, version),
         owner: terminal.owner,
         user: terminal.user,
         fs: terminal.fs,
@@ -379,9 +383,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
     log,
-    onOpen(next, acks) {
+    onOpen(next, acks, tools) {
       send = next;
       online = true;
+      outside.opened(next, tools);
       checks.online(true);
       confirmed = acks;
       host?.closeViews();
@@ -402,7 +407,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onClose: () => {
-      online = false; stopChecks(checks, testing); testMessages.cancelDescriptions();
+      online = false; outside.closed(); stopChecks(checks, testing); testMessages.cancelDescriptions();
     },
     onRefused: () => {
       log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
@@ -454,6 +459,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return shownBy(login, host, m.termId)?.close(m);
       case 'turn.opened':
         return host?.opened(m);
+      case 'tools.answer':
+        return outside.answered(m);
       case 'agent.input_kept':
         return host?.inputKept(m);
       case 'agent.say':

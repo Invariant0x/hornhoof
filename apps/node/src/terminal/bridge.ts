@@ -16,6 +16,12 @@ const HOOK_WAIT_MS = 10_000;
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
 export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
+/* Hornhoof's answer to what a program sent its tools with no turn running, as /mcp gave it; null when it cannot be asked. */
+export type OutsideAnswer = { status: number; body: string };
+/* Asks Hornhoof over the node's own link, with the protocol version the program asked with. */
+export type Outside = (key: string, body: string, version: string | undefined) => Promise<OutsideAnswer | null>;
+/* The turn a person's words are opening for the agent now, which a tool call waits for; null when none is. */
+export type Opening = (key: string) => Promise<unknown> | null;
 
 /* A short outage of Hornhoof, as its proxy says it: a call that only reads is asked again after these growing pauses. */
 const OUTAGE = new Set([502, 503, 504]);
@@ -59,7 +65,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void> } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected; pause?: (ms: number) => Promise<void>; outside?: Outside; opening?: Opening } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.refusals = new HookFailures(options.refused);
@@ -227,6 +233,7 @@ export class Bridge {
     const body = await reading;
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
+    if (kind === 'mcp' && req.method === 'POST' && !this.tokens.has(key) && (await this.withoutTurn(req, res, key, body, asked))) return;
     const known = kind === 'mcp' && !this.tokens.has(key) ? this.memory.answer(key, body) : null;
     if (known !== null) return this.answered(res, key, body, known, asked);
     const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
@@ -261,6 +268,32 @@ export class Bridge {
       up = await fetch(target, init);
     }
     return up;
+  }
+
+  /* With no turn running, Hornhoof answers over the node's link as /mcp does in a turn: what the program sends as it connects
+     at once, and a tool call after the turn a person's words are opening now, if one is, goes with that turn's token.
+     False when the request goes on as before: a turn's token came, or Hornhoof cannot be asked. */
+  private async withoutTurn(req: IncomingMessage, res: ServerResponse, key: string, body: Buffer, asked: number): Promise<boolean> {
+    const outside = this.options.outside;
+    if (!outside) return false;
+    const opening = only(body, CONNECTING) ? null : (this.options.opening?.(key) ?? null);
+    if (opening) {
+      await opening.catch(() => {});
+      if (this.tokens.has(key)) return false;
+    }
+    const version = req.headers['mcp-protocol-version'];
+    const got = await outside(key, body.toString('utf8'), typeof version === 'string' ? version : undefined).catch(() => null);
+    if (!got) return false;
+    reply(res, got.status, got.body);
+    const answer = Buffer.from(got.body);
+    /* Turned away as it connects, by the machine installing its build or the agent no longer here: it keeps no tools. */
+    if (got.status !== 200 || !resultsOnly(answer)) {
+      if (JOINING.some(method => asks(body, method))) this.refusedAt.set(key, asked);
+      return true;
+    }
+    this.memory.keep(key, body, answer);
+    if (asks(body, 'tools/list')) this.heardList(key, asked);
+    return true;
   }
 
   /* With no turn open, a program that connects or lists its tools hears what Hornhoof said to the same before. */
@@ -355,6 +388,12 @@ function messages(body: Buffer): { method?: unknown }[] {
 /* Whether a JSON-RPC message, or a batch of them, calls this method. */
 function asks(body: Buffer, method: string): boolean {
   return messages(body).some(m => m?.method === method);
+}
+
+/* Whether a JSON-RPC answer, or every answer of a batch, is a result and no error. */
+function resultsOnly(answer: Buffer): boolean {
+  const all = messages(answer) as { result?: unknown }[];
+  return all.length > 0 && all.every(m => m?.result !== undefined);
 }
 
 /* Whether a JSON-RPC message, or every message of a batch, calls one of these methods. */
