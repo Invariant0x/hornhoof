@@ -201,38 +201,61 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
   return queued.id;
 }
 
-/* Why a turn that did not go out cannot wait its line, or null when it waits for something that ends by itself: the update
-   its machine gets ready for, the turn that runs, a turn ahead of it or its machine getting back on the line. One its plan
-   cannot run for now, at its limit or past the share set for tasks, does not: the sender hears at once and can tell
-   someone else, as it does of one that cannot run for any other reason, or whose turn did not go out. */
-async function heldBack(ctx: Ctx, agentId: string, id: string): Promise<string | null> {
-  const [turn] = await ctx.db.select({ taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
-  if (!turn) return 'turn_not_sent';
-  const state = await agentState(ctx, agentId);
-  if (state.machineDrain && state.machineDrain.state !== 'postponed') return null;
-  if (state.limitUntil) return 'plan_at_limit';
-  if (state.budgetUntil && turn.taskId) return 'plan_budget';
-  if (state.busy) return null;
-  const [ahead] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, id), lte(jobs.createdAt, turn.createdAt))).limit(1);
-  if (ahead) return null;
-  if (state.reason === 'machine_offline' && (await reconnecting(ctx, agentId))) return null;
-  return state.reason ?? 'turn_not_sent';
+type AgentNow = Awaited<ReturnType<typeof agentState>>;
+
+/* The update its machine gets ready for, which a turn waits out. */
+const updating = (state: AgentNow): boolean => Boolean(state.machineDrain && state.machineDrain.state !== 'postponed');
+
+/* What its plan holds a turn back for, which the sender should not wait out: its limit, or the share set for tasks. */
+const planHold = (state: AgentNow, onTask: boolean): string | null => (state.limitUntil ? 'plan_at_limit' : state.budgetUntil && onTask ? 'plan_budget' : null);
+
+/* Whether a turn waits in line for something that ends by itself: the turn that runs, a turn ahead of it, or its machine
+   getting back on the line. */
+async function waitsInLine(ctx: Ctx, agentId: string, turn: { id: string; createdAt: Date }, state: AgentNow): Promise<boolean> {
+  if (state.busy) return true;
+  const [ahead] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, turn.id), lte(jobs.createdAt, turn.createdAt))).limit(1);
+  if (ahead) return true;
+  return state.reason === 'machine_offline' && (await reconnecting(ctx, agentId));
 }
 
-/* A turn that cannot go out fails with why, its sender hears so, and its letter waits for nobody; one that failed on its own
-   way out names its own reason. A letter in the inbox waits there for the turn that takes it, which other letters wait for
-   too, whatever holds that turn back. */
-async function confirmMessage(ctx: Ctx, input: TaskMessage, id: string): Promise<void> {
-  const { agentId } = input;
+/* Why a turn that did not go out cannot wait its line, or null when it waits for something that ends by itself. One its
+   plan cannot run for now does not: the sender hears at once and can tell someone else, as it does of one that cannot run
+   for any other reason, or whose turn did not go out. */
+async function notWaiting(ctx: Ctx, agentId: string, id: string): Promise<string | null> {
+  const [turn] = await ctx.db.select({ id: jobs.id, taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
+  if (!turn) return 'turn_not_sent';
+  const state = await agentState(ctx, agentId);
+  if (updating(state)) return null;
+  const held = planHold(state, turn.taskId !== null);
+  if (held) return held;
+  return (await waitsInLine(ctx, agentId, turn, state)) ? null : (state.reason ?? 'turn_not_sent');
+}
+
+/* A letter in the inbox waits there for the turn that takes it, which other letters wait for too, whatever holds that turn back. */
+async function inInbox(ctx: Ctx, id: string): Promise<boolean> {
   const [kept] = await ctx.db.select({ inboxWake: jobs.inboxWake }).from(jobs).where(eq(jobs.id, id));
-  const why = kept?.inboxWake ? null : await heldBack(ctx, agentId, id);
-  if (why === null) return;
-  const line = undeliveredLine({ reason: why, recipient: agentId, task: taskNamed(input.task) });
+  return kept?.inboxWake === true;
+}
+
+/* The turn of a message that cannot wait fails with the line that says why, unless it went out or failed on its way. */
+async function failUndelivered(ctx: Ctx, input: TaskMessage, id: string, why: string) {
+  const line = undeliveredLine({ reason: why, recipient: input.agentId, task: taskNamed(input.task) });
   await ctx.db.update(jobs).set({ status: 'failed', error: NOT_DELIVERED, result: line, finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
   const [job] = await ctx.db.select({ status: jobs.status, error: jobs.error }).from(jobs).where(eq(jobs.id, id));
+  return job;
+}
+
+/* A turn that failed on its own way out names its own reason. */
+const ownReason = (job: { error: string | null } | undefined, why: string): string => (job?.error && job.error !== NOT_DELIVERED ? job.error : why);
+
+/* A turn that cannot go out nor wait its line fails with why, its sender hears so, and its letter waits for nobody. */
+async function confirmMessage(ctx: Ctx, input: TaskMessage, id: string): Promise<void> {
+  const why = (await inInbox(ctx, id)) ? null : await notWaiting(ctx, input.agentId, id);
+  if (why === null) return;
+  const job = await failUndelivered(ctx, input, id, why);
   if (job && job.status !== 'failed') return;
-  if (await dropMail(ctx.db, agentId, id)) await inboxChanged(ctx, agentId);
-  throw messageNotDelivered(job?.error && job.error !== NOT_DELIVERED ? job.error : why);
+  if (await dropMail(ctx.db, input.agentId, id)) await inboxChanged(ctx, input.agentId);
+  throw messageNotDelivered(ownReason(job, why));
 }
 
 /* A failed send preserves the previous wait unless another task action has already replaced it. */

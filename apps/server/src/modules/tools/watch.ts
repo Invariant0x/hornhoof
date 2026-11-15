@@ -220,6 +220,54 @@ async function sentLine(ctx: Ctx, name: string, jobId: string, waits: Waits): Pr
 /* Why a message does not go, as a code a failure collector groups by and as words its sender reads. */
 type Refusal = { reason: string; text: string };
 
+const nobody = (employee: string): Refusal => ({ reason: 'recipient_unknown', text: `There is no employee with id ${employee}. Call agents to see the current ids.` });
+
+/* The sender and the employee it writes to, or why it may not: the employee is not there, is the sender itself, is out of
+   its reach, or is switched off. */
+async function partiesOf(ctx: Pick<Ctx, 'db'>, job: ToolJob, employee: string, reachable: (me: Agent, target: Agent) => Promise<boolean>): Promise<{ me: Agent; target: Agent } | Refusal> {
+  const [me] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
+  const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
+  if (!me || !target) return nobody(employee);
+  if (target.id === me.id) return { reason: 'recipient_is_sender', text: 'That is you. Write to another employee.' };
+  if (!(await reachable(me, target)))
+    return target.kind === 'orchestrator' ? nobody(employee) : { reason: 'other_department', text: `${target.name} works in another department. Ask your head, who has the orchestrator pass it on.` };
+  if (target.switchedOffAt) return { reason: 'switched_off', text: `${target.name} is switched off and takes no work until a person switches it on.` };
+  return { me, target };
+}
+
+/* Why the employee's turn cannot go out now nor wait for it, or null: a machine getting back on the line takes it once it is back. */
+async function cannotTake(ctx: Ctx, me: Agent, target: Agent, state: Awaited<ReturnType<typeof agentState>>): Promise<Refusal | null> {
+  if (state.ready || (state.reason === 'machine_offline' && (await reconnecting(ctx, target.id)))) return null;
+  return { reason: state.reason ?? 'cannot_run', text: await cannotRun(ctx, me, target, state.reason) };
+}
+
+/* A refusal its sender hears with its code, the employee and the task, as it is kept for failures. */
+async function refused(ctx: Ctx, job: ToolJob, refusal: Refusal, employee: string, task: number | string | undefined) {
+  const line = await keepUndelivered(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, { reason: refusal.reason, recipient: employee, task: task ?? null });
+  return say(cleanDiagnostic(`${refusal.text}\n${line}`), true);
+}
+
+/* The messages employees could not deliver since then, as their senders' turns kept them, newest first. Their words were
+   cleaned when they were kept, and are again for a reader who may not open the sender's work. */
+async function undeliveredSince(ctx: Pick<Ctx, 'db'>, companyId: string, since: Date, reader: Reader | undefined) {
+  const rows = await ctx.db
+    .select({ agentId: agents.id, departmentId: agents.departmentId, agent: agents.name, data: agentEvents.data, at: agentEvents.createdAt, sight: SIGHT })
+    .from(agentEvents)
+    .innerJoin(agents, eq(agents.id, agentEvents.agentId))
+    .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
+    .leftJoin(tasks, eq(tasks.id, jobs.taskId))
+    .where(and(eq(agentEvents.companyId, companyId), eq(agentEvents.kind, 'tool_result'), sql`${agentEvents.data}->'undelivered' is not null`, gte(agentEvents.createdAt, since)))
+    .orderBy(desc(agentEvents.seq))
+    .limit(UNDELIVERED_MAX);
+  const staff = new Map((await ctx.db.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.companyId, companyId))).map(a => [a.id, a.name]));
+  return rows.flatMap(({ agentId, departmentId, sight, data, ...row }) => {
+    const kept = UndeliveredRecord.safeParse(data);
+    if (!kept.success) return [];
+    const { recipient, task, reason } = kept.data.undelivered;
+    return [shownAll({ ...row, recipient, to: staff.get(recipient) ?? null, task, reason, text: kept.data.summary }, opensTurn(reader, sight, { id: agentId, departmentId }))];
+  });
+}
+
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
    restarting a program. Every employee has message_employee, which a grant only widens to other departments, and a head
    has tell_orchestrator. */
@@ -309,27 +357,6 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     );
   }
 
-  /* The messages employees could not deliver since then, as their senders' turns kept them, newest first. Their words were
-     cleaned when they were kept, and are again for a reader who may not open the sender's work. */
-  async function undeliveredSince(since: Date, reader: Reader | undefined) {
-    const rows = await db
-      .select({ agentId: agents.id, departmentId: agents.departmentId, agent: agents.name, data: agentEvents.data, at: agentEvents.createdAt, sight: SIGHT })
-      .from(agentEvents)
-      .innerJoin(agents, eq(agents.id, agentEvents.agentId))
-      .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
-      .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-      .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, 'tool_result'), sql`${agentEvents.data}->'undelivered' is not null`, gte(agentEvents.createdAt, since)))
-      .orderBy(desc(agentEvents.seq))
-      .limit(UNDELIVERED_MAX);
-    const staff = new Map((await db.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.companyId, job.companyId))).map(a => [a.id, a.name]));
-    return rows.flatMap(({ agentId, departmentId, sight, data, ...row }) => {
-      const kept = UndeliveredRecord.safeParse(data);
-      if (!kept.success) return [];
-      const { recipient, task, reason } = kept.data.undelivered;
-      return [shownAll({ ...row, recipient, to: staff.get(recipient) ?? null, task, reason, text: kept.data.summary }, opensTurn(reader, sight, { id: agentId, departmentId }))];
-    });
-  }
-
   if (grants.has('failures')) {
     server.registerTool(
       'failures',
@@ -417,7 +444,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           const open = opensTask(reader, sight);
           stops.push(shownAll({ ...stop, lastTurn: turnEnd(last, open) }, open));
         }
-        const undelivered = await undeliveredSince(since, reader);
+        const undelivered = await undeliveredSince(ctx, job.companyId, since, reader);
         return json({
           failed: failed.map(row => failedLine(row, reader, names)),
           blocked,
@@ -509,29 +536,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       .limit(1);
     return !answered;
   };
-  const nobody = (employee: string): Refusal => ({ reason: 'recipient_unknown', text: `There is no employee with id ${employee}. Call agents to see the current ids.` });
-  /* The sender and the employee it writes to, or why it may not: the employee is not there, is the sender itself, is out of
-     its reach and owes it no answer, or is switched off. */
-  async function partiesOf(employee: string): Promise<{ me: Agent; target: Agent } | Refusal> {
-    const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
-    const [target] = await db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
-    if (!me || !target) return nobody(employee);
-    if (target.id === me.id) return { reason: 'recipient_is_sender', text: 'That is you. Write to another employee.' };
-    if (!(await inReach(me, target)) && !(await owesAnswer(me, target)))
-      return target.kind === 'orchestrator' ? nobody(employee) : { reason: 'other_department', text: `${target.name} works in another department. Ask your head, who has the orchestrator pass it on.` };
-    if (target.switchedOffAt) return { reason: 'switched_off', text: `${target.name} is switched off and takes no work until a person switches it on.` };
-    return { me, target };
-  }
-  /* Why the employee's turn cannot go out now nor wait for it, or null: a machine getting back on the line takes it once it is back. */
-  async function cannotTake(me: Agent, target: Agent, state: Awaited<ReturnType<typeof agentState>>): Promise<Refusal | null> {
-    if (state.ready || (state.reason === 'machine_offline' && (await reconnecting(ctx, target.id)))) return null;
-    return { reason: state.reason ?? 'cannot_run', text: await cannotRun(ctx, me, target, state.reason) };
-  }
-  /* A refusal its sender hears with its code, the employee and the task, as it is kept for failures. */
-  const refused = async (refusal: Refusal, employee: string, task: number | string | undefined) => {
-    const line = await keepUndelivered(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, { reason: refusal.reason, recipient: employee, task: task ?? null });
-    return say(cleanDiagnostic(`${refusal.text}\n${line}`), true);
-  };
+  /* Who may write to whom: within reach, or answering the one who wrote last. */
+  const reachable = async (me: Agent, target: Agent) => (await inReach(me, target)) || (await owesAnswer(me, target));
 
   server.registerTool(
     'message_employee',
@@ -545,13 +551,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     },
     async ({ employee, text, task: ref }) => {
       if (carriesFile(text)) return say(encodedHint(), true);
-      const parties = await partiesOf(employee);
-      if ('reason' in parties) return refused(parties, employee, ref);
+      const parties = await partiesOf(ctx, job, employee, reachable);
+      if ('reason' in parties) return refused(ctx, job, parties, employee, ref);
       const { me, target } = parties;
       const state = await agentState(ctx, target.id);
-      const unable = await cannotTake(me, target, state);
-      if (unable) return refused(unable, employee, ref);
-      if (!(await counted(me.id))) return refused({ reason: 'send_limit', text: `One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.` }, employee, ref);
+      const unable = await cannotTake(ctx, me, target, state);
+      if (unable) return refused(ctx, job, unable, employee, ref);
+      if (!(await counted(me.id))) return refused(ctx, job, { reason: 'send_limit', text: `One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.` }, employee, ref);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
       return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
           companyId: job.companyId,
