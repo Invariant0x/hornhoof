@@ -3,6 +3,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS } from '../src/skins/registry';
 import type { SubView, TokenPeriods, TokenSum } from '../src/types';
+import { subName } from '../src/ui/subscription';
 import { tokenCount } from '../src/ui/token-count';
 import { CARD } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
@@ -290,8 +291,9 @@ for (const lang of ['en', 'ru'] as const) {
 
       await page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn').click();
       const card = page.getByRole('article', { name: /MKT1/ });
-      await expect(card.getByRole('button', { name: t.subs.editApiLabel('Marketing key'), exact: true })).toBeVisible();
-      await expect(card.getByRole('button', { name: t.subs.removeLabel('Marketing key'), exact: true })).toBeVisible();
+      const name = subName(t, MARKETING_KEY);
+      await expect(card.getByRole('button', { name: t.subs.editApiLabel(name), exact: true })).toBeVisible();
+      await expect(card.getByRole('button', { name: t.subs.removeLabel(name), exact: true })).toBeVisible();
       expect(await fits(page)).toBe(true);
       await page.screenshot({ path: info.outputPath(`owner-card-${lang}-${width}.png`), fullPage: true });
 
