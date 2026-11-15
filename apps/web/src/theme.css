@@ -2088,7 +2088,7 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .people.machines, .people.subs { max-width: none; min-width: 0; }
 .people.machines > *, .people.subs > * { min-width: 0; }
 @media (min-width: 1200px) {
-  .people.machines, .people.subs { padding-left: 32px; padding-right: 32px; }
+  .people.machines, .people.subs { padding-inline: 32px; }
 }
 .machine > .edge-in { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
 .machine > .edge-in > * { min-width: 0; }
@@ -2302,7 +2302,7 @@ th.k-prio .sorth { white-space: nowrap; }
 .dt > tbody > tr.rm.open > td { background: var(--surface2); border-block-end-color: transparent; }
 .dt > tbody > tr.det > td { padding-block: 0 14px; padding-inline: 12px; background: var(--surface2); }
 .rowbtn { position: relative; display: inline-flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; min-inline-size: 44px; max-inline-size: 100%; min-block-size: 44px; border: 0; background: none; padding-block: 10px; padding-inline-start: 20px; padding-inline-end: 0; text-align: start; cursor: pointer; color: var(--ink); }
-.sorth:focus-visible, .sortb:focus-visible, .rowbtn:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.sorth:focus-visible, .sortb:focus-visible, .rowbtn:focus-visible, .chipf:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .rowbtn .nmg { display: flex; align-items: flex-start; gap: 8px; min-inline-size: 0; }
 .rowbtn .nmg > .pm { margin-block-start: 3px; }
 .rowbtn .chev { position: absolute; inset-inline-start: 0; inset-block-start: 14px; inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.8; transition: transform .15s; }
@@ -2378,15 +2378,15 @@ th.k-prio .sorth { white-space: nowrap; }
 .search { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--muted); }
 .search:focus-within { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 .search input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--ink); font-size: 13.5px; }
-.tools-r2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
-.fgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.fgroup > .lbl { font-size: 12px; color: var(--muted); margin-right: 4px; }
-.chipf { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border: 1px solid var(--line2); background: none; color: var(--ink); font-size: 12.5px; cursor: pointer; }
+.tools-r2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-inline-size: 0; }
+.fgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-inline-size: 0; max-inline-size: 100%; }
+.fgroup > .lbl { font-size: 12px; color: var(--muted); margin-inline-end: 4px; }
+.chipf { display: inline-flex; align-items: center; gap: 6px; block-size: 28px; padding-block: 0; padding-inline: 9px; border: 1px solid var(--line2); background: none; color: var(--ink); font-size: 12.5px; cursor: pointer; }
 .chipf:hover { border-color: var(--cyan); }
 .chipf[aria-pressed="true"] { border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
-.chipf .n { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chipf .n { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* A group that starts with All: a target of 44 px, the chosen one in the ink of a link. */
-.fgroup.whole .chipf { block-size: auto; min-block-size: 44px; padding-inline: 12px; }
+.fgroup.whole .chipf { min-inline-size: 44px; max-inline-size: 100%; block-size: auto; min-block-size: 44px; padding-block: 8px; padding-inline: 12px; text-align: start; overflow-wrap: break-word; }
 .fgroup.whole .chipf[aria-pressed="true"] { border-color: var(--cyan-ink); }
 .linkbtn { border: 0; background: none; padding: 0; color: var(--cyan-ink); font-weight: 600; cursor: pointer; text-decoration: underline; }
 .nothing { padding: 18px; border: 1px dashed var(--line2); color: var(--muted); }

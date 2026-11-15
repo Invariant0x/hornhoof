@@ -62,7 +62,7 @@ const BACKLOG_ITEMS: BacklogItem[] = [
 async function brokenTargets(scope: Locator): Promise<string[]> {
   return scope.evaluate(root => {
     const out: string[] = [];
-    for (const btn of root.querySelectorAll<HTMLElement>('.sorth, .sortb, .rowbtn')) {
+    for (const btn of root.querySelectorAll<HTMLElement>('.sorth, .sortb, .rowbtn, .chipf')) {
       const r = btn.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0 || getComputedStyle(btn).visibility === 'hidden') continue;
       const [w, h] = [Math.round(r.width), Math.round(r.height)];
@@ -70,6 +70,63 @@ async function brokenTargets(scope: Locator): Promise<string[]> {
     }
     return out;
   });
+}
+
+async function brokenFilterWords(scope: Locator): Promise<string[]> {
+  return scope.evaluate(root => {
+    const out: string[] = [];
+    for (const el of root.querySelectorAll<HTMLElement>('.fgroup > .lbl, .fgroup .chipf')) {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        for (const word of (node.textContent ?? '').matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(node, word.index);
+          range.setEnd(node, word.index + word[0].length);
+          const lines = new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top)));
+          if (lines.size > 1) out.push(word[0]);
+        }
+      }
+    }
+    return out;
+  });
+}
+
+async function checkMachineFilters(page: Page, section: Locator, t: Messages, dir: 'ltr' | 'rtl'): Promise<void> {
+  const linkInk = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('span'));
+    probe.style.color = 'var(--cyan-ink)';
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  const rows = section.locator('tr.rm');
+  const groups: [string, string, number][] = [
+    [t.tables.provider, 'Codex', 1],
+    [t.tables.status, t.cards.offline, 1],
+    [t.tables.testFilters, t.tables.lentFilter, 2],
+  ];
+  for (const [label, option, shown] of groups) {
+    const group = section.getByRole('group', { name: label, exact: true });
+    await expect(group).toHaveClass(/\bwhole\b/);
+    const all = group.getByRole('button').first();
+    await expect(all).toHaveText(`${t.tables.all}${MACHINES.length}`);
+    await expect(all).toHaveAttribute('aria-pressed', 'true');
+    await expect(all).toHaveCSS('border-top-color', linkInk);
+    const choice = group.getByRole('button', { name: new RegExp(`^${option}`) });
+    await choice.click();
+    await expect(all).toHaveAttribute('aria-pressed', 'false');
+    await expect(choice).toHaveAttribute('aria-pressed', 'true');
+    await expect(choice).toHaveCSS('border-top-color', linkInk);
+    await expect(rows).toHaveCount(shown);
+    await all.click();
+    await expect(all).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows).toHaveCount(MACHINES.length);
+  }
+  if (dir === 'rtl') {
+    const group = section.locator('.fgroup').first();
+    const [lblBox, chipBox] = [await box(group.locator('.lbl')), await box(group.locator('.chipf').first())];
+    expect(lblBox.x).toBeGreaterThanOrEqual(chipBox.x + chipBox.width);
+  }
 }
 
 async function checkKeyboardFocus(page: Page, control: Locator, shotPath: string): Promise<void> {
@@ -120,19 +177,26 @@ async function checkMachines(page: Page, info: TestInfo, t: Messages, tag: strin
   await page.evaluate(() => document.fonts.ready);
 
   expect(await brokenTargets(section)).toEqual([]);
+  expect(await brokenFilterWords(section)).toEqual([]);
   expect(await brokenHeaderWords(page)).toEqual([]);
   expect(await tableFits(page)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await checkMachineFilters(page, section, t, dir);
 
-  const pieces = { head: '.people-head', pool: '.pool', tools: '.tools', thead: '.dt > thead', sortbar: '.sortbar', row: 'tr.rm', sortHeader: 'thead .sorth', sortButton: '.sortbar .sortb', rowButton: '.rowbtn' };
+  const pieces = {
+    head: '.people-head', pool: '.pool', tools: '.tools', filterGroup: '.fgroup', filterChip: '.fgroup .chipf',
+    thead: '.dt > thead', sortbar: '.sortbar', row: 'tr.rm', sortHeader: 'thead .sorth', sortButton: '.sortbar .sortb', rowButton: '.rowbtn',
+  };
   const allSizes = await sizes(section, pieces);
   delete allSizes['part height'];
   delete allSizes['part width'];
   const measured: Measured = { browser: browserName, look: tag, screen: 'machines', sizes: allSizes };
   await wholePage(page, info.outputPath(`machines-list-${tag}-${browserName}.png`));
 
+  const filterChip = section.locator('.fgroup .chipf').first();
   const sortControl = (await section.locator('thead').isVisible()) ? section.locator('button.sorth').first() : section.locator('button.sortb').first();
   const rowButton = section.locator('tr.rm').first().locator('button.rowbtn');
+  await checkKeyboardFocus(page, filterChip, info.outputPath(`machines-filter-focus-${tag}-${browserName}.png`));
   await checkKeyboardFocus(page, sortControl, info.outputPath(`machines-header-focus-${tag}-${browserName}.png`));
   await checkKeyboardFocus(page, rowButton, info.outputPath(`machines-row-focus-${tag}-${browserName}.png`));
   if (dir === 'rtl') await checkRtlChevron(rowButton);

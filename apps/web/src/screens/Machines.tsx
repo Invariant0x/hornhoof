@@ -167,11 +167,12 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
 }
 
 function machineFilters(t: Messages): FilterGroup<MachineRow>[] {
-  return [
+  const groups: FilterGroup<MachineRow>[] = [
     providerFilter(t.tables.provider, m => m.plans.map(p => p.provider)),
     { key: 'status', label: t.tables.status, values: m => [m.online ? 'online' : 'offline'], text: value => value === 'online' ? t.machines.online : t.cards.offline },
     { key: 'tests', label: t.tables.testFilters, values: m => m.lendsTests ? ['lent'] : [], text: () => t.tables.lentFilter, single: true },
   ];
+  return groups.map(group => ({ ...group, all: t.tables.all }));
 }
 
 function machineSearch(t: Messages, language: Language, subs: SubView[], row: MachineRow): string {
@@ -774,7 +775,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           name={row => row.hostname}
           openIds={openIds}
           initialSort={{ key: priority ? 'priority' : 'status', direction: 1 }}
-          search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
+          search={{ placeholder: t.tables.searchMachines, short: t.tables.searchMachinesShort, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} order={{ shown: priority, last: Math.max(1, ...rows.map(one => placeOf(one) ?? 0)), moving }} controls={{
             picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, keepBackups, disconnect, refresh: load, fail: setFailure,

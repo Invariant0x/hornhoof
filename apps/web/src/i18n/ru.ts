@@ -685,7 +685,7 @@ export const ru: Messages = {
     },
   },
   tables: {
-    search: 'Поиск', searchMachines: 'Поиск по машине, владельцу, агенту или роли', searchSubscriptions: 'Поиск по подписке, владельцу, агенту или машине', searchSubscriptionsShort: 'Поиск подключений',
+    search: 'Поиск', searchMachines: 'Поиск по машине, владельцу, агенту или роли', searchMachinesShort: 'Поиск машин', searchSubscriptions: 'Поиск по подписке, владельцу, агенту или машине', searchSubscriptionsShort: 'Поиск подключений',
     provider: 'Провайдер', testFilters: 'Тесты', all: 'Все',
     lentFilter: 'Отдана под тесты',
     machineCount: n => `${n} ${plural('ru', n, { one: 'машина', few: 'машины', many: 'машин', other: 'машины' })}`,
