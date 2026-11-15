@@ -116,6 +116,9 @@ describe('an address a person writes', () => {
       expect(internalAddress(new URL(href), []), href).toBe(true);
     }
     for (const href of ['https://openrouter.ai/api', 'https://llm.acme.example/v1', 'http://93.184.216.34']) expect(internalAddress(new URL(href), []), href).toBe(false);
+    /* A name may end in the root's dot and still be the same name. */
+    for (const href of ['http://localhost./v1', 'http://ollama.localhost../v1', 'http://LOCALHOST.:8080']) expect(internalAddress(new URL(href), []), href).toBe(true);
+    expect(internalAddress(new URL('http://localhost.:11434'), ['localhost'])).toBe(false);
     expect(internalAddress(new URL('http://localhost:11434'), ['localhost'])).toBe(false);
     expect(internalAddress(new URL('http://10.0.0.7:8000'), ['10.0.0.7'])).toBe(false);
     expect(internalAddress(new URL('http://10.0.0.8:8000'), ['10.0.0.7'])).toBe(true);
