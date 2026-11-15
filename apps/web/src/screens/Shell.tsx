@@ -6,6 +6,7 @@ import { forgetOwnerKey } from '../owner-key';
 import type { ComputerAccessView, Me, Org } from '../types';
 import { cannotOpen, isOpen, machineName, useAccess } from '../ui/access';
 import { LogoMark } from '../ui/icons';
+import { Idents } from '../ui/Idents';
 import { RecoveryBanner } from '../ui/RecoveryBanner';
 import { SwitchBanner } from '../ui/SwitchBanner';
 import { UpdateBanner } from '../ui/UpdateBanner';
@@ -65,9 +66,9 @@ function AccountDialog({ route, me, updates, inbox, onRenamed, onGroup, onOpenTa
   return <Settings me={me} group={route.group} onGroup={onGroup} onRenamed={onRenamed} onOpenTask={onOpenTask} onClose={onClose} />;
 }
 
-/* For a person who sits at a machine of the company that is theirs to open and closed: one line of the menu that gives
-   the orchestrator access to it for a day. Opened, the menu closes. Elsewhere, or on a machine they cannot open now,
-   nothing shows. */
+/* For a person who sits at a machine of the company that is theirs to open and closed: a group of the menu, its line
+   above it, that gives the orchestrator access to it for a day. Opened, the menu closes. Elsewhere, or on a machine they
+   cannot open now, nothing shows, not even the line. */
 function AccessHere({ onDone }: { onDone: () => void }) {
   const t = useT();
   const [view, setView] = useState<ComputerAccessView | null>(null);
@@ -87,9 +88,10 @@ function AccessHere({ onDone }: { onDone: () => void }) {
   if (!view || !view.canOpen || isOpen(view) || cannotOpen(t, view)) return null;
   return (
     <>
+      <hr className="am-sep" />
       {prompt ?? (
-        <button className="btn small ghost" type="button" onClick={() => void answer(view, 'open')}>
-          {t.window.computerHere(machineName(t, view.machine))}
+        <button className="mi" type="button" onClick={() => void answer(view, 'open')}>
+          <span>{t.window.computerHere(machineName(t, view.machine))}</span>
         </button>
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
@@ -97,19 +99,25 @@ function AccessHere({ onDone }: { onDone: () => void }) {
   );
 }
 
-/* onImprovements, onInbox and onVersions: only for people who see the whole company, onInbox only on Hornhoof's own
-   installation. Themes, the language and External messaging live in Settings, feedback in About. */
-function AccountMenu({
-  me,
-  onClose,
-  onSignOut,
-  onImprovements,
-  onInbox,
-  onVersions,
-  onSettings,
-  onAbout,
-  toDecide,
-}: {
+/* One row of the account menu: it closes the menu, then does what it says. */
+function MenuRow({ label, count, onPick, onClose }: { label: string; count?: { shown: number; said: string }; onPick: () => void; onClose: () => void }) {
+  return (
+    <button
+      className="mi"
+      type="button"
+      aria-label={count?.shown ? count.said : undefined}
+      onClick={() => {
+        onClose();
+        onPick();
+      }}
+    >
+      <span>{label}</span>
+      {count && count.shown > 0 && <span className="nav-count" aria-hidden="true">{count.shown}</span>}
+    </button>
+  );
+}
+
+type MenuProps = {
   me: Me;
   onClose: () => void;
   onSignOut: () => void;
@@ -119,65 +127,45 @@ function AccountMenu({
   onSettings: () => void;
   onAbout: () => void;
   toDecide: number;
-}) {
+};
+
+/* The pages of the whole company: what employees found to improve with how many wait for a decision, the feedback
+   inbox and Versions. Nothing, and no line above it, for a person who sees only some departments. */
+function CompanyRows({ onClose, onImprovements, onInbox, onVersions, toDecide }: Omit<MenuProps, 'me' | 'onSignOut' | 'onSettings' | 'onAbout'>) {
+  const t = useT();
+  if (!onImprovements && !onInbox && !onVersions) return null;
+  return (
+    <>
+      <hr className="am-sep" />
+      {onImprovements && <MenuRow label={t.shell.tabs.improvements} count={{ shown: toDecide, said: t.improvements.nav(toDecide) }} onPick={onImprovements} onClose={onClose} />}
+      {onInbox && <MenuRow label={t.inbox.menu} onPick={onInbox} onClose={onClose} />}
+      {onVersions && <MenuRow label={t.updates.menu} onPick={onVersions} onClose={onClose} />}
+    </>
+  );
+}
+
+/* The short account menu as Design's reference draws it: the person and the version, then rows in groups with a line
+   between them: giving the orchestrator access to this machine, Settings, the pages of the whole company, About and Log
+   out. onImprovements, onInbox and onVersions: only for people who see the whole company, onInbox only on Hornhoof's own
+   installation. Themes, the language and External messaging live in Settings, feedback in About. */
+function AccountMenu({ me, onClose, onSignOut, onSettings, onAbout, ...company }: MenuProps) {
   const t = useT();
   const version = useVersion();
 
   return (
     <div className="account-menu">
-      <p>
+      <div className="am-head">
         <b>{me.person.name}</b>
-        <span>{me.person.email}</span>
-      </p>
-      {version && <p className="menu-version">{t.shell.version(versionText(version))}</p>}
+        <span><bdi dir="ltr">{me.person.email}</bdi></span>
+        {version && <span className="menu-version"><Idents text={t.shell.version(versionText(version))} idents={[versionText(version)]} /></span>}
+      </div>
       <AccessHere onDone={onClose} />
-      {onImprovements && (
-        <button
-          className="btn small ghost"
-          type="button"
-          aria-label={toDecide ? t.improvements.nav(toDecide) : undefined}
-          onClick={() => {
-            onClose();
-            onImprovements();
-          }}
-        >
-          {t.shell.tabs.improvements}
-          {toDecide > 0 && <span className="nav-count" aria-hidden="true">{toDecide}</span>}
-        </button>
-      )}
-      {onInbox && (
-        <button className="btn small ghost" type="button" onClick={() => { onClose(); onInbox(); }}>
-          {t.inbox.menu}
-        </button>
-      )}
-      {onVersions && (
-        <button
-          className="btn small ghost"
-          type="button"
-          onClick={() => {
-            onClose();
-            onVersions();
-          }}
-        >
-          {t.updates.menu}
-        </button>
-      )}
-      <button className="btn small ghost" type="button" onClick={() => { onClose(); onSettings(); }}>
-        {t.settings.menu}
-      </button>
-      <button className="btn small ghost" type="button" onClick={() => { onClose(); onAbout(); }}>
-        {t.about.menu}
-      </button>
-      <button
-        className="btn small ghost"
-        type="button"
-        onClick={() => {
-          onClose();
-          onSignOut();
-        }}
-      >
-        {t.shell.logOut}
-      </button>
+      <hr className="am-sep" />
+      <MenuRow label={t.settings.menu} onPick={onSettings} onClose={onClose} />
+      <CompanyRows onClose={onClose} {...company} />
+      <hr className="am-sep" />
+      <MenuRow label={t.about.menu} onPick={onAbout} onClose={onClose} />
+      <MenuRow label={t.shell.logOut} onPick={onSignOut} onClose={onClose} />
     </div>
   );
 }

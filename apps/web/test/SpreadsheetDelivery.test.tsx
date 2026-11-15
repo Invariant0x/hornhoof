@@ -112,12 +112,21 @@ describe('1-click spreadsheet download in TaskFiles, AgentWindow chat, and Googl
     expect(part).toHaveClass('integration');
     expect(within(part).getByText('Not connected')).toHaveAttribute('data-connected', 'false');
     expect(within(dialog).getByRole('button', { name: 'Integrations' })).toHaveAttribute('aria-current', 'page');
-    await user.click(within(part).getByRole('button', { name: 'Connect Google Sheets' }));
+    /* Not connected, Connect is the record's one action and its main button (spec 4.4). */
+    const connect = within(part).getByRole('button', { name: 'Connect Google Sheets' });
+    expect(connect).toHaveClass('btn');
+    expect(connect).not.toHaveClass('ghost');
+    await user.click(connect);
     await user.type(within(part).getByLabelText('Google key JSON'), '{{"type":"service_account"}');
     await user.type(within(part).getByLabelText('Share new spreadsheets with'), 'ivan@acme.com');
     await user.click(within(part).getByRole('button', { name: 'Save' }));
     expect(await within(part).findByText(/sheets-bot@acme\.iam\.gserviceaccount\.com/)).toBeInTheDocument();
     expect(within(part).getByText('Connected')).toHaveAttribute('data-connected', 'true');
+    /* Connected, Disconnect is the pink secondary button, last of its row. */
+    const disconnect = within(part).getByRole('button', { name: 'Disconnect' });
+    expect(disconnect).toHaveClass('btn', 'ghost', 'danger');
+    expect(disconnect.parentElement!.lastElementChild).toBe(disconnect);
+    expect(within(part).getByRole('button', { name: 'Change settings' })).not.toHaveClass('danger');
     expect(calls.find(c => c.method === 'PUT' && c.path === '/api/google-sheets')).toEqual({
       method: 'PUT',
       path: '/api/google-sheets',
