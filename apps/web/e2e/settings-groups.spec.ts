@@ -183,10 +183,78 @@ async function openGroup(page: Page, t: Messages, group: GroupId, path: string, 
   await expect(nav.getByRole('button')).toHaveText(shown.map(id => t.settings.groups[id]));
   await expect(nav.getByRole('button', { name: t.settings.groups[group], exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(dialog.getByRole('heading', { name: t.settings.groups[group], level: 3, exact: true })).toBeVisible();
+  const found = await navigation(page);
+  expect(found.current, `${group} ${dir}: only the open group is the current page`).toEqual([t.settings.groups[group]]);
+  expect(found.marked, `${group} ${dir}: the open group stands out in the list`).toEqual([]);
+  expect(found.headingFirst, `${group} ${dir}: the open group's heading stands at its top`).toBe(true);
+  expect(found.cut, `${group} ${dir}: no item of the list is cut`).toEqual([]);
+  expect(found.broken, `${group} ${dir}: no word of an item breaks`).toEqual([]);
+  if (found.narrow) expect(found.rows, `${group} ${dir}: at a phone width the items stand in rows`).toBeGreaterThan(1);
   return dialog;
 }
 
+/* Design took one group at a time on three conditions (#970, finding 3): the open item stands out and is the current
+   page, the heading of the open group stands at the top of the window's body, beside the list or under it, and at a
+   phone's width the items wrap in rows of whole words. */
+async function navigation(page: Page) {
+  return page.evaluate(() => {
+    const nav = document.querySelector<HTMLElement>('.settings-nav')!;
+    const items = [...nav.querySelectorAll<HTMLElement>('.btn')];
+    const open = items.filter(item => item.getAttribute('aria-current') === 'page');
+    const style = (item: Element) => getComputedStyle(item);
+    const look = (item: Element) => `${style(item).backgroundColor} ${style(item).color} ${style(item).borderInlineStartColor} ${style(item).boxShadow}`;
+    const marked = open.flatMap(item => items.filter(other => other !== item && look(other) === look(item)).map(other => other.textContent ?? ''));
+    const body = document.querySelector('.settings-scroll')!;
+    const heading = document.querySelector<HTMLElement>('.sgroup > .g-head > h3')!;
+    const group = document.querySelector('.sgroup')!;
+    const top = heading.getBoundingClientRect().top;
+    const narrow = innerWidth <= 760;
+    const navBox = nav.getBoundingClientRect();
+    const headingFirst = group.firstElementChild?.firstElementChild === heading && body.scrollTop === 0
+      && (narrow ? top >= navBox.bottom && top - navBox.bottom <= 24 : Math.abs(top - navBox.top) <= 1);
+    const broken: string[] = [];
+    for (const item of items) {
+      const range = document.createRange();
+      range.selectNodeContents(item);
+      const lines = new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => Math.round(rect.top)));
+      const words = (item.textContent ?? '').split(/\s+/).filter(Boolean);
+      if (lines.size > words.length) broken.push(item.textContent ?? '');
+    }
+    return {
+      current: open.map(item => item.textContent ?? ''),
+      marked: marked.concat(open.length ? [] : ['none']),
+      headingFirst,
+      cut: items.filter(item => item.scrollWidth > item.clientWidth + 1).map(item => item.textContent ?? ''),
+      broken,
+      narrow,
+      rows: new Set(items.map(item => Math.round(item.getBoundingClientRect().top))).size,
+    };
+  });
+}
+
 const ALL: readonly GroupId[] = GROUPS.map(group => group.id);
+
+/* The pink buttons of the open group, each with whether its words are --pink-ink and it is last of its row, and its
+   filled buttons, each with whether it is filled with --btn. */
+async function tonesOf(page: Page) {
+  return page.evaluate(() => {
+    const probe = document.createElement('span');
+    document.body.append(probe);
+    const token = (name: string, property: 'color' | 'backgroundColor') => {
+      probe.style.cssText = property === 'color' ? `color: var(${name})` : `background-color: var(${name})`;
+      return getComputedStyle(probe)[property];
+    };
+    const pink = token('--pink-ink', 'color');
+    const fill = token('--btn', 'backgroundColor');
+    probe.remove();
+    const group = document.querySelector('.sgroup')!;
+    const words = (button: Element) => button.textContent?.trim() ?? '';
+    return {
+      danger: [...group.querySelectorAll('.btn.danger')].map(button => [words(button), getComputedStyle(button).color === pink, button.parentElement!.lastElementChild === button]),
+      main: [...group.querySelectorAll('.btn:not(.ghost)')].map(button => [words(button), getComputedStyle(button).backgroundColor === fill]),
+    };
+  });
+}
 
 /* Checks a group the person has, and waits for what it holds. */
 async function checkGroup(page: Page, t: Messages, group: GroupId, look: string) {
@@ -200,6 +268,11 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
     const room = await list.evaluate(element => element.parentElement!.parentElement!.getBoundingClientRect().width);
     expect(Math.abs(box.height - 44), `${look}: the list is 44 px high`).toBeLessThanOrEqual(0.5);
     expect(Math.abs(box.width - Math.min(360, room)), `${look}: the list is as wide as its place, at most 360 px`).toBeLessThanOrEqual(1);
+    const gaps = await dialog.locator('.lang-part').evaluate(part => {
+      const [heading, hint, wrap] = [part.querySelector('h4')!, part.querySelector(':scope > p')!, part.querySelector('.select-wrap')!].map(element => element.getBoundingClientRect());
+      return [Math.round((hint!.top - heading!.bottom) * 10) / 10, Math.round((wrap!.top - hint!.bottom) * 10) / 10];
+    });
+    expect(gaps, `${look}: the hint 4 px under the heading, the list 8 px under the hint`).toEqual([4, 8]);
     const grid = await skinGrid(page);
     expect(grid.columns, `${look}: ${grid.room} px of room`).toBe(grid.room >= 560 ? 2 : 1);
     await expect(dialog.locator('.skin-card[data-current]').getByText(t.skins.applied, { exact: true })).toBeVisible();
@@ -209,10 +282,14 @@ async function checkGroup(page: Page, t: Messages, group: GroupId, look: string)
     await expect(dialog.getByRole('article', { name: t.googleSheets.title, exact: true }).getByText(t.integrations.connected, { exact: true })).toBeVisible();
     await expect(dialog.getByRole('article', { name: t.repoHost.title, exact: true }).getByText(t.integrations.notConnected, { exact: true })).toBeVisible();
     await expect(dialog.getByRole('article')).toHaveCount(2);
+    const tones = await tonesOf(page);
+    expect(tones.danger, `${look}: Disconnect is pink, last of its row`).toEqual([[t.googleSheets.remove, true, true]]);
+    expect(tones.main, `${look}: Save a key, the one action of a record with no key, is the main button`).toEqual([[t.repoHost.save, true]]);
   }
   if (group === 'messaging') await expect(dialog.getByRole('heading', { name: 'Sales Mail', exact: true })).toBeVisible();
   if (group === 'company') {
     await expect(dialog.getByRole('link', { name: 'https://acme.hornhoof.org', exact: true })).toBeVisible();
+    expect((await tonesOf(page)).danger, `${look}: Remove link is pink, last of its row`).toEqual([[t.settings.remove, true, true]]);
     await expect(dialog.getByRole('heading', { name: t.repoHost.title, exact: true })).toHaveCount(0);
   }
   const found = await layout(page);
@@ -235,7 +312,7 @@ for (const skin of SKINS) for (const lang of LANGS) for (const width of WIDTHS) 
     await page.goto('/');
     await page.getByRole('button', { name: t.shell.account, exact: true }).click();
     const menu = page.locator('.account-menu');
-    await expect(menu.getByRole('button')).toHaveText([new RegExp(`^${t.shell.tabs.improvements}`), t.updates.menu, t.settings.menu, t.about.menu, t.shell.logOut]);
+    await expect(menu.getByRole('button')).toHaveText([t.settings.menu, new RegExp(`^${t.shell.tabs.improvements}`), t.updates.menu, t.about.menu, t.shell.logOut]);
     await expect(menu.getByRole('group')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await shot(page, info, `menu-${look}`);
@@ -249,7 +326,7 @@ for (const skin of SKINS) for (const lang of LANGS) for (const width of WIDTHS) 
     }
     await page.goto('/about');
     const about = page.getByRole('dialog', { name: t.about.title, exact: true });
-    await expect(about.getByRole('region', { name: t.feedback.title, exact: true }).getByRole('button', { name: t.common.next, exact: true })).toBeVisible();
+    await expect(about.getByRole('region', { name: t.feedback.section, exact: true }).getByRole('button', { name: t.feedback.write, exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await about.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await shot(page, info, `about-${look}`);

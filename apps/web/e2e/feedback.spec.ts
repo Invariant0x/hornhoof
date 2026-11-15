@@ -96,13 +96,16 @@ async function setLook(page: Page, choice: Choice, language: Language) {
 
 type Scene = { name: string; inbox: boolean; open: (page: Page, words: Messages) => Promise<Locator> };
 
-/* Writing to the developers inside About, once About holds the focus it takes when it opens, so what a test types next
-   stays where it is typed. */
+/* Writing to the developers inside About, opened from its button once About holds the focus it takes when it opens, so
+   what a test types next stays where it is typed. */
 async function dialog(page: Page, words: Messages): Promise<Locator> {
   await page.goto('/about');
   const about = page.getByRole('dialog', { name: words.about.title, exact: true });
   await expect(about).toBeFocused();
-  return about.getByRole('region', { name: words.feedback.title, exact: true });
+  const part = about.getByRole('region', { name: words.feedback.section, exact: true });
+  await part.getByRole('button', { name: words.feedback.write, exact: true }).click();
+  await expect(part.getByRole('button', { name: words.common.next, exact: true })).toBeVisible();
+  return part;
 }
 
 /* Every place a person meets, opened the way they open it. */
@@ -201,12 +204,12 @@ async function lowestContrast(place: Locator): Promise<{ ratio: number; what: st
   });
 }
 
-/* A field keeps 40 px, a kind choice and a button of a form's foot or of a record from 44 px, the description from 120 px. */
+/* A field keeps 44 px, a kind choice and a button of a form's foot or of a record from 44 px, the description from 120 px. */
 async function heights(place: Locator): Promise<string[]> {
   return place.evaluate(root => {
     const wrong: string[] = [];
     const h = (e: Element) => Math.round(e.getBoundingClientRect().height * 100) / 100;
-    for (const e of root.querySelectorAll('.field input')) if (Math.abs(h(e) - 40) > 0.5) wrong.push(`${e.tagName} ${h(e)}`);
+    for (const e of root.querySelectorAll('.field input')) if (Math.abs(h(e) - 44) > 0.5) wrong.push(`${e.tagName} ${h(e)}`);
     for (const e of root.querySelectorAll('.fb-input')) if (h(e) < 119.5) wrong.push(`textarea ${h(e)}`);
     for (const e of root.querySelectorAll('.form-foot > *, .entry-actions > *, .fb-kinds button')) if (h(e) < 43.5) wrong.push(`${e.className} ${e.textContent?.trim().slice(0, 20)} ${h(e)}`);
     return wrong;
@@ -297,8 +300,10 @@ test('mirrors writing to the developers in About and the inbox for a language wr
     expect((await kinds.nth(0).boundingBox())!.x, 'Bug, the first kind, is on the right').toBeGreaterThan((await kinds.nth(2).boundingBox())!.x);
     const frame = (await box.boundingBox())!;
     const main = (await box.getByRole('button', { name: words.common.next, exact: true }).boundingBox())!;
-    await expect(box.getByRole('button', { name: words.common.cancel, exact: true }), 'About has its own close, so no Cancel').toHaveCount(0);
+    const cancel = (await box.getByRole('button', { name: words.common.cancel, exact: true }).boundingBox())!;
     expect(main.x - frame.x, 'Next stands at the end, the left edge').toBeLessThan(frame.width / 2);
+    expect(Math.abs(cancel.x - frame.x), 'Cancel, the last of the foot, ends on the left edge').toBeLessThanOrEqual(1);
+    expect(cancel.x, 'Next stands to the right of Cancel').toBeLessThan(main.x);
     expect(await whole(page, box)).toEqual([]);
     await box.screenshot({ path: info.outputPath(`${browserName}/rtl-${width}-feedback-write.png`), animations: 'disabled' });
 

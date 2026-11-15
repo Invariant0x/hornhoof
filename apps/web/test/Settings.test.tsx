@@ -407,6 +407,8 @@ describe('the language under Appearance & language', () => {
 
   it('draws text and buttons with the same widths in every engine', () => {
     expect(decl('body', 'text-rendering')).toBe('geometricPrecision');
+    /* Chromium's own styles give its controls text-rendering: auto; they take the page's instead. */
+    expect(decl('button', 'text-rendering')).toBe('inherit');
   });
 
   it('draws the list 44 px high from the theme tokens, at most 360 px wide, with its own arrow at the end of either direction', () => {

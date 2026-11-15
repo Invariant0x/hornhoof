@@ -5,9 +5,6 @@ import { ME, serveApi } from './api';
 
 const VERSION = { version: '0.5.0', commit: 'abc1234' };
 const PERSON = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
-/* Its facts are small: they were 292 and 448 pixels tall on these screens before they were made compact. Writing to the
-   developers stands under them. */
-const TALLEST: Record<number, number> = { 1440: 220, 375: 240 };
 
 async function prepare(page: Page, language: string, theme: string): Promise<void> {
   await serveApi(page);
@@ -39,16 +36,19 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     await expect(dialog.getByText('0.5.0 (abc1234)')).toBeVisible();
     await expect(dialog.getByRole('link')).toHaveCount(3);
     const words = language === 'en' ? en : ru;
-    const feedback = dialog.getByRole('region', { name: words.feedback.title, exact: true });
-    await expect(feedback.getByRole('button', { name: words.common.next, exact: true })).toBeVisible();
+    /* Feedback is closed to one sentence and its button until the person opens it. */
+    const feedback = dialog.getByRole('region', { name: words.feedback.section, exact: true });
+    const write = feedback.getByRole('button', { name: words.feedback.write, exact: true });
+    await expect(write).toBeVisible();
+    await expect(feedback.getByRole('textbox')).toHaveCount(0);
     await expect(dialog).toBeFocused();
     await page.keyboard.press('Shift+Tab');
-    await expect(feedback.getByRole('button', { name: words.common.next, exact: true })).toBeFocused();
+    await expect(write).toBeFocused();
     await page.keyboard.press('Tab');
     const close = dialog.getByRole('button', { name: language === 'en' ? 'Close' : 'Закрыть', exact: true });
     await expect(close).toBeFocused();
-    /* Three links, the three kinds, the title, the text and Next, then back to the cross. */
-    for (let index = 0; index < 10; index++) await page.keyboard.press('Tab');
+    /* Three links and Write to developers, then back to the cross. */
+    for (let index = 0; index < 5; index++) await page.keyboard.press('Tab');
     await expect(close).toBeFocused();
     await page.evaluate(async () => { await document.fonts.ready; });
     const box = await dialog.boundingBox();
@@ -60,10 +60,16 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     await page.screenshot({ path: info.outputPath(`about-${language}-${theme}-${width}.png`), fullPage: true });
     await expect(dialog).not.toContainText(language === 'en' ? 'Developer' : 'Разработчик');
     await expect(dialog.locator('.about-author')).toHaveText(language === 'en' ? 'Author: Ivan Korol, © 2026' : 'Автор: Ivan Korol, © 2026');
-    const top = await dialog.evaluate(element => element.getBoundingClientRect().top);
-    const facts = (await feedback.boundingBox())!.y - top;
-    expect(facts, 'what stands above writing to the developers is clearly lower than the window was').toBeLessThan(TALLEST[width]!);
-    expect(box!.width, 'the window is no wider than a small window').toBeLessThanOrEqual(420);
+    /* As Design's reference draws it: 480 px, or the screen less 16 px on each side; a 44 px cross; 14 px text, its facts
+       13.5 px and its author 12 px; the description, the facts, the author, a line, then Feedback. */
+    expect(Math.abs(box!.width - Math.min(480, width - 32)), 'the window is 480 px or the screen less 32 px').toBeLessThanOrEqual(1);
+    const cross = (await close.boundingBox())!;
+    expect([Math.round(cross.width), Math.round(cross.height)], 'the cross is a 44 px target').toEqual([44, 44]);
+    const fontSize = (selector: string) => dialog.locator(selector).first().evaluate(element => parseFloat(getComputedStyle(element).fontSize));
+    expect(await fontSize(':scope > p')).toBe(14);
+    expect(await fontSize('.facts')).toBe(13.5);
+    expect(await fontSize('.about-author')).toBe(12);
+    expect(await dialog.evaluate(element => [...element.children].map(child => child.tagName.toLowerCase() + (child.className ? `.${child.className}` : '')))).toEqual(['header', 'p', 'dl.facts', 'p.about-author', 'hr.about-sep', 'section.about-feedback']);
     if (width === 1440) expect(await dialog.evaluate(element => element.scrollHeight <= element.clientHeight), 'the window fits without scrolling').toBe(true);
     /* Writing takes the whole width of the window inside its padding, as the facts do. */
     const edges = await dialog.evaluate(element => [...element.querySelectorAll(':scope > .facts, :scope > .about-feedback')].map(part => {
@@ -71,9 +77,6 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
       return [Math.round(rect.left), Math.round(rect.right)];
     }));
     expect(edges[1]).toEqual(edges[0]);
-    const fontSize = (selector: string) => dialog.locator(selector).first().evaluate(element => parseFloat(getComputedStyle(element).fontSize));
-    expect(await fontSize('.facts')).toBeLessThanOrEqual(13);
-    expect(await fontSize('.about-author')).toBeLessThanOrEqual(12.5);
     await dialog.getByRole('button', { name: language === 'en' ? 'Close' : 'Закрыть', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(account).toBeFocused();
