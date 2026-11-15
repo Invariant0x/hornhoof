@@ -1,5 +1,13 @@
 {
   "name": "@hornhoof/server",
+  "description": "The Hornhoof server: the company's database, its API and the agents' work, and the web app it serves.",
+  "license": "MIT",
+  "author": "Ivan Korol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/invariant0x/hornhoof.git",
+    "directory": "apps/server"
+  },
   "private": true,
   "type": "module",
   "scripts": {

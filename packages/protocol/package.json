@@ -1,5 +1,13 @@
 {
   "name": "@hornhoof/protocol",
+  "description": "Types and messages shared by the Hornhoof server, node and web app.",
+  "license": "MIT",
+  "author": "Ivan Korol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/invariant0x/hornhoof.git",
+    "directory": "packages/protocol"
+  },
   "private": true,
   "type": "module",
   "exports": {
