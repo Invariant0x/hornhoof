@@ -43,13 +43,21 @@ function SortBar<T>({ columns, sort, choose }: SortControls<T>) {
   </div>;
 }
 
-/* The row's cells, each with the column it starts at and how many it takes. */
-function rowCells<T>(row: T, columns: TableColumn<T>[]): { column: TableColumn<T>; index: number; span: ColumnSpan | null }[] {
-  const cells = [];
+type Cell<T> = { column: TableColumn<T>; index: number; colSpan?: number; label?: string };
+
+/* The label a cell goes by as an entry: none for the name and the state, which need none. */
+function entryLabel<T>(column: TableColumn<T>, named: boolean, span: ColumnSpan | null): string | undefined {
+  if (named || column.className === 'k-status') return undefined;
+  return span?.label ?? column.label;
+}
+
+/* The row's cells, each with the column it starts at, how many it takes, and the label it goes by as an entry. */
+function rowCells<T>(row: T, columns: TableColumn<T>[], named: number): Cell<T>[] {
+  const cells: Cell<T>[] = [];
   for (let index = 0; index < columns.length; ) {
     const column = columns[index]!;
     const span = column.span?.(row) ?? null;
-    cells.push({ column, index, span });
+    cells.push({ column, index, colSpan: span?.columns, label: entryLabel(column, index === named, span) });
     index += Math.max(1, span?.columns ?? 1);
   }
   return cells;
@@ -59,7 +67,7 @@ function TableRow<T>({ row, columns, name, expanded, toggle }: { row: T; columns
   const t = useT();
   const named = Math.max(0, columns.findIndex(c => !c.lead));
   return <tr className={`rm${expanded ? ' open' : ''}`} aria-label={name} onClick={() => { if (!window.getSelection()?.toString()) toggle(); }}>
-    {rowCells(row, columns).map(({ column: c, index: i, span }) => <td key={c.key} className={i === named ? 'k-name' : c.className} colSpan={span?.columns} data-label={i === named || c.className === 'k-status' ? undefined : (span?.label ?? c.label)}>
+    {rowCells(row, columns, named).map(({ column: c, index: i, colSpan, label }) => <td key={c.key} className={i === named ? 'k-name' : c.className} colSpan={colSpan} data-label={label}>
       {i === named ? <button className="rowbtn" type="button" aria-expanded={expanded} aria-label={t.tables.openCard(name)}>
         <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>{c.cell(row)}
       </button> : c.cell(row)}

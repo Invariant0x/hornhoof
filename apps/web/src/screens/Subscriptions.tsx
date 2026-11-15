@@ -110,8 +110,11 @@ function TokensCell({ sub: s }: { sub: SubView }) {
   return s.tokens ? <span className="num">{tokenCount(language, s.tokens.month.total)}</span> : null;
 }
 
-/* An API has no plan limits: it says so once across both limit columns, under the name of both. */
-const apiLimits = (t: Messages) => (s: SubView) => (s.kind === 'api_key' ? { columns: 2, label: t.subs.limits } : null);
+/* A limit's column. An API has no plan limits: it says so once across both limit columns, under the name of both. */
+function limitColumn(t: Messages, now: number, key: string): TableColumn<SubView> {
+  const span = key === 'five_hour' ? (s: SubView) => (s.kind === 'api_key' ? { columns: 2, label: t.subs.limits } : null) : undefined;
+  return { key, label: windowName(t, key), direction: -1, value: s => windowUsage(s, key, now), cell: s => <LimitCell sub={s} name={key} now={now} />, span };
+}
 
 function subscriptionColumns(t: Messages, now: number): TableColumn<SubView>[] {
   return [
@@ -120,7 +123,7 @@ function subscriptionColumns(t: Messages, now: number): TableColumn<SubView>[] {
     { key: 'status', label: t.tables.status, direction: 1, value: s => STATUS_ORDER.indexOf(stateOf(s, now)), className: 'k-status', cell: s => <SubscriptionStatus sub={s} now={now} showUntil /> },
     { key: 'serves', label: t.tables.serves, direction: 1, value: s => [s.place.kind === 'company' ? 0 : 1, s.place.name], cell: s => s.place.kind === 'company' ? t.people.wholeCompany : s.place.name },
     { key: 'machines', label: t.subs.columns.machine, direction: -1, value: s => s.kind === 'api_key' ? null : s.machines.length, cell: s => <MachinesCell sub={s} /> },
-    ...['five_hour', 'seven_day'].map(key => ({ key, label: windowName(t, key), direction: -1 as const, value: (s: SubView) => windowUsage(s, key, now), cell: (s: SubView) => <LimitCell sub={s} name={key} now={now} />, span: key === 'five_hour' ? apiLimits(t) : undefined })),
+    ...['five_hour', 'seven_day'].map(key => limitColumn(t, now, key)),
     { key: 'tokens', label: t.subs.tokensColumn, direction: -1, value: s => s.tokens?.month.total ?? null, cell: s => <TokensCell sub={s} /> },
     { key: 'agents', label: t.tables.agents, direction: -1, value: s => agentAmounts(s.agents ?? []), cell: s => <AgentsCell agents={s.agents ?? []} /> },
   ];

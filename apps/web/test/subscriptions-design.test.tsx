@@ -93,6 +93,24 @@ describe('the Type filter', () => {
   });
 });
 
+describe('the table of the section', () => {
+  it('sorts by every column, the API that used more tokens above the plan', async () => {
+    lists();
+    show();
+    await screen.findByRole('table');
+    const headers = screen.getAllByRole('columnheader');
+    for (const header of headers) {
+      fireEvent.click(within(header).getByRole('button'));
+      expect(header).toHaveAttribute('aria-sort', expect.stringMatching(/^(ascending|descending)$/));
+      expect(screen.getAllByRole('row').slice(1)).toHaveLength(2);
+    }
+    const tokens = screen.getByRole('columnheader', { name: /^Tokens, 30 days/ });
+    fireEvent.click(within(tokens).getByRole('button'));
+    if (tokens.getAttribute('aria-sort') !== 'descending') fireEvent.click(within(tokens).getByRole('button'));
+    expect(screen.getAllByRole('row')[1]).toHaveAccessibleName(/WXYZ/);
+  });
+});
+
 describe('the limits of an API', () => {
   it('say once across both limit columns that it pays as it goes, while a plan keeps a cell for each', async () => {
     lists();
