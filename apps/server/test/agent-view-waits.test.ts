@@ -97,6 +97,18 @@ describe('wait routes use real role and personal-card authority', () => {
     expect(await c.db.select().from(waitPolicies)).toEqual([]);
   });
 
+  it("lets a person who runs the task's department replan its wait though someone else decides it, and nobody else", async () => {
+    const c = await aclCompany(), { wait } = await waiting(c, 'owned');
+    await c.db.update(taskWaits).set({ finalDecisionPersonId: c.ids.ceo }).where(eq(taskWaits.id, wait.id));
+    const replan = (viewer: Viewer, generation: number) => c.app.inject({ method: 'POST', url: `/api/waits/${wait.id}/replan`,
+      payload: { expectedGeneration: generation, plan: plan(c), reason: 'I run this department.' }, ...as(c.tokens[viewer]) });
+    const refused = await replan('wes', 1);
+    expect([refused.statusCode, refused.json().error.reason]).toEqual([403, 'task_not_yours']);
+    const result = await replan('olga', 1);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().wait).toMatchObject({ id: wait.id, generation: 2 });
+  });
+
   it('lets a person who owns a visible wait replan it without department-owner powers', async () => {
     const c = await aclCompany(), { wait } = await waiting(c, 'mine');
     await c.db.update(taskWaits).set({ ownerAgentId: null, ownerPersonId: c.ids.ann }).where(eq(taskWaits.id, wait.id));

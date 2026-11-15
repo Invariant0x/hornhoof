@@ -94,7 +94,7 @@ type Agent = typeof agents.$inferSelect;
    from its branch, or it moves to a plan of the department that is online. */
 async function cannotRun(ctx: Pick<Ctx, 'db' | 'hub'>, me: Agent, target: Agent, reason: string | null): Promise<string> {
   const offline = reason === 'machine_offline' ? await offlineMachine(ctx, target.subscriptionId) : null;
-  if (!offline) return `${target.name} cannot run now. Tell your head, who tells the CEO.`;
+  if (!offline) return `${target.name} cannot run now. Tell your head: a person who runs the department gives ${target.name} a plan of the department that serves it, or the plan's owner signs it in.`;
   /* Which machine it is stays inside the department, as on the cards. */
   const machine = (await worksIn(ctx.db, me, target.departmentId)) ? `${offline.hostname}, the machine of its plan, is offline` : 'the machine of its plan is offline';
   return `${target.name} cannot run now: ${machine}. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move ${target.name} to a plan of the department that is online.`;
@@ -408,7 +408,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'tell_orchestrator',
       {
         description:
-          'Writes to the orchestrator, as you, into its window, which the CEO reads: what came of your work outside the tasks it gave you, such as a timer round, what you need decided, what blocks your department. ' +
+          'Writes to the orchestrator, as you, into its window, which the CEO reads: what came of your work outside the tasks it gave you, such as a timer round, what you need decided beyond your department, what blocks it. ' +
+          'Not for your department\'s own staff, units, products, tasks, approval and wait policies: what a person who runs it decides, you do yourself. ' +
           `It decides with the CEO or the employee concerned. One turn sends at most ${TURN_NUDGES} messages.`,
         inputSchema: { text: Text.trim().min(1) },
       },

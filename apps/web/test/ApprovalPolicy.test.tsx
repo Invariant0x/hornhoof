@@ -219,7 +219,7 @@ describe('the words', () => {
     expect(String((ru.dept.approvals as Record<string, unknown>).autonomousRelease)).toContain('Автономный выпуск');
   });
 
-  it('lets only the CEO toggle autonomous release on the commit channel and shows the company journal', async () => {
+  it('lets the people who run the department toggle its autonomous release, the CEO too, and shows its journal', async () => {
     const entry = {
       id: 'ar1',
       taskId: 't1',
@@ -257,21 +257,29 @@ describe('the words', () => {
     expect(screen.getByText(/42/)).toBeInTheDocument();
     unmount();
 
-    /* Department owner (not CEO) sees read-only status with no switch to toggle it. */
+    /* Dana runs the department without being the CEO: the switch is hers, and she turns it off herself. */
+    const hers = view({ owner: { id: 'p2', name: 'Dana' }, canChangePolicy: true, autonomousRelease: true, canSetAutonomousRelease: true } as Partial<ApprovalPolicyView>);
+    const owner = mockApi({
+      [POLICY]: [200, hers],
+      'PUT /api/departments/d1/approval-policy/autonomous-release': [200, { ...hers, autonomousRelease: false }],
+      'GET /api/autonomous-releases?department=d1': [200, { entries: [] }],
+    });
+    const second = render(<ApprovalPolicy departmentId="d1" />);
+    await screen.findByText(t.ownerIs('Dana'));
+    const own = screen.getByRole('switch', { name: /autonomous release/i });
+    expect(own).toBeChecked();
+    fireEvent.click(own);
+    await waitFor(() => expect(owner.find(c => c.method === 'PUT' && c.path.endsWith('/autonomous-release'))?.body).toEqual({ enabled: false }));
+    second.unmount();
+
+    /* Someone who sees the department but does not run it reads its state, with no switch. */
     mockApi({
-      [POLICY]: [
-        200,
-        view({
-          owner: { id: 'p2', name: 'Dana' },
-          canChangePolicy: true,
-          autonomousRelease: true,
-          canSetAutonomousRelease: false,
-        } as Partial<ApprovalPolicyView>),
-      ],
+      [POLICY]: [200, view({ owner: { id: 'p2', name: 'Dana' }, autonomousRelease: true, canSetAutonomousRelease: false } as Partial<ApprovalPolicyView>)],
       'GET /api/autonomous-releases?department=d1': [200, { entries: [] }],
     });
     render(<ApprovalPolicy departmentId="d1" />);
     await screen.findByText(t.ownerIs('Dana'));
     expect(screen.queryByRole('switch', { name: /autonomous release/i })).not.toBeInTheDocument();
+    expect(screen.getByText(t.autonomousReleaseState(true))).toBeInTheDocument();
   });
 });

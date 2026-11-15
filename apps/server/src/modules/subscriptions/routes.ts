@@ -3,6 +3,8 @@ import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { accessOf } from '../../auth/access.js';
+import { runsDepartment } from '../../auth/departments.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
@@ -200,6 +202,38 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   const ownsOrCompany = (me: Person, ownerId: string) => me.id === ownerId || me.scopeKind === 'company';
 
+  /* A key placed in a department, a product of it or a team in it is that department's: a person who runs it adds, changes
+     and removes it there as the CEO does, from their own screen and never through an agent. What serves the whole company
+     or the orchestrator stays with people who see the whole company, and so does every personal plan of someone else. */
+  async function runsPlace(me: Person, kind: string | null, id: string | null): Promise<boolean> {
+    if (me.via || !id) return false;
+    if (kind === 'department') return runsDepartment(db, me, id);
+    if (kind !== 'team') return false;
+    const [team] = await db.select({ departmentId: teams.departmentId }).from(teams).where(and(eq(teams.id, id), eq(teams.companyId, me.companyId)));
+    return team ? runsDepartment(db, me, team.departmentId) : false;
+  }
+  const mayPlace = async (me: Person, target: z.infer<typeof Target>) => me.scopeKind === 'company' || runsPlace(me, target.kind, 'id' in target ? target.id : null);
+  const mayKeep = async (me: Person, sub: { kind: string; targetKind: string | null; targetId: string | null }) =>
+    me.scopeKind === 'company' || (sub.kind === 'api_key' && (await runsPlace(me, sub.targetKind, sub.targetId)));
+  const notTheirPlace = () => new ApiError(403, 'forbidden', 'Only people who see the whole company, or who run the department it is for, place an API key there.', 'company_scope_only');
+
+  /* The top-level departments a person runs from their own screen, in the order of the map. */
+  async function placesRun(me: Person): Promise<string[]> {
+    const owns = me.via ? undefined : (await accessOf(db, me)).owns;
+    if (!owns?.size) return [];
+    const tops = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
+    return tops.map(d => d.id).filter(id => owns.has(id));
+  }
+
+  /* The API keys of the departments a person runs, beside their own plans. */
+  async function keptKeys(me: Person): Promise<Set<string>> {
+    if (me.via || !(await accessOf(db, me)).owns?.size) return new Set();
+    const keys = await db.select({ id: subscriptions.id, kind: subscriptions.kind, targetKind: subscriptions.targetKind, targetId: subscriptions.targetId }).from(subscriptions)
+      .where(and(eq(subscriptions.companyId, me.companyId), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt)));
+    const kept = await Promise.all(keys.map(async key => ((await mayKeep(me, key)) ? key.id : null)));
+    return new Set(kept.filter((id): id is string => id !== null));
+  }
+
   async function placeExists(target: z.infer<typeof Target>) {
     if (target.kind !== 'department' && target.kind !== 'team') return;
     const table = target.kind === 'department' ? departments : teams;
@@ -227,9 +261,14 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { zone } = TokensQuery.parse(req.query);
     const all = await subViews(db, online, undefined, me);
     const placed = await runningAgents(ctx, me);
-    const visible = me.scopeKind === 'company' ? all : all.filter(s => s.owner.id === me.id);
+    const kept = me.scopeKind === 'company' ? null : await keptKeys(me);
+    const visible = kept === null ? all : all.filter(s => s.owner.id === me.id || kept.has(s.id));
     const tokens = await tokensBySubscription(db, me.companyId, ctx.clock(), zone, visible.map(s => s.id));
-    return { subscriptions: visible.map(s => ({ ...s, agents: placed.filter(a => a.subscriptionId === s.id).map(a => a.view), tokens: periodsOf(tokens, s.id) })) };
+    return {
+      subscriptions: visible.map(s => ({ ...s, canChange: kept === null || kept.has(s.id), agents: placed.filter(a => a.subscriptionId === s.id).map(a => a.view), tokens: periodsOf(tokens, s.id) })),
+      /* Where this person connects an API key: anywhere (null), or only in the departments they run. */
+      apiPlaces: kept === null ? null : await placesRun(me),
+    };
   });
 
   /* What a subscription's turns used, for its owner and company scope. */
@@ -238,7 +277,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { zone } = TokensQuery.parse(req.query);
     const [sub] = await db.select({ id: subscriptions.id, ownerPersonId: subscriptions.ownerPersonId }).from(subscriptions).where(and(eq(subscriptions.id, IdParams.parse(req.params).id), eq(subscriptions.companyId, me.companyId)));
     if (!sub) throw unknown();
-    if (!ownsOrCompany(me, sub.ownerPersonId)) throw notOwner();
+    if (!ownsOrCompany(me, sub.ownerPersonId) && !(await keptKeys(me)).has(sub.id)) throw notOwner();
     const now = ctx.clock();
     return { tokens: periodsOf(await tokensBySubscription(db, me.companyId, now, zone, [sub.id]), sub.id), models: await tokensByModel(db, me.companyId, sub.id, now) };
   });
@@ -254,7 +293,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* An API's models with a key a person gives, before the connection is saved. */
   app.post('/api/subscriptions/models', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
+    if (me.scopeKind !== 'company' && (me.via || !(await accessOf(db, me)).owns?.size)) throw notTheirPlace();
     const body = ModelsBody.parse(req.body);
     return listedModels(ctx, body.provider, body, body.apiKey);
   });
@@ -262,17 +301,17 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* An API connection's models with its own key, which never goes back to the browser. */
   app.post('/api/subscriptions/:id/models', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
+    if (!(await mayKeep(me, sub))) throw notTheirPlace();
     if (sub.kind !== 'api_key' || !sub.secretEnc || !isApiProvider(sub.provider)) throw notApiKey();
     return listedModels(ctx, sub.provider, { baseUrl: sub.baseUrl, protocol: sub.apiProtocol }, decryptSecret(sub.secretEnc, config.secret));
   });
 
   app.post('/api/subscriptions', async (req, reply) => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const body = SubscriptionBody.parse(req.body);
     const { target } = body;
+    if (!(await mayPlace(me, target))) throw notTheirPlace();
     const endpoint = apiEndpoint(body.provider, body)!;
     if (body.provider === 'custom_api' && internalAddress(new URL(endpoint.baseUrl), config.apiInternalHosts)) throw internal();
 
@@ -378,11 +417,13 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.patch('/api/subscriptions/:id', async req => {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
-    if (!ownsOrCompany(me, sub.ownerPersonId)) throw notOwner();
+    const keeps = await mayKeep(me, sub);
+    if (!ownsOrCompany(me, sub.ownerPersonId) && !keeps) throw notOwner();
     const { budget, label, models, target } = SubscriptionPatch.parse(req.body);
     if (label !== undefined || models !== undefined || target !== undefined) {
-      requireCompanyScope(me);
+      if (!keeps) throw notTheirPlace();
       if (sub.kind !== 'api_key') throw notApiKey();
+      if (target && !(await mayPlace(me, target))) throw notTheirPlace();
     }
     if (target) await placeExists(target);
     const place = target ? { targetKind: target.kind, targetId: 'id' in target ? target.id : null } : {};
@@ -395,7 +436,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/subscriptions/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
-    if (!ownsOrCompany(me, sub.ownerPersonId)) throw notOwner();
+    if (!ownsOrCompany(me, sub.ownerPersonId) && !(await mayKeep(me, sub))) throw notOwner();
     await db.transaction(async tx => {
       await tx
         .update(subscriptions)

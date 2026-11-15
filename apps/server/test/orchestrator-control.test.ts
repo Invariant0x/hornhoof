@@ -625,7 +625,7 @@ describe('the orchestrator reads and changes the database itself', () => {
       ['DELETE FROM test_parts', /run_tests/],
       ['DELETE FROM harness_builds', /test_harness/],
       [`UPDATE harness_products SET told = 'quiet'`, /test_harness/],
-      [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only the CEO/],
+      [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only on its screen or with set_repository, on the word of the CEO or a person who runs it/],
       [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
       [`UPDATE agents SET node_id = NULL WHERE id = '${bruno.id}'`, /change_employee/],
       [`UPDATE agents SET name = 'Ivy' WHERE id = '${ava!.id}'`, /an assistant's own agent belongs to its owner/],

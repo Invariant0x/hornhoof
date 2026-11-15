@@ -154,6 +154,27 @@ for (const lang of ['en', 'ru'] as const) {
         expect(errors.filter(e => !/400/.test(e))).toEqual([]);
       });
 
+      test(`the person who runs the department, not the CEO, switches its autonomous release, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+        const t = MESSAGES[lang];
+        const { errors, puts } = await open(page, lang, theme, width, {
+          ...POLICY,
+          owner: { id: 'p2', name: 'Dana Abramovna Konstantinopolskaya' },
+          canSetOwner: false,
+          candidates: [],
+        });
+        const part = section(page, t);
+        const own = part.getByRole('switch', { name: t.dept.approvals.autonomousRelease, exact: true });
+        await expect(own).not.toBeChecked();
+        await expect(part.getByText(t.dept.approvals.autonomousReleaseHint)).toBeVisible();
+        await own.click();
+        await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/autonomous-release', body: { enabled: true } });
+        await expect(own).toBeChecked();
+        await expect(part.getByText('d7a1eb2b34edb970a2c5abbaadf25e50d4dc4031')).toBeVisible();
+        await fitsTheScreen(page, width);
+        await part.screenshot({ path: info.outputPath(`approvals-owner-${width}-${lang}-${theme}.png`) });
+        expect(errors).toEqual([]);
+      });
+
       test(`someone with access reads the rules and changes nothing, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
         const { errors } = await open(page, lang, theme, width, {

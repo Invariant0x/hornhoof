@@ -90,8 +90,8 @@ export const companies = pgTable('companies', {
      task-N or a version 0.N.0 never names two pieces of work. */
   taskNumbersUsed: integer('task_numbers_used').notNull().default(0),
   turnNumbersUsed: integer('turn_numbers_used').notNull().default(0),
-  /* Only the human CEO toggles this: when on, exact commits for main with a green full run, an independent PASS verdict and
-     a fast-forward path from main pass without a human approval card. */
+  /* Autonomous release as the whole company had it before each department got its own (departments.autonomous_release);
+     read by nothing now, kept until a later migration drops it. */
   autonomousRelease: boolean('autonomous_release').notNull().default(false),
   createdAt: createdAt(),
 });
@@ -303,6 +303,10 @@ export const departments = pgTable('departments', {
   /* The person the CEO named to take the department's approvals and set its policy; none means the CEO. Only the CEO sets it,
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
+  /* A top-level department's autonomous release, set only by a signed-in person who runs it, never an agent: when on, exact
+     commits for its main line with a green full run, an independent PASS verdict and a fast-forward path from main pass
+     without a human approval card. Its products and parts go by it. */
+  autonomousRelease: boolean('autonomous_release').notNull().default(false),
   createdAt: createdAt(),
 }, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 

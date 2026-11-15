@@ -8,18 +8,20 @@ type Setter<T> = Dispatch<SetStateAction<T>>;
 type Controls = {
   failure: unknown;
   subs: SubView[] | null; setSubs: Setter<SubView[] | null>; commands: ShownCommand[] | null;
+  /* Where this person connects an API key: anywhere (null), or only in these departments, which they run. */
+  apiPlaces: string[] | null;
   load: () => Promise<void>; connected: (shown: ActiveCommand, added: SubView[]) => void;
   newCommand: (sub: SubView) => Promise<void>; dismissCommand: (command: ShownCommand, id: string) => Promise<void>;
 };
 
 async function readPlans() {
   const [list, shown] = await Promise.all([
-    api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
+    api.get<{ subscriptions: SubView[]; apiPlaces?: string[] | null }>('/api/subscriptions'),
     api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').then(
       r => ({ commands: r.commands, error: null }), error => ({ commands: null, error }),
     ),
   ]);
-  return { subscriptions: list.subscriptions, ...shown };
+  return { subscriptions: list.subscriptions, apiPlaces: list.apiPlaces === undefined ? [] : list.apiPlaces, ...shown };
 }
 
 const mergePlans = (old: SubView[] | null, added: SubView[]) => [...(old ?? []).filter(s => !added.some(a => a.id === s.id)), ...added];
@@ -35,6 +37,7 @@ const dismiss = (all: ShownCommand[] | null, commandId: string, subId: string) =
 export function usePlanCommands(live: { current: boolean }, setFailure: Setter<unknown>): Controls {
   const [failure, setReadFailure] = useState<unknown>(null);
   const [subs, setSubs] = useState<SubView[] | null>(null);
+  const [apiPlaces, setApiPlaces] = useState<string[] | null>([]);
   const [commands, setCommands] = useState<ShownCommand[] | null>(null);
   const revision = useRef(0);
   const load = useCallback(async () => {
@@ -43,6 +46,7 @@ export function usePlanCommands(live: { current: boolean }, setFailure: Setter<u
       const next = await readPlans();
       if (!live.current || started !== revision.current) return;
       setSubs(next.subscriptions);
+      setApiPlaces(next.apiPlaces);
       setReadFailure(null);
       if (next.commands) setCommands(next.commands);
       if (next.error) setFailure(next.error);
@@ -70,5 +74,5 @@ export function usePlanCommands(live: { current: boolean }, setFailure: Setter<u
     revision.current++;
     setCommands(list => dismiss(list, command.id, id));
   };
-  return { subs, setSubs, commands, load, connected, newCommand, dismissCommand, failure };
+  return { subs, setSubs, apiPlaces, commands, load, connected, newCommand, dismissCommand, failure };
 }
