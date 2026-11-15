@@ -16,7 +16,7 @@
 - The newer CEO decision delegates coverage, complexity, duplication, full-suite and live pool checks to testers on the final turn candidate. Author acceptance uses failing tests before implementation and targeted remote affected tests. Earlier evidence remains unchanged.
 - Do not edit main.ts, runs.ts, refs.ts, schema.ts, index.ts or the journal. The node tests.ts lease is ours until an explicit checked release; 546 hooks follow it.
 - Canonical manifest ownership was transferred by 6d in task 588 at 10:33:16. Legacy finalChecks retain their post-suite meaning.
-- Commit as Ivan Korol <invariant0x@icloud.com>, no trailers or force. Main is untouched.
+- Commit as the repository's author, no trailers or force. Main is untouched.
 
 ## Review focus
 

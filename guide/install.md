@@ -121,6 +121,10 @@ It prints a one-time link that works for 7 days and sets a new password. The old
 
 ## How do I remove it?
 
-The README's [Remove it](../README.md#remove-it) says how to remove the server and what Hornhoof put on a connected computer.
+- **From a connected computer:** run `curl -fsSL <your Hornhoof address>/install.sh | bash -s -- --uninstall`. It lists this
+  company's nodes on that computer and removes them once you say yes, with the company's core there if it has one. Their
+  volumes, with the sign-ins and work files, are deleted only if you say yes again.
+- **The server:** run `docker compose down -v` in the `~/hornhoof` folder, or `~/hornhoof-<name>` for a named company,
+  and delete the folder. This deletes the company's data on this computer. Remove its other machines as above.
 
 [Back to the guide](README.md)

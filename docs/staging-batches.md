@@ -20,8 +20,8 @@ The implementation currently provides these internal components:
 
 The following runtime dependencies are absent and remain disabled:
 
-- The canonical current sealed/published submission authority from workspace A
-  (#456). Text phases and publication JSON are metadata, not its replacement.
+- The canonical current sealed/published submission authority. Text
+  phases and publication JSON are metadata, not its replacement.
 - The authenticated registered-operation entry for protected Git preparation and
   publication, exact full ref and expected commit, and server-selected affected
   test snapshot. Public `run_work`, free-form commands, and a moving branch do not

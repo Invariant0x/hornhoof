@@ -1,6 +1,6 @@
 # Personal agent features proposal
 
-This is the concrete proposal requested for item 6a. The task delegates this design decision to Tank. The deliverable is this design, including card placement and normal skill delivery; storage, API, UI and agent self-writing are future implementation. No decision from the task owner is pending. The live company and its cards stay unchanged.
+This is the concrete proposal requested for item 6a. The task delegates this design decision to one developer. The deliverable is this design, including card placement and normal skill delivery; storage, API, UI and agent self-writing are future implementation. No decision from the task owner is pending. The live company and its cards stay unchanged.
 
 ## Card and meaning
 

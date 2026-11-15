@@ -1,15 +1,18 @@
 # Network phase 1: the run on two real machines
 
-The run of plan 13's Task 16, on 14 November 2026 (all times UTC), on build `eb17b961` of the branch `network-1`,
-with images from the registry by their commit tag. It was stopped after step 3: the first three rows are as measured,
-the rest were not run on this build. The second part of this page hands what the run found to whoever fixes it.
+**All six findings of this early run were fixed and checked on a test stand before release 0.23.6.** The page keeps the
+run as it was measured on an early build; the places in the code it names are as they were then.
 
-Two computers at one home, both Macs with Docker Desktop: machine A, where the company was installed and which led
-first, and machine B, which joined by the command from Machines. The company was a throwaway one, installed by the
+The run of 14 November 2026 (all times UTC), on build `eb17b961` of the network branch, with images from the registry
+by their commit tag. It was stopped after step 3: the first three rows are as measured, the rest were not run on this
+build. The second part of this page lists what the run found.
+
+Two computers on one local network, both Macs with Docker Desktop: machine A, where the company was installed and which
+led first, and machine B, which joined by the command from Machines. The company was a throwaway one, installed by the
 branch's `install.sh server --name`, set up through the API, with a real link and a real certificate at hornhoof.org.
-Both computers carried nodes of other companies the whole time, which were not touched. A writer on each machine made
+Both computers also ran nodes of other companies the whole time, which were not touched. A writer on each machine made
 a task every 200 ms through the company's link, and a recorder on each wrote once a second what the machine's own
-door, its keeper and the link said. The router step was left out by agreement.
+door, its keeper and the link said. The router step was left out.
 
 ## What happened
 
@@ -39,17 +42,17 @@ try took about 10 s and ended with "The merge stopped: Failed query: commit".
 | 1. Power off the leader | yes | The question after 30 s. B led 11 s after the CEO's answer. The writer's gap was 94 s, 53 s of them the answer's delay. | The copy leads by itself in about 60 s | No: a question, not a takeover by itself. Nothing was lost. |
 | 2. The old leader back | yes | It followed in 3 s, was saved in 10 s, and its copy was ready 51 s after its start. | Its copy catches up or is remade, the server stays | Partly: remade, and the server stayed, but its merge never ends, so the new copy is never swapped in. |
 | 3. Move the server back | asked | Refused in 1 s, "not ready". | About 10 s | No. |
-| 4, 5, 6, 8, 9, 10, 11, 12 | not run on eb17b961 | | | They wait for the fixes below. |
-| 7. Router | not done | | | Left out by agreement. |
+| 4, 5, 6, 8, 9, 10, 11, 12 | not run on eb17b961 | | | Left for the build with the fixes below. |
+| 7. Router | not done | | | Left out. |
 
 Every task the company confirmed was there at the end: 4244 confirmed of 4332 sent, none missing in the leader's
 database, none missing in A's new copy. With B leading and the copy waited for over the direct path, a task through
 the link took 476 ms at the median and 621 ms at the 99th percentile.
 
-## For whoever fixes it
+## What the run found
 
-Each finding with what was seen, where to look, and a test that should show it. Directions are suggestions, not
-rulings.
+Each finding with what was seen, where it was in the code, the test it called for and the direction of its fix. All six
+are fixed, as the note at the top says.
 
 ### 1. The merge of a returned leader's database never commits
 
@@ -140,7 +143,7 @@ home range.
 
 ### 6. Several Hornhoof projects on one computer, several companies in one network of computers
 
-Ivan's requirement, not a wish: one computer may hold two, three or more Hornhoof projects (companies, nodes, test
+A requirement, not a wish: one computer may hold two, three or more Hornhoof projects (companies, nodes, test
 stands), and one network of computers may hold two, three or more companies. So:
 
 - The installer and the network keep their Docker subnets apart from each other and from the computer's own

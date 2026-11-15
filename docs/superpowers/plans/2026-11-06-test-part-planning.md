@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- Work on task-588 from turn-8@353a099a6b6a47477e47f2de7b88c9ab8bd85675; Ivan Korol <invariant0x@icloud.com>, no trailers, force or main.
+- Work on task-588 from turn-8@353a099a6b6a47477e47f2de7b88c9ab8bd85675; the repository's author, no trailers, force or main.
 - All author checks run remotely through run_tests on exact published SHA. No full suite or local heavy checks.
 - Do not change shared runs.ts, refs.ts, describe.ts, protocol or schema without the current owner's narrow handoff.
 - #535 and #378 take priority. Actual pool distribution is NOT_RUN until observed; unit plans are not runtime receipts.

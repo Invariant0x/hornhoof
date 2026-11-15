@@ -21,7 +21,7 @@ Progress after the interrupted turn:
 - UI increment aeda1de: 70 focused tests; 8 Playwright cases, EN/RU x light/dark x 1440/375, without page/console/request errors. Three manual web mutants killed: missing via attribution, missing source name, ignored coalesced event update.
 - Independent review found initial assignment provenance, blocked-report wording, reverse ordering and report delays holding the entire queue. Added regressions and fixed these findings. No critical findings or deferred minor findings.
 - Ruling: preserve the existing checkout and task branch, as the task requires. No new worktree or external approval is needed.
-- Ruling: department instructions override CONTRIBUTING's sign-off trailer, full-suite and Docker guidance. Commits use Ivan Korol without trailers; checks cover changed components on Linux.
+- Ruling: department instructions override CONTRIBUTING's sign-off trailer, full-suite and Docker guidance. Commits use the repository's author without trailers; checks cover changed components on Linux.
 - Ruling: only service reports/submissions wait up to 10 seconds. People and employee messages bypass this delay; an employee's identical copy flushes the grouped report immediately, including into a live turn.
 - Migration 0054 adds nullable pending_wakes.cause and an agent/time index for report matching. Old rows survive a twice-applied migration unchanged; the previous release can ignore the new column and index.
 - Formatter configuration is absent; reported to the head and did not install one. npm ci reported 16 moderate dependency advisories; dependency changes are outside this task.

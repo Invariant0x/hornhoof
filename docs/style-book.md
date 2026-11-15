@@ -2,7 +2,7 @@
 
 **Version 1.3, approved by the head of Design on 2026-11-13.** The head of Design owns this book (section 8).
 
-**Base.** `apps/web/src/theme.css` at commit `a354cc276d6f92792e4e602627d7300dfc04f251`, SHA256 `6efe8ccd9c9d420114e212c0cbf6c99d4a1ac97771b8ceebb00c1f8549a412ec`. Colours, type, sizes, components, fonts and languages were read at that commit (#655). Counts of sizes and weights in sections 2 and 3 were taken at `2fed0c54` and not recounted.
+**Base.** `apps/web/src/theme.css` at commit `a354cc276d6f92792e4e602627d7300dfc04f251`, SHA256 `6efe8ccd9c9d420114e212c0cbf6c99d4a1ac97771b8ceebb00c1f8549a412ec`. Colours, type, sizes, components, fonts and languages were read at that commit. Counts of sizes and weights in sections 2 and 3 were taken at `2fed0c54` and not recounted.
 
 **Themes.** The look of Hornhoof changes by theme. This book holds what stays the same in every theme. The token values below are those of the current theme, Cyberpunk. What a theme may change, the sheet of each theme and the checks are in `hornhoof-themes.md`: read it together with this book.
 
@@ -96,11 +96,11 @@ Lines against what they stand on. The limit of 3:1 is for controls; `--line` onl
 | `--cyan` | `--bg` | **2.51** | 10.97 |
 | `--cyan-ink` | `--surface` | 5.67 | 11.06 |
 
-**GAP.** Tokens with bold cells are used as text today. This table shows the token against each surface, not an audit of which pair appears on which screen. Do not use a bold pair for new small text. Example: `--pink` is the text of `.t-card-tag` at 12.5 px, 4.10 on `--surface` in the light theme. The text tokens of the light theme not in bold took the values the head of Design set on #777, so they hold 4.5:1 on every surface.
+**GAP.** Tokens with bold cells are used as text today. This table shows the token against each surface, not an audit of which pair appears on which screen. Do not use a bold pair for new small text. Example: `--pink` is the text of `.t-card-tag` at 12.5 px, 4.10 on `--surface` in the light theme. The text tokens of the light theme not in bold took the values the head of Design set, so they hold 4.5:1 on every surface.
 
-`--line2`, the border of controls, holds 3:1 on its surfaces in both themes, with the values the head of Design set on #777.
+`--line2`, the border of controls, holds 3:1 on its surfaces in both themes, with the values the head of Design set.
 
-Every focus ring in `theme.css` is drawn in `--cyan-ink`, the general `:focus-visible` among them, as #777 asks: it holds 3:1 on every surface where `--cyan` does not.
+Every focus ring in `theme.css` is drawn in `--cyan-ink`, the general `:focus-visible` among them, as the head of Design asked: it holds 3:1 on every surface where `--cyan` does not.
 
 **GAP.** 3 raw colours, in 5 uses, still sit outside the tokens in `theme.css`: `#15191F` in `.t-term` and `.t-load`, `#dcdcdc` in `.t-load` and `.t-load .spinner`, `#2b323b` in `.t-load .spinner`. `.dialog-back` uses `--scrim` and `.nav-count` uses `--on-pink` since 1.3. For the whole product, see `hornhoof-themes.md`, section 8.
 
@@ -159,7 +159,7 @@ Today a letter missing from Onest or Tektur falls through the token's list to `s
 
 **RULE.** Line heights are numbers without a unit, so taller scripts grow the line. Fonts are chosen by language or by `unicode-range`, never by a rule that looks at one screen.
 
-**PROPOSAL.** When a language needs a script Onest lacks: add one font family with the writing system's own `unicode-range` before `system-ui` in `--f-body` and `--f-display`, and check its licence. Noto families served this way in test prototypes under #493 only, not in the product. This needs a decision on font size and download weight per language.
+**PROPOSAL.** When a language needs a script Onest lacks: add one font family with the writing system's own `unicode-range` before `system-ui` in `--f-body` and `--f-display`, and check its licence. Noto families served this way in test prototypes only, not in the product. This needs a decision on font size and download weight per language.
 
 ## 3. Spacing and sizes
 
@@ -179,7 +179,7 @@ There are no spacing tokens. Uses per value in `margin`, `padding` and `gap` in 
 | Table cell | 12 px 14 px, header 10 px 14 px | `.ptable td`, `.ptable th` |
 | Sort table cell | 10 px | `.dt > tbody > tr > td` |
 | Common button gap | 8 px or 10 px | `.ac-actions`, `.settings-actions`, `.card .actions` |
-| Side panel `.acard`, drawer `.dv-drawer` | 400 px; at 760 px and under 16 px from each side, 343 px on a 375 px phone (measured by #469) | `.dv-drawer, .acard` |
+| Side panel `.acard`, drawer `.dv-drawer` | 400 px; at 760 px and under 16 px from each side, 343 px on a 375 px phone (measured in the screen inventory) | `.dv-drawer, .acard` |
 | Panels in the agent window | up to 400 px; at 760 px and under the full window | `.orch`, `.side-panel` |
 | Dialog width | up to 560 px | `.dialog` |
 | Card width | up to 440 px, wide 960 px | `.card` |
@@ -271,7 +271,7 @@ The focus of `.btn` is set in `theme.css:81`. It has not been checked on a pictu
 
 ### Records and their buttons
 
-The record of section 6 now stands in the notebook, people, requests, confirmations, the task panel and settings (#470). `.entries` and `.entry` exist only inside `.notebook`, and `.fit` only on the people table. These older groups still do the same job in different ways, as #469 records:
+The record of section 6 now stands in the notebook, people, requests, confirmations, the task panel and settings. `.entries` and `.entry` exist only inside `.notebook`, and `.fit` only on the people table. These older groups still do the same job in different ways, as the screen inventory records:
 
 | Class | Structure today | Source |
 |---|---|---|
@@ -288,16 +288,16 @@ New work follows section 6, with the classes named there.
 
 **RULE.** Draw a state only where it exists, and add no new confirmation steps. Show a confirmation only where the product already has one. Saving shows a visible sign that keeps the group's width, not `disabled` alone.
 
-Which states exist, from the check with Development recorded on #478. That check was on `3e372c98` plus unfinished work of #470, so it is neither a clean snapshot nor a live test:
+Which states exist, from a check with Development. That check was on `3e372c98` plus unfinished work on the records of section 6, so it is neither a clean snapshot nor a live test:
 
 | Place | States |
 |---|---|
 | Notebook | Normal, hover, focus, read error with retry, save error, empty and editing can be told apart. Loading and saving are being added there locally with `aria-busy` and a status |
 | People | Busy and error can be told apart |
 | Shared confirmations | Their own local state of the question |
-| Requests | Normal, hover and focus exist. Sending shows a `role="status"` line and `aria-busy`, with the buttons disabled; no spinner is needed there. A save error is an alert, and the draft stays. Read-only shows who decided. Loading and empty live in the parent panels. A read error is needed there, but it does not reach the person yet, by #512. There is no confirmation step |
+| Requests | Normal, hover and focus exist. Sending shows a `role="status"` line and `aria-busy`, with the buttons disabled; no spinner is needed there. A save error is an alert, and the draft stays. Read-only shows who decided. Loading and empty live in the parent panels. A read error is needed there, but it does not reach the person yet. There is no confirmation step |
 
-`Remove` in the notebook has no confirmation. Development decided on #478 that this is not a defect and that no confirmation will be added. `templates/skills/dsn-ui-rules.md` asks for one in general, so the case stands in the exceptions list of section 8.
+`Remove` in the notebook has no confirmation. Development decided that this is not a defect and that no confirmation will be added. `templates/skills/dsn-ui-rules.md` asks for one in general, so the case stands in the exceptions list of section 8.
 
 ### Materials of a question
 
@@ -333,9 +333,9 @@ Built with the classes `.mat*`, `.mv*`, `.opt*` and `.answer-zone`. What each fi
 4. Text wraps instead of being cut (section 6).
 5. No rule looks at one language. Words and the order of words may change, so no sentence is glued from pieces.
 
-**How to check.** Take the longest and the shortest of the languages really supported, by the method of #469 (`README-inventory.txt` on that task): import the real `LANGUAGES` registry and dictionaries, measure the shared static keys at 14 px Onest in Chromium after `fonts.ready`, sum the text widths and rank them. Recompute when the registry grows; the ranking is not a fixed rule. Add one right to left language when one exists. Until then right to left is NOT_AVAILABLE as a product language, and pseudo strings only test the rule. They are not translations.
+**How to check.** Take the longest and the shortest of the languages really supported, by the method of the screen inventory: import the real `LANGUAGES` registry and dictionaries, measure the shared static keys at 14 px Onest in Chromium after `fonts.ready`, sum the text widths and rank them. Recompute when the registry grows; the ranking is not a fixed rule. Add one right to left language when one exists. Until then right to left is NOT_AVAILABLE as a product language, and pseudo strings only test the rule. They are not translations.
 
-Result of #469 at `5c67fb00`, not recomputed here: 1124 shared keys, EN is the shortest and RU the longest. Some single panels go the other way, so both are captured.
+Result of the screen inventory at `5c67fb00`, not recomputed here: 1124 shared keys, EN is the shortest and RU the longest. Some single panels go the other way, so both are captured.
 
 **Known debt, counted on the base of this book:**
 
@@ -385,7 +385,7 @@ Not every physical side needs to change: `left: 0` on a full-width layer stays c
 | How a `.btn` with a cut corner shows focus | It drops the cut while it has focus, as `.t-access-row .btn` already does |
 | Class names | `.fit`, `.entries`, `.entry`, `.entry-main`, `.entry-meta`, `.entry-actions`, `.form-foot`, `.choice-list`, `.facts` |
 
-**GAP.** The product meets this section only in part. #470 is in the code at the base of this book. Of the 17 remarks of the verdict on #591, 16 are still in the code; the fixes wait in #593. Requests stand on the start edge against this section: `.req-actions.entry-actions` in `theme.css:1142`. `.entry-actions > :is(.act, .btn)` is set twice, `theme.css:736` and `theme.css:1141`. Tables other than people have no `.fit` and break words, remark M3.
+**GAP.** The product meets this section only in part. The records of section 6 are in the code at the base of this book. Of the 17 remarks of the panel review, 16 are still in the code and wait for their fixes. Requests stand on the start edge against this section: `.req-actions.entry-actions` in `theme.css:1142`. `.entry-actions > :is(.act, .btn)` is set twice, `theme.css:736` and `theme.css:1141`. Tables other than people have no `.fit` and break words, remark M3.
 
 ## 7. Site and marketing
 
@@ -430,10 +430,10 @@ Real sources in the repository:
 
 | Place | Rule | Reason | Owner | Until |
 |---|---|---|---|---|
-| `Remove` in the notebook, `ui/Notebook.tsx` | Destructive actions ask for confirmation, `templates/skills/dsn-ui-rules.md` | Development decided on #478 that it is not a defect | Development | Reviewed by 2027-02-05 |
-| Compact labels of the map, the ticker and `.chip` | No ellipsis on text, section 6 | Existing compact labels with their own ellipsis, as #469 records; panel text gets no such right | Development | Reviewed by 2027-02-05 |
+| `Remove` in the notebook, `ui/Notebook.tsx` | Destructive actions ask for confirmation, `templates/skills/dsn-ui-rules.md` | Development decided that it is not a defect | Development | Reviewed by 2027-02-05 |
+| Compact labels of the map, the ticker and `.chip` | No ellipsis on text, section 6 | Existing compact labels with their own ellipsis, as the screen inventory records; panel text gets no such right | Development | Reviewed by 2027-02-05 |
 | Close button of a panel | Touch target of 44 px, section 3 | The panel bar is 38 px; a change of the bar is its own work | Design | Reviewed by 2027-02-05 |
-| Name in the terminal bar: cut with an ellipsis in Russian at 375 px | No ellipsis on text, section 6 | The terminal bar keeps its own rule, #335 | Development | Reviewed by 2027-02-05 |
+| Name in the terminal bar: cut with an ellipsis in Russian at 375 px | No ellipsis on text, section 6 | The terminal bar keeps its own rule of fitting its window | Development | Reviewed by 2027-02-05 |
 
 ### Change list
 
@@ -441,8 +441,8 @@ Real sources in the repository:
 |---|---|---|---|
 | 1.0 | 2026-11-05 | First version: built from the code, numbers of section 6 after the CEO's choice, rules 11 to 13, section 9 | Head of Design |
 | 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |
-| 1.2 | 2026-11-07 | Base moved to `a354cc27` (#655). Themes and modes told apart. GAPs and counts updated. Rules 14 and 15 of section 6, from the verdict on #591. One exception added. Reading before work extended to giving out tasks | Head of Design |
-| 1.3 | 2026-11-13 | Tokens of skin file version 2: `--on-pink`, `--scrim`, `--scrollbar-thumb`, `--scrollbar-track` and `--cut-k`, with their contrast. Raw colours of `.dialog-back` and `.nav-count` removed from the GAP (#789) | Head of Design |
+| 1.2 | 2026-11-07 | Base moved to `a354cc27`. Themes and modes told apart. GAPs and counts updated. Rules 14 and 15 of section 6, from the panel review. One exception added. Reading before work extended to giving out tasks | Head of Design |
+| 1.3 | 2026-11-13 | Tokens of skin file version 2: `--on-pink`, `--scrim`, `--scrollbar-thumb`, `--scrollbar-track` and `--cut-k`, with their contrast. Raw colours of `.dialog-back` and `.nav-count` removed from the GAP | Head of Design |
 
 ## 9. Browsers
 

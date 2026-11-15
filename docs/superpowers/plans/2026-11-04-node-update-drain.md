@@ -56,7 +56,7 @@ Files: updates/routes.ts and control.ts, node update command, scripts/install.sh
 - API agreed in #299: MachineDrain waiting/postponed/restarting; confirmTurns with turns_would_stop; AgentState.machineDrain next to limitUntil, with ready staying true.
 - No SQL tool is exposed to this developer. Requested an aggregate-only SELECT through the head in #299.
 - npm ci completed with exit 0. npm reported 15 moderate vulnerabilities; dependency updates are outside this task.
-- Taken over from 07296884 on 2026-11-04 after its model outage; its shell work was never pushed and was redone here.
+- Taken over from another developer on 2026-11-04 after its model outage; its shell work was never pushed and was redone here.
 - Replaced waiting before the install with app first, nodes after, for every release. The order the head agreed for the first release then needs no branch of its own: an updater from before starts the app alone, and the updater it starts replaces the nodes. A failed update touches no node, so going back cuts no turn.
 - Measured turn lengths (7 days, done, n=1710): p50 34 s, p90 887 s, p95 1674 s, p99 5438 s, max 11798 s. Wait 90 minutes, retry 15 minutes.
 - Why these: 90 minutes (5400 s) stands just under the p99 of turns that ended well (5438 s), and a turn that started before the wait has already run part of its length. 15 minutes (900 s) stands just over their p90 (887 s), so most of the work the node took back while postponed ends before it holds again.

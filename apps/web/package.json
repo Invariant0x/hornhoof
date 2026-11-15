@@ -1,5 +1,13 @@
 {
   "name": "@hornhoof/web",
+  "description": "The Hornhoof web app: the company map, departments, tasks and agent windows in the browser.",
+  "license": "MIT",
+  "author": "Ivan Korol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/invariant0x/hornhoof.git",
+    "directory": "apps/web"
+  },
   "version": "0.23.6",
   "private": true,
   "type": "module",

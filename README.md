@@ -55,7 +55,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 | --- | :---: | :---: |
 | Your plans and your friends' plans work on one job at the same time | ❌ | ✅ |
 | Work goes on when a plan hits its limit | ❌ | ✅ |
-| Every change is reviewed by AI of other makers, then security, then tests | ❌ | ✅ |
+| Every change is reviewed by another agent, preferably of another maker, then tested, and checked for security where it matters | ❌ | ✅ |
 | One map shows every agent, what it does now and who stands idle | ❌ | ✅ |
 | Spare computers take the full test runs | ❌ | ✅ |
 | The company keeps running when one of your computers stops | ❌ | ✅ |
@@ -98,7 +98,7 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 *Everyone brings what they have. The company uses all of it.*
 
 - **Plans add up.** Each person connects their own plans on their own computer. All of them work on the same goal at once, and when one runs out, its task goes to the same role on another plan.
-- **Computers add up.** Laptops, a Mac mini and an old server become one pool. The full test run splits across the freest machines. If the computer with the server turns off, the next one takes over within a minute, at the same link.
+- **Computers add up.** Laptops, a Mac mini and an old server become one pool. The full test run splits across the freest machines. If the computer with the server turns off, a machine with a full copy of the data takes over within a minute, at the same link.
 - **Everyone sees their part.** Each person gets the departments they work in, and inside them the agents on their own plans. Someone who runs several departments sits next to the CEO as a deputy.
 - **Sign-ins stay with their owners.** Your plan's sign-in is sealed to your own machines. Nobody else can read it, the CEO included.
 - **Real departments from day one.** Development, design, marketing, sales, support, finance. Nine company templates, each department with a head and employees who know their job.
@@ -120,7 +120,7 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 *Your home is a company too.*
 
 - **Every device, watched.** One agent looks after the Wi-Fi and the router, another keeps the smart devices updated and tuned, and the department always knows the state of every device.
-- **No junk on your devices.** Apps, extensions and settings that should not be there get found, and you get a list of what to remove.
+- **Strangers on your network.** A device nobody recognises on the Wi-Fi gets found, and you decide what to do about it.
 - **The household runs itself.** One agent keeps the shopping list and supplies and drafts the orders, one tracks bills and subscriptions, one keeps the family calendar and chores.
 - **Nothing happens behind your back.** Anything that changes a real device, buys something or pays for it waits for a person to say yes.
 - **Runs on what you have.** An old laptop or a home server carries the work.
@@ -167,7 +167,7 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 | --- | :---: | :---: | :---: |
 | Agents of different makers work on one job at the same time | ❌ | ⚠️ side by side, you coordinate | ✅ |
 | A main agent splits the work and hands it out | ❌ | ⚠️ some | ✅ |
-| Each change reviewed by the other makers at once, then security, then tests | ❌ | ❌ | ✅ |
+| Each change reviewed by another agent, preferably of another maker, then tested, and checked for security where it matters | ❌ | ❌ | ✅ |
 | Work goes on when a plan hits its limit | ❌ | ❌ | ✅ |
 | The full test run splits across your free computers | ❌ | ❌ | ✅ |
 | Keeps running when the server's computer turns off | ❌ | ❌ | ✅ |
@@ -183,13 +183,14 @@ Hornhoof is developed inside Hornhoof. Its own company of agents on Claude, Chat
 
 I built Hornhoof for myself, to make working with AI convenient: several plans, several computers and far too many terminal tabs, working as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in the templates, 54 roles and over 150 skills that every company starts with.
 
-Let's join forces and make it the best way to run AI agents: the fastest, the most reliable, safe, and fully yours. The code is open under MIT, and Hornhoof's own company puts what you add to work right away. Try it and tell me what broke, bring the practices that work for you, write templates for departments and roles, translate the screens, or pick an issue marked "good first issue".
+Let's join forces and make it the best way to run AI agents: the fastest, the most reliable, safe, and fully yours. The code is open under MIT, and Hornhoof's own company puts what you add to work right away. Try it and tell me what broke, bring the practices that work for you, write templates for departments and roles, translate the screens, or pick an open issue.
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct](CODE_OF_CONDUCT.md), and report security problems privately, as [SECURITY.md](SECURITY.md) says.
 
 ## Good to know
 
 - **Each agent is a real program on your machine.** More agents need more memory. Spare computers help.
+- **Themes.** Pick one of four looks, Cyberpunk, Light, Matrix or Pixel, in the account menu or in Settings, or load a theme file of your own.
 - **Hornhoof is young.** It works and changes fast. Expect rough edges, and tell me about them.
 
 ## Your company stays yours
@@ -212,7 +213,6 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 | Phones and tablets as workers | One Android app turns a phone or tablet on a charger into a full machine of the company: agents, tests and checks on a real device |
 | Checkpoints for every department | Marketing, content and sales get stages and checks between them, the way development has them |
 | Schemes to share | Save a department or the whole company with its agents and skills as one file, load someone else's in a click, and its agents start working |
-| Styles for the interface | Pick the look you like in Settings |
 
 Want to add something? [Write to us](https://github.com/Invariant0x/hornhoof/issues) and let's build it.
 

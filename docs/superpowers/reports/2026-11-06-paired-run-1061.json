@@ -4,7 +4,7 @@
   "part": 1,
   "nativeOutcome": "passed",
   "exitCode": 0,
-  "machineLabel": "0x.local",
+  "machineLabel": "machine A",
   "notHomeApi": true,
   "harnessSha": "746fec3a3901b7c468b657c4be98e09cdcda217d",
   "controlSha": "6d0c79b0ced4ab2fc4f771a46479680664d6b663",

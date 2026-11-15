@@ -26,7 +26,7 @@
 - Missing operator/plan or a stuck operator escalates immediately. Pre-work deadline ends that job once with agent_failed; working turns remain running. Escalated recovery holds automatic continuation until safe owner recovery.
 - Source program_operator follows #242 metadata. Read operator role from persisted data; do not import part B's subscription module.
 - Structural generated migrations only, no company data/access grants. Coordinate migration order after #242/#241.
-- English code/comments/commits, no em dashes; EN/RU human text where shown. Commit as Ivan Korol without trailers. Only focused tests, Linux, no Docker or release workflow; submit then merge turn-7, never main.
+- English code/comments/commits, no em dashes; EN/RU human text where shown. Commit as the repository's author without trailers. Only focused tests, Linux, no Docker or release workflow; submit then merge turn-7, never main.
 
 ## Review Focus
 

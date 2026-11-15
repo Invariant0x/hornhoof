@@ -338,7 +338,7 @@ Content-Type: application/json
 {"text":"New events wait for you in Hornhoof after number 40. Read them with the Hornhoof tool read_events, with after 40, and tell your owner what they need to know.","mode":"now"}
 ```
 
-* The events address is the gateway's address and `/hooks/wake`, for example `http://192.168.1.5:18789/hooks/wake`, and the signing secret is the hook's token (`hooks.token`).
+* The events address is the gateway's address and `/hooks/wake`, for example `http://192.0.2.10:18789/hooks/wake`, and the signing secret is the hook's token (`hooks.token`).
 * OpenClaw puts the text into the agent's main session and runs it as soon as the session is free ([webhooks](https://docs.openclaw.ai/automation/cron-jobs/webhooks), [hooks settings](https://docs.openclaw.ai/gateway/config-hooks)).
 
 Hermes Agent, at its webhook route:
@@ -353,14 +353,14 @@ X-Request-ID: hornhoof-<assistant id>-40
 {"type":"wake","after":40}
 ```
 
-* The events address is the webhook's address and the route, for example `http://192.168.1.5:8644/webhooks/hornhoof`.
+* The events address is the webhook's address and the route, for example `http://192.0.2.10:8644/webhooks/hornhoof`.
 * `X-Webhook-Signature-V2` is Hermes' generic V2 signature: the HMAC-SHA256 of the timestamp, a dot and the exact body, under the signing secret as a UTF-8 string, in lowercase hex. The timestamp is in whole seconds, and Hermes takes it within 5 minutes of its own clock.
 * `X-Request-ID` is the same on every try of one wake, so Hermes runs it once.
 * The route's `prompt` puts the number in place of `{after}` and runs it as a new turn; its answer goes where the route's `deliver` says ([webhooks](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks)).
 
 ## Connecting OpenClaw
 
-1. In People, add the assistant for its owner and choose the program OpenClaw. For wakes, give the events address: the address at which Hornhoof reaches OpenClaw's gateway, then `:18789/hooks/wake`, for example `http://192.168.1.5:18789/hooks/wake`. The gateway listens only on its own computer unless `gateway.bind` says otherwise, so Hornhoof reaches it over a private network or through a reverse proxy with HTTPS. Without an events address, OpenClaw still has the tools, but nobody wakes it.
+1. In People, add the assistant for its owner and choose the program OpenClaw. For wakes, give the events address: the address at which Hornhoof reaches OpenClaw's gateway, then `:18789/hooks/wake`, for example `http://192.0.2.10:18789/hooks/wake`. The gateway listens only on its own computer unless `gateway.bind` says otherwise, so Hornhoof reaches it over a private network or through a reverse proxy with HTTPS. Without an events address, OpenClaw still has the tools, but nobody wakes it.
 2. On the assistant's card, make the key. The window shows "Settings for OpenClaw". Copy them.
 3. Put them into `~/.openclaw/openclaw.json` on the computer where OpenClaw runs, next to what is there: the `hornhoof` server under `mcp.servers`, and the `hooks` block. OpenClaw takes both without a restart.
 4. Ask OpenClaw, for example in Telegram, who you are in Hornhoof. It answers with `who_am_i`.
@@ -389,7 +389,7 @@ The `hooks` block is there only when the card has an events address. OpenClaw's 
 
 ## Connecting Hermes Agent
 
-1. In People, add the assistant for its owner and choose the program Hermes Agent. For wakes, give the events address: the address at which Hornhoof reaches the computer Hermes runs on, then `:8644/webhooks/hornhoof`, for example `http://192.168.1.5:8644/webhooks/hornhoof`. Without an events address, Hermes still has the tools, but nobody wakes it.
+1. In People, add the assistant for its owner and choose the program Hermes Agent. For wakes, give the events address: the address at which Hornhoof reaches the computer Hermes runs on, then `:8644/webhooks/hornhoof`, for example `http://192.0.2.10:8644/webhooks/hornhoof`. Without an events address, Hermes still has the tools, but nobody wakes it.
 2. On the assistant's card, make the key. The window shows "Settings for Hermes Agent". Copy them.
 3. Put them into `~/.hermes/config.yaml` on the computer where Hermes runs, next to what is there: the `hornhoof` server under `mcp_servers`, and the `hornhoof` route of the webhook under `platforms`. Where the file has `platforms` already, `webhook` goes under it. Then start Hermes' gateway again, so it reads them.
 4. The answer to a wake goes to the home chat of Hermes in Telegram (`deliver: telegram`), and with `mirror_to_session` into that chat's conversation too, so the owner answers it there. For another chat, set `deliver_extra` with its `chat_id`, or another program in `deliver`.

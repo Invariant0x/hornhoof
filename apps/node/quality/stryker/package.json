@@ -1,5 +1,7 @@
 {
   "name": "hornhoof-quality-pilot",
+  "description": "A pilot of mutation tests for the Hornhoof node with Stryker and Vitest, kept apart from the application's dependencies.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {

@@ -60,7 +60,7 @@ Run the same two files. Expected: all selected tests pass.
 
 - [ ] **Step 5: Commit and push**
 
-Commit with Ivan Korol as author and no trailers.
+Commit as the repository's author and no trailers.
 
 ### Task 2: Server and Web Visibility
 

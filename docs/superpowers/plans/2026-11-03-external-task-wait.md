@@ -17,7 +17,7 @@
 - externalWait?: { reason: string; since: string; until: string } | null; dates are canonical ISO strings.
 - English code, comments and commits. EN/RU UI, light/dark, phone layout. No em dashes; Russian uses е.
 - TDD; only changed-area tests and package type checks. New functions CRAP <10, existing CC does not grow against main. Mutate changed source lines; dryer threshold 0.8.
-- Ivan Korol <invariant0x@icloud.com>, no trailers. Submit before integrating fresh turn-5, submit again after integration.
+- The repository's author, no trailers. Submit before integrating fresh turn-5, submit again after integration.
 
 ## Review Focus
 

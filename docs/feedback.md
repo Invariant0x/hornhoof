@@ -42,11 +42,11 @@ The server of an installation, never the browser, sends `POST {RELAY_URL}/api/v1
 `RELAY_URL` is `https://hornhoof.org` unless set.
 
 **What the relay has to do.** This repository has no code of the relay (`relay.py` of hornhoof.org); its owners update
-it with a release. Hornhoof's own installation is at `https://hornhoof-team.hornhoof.org`, and its `.env` has
+it with a release. It knows the address of Hornhoof's own installation, `{INBOX}` below, whose `.env` has
 `FEEDBACK_INBOX=true`. The contract:
 
 1. The relay takes `POST {RELAY_URL}/api/v1/feedback` with `Content-Type: application/json`.
-2. It sends `POST https://hornhoof-team.hornhoof.org/api/feedback/inbound` with the body byte for byte as it came,
+2. It sends `POST {INBOX}/api/feedback/inbound` with the body byte for byte as it came,
    `Content-Type: application/json` and no `Origin` header. It adds nothing to the body and takes nothing out.
 3. It gives the installation back the inbox's status and body as they are, with the inbox's `Retry-After` header when
    there is one: 202, 400, 413 or 429.
@@ -96,7 +96,7 @@ number, whatever else the answer says.
 tells repeats by (`fingerprintOfReport` in `inbox.ts`), no new card opens: the sent one counts one more round. Its card
 then offers "Report repeats (N)". A person's press sends the same report word for word with `"repeats": N`, and the inbox
 adds that many signals to the card from this installation; the answer brings the issue, if there is one now. Repeats only
-ever go on a person's press (the CEO's decision on #779): counting one sends nothing. A finding found again after its fix
+ever go on a person's press: counting one sends nothing. A finding found again after its fix
 is a new one.
 
 **Fixed.** `apps/server/src/modules/feedback/released.ts` lists what releases say about reports: its number, its issue and

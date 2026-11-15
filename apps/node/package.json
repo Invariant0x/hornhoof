@@ -1,5 +1,13 @@
 {
   "name": "@hornhoof/node",
+  "description": "The Hornhoof node: runs a company's agents and checks on one machine and keeps it connected to the server.",
+  "license": "MIT",
+  "author": "Ivan Korol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/invariant0x/hornhoof.git",
+    "directory": "apps/node"
+  },
   "version": "0.23.6",
   "private": true,
   "type": "module",

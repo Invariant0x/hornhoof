@@ -119,15 +119,22 @@ The command's code never reaches an agent, its terminal or its conversation. A c
 
 A plan at its usage limit holds its agents' turns until the limit starts over, and their tasks go on after it. An agent's turn is one round of its work: [Tasks and turns](tasks-and-turns.md#what-is-a-turn) explains it.
 
-- A task an employee on that plan was doing goes instead to another employee of the same role in the department. That employee must be switched on and work on a plan of another provider that is not at its limit. The task gets one note about the move.
-- Heads and the orchestrator wait for the reset.
+When an employee's turn on a task ends without moving the task while the employee's plan is at its limit, the task can go to another employee. It goes only when all of this holds:
 
-Hornhoof learns about the limit from the plan's own figures, or from the error its program prints, like Kimi's 429 or Codex's "hit your usage limit". A program that names no time is tried again every quarter of an hour.
+- The task was given to this employee, is open or in work, goes through stages and is still at Architecture or Development, with nothing handed in for checking yet.
+- None of the employee's turns on the task did any work: each one that started, the plan refused for its limit within three minutes. What a turn did lives in the employee's folder on its machine and may not be pushed, so work that was begun stays with the employee.
+- The employee is not in a sub-unit.
+- The other employee has the same role in the same department, is switched on, is not in a sub-unit, works on a plan of another provider, and works for the task's product or for no product.
+- The other employee's turn would go out now: signed in, on a machine that is on and not winding down for an update, with its plan neither at its limit nor past its "Tasks may use" share.
+
+Of those who fit, the one hired first takes the task. The task gets one note: whose plan is at its limit until when, who takes the work over, and on which plan. Otherwise the employee goes on with the task once the limit starts over. Heads and the orchestrator always keep their work and wait for the reset.
+
+Hornhoof learns about the limit from the plan's own figures, or from the error its program prints, like Kimi's 429 or Codex's "hit your usage limit". When the program names no time, Hornhoof waits for the reset the plan's own figures named, if that is still ahead, and otherwise tries again after a quarter of an hour.
 
 ## Keep part of a plan for yourself
 
 Next to each plan's limits, "Tasks may use" sets the share of every limit window that task turns may spend: from 50 to 90 percent, or the whole limit.
 
-Past that share, task turns wait for that window to start over. Messages from people still go.
+Past that share, an employee's task turns wait for that window to start over. Its turns outside tasks, like answers to people, still go. The share holds back only employees: heads and the orchestrator go on coordinating above it.
 
 [Back to the guide](README.md)
