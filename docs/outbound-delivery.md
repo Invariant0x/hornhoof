@@ -1,7 +1,7 @@
 # How outbound messages leave
 
 The dispatcher is the only thing that sends. It runs on the server's own minute, whatever any agent does, and reads an account's
-settings itself. No tool, view, job, log or model ever gets them. Design: task #403, sections 8 and 9.
+settings itself. No tool, view, job, log or model ever gets them.
 
 ## Sending accounts
 

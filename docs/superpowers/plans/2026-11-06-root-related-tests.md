@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Branch task-565 from fresh turn-8, author Ivan Korol, no trailers/force/main.
+- Branch task-565 from fresh turn-8, the repository's author, no trailers/force/main.
 - All author checks through targeted run_tests on the platform-selected Linux machine, no local heavy checks or full suite.
 - No integration into280/222;566 owns selector/fallback/language adapters/replay10.
 - No assertion, deadline or test removal. Compare complete file inventories without executing the whole suite; final executed test totals remain the turn's T3 responsibility.

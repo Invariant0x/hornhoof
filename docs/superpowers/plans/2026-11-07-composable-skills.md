@@ -12,7 +12,7 @@ This plan records the implementation units. The current task body controls execu
 
 ## Global Constraints
 
-- Branch task-707-lego starts on released main f2bf36658b7e7b67f7f13fffff3bcb022f66fdb3 (0.8.1), outside planned turns. David owns final integration and release. Do not change live cards/models.
+- Branch task-707-lego starts on released main f2bf36658b7e7b67f7f13fffff3bcb022f66fdb3 (0.8.1), outside planned turns. The release owner owns final integration and release. Do not change live cards/models.
 - Personal features 6a: the implementer chooses the concrete proposal as the requested deliverable. No new storage/API/UI/self-write implementation is included and no scope question is pending.
 - English template bodies, bilingual metadata, no em dashes; preserve sources and tool grants.
 - Independent Security before shared merge for sensitive access/root/permissions/secrets remains mandatory.
@@ -69,7 +69,7 @@ This plan records the implementation units. The current task body controls execu
 
 - [ ] Add RED tests for version/notes/live-node/exact-approval/merge/publication conditions and for absence of fixed downstream role handoffs.
 - [ ] Implement the release ability and migrate selections if an ID changes; run GREEN remotely and read logs.
-- [ ] Prepare Morpheus/Neo/Trinity/Tank/Switch skill sets and assignment text with provenance and no live card/model changes.
+- [ ] Prepare the five developers' skill sets and assignment text with provenance and no live card/model changes.
 - [ ] Record the concrete 6a proposal, including card placement, permissions, self-append and normal SkillFile delivery, with future implementation stated explicitly.
 - [ ] Integrate the preserved work with released main, run affected checks on the final exact candidate and report counts, migration behavior and evidence.
 - [ ] Obtain an independent subagent review at maximum effort, resolve blockers and submit the branch/SHA and current RED/GREEN evidence through the normal task route. No main merge or release by the implementer.

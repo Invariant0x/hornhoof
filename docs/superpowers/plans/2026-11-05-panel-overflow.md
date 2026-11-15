@@ -17,7 +17,7 @@
 - Preserve #369 panel alignment, #335 terminal fit, #411 rendering performance and #398 access control.
 - Real supported locales only, currently EN and RU; synthetic expansion is separate and missing RTL is not a pass.
 - Only focused tests, package types, `typecheck:tests`, lint, crapper and dryer. No root `npm test`, `run_tests` or mutator.
-- Work on `task-470`, commit as Ivan Korol without trailers, merge to `turn-8` without force, never change main.
+- Work on `task-470`, commit as the repository's author without trailers, merge to `turn-8` without force, never change main.
 
 ## Review Focus
 

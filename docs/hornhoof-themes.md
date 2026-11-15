@@ -1,6 +1,6 @@
 # Hornhoof themes
 
-**Version 1.0, approved by the head of Design on 2026-11-07.** Built from the facts of the code (#655) and proved by a swap to another theme (#656). Only the head of Design approves a change; the version grows as in style book section 8.
+**Version 1.0, approved by the head of Design on 2026-11-07.** Built from the facts of the code and proved by a swap to another theme on a prototype. Only the head of Design approves a change; the version grows as in style book section 8.
 
 The CEO decided that the look of Hornhoof changes by theme. Today's theme is Cyberpunk. Others will follow, for example Matrix. This one file holds everything about themes: what a theme is, the sheet every theme fills in, the current theme, an example, the checks, and what stands in the way today.
 
@@ -8,9 +8,9 @@ The CEO decided that the look of Hornhoof changes by theme. Today's theme is Cyb
 
 | What | Source | State |
 |---|---|---|
-| Colours, type, shape, motion, TSX, SVG, terminal, how the mode is stored | Code at `a354cc276d6f92792e4e602627d7300dfc04f251`, branch `turn-8`, read in #655 | Read, not run. By the orchestrator, the top of the branch differs only in 2 test files |
-| Screens | 6 screens of inventory #469 at `5c67fb00`, 41 snapshots of #591 at `a60131fb` | Chromium only. Older than the code above |
-| Swap proof | Matrix on the prototype of the etalon, #656 | Panels only, Chromium only. See section 5 |
+| Colours, type, shape, motion, TSX, SVG, terminal, how the mode is stored | Code at `a354cc276d6f92792e4e602627d7300dfc04f251`, read for this file | Read, not run. The top of its branch differed only in 2 test files |
+| Screens | 6 screens of the screen inventory at `5c67fb00`, 41 snapshots of the panel review at `a60131fb` | Chromium only. Older than the code above |
+| Swap proof | Matrix on the prototype of the etalon | Panels only, Chromium only. See section 5 |
 | What stays the same in every theme | `hornhoof-style-book.md`, version 1.2 | Read with this file |
 
 Marks as in the style book: **RULE**, **PROPOSAL**, **GAP**, **NOT_AVAILABLE**. Everything else is a fact read from the sources above.
@@ -36,7 +36,7 @@ Marks as in the style book: **RULE**, **PROPOSAL**, **GAP**, **NOT_AVAILABLE**. 
 | Corner cuts and radii | Wrapping, order of buttons, the end edge (style book section 6) |
 | Grid, halo, glass, corner mark | Labels, languages and their rules (style book section 5) |
 | Speed and kind of motion | Respect for reduced motion, visible focus |
-| Palette of the terminal | How the terminal fits its window (#335) |
+| Palette of the terminal | How the terminal fits its window |
 | Colours of the mark | Shape of the mark (style book section 7) |
 | An extra decor layer | Readability: decor never runs behind text a person is reading |
 
@@ -51,7 +51,7 @@ Marks as in the style book: **RULE**, **PROPOSAL**, **GAP**, **NOT_AVAILABLE**. 
 1. It lives only on the background of the map, under the grid, lines and frames. Never under a panel, card, dialog, table, terminal or glass.
 2. With the layer at its brightest, map lines keep 3:1 and text on glass keeps 4.5:1.
 3. Under reduced motion it is off and hidden. It does not slow down, and it leaves no frozen picture.
-4. It uses nothing while the tab is hidden or a window covers the map (#335, #411).
+4. It uses nothing while the tab is hidden or a window covers the map.
 5. It is hidden from screen readers and takes no clicks, wheel or focus.
 6. It draws open technical characters only, in the theme's mono font.
 7. A person can turn it off without changing the theme.
@@ -249,7 +249,7 @@ mark:
 
 **RULE.** The general look only. No film stills, logos, character names, quotes or mirrored film glyphs. The name people see is decided before release; `matrix` is a working id.
 
-What the proof showed, on the prototype of the etalon, `#656`:
+What the proof showed, on the prototype of the etalon:
 
 | Asked | Result |
 |---|---|
@@ -263,7 +263,7 @@ What the proof showed, on the prototype of the etalon, `#656`:
 | Monospaced Russian | Fits: the long label is as wide as in Onest. Long Latin and addresses are 12% wider and wrap inside the panel |
 | Font | `@fontsource/jetbrains-mono` 5.3.0, OFL-1.1. Latin and Cyrillic, 3 faces: 80 928 bytes |
 
-Not proved, because the prototype does not draw them: map, `.chip`, ticker, tree view, live terminal, layer behind a dialog, `.nav-count`, login card, inline cuts of `Edge`. Firefox and WebKit: NOT_AVAILABLE. Pictures: `compare-*.png` on #656.
+Not proved, because the prototype does not draw them: map, `.chip`, ticker, tree view, live terminal, layer behind a dialog, `.nav-count`, login card, inline cuts of `Edge`. Firefox and WebKit: NOT_AVAILABLE.
 
 ```yaml
 id: matrix
@@ -381,14 +381,14 @@ mark:
 | Native parts | `textarea` and its hint, checkbox, radio, `select`, scrollbar: none shows a browser default colour |
 | Words | No label names a colour or a shape of a theme |
 | Terminal | The 15 text colours from 4.5:1 on its `bg`. `colors.black` is for dark text on bright plates: from 4.5:1 on green, yellow, cyan and white |
-| Motion and decor | Off under reduced motion, including what moves from code. Never behind text. No change to terminal fit (#335) or load (#411) |
-| Every mode the sheet declares | Pictures at 375 and 1440, RU and EN, in Chromium, Firefox and WebKit (#527) |
+| Motion and decor | Off under reduced motion, including what moves from code. Never behind text. No change to terminal fit or load |
+| Every mode the sheet declares | Pictures at 375 and 1440, RU and EN, in Chromium, Firefox and WebKit |
 | Switching | The same elements and words before and after. No flash of another theme on first paint |
 | The checks themselves | A check reads roles and the sheet, never a value of one theme: a font name or a hex in a test fails on the next theme |
 
 ## 7. Check: does the product match Cyberpunk?
 
-Looked at by the head of Design: map, login, terminal window, department panel, machine card (#469), all panels of #591. Those pictures are older than the code. Not looked at: the other states of the 104 in inventory #469 and the materials of a question. A full check by element is with the Codex designer.
+Looked at by the head of Design: map, login, terminal window, department panel, machine card, all panels of the panel review. Those pictures are older than the code. Not looked at: the other states of the 104 in the screen inventory and the materials of a question. A full check by element is still to be done.
 
 | Code | Verdict | What | Evidence |
 |---|---|---|---|
@@ -410,7 +410,7 @@ Looked at by the head of Design: map, login, terminal window, department panel, 
 
 | Code | What stands in the way | Evidence | What is needed |
 |---|---|---|---|
-| T1 | No theme exists. `data-theme` is the mode, only `light` or `dark`, with dark values written twice. A theme with one mode falls into Cyberpunk light on `light`, or keeps a switch that does nothing | `theme.ts:9`, `theme.css:15` to `38`, `compare-light-mode-ru-1440.png` on #656 | A theme and a mode as two separate choices, each theme one set of values. The mode switch hides when a theme has one mode |
+| T1 | No theme exists. `data-theme` is the mode, only `light` or `dark`, with dark values written twice. A theme with one mode falls into Cyberpunk light on `light`, or keeps a switch that does nothing | `theme.ts:9`, `theme.css:15` to `38` | A theme and a mode as two separate choices, each theme one set of values. The mode switch hides when a theme has one mode |
 | T2 | The choice lives only in one browser (`localStorage`, `hh-theme`), there is no way back to system, and nothing runs before first paint, so a flash of the wrong mode is possible by the code. Not measured | `theme.ts:3`, `theme.ts:21`, `apps/web/index.html:12` | Stored for the person, applied before first paint |
 | T3 | Interface words: «Тема» and `Theme` mean the mode | `i18n/ru.ts:169`, `i18n/en.ts:133` | Rename when themes ship: mode for light and dark, theme for the style |
 | T4 | Tokens carry colour names, so in Matrix `--cyan` would be green | In `theme.css`: `--cyan` 110, `--cyan-ink` 70, `--amber` 40, `--amber-ink` 22, `--pink` 22, `--pink-ink` 17, in all 281 uses. In TS and TSX: 0 | Role names of section 3. Only `theme.css` changes. CSS class tones and code comments follow later |
@@ -418,14 +418,14 @@ Looked at by the head of Design: map, login, terminal window, department panel, 
 | T6 | 7 raw colours in `theme.css` | `.dialog-back` `272`, `.t-term` `688`, `.t-load` `695` twice, `.t-load .spinner` `696` twice, `.nav-count` `1036` | `scrim`, `terminal.*`, `on_attention` |
 | T7 | Corner cuts cannot be changed in one place. There are 6 values. `--cut` stands on each element, and `Edge` writes it inline in 23 places, so `--cut: 0` on a parent does nothing. The polygon itself allows 0 | `ui/Edge.tsx:8`, `theme.css:61`, `72`, `709`, `1300`, `1381`, `1593` | Tokens for the steps of `shape.cut`, set once for the theme. Components and `Edge` name a step, not pixels |
 | T8 | Fonts are imported once, for everyone | `main.tsx:1` to `5` | Load only the fonts of the chosen theme, without a flash |
-| T9 | Widths tied to a font: a badge is `length * 6.7` for Onest at 11.5 px; map and department cards have fixed sizes with an ellipsis; 21 rules in `--f-display` fix one line, a height or letter spacing. Measured in #656: a badge in JetBrains Mono takes 161 px of its 154.1 px in Russian, 133 of 127.3 in English. Map and tree were not drawn | `screens/TreeView.tsx:74`, `screens/Map.tsx:26`, `map-people.ts:4`, `screens/schema.ts:7` | Measure the text, not the font. The wrap check on each theme |
+| T9 | Widths tied to a font: a badge is `length * 6.7` for Onest at 11.5 px; map and department cards have fixed sizes with an ellipsis; 21 rules in `--f-display` fix one line, a height or letter spacing. Measured on the prototype: a badge in JetBrains Mono takes 161 px of its 154.1 px in Russian, 133 of 127.3 in English. Map and tree were not drawn | `screens/TreeView.tsx:74`, `screens/Map.tsx:26`, `map-people.ts:4`, `screens/schema.ts:7` | Measure the text, not the font. The wrap check on each theme |
 | T10 | Words name a colour of today's theme: "The amber line", «Желтая линия» | `i18n/en.ts:847`, `i18n/ru.ts:878` | Name what it means, not its colour |
 | T11 | Mark files are fixed | `logo.svg`, favicon `apps/web/index.html:8` | Colours from the theme, or a decision that they stay |
 | T12 | Native parts follow the browser where nothing is set | CP3, CP4 | Set by the theme, style book section 9. A native checkbox keeps the browser's small radius, also in a theme without cuts: accepted for now, redrawing it is its own work |
 | T13 | The running dot on map lines only slows under reduced motion, while everything else stops | `ui/wires.tsx:44`. CSS: `theme.css:150`. `theme.css:697` tries to slow a spinner that the rule at line 150 stops | Decide one behaviour |
 | T14 | Checks tied to today's theme. The wrap check of the etalon names Tektur, so on another font it gives 34 930 false errors. One product test compares an exact colour | `panel-wrap-standard-final-check.js:159`, `apps/web/e2e/agent-state.spec.ts:84` | Read the token, not a value |
 
-Not leaks, checked: the white in `ui/MessagePictures.tsx:43` is a background under a picture before it is compressed; black and white in `ui/PeopleWires.tsx:17`, `18` are an SVG mask. Neither reaches the screen as a colour. `theme-leaks.py` on #655 finds new raw values on any commit, but not colours built while running or inside packages.
+Not leaks, checked: the white in `ui/MessagePictures.tsx:43` is a background under a picture before it is compressed; black and white in `ui/PeopleWires.tsx:17`, `18` are an SVG mask. Neither reaches the screen as a colour. A scan for raw values finds new ones on any commit, but not colours built while running or inside packages.
 
 **Open decisions, with my recommendation:**
 

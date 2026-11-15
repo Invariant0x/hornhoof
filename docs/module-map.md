@@ -1,8 +1,8 @@
 # Module map
 
 What lies where in Hornhoof 0.18.0 (commit `4568a8a5`), who depends on whom, what is unused, and the structure the
-refactoring moves towards. Sizes are lines of source without tests. The numbers of the live company come from its
-database on 2026-11-09, before its tasks and turns were removed.
+refactoring moves towards. Sizes are lines of source without tests. The usage numbers come from the database of a
+company in daily use, read on 2026-11-09.
 
 ## Sizes
 
@@ -17,7 +17,7 @@ database on 2026-11-09, before its tasks and turns were removed.
 
 The database has 91 tables. An agent can be offered about 108 tools.
 
-## What the live company showed
+## What a company in daily use showed
 
 - 7,860 agent turns in 8 days. 5,326 of them (68%) went to the orchestrator, the heads, the task watchdog and the rest
   of Operations, and 2,532 to employees who produce work. By program time it is the other way round: 102 of 541 hours.
@@ -25,7 +25,7 @@ The database has 91 tables. An agent can be offered about 108 tools.
   task watchdog 1,175 times.
 - Turn 8 took 65 hours: 290 tasks, 2,140 agent turns, 1,501 comments. Turn 17 took 23 hours: 24 tasks, 435 agent turns,
   383 comments.
-- 1,381 test runs, 793 of them failed. One task (#719) started 234 runs.
+- 1,381 test runs, 793 of them failed. One task started 234 runs.
 - 422 agent turns failed (5.4%); on Antigravity 193 of 914.
 
 ## Server modules today
@@ -104,7 +104,7 @@ Checked by searching for importers outside tests.
 - `planningHistory` (`testruns/plan-history.ts`), `test-impact-replay*.ts`, `independentView`, the wake cause
   `changes`, `gateCounts`, `encodeNativeDecision`: only tests use them.
 - The skill `hh-questions` was given to nobody; since 2026-11-10 every employee carries it.
-- `outbound` and `model-checks`: reachable, but the live company has no row in any of their 23 tables, and the web
+- `outbound` and `model-checks`: reachable, but that company has no row in any of their 23 tables, and the web
   calls 2 of their 28 routes.
 
 ## Faults found while mapping

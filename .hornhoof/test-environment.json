@@ -707,7 +707,7 @@
     ],
     "migrationCheck": {
       "status": "unsupported",
-      "reason": "No down migration command is defined; tracked in #309."
+      "reason": "No down migration command is defined."
     }
   },
   "mutation": {

@@ -1,6 +1,6 @@
 # Agent environment audit
 
-Reviewed for task #162 on 2026-11-03. `src/agent-env.ts` in the node defines the shared inheritance policy. `childEnv` applies it before adding Hornhoof's account settings. Tmux also resets these named settings before loading the private per-agent environment file, including when its server survived a node restart. Existing agent processes are unaffected until restarted.
+Reviewed on 2026-11-03. `src/agent-env.ts` in the node defines the shared inheritance policy. `childEnv` applies it before adding Hornhoof's account settings. Tmux also resets these named settings before loading the private per-agent environment file, including when its server survived a node restart. Existing agent processes are unaffected until restarted.
 
 ## Removed from the machine environment
 
@@ -78,7 +78,7 @@ Explicit per-agent values are applied after filtering, so Hornhoof's compact win
 
 ## Retained
 
-Operating-system settings remain available: `PATH` (with tools first), `HOME` (unless the provider supplies its own), temporary directories, locale, proxies, certificate paths, and unrelated developer tools' settings. `CODEX_CA_CERTIFICATE` is a transport trust setting, not an account selector. Telemetry preferences such as `KIMI_DISABLE_TELEMETRY` remain available. Auto-update policy belongs to #140.
+Operating-system settings remain available: `PATH` (with tools first), `HOME` (unless the provider supplies its own), temporary directories, locale, proxies, certificate paths, and unrelated developer tools' settings. `CODEX_CA_CERTIFICATE` is a transport trust setting, not an account selector. Telemetry preferences such as `KIMI_DISABLE_TELEMETRY` remain available. Auto-update policy is not part of this list.
 
 `CLAUDE_CODE_MAX_OUTPUT_TOKENS` remains available because Hornhoof does not manage an output-token cap. It can indirectly affect the room left before compaction; this is an audit concern. Display/capability metadata and inactive cloud-specific settings were also left alone.
 

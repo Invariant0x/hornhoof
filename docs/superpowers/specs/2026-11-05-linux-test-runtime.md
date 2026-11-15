@@ -8,7 +8,7 @@ Keep real terminal processes, HTTP, ownership checks, retries and cancellation. 
 
 Split install-script (94 cases), test-runs (99) and decisions (58), preserving the multiset of full test names. Keep installer stubs in their existing directory, unchanged. Never modify the installer/updater scripts, updater tests, install-nodes-only, server helpers/global-setup/migrations/migration-history/typed/live/decision-context tests, image workflow/github-test-status/RepoSettings, node browser/image/check-queue/check-slots, or test-environment-templates. Do not run mutation tools.
 
-Use targeted tests during development; full run_tests is allowed only for the two benchmark runs. Final checks: affected tests, tsc for node/server, typecheck:tests, eslint, crapper with existing coverage, dryer. Work on task-378, commit as Ivan Korol without trailers and push this branch. The parent task assesses the combined 30% improvement against turn 7 with task 321; this baseline is a later turn-8 snapshot, not a turn-7 measurement.
+Use targeted tests during development; full run_tests is allowed only for the two benchmark runs. Final checks: affected tests, tsc for node/server, typecheck:tests, eslint, crapper with existing coverage, dryer. Work on task-378, commit as the repository's author without trailers and push this branch. The parent task assesses the combined 30% improvement against turn 7 with task 321; this baseline is a later turn-8 snapshot, not a turn-7 measurement.
 
 
 ## Controlled continuation, head decision at 2026-11-05 16:07 UTC

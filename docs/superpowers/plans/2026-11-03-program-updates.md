@@ -20,7 +20,7 @@
 - Keep versions in live NodeHub state. No migration is needed. Older nodes without program snapshots cannot receive update commands.
 - English code/comments, English and Russian UI, no em dashes. Use existing card components and tokens.
 - Targeted tests only, plus protocol build and tsc for changed packages. No Docker or release workflow. New functions CRAP < 10; existing CC must not increase relative to main. Dryer threshold .8; mutator on changed lines with coverage and survivor analysis.
-- Commit as Ivan Korol <invariant0x@icloud.com>, no trailers. Submit, then merge the fresh turn-5 and verify before pushing. Main needs CEO approval and is outside this task's integration.
+- Commit as the repository's author, no trailers. Submit, then merge the fresh turn-5 and verify before pushing. Main needs CEO approval and is outside this task's integration.
 
 ## Review focus
 

@@ -17,7 +17,7 @@
 - Keep installer stubs in their existing directory, unchanged.
 - All exclusions in the spec apply; no mutation tools.
 - Full run_tests is allowed only for the two benchmark runs.
-- English repository text, no em dashes, Ivan Korol commits without trailers.
+- English repository text, no em dashes, the repository's author commits without trailers.
 
 ## Review Focus
 

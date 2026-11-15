@@ -66,7 +66,7 @@ does not establish equivalent execution, cache behavior or isolation.
 - Respect B's files, #391's 0065 migration and #392's template/task files. Do not edit test/helpers.ts or the queue implementation.
 - Generate 0066 only after coordinating the unchanged 0065 snapshot/journal with b30ac28f. Do not merge 0066 into turn-8 before 0065.
 - Only targeted tests and compiler/lint/coverage/crapper/dryer checks. No root npm test, full remote run or mutation run. Do not raise test timeouts.
-- English repository text, Ivan Korol <invariant0x@icloud.com>, no commit trailers, no main merge or release workflow.
+- English repository text, the repository's author, no commit trailers, no main merge or release workflow.
 
 ## Review Focus
 

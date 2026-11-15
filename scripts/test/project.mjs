@@ -26,8 +26,8 @@ export function project(version = '0.5.0', branch = 'turn-5') {
   writeFileSync(join(root, 'CHANGELOG.md'), `# Changelog\n\n## [${version}] - 2026-11-04\nA release for people.\n\n### Fixed\n- A checkout issue.\n`);
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe' }).trim();
   git('init', '--quiet', `--initial-branch=${branch}`);
-  git('config', 'user.name', 'Ivan Korol');
-  git('config', 'user.email', 'invariant0x@icloud.com');
+  git('config', 'user.name', 'Release Fixture');
+  git('config', 'user.email', 'release@example.test');
   git('add', '.');
   git('commit', '--quiet', '-m', 'Create release fixture');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');

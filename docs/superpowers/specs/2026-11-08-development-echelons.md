@@ -336,5 +336,5 @@ selection. Planned acceptance is not evidence of implemented behavior.
 
 Integration of permission/access changes waits for the independent DEV-SEC result
 on the exact SHA arranged by the head. The current turn's review/test route and
-David's eventual release rights are unchanged. This task does not run live,
+The release owner's eventual release rights are unchanged. This task does not run live,
 publish, deploy, change main or create an implementation-plan task.

@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Work on task-460 from turn-8; Ivan Korol, no trailers; main is untouched.
+- Work on task-460 from turn-8; the repository's author, no trailers; main is untouched.
 - Targeted checks only; no full suite or release workflow. The head's later CEO decision requires every new T2 command through run_tests on a compatible platform-selected machine. Earlier local evidence keeps its actual origin; collect an already started background run, with no local fallback.
 - Exact lowercase 40-character reviewed/fix SHA; repository outages are explicit degraded results.
 - A turn review has one round. Only the original reviewer checks fixes for its own blocking security/data/spec finding. Medium comes from the existing effort policy.
