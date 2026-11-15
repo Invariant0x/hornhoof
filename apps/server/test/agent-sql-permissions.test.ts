@@ -126,3 +126,23 @@ it('keeps companies.autonomous_release readable and not writable by either SQL r
     await expect(run(mode, 'UPDATE companies SET autonomous_release = true WHERE false'), mode).rejects.toThrow(/permission denied/);
   }
 });
+
+it('keeps departments.autonomous_release readable and not writable by either SQL role', async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    expect((await run(mode, 'SELECT autonomous_release FROM departments WHERE false'))[0]!.rows).toEqual([]);
+    for (const statement of ['UPDATE departments SET autonomous_release = true WHERE false', 'INSERT INTO departments (company_id, autonomous_release) SELECT company_id, true FROM departments WHERE false']) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
+
+it("keeps a head's Telegram bot token from both SQL roles, while the bot itself stays readable", async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    expect((await run(mode, 'SELECT id, agent_id FROM telegram_bots WHERE false'))[0]!.rows).toEqual([]);
+    for (const statement of ['SELECT token_enc FROM telegram_bots', 'SELECT * FROM telegram_bots', "UPDATE telegram_bots SET token_enc = 'x' WHERE false"]) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});

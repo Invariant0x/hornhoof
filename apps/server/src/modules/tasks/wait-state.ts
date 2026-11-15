@@ -1,6 +1,7 @@
 import { EndSourceWait, ReplanWait, signalsOnce, SyncSourceWaits, validSourceKey, WaitOwnerBinding, WaitPlan, WaitSourceKind, WaitSourceState, type WaitOutcome } from '@hornhoof/protocol/waits';
 import { and, asc, desc, eq, inArray, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
+import { runsDepartment } from '../../auth/departments.js';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
 import { CLOSED, note, ownNote, refuse, type Actor, type Task, type Tx } from './engine.js';
 import { nextReview, planFromPolicy, setsWaitDates, waitRoute } from './wait-policy.js';
@@ -312,14 +313,18 @@ async function agentMayReplan(tx: Tx, task: Task, wait: TaskWait, agentId: strin
   return agent?.kind === 'orchestrator' || (agent?.kind === 'head' && agent.departmentId === task.departmentId);
 }
 
-async function personMayReplan(tx: Tx, wait: TaskWait, personId: string): Promise<boolean> {
+/* A person who runs the task's department too, every one of them where several do, as the CEO and the delegate do. */
+async function personMayReplan(tx: Tx, task: Task, wait: TaskWait, personId: string): Promise<boolean> {
   if (wait.ownerPersonId === personId || wait.finalDecisionPersonId === personId) return true;
-  const [person] = await tx.select({ isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate }).from(people).where(eq(people.id, personId));
-  return Boolean(person?.isOwner || person?.isCeoDelegate);
+  const [person] = await tx
+    .select({ id: people.id, companyId: people.companyId, scopeKind: people.scopeKind, status: people.status, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate })
+    .from(people)
+    .where(and(eq(people.id, personId), eq(people.companyId, task.companyId)));
+  return person ? runsDepartment(tx, person, task.departmentId) : false;
 }
 
 const mayReplan = (tx: Tx, task: Task, wait: TaskWait, actor: Actor): Promise<boolean> =>
-  actor.agentId ? agentMayReplan(tx, task, wait, actor.agentId) : personMayReplan(tx, wait, actor.personId!);
+  actor.agentId ? agentMayReplan(tx, task, wait, actor.agentId) : personMayReplan(tx, task, wait, actor.personId!);
 
 function replanned(wait: TaskWait, valid: ReplanWait): { owner: WaitOwnerBinding; plan: WaitPlan } {
   const owner = valid.ownerBinding ?? waitOwner(wait);

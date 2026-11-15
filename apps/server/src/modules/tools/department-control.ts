@@ -130,20 +130,28 @@ export function registerDepartmentControlTools(server: McpServer, ctx: Ctx, app:
       description:
         'Changes your department itself when a person who runs it, or the CEO, decides so, as the last person who wrote to you: teams creates sub-units by name, ' +
         'renames ({ id, name }) or removes ({ id, remove: true }) existing ones, whose employees go back to the department\'s pipeline; products adds products by name, ' +
-        'each with the people its template keeps for a product; removeProducts takes away products with no employees, people, keys or open tasks. ' +
+        'each with the people its template keeps for a product; removeProducts takes away products with no employees, people, keys or open tasks; ' +
+        'about replaces the department description, such as the measures its pipeline report counts. ' +
         'A new department, another department and removing your own stay with the CEO.',
-      inputSchema: { teams: ChangeItem.shape.teams, products: ChangeItem.shape.products, removeProducts: z.array(z.uuid()).max(10).optional() },
+      inputSchema: {
+        teams: ChangeItem.shape.teams,
+        products: ChangeItem.shape.products,
+        removeProducts: z.array(z.uuid()).max(10).optional(),
+        about: z.string().trim().max(160).optional().describe('The new department description, up to 160 characters; empty clears it.'),
+      },
     },
-    async ({ teams: units, products, removeProducts = [] }) => {
+    async ({ teams: units, products, removeProducts = [], about }) => {
       if (!own) return say(outside('This'), true);
       const mine = new Set((await ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.parentId, own), eq(departments.companyId, job.companyId)))).map(d => d.id));
       const stranger = removeProducts.find(id => !mine.has(id));
       if (stranger) return say(outside(`The product ${stranger}`), true);
       const items = [
-        ...(units?.length || products?.length ? [{ department: own, ...(units?.length ? { teams: units } : {}), ...(products?.length ? { products } : {}) }] : []),
+        ...(units?.length || products?.length || about !== undefined
+          ? [{ department: own, ...(units?.length ? { teams: units } : {}), ...(products?.length ? { products } : {}), ...(about !== undefined ? { about } : {}) }]
+          : []),
         ...removeProducts.map(id => ({ department: id, remove: true })),
       ];
-      if (!items.length) return say('Say what changes: teams, products or removeProducts.', true);
+      if (!items.length) return say('Say what changes: teams, products, removeProducts or about.', true);
       return asPerson({ method: 'POST', url: '/api/departments/build', payload: { items } });
     },
   );

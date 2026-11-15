@@ -346,7 +346,7 @@ describe('the orchestrator\'s tools for owners and rules', () => {
     expect(said(refused)).toContain('Only the CEO');
   });
 
-  it('gives setting tools to the orchestrator alone', async () => {
+  it("names owners through the orchestrator alone, and sets a department's rules through its head too, never a worker", async () => {
     const c = await company();
     const names = async (agent: { id: string }) => (await (await c.tools(agent)).listTools()).tools.map(t => t.name);
     for (const agent of [c.worker, c.head]) {
@@ -354,8 +354,10 @@ describe('the orchestrator\'s tools for owners and rules', () => {
       expect(own).toContain('request_approval');
       expect(own).toContain('approval_policy');
       expect(own).not.toContain('set_department_owner');
-      expect(own).not.toContain('set_approval_policy');
     }
+    expect(await names(c.worker)).not.toEqual(expect.arrayContaining(['set_approval_policy']));
+    expect(await names(c.worker)).not.toEqual(expect.arrayContaining(['set_wait_policy']));
+    expect(await names(c.head)).toEqual(expect.arrayContaining(['set_approval_policy', 'set_wait_policy']));
     expect(await names(c.orchestrator)).toEqual(expect.arrayContaining(['set_department_owner', 'set_approval_policy', 'approval_policy', 'request_approval', 'escalate_missed_goal']));
   });
 });

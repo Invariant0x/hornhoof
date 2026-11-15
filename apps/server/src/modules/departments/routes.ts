@@ -22,7 +22,7 @@ import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
 import { planFor, productRoster, rosterOf, templateRoster, templateTeams } from './roster.js';
-import { checkStaff, departmentOf, HireLine, requiredState, servingSubscriptions, spotIn } from '../tools/staff.js';
+import { checkStaff, departmentOf, grantingSkillOn, HireLine, requiredState, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
@@ -334,6 +334,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           removed.push({ id: dept.id, template: dept.templateKey, name: dept.name });
           continue;
         }
+        if (item.about !== undefined) await tx.update(departments).set({ about: item.about }).where(eq(departments.id, dept.id));
         if (item.products?.length) {
           /* A product added to a department comes with the people its template keeps one of for each product. */
           const serving = await servingSubscriptions({ db: tx }, me.companyId, spotIn(dept));
@@ -517,6 +518,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const { lines, present } = await linesToHire(ctx, tx, dept, body.people, Boolean(body.proposalId));
       const problem = await checkStaff({ db: tx, templates: ctx.templates }, me.companyId, dept, lines);
       if (problem) throw invalid(problem);
+      const granting = grantingSkillOn(ctx.templates, lines);
+      if (granting && (me.scopeKind !== 'company' || me.viaHead)) {
+        throw new ApiError(403, 'forbidden', `Only people who see the whole company give a new employee ${granting}: it reaches the whole company.`, 'skill_company_only');
+      }
       const heads = lines.filter(l => ctx.templates.roles.get(l.role)!.kind === 'head');
       if (heads.length > 1) throw invalid(`${deptName(dept)} can have one head; the card has ${heads.length}.`);
       if (heads.length) {

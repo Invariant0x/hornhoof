@@ -249,6 +249,8 @@ type PlanControls = {
   editing: boolean;
   setEditFor: (id: string | null) => void;
   saved: (sub: SubView) => void;
+  /* Where an API connection may go: anywhere (null), or only the departments this person runs. */
+  places: string[] | null;
   newCommand: (sub: SubView) => unknown;
   setConfirm: (id: string | null) => void;
   remove: (sub: SubView) => unknown;
@@ -295,10 +297,12 @@ function KeyButton({ sub: s, me, controls: c }: PlanProps) {
   return <button className="act" type="button" aria-label={t.subs.pasteKeyLabel(subName(t, s))} onClick={() => c.setKeyFor(s.id)}>{t.subs.pasteKey}</button>;
 }
 
-/* Company scope changes an API connection's name, models and place. */
+/* Company scope changes an API connection's name, models and place, and so does a person who runs the department it serves. */
+const changesApi = (s: SubView, me: Me) => s.kind === 'api_key' && (me.person.scopeKind === 'company' || s.canChange === true);
+
 function EditButton({ sub: s, me, controls: c }: PlanProps) {
   const t = useT();
-  if (s.kind !== 'api_key' || me.person.scopeKind !== 'company' || c.editing) return null;
+  if (!changesApi(s, me) || c.editing) return null;
   return <button className="act" type="button" aria-label={t.subs.editApiLabel(subName(t, s))} onClick={() => c.setEditFor(s.id)}>{t.subs.editApi}</button>;
 }
 
@@ -307,7 +311,7 @@ function RemoveButtons({ sub: s, me, controls: c }: PlanProps) {
   const name = subName(t, s);
   const mine = s.owner.id === me.person.id;
   return <>
-    {(mine || me.person.scopeKind === 'company') && <button className="act danger" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
+    {(mine || me.person.scopeKind === 'company' || changesApi(s, me)) && <button className="act danger" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
   </>;
 }
 
@@ -320,7 +324,7 @@ function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
   return <>
     {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} />}
     {c.keying && isKeyPlan(s.provider) && <KeyForm sub={{ ...s, provider: s.provider }} onDone={c.done} onCancel={() => c.setKeyFor(null)} />}
-    {c.editing && s.kind === 'api_key' && <ApiForm sub={s} onSaved={c.saved} onCancel={() => c.setEditFor(null)} />}
+    {c.editing && s.kind === 'api_key' && <ApiForm sub={s} places={c.places} onSaved={c.saved} onCancel={() => c.setEditFor(null)} />}
   </>;
 }
 
@@ -453,7 +457,9 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
     };
   }, []);
 
-  const { subs, setSubs, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure } = usePlanCommands(live, setFailure);
+  const { subs, setSubs, apiPlaces, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure } = usePlanCommands(live, setFailure);
+  /* Where this person connects an API key: anywhere with the whole company, else only in the departments they run. */
+  const places = me.person.scopeKind === 'company' ? null : apiPlaces ?? [];
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
   const onConnected = (shown: ActiveCommand, added: SubView[]) => { setConnecting(false); connected(shown, added); };
 
@@ -544,7 +550,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
         {(!connecting || !connectingApi) && (
           <div className="head-actions">
             {!connecting && <button className="btn" type="button" onClick={() => setConnecting(true)}>{t.subs.connect}</button>}
-            {!connectingApi && me.person.scopeKind === 'company' && <button className="btn ghost" type="button" onClick={() => setConnectingApi(true)}>{t.subs.connectApi}</button>}
+            {!connectingApi && (places === null || places.length > 0) && <button className="btn ghost" type="button" onClick={() => setConnectingApi(true)}>{t.subs.connectApi}</button>}
           </div>
         )}
       </header>
@@ -556,7 +562,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             <h2 className="form-title">{t.subs.connectApi}</h2>
             <p className="muted">{t.subs.apiIntro}</p>
           </div>
-          <ApiForm onSaved={() => { setConnectingApi(false); void load(); }} onCancel={() => setConnectingApi(false)} />
+          <ApiForm places={places} onSaved={() => { setConnectingApi(false); void load(); }} onCancel={() => setConnectingApi(false)} />
         </Edge>
       )}
       <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
@@ -578,7 +584,7 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
             note: signNote?.subId === s.id ? signNote : null,
             keying: keyFor === s.id,
             editing: editFor === s.id, setEditFor,
-            saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); },
+            saved: subscription => { setEditFor(null); setSubs(list => replaceSubscription(list, subscription, 'update')); }, places,
             setBudget, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn,
             done: () => { setKeyFor(null); void load(); },
           }} />}

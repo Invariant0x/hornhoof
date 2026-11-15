@@ -112,6 +112,9 @@ export type SubView = {
   target?: { kind: 'orchestrator' | 'department' | 'team' | 'any'; id: string | null } | null;
   /* What its turns used, in the list alone, with today counted in UTC: an open card asks for its own day. */
   tokens?: TokenPeriods;
+  /* In the list alone: this person changes and removes this API connection, as one of the whole company or as one who runs
+     the department it serves. */
+  canChange?: boolean;
 };
 
 /* What a subscription's turns used in a period: turns counts them all, noData those whose program told no tokens. */

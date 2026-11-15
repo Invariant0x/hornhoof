@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
-import type { SubView } from '../src/types';
-import { ME, mockApi, ORG, SUBS } from './api-mock';
+import type { Me, SubView } from '../src/types';
+import { ME, mockApi, ORG, ORG_WITH_TEAMS, SUBS } from './api-mock';
 
 /* One section holds the plans and the APIs paid by the token: each says how it is paid, the table filters by it and shows
    what each used, and an open card shows its tokens next to its limits. Company scope connects any API and changes it. */
@@ -151,6 +151,39 @@ describe('Subscriptions & API', () => {
     expect(calls.find(c => c.method === 'PATCH')!.body).toEqual({
       label: 'Router', target: { kind: 'any' },
       models: [{ id: 'meta-llama/llama-4-maverick', name: 'Llama 4 Maverick' }, { id: 'qwen/qwen-3-coder', name: 'Qwen 3 Coder' }],
+    });
+  });
+
+  describe('for a person who runs a department', () => {
+    const DANA: Me = { person: { ...ME.person, id: 'p2', name: 'Dana', email: 'dana@acme.com', title: 'CMO', scopeKind: 'listed', isOwner: false }, company: ME.company };
+    const KEY: SubView = { ...ROUTER, id: 's-mkt', label: 'Marketing key', last4: 'MKT1', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'department', id: 'd1', name: 'Marketing' }, target: { kind: 'department', id: 'd1' }, canChange: true };
+    const card = async (last4: string) => {
+      const row = (await screen.findAllByRole('row')).find(r => r.textContent!.includes(last4))!;
+      fireEvent.click(within(row).getByRole('button', { name: /^(Open the card of |Открыть карточку )/ }));
+      return screen.findByRole('article', { name: new RegExp(last4) });
+    };
+
+    it('connects an API key only in that department, and changes and removes the one that serves it', async () => {
+      lists({ 'GET /api/subscriptions': [200, { subscriptions: [KEY], apiPlaces: ['d1'] }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+      const user = userEvent.setup();
+      render(<LanguageProvider><Subscriptions me={DANA} /></LanguageProvider>);
+      const open = await card('MKT1');
+      expect(within(open).getByRole('button', { name: /^Edit / })).toBeInTheDocument();
+      expect(within(open).getByRole('button', { name: /^Remove / })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Connect an API' }));
+      const form = screen.getAllByRole('form').find(f => !open.contains(f))!;
+      const serves = within(form).getByRole('combobox', { name: 'Serves' });
+      expect((await within(serves).findAllByRole('option')).map(o => o.textContent)).toEqual(['Marketing', 'Marketing, Social', 'Marketing, Content']);
+      expect(serves).toHaveValue('department:d1');
+    });
+
+    it('offers no API key to connect or change where they run nothing', async () => {
+      lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...KEY, canChange: false }], apiPlaces: [] }] });
+      render(<LanguageProvider><Subscriptions me={DANA} /></LanguageProvider>);
+      const open = await card('MKT1');
+      expect(within(open).queryByRole('button', { name: /^Edit / })).toBeNull();
+      expect(within(open).queryByRole('button', { name: /^Remove / })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Connect an API' })).toBeNull();
     });
   });
 });

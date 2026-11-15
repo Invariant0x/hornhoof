@@ -8,8 +8,8 @@ import { BusyLabel } from './BusyLabel';
 import { Field, type InputProps } from './Field';
 
 /* A company connects an API paid by the token, and changes its name, models and the place it serves: company scope
-   alone, as the server checks. The key goes to the server once and never comes back; changing a connection asks for it no
-   more. */
+   anywhere, and a person who runs a department in that department alone, as the server checks. The key goes to the server
+   once and never comes back; changing a connection asks for it no more. */
 
 const PROVIDERS = ['anthropic_api', 'openai_api', 'openrouter', 'custom_api'] as const;
 type ApiProvider = (typeof PROVIDERS)[number];
@@ -25,24 +25,27 @@ function targetOf(value: string): Target {
   const [kind, id] = value.split(':');
   return id && (kind === 'department' || kind === 'team') ? { kind, id } : { kind: kind === 'orchestrator' ? 'orchestrator' : 'any' };
 }
-const startTarget = (sub?: SubView): Target => {
+/* places: the departments a person who runs them may give a key to; null for anywhere. */
+const startTarget = (sub: SubView | undefined, places: readonly string[] | null): Target => {
   const target = sub?.target;
   if (target && target.id && (target.kind === 'department' || target.kind === 'team')) return { kind: target.kind, id: target.id };
+  if (places?.[0]) return { kind: 'department', id: places[0] };
   return { kind: target?.kind === 'orchestrator' ? 'orchestrator' : 'any' };
 };
 const ownModels = (sub?: SubView): Model[] => (sub?.models ?? []).map(({ id, name }) => ({ id, name }));
 const isApi = (provider: string): provider is ApiProvider => (PROVIDERS as readonly string[]).includes(provider);
 
-function ScopeField({ value, onChange }: { value: string; onChange(value: string): void }) {
+function ScopeField({ value, places, onChange }: { value: string; places: readonly string[] | null; onChange(value: string): void }) {
   const t = useT();
   const { org } = useOrg();
+  const shown = (org?.departments ?? []).filter(d => places === null || places.includes(d.id));
   return (
     <Field label={t.subs.apiServes}>
       {p => (
         <select {...p} className="sel" value={value} onChange={e => onChange(e.target.value)}>
-          <option value="any">{t.subs.serves.any}</option>
-          <option value="orchestrator">{t.subs.serves.orchestrator}</option>
-          {(org?.departments ?? []).map(d => (
+          {places === null && <option value="any">{t.subs.serves.any}</option>}
+          {places === null && <option value="orchestrator">{t.subs.serves.orchestrator}</option>}
+          {shown.map(d => (
             <optgroup key={d.id} label={deptLabel(t, d)}>
               <option value={`department:${d.id}`}>{deptLabel(t, d)}</option>
               {d.teams.map(team => <option key={team.id} value={`team:${team.id}`}>{`${deptLabel(t, d)}, ${team.name}`}</option>)}
@@ -174,12 +177,12 @@ function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>):
 type NewForm = { provider: ApiProvider; apiKey: string; baseUrl: string; protocol: Protocol };
 
 /* sub: the connection to change; without it the form connects a new one. */
-export function ApiForm({ sub, onSaved, onCancel }: { sub?: SubView; onSaved(sub: SubView): void; onCancel(): void }) {
+export function ApiForm({ sub, places = null, onSaved, onCancel }: { sub?: SubView; places?: readonly string[] | null; onSaved(sub: SubView): void; onCancel(): void }) {
   const t = useT();
   const editing = Boolean(sub);
   const [fresh, setFresh] = useState<NewForm>({ provider: 'anthropic_api', apiKey: '', baseUrl: '', protocol: 'anthropic' });
   const [label, setLabel] = useState(sub?.label ?? '');
-  const [scope, setScope] = useState(targetValue(startTarget(sub)));
+  const [scope, setScope] = useState(targetValue(startTarget(sub, places)));
   const [models, setModels] = useState<Model[]>(ownModels(sub));
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -229,7 +232,7 @@ export function ApiForm({ sub, onSaved, onCancel }: { sub?: SubView; onSaved(sub
         {p => <input {...p} autoComplete="off" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} />}
       </Field>
       {(editing ? sub && isApi(sub.provider) : true) && <ModelsField models={models} setModels={setModels} load={load} />}
-      <ScopeField value={scope} onChange={setScope} />
+      <ScopeField value={scope} places={places} onChange={setScope} />
       {problem && <p className="alert" role="alert">{problem}</p>}
       <div className="form-foot">
         <button className="btn" type="submit" aria-busy={busy} disabled={busy || !ready}>

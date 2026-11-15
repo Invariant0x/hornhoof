@@ -155,7 +155,7 @@ async function readPolicy(ctx: Pick<Ctx, 'db'>, job: ToolJob, department: string
     JSON.stringify({
       department: top,
       owner: await departmentOwner(ctx, job.companyId, top),
-      autonomousRelease: await isAutonomousReleaseEnabled(ctx.db, job.companyId),
+      autonomousRelease: await isAutonomousReleaseEnabled(ctx.db, top),
       rules: await departmentRules(ctx.db, top),
       waitDates: await departmentWaitPolicies(ctx, top),
     }),
@@ -195,7 +195,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'approval_policy',
     {
       description:
-        "A department's approvals: who owns them (none means the CEO), whether the CEO enabled autonomousRelease for exact commits to main, and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks every time.",
+        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for exact commits to main, and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks every time.",
       inputSchema: { department: Department },
     },
     ({ department }) => readable(() => readPolicy(ctx, job, department)),
@@ -209,7 +209,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         'When the policy lets the work go, no person is asked: the answer says so and a line goes in the task\'s log, so go on with the work. Otherwise the task waits, the department\'s owner (with none, the CEO) is asked, and you are woken with the answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
         'amount: how much this one is, in what the channel\'s limit counts. Without it, a limit never lets the work go. text: what you want to do, in plain words. link: an https page where it can be seen.' +
-        ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. Before pushing an exact 40-character commit to main from a release task or turn leading to main, ask here on channel commit (or ask_person with commit): Hornhoof approves automatically without a card only when the CEO enabled autonomousRelease and that current candidate commit on a main-line route (review.baseCommit on main) has a completed green full run_tests run that proves it, an independent non-author PASS verdict on that exact SHA and a complete fast-forward comparison from main (within GitHub's diff limits); otherwise it opens a release approval card.`,
+        ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. Before pushing an exact 40-character commit to main from a release task or turn leading to main, ask here on channel commit (or ask_person with commit): Hornhoof approves automatically without a card only when its department enabled autonomousRelease and that current candidate commit on a main-line route (review.baseCommit on main) has a completed green full run_tests run that proves it, an independent non-author PASS verdict on that exact SHA and a complete fast-forward comparison from main (within GitHub's diff limits); otherwise it opens a release approval card.`,
       inputSchema: {
         task: Ref,
         channel: ApprovalChannel,
@@ -245,11 +245,14 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
 }
 
 const NO_PERSON = 'This turn answers no person who may change this: the last message in it came from an employee or from Hornhoof. Nothing was changed. Ask the CEO or the CEO delegate, or for a rule the department\'s owner.';
+const NOT_YOURS = 'This department is not yours. Nothing was changed. You set only your own department\'s approvals and wait dates.';
 
-/* The orchestrator's tools to change them. Each calls the route the screen calls, as the person whose words its turn answers
-   now, under the input lock, so the route allows it what that person may, and no employee, timer or task can ask it to. */
-export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
-  const asPerson = (url: string, payload: object) =>
+type Change = (url: string, payload: object) => Promise<ReturnType<typeof say>>;
+
+/* A change calls the route the screen calls, as the person whose words the agent's turn answers now, under the input lock, so
+   the route allows it what that person may, and no employee, timer or task can ask for it. */
+function changeAsPerson(ctx: Ctx, app: FastifyInstance, job: ToolJob): Change {
+  return (url, payload) =>
     withInputLock(ctx, job.agentId, async () => {
       const personId = (await decisionPrincipal(ctx.db, job.id))?.personId;
       if (!personId) return say(NO_PERSON, true);
@@ -257,25 +260,24 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
       if (res.statusCode < 400) return say(res.body);
       return say((JSON.parse(res.body) as { error?: { message?: string } }).error?.message ?? `Hornhoof answered ${res.statusCode}.`, true);
     });
+}
 
-  server.registerTool(
-    'set_department_owner',
-    {
-      description: 'Names who owns a department: they take its approvals and set its policy. person: someone active with access to the department, or null to leave it to the CEO. Access alone never makes anyone an owner, and the rules stay as they are when the owner changes. Only in a turn that answers the CEO or the CEO delegate.',
-      inputSchema: { department: Department, person: z.uuid().nullable() },
-    },
-    ({ department, person }) => asPerson(`/api/departments/${department}/owner`, { personId: person }),
-  );
+const ORCHESTRATOR_WHO = "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.";
+const HEAD_WHO = 'Only for your own department, and only in a turn that answers a person who runs it or the CEO, as their decision.';
 
+/* The tools that set a department's approvals and wait dates; mine says which department the agent may name. */
+function registerPolicyTools(server: McpServer, change: Change, who: string, mine: (department: string) => boolean): void {
+  const place = (department: string, url: string, payload: object) => (mine(department) ? change(url, payload) : Promise.resolve(say(NOT_YOURS, true)));
   server.registerTool(
     'set_approval_policy',
     {
       description:
         'Sets how one channel of a department is approved. mode every: each one asks. new_kinds: only a kind nobody approved yet asks. within_limits: no approval up to limit, above it the owner is asked; unit says what the limit counts, like USD. ' +
-        "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.",
+        who,
       inputSchema: { department: Department, channel: ApprovalChannel, mode: z.enum(APPROVAL_MODES), limit: ApprovalAmount.optional(), unit: z.string().trim().min(1).max(16).optional() },
     },
-    ({ department, channel, mode, limit, unit }) => asPerson(`/api/departments/${department}/approval-policy/${channel}`, { mode, ...(limit === undefined ? {} : { limit }), ...(unit === undefined ? {} : { unit }) }),
+    ({ department, channel, mode, limit, unit }) =>
+      place(department, `/api/departments/${department}/approval-policy/${channel}`, { mode, ...(limit === undefined ? {} : { limit }), ...(unit === undefined ? {} : { unit }) }),
   );
 
   server.registerTool(
@@ -284,9 +286,29 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
       description:
         'Sets how long a department gives a kind of wait: after, review, person, run or external, at a stage of a run or at all. ownerMs, headMs, decisionMs: when its owner, its head and then the department\'s owner are told, counted from when the wait began. reviewIntervalMs: how often the head looks at it again after that. ' +
         'The first one set makes the department strict: from then on a wait of a kind with no dates set and no promise is refused, so set them all that are needed. A question to a person is never refused: it then waits with no dates. Write down only what the person said: there are no standard numbers. ' +
-        "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.",
+        who,
       inputSchema: { department: Department, kind: z.enum(WAIT_SOURCE_KINDS), stage: z.string().trim().max(40).optional(), ownerMs: z.number().int().positive(), headMs: z.number().int().positive(), decisionMs: z.number().int().positive(), reviewIntervalMs: z.number().int().positive() },
     },
-    ({ department, kind, ...policy }) => asPerson(`/api/departments/${department}/wait-policy/${kind}`, policy),
+    ({ department, kind, ...policy }) => place(department, `/api/departments/${department}/wait-policy/${kind}`, policy),
   );
+}
+
+/* The orchestrator's tools to change them, for any department, as the person its turn answers. */
+export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
+  const change = changeAsPerson(ctx, app, job);
+  server.registerTool(
+    'set_department_owner',
+    {
+      description: 'Names who owns a department: they take its approvals and set its policy. person: someone active with access to the department, or null to leave it to the CEO. Access alone never makes anyone an owner, and the rules stay as they are when the owner changes. Only in a turn that answers the CEO or the CEO delegate.',
+      inputSchema: { department: Department, person: z.uuid().nullable() },
+    },
+    ({ department, person }) => change(`/api/departments/${department}/owner`, { personId: person }),
+  );
+  registerPolicyTools(server, change, ORCHESTRATOR_WHO, () => true);
+}
+
+/* A head's own: the same tools for its own department only, with no word of the orchestrator or the CEO. The route still lets
+   only a person who runs the department, or the CEO, change them, and commits always ask. */
+export function registerHeadPolicyTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
+  registerPolicyTools(server, changeAsPerson(ctx, app, job), HEAD_WHO, department => job.departmentId !== null && department === job.departmentId);
 }

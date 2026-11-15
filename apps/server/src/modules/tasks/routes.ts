@@ -8,7 +8,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
 import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
-import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -447,7 +447,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* The orchestrator puts what an employee asks into plain words for the people who answer it. */
   app.post('/api/requests/:id/explained', async req => {
     const me = await requirePerson(req, db);
-    if (!me.via) throw new ApiError(403, 'forbidden', 'Only the orchestrator puts a request into words for people. Answer it instead.', 'orchestrator_only');
+    if (!viaOrchestrator(me)) throw new ApiError(403, 'forbidden', 'Only the orchestrator puts a request into words for people. Answer it instead.', 'orchestrator_only');
     const { id } = IdParams.parse(req.params);
     const { text } = z.object({ text: z.string().trim().min(1).max(3000) }).parse(req.body);
     const [row] = await db
