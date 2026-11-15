@@ -135,8 +135,10 @@ export function signInTurn(program: Pick<TurnProgram, 'signAt'>, job: Pick<Job, 
 
 /* worked: the turn's last sign besides its program's reports, an event of its work or a call of a Hornhoof tool. A node
    that streams the work of a program with no screen is not silent, nor is a program that calls Hornhoof. */
-function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number, worked: number | null): TurnAlarm | null {
-  const heard = Math.max(program.reportedAt, worked ?? 0);
+const lastHeard = (at: number, worked: number | undefined): number => Math.max(at, worked ?? 0);
+
+function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number, worked: number | undefined): TurnAlarm | null {
+  const heard = lastHeard(program.reportedAt, worked);
   if (nowMs - heard >= SILENT_TURN_MS) return { reason: 'node_silent', since: heard };
   if (signAt !== null) {
     if (program.state === 'asking') return null;
@@ -148,11 +150,11 @@ function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: num
 }
 
 /* What the watchdog knows of a running turn: its program as its node reported it, and the turn's last sign besides. */
-type Watched = { job: Job; program: TurnProgram | null; worked: number | null };
+type Watched = { job: Job; program: TurnProgram | null; worked: number | undefined };
 
 function alarmForTurn({ job, program, worked }: Watched, nowMs: number): TurnAlarm | null {
   if (program) return alarmForProgram(program, signInTurn(program, job), nowMs, worked);
-  const heard = Math.max((job.startedAt ?? job.createdAt).getTime(), worked ?? 0);
+  const heard = lastHeard((job.startedAt ?? job.createdAt).getTime(), worked);
   return nowMs - heard >= SILENT_TURN_MS ? { reason: 'node_silent', since: heard } : null;
 }
 
@@ -218,7 +220,7 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
     /* A program on a machine Hornhoof cannot reach is silent for that reason, and nobody can look at its screen: no
        alarm is raised for it until the machine is back. */
     const node = job.nodeId ? nodeIdentity(job.nodeId) : job.builtinMachine ? builtinOf(job.builtinMachine) : null;
-    const turn = { job, program, worked: signs.get(job.id) ?? null };
+    const turn = { job, program, worked: signs.get(job.id) };
     const alarm = node && ctx.hub.awaySince(node) !== null ? null : alarmWithCheckQueue(ctx, turn, task, nowMs);
     await updateTurnAlarm(ctx, job, alarm, now);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });

@@ -10,11 +10,7 @@ const WORK = ['text', 'tool', 'tool_result', 'todo'] as const;
    memory; after a restart of the server the events of its work stored before stand for it. */
 const signs = new WeakMap<Ctx, Map<string, number>>();
 
-function signsOf(ctx: Ctx): Map<string, number> {
-  const map = signs.get(ctx) ?? new Map<string, number>();
-  signs.set(ctx, map);
-  return map;
-}
+const signsOf = (ctx: Ctx): Map<string, number> => signs.get(ctx) ?? signs.set(ctx, new Map()).get(ctx)!;
 
 export function turnSign(ctx: Ctx, jobId: string, at = Date.now()): void {
   const map = signsOf(ctx);

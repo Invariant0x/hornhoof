@@ -132,6 +132,11 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
   return failed.map(j => j.id);
 }
 
+/* An event of a running turn's work, kept in its conversation; a sign that the turn goes on, whatever its program reports. */
+async function turnEvent(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'job.event' }>, now: Date): Promise<void> {
+  if (await appendTurnEvent(ctx, msg.jobId, msg.event, jobsOf(id, ctx))) turnSign(ctx, msg.jobId, now.getTime());
+}
+
 /* An agent's turn on a task, of the jobs a node runs. */
 const onTask = (job: { kind: string; taskId: string | null }) => job.kind === 'conversation' && job.taskId !== null;
 
@@ -383,7 +388,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
 
     case 'job.event': {
-      if (await appendTurnEvent(ctx, msg.jobId, msg.event, jobsOf(id, ctx))) turnSign(ctx, msg.jobId, now.getTime());
+      await turnEvent(ctx, id, msg, now);
       return;
     }
     case 'job.started':

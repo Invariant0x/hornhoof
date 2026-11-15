@@ -27,9 +27,9 @@ const NO_MACHINE = 'Hornhoof ended this turn as interrupted: it went out to no m
 
 /* Its program reported work a moment ago: it thinks, runs a tool, asks or retries. Or the turn itself showed work a moment
    ago, as a program with no screen does: its node streamed an event of it, or it called a Hornhoof tool. */
-function working(ctx: Ctx, job: Job, now: number, worked: number | null): boolean {
+function working(ctx: Ctx, job: Job, now: number, worked: number | undefined): boolean {
   const program = agentProgramState(ctx, job).program;
-  return Boolean(program && WORKING.has(program.state) && now - program.reportedAt < PULSE_MS) || (worked !== null && now - worked < PULSE_MS);
+  return Boolean(program && WORKING.has(program.state) && now - program.reportedAt < PULSE_MS) || (worked !== undefined && now - worked < PULSE_MS);
 }
 
 /* The node that holds the turn said its program is gone, and named the programs that run on it after that without this
@@ -79,7 +79,7 @@ export async function turnsHeld(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMes
   const asked = await ctx.db.select().from(jobs).where(and(inArray(jobs.id, doubtful), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), jobsOf(id, ctx), lte(jobs.startedAt, new Date(now.getTime() - ASK_AFTER_MS))));
   const signs = await lastTurnSigns(ctx, asked.map(job => job.id));
   for (const job of asked) {
-    if (working(ctx, job, now.getTime(), signs.get(job.id) ?? null)) continue;
+    if (working(ctx, job, now.getTime(), signs.get(job.id))) continue;
     if (!held.has(job.id)) await endLost(ctx, job, NOT_HELD);
     else if (programLeft(ctx, id, job)) await endLost(ctx, job, GONE_HELD);
   }
