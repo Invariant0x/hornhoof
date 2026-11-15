@@ -118,7 +118,10 @@ for (const look of LOOKS) {
     await shot(page, policy, `settings-policy-form-${browserName}-${name}`);
     await shot(page, part.getByRole('form', { name: t.outboundSetup.connectHook }), `settings-account-form-${browserName}-${name}`);
 
-    await part.getByRole('button', { name: t.outboundSetup.publish }).click();
+    /* The part reads its catalog and log again after a publish; leaving before that ends cancels them, which WebKit
+       reports as a page error. */
+    const reread = (path: string) => page.waitForResponse(r => new URL(r.url()).pathname === path);
+    await Promise.all([reread('/api/outbound/catalog'), reread('/api/outbound/setup-log'), part.getByRole('button', { name: t.outboundSetup.publish }).click()]);
     await expect.poll(() => published).toEqual(['/api/outbound/catalog/r2/publish']);
 
     await page.goto(`/departments/${DEPT}`);
