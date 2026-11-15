@@ -642,6 +642,7 @@
           "apps/server/test/credentials.test.ts",
           "apps/server/test/department-echelons-template.test.ts",
           "apps/server/test/department-echelons.test.ts",
+          "apps/server/test/department-owner-control.test.ts",
           "apps/server/test/department-owner-rights.test.ts",
           "apps/server/test/department-routes-without-checkers.test.ts",
           "apps/server/test/departments.test.ts",
