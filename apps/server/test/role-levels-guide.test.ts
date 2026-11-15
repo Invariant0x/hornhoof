@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { API_MODELS, CLAUDE_ALIASES, effortFor, modelsFor, PROVIDER_IDS, ROLE_EFFORTS, type ProviderId } from '@hornhoof/protocol';
+import { API_MODELS, CLAUDE_ALIASES, effortFor, isApiProvider, modelsFor, PROVIDER_IDS, ROLE_EFFORTS, type ProviderId } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { loadTemplates, type Role } from '../src/modules/templates/load.js';
 import { runsTier } from '../src/modules/tools/staff.js';
@@ -8,19 +8,21 @@ import { runsTier } from '../src/modules/tools/staff.js';
 const GUIDE = fileURLToPath(new URL('../../../guide/departments-and-employees.md', import.meta.url));
 const templates = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
 const LEVELS = [...ROLE_EFFORTS];
-const PROGRAMS: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', kimi: 'Kimi Code', glm: 'GLM', antigravity: 'Antigravity', anthropic_api: 'Claude API', openai_api: 'OpenAI API' };
+const PROGRAMS: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', kimi: 'Kimi Code', glm: 'GLM', antigravity: 'Antigravity', anthropic_api: 'Claude API', openai_api: 'OpenAI API', openrouter: 'OpenRouter', custom_api: 'Compatible API' };
 const REPORTED = 'what its machine reports';
+const CONNECTED = 'what its connection names';
 
 const table = (head: string[], rows: string[][]) => [head, head.map(() => '---'), ...rows].map(cells => `| ${cells.join(' | ')} |`).join('\n');
 const unique = (lists: string[][]) => [...new Set(lists.flat())];
 
-/* What each program can run, from the same lists Hornhoof runs on: the ones a machine reports are not known before it does. */
-const reported = (names: string[]) => names.join(', ') || REPORTED;
+/* What each program can run, from the same lists Hornhoof runs on: the ones a machine reports are not known before it does,
+   and an API connection with no list of Hornhoof's own runs the models the person named for it. */
+const reported = (id: ProviderId, names: string[]) => names.join(', ') || (isApiProvider(id) ? CONNECTED : REPORTED);
 const levelsOf = (models: { efforts?: string[] }[]) => unique(models.map(m => m.efforts ?? []));
 const runsDeep = (id: ProviderId) => (runsTier(id, 'deep') ? 'yes' : 'no');
 const programRow = (id: ProviderId) => {
   const models = modelsFor(id, null);
-  return [PROGRAMS[id], reported(models.map(m => m.name)), reported(levelsOf(models)), runsDeep(id)];
+  return [PROGRAMS[id], reported(id, models.map(m => m.name)), reported(id, levelsOf(models)), runsDeep(id)];
 };
 const programs = () => table(['Program', 'Models', 'Levels', 'Deep roles'], PROVIDER_IDS.map(programRow));
 

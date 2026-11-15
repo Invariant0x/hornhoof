@@ -150,7 +150,7 @@ Hornhoof picks the configured level when a turn starts. It stays until that turn
 
 ### Which programs, models and levels fit a role?
 
-Hornhoof's own lists give these tables, so they say what it does today. A program that lists no models here shows what it has once its machine reports it. A model that lacks a level gets the nearest one it has.
+Hornhoof's own lists give these tables, so they say what it does today. A program that lists no models here shows what it has once its machine reports it. OpenRouter and a compatible API run the models named for their connection. A model that lacks a level gets the nearest one it has.
 
 | Program | Models | Levels | Deep roles |
 | --- | --- | --- | --- |
@@ -161,6 +161,8 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | Claude API | Claude Fable 5.1, Claude Opus 5.5, Claude Sonnet 5.5, Claude Haiku 5.5 | low, medium, high, xhigh, max | yes |
 | OpenAI API | GPT-6.1 Sol, GPT-6 Astra, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna | low, medium, high, xhigh, max | yes |
 | Antigravity | what its machine reports | what its machine reports | yes |
+| OpenRouter | what its connection names | what its connection names | yes |
+| Compatible API | what its connection names | what its connection names | yes |
 
 | Level of the role or card | Every echelon, including repairs |
 | --- | --- |
