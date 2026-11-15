@@ -45,7 +45,9 @@ describe('About from the account menu', () => {
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     }
     expect(within(box).getAllByRole('link')).toHaveLength(3);
-    expect(within(box).getByRole('button', { name: 'Report a bug or suggest an idea' })).toBeInTheDocument();
+    expect(within(box).queryByText('Contact')).not.toBeInTheDocument();
+    expect(within(box).queryByRole('button', { name: 'Report a bug or suggest an idea' })).not.toBeInTheDocument();
+    expect(within(box).getByRole('region', { name: 'Write to Hornhoof developers' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Versions' })).not.toBeInTheDocument();
   });
 
@@ -69,7 +71,8 @@ describe('About from the account menu', () => {
     const box = await screen.findByRole('dialog', { name: 'О программе Hornhoof' });
     expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
     expect(within(box).getByText('Компания, где люди и агенты работают вместе.')).toBeInTheDocument();
-    expect(within(box).getByRole('button', { name: 'Сообщить об ошибке или предложить идею' })).toBeInTheDocument();
+    expect(within(box).getByRole('region', { name: 'Написать разработчикам Hornhoof' })).toBeInTheDocument();
+    expect(within(box).getByRole('button', { name: 'Далее' })).toBeInTheDocument();
     expect(within(box).queryByText('Разработчик')).not.toBeInTheDocument();
     expect(within(box).getByText('Автор: Ivan Korol, © 2026')).toBeInTheDocument();
     expect(box.textContent!).not.toMatch(/[\u0451\u2014]/);
@@ -82,15 +85,15 @@ describe('About from the account menu', () => {
     await open(user);
     const box = screen.getByRole('dialog', { name: 'About Hornhoof' });
     const close = within(box).getByRole('button', { name: 'Close' });
-    const website = within(box).getByRole('link', { name: 'hornhoof.org' });
+    const next = within(box).getByRole('button', { name: 'Next' });
     await user.tab({ shift: true });
-    expect(website).toHaveFocus();
+    expect(next).toHaveFocus();
     await user.tab();
     expect(close).toHaveFocus();
     await user.tab({ shift: true });
-    expect(website).toHaveFocus();
+    expect(next).toHaveFocus();
     await user.tab();
-    for (const [role, name] of [['link', 'MIT'], ['link', 'Source code'], ['button', 'Report a bug or suggest an idea'], ['link', 'hornhoof.org']] as const) {
+    for (const [role, name] of [['link', 'MIT'], ['link', 'Source code'], ['link', 'hornhoof.org'], ['button', 'Bug'], ['button', 'Improvement'], ['button', 'Idea'], ['textbox', 'Title'], ['textbox', 'What happened, or what you would like'], ['button', 'Next']] as const) {
       await user.tab();
       expect(within(box).getByRole(role, { name })).toHaveFocus();
     }
@@ -104,7 +107,7 @@ describe('About from the account menu', () => {
     const user = page('en', () => pending);
     await open(user);
     const box = screen.getByRole('dialog', { name: 'About Hornhoof' });
-    expect(within(box).getByText('Loading…')).toBeInTheDocument();
+    expect(within(box).getByText('Loading…', { selector: 'dd' })).toBeInTheDocument();
     expect(within(box).getByRole('link', { name: 'MIT' })).toBeInTheDocument();
     await act(async () => answer([200, VERSION]));
     expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();

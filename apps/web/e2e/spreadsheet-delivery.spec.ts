@@ -196,9 +196,9 @@ for (const lang of ['en', 'ru'] as const) {
           return route.fulfill({ json: { google: saved } });
         });
 
-        await page.goto('/settings');
+        await page.goto('/settings/integrations');
         const dialog = page.getByRole('dialog', { name: t.settings.title, exact: true });
-        const part = dialog.getByRole('region', { name: t.googleSheets.title, exact: true });
+        const part = dialog.getByRole('article', { name: t.googleSheets.title, exact: true });
         await expect(part).toBeVisible();
         await part.getByRole('button', { name: t.googleSheets.connect, exact: true }).click();
         await fits(page, '.dialog', width);

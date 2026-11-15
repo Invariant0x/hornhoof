@@ -41,11 +41,13 @@ for (const lang of ['en', 'ru'] as const) {
         await page.getByRole('button', { name: lang === 'en' ? 'Account' : 'Аккаунт' }).click();
         await page.getByRole('button', { name: lang === 'en' ? 'Settings' : 'Настройки' }).click();
         const dialog = page.getByRole('dialog', { name: lang === 'en' ? 'Settings' : 'Настройки' });
+        /* One's own name stands first under Company & access. */
+        await dialog.getByRole('button', { name: lang === 'en' ? 'Company & access' : 'Компания и доступ', exact: true }).click();
         const field = dialog.getByLabel(lang === 'en' ? 'Name' : 'Имя', { exact: true });
         await expect(field).toHaveValue('Lisa');
         await page.screenshot({ path: info.outputPath(`self-rename-field-${width}-${lang}-${theme}.png`) });
         await field.fill(lang === 'en' ? '  Lisa Ray  ' : '  Лиза Рей  ');
-        await dialog.getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить' }).click();
+        await dialog.getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить', exact: true }).click();
         await dialog.getByRole('button', { name: lang === 'en' ? 'Done' : 'Готово' }).click();
         await expect(page.getByText(lang === 'en' ? 'Lisa Ray' : 'Лиза Рей', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: lang === 'en' ? 'Account' : 'Аккаунт' }).click();

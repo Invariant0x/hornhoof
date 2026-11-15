@@ -55,7 +55,7 @@ for (const settings of SETTINGS) {
     await expect(page.getByRole('heading', { name: 'Development', exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`department-${lang}-${theme}-${width}.png`), animations: 'disabled' });
 
-    for (const [label, path, title] of [[t.about.menu, '/about', t.about.title], [t.profile.title, '/profile', t.profile.title], [t.settings.menu, '/settings', t.settings.title], [t.updates.menu, '/versions', t.updates.title]] as const) {
+    for (const [label, path, title] of [[t.about.menu, '/about', t.about.title], [t.settings.menu, '/settings', t.settings.title], [t.updates.menu, '/versions', t.updates.title]] as const) {
       await page.getByRole('button', { name: t.shell.account, exact: true }).click();
       await page.getByRole('button', { name: label, exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${path}$`));
@@ -204,8 +204,8 @@ test('login keeps a local deep link and never follows an external return address
 
 test('the settings dialog reserves stable scrollbar room', async ({ page }) => {
   await serveRoutes(page);
-  await page.goto('/settings');
-  await expect(page.getByRole('dialog', { name: 'Company settings', exact: true })).toHaveCSS('scrollbar-gutter', 'stable');
+  await page.goto('/settings/company');
+  await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toHaveCSS('scrollbar-gutter', 'stable');
 });
 
 test('unknown and inaccessible links show the same unavailable page', async ({ page }, info) => {
@@ -286,7 +286,7 @@ test('closing a history-revisited dialog returns to its own section', async ({ p
   await expect(page).toHaveURL(/\/people$/);
 });
 
-for (const [path, api] of [['/versions', '/api/updates'], ['/settings', '/api/link']]) {
+for (const [path, api] of [['/versions', '/api/updates']]) {
   test(`a denied ${path} dialog offers a visible way home`, async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
     await serveRoutes(page);

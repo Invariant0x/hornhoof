@@ -74,7 +74,7 @@ for (const lang of ['en', 'ru'] as const) {
           saved = { ...KEY, owner: body.owner };
           return route.fulfill({ json: { host: saved } });
         });
-        await page.goto('/settings');
+        await page.goto('/settings/company');
         const dialog = page.getByRole('dialog', { name: t.settings.title, exact: true });
         const part = dialog.getByRole('region', { name: t.repoHost.title, exact: true });
         await expect(part.getByText(t.repoHost.none)).toBeVisible();

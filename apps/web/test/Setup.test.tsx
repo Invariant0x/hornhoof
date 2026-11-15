@@ -237,7 +237,7 @@ describe('the public link on the setup screen', () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
     expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toHaveAccessibleDescription(/open it later under Company settings\.$/);
+    expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toHaveAccessibleDescription(/open it later in Settings, under Company & access\.$/);
     expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
     await user.type(screen.getByLabelText('Company name'), 'Рога и копыта');
     expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
@@ -320,7 +320,7 @@ describe('the public link on the setup screen', () => {
     await user.click(screen.getByRole('radio', { name: 'Later' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(await screen.findByText('hornhoof.org does not answer now. Try again in a few minutes.')).toBeInTheDocument();
-    expect(screen.getByText(/turn off "Open Hornhoof on the internet", and open the link later under Company settings\./)).toBeInTheDocument();
+    expect(screen.getByText(/turn off "Open Hornhoof on the internet", and open the link later in Settings, under Company & access\./)).toBeInTheDocument();
   });
 });
 
@@ -462,7 +462,7 @@ describe('Setup from a recovery file', () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Restore from a recovery file' }));
-    expect(screen.getByText('Choose the recovery file you saved in Company settings.')).toBeInTheDocument();
+    expect(screen.getByText('Choose the recovery file you saved in Settings, under Company & access.')).toBeInTheDocument();
     /* The code came with the setup link, so only the file is asked for. */
     expect(screen.queryByLabelText('Setup code')).not.toBeInTheDocument();
     await user.upload(screen.getByLabelText('Recovery file'), new File([FILE], 'hornhoof-recovery.txt', { type: 'text/plain' }));

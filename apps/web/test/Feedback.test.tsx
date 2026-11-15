@@ -2,11 +2,12 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { About } from '../src/screens/About';
 import { Feedback } from '../src/screens/Feedback';
 import { Shell } from '../src/screens/Shell';
 import { ME, mockApi, ORG } from './api-mock';
 
-/* A person writes a bug, an improvement or an idea to Hornhoof's developers in a quick window: they see exactly what goes,
+/* A person writes a bug, an improvement or an idea to Hornhoof's developers inside About: they see exactly what goes,
    with the technical data beside it, and nothing leaves until they press Send. */
 
 const PERSON = { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } };
@@ -30,13 +31,14 @@ function page(routes: Record<string, unknown> = {}, language = 'en') {
     'GET /api/feedback': [200, { inbox: false }],
     'POST /api/feedback/preview': (body: unknown) => previewOf(body as Body),
     'POST /api/feedback': [200, { sent: true }],
+    'GET /api/updates/current': [200, { version: '0.18.11', commit: 'abc1234' }],
     ...(routes as Record<string, [number, unknown]>),
   });
   render(<LanguageProvider><Shell me={PERSON} onSignOut={() => {}} /></LanguageProvider>);
   return { user: userEvent.setup(), calls };
 }
 
-async function openFeedback(user: ReturnType<typeof userEvent.setup>, account = 'Account', item = 'Feedback', title = 'Write to Hornhoof developers') {
+async function openFeedback(user: ReturnType<typeof userEvent.setup>, account = 'Account', item = 'About', title = 'About Hornhoof') {
   await user.click(screen.getByRole('button', { name: account }));
   await user.click(screen.getByRole('button', { name: item }));
   return screen.findByRole('dialog', { name: title });
@@ -46,7 +48,7 @@ const sent = (calls: ReturnType<typeof mockApi>) => calls.filter(c => c.method =
 
 afterEach(() => localStorage.clear());
 
-describe('the feedback window', () => {
+describe('writing to Hornhoof developers inside About', () => {
   it('lets a person pick bug, improvement or idea, then shows what goes and sends it only when they press Send', async () => {
     const { user, calls } = page();
     const box = await openFeedback(user);
@@ -121,17 +123,34 @@ describe('the feedback window', () => {
     expect(await within(box).findByText('Added to the inbox.')).toBeInTheDocument();
   });
 
-  it('opens from About in place of the old link to GitHub', async () => {
-    const { user } = page({ 'GET /api/updates/current': [200, { version: '0.18.11', commit: 'abc1234' }] });
+  it('stands in About under its facts, with no Feedback item in the account menu and no window of its own', async () => {
+    const { user } = page();
     await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(screen.queryByRole('button', { name: 'Feedback' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'About' }));
     const about = await screen.findByRole('dialog', { name: 'About Hornhoof' });
-    expect(within(about).queryByRole('link', { name: 'Report a bug or suggest an idea' })).not.toBeInTheDocument();
-    await user.click(within(about).getByRole('button', { name: 'Report a bug or suggest an idea' }));
-    expect(await screen.findByRole('dialog', { name: 'Write to Hornhoof developers' })).toBeInTheDocument();
+    const part = within(about).getByRole('region', { name: 'Write to Hornhoof developers' });
+    expect(part.previousElementSibling).toHaveClass('facts');
+    expect(within(part).getByRole('button', { name: 'Next' })).toBeInTheDocument();
+    /* About has its own close button, so the form needs no Cancel. */
+    expect(within(part).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(location.pathname).toBe('/about');
   });
 
-  it('keeps the focus where the person types when the screen behind it is drawn again', async () => {
+  it('keeps the focus where the person types in About when the screen behind it is drawn again', async () => {
+    localStorage.setItem('hh-lang', 'en');
+    mockApi({ 'GET /api/updates/current': [200, { version: '0.18.11', commit: 'abc1234' }] });
+    const { rerender } = render(<LanguageProvider><About inbox={false} onClose={() => {}} /></LanguageProvider>);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Title'), 'Terminal');
+    rerender(<LanguageProvider><About inbox={false} onClose={() => {}} /></LanguageProvider>);
+    await user.keyboard(' froze');
+    expect(screen.getByLabelText('Title')).toHaveFocus();
+    expect(screen.getByLabelText('Title')).toHaveValue('Terminal froze');
+  });
+
+  it('keeps the focus where the person types in the window of a finding when the screen behind it is drawn again', async () => {
     localStorage.setItem('hh-lang', 'en');
     const { rerender } = render(<LanguageProvider><Feedback inbox={false} onClose={() => {}} /></LanguageProvider>);
     const user = userEvent.setup();
@@ -144,7 +163,8 @@ describe('the feedback window', () => {
 
   it('speaks Russian', async () => {
     const { user } = page({}, 'ru');
-    const box = await openFeedback(user, 'Аккаунт', 'Обратная связь', 'Написать разработчикам Hornhoof');
+    const box = await openFeedback(user, 'Аккаунт', 'О программе', 'О программе Hornhoof');
+    expect(within(box).getByRole('region', { name: 'Написать разработчикам Hornhoof' })).toBeInTheDocument();
     expect(within(within(box).getByRole('group', { name: 'Что это' })).getAllByRole('button').map(b => b.textContent)).toEqual(['Ошибка', 'Улучшение', 'Идея']);
     await user.type(within(box).getByLabelText('Заголовок'), 'Терминал завис');
     await user.click(within(box).getByRole('button', { name: 'Далее' }));

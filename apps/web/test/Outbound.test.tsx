@@ -6,7 +6,7 @@ import { LanguageProvider } from '../src/i18n';
 import { parseRoute, routePath } from '../src/routes';
 import { Shell } from '../src/screens/Shell';
 import type { WaitingRequest } from '../src/types';
-import { Outbound } from '../src/ui/Outbound';
+import { ExternalMessaging } from '../src/ui/Outbound';
 import { Requests } from '../src/ui/Requests';
 import { decisions, ME, mockApi, ORG } from './api-mock';
 
@@ -127,15 +127,16 @@ function inRussian(node: ReactNode) {
   }
 }
 
-describe('Outbound screen, bound Requests snapshot, and routing', () => {
+describe('External messaging in Settings, bound Requests snapshot, and routing', () => {
   afterEach(() => {
     localStorage.removeItem('hh-lang');
     history.replaceState(null, '', '/');
   });
 
-  it('parses and formats /outbound without altering top navigation tabs', async () => {
-    expect(parseRoute('/outbound')).toEqual({ kind: 'outbound' });
-    expect(routePath({ kind: 'outbound' })).toBe('/outbound');
+  it('lives under External messaging in Settings, at /settings/messaging, with no Outbound in the menu or the tabs', async () => {
+    expect(parseRoute('/outbound')).toEqual({ kind: 'unavailable' });
+    expect(parseRoute('/settings/messaging')).toEqual({ kind: 'settings', group: 'messaging' });
+    expect(routePath({ kind: 'settings', group: 'messaging' })).toBe('/settings/messaging');
 
     mockApi({
       'GET /api/org': [200, ORG],
@@ -151,8 +152,17 @@ describe('Outbound screen, bound Requests snapshot, and routing', () => {
     expect(navButtons).toEqual(['Map', 'Tasks', 'People', 'Subscriptions & API', 'Machines']);
 
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    await user.click(screen.getByRole('button', { name: 'Outbound' }));
-    expect(await screen.findByRole('heading', { name: 'Outbound' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Outbound' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    await user.click(await within(dialog).findByRole('button', { name: 'External messaging' }));
+    expect(location.pathname).toBe('/settings/messaging');
+    expect(await within(dialog).findByRole('heading', { name: 'Waiting for exact approval', level: 3 })).toBeInTheDocument();
+    expect(within(dialog).getByText(/^What the departments send to people outside the company, by mail or webhook/)).toBeInTheDocument();
+    /* A task opened from a message takes the place of the window, as from any other place. */
+    await user.click(within(dialog).getAllByRole('button', { name: 'Open task' })[0]!);
+    expect(location.pathname).toBe(`/tasks/${TASK_ID}`);
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
   it('renders exact bound approvals for owners vs read-only viewers, unknown delivery recovery, and escalations in English and Russian', async () => {
@@ -162,7 +172,7 @@ describe('Outbound screen, bound Requests snapshot, and routing', () => {
     });
     const openedTasks: string[] = [];
     const user = userEvent.setup();
-    const { unmount } = render(<Outbound onOpenTask={id => openedTasks.push(id)} />);
+    const { unmount } = render(<ExternalMessaging onOpenTask={id => openedTasks.push(id)} />);
 
     expect(await screen.findByText('Quarterly plan overview')).toBeInTheDocument();
     expect(screen.getByText(/Plan price: \$29\.00/)).toBeInTheDocument();
@@ -187,8 +197,8 @@ describe('Outbound screen, bound Requests snapshot, and routing', () => {
     unmount();
 
     mockApi({ 'GET /api/outbound': [200, OVERVIEW] });
-    inRussian(<Outbound onOpenTask={() => {}} />);
-    expect(await screen.findByRole('heading', { name: 'Исходящие' })).toBeInTheDocument();
+    inRussian(<ExternalMessaging onOpenTask={() => {}} />);
+    expect(await screen.findByText(/^Что отделы отправляют людям вне компании по почте или через вебхук/)).toBeInTheDocument();
     expect(screen.getByText(/Не отправляйте повторно вслепую/)).toBeInTheDocument();
     expect(screen.getAllByText('Принимает хозяин отдела Sales, CEO или его заместитель.').length).toBeGreaterThanOrEqual(1);
   });
@@ -257,7 +267,7 @@ describe('Outbound screen, bound Requests snapshot, and routing', () => {
     localStorage.setItem('hh-lang', language);
     const held = { ...OVERVIEW.messages[0]!, id: '77777777-7777-4777-8777-777777777777', status: 'waiting_approval' as const, reasonCodes: ['approval_required', 'restored'], unknownRecovery: null };
     mockApi({ 'GET /api/outbound': [200, { ...OVERVIEW, messages: [held], approvals: [], escalations: [] }] });
-    render(<LanguageProvider><Outbound onOpenTask={() => {}} /></LanguageProvider>);
+    render(<LanguageProvider><ExternalMessaging onOpenTask={() => {}} /></LanguageProvider>);
     expect(await screen.findByText(line)).toBeInTheDocument();
     localStorage.clear();
   });
@@ -268,7 +278,7 @@ describe('Outbound screen, bound Requests snapshot, and routing', () => {
   ])('says so in %s in the question a person answers', async (language, line) => {
     localStorage.setItem('hh-lang', language);
     mockApi({ 'GET /api/outbound': [200, { ...OVERVIEW, messages: [], escalations: [], approvals: [{ ...BOUND_MESSAGE, restored: true }] }] });
-    render(<LanguageProvider><Outbound onOpenTask={() => {}} /></LanguageProvider>);
+    render(<LanguageProvider><ExternalMessaging onOpenTask={() => {}} /></LanguageProvider>);
     const card = (await screen.findByText(/Plan price: \$29\.00/)).closest('article')!;
     expect(within(card).getByText(line)).toBeInTheDocument();
     localStorage.clear();
@@ -277,32 +287,30 @@ describe('Outbound screen, bound Requests snapshot, and routing', () => {
   it('says nothing of a restore for a message that waits for another reason', async () => {
     const waiting = { ...OVERVIEW.messages[0]!, status: 'waiting_approval' as const, reasonCodes: ['approval_required'], unknownRecovery: null };
     mockApi({ 'GET /api/outbound': [200, { ...OVERVIEW, messages: [waiting], approvals: [], escalations: [] }] });
-    render(<Outbound onOpenTask={() => {}} />);
+    render(<ExternalMessaging onOpenTask={() => {}} />);
     expect(await screen.findByText(/waiting for approval/)).toBeInTheDocument();
     expect(screen.queryByText(/restore from a backup/)).not.toBeInTheDocument();
   });
 
   it('handles empty state, server errors, forbidden access, decline notes, and missing snapshots cleanly', async () => {
     const user = userEvent.setup();
-    let wentHome = 0;
+
 
     mockApi({ 'GET /api/outbound': [200, { channels: [], messages: [], escalations: [], approvals: [] }] });
-    const emptyView = render(<Outbound onOpenTask={() => {}} />);
+    const emptyView = render(<ExternalMessaging onOpenTask={() => {}} />);
     expect(await screen.findByText('Nothing has been sent or queued outside yet.')).toBeInTheDocument();
     emptyView.unmount();
 
     mockApi({ 'GET /api/outbound': [403, { error: { code: 'forbidden', message: 'Denied' } }] });
-    const deniedView = render(<Outbound onOpenTask={() => {}} onHome={() => { wentHome += 1; }} />);
-    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Go to the map' }));
-    expect(wentHome).toBe(1);
+    const deniedView = render(<ExternalMessaging onOpenTask={() => {}} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Denied');
     deniedView.unmount();
 
     const calls = mockApi({
       'GET /api/outbound': [200, { ...OVERVIEW, approvals: [{ ...BOUND_MESSAGE, rendered: { subject: '', body: 'Body only' }, sources: [] }] }],
       [`POST /api/requests/${MSG_REQ_ID}`]: [500, { error: { code: 'internal', message: 'Server busy' } }],
     });
-    const failCard = render(<Outbound onOpenTask={() => {}} />);
+    const failCard = render(<ExternalMessaging onOpenTask={() => {}} />);
     expect(await screen.findByText('No subject')).toBeInTheDocument();
     await user.type(screen.getByLabelText('Note, if any'), 'Wrong quarter');
     await user.click(screen.getByRole('button', { name: 'Decline' }));
