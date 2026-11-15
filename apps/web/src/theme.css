@@ -221,8 +221,8 @@ select:disabled { opacity: .55; }
 .link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
-.command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.command { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; min-inline-size: 0; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
+.command code { min-inline-size: 0; font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* Shell: the header floats over the canvas in three glass blocks; there is no bar under it. */
 .shell { position: relative; height: 100%; }
@@ -815,7 +815,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .people-head > .head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 /* A column of lines, each as wide as the list: as wide as its longest word in a table, as wide as its place as an entry. */
 .where-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.add-plan { display: grid; gap: 10px; }
+.add-plan { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .add-plan .actions { display: flex; justify-content: flex-end; }
 .share { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .share select { background-color: var(--surface); }
@@ -865,7 +865,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .test.ok { color: var(--ok); }
 .test details summary { cursor: pointer; color: var(--cyan-ink); }
 .test pre { margin: 6px 0 0; padding: 10px; max-height: 240px; overflow: auto; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); }
-.command-box { display: grid; gap: 8px; }
+.command-box { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .trust { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
 /* The plans to connect: a card each, with its tick, its mark, its name and what it takes. */
 .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; min-width: 0; border: 0; padding: 0; margin: 0; }
@@ -2131,6 +2131,9 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .card-t > .mc { color: var(--ink); }
 .stline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; color: var(--muted); }
 .wcard { container: card / inline-size; }
+/* A button of an open card is a touch's height and wraps its words inside the card's column, from the start of the line;
+   a narrow row of a table keeps its own, and a screen that sets its cards' buttons, as Subscriptions does, keeps its. */
+:where(.wcard) .act { box-sizing: border-box; height: auto; min-height: 44px; max-inline-size: 100%; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; text-align: start; justify-content: flex-start; }
 .blocks { display: grid; gap: 18px 32px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "facts" "run" "side"; }
 .blk { display: grid; gap: 10px; align-content: start; min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
 .blk-facts { grid-area: facts; }
@@ -2421,6 +2424,8 @@ th.k-prio .sorth { white-space: nowrap; }
    table, a sorting table keeps each status whole on one line as well; one that does not fit so stands as entries
    (useEntriesFit), where a status wraps its words inside its frame. */
 .dt td, .dt th, .cell-lim, .where-list { overflow-wrap: break-word; }
+/* The card open below a row is no cell of the table's columns: its words break as they do in a card anywhere else. */
+.dt > tbody > tr.det > td { overflow-wrap: anywhere; }
 .dt .status { white-space: normal; }
 @container tbl (width > 780px) {
   .dt:not([data-fit="entries"]) > tbody > tr.rm .status { white-space: nowrap; }
