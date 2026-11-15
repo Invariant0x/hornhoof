@@ -442,6 +442,14 @@ export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started'
 const MessageNumber = z.number().int().min(1).optional();
 /* The header of the upgrade answer of a server that sends ack. */
 export const ACKS_HEADER = 'hornhoof-acks';
+/* The header of the upgrade answer of a server that answers an agent's calls to its tools with no turn running, by
+   tools.call. */
+export const TOOLS_HEADER = 'hornhoof-tools';
+/* The most a call to the tools with no turn running, or Hornhoof's answer to it, carries: a frame holds 4 MB. */
+export const TOOLS_BODY_MAX = 3 * 1024 * 1024;
+/* What an MCP client sends while it connects and looks at what the server has. A newer client, agy 1.4.12 among them,
+   first asks with server/discover and falls back to initialize when the server does not know it. */
+export const MCP_CONNECTING: readonly string[] = ['server/discover', 'initialize', 'notifications/initialized', 'ping', 'tools/list', 'resources/list', 'resources/templates/list', 'prompts/list'];
 /* How many runs or parts a hello may list. A node lists the ends it has not had confirmed too, and never drops those, so
    the bound is the outbox's own; at a uuid's 39 bytes both lists leave half of the socket's 4 MiB for the rest. */
 export const HELLO_IDS_MAX = 20_000;
@@ -589,6 +597,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* Someone who may type opened the window of an agent whose program does not run: Hornhoof starts it with a turn that
      types nothing. */
   z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
+  /* What the agent's program sent to its tools while no turn of it ran: as it connected, or a call. Hornhoof answers it in
+     a step of its own, as tools.answer under the same ref. version: the MCP protocol version the program asked with. */
+  z.object({ type: z.literal('tools.call'), agentKey: Id, ref: z.string().min(1).max(64), body: z.string().max(TOOLS_BODY_MAX), version: z.string().max(40).optional() }),
   /* A hook refusal is diagnostic, not an answer or a change to the turn's state. */
   z.object({
     type: z.literal('agent.hook_rejected'),
@@ -760,6 +771,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* The agent left this node's plan: its program goes once it is idle. jobId is the last turn it was sent here, so a word that
      comes late does not close a program that ran a later one. */
   z.object({ type: z.literal('agent.release'), agentKey: Id, jobId: Id }),
+  /* Hornhoof's answer to a tools.call, as its /mcp gave it: the HTTP status and the body, empty for a notification. */
+  z.object({ type: z.literal('tools.answer'), agentKey: Id, ref: z.string().min(1).max(64), status: z.number().int().min(100).max(599), body: z.string().max(TOOLS_BODY_MAX) }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
