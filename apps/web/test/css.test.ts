@@ -89,6 +89,20 @@ it('draws every focus ring in the accent ink, which keeps 3:1 on every surface o
   for (const ring of rings) expect(ring.decls.outline, ring.selectors.join(', ')).toMatch(/^2px solid var\(--cyan-ink\)$/);
 });
 
+it('frames every invalid field control in pink by one shared .field rule while keeping a visible focus ring', () => {
+  const invalid = '.field :is(input, select, textarea)[aria-invalid="true"]';
+  const focused = `${invalid}:is(:focus, :focus-visible)`;
+  expect(decl(invalid, 'border-color')).toBe('var(--pink)');
+  expect(decl(focused, 'border-color')).toBe('var(--pink)');
+  expect(decl(focused, 'outline')).toBe('2px solid var(--cyan-ink)');
+  expect(decl(focused, 'outline-offset')).toBe('2px');
+  expect(decl(focused, 'box-shadow')).toBe('none');
+  expect(RULES.filter(r => r.selectors.some(s => s.includes('aria-invalid'))).map(r => r.selectors)).toEqual([
+    [invalid],
+    [focused],
+  ]);
+});
+
 it('lets a finger take a line of the company map and a bend on it as easily as a block\'s grip', () => {
   /* In the map's own units, against its zoom: a browser finds what a pointer is on without vector-effect, by the drawn width. */
   expect(decl('.wires .hit', 'stroke-width')).toBe('calc(12px / var(--k, 1))');
