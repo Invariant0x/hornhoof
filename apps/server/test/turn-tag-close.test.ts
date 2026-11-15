@@ -70,8 +70,11 @@ describe('the server closes a turn by the tag of its release', () => {
     expect(snapshot!.facts.whole.tasks.total).toBe(1);
     expect(snapshot!.createdAt.getTime()).toBeLessThanOrEqual(next!.openedAt!.getTime());
     expect(await f.db.select().from(turnSnapshots).where(eq(turnSnapshots.turnId, next!.id))).toEqual([]);
-    /* And the CEO hears once what is on record of the release. */
+    /* And the CEO hears once what is on record of the release, on a card that names the turn and its version. */
     expect((await f.db.select().from(waitNotices)).filter(n => n.dedupKey.startsWith(`turn_summary:${closed!.id}:`))).toHaveLength(1);
+    await deliverWaitNotices(f.ctx);
+    const cards = (await f.app.inject({ method: 'GET', url: '/api/wait-cards', ...as(f.ceoToken) })).json().cards;
+    expect(cards).toEqual([expect.objectContaining({ about: 'turn_summary', taskId: f.task.id, turn: { number: f.turn.number, version: 'v1.7.0' }, tag: null })]);
   });
 
   it('never keeps a turn from closing over its snapshot: the failure is logged and the turn rebuilds when it is read', async () => {
@@ -134,7 +137,7 @@ describe('the server closes a turn by the tag of its release', () => {
     /* The CEO sees it among their cards. */
     await deliverWaitNotices(f.ctx);
     const cards = (await f.app.inject({ method: 'GET', url: '/api/wait-cards', ...as(f.ceoToken) })).json().cards;
-    expect(cards).toEqual([expect.objectContaining({ about: 'release_tag', taskId: f.task.id, number: f.task.number })]);
+    expect(cards).toEqual([expect.objectContaining({ about: 'release_tag', taskId: f.task.id, number: f.task.number, turn: { number: f.turn.number, version: null }, tag: { version: 'v1.7.0', why: 'unrecorded' } })]);
   });
 
   it('tells them too when the full run its record relied on failed since, and keeps the turn open', async () => {
@@ -145,6 +148,7 @@ describe('the server closes a turn by the tag of its release', () => {
     const told = await toldOfTag(f);
     expect(told).toHaveLength(2);
     expect(told.find(n => n.agentId)!.message.text).toContain('no longer stands');
+    expect(told.find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: f.R, why: 'stale' });
   });
 
   it('tells nobody of a tag that releases its turn, of an older one or of one not named as a version', async () => {

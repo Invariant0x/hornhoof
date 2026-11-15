@@ -449,3 +449,63 @@ describe('turns as releases', () => {
     }
   });
 });
+
+/* Cards Hornhoof keeps for the person: of a version marked in the code with no release recorded, of a turn that is over. */
+describe('cards for the person', () => {
+  const TAG = {
+    id: 'c1', about: 'release_tag', taskId: TASKS[0]!.id, number: TASKS[0]!.number, kind: null, level: null, words: 'Server words.', at: '2026-11-14T10:00:00.000Z',
+    turn: { number: 24, version: null }, tag: { version: 'v1.7.0', why: 'unrecorded' },
+  };
+  const STALE = { ...TAG, id: 'c3', tag: { version: 'v1.7.1', why: 'stale' } };
+  const SUMMARY = { ...TAG, id: 'c2', about: 'turn_summary', turn: { number: 23, version: 'v1.6.0' }, tag: null, at: '2026-11-13T10:00:00.000Z' };
+
+  it.each([
+    ['en', 'A version was marked without a release', 'Version v1.7.0 was marked in the code, but its release was not recorded and approved beforehand. So the tasks of Turn 24 are not counted as released, and the turn stays open. The head of the department was told.',
+      'Version v1.7.1 was marked in the code, but the full check or the approval its release relied on no longer holds.', 'Turn 23 is over', 'Turn 23 came out as version v1.6.0. What went into it is under “By turn and release”.', 'Open task'],
+    ['ru', 'Версия отмечена без записи выпуска', 'Версия v1.7.0 отмечена в коде, но ее выпуск не был записан и одобрен заранее. Поэтому задачи хода 24 не считаются выпущенными, и ход остается открытым. Глава отдела уже знает.',
+      'Версия v1.7.1 отмечена в коде, но полная проверка или одобрение, на которых держался ее выпуск, больше не действуют.', 'Ход 23 закончен', 'Ход 23 вышел версией v1.6.0. Что в него вошло, видно в разделе «По ходам и выпускам».', 'Открыть задачу'],
+  ])('shows a version marked without a release and a turn that is over in plain words, and opens the task (%s)', async (lang, tagTitle, tagWords, staleWords, summaryTitle, summaryWords, open) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      const calls = shell({ 'GET /api/wait-cards': [200, { cards: [TAG, STALE, SUMMARY], next: null }] });
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      const [tag, stale] = await screen.findAllByRole('region', { name: tagTitle });
+      expect(tag).toHaveTextContent(tagWords);
+      expect(stale).toHaveTextContent(staleWords);
+      expect(screen.getByRole('region', { name: summaryTitle })).toHaveTextContent(summaryWords);
+      expect(screen.queryByText('Server words.')).not.toBeInTheDocument();
+      await user.click(within(tag!).getByRole('button', { name: open }));
+      await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'GET', path: `/api/tasks/${TASKS[0]!.id}` })));
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('says the person saw a card, which then goes, and nothing waits for them any more', async () => {
+    const user = userEvent.setup();
+    let seen = false;
+    const calls = shell({
+      'GET /api/requests': [200, decisions([])],
+      'GET /api/wait-cards': () => [200, { cards: seen ? [] : [TAG], next: null }],
+      'POST /api/wait-cards/c1/ack': () => { seen = true; return [200, { ok: true }]; },
+    });
+    await openTasks(user);
+    const card = await screen.findByRole('region', { name: 'A version was marked without a release' });
+    expect(screen.queryByText('Nothing waits for you.')).not.toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: 'Got it' }));
+    await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/api/wait-cards/c1/ack' })));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'A version was marked without a release' })).not.toBeInTheDocument());
+  });
+
+  it("keeps the person's own cards out of sight while another person's decisions are shown", async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/org': [200, counted({ p1: 1, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!])], 'GET /api/wait-cards': [200, { cards: [TAG], next: null }] });
+    await user.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByText('Decisions for Dan')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'A version was marked without a release' })).not.toBeInTheDocument();
+    await user.click(within(waiting).getByRole('button', { name: "Show everyone's decisions" }));
+    expect(await screen.findByRole('region', { name: 'A version was marked without a release' })).toBeInTheDocument();
+  });
+});
