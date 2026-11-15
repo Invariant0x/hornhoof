@@ -37,6 +37,7 @@ export type MailMessage = {
   notification?: { source: string };
   /* Who did what a notice of Hornhoof tells, as the notice names them. */
   actor?: { kind: 'person' | 'agent' | 'hornhoof'; id: string | null; name: string };
+  computerAccess?: { machineId: string; inboxId?: string };
 };
 export type MailTurn = { companyId: string; agentId: string; taskId?: string; repeated?: unknown; message?: MailMessage };
 
@@ -81,10 +82,10 @@ async function senderOf(db: Reader, companyId: string, m: MailMessage): Promise<
 }
 
 /* Keeps the letter in the employee's inbox, with the turn it went into or waits for. */
-export async function keepMail(db: Writer, t: MailTurn & { message: MailMessage }, jobId: string, status: InboxStatus): Promise<void> {
+export async function keepMail(db: Writer, t: MailTurn & { message: MailMessage }, jobId: string, status: InboxStatus): Promise<string> {
   const m = t.message;
   const task = m.task ?? null;
-  await db.insert(agentInbox).values({
+  const [row] = await db.insert(agentInbox).values({
     companyId: t.companyId,
     agentId: t.agentId,
     ...(await senderOf(db, t.companyId, m)),
@@ -97,7 +98,8 @@ export async function keepMail(db: Writer, t: MailTurn & { message: MailMessage 
     status,
     readAt: status === 'unread' ? null : new Date(),
     createdAt: new Date(),
-  });
+  }).returning({ id: agentInbox.id });
+  return row!.id;
 }
 
 /* The screens of the employee's place fetch its inbox again; the message says nothing of what is in it. */
@@ -117,6 +119,14 @@ export async function mailWentOut(db: Writer, agentId: string, jobIds: string[])
 export async function dropMail(db: Writer, agentId: string, jobId: string): Promise<number> {
   const dropped = await db.delete(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.jobId, jobId), eq(agentInbox.status, 'unread'))).returning({ id: agentInbox.id });
   return dropped.length;
+}
+
+/* Attaches the unread letters that go out with this inbox turn before dispatch, detaching any unshown ones. */
+export async function claimMail(db: Writer, agentId: string, mail: readonly Pick<InboxRow, 'id'>[], job: { id: string; inboxWake: boolean }): Promise<void> {
+  if (!job.inboxWake || !mail.length) return;
+  const ids = mail.map(m => m.id);
+  await db.update(agentInbox).set({ jobId: null }).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.jobId, job.id), notInArray(agentInbox.id, ids)));
+  await db.update(agentInbox).set({ jobId: job.id }).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids), eq(agentInbox.status, 'unread')));
 }
 
 /* The turn that took the inbox went out with these letters in its summary: read, as letters of that turn. */
@@ -207,6 +217,12 @@ export async function unreadCount(db: Reader, agentId: string): Promise<number> 
   return row?.n ?? 0;
 }
 
+async function detachQueuedWake(db: Pick<Db, 'select' | 'update'>, agentId: string, picked: SQL | undefined): Promise<void> {
+  const queued = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true)));
+  if (!queued.length) return;
+  await db.update(agentInbox).set({ jobId: null }).where(and(picked, eq(agentInbox.status, 'unread'), inArray(agentInbox.jobId, queued.map(j => j.id))));
+}
+
 /* A person marks the employee's own letters read, these or all of them; a letter it dealt with stays so, and any other id
    is refused whole. How many are unread after. */
 export async function readByPerson(db: Pick<Db, 'select' | 'update'>, agentId: string, which: string[] | 'all'): Promise<number | null> {
@@ -216,14 +232,17 @@ export async function readByPerson(db: Pick<Db, 'select' | 'update'>, agentId: s
     if (found.length !== new Set(which).size) return null;
   }
   const picked = which === 'all' ? mine : and(mine, inArray(agentInbox.id, which));
+  await detachQueuedWake(db, agentId, picked);
   await db.update(agentInbox).set({ status: 'read', readAt: new Date() }).where(and(picked, eq(agentInbox.status, 'unread')));
   return unreadCount(db, agentId);
 }
 
 /* Marks the employee's own letters; any other id is refused whole. */
 export async function markMail(db: Pick<Db, 'select' | 'update'>, agentId: string, ids: string[], status: 'read' | 'done'): Promise<number | null> {
-  const mine = await db.select({ id: agentInbox.id }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids)));
+  const picked = and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids));
+  const mine = await db.select({ id: agentInbox.id }).from(agentInbox).where(picked);
   if (mine.length !== new Set(ids).size) return null;
-  await db.update(agentInbox).set({ status, readAt: new Date() }).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids)));
+  await detachQueuedWake(db, agentId, picked);
+  await db.update(agentInbox).set({ status, readAt: new Date() }).where(picked);
   return mine.length;
 }
