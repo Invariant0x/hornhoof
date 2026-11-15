@@ -652,6 +652,7 @@
           "apps/server/test/notebook.test.ts",
           "apps/server/test/notification-actions.test.ts",
           "apps/server/test/operations-card.test.ts",
+          "apps/server/test/operations-recovery.test.ts",
           "apps/server/test/operations-required.test.ts",
           "apps/server/test/orchestrator-control.test.ts",
           "apps/server/test/org.test.ts",
