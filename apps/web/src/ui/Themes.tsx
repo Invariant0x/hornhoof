@@ -22,12 +22,6 @@ const useSkins = () => useSyncExternalStore(subscribeSkins, skinsState);
 const nameIn = (names: SkinNames, language: Language) => (language === 'ru' ? names.ru : names.en);
 const builtinNames = (id: BuiltinSkinId): SkinNames => ({ ru: ru.skins.names[id], en: en.skins.names[id] });
 
-/* The name people see: a built-in skin's in the language of the page, one's own as its file names it. */
-function skinName(t: Messages, language: Language, id: string, custom: readonly CustomSkin[]): string {
-  const own = custom.find(entry => entry.id === id);
-  return own ? nameIn(own.skin.name, language) : t.skins.names[id as BuiltinSkinId];
-}
-
 /* The tokens of a skin on its own preview only, so each card shows its skin in the same drawing. */
 const previewStyle = (look: SkinLook) => Object.fromEntries(declarations(look).filter(([property]) => property.startsWith('--'))) as CSSProperties;
 

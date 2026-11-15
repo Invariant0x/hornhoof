@@ -9,7 +9,7 @@ import { builtinFile } from '../src/skins/validate';
 import type { FeedbackShown, Improvement, InboxCard } from '../src/types';
 import { serveApi } from './api';
 
-/* The feedback window, a finding about Hornhoof itself on its card and the inbox of Hornhoof's developers, as a person
+/* Writing to Hornhoof's developers inside About, a finding about Hornhoof itself on its card and their inbox, as a person
    meets them: in each built-in skin and one of a person's own, every block stands in the same place with the same size
    among skins written in the same fonts, text
    stays readable and whole, controls keep their heights and nothing runs off the screen, in every shipped language, at a
@@ -96,24 +96,24 @@ async function setLook(page: Page, choice: Choice, language: Language) {
 
 type Scene = { name: string; inbox: boolean; open: (page: Page, words: Messages) => Promise<Locator> };
 
-/* The window, once it holds the focus it takes when it opens, so what a test types next stays where it is typed. */
+/* Writing to the developers inside About, once About holds the focus it takes when it opens, so what a test types next
+   stays where it is typed. */
 async function dialog(page: Page, words: Messages): Promise<Locator> {
-  const box = page.getByRole('dialog', { name: words.feedback.title, exact: true });
-  await expect(box).toBeFocused();
-  return box;
+  await page.goto('/about');
+  const about = page.getByRole('dialog', { name: words.about.title, exact: true });
+  await expect(about).toBeFocused();
+  return about.getByRole('region', { name: words.feedback.title, exact: true });
 }
 
 /* Every place a person meets, opened the way they open it. */
 const SCENES: Scene[] = [
   { name: 'feedback-write', inbox: false, open: async (page, words) => {
-    await page.goto('/feedback');
     const box = await dialog(page, words);
     await box.getByLabel(words.feedback.titleLabel, { exact: true }).fill(TITLE);
     await box.getByLabel(words.feedback.text, { exact: true }).fill(TEXT);
     return box;
   } },
   { name: 'feedback-check', inbox: false, open: async (page, words) => {
-    await page.goto('/feedback');
     const box = await dialog(page, words);
     await box.getByLabel(words.feedback.titleLabel, { exact: true }).fill(TITLE);
     await box.getByLabel(words.feedback.text, { exact: true }).fill(TEXT);
@@ -240,7 +240,7 @@ function keep(info: TestInfo, name: string, body: unknown) {
   writeFileSync(path, JSON.stringify(body, null, 2));
 }
 
-test('the feedback window, a finding about Hornhoof itself and the inbox keep their layout in each theme and language, wide and narrow', async ({ page, browserName }, info) => {
+test('writing to the developers in About, a finding about Hornhoof itself and the inbox keep their layout in each theme and language, wide and narrow', async ({ page, browserName }, info) => {
   const problems = watchProblems(page);
   const inbox = { value: false };
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -274,7 +274,7 @@ test('the feedback window, a finding about Hornhoof itself and the inbox keep th
   expect(problems).toEqual([]);
 });
 
-test('mirrors the feedback window and the inbox for a language written right to left', async ({ page, browserName }, info) => {
+test('mirrors writing to the developers in About and the inbox for a language written right to left', async ({ page, browserName }, info) => {
   /* No shipped language is written right to left yet; this checks the rule on English with the page turned. */
   const words = await messagesFor('en');
   const inbox = { value: false };
@@ -285,16 +285,20 @@ test('mirrors the feedback window and the inbox for a language written right to 
     inbox.value = false;
     const box = await openScene(page, SCENES[0]!, words);
     await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
-    const label = (await box.locator('.field > label').first().boundingBox())!;
-    const input = (await box.locator('.field input').first().boundingBox())!;
-    if (width === 1440) expect(label.x, 'the label column is on the right').toBeGreaterThan(input.x + input.width - 1);
+    /* About is narrow, so each label stands over its field, its words from the right edge. */
+    const label = await box.locator('.field > label').first().evaluate(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const words = range.getBoundingClientRect();
+      return element.getBoundingClientRect().right - words.right;
+    });
+    expect(label, 'the label starts on the right').toBeLessThan(1);
     const kinds = box.locator('.fb-kinds button');
     expect((await kinds.nth(0).boundingBox())!.x, 'Bug, the first kind, is on the right').toBeGreaterThan((await kinds.nth(2).boundingBox())!.x);
     const frame = (await box.boundingBox())!;
     const main = (await box.getByRole('button', { name: words.common.next, exact: true }).boundingBox())!;
-    const cancel = (await box.getByRole('button', { name: words.common.cancel, exact: true }).boundingBox())!;
-    expect(main.x, 'Next is first from the right').toBeGreaterThan(cancel.x);
-    expect(cancel.x - frame.x, 'the group stands at the end, the left edge').toBeLessThan(frame.width / 2);
+    await expect(box.getByRole('button', { name: words.common.cancel, exact: true }), 'About has its own close, so no Cancel').toHaveCount(0);
+    expect(main.x - frame.x, 'Next stands at the end, the left edge').toBeLessThan(frame.width / 2);
     expect(await whole(page, box)).toEqual([]);
     await box.screenshot({ path: info.outputPath(`${browserName}/rtl-${width}-feedback-write.png`), animations: 'disabled' });
 
