@@ -171,13 +171,15 @@ async function lowestContrast(form: Locator): Promise<{ ratio: number; what: str
   });
 }
 
-/* Each control keeps its height: a field and a select 40 px, a button of a form's foot and a choice card from 44 px. On a
-   desktop's width a button of the foot has the room for its words and stays on one line of 44 px. */
+/* Each control keeps its height: a field and a select 40 px, or 44 px on Subscriptions & API as Design checked it (#989),
+   a button of a form's foot and a choice card from 44 px. On a desktop's width a button of the foot has the room for its
+   words and stays on one line of 44 px. */
 async function heights(form: Locator, wide: boolean): Promise<string[]> {
   return form.evaluate((root, wide) => {
     const wrong: string[] = [];
     const h = (e: Element) => Math.round(e.getBoundingClientRect().height * 100) / 100;
-    for (const e of root.querySelectorAll('.field input:not(.sr, [type="checkbox"], [type="radio"]), .field select, .staff-pick select')) if (Math.abs(h(e) - 40) > 0.5) wrong.push(`${e.tagName} ${h(e)}`);
+    const field = root.closest('.subs') ? 44 : 40;
+    for (const e of root.querySelectorAll('.field input:not(.sr, [type="checkbox"], [type="radio"]), .field select, .staff-pick select')) if (Math.abs(h(e) - field) > 0.5) wrong.push(`${e.tagName} ${h(e)}`);
     for (const e of root.querySelectorAll('.form-foot > *, .entry-actions > *, .kind-card, .check-card, .plan')) if (h(e) < 43.5) wrong.push(`${e.className} ${e.textContent?.trim().slice(0, 20)} ${h(e)}`);
     if (wide) for (const e of root.querySelectorAll('.form-foot > *')) if (h(e) > 44.5) wrong.push(`one line: ${e.className} ${e.textContent?.trim().slice(0, 20)} ${h(e)}`);
     for (const e of root.querySelectorAll('input[type="checkbox"], input[type="radio"]:not(.sr)')) if (Math.abs(h(e) - 16) > 0.5) wrong.push(`${e.getAttribute('type')} ${h(e)}`);

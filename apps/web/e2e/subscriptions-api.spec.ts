@@ -1,3 +1,5 @@
+/// <reference types="node" />
+import { writeFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
@@ -8,6 +10,8 @@ import { tokenCount } from '../src/ui/token-count';
 import { CARD } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
 import { box, brokenHeaderWords, serveApi, tableFits } from './api';
+import { around, focusRing, markClear, offences, sizes, tabsWhole, wholePage } from './owner-screens-look';
+import type { Measured } from './owner-screens-sizes';
 
 /* One section holds the plans and the APIs paid by the token: each says how it is paid, the table filters by it and shows
    what each used in 30 days, an open card shows its tokens beside its limits, the whole company connects an API with the
@@ -232,7 +236,7 @@ for (const { lang, skin, width } of LOOKS) {
     await expect(form).toContainText(t.subs.modelsFound(3));
     const qwen = form.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true });
     /* A box stands at the first line of its name, the size of a box. */
-    const [tick, name] = [await box(qwen), await box(form.locator('.model-found label').filter({ has: page.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }) }).locator('span'))];
+    const [tick, name] = [await box(qwen), await box(form.locator('.model-found label').filter({ has: page.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }) }).locator(':scope > span:not(.tick-box)'))];
     expect(tick.height).toBeLessThan(22);
     expect(Math.abs(tick.y + tick.height / 2 - (name.y + Math.min(name.height, 22) / 2))).toBeLessThan(5);
     await qwen.check();
@@ -269,45 +273,86 @@ const department = (id: string, name: string, teams: { id: string; name: string 
   teams: teams.map(team => ({ ...team, about: '', stage: 0, gate: false, turnkey: false })),
 });
 
-for (const lang of ['en', 'ru'] as const) {
-  for (const width of [1440, 375]) {
-    test(`Subscriptions & API: a person who runs a department keeps its API keys there alone, ${lang} light ${width}`, async ({ page }, info) => {
-      const t = messages[lang];
-      const errors = watch(page);
-      await page.setViewportSize({ width, height: 900 });
-      await page.clock.install({ time: NOW });
-      await page.addInitScript(lang => { localStorage.setItem('hh-lang', lang); localStorage.setItem('hh-theme', 'light'); }, lang);
-      await serveSection(page, [], [MARKETING_KEY]);
-      await page.route(url => pathOf(url) === '/api/subscriptions', route => route.fulfill({ json: { subscriptions: [MARKETING_KEY], apiPlaces: ['d1'] } }));
-      await page.route(url => pathOf(url) === '/api/me', route => route.fulfill({ json: DANA }));
-      await page.route(url => pathOf(url) === '/api/org', route => route.fulfill({ json: {
-        company: DANA.company, people: [], agents: { total: 0, working: 0 },
-        orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
-        departments: [department('d1', 'Marketing', [{ id: 't1', name: 'Social media and long-form content' }]), department('d2', 'Development', [])],
-      } }));
-      await page.goto('/');
-      await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
-      await expect(page.getByRole('heading', { level: 1, name: t.subs.heading, exact: true })).toBeVisible();
+/* Both languages in both skins, at a desk and on a phone, and right to left: Design's rules hold on the list, the card and
+   the form, the tabs above stand whole, the version mark covers no button, and the pieces are drawn for Design. */
+type OwnerLook = { lang: 'en' | 'ru'; skin: 'light' | 'cyberpunk'; width: number; dir: 'ltr' | 'rtl' };
+const OWNER_LOOKS: OwnerLook[] = [
+  ...(['en', 'ru'] as const).flatMap(lang => (['light', 'cyberpunk'] as const).flatMap(skin => [1440, 375].map(width => ({ lang, skin, width, dir: 'ltr' as const })))),
+  { lang: 'en', skin: 'light', width: 1440, dir: 'rtl' },
+  { lang: 'ru', skin: 'cyberpunk', width: 375, dir: 'rtl' },
+];
 
-      await page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn').click();
-      const card = page.getByRole('article', { name: /MKT1/ });
-      const name = subName(t, MARKETING_KEY);
-      await expect(card.getByRole('button', { name: t.subs.editApiLabel(name), exact: true })).toBeVisible();
-      await expect(card.getByRole('button', { name: t.subs.removeLabel(name), exact: true })).toBeVisible();
-      expect(await fits(page)).toBe(true);
-      await page.screenshot({ path: info.outputPath(`owner-card-${lang}-${width}.png`), fullPage: true });
+for (const { lang, skin, width, dir } of OWNER_LOOKS) {
+  const mode = skin === 'light' ? 'light' : `dark ${skin}`;
+  const look = `${lang}-${skin}-${width}-${dir}`;
+  test(`Subscriptions & API: a person who runs a department keeps its API keys there alone, ${lang} ${mode} ${width}${dir === 'rtl' ? ' right to left' : ''}`, async ({ page, browserName }, info) => {
+    const t = messages[lang];
+    const errors = watch(page);
+    await page.setViewportSize({ width, height: 900 });
+    await page.clock.install({ time: NOW });
+    await page.addInitScript(({ lang, skin, dir }) => {
+      localStorage.setItem('hh-lang', lang);
+      localStorage.setItem('hh-theme', skin);
+      if (dir === 'rtl') document.addEventListener('DOMContentLoaded', () => { document.documentElement.dir = 'rtl'; });
+    }, { lang, skin, dir });
+    await serveSection(page, [], [MARKETING_KEY]);
+    await page.route(url => pathOf(url) === '/api/subscriptions', route => route.fulfill({ json: { subscriptions: [MARKETING_KEY], apiPlaces: ['d1'] } }));
+    await page.route(url => pathOf(url) === '/api/me', route => route.fulfill({ json: DANA }));
+    await page.route(url => pathOf(url) === '/api/org', route => route.fulfill({ json: {
+      company: DANA.company, people: [], agents: { total: 0, working: 0 },
+      orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
+      departments: [department('d1', 'Marketing', [{ id: 't1', name: 'Social media and long-form content' }]), department('d2', 'Development', [])],
+    } }));
+    await page.goto('/');
+    await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
+    await expect(page.getByRole('heading', { level: 1, name: t.subs.heading, exact: true })).toBeVisible();
+    await page.evaluate(async () => { await document.fonts.ready; });
+    const section = page.locator('section.subs');
+    const pieces = { head: '.people-head', connect: '.head-actions > .btn', tools: '.tools', table: '.tbl' };
+    expect(await tabsWhole(page)).toEqual([]);
+    expect.soft(await offences(section, { danger: [], groups: '.head-actions' })).toEqual([]);
+    const measured: Measured[] = [{ browser: browserName, look, screen: 'subscriptions', sizes: await sizes(section, pieces) }];
+    await wholePage(page, info.outputPath(`subs-list-${look}-${browserName}.png`));
 
-      await page.getByRole('button', { name: t.subs.connectApi, exact: true }).click();
-      const form = page.getByRole('form', { name: t.subs.connectApi });
-      const serves = form.getByLabel(t.subs.apiServes, { exact: true });
-      await expect(serves).toHaveValue('department:d1');
-      await expect(serves.locator('option')).toHaveText(['Marketing', 'Marketing, Social media and long-form content']);
-      expect(await fits(page)).toBe(true);
-      await form.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: info.outputPath(`owner-form-${lang}-${width}.png`), fullPage: true });
-      expect(errors).toEqual([]);
-    });
-  }
+    await page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn').click();
+    const card = page.getByRole('article', { name: /MKT1/ });
+    const name = subName(t, MARKETING_KEY);
+    const remove = card.getByRole('button', { name: t.subs.removeLabel(name), exact: true });
+    await expect(card.getByRole('button', { name: t.subs.editApiLabel(name), exact: true })).toBeVisible();
+    await expect(remove).toBeVisible();
+    expect(await fits(page)).toBe(true);
+    expect.soft(await offences(card, { danger: [t.subs.remove], groups: '.machine-actions' })).toEqual([]);
+    measured.push({ browser: browserName, look, screen: 'subscriptions card', sizes: await sizes(card, { side: '.blk-side', actions: '.machine-actions', action: '.machine-actions > button' }) });
+    await wholePage(page, info.outputPath(`subs-card-${look}-${browserName}.png`));
+
+    /* The keyboard reaches Remove and shows where it is. */
+    await remove.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(remove).toBeFocused();
+    expect(await focusRing(page)).toBe('ring');
+    await around(page, card.locator('.machine-actions'), info.outputPath(`subs-focus-${look}-${browserName}.png`));
+
+    await page.getByRole('button', { name: t.subs.connectApi, exact: true }).click();
+    const form = page.getByRole('form', { name: t.subs.connectApi });
+    const serves = form.getByLabel(t.subs.apiServes, { exact: true });
+    await expect(serves).toHaveValue('department:d1');
+    await expect(serves.locator('option')).toHaveText(['Marketing', 'Marketing, Social media and long-form content']);
+    await form.getByLabel(t.subs.apiService, { exact: true }).selectOption('openrouter');
+    await form.getByLabel(t.subs.apiKey, { exact: true }).fill(KEY);
+    await form.getByRole('button', { name: t.subs.loadModels, exact: true }).click();
+    await expect(form).toContainText(t.subs.modelsFound(3));
+    await form.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }).check();
+    expect(await fits(page)).toBe(true);
+    expect.soft(await offences(form, { danger: [], groups: '.form-foot' })).toEqual([]);
+    measured.push({ browser: browserName, look, screen: 'subscriptions form', sizes: await sizes(form, { fields: '.field', foot: '.form-foot > .btn' }) });
+    writeFileSync(info.outputPath('sizes.json'), JSON.stringify(measured));
+    await form.getByRole('button', { name: t.common.cancel, exact: true }).scrollIntoViewIfNeeded();
+    expect(await markClear(page)).toEqual([]);
+    await page.screenshot({ path: info.outputPath(`subs-form-foot-${look}-${browserName}.png`) });
+    await wholePage(page, info.outputPath(`subs-form-${look}-${browserName}.png`));
+    expect(errors).toEqual([]);
+  });
 }
 
 /* Every filter group with two values or more starts with All and its count, pressed until a value is; each button is a

@@ -6,6 +6,7 @@ import type { ModelOption, SubView } from '../types';
 import { subName } from './subscription';
 import { BusyLabel } from './BusyLabel';
 import { Field, type InputProps } from './Field';
+import { TickBox } from './TickBox';
 
 /* A company connects an API paid by the token, and changes its name, models and the place it serves: company scope
    anywhere, and a person who runs a department in that department alone, as the server checks. The key goes to the server
@@ -112,7 +113,7 @@ function ModelsField({ models, setModels, load }: { models: Model[]; setModels(m
             <ul className="model-found">
               {found.map(m => (
                 <li key={m.id}>
-                  <label><input type="checkbox" checked={kept.has(m.id)} onChange={() => toggle(m)} /><span>{m.name}</span></label>
+                  <label><TickBox checked={kept.has(m.id)} onChange={() => toggle(m)} /><span>{m.name}</span></label>
                 </li>
               ))}
             </ul>

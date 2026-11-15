@@ -34,6 +34,11 @@ describe('ApprovalPolicy', () => {
     expect(screen.getByText(t.ownerHint)).toBeInTheDocument();
   });
 
+  it('names the state of autonomous release in a word in both languages', () => {
+    expect([en.dept.approvals.autonomousReleaseWord(true), en.dept.approvals.autonomousReleaseWord(false)]).toEqual(['on', 'off']);
+    expect([ru.dept.approvals.autonomousReleaseWord(true), ru.dept.approvals.autonomousReleaseWord(false)]).toEqual(['включен', 'выключен']);
+  });
+
   it('says in both languages that everyone given the department runs it too, the owner only coming first with its approvals', () => {
     expect(en.dept.approvals.ownerHint).toBe('The owner gets this department\'s approvals and decisions first. Everyone given the department runs it in full as well: hires and removes its employees, changes its sub-units and repository and answers its approvals.');
     expect(ru.dept.approvals.ownerHint).toBe('Хозяину отдела первым приходят его одобрения и решения. Каждый, кому дан отдел, тоже управляет им полностью: нанимает и убирает сотрудников, меняет подотделы и репозиторий и отвечает на одобрения.');
@@ -268,8 +273,12 @@ describe('the words', () => {
     await screen.findByText(t.ownerIs('Dana'));
     const own = screen.getByRole('switch', { name: /autonomous release/i });
     expect(own).toBeChecked();
+    /* Its state is said in a word beside the box, not by the box alone. */
+    const line = own.closest('label')!;
+    expect(within(line).getByText(t.autonomousReleaseWord(true))).toBeInTheDocument();
     fireEvent.click(own);
     await waitFor(() => expect(owner.find(c => c.method === 'PUT' && c.path.endsWith('/autonomous-release'))?.body).toEqual({ enabled: false }));
+    expect(await within(line).findByText(t.autonomousReleaseWord(false))).toBeInTheDocument();
     second.unmount();
 
     /* Someone who sees the department but does not run it reads its state, with no switch. */

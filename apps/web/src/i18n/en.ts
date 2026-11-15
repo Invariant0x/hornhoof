@@ -1202,6 +1202,7 @@ export const en = {
       channels: { message: 'Messages', price: 'Prices', publication: 'Publications', commit: 'Commits', spend: 'Spending', other: 'Everything else' },
       autonomousRelease: 'Autonomous release',
       autonomousReleaseHint: 'When on, an exact commit for main passes without an approval card if it has a green full test run, an independent PASS verdict from another employee and a fast-forward path from main. It is this department\'s own: the people who run it turn it on and off, never an agent.',
+      autonomousReleaseWord: (on: boolean): string => (on ? 'on' : 'off'),
       autonomousReleaseState: (on: boolean): string => (on ? 'Autonomous release: on. The people who run this department switch it.' : 'Autonomous release: off. The people who run this department switch it.'),
       autonomousJournalTitle: 'Autonomous release log',
       autonomousJournalEmpty: 'No commits have been auto-approved yet.',

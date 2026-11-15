@@ -3,6 +3,7 @@ import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import type { Messages } from '../i18n/en';
 import { Field } from './Field';
+import { TickBox } from './TickBox';
 
 /* A department's own outbound messages, for the people who run it: its channels with their mail accounts, limits and
    sending without a yes to each message, its catalog with what to publish or take back, and the log of who set what up.
@@ -193,10 +194,7 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
       <Field label={s.domainDailyLimit} hint={s.domainDailyLimitHint}>{p => <input {...p} type="number" min={1} step={1} value={v.domainDailyLimit} onChange={e => setV({ ...v, domainDailyLimit: e.target.value })} required />}</Field>
       <Field label={s.timezone} hint={s.timezoneHint}>{p => <input {...p} value={v.timezone} onChange={e => setV({ ...v, timezone: e.target.value })} maxLength={64} required />}</Field>
       <label className="check-card">
-        <span className="tick-box">
-          <input type="checkbox" checked={v.autoSend} onChange={e => setV({ ...v, autoSend: e.target.checked })} />
-          <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 8.5l3 3 6-7" /></svg>
-        </span>
+        <TickBox checked={v.autoSend} onChange={e => setV({ ...v, autoSend: e.target.checked })} />
         <span>
           <b>{s.autoSend}</b>
           <small>{channel.audience === 'public' ? s.autoSendPublic : s.autoSendHint}</small>
