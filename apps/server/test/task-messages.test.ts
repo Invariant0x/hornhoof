@@ -9,7 +9,7 @@ import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from './builtin.js';
 import { comment, createTask, updateTask } from '../src/modules/tasks/engine.js';
 import { withInputLock } from '../src/modules/conversation/decision-context.js';
-import { enqueueTurn, onAgent } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, onAgent, pump } from '../src/modules/conversation/queue.js';
 import { queueTaskMessage, waitFor } from '../src/modules/tasks/external-wait.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { routeOf } from '../src/modules/tasks/echelons-store.js';
@@ -98,11 +98,10 @@ describe('task messages reach their recipient', () => {
     /* What a failure collector reads of the messages a sender's turns could not deliver. */
     const undeliveredBy = async (c: Awaited<ReturnType<typeof messaging>>, agentId: string) =>
       (await listEvents(c.db, agentId, 0)).filter(e => e.kind === 'tool_result' && (e.data as { undelivered?: unknown }).undelivered).map(e => ({ jobId: e.jobId, data: e.data }));
-    /* The machine of the company key lost its line, and was last heard from this long ago. */
-    const lineLost = (c: Awaited<ReturnType<typeof messaging>>, ago: number) => {
-      c.ctx.hub.isReady = () => false;
-      c.ctx.hub.isOnline = () => false;
-      c.ctx.hub.lastSeenAt = () => Date.now() - ago;
+    /* The machine of the company key, as Hornhoof sees its line: open before its hello, open past it, or closed. */
+    const line = (c: Awaited<ReturnType<typeof messaging>>, state: 'hello_pending' | 'ready' | 'closed') => {
+      c.ctx.hub.isOnline = () => state !== 'closed';
+      c.ctx.hub.isReady = () => state === 'ready';
     };
 
     it.each([{ bound: true }, { bound: false }])('keeps a message for a busy employee whose running turn did not take it, for its next turn: %j', async ({ bound }) => {
@@ -139,46 +138,49 @@ describe('task messages reach their recipient', () => {
       expect(queued.map(j => j.prompt)).toEqual([expect.stringContaining('Check the release notes.')]);
     });
 
-    it.each([{ bound: true }, { bound: false }])('keeps a message for an employee whose machine is getting back on the line, until it is back: %j', async ({ bound }) => {
+    it.each([{ bound: true }, { bound: false }])('keeps a message for an employee whose machine is getting back on the line, and sends it once the machine says hello: %j', async ({ bound }) => {
       const c = await messaging();
       const task = await c.task();
       const head = await c.run(c.head.id);
-      lineLost(c, 60_000);
+      line(c, 'hello_pending');
       const result = await send(head.client, c.agent.id, 'Wait for me.', bound ? task.number : undefined);
       expect([result.isError, result.content[0]!.text]).toEqual([undefined, 'Sent to Bruno. Its machine is getting back on the line, so the turn starts once it is back.']);
-      const queued = (await c.turnsOf()).filter(j => j.status === 'queued');
-      expect(queued.map(j => j.prompt)).toEqual([expect.stringContaining('Wait for me.')]);
+      const [queued, ...more] = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect([queued!.prompt, more]).toEqual([expect.stringContaining('Wait for me.'), []]);
       expect(await undeliveredBy(c, c.head.id)).toEqual([]);
+      line(c, 'ready');
+      await pump(c.ctx, c.agent.id);
+      expect((await c.jobOf(queued!.id)).status).toBe('running');
     });
 
-    it('keeps the orchestrator\'s message for an employee whose machine is getting back on the line, and refuses one with its code once it has been off for long', async () => {
+    it('keeps the orchestrator\'s message for an employee whose machine is getting back on the line, and refuses one with its code once the line is closed', async () => {
       const c = await messaging();
       const task = await c.task();
       const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
       const sender = await c.run(orchestrator!.id);
-      lineLost(c, 60_000);
+      line(c, 'hello_pending');
       expect((await send(sender.client, c.agent.id, 'Wait for me.', task.number)).isError).toBeFalsy();
       expect((await c.turnsOf()).filter(j => j.status === 'queued').map(j => j.prompt)).toEqual([expect.stringContaining('Wait for me.')]);
-      lineLost(c, 6 * 60_000);
+      line(c, 'closed');
       const refused = await send(sender.client, c.agent.id, 'Are you there?', task.number);
-      const line = `Not delivered: reason machine_offline, recipient ${c.agent.id}, task #${task.number}.`;
+      const said = `Not delivered: reason machine_offline, recipient ${c.agent.id}, task #${task.number}.`;
       expect(refused.isError).toBe(true);
-      expect(refused.content[0]!.text).toContain(`This employee cannot answer right now. See the window for what to do.\n${line}`);
-      expect(await undeliveredBy(c, orchestrator!.id)).toEqual([{ jobId: sender.job.id, data: { ok: false, summary: line, undelivered: { reason: 'machine_offline', recipient: c.agent.id, task: task.number } } }]);
+      expect(refused.content[0]!.text).toContain(`This employee cannot answer right now. See the window for what to do.\n${said}`);
+      expect(await undeliveredBy(c, orchestrator!.id)).toEqual([{ jobId: sender.job.id, data: { ok: false, summary: said, undelivered: { reason: 'machine_offline', recipient: c.agent.id, task: task.number } } }]);
     });
 
-    it.each([{ bound: true }, { bound: false }])('refuses a message for an employee whose machine has been off the line for long, with the code, the employee and the task: %j', async ({ bound }) => {
+    it.each([{ bound: true }, { bound: false }])('refuses a message for an employee whose machine is off the line, with the code, the employee and the task: %j', async ({ bound }) => {
       const c = await messaging();
       const task = await c.task();
       const head = await c.run(c.head.id);
-      lineLost(c, 6 * 60_000);
+      line(c, 'closed');
       const result = await send(head.client, c.agent.id, 'Are you there?', bound ? task.number : undefined);
-      const line = `Not delivered: reason machine_offline, recipient ${c.agent.id}, task ${bound ? `#${task.number}` : 'none'}.`;
+      const said = `Not delivered: reason machine_offline, recipient ${c.agent.id}, task ${bound ? `#${task.number}` : 'none'}.`;
       expect(result.isError).toBe(true);
       expect(result.content[0]!.text).toMatch(/^Bruno cannot run now\. /);
-      expect(result.content[0]!.text.endsWith(`\n${line}`)).toBe(true);
+      expect(result.content[0]!.text.endsWith(`\n${said}`)).toBe(true);
       expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
-      expect(await undeliveredBy(c, c.head.id)).toEqual([{ jobId: head.job.id, data: { ok: false, summary: line, undelivered: { reason: 'machine_offline', recipient: c.agent.id, task: bound ? task.number : null } } }]);
+      expect(await undeliveredBy(c, c.head.id)).toEqual([{ jobId: head.job.id, data: { ok: false, summary: said, undelivered: { reason: 'machine_offline', recipient: c.agent.id, task: bound ? task.number : null } } }]);
     });
 
     it.each([{ bound: true }, { bound: false }])('keeps a message for a busy employee on a node without live terminals: %j', async ({ bound }) => {
