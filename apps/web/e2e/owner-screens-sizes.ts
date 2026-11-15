@@ -8,8 +8,6 @@ import { fileURLToPath } from 'node:url';
    only is compared with none. */
 export type Measured = { browser: string; look: string; screen: string; sizes: Record<string, number> };
 
-const RESULTS = fileURLToPath(new URL('results/owner-screens', import.meta.url));
-
 function measured(dir: string): Measured[] {
   let names: string[];
   try {
@@ -39,5 +37,5 @@ export function checkSizes(dir: string): void {
 }
 
 export default function compareSizes(): void {
-  checkSizes(RESULTS);
+  checkSizes(fileURLToPath(new URL('results/owner-screens', import.meta.url)));
 }

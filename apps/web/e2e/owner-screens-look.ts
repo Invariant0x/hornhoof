@@ -5,8 +5,36 @@ import type { Locator, Page } from '@playwright/test';
    pink at rest, last of their group; groups: the selector of the button groups that end at the end edge of their line. */
 export type Words = { danger: string[]; groups: string };
 
+export async function fieldsetFrameOffences(part: Locator): Promise<string[]> {
+  return part.evaluate(root =>
+    [...root.querySelectorAll('fieldset')].flatMap(set => {
+      const box = set.getBoundingClientRect();
+      const s = getComputedStyle(set);
+      if (box.width * box.height === 0 || s.visibility === 'hidden') return [];
+      const label = `fieldset "${set.textContent.trim().slice(0, 40)}"`;
+      const framed = [s.borderTopWidth, s.paddingInlineStart, s.paddingInlineEnd].some(v => parseFloat(v) > 0);
+      const host = set.parentElement!.getBoundingClientRect();
+      const inset = Math.max(Math.abs(box.left - host.left), Math.abs(box.right - host.right)) > 1;
+      return [...(framed ? [`6: ${label} keeps the browser's frame`] : []), ...(inset ? [`6: ${label} leaves its parent's edge`] : [])];
+    }),
+  );
+}
+
+export async function fieldsetHeadingOffences(part: Locator): Promise<string[]> {
+  return part.evaluate(root =>
+    [...root.querySelectorAll('fieldset > legend')].flatMap(legend => {
+      const set = legend.parentElement!;
+      const box = set.getBoundingClientRect();
+      if (box.width * box.height === 0 || getComputedStyle(set).visibility === 'hidden') return [];
+      const next = set.querySelector(':scope > legend ~ * > :first-child, :scope > legend + :not(div)');
+      const gap = next ? next.getBoundingClientRect().top - legend.getBoundingClientRect().bottom : NaN;
+      return !(Math.abs(gap - 4) <= 1) ? [`6: fieldset "${legend.textContent.trim().slice(0, 40)}" has ${Math.round(gap)}px under its heading`] : [];
+    }),
+  );
+}
+
 export async function offences(part: Locator, words: Words): Promise<string[]> {
-  return part.evaluate((root, words) => {
+  const base = await part.evaluate((root, words) => {
     const out: string[] = [];
     const css = (el: Element) => getComputedStyle(el) as CSSStyleDeclaration & { webkitAppearance?: string; MozAppearance?: string };
     const rect = (el: Element) => el.getBoundingClientRect();
@@ -69,22 +97,9 @@ export async function offences(part: Locator, words: Words): Promise<string[]> {
 
     /* 5. A number is typed as text: no arrows of the browser. */
     for (const field of root.querySelectorAll('input[type=number]')) if (look(field) !== 'textfield') out.push(`5: ${name(field)} keeps the look ${look(field)}`);
-
-    /* 6. A group of fields has no frame of the browser: its heading stands 4px above what follows it, on the part's edge. */
-    const px = (value: string) => parseFloat(value) || 0;
-    for (const set of root.querySelectorAll('fieldset')) {
-      if (!shown(set)) continue;
-      const s = css(set);
-      if (px(s.borderTopWidth) || px(s.paddingInlineStart) || px(s.paddingInlineEnd)) out.push(`6: ${name(set)} keeps the browser's frame`);
-      const host = set.parentElement ? rect(set.parentElement) : rect(root);
-      if (Math.abs(rect(set).left - host.left) > 1 || Math.abs(rect(set).right - host.right) > 1) out.push(`6: ${name(set)} leaves its parent's edge`);
-      const legend = set.querySelector(':scope > legend');
-      const next = legend && set.querySelector(':scope > legend ~ * > :first-child, :scope > legend + :not(div)');
-      const gap = legend && next ? rect(next).top - rect(legend).bottom : NaN;
-      if (legend && Math.abs(gap - 4) > 1) out.push(`6: ${name(set)} has ${Math.round(gap)}px under its heading`);
-    }
     return out;
   }, words);
+  return [...base, ...(await fieldsetFrameOffences(part)), ...(await fieldsetHeadingOffences(part))];
 }
 
 /* The heights and widths of a part's pieces in whole pixels, to compare one browser with another. Each piece found by
@@ -116,7 +131,8 @@ export async function focusRing(page: Page): Promise<string> {
     probe.style.color = 'var(--cyan-ink)';
     const cyan = getComputedStyle(probe).color;
     probe.remove();
-    return s.outlineStyle === 'solid' && s.outlineWidth === '2px' && s.outlineOffset === '2px' && s.outlineColor === cyan ? 'ring' : `${el.tagName.toLowerCase()} has the outline ${s.outlineWidth} ${s.outlineStyle} ${s.outlineColor} offset ${s.outlineOffset}`;
+    const got = `${s.outlineStyle} ${s.outlineWidth} ${s.outlineOffset} ${s.outlineColor}`;
+    return got === `solid 2px 2px ${cyan}` ? 'ring' : `${el.tagName.toLowerCase()} has the outline ${got}`;
   });
 }
 
