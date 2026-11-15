@@ -13,6 +13,8 @@ ownDatabases();
 
 const LATER = '4'.repeat(40);
 const OTHER = '3'.repeat(40);
+const TURNKEY_SHA = '9'.repeat(40);
+const REL_SHA = 'c'.repeat(40);
 
 /* A turn whose start the server has seen, its release recorded before main moved, then main moved and tagged. */
 async function released(options: { record?: boolean; tag?: string; at?: string; autonomous?: boolean } = {}) {
@@ -210,6 +212,49 @@ describe('the server closes a turn by the tag of its release', () => {
     const told = await toldOfTag(f);
     expect(told).toHaveLength(2);
     expect(told.find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: f.R, why: 'stale' });
+  });
+
+  it('closes a pure turnkey turn and a mixed turn on the tag of an autonomously approved release, and keeps it open when a turnkey executor is switched off', async () => {
+    /* Pure turnkey turn closes on tag. */
+    const pure = await releasing();
+    const roundOf = (f: Awaited<ReturnType<typeof releasing>>) => minuteRound(f.ctx, new Date(), () => () => undefined);
+    pure.repo.tags['v1.6.0'] = BASE;
+    await roundOf(pure);
+    await pure.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, pure.task.departmentId!));
+    await pure.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, pure.task.id));
+    await pure.acceptTurnkey(TURNKEY_SHA, BASE);
+    const pureRun = await pure.fullRun({ commit: TURNKEY_SHA });
+    expect((await pure.recordRelease({ commit: TURNKEY_SHA, runId: pureRun.id })).isError).toBe(false);
+    pure.repo.heads.main = TURNKEY_SHA;
+    pure.repo.tags['v1.7.0'] = TURNKEY_SHA;
+    await roundOf(pure);
+    expect((await pure.db.select().from(turns).where(eq(turns.id, pure.turn.id)))[0]).toMatchObject({ status: 'closed', version: 'v1.7.0', commit: TURNKEY_SHA });
+
+    /* Mixed turn (echelon + turnkey + turnkey release commit) closes on tag, or stays stale if turnkey author or release holder is switched off before tag. */
+    const mixed = await releasing();
+    mixed.repo.tags['v1.6.0'] = BASE;
+    await roundOf(mixed);
+    await mixed.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, mixed.task.departmentId!));
+    await mixed.acceptTurnkey(TURNKEY_SHA, mixed.R);
+    const { relSolo, relTask, relCall } = await mixed.turnkeyReleaseTask();
+    mixed.repo.heads[`task-${relTask.number}`] = REL_SHA;
+    mixed.repo.heads[mixed.branch] = REL_SHA;
+    mixed.repo.holds[REL_SHA] = [TURNKEY_SHA, mixed.R, BASE];
+    mixed.repo.between[`${BASE}..${REL_SHA}`] = [
+      { sha: mixed.R, parents: [BASE] },
+      { sha: TURNKEY_SHA, parents: [mixed.R] },
+      { sha: REL_SHA, parents: [TURNKEY_SHA] },
+    ];
+    const mixedRun = await mixed.fullRun({ commit: REL_SHA });
+    expect((await relCall('release_turn', { task: relTask.number, commit: REL_SHA, runId: mixedRun.id })).isError).toBe(false);
+    mixed.repo.heads.main = REL_SHA;
+    mixed.repo.tags['v1.7.0'] = REL_SHA;
+    await mixed.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, relSolo.id));
+    await roundOf(mixed);
+    expect((await mixed.db.select().from(turns).where(eq(turns.id, mixed.turn.id)))[0]).toMatchObject({ status: 'open' });
+    const staleNotices = (await mixed.db.select().from(waitNotices)).filter(n => n.dedupKey.startsWith('release_tag:'));
+    expect(staleNotices).toHaveLength(2);
+    expect(staleNotices.find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: REL_SHA, why: 'stale' });
   });
 
   it('tells nobody of a tag that releases its turn, of an older one or of one not named as a version', async () => {

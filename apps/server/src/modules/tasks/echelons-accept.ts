@@ -33,7 +33,7 @@ function requireReady(route: Route, input: AcceptanceInput): void {
 }
 
 
-async function humanMainApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
+export async function humanMainApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
   const [approval] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id),
     eq(requests.kind, 'approval'), eq(requests.status, 'approved'), eq(requests.commit, commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt))).limit(1);
   return approval?.id ?? null;
@@ -69,7 +69,7 @@ type AutoProof = Awaited<ReturnType<typeof verifyAutonomousMainAcceptance>>;
 
 /* A main line of its own takes a result on a person's approval of the exact commit, or, where the CEO turned autonomous
    release on, on its record made before main moved (#858). */
-async function verifyMainIntegrationApproval(ctx: Reader, task: Task, commit: string): Promise<{ humanApproval: string | null; autoProof: AutoProof }> {
+export async function verifyMainIntegrationApproval(ctx: Reader, task: Task, commit: string): Promise<{ humanApproval: string | null; autoProof: AutoProof }> {
   const humanApproval = await humanMainApproval(ctx.db, task, commit);
   if (humanApproval) return { humanApproval, autoProof: null };
   const autoProof = await verifyAutonomousMainAcceptance(ctx, task, commit);
@@ -77,7 +77,7 @@ async function verifyMainIntegrationApproval(ctx: Reader, task: Task, commit: st
   return { humanApproval: null, autoProof };
 }
 
-async function confirmMainApprovalInTx(tx: Tx, task: Task, commit: string, autoProof: AutoProof): Promise<void> {
+export async function confirmMainApprovalInTx(tx: Tx, task: Task, commit: string, autoProof: AutoProof): Promise<void> {
   if (await humanMainApproval(tx, task, commit)) return;
   const confirmed = autoProof ? await confirmAutonomousMainAcceptance(tx, task, commit, autoProof) : null;
   if (!confirmed) throw noMainApproval();

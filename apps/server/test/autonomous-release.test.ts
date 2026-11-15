@@ -12,7 +12,7 @@ import { partDone, pumpTests, startRun } from '../src/modules/testruns/runs.js';
 import { company } from './department-owner-fixture.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { planningEnvironment } from './fixtures/run-planning/environment.js';
-import { as, listen, mcp } from './helpers.js';
+import { as, echelonsTurn, listen, mcp } from './helpers.js';
 
 const MAIN_BASE = '1'.repeat(40);
 const CANDIDATE = HEAD;
@@ -120,11 +120,13 @@ async function releaseFixture(options: { product?: boolean } = {}) {
     suite?: string;
     reused?: number;
     status?: 'passed' | 'failed';
+    task?: typeof f.task;
+    runner?: typeof f.author;
     candidate?: { candidateId: string; revision: number; baseCommit: string };
   } = {}) => {
     const sha = opts.commit ?? CANDIDATE;
-    const runTask = opts.candidate ? task : f.task;
-    const runner = opts.candidate ? tester : author;
+    const runTask = opts.task ?? (opts.candidate ? task : f.task);
+    const runner = opts.runner ?? (opts.candidate ? tester : author);
     const branch = opts.branch ?? `task-${task.number}`;
     const chosenProfile = opts.profile ?? 'full';
     const prevBranchCommit = branchCommit;
@@ -1261,5 +1263,179 @@ describe('autonomous release for exact commits to main', () => {
     const askedAfterOff = await pendingAsk;
     expect(askedAfterOff.text).toContain('waits for a person');
     expect((await f2.journal()).json().entries).toEqual([]);
+  });
+
+  it('auto-approves a direct turnkey commit to main on a product repository via ask_person and request_approval and confirms it on report done', async () => {
+    const f = await releaseFixture();
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    const [lane] = await f.db.insert(teams).values({ companyId: f.head.companyId, departmentId: f.departmentId, name: 'Turnkey', turnkey: true }).returning();
+    const solo = await f.hire('Solo', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    await f.db.update(agents).set({ teamId: lane!.id }).where(eq(agents.id, solo.id));
+
+    const TK_SHA_1 = '7'.repeat(40);
+    const TK_SHA_2 = '8'.repeat(40);
+    const tkTask1 = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Turnkey product patch 1', brief: '', body: '', departmentId: f.departmentId, productId: f.productId, assigneeAgentId: solo.id, executor: true },
+      )
+    ).task;
+    const tkTask2 = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Turnkey product patch 2', brief: '', body: '', departmentId: f.departmentId, productId: f.productId, assigneeAgentId: solo.id, executor: true },
+      )
+    ).task;
+    f.setBranchHead(`task-${tkTask1.number}`, TK_SHA_1);
+    f.setBranchHead(`task-${tkTask2.number}`, TK_SHA_2);
+    const run1 = await f.runProductSuite({ commit: TK_SHA_1, branch: `task-${tkTask1.number}`, profile: 'full', task: tkTask1, runner: solo });
+    const run2 = await f.runProductSuite({ commit: TK_SHA_2, branch: `task-${tkTask2.number}`, profile: 'full', task: tkTask2, runner: solo });
+    const { call: soloCall } = await f.openTools(solo);
+
+    /* Unapproved push to main before asking is refused on report(done: true). */
+    f.setMain(TK_SHA_1);
+    await expect(report(f.ctx, solo.id, tkTask1.id, { done: true, summary: 'Pushed without asking.' }).then(() => null)).rejects.toMatchObject({ status: 403 });
+    f.setMain(MAIN_BASE);
+
+    /* ask_person with commit auto-approves without a card and logs stage turnkey. */
+    const asked = await soloCall('ask_person', { task: tkTask1.number, question: 'Ship turnkey patch 1 to main.', commit: TK_SHA_1 });
+    expect(asked.isError).toBe(false);
+    expect(asked.text).not.toContain('waits for a person');
+    expect(await f.db.select().from(requests).where(eq(requests.taskId, tkTask1.id))).toEqual([]);
+
+    /* request_approval on channel commit also auto-approves without a card. */
+    const requested = await soloCall('request_approval', {
+      task: tkTask2.number,
+      channel: 'commit',
+      kind: 'main-release',
+      text: 'Ship turnkey patch 2 to main.',
+      commit: TK_SHA_2,
+    });
+    expect(requested.isError).toBe(false);
+    expect(requested.text).not.toContain('waits for a person');
+    expect(await f.db.select().from(requests).where(eq(requests.taskId, tkTask2.id))).toEqual([]);
+
+    /* Push to main and confirm pre-push approval when closing tkTask1. */
+    f.setMain(TK_SHA_1);
+    const closed = await report(f.ctx, solo.id, tkTask1.id, { done: true, summary: 'Integrated turnkey patch 1.' });
+    expect(closed.task).toMatchObject({ status: 'done', turnId: null });
+
+    const entries = (await f.journal()).json().entries;
+    expect(entries).toHaveLength(2);
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskNumber: tkTask1.number,
+          agentId: solo.id,
+          agentName: solo.name,
+          commitSha: TK_SHA_1,
+          baseCommitSha: MAIN_BASE,
+          testRunId: run1.id,
+          testRunNumber: run1.number,
+          reviewerAgentId: solo.id,
+          reviewerName: solo.name,
+          verdictStage: 'turnkey',
+        }),
+        expect.objectContaining({
+          taskNumber: tkTask2.number,
+          commitSha: TK_SHA_2,
+          testRunId: run2.id,
+          reviewerAgentId: solo.id,
+          reviewerName: solo.name,
+          verdictStage: 'turnkey',
+        }),
+      ]),
+    );
+  });
+
+  it('auto-approves a standalone turnkey patch to main on a top-level department outside release_turn while preserving every security refusal', async () => {
+    const f = await releaseFixture({ product: false });
+    expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
+    const [lane] = await f.db.insert(teams).values({ companyId: f.head.companyId, departmentId: f.departmentId, name: 'Turnkey', turnkey: true }).returning();
+    const solo = await f.hire('Solo', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    await f.db.update(agents).set({ teamId: lane!.id }).where(eq(agents.id, solo.id));
+
+    const openTurn = await echelonsTurn(f.db, f.head.companyId);
+    const TURN_HEAD = '4'.repeat(40);
+    const HOTFIX_SHA = '7'.repeat(40);
+    const SMUGGLED_SHA = '8'.repeat(40);
+    f.setBranchHead(`turn-${openTurn.number}`, TURN_HEAD);
+    /* TURN_HEAD is on turn-1, NOT on HOTFIX_SHA; SMUGGLED_SHA sits on top of TURN_HEAD. */
+    f.markNonMainBase(TURN_HEAD, [SMUGGLED_SHA]);
+
+    const hotfixTask = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: '0.24.2 standalone hotfix', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: solo.id, executor: true },
+      )
+    ).task;
+    f.setBranchHead(`task-${hotfixTask.number}`, HOTFIX_SHA);
+    const { call: soloCall } = await f.openTools(solo);
+
+    /* 1. Refused when test run reused cached results (reused > 0). */
+    await f.runProductSuite({ commit: HOTFIX_SHA, branch: `task-${hotfixTask.number}`, profile: 'full', reused: 2, task: hotfixTask, runner: solo });
+    const reusedAsk = await soloCall('ask_person', { task: hotfixTask.number, question: 'Ship with reused cache?', commit: HOTFIX_SHA });
+    expect(reusedAsk.text).toContain('waits for a person');
+    await f.db.delete(requests).where(eq(requests.taskId, hotfixTask.id));
+    await f.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, hotfixTask.id));
+
+    /* 2. Fresh green full run with reused = 0, yet turnkey executor switched off -> opens a card. */
+    const cleanRun = await f.runProductSuite({ commit: HOTFIX_SHA, branch: `task-${hotfixTask.number}`, profile: 'full', task: hotfixTask, runner: solo });
+    await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, solo.id));
+    const offAsk = await soloCall('ask_person', { task: hotfixTask.number, question: 'Ship while switched off?', commit: HOTFIX_SHA });
+    expect(offAsk.text).toContain('waits for a person');
+    await f.db.delete(requests).where(eq(requests.taskId, hotfixTask.id));
+    await f.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, hotfixTask.id));
+    await f.db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, solo.id));
+
+    /* 3. Smuggling turn-1 commits into main via a turnkey task sitting on top of TURN_HEAD is refused -> opens a card. */
+    const smuggleTask = (
+      await createTask(
+        f.ctx,
+        { agentId: f.head.id },
+        { title: 'Attempt turn smuggle', brief: '', body: '', departmentId: f.departmentId, assigneeAgentId: solo.id, executor: true },
+      )
+    ).task;
+    f.setBranchHead(`task-${smuggleTask.number}`, SMUGGLED_SHA);
+    await f.runProductSuite({ commit: SMUGGLED_SHA, branch: `task-${smuggleTask.number}`, profile: 'full', task: smuggleTask, runner: solo });
+    const smuggleAsk = await soloCall('request_approval', {
+      task: smuggleTask.number,
+      channel: 'commit',
+      kind: 'main-release',
+      text: 'Smuggle turn-1 commit?',
+      commit: SMUGGLED_SHA,
+    });
+    expect(smuggleAsk.text).toContain('waits for a person');
+    expect((await f.journal()).json().entries).toEqual([]);
+
+    /* 4. Genuine standalone hotfix from origin/main outside turn-1 passes without a card and confirms on report(done: true). */
+    const approved = await soloCall('request_approval', {
+      task: hotfixTask.number,
+      channel: 'commit',
+      kind: 'main-release',
+      text: 'Ship standalone hotfix 0.24.2 to main.',
+      commit: HOTFIX_SHA,
+    });
+    expect(approved.isError).toBe(false);
+    expect(approved.text).not.toContain('waits for a person');
+    expect(await f.db.select().from(requests).where(eq(requests.taskId, hotfixTask.id))).toEqual([]);
+
+    f.setMain(HOTFIX_SHA);
+    const closed = await report(f.ctx, solo.id, hotfixTask.id, { done: true, summary: 'Released 0.24.2 to main.' });
+    expect(closed.task).toMatchObject({ status: 'done', turnId: null });
+    expect((await f.journal()).json().entries).toEqual([
+      expect.objectContaining({
+        taskNumber: hotfixTask.number,
+        commitSha: HOTFIX_SHA,
+        baseCommitSha: MAIN_BASE,
+        testRunId: cleanRun.id,
+        reviewerAgentId: solo.id,
+        reviewerName: solo.name,
+        verdictStage: 'turnkey',
+      }),
+    ]);
   });
 });

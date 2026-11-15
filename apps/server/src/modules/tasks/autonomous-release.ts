@@ -16,7 +16,11 @@ import { currentCandidate } from './echelons-candidates.js';
 import { routeOf, type Route } from './echelons-store.js';
 import { comment, loadTask, mayAsk, type Moved, type Task, type Tx } from './engine.js';
 import { refusePaused } from './pause.js';
+import { autonomousTurnReleaseReady } from './releases.js';
 import { exactComparison } from './review-context.js';
+import { openTurnOf } from './turn-department.js';
+import { branchHolds, headOf } from './turn-integration.js';
+import { turnkeyTeamOf } from './turnkey.js';
 
 const RELEASE_BRANCH_RE = /^release-\d+\.\d+\.\d+$/;
 
@@ -32,17 +36,25 @@ type ScopeAddress = Snapshot['description']['repositoryScope'];
 
 type VerifiedRun = { id: string; number: number };
 type VerifiedVerdict = {
-  eventId: number;
+  eventId: number | null;
   reviewerAgentId: string;
   reviewerName: string;
   stage: string;
   baseCommitSha: string;
   allowedRunBranches: Set<string>;
+  allowedTaskIds?: Set<string> | undefined;
+  isTurnkey?: boolean | undefined;
 };
 type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict; baseCommitSha: string };
 type VerdictRow = { id: number; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string; reviewedCommit: string };
 
-export type RecordedMainApproval = { entryId: string; baseCommitSha: string; candidateBaseCommitSha: string; department: Dept };
+export type RecordedMainApproval = {
+  entryId: string;
+  baseCommitSha: string;
+  candidateBaseCommitSha: string;
+  department: Dept;
+  isTurnkey?: boolean | undefined;
+};
 
 export type AutonomousReleaseEntry = {
   id: string;
@@ -159,16 +171,35 @@ function isAllowedRunBranch(branch: string | null, allowedRunBranches: Set<strin
   return Boolean(branch && (allowedRunBranches.has(branch) || RELEASE_BRANCH_RE.test(branch)));
 }
 
-function isPassedCommitRun(run: Run, commit: string, allowedRunBranches: Set<string>): boolean {
-  return run.status === 'passed' && Boolean(run.finishedAt) && run.commitSha === commit && isAllowedRunBranch(run.branch, allowedRunBranches);
+function matchesTurnkeyTaskRun(run: Run, allowedRunBranches: Set<string>, allowedTaskIds?: Set<string>): boolean {
+  if (!allowedTaskIds) return true;
+  if (run.branch?.startsWith('task-')) return allowedRunBranches.has(run.branch);
+  return Boolean(run.taskId && allowedTaskIds.has(run.taskId));
+}
+
+function isPassedCommitRun(run: Run, commit: string, allowedRunBranches: Set<string>, allowedTaskIds?: Set<string>): boolean {
+  if (run.status !== 'passed' || !run.finishedAt || run.commitSha !== commit) return false;
+  return isAllowedRunBranch(run.branch, allowedRunBranches) && matchesTurnkeyTaskRun(run, allowedRunBranches, allowedTaskIds);
+}
+
+function hasZeroReusedResults(run: Run): boolean {
+  return !run.fileCache || (run.fileCache.mode === 'full' && run.fileCache.reused === 0);
 }
 
 function matchesLegacyFullCommand(department: Dept, command: string): boolean {
   return command === department.repoFullTestCommand && coversEveryPart(command);
 }
 
-async function isWholeSuiteGreenRun(db: QueryDb, companyId: string, department: Dept, commit: string, run: Run, allowedRunBranches: Set<string>): Promise<boolean> {
-  if (!isPassedCommitRun(run, commit, allowedRunBranches)) return false;
+async function isWholeSuiteGreenRun(
+  db: QueryDb,
+  companyId: string,
+  department: Dept,
+  commit: string,
+  run: Run,
+  allowedRunBranches: Set<string>,
+  allowedTaskIds?: Set<string>,
+): Promise<boolean> {
+  if (!isPassedCommitRun(run, commit, allowedRunBranches, allowedTaskIds) || !hasZeroReusedResults(run)) return false;
   const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
   if (!completeRunParts(parts, run, companyId, commit)) return false;
   return run.command === '' ? validFullProductRun(run, parts, companyId, department.id, commit) : matchesLegacyFullCommand(department, run.command);
@@ -200,6 +231,7 @@ async function verifiedFullRun(
   commit: string,
   checkFreshness: boolean,
   allowedRunBranches: Set<string>,
+  allowedTaskIds?: Set<string>,
 ): Promise<VerifiedRun | null> {
   const failedAfter = await newestFailedNumber(db, companyId, department.id, commit);
   const runs = await db
@@ -210,7 +242,7 @@ async function verifiedFullRun(
     .limit(25);
   for (const run of runs) {
     if (run.number <= failedAfter) break;
-    if ((await isWholeSuiteGreenRun(db, companyId, department, commit, run, allowedRunBranches)) && (await isCurrentRunEvidence(ctx, run, checkFreshness))) {
+    if ((await isWholeSuiteGreenRun(db, companyId, department, commit, run, allowedRunBranches, allowedTaskIds)) && (await isCurrentRunEvidence(ctx, run, checkFreshness))) {
       return { id: run.id, number: run.number };
     }
   }
@@ -452,14 +484,74 @@ async function verifiedMainLine(ctx: Reader, repo: Repo, candidateBaseSha: strin
   return (await verifiedAncestorSha(ctx, repo, candidateBaseSha, mainSha)) ? mainSha : null;
 }
 
-/* Only a result that goes to its own main line straight is approved here: of a product, or a part of a department, that keeps
-   a repository of its own. A top-level department releases turns: its results join the open turn, and main moves for it
-   only by the release of that turn, which autonomous release approves at release_turn. */
-async function enabledMainRepo(ctx: Reader, task: Task): Promise<{ department: Dept; repo: Repo } | null> {
+async function enabledAnyMainRepo(ctx: Reader, task: Task): Promise<{ department: Dept; repo: Repo } | null> {
   if (!ctx.config) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null);
-  if (!found || !found.department.parentId || !isMainRepository(found.department, found.repo)) return null;
+  if (!found || !isMainRepository(found.department, found.repo)) return null;
   return (await isAutonomousReleaseEnabled(ctx.db, found.department.id)) ? { department: found.department, repo: found.repo } : null;
+}
+
+/* Only a result that goes to its own main line straight is approved here for echelon candidates: of a product, or a part of a
+   department, that keeps a repository of its own. A top-level department releases echelon work through release_turn. */
+async function enabledMainRepo(ctx: Reader, task: Task): Promise<{ department: Dept; repo: Repo } | null> {
+  const found = await enabledAnyMainRepo(ctx, task);
+  return found?.department.parentId ? found : null;
+}
+
+async function activeTurnkeyExecutor(db: QueryDb, task: Task): Promise<{ id: string; name: string } | null> {
+  const executorId = task.executorAgentId ?? task.assigneeAgentId;
+  if (!executorId || !(await turnkeyTeamOf(db, task.companyId, executorId))) return null;
+  const [row] = await db
+    .select({ id: agents.id, name: agents.name })
+    .from(agents)
+    .where(and(eq(agents.id, executorId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  return row ?? null;
+}
+
+async function verifiedTurnkeyTask(
+  db: QueryDb,
+  task: Task,
+  repositoryOwnerId: string,
+  baseCommitSha: string,
+): Promise<{ task: Task; verdict: VerifiedVerdict } | null> {
+  const placeIds = await repoDepartmentIds(db, task.companyId, repositoryOwnerId);
+  if (!taskInRepoScope(task, placeIds)) return null;
+  const route = await routeOf(db, task);
+  if (route.state.resultKind !== 'turnkey' || route.state.phase !== 'active') return null;
+  const executor = await activeTurnkeyExecutor(db, task);
+  if (!executor) return null;
+  return {
+    task,
+    verdict: {
+      eventId: null,
+      reviewerAgentId: executor.id,
+      reviewerName: executor.name,
+      stage: 'turnkey',
+      baseCommitSha,
+      allowedRunBranches: new Set<string>([`task-${task.number}`, 'main']),
+      allowedTaskIds: new Set<string>([task.id]),
+      isTurnkey: true,
+    },
+  };
+}
+
+async function smugglesOpenTurn(ctx: Reader, department: Dept, repo: Repo, companyId: string, baseCommitSha: string, commit: string): Promise<boolean> {
+  if (department.parentId) return false;
+  const openTurn = await openTurnOf(ctx.db, companyId, department.id);
+  const turnHead = openTurn ? await headOf(ctx, repo, `turn-${openTurn.number}`) : null;
+  if (!turnHead || turnHead === baseCommitSha) return false;
+  return branchHolds(ctx, repo, commit, turnHead);
+}
+
+async function verifyTurnkeyConditions(ctx: Reader, task: Task, commit: string): Promise<VerifiedProof | null> {
+  const found = await enabledAnyMainRepo(ctx, task);
+  const baseCommitSha = found ? await verifiedFastForward(ctx, found.repo, commit) : null;
+  if (!found || !baseCommitSha) return null;
+  const tk = await verifiedTurnkeyTask(ctx.db, task, found.department.id, baseCommitSha);
+  if (!tk || (await headOf(ctx, found.repo, `task-${tk.task.number}`)) !== commit) return null;
+  if (await smugglesOpenTurn(ctx, found.department, found.repo, task.companyId, baseCommitSha, commit)) return null;
+  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, found.department, commit, true, tk.verdict.allowedRunBranches, tk.verdict.allowedTaskIds);
+  return run ? { department: found.department, repo: found.repo, run, verdict: tk.verdict, baseCommitSha } : null;
 }
 
 async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Promise<VerifiedProof | null> {
@@ -481,11 +573,20 @@ async function enabledMainInTransaction(tx: Tx, companyId: string, departmentId:
   return Boolean(top?.on) && (deptRow.repoBranch ?? 'main') === 'main';
 }
 
-async function reverifyInTransaction(tx: Tx, task: Task, commit: string, department: Dept): Promise<{ run: VerifiedRun; verdict: VerifiedVerdict } | null> {
+async function reverifyInTransaction(
+  tx: Tx,
+  task: Task,
+  commit: string,
+  department: Dept,
+  baseCommitSha: string,
+  isTurnkey = false,
+): Promise<{ run: VerifiedRun; verdict: VerifiedVerdict } | null> {
   if (!(await enabledMainInTransaction(tx, task.companyId, department.id))) return null;
-  const verdict = await verifiedIndependentVerdict(tx, task, department.id, commit);
+  const verdict = isTurnkey
+    ? (await verifiedTurnkeyTask(tx, task, department.id, baseCommitSha))?.verdict ?? null
+    : await verifiedIndependentVerdict(tx, task, department.id, commit);
   if (!verdict) return null;
-  const run = await verifiedFullRun(null, tx, task.companyId, department, commit, false, verdict.allowedRunBranches);
+  const run = await verifiedFullRun(null, tx, task.companyId, department, commit, false, verdict.allowedRunBranches, verdict.allowedTaskIds);
   return run ? { run, verdict } : null;
 }
 
@@ -523,7 +624,7 @@ async function insertJournalRow(
   commit: string,
   proof: VerifiedProof,
 ): Promise<{ id: string; baseCommitSha: string } | null> {
-  const fresh = await reverifyInTransaction(tx, task, commit, proof.department);
+  const fresh = await reverifyInTransaction(tx, task, commit, proof.department, proof.verdict.baseCommitSha, Boolean(proof.verdict.isTurnkey));
   if (!fresh || fresh.verdict.baseCommitSha !== proof.verdict.baseCommitSha) return null;
   const [requester] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId)));
   if (!requester) return null;
@@ -534,7 +635,33 @@ async function insertJournalRow(
   return { id: inserted.id, baseCommitSha: proof.baseCommitSha };
 }
 
-/* Auto-approves an exact commit before push without opening a human card when autonomous release is on and (a)+(b)+(c) hold. */
+function approvalProofWords(proof: VerifiedProof): string {
+  return proof.verdict.isTurnkey
+    ? `active turnkey executor ${proof.verdict.reviewerName}`
+    : `independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}`;
+}
+
+async function replyForCoveredTurn(
+  ctx: Ctx,
+  task: Task,
+  agentId: string,
+  commit: string,
+  reasonText: string,
+  ready: NonNullable<Awaited<ReturnType<typeof autonomousTurnReleaseReady>>>,
+): Promise<{ moved: Moved; text: string }> {
+  const noteText =
+    `Autonomous release is enabled and covers Turn ${ready.turnNumber} at ${commit} (full test run ${ready.runNumber}): ` +
+    `record the release directly with release_turn. ${reasonText}`;
+  const moved = await comment(ctx, { agentId }, task.id, noteText);
+  return {
+    moved,
+    text:
+      `No human card needed: autonomous release is enabled and covers Turn ${ready.turnNumber} at ${commit} ` +
+      `(full test run ${ready.runNumber}). Record the release directly with release_turn (runId: ${ready.runId}).`,
+  };
+}
+
+/* Auto-approves an exact commit before push without opening a human card when autonomous release is on and all proofs hold. */
 export async function tryAutonomousCommitApproval(
   ctx: Ctx,
   task: Task,
@@ -545,20 +672,20 @@ export async function tryAutonomousCommitApproval(
   const fresh = await loadTask(ctx.db, task.id);
   mayAsk(fresh, agentId);
   refusePaused(fresh);
-  const proof = await verifyAllConditions(ctx, fresh, commit);
+  const turnReady = await autonomousTurnReleaseReady(ctx, fresh, agentId, commit);
+  if (turnReady) return replyForCoveredTurn(ctx, fresh, agentId, commit, reasonText, turnReady);
+  const proof = (await verifyAllConditions(ctx, fresh, commit)) ?? (await verifyTurnkeyConditions(ctx, fresh, commit));
   if (!proof) return null;
   const recorded = await ctx.db.transaction(tx => insertJournalRow(tx, fresh, agentId, commit, proof));
   if (!recorded) return null;
+  const who = approvalProofWords(proof);
   const noteText =
     `Autonomous release approved exact commit ${commit} before push without a human card: ` +
-    `test run ${proof.run.number} passed full suite on ${commit}, ` +
-    `independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} (${recorded.baseCommitSha}). ${reasonText}`;
+    `test run ${proof.run.number} passed full suite on ${commit}, ${who}, fast-forward from ${proof.repo.branch} (${recorded.baseCommitSha}). ${reasonText}`;
   const moved = await comment(ctx, { agentId }, fresh.id, noteText);
   return {
     moved,
-    text:
-      `No human card needed: autonomous release approved exact commit ${commit} ` +
-      `(full test run ${proof.run.number}, independent ${proof.verdict.stage} PASS by ${proof.verdict.reviewerName}, fast-forward from ${proof.repo.branch} at ${recorded.baseCommitSha}).`,
+    text: `No human card needed: autonomous release approved exact commit ${commit} (full test run ${proof.run.number}, ${who}, fast-forward from ${proof.repo.branch} at ${recorded.baseCommitSha}).`,
   };
 }
 
@@ -572,8 +699,12 @@ async function findRecordedAutoApproval(db: QueryDb, task: Task, commit: string)
   return row ?? null;
 }
 
-async function loadAcceptanceTarget(ctx: Reader, task: Task, commit: string) {
-  const found = await enabledMainRepo(ctx, task);
+export async function hasRecordedAutoApproval(db: QueryDb, task: Task, commit: string): Promise<boolean> {
+  return Boolean(await findRecordedAutoApproval(db, task, commit));
+}
+
+async function loadAcceptanceTarget(ctx: Reader, task: Task, commit: string, allowTopLevel = false) {
+  const found = allowTopLevel ? await enabledAnyMainRepo(ctx, task) : await enabledMainRepo(ctx, task);
   if (!found) return null;
   const recorded = await findRecordedAutoApproval(ctx.db, task, commit);
   return recorded ? { recorded, department: found.department, repo: found.repo } : null;
@@ -587,21 +718,41 @@ async function verifiedRecordedLine(ctx: Reader, repo: Repo, candidateBaseSha: s
   return baseOnMain && ffFromRecorded;
 }
 
-/* Verifies pre-push autonomous release journal row + live run, verdict and recorded base ancestry for main acceptance. */
-export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, commit: string): Promise<RecordedMainApproval | null> {
-  const target = await loadAcceptanceTarget(ctx, task, commit);
+async function verifyTurnkeyMainAcceptance(ctx: Reader, task: Task, commit: string): Promise<RecordedMainApproval | null> {
+  const target = await loadAcceptanceTarget(ctx, task, commit, true);
   if (!target) return null;
-  const verdict = await verifiedIndependentVerdict(ctx.db, task, target.department.id, commit);
-  if (!verdict || !(await verifiedRecordedLine(ctx, target.repo, verdict.baseCommitSha, target.recorded.baseCommitSha, commit))) return null;
-  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true, verdict.allowedRunBranches);
+  const tk = await verifiedTurnkeyTask(ctx.db, task, target.department.id, target.recorded.baseCommitSha);
+  if (!tk || (await headOf(ctx, target.repo, `task-${tk.task.number}`)) !== commit) return null;
+  if (!(await verifiedAncestorSha(ctx, target.repo, target.recorded.baseCommitSha, commit))) return null;
+  if (await smugglesOpenTurn(ctx, target.department, target.repo, task.companyId, target.recorded.baseCommitSha, commit)) return null;
+  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true, tk.verdict.allowedRunBranches, tk.verdict.allowedTaskIds);
   return run
     ? {
         entryId: target.recorded.id,
         baseCommitSha: target.recorded.baseCommitSha,
-        candidateBaseCommitSha: verdict.baseCommitSha,
+        candidateBaseCommitSha: target.recorded.baseCommitSha,
         department: target.department,
+        isTurnkey: true,
       }
     : null;
+}
+
+/* Verifies pre-push autonomous release journal row + live run, verdict/turnkey executor and recorded base ancestry for main acceptance. */
+export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, commit: string): Promise<RecordedMainApproval | null> {
+  const target = await loadAcceptanceTarget(ctx, task, commit);
+  const verdict = target ? await verifiedIndependentVerdict(ctx.db, task, target.department.id, commit) : null;
+  if (target && verdict && (await verifiedRecordedLine(ctx, target.repo, verdict.baseCommitSha, target.recorded.baseCommitSha, commit))) {
+    const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true, verdict.allowedRunBranches);
+    if (run) {
+      return {
+        entryId: target.recorded.id,
+        baseCommitSha: target.recorded.baseCommitSha,
+        candidateBaseCommitSha: verdict.baseCommitSha,
+        department: target.department,
+      };
+    }
+  }
+  return verifyTurnkeyMainAcceptance(ctx, task, commit);
 }
 
 export async function confirmAutonomousMainAcceptance(
@@ -624,6 +775,6 @@ export async function confirmAutonomousMainAcceptance(
     )
     .limit(1);
   if (!existing) return null;
-  const fresh = await reverifyInTransaction(tx, task, commit, proof.department);
+  const fresh = await reverifyInTransaction(tx, task, commit, proof.department, proof.candidateBaseCommitSha, Boolean(proof.isTurnkey));
   return fresh && fresh.verdict.baseCommitSha === proof.candidateBaseCommitSha ? existing.id : null;
 }

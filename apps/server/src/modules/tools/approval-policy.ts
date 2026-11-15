@@ -195,7 +195,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'approval_policy',
     {
       description:
-        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for exact commits to main, and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks every time.",
+        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for checked or active-turnkey commits to main (switched only by signed-in people who run the department, never an agent), and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks every time.",
       inputSchema: { department: Department },
     },
     ({ department }) => readable(() => readPolicy(ctx, job, department)),
@@ -209,7 +209,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         'When the policy lets the work go, no person is asked: the answer says so and a line goes in the task\'s log, so go on with the work. Otherwise the task waits, the department\'s owner (with none, the CEO) is asked, and you are woken with the answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
         'amount: how much this one is, in what the channel\'s limit counts. Without it, a limit never lets the work go. text: what you want to do, in plain words. link: an https page where it can be seen.' +
-        ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. Before pushing an exact 40-character commit to main from a release task or turn leading to main, ask here on channel commit (or ask_person with commit): Hornhoof approves automatically without a card only when its department enabled autonomousRelease and that current candidate commit on a main-line route (review.baseCommit on main) has a completed green full run_tests run that proves it, an independent non-author PASS verdict on that exact SHA and a complete fast-forward comparison from main (within GitHub's diff limits); otherwise it opens a release approval card.`,
+        ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. Before pushing an exact 40-character commit directly to main, ask here on channel commit (or ask_person with commit): Hornhoof approves automatically without a card only when its department enabled autonomousRelease and that exact SHA has a current green full run_tests run (nothing reused), a complete fast-forward comparison from main, and either an independent non-author PASS verdict on a main-line candidate (review.baseCommit on main) or an active turnkey executor's task branch at that commit; when called on a turn release whose turn-<number> head already satisfies autonomous release, it replies to record the release directly with release_turn without opening a card; otherwise it opens a release approval card.`,
       inputSchema: {
         task: Ref,
         channel: ApprovalChannel,

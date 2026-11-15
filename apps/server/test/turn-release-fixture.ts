@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, jobs, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, report } from '../src/modules/tasks/engine.js';
 import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
@@ -108,5 +108,49 @@ export async function releasing() {
   };
   const recordRelease = (args: Record<string, unknown> = {}) => call('release_turn', { task: release!.number, commit: R, ...args });
   const department = async () => (await f.db.select().from(departments).where(eq(departments.id, f.task.departmentId!)))[0]!;
-  return { ...f, release: release!, R, fullRun, approve, client, call, recordRelease, department };
+  let turnkeyTeamId: string | null = null;
+  let workerTokens = 0;
+  const hireTurnkey = async (name = 'Solo') => {
+    if (!turnkeyTeamId) {
+      const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Turnkey lane', turnkey: true }).returning();
+      turnkeyTeamId = team!.id;
+    }
+    const member = await f.hire(name, 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    await f.db.update(agents).set({ teamId: turnkeyTeamId }).where(eq(agents.id, member.id));
+    const [reloaded] = await f.db.select().from(agents).where(eq(agents.id, member.id));
+    return reloaded!;
+  };
+  const agentTools = async (agent: typeof f.head, onTaskId = release!.id) => {
+    const token = `release-worker-tool-token-${++workerTokens}-0123456789abcdef`;
+    await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: agent.id, subscriptionId: agent.subscriptionId!, taskId: onTaskId, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
+    const mcpClient = await mcp(f.app, token);
+    return async (name: string, args: Record<string, unknown>) => {
+      const result = await mcpClient.callTool({ name, arguments: args }) as { isError?: boolean; content: { type: string; text?: string }[] };
+      return { isError: result.isError === true, text: result.content.map(part => part.text ?? '').join('\n') };
+    };
+  };
+  const acceptTurnkey = async (commit: string, parentCommit: string, actor?: Awaited<ReturnType<typeof hireTurnkey>>) => {
+    const solo = actor ?? (await hireTurnkey());
+    const { task: tk } = await createTask(f.ctx, { agentId: f.head.id }, {
+      title: `Turnkey ${commit.slice(0, 6)}`, brief: 'Turnkey work.', body: 'Done end to end.',
+      departmentId: f.task.departmentId!, assigneeAgentId: solo.id, executor: true,
+    });
+    f.repo.heads[`task-${tk.number}`] = commit;
+    f.repo.heads[f.branch] = commit;
+    f.repo.holds[commit] = [parentCommit, ...(f.repo.holds[parentCommit] ?? [])];
+    const prior = parentCommit === BASE ? [] : (f.repo.between[`${BASE}..${parentCommit}`] ?? []);
+    f.repo.between[`${BASE}..${commit}`] = [...prior, { sha: commit, parents: [parentCommit] }];
+    await report(f.ctx, solo.id, tk.id, { done: true, summary: 'Fast-forwarded turn branch to turnkey commit.' });
+    return { solo, task: tk };
+  };
+  const turnkeyReleaseTask = async (actor?: Awaited<ReturnType<typeof hireTurnkey>>) => {
+    const relSolo = actor ?? (await hireTurnkey('RelSolo'));
+    const { task: relTask } = await createTask(f.ctx, { agentId: f.head.id }, {
+      title: 'Turnkey release', brief: 'Assemble turn release.', body: 'Bump version and release turn.',
+      departmentId: f.task.departmentId!, assigneeAgentId: relSolo.id, executor: true,
+    });
+    const relCall = await agentTools(relSolo, relTask.id);
+    return { relSolo, relTask, relCall };
+  };
+  return { ...f, release: release!, R, fullRun, approve, client, call, recordRelease, department, hireTurnkey, agentTools, acceptTurnkey, turnkeyReleaseTask };
 }

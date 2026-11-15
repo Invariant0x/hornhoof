@@ -1,12 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, tasks } from '../src/db/schema.js';
+import { agents, departments, requests, tasks } from '../src/db/schema.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
 import { releasing } from './turn-release-fixture.js';
 
 const EXTRA = '7'.repeat(40);
 const SIDE = '8'.repeat(40);
+const TURNKEY_SHA = '9'.repeat(40);
+const REL_SHA = 'c'.repeat(40);
 
 const recorded = (text: string) => JSON.parse(text) as Record<string, unknown>;
 
@@ -165,5 +167,209 @@ describe('the release step with autonomous release on', () => {
     const result = await f.recordRelease({ runId: run.id });
     expect(recorded(result.text)).toMatchObject({ approvalRequestId: approval.id, autonomousReleaseId: null });
     expect(await journal(f)).toEqual([]);
+  });
+
+  it('approves a pure turnkey turn when autonomous release is on and the turnkey executor is active, logging stage turnkey', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
+    const { solo, task: tk } = await f.acceptTurnkey(TURNKEY_SHA, BASE);
+    const run = await f.fullRun({ commit: TURNKEY_SHA });
+    const result = await f.recordRelease({ commit: TURNKEY_SHA, runId: run.id });
+    expect(result.isError).toBe(false);
+    const record = recorded(result.text);
+    expect(record).toMatchObject({
+      turn: f.turn.number,
+      commit: TURNKEY_SHA,
+      baseCommit: BASE,
+      runId: run.id,
+      approvalRequestId: null,
+      autonomousReleaseId: expect.any(String),
+      covered: true,
+      uncovered: [],
+      tasks: [{ number: tk.number, commit: TURNKEY_SHA, verdicts: [] }],
+    });
+    expect(await journal(f)).toEqual([
+      expect.objectContaining({
+        id: record.autonomousReleaseId,
+        taskNumber: f.release.number,
+        agentName: f.head.name,
+        commitSha: TURNKEY_SHA,
+        baseCommitSha: BASE,
+        testRunId: run.id,
+        testRunNumber: run.number,
+        reviewerAgentId: solo.id,
+        reviewerName: solo.name,
+        verdictStage: 'turnkey',
+      }),
+    ]);
+  });
+
+  it('approves a mixed turn of checked echelon work and active turnkey work, listing both in the journal', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const { solo } = await f.acceptTurnkey(TURNKEY_SHA, f.R);
+    const run = await f.fullRun({ commit: TURNKEY_SHA });
+    const result = await f.recordRelease({ commit: TURNKEY_SHA, runId: run.id });
+    expect(result.isError).toBe(false);
+    const record = recorded(result.text);
+    expect(record).toMatchObject({
+      commit: TURNKEY_SHA,
+      covered: true,
+      uncovered: [],
+      autonomousReleaseId: expect.any(String),
+    });
+    expect(await journal(f)).toEqual([
+      expect.objectContaining({
+        id: record.autonomousReleaseId,
+        commitSha: TURNKEY_SHA,
+        reviewerAgentId: null,
+        reviewerName: `${f.reviewer.name}, ${solo.name}`,
+        verdictStage: 'review, turnkey',
+      }),
+    ]);
+  });
+
+  it('covers the release commit or merge of an active turnkey release task whose task branch stands at the turn head', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const { solo } = await f.acceptTurnkey(TURNKEY_SHA, BASE);
+    const { relSolo, relTask, relCall } = await f.turnkeyReleaseTask();
+    f.repo.heads[`task-${relTask.number}`] = REL_SHA;
+    f.repo.heads[f.branch] = REL_SHA;
+    f.repo.holds[REL_SHA] = [TURNKEY_SHA, f.R, BASE];
+    f.repo.between[`${BASE}..${REL_SHA}`] = [
+      { sha: f.R, parents: [BASE] },
+      { sha: TURNKEY_SHA, parents: [BASE] },
+      { sha: REL_SHA, parents: [f.R, TURNKEY_SHA] },
+    ];
+    const run = await f.fullRun({ commit: REL_SHA });
+    const result = await relCall('release_turn', { task: relTask.number, commit: REL_SHA, runId: run.id });
+    expect(result.isError).toBe(false);
+    const record = recorded(result.text);
+    expect(record).toMatchObject({
+      commit: REL_SHA,
+      covered: true,
+      uncovered: [],
+      autonomousReleaseId: expect.any(String),
+    });
+    expect(await journal(f)).toEqual([
+      expect.objectContaining({
+        id: record.autonomousReleaseId,
+        taskNumber: relTask.number,
+        agentName: relSolo.name,
+        commitSha: REL_SHA,
+        reviewerAgentId: null,
+        reviewerName: `${f.reviewer.name}, ${solo.name}, ${relSolo.name}`,
+        verdictStage: 'review, turnkey',
+      }),
+    ]);
+  });
+
+  it('refuses autonomous release when a turnkey author or turnkey release holder is switched off or removed', async () => {
+    const f1 = await releasing();
+    await autonomous(f1);
+    await f1.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f1.task.id));
+    const { solo } = await f1.acceptTurnkey(TURNKEY_SHA, BASE);
+    const run1 = await f1.fullRun({ commit: TURNKEY_SHA });
+    await f1.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, solo.id));
+    expect(await f1.recordRelease({ commit: TURNKEY_SHA, runId: run1.id })).toMatchObject({
+      isError: true,
+      text: expect.stringContaining('approv') as unknown,
+    });
+    await f1.db.update(agents).set({ switchedOffAt: null, removedAt: new Date() }).where(eq(agents.id, solo.id));
+    expect(await f1.recordRelease({ commit: TURNKEY_SHA, runId: run1.id })).toMatchObject({
+      isError: true,
+      text: expect.stringContaining('approv') as unknown,
+    });
+    expect(await journal(f1)).toEqual([]);
+
+    const f2 = await releasing();
+    await autonomous(f2);
+    const { relSolo, relTask, relCall } = await f2.turnkeyReleaseTask();
+    f2.repo.heads[`task-${relTask.number}`] = REL_SHA;
+    f2.repo.heads[f2.branch] = REL_SHA;
+    f2.repo.holds[REL_SHA] = [f2.R, BASE];
+    f2.repo.between[`${BASE}..${REL_SHA}`] = [{ sha: f2.R, parents: [BASE] }, { sha: REL_SHA, parents: [f2.R] }];
+    const run2 = await f2.fullRun({ commit: REL_SHA });
+    await f2.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, relSolo.id));
+    expect(await relCall('release_turn', { task: relTask.number, commit: REL_SHA, runId: run2.id })).toMatchObject({
+      isError: true,
+      text: expect.stringContaining('approv') as unknown,
+    });
+    expect(await journal(f2)).toEqual([]);
+  });
+
+  it('still refuses an extraneous commit or merge outside accepted tasks when the release task is coordination or its task branch is not at R', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
+    await f.acceptTurnkey(TURNKEY_SHA, BASE);
+    f.repo.heads[f.branch] = REL_SHA;
+    f.repo.holds[REL_SHA] = [TURNKEY_SHA, SIDE, BASE];
+    f.repo.between[`${BASE}..${REL_SHA}`] = [
+      { sha: TURNKEY_SHA, parents: [BASE] },
+      { sha: SIDE, parents: [BASE] },
+      { sha: REL_SHA, parents: [TURNKEY_SHA, SIDE] },
+    ];
+    const run = await f.fullRun({ commit: REL_SHA });
+    expect(await f.recordRelease({ commit: REL_SHA, runId: run.id })).toMatchObject({
+      isError: true,
+      text: expect.stringContaining('approv') as unknown,
+    });
+
+    const { relTask, relCall } = await f.turnkeyReleaseTask();
+    f.repo.heads[`task-${relTask.number}`] = TURNKEY_SHA;
+    expect(await relCall('release_turn', { task: relTask.number, commit: REL_SHA, runId: run.id })).toMatchObject({
+      isError: true,
+      text: expect.stringContaining('approv') as unknown,
+    });
+    expect(await journal(f)).toEqual([]);
+  });
+
+  it('still refuses a mixed turn when the checker of its non-turnkey task was switched off, even with active turnkey work on top', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    await f.acceptTurnkey(TURNKEY_SHA, f.R);
+    await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id));
+    const run = await f.fullRun({ commit: TURNKEY_SHA });
+    expect(await f.recordRelease({ commit: TURNKEY_SHA, runId: run.id })).toMatchObject({
+      isError: true,
+      text: expect.stringContaining('approv') as unknown,
+    });
+    expect(await journal(f)).toEqual([]);
+  });
+
+  it('tells the release holder to record with release_turn without opening a card when the turn head already passes autonomous release', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
+    await f.acceptTurnkey(TURNKEY_SHA, BASE);
+    const run = await f.fullRun({ commit: TURNKEY_SHA });
+
+    const asked = await f.call('ask_person', {
+      task: f.release.number,
+      question: 'Approve turn release?',
+      commit: TURNKEY_SHA,
+    });
+    expect(asked.isError).toBe(false);
+    expect(asked.text).not.toContain('waits for a person');
+    expect(asked.text).toContain('release_turn');
+
+    const requested = await f.call('request_approval', {
+      task: f.release.number,
+      channel: 'commit',
+      kind: 'turn-release',
+      text: 'Approve turn release?',
+      commit: TURNKEY_SHA,
+    });
+    expect(requested.isError).toBe(false);
+    expect(requested.text).not.toContain('waits for a person');
+    expect(requested.text).toContain('release_turn');
+
+    expect(await f.db.select().from(requests).where(eq(requests.taskId, f.release.id))).toEqual([]);
+    expect(await journal(f)).toEqual([]);
+    expect((await f.recordRelease({ commit: TURNKEY_SHA, runId: run.id })).isError).toBe(false);
+    expect(await journal(f)).toHaveLength(1);
   });
 });
