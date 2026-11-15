@@ -361,6 +361,16 @@ select:disabled { opacity: .55; }
 .integration-state { color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .integration-state[data-connected='true'] { color: var(--ok); }
 .messaging > p { margin: 0; overflow-wrap: break-word; }
+/* A department's own outbound setup: its channels and accounts, its catalog and its log. */
+.outbound-setup { display: grid; gap: 16px; min-width: 0; }
+.outbound-setup > p, .outbound-setup .settings-part h4 { margin: 0; overflow-wrap: break-word; }
+.outbound-setup .settings-part h4 { font-size: 14px; }
+.outbound-numbers { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 10px 12px; border: 1px solid var(--line2); }
+.outbound-numbers > legend { padding: 0 4px; font-weight: 600; overflow-wrap: break-word; }
+.outbound-numbers > .hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.outbound-revision, .outbound-log > li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.outbound-revision small, .outbound-log small { color: var(--muted); font-size: 12px; }
+.outbound-revision .repo-actions { margin-block-start: 2px; }
 @media (max-width: 760px) {
   .settings-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; }
@@ -1521,10 +1531,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .filter-chip { justify-self: start; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; margin: 0; padding-left: 12px; border: 1px solid var(--amber); background: var(--surface); font-size: 13px; font-weight: 600; }
 .filter-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .imps { display: grid; gap: 10px; }
-.imp { display: grid; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--amber); }
-.imp-taken { border-left-color: var(--cyan); }
-.imp-done { border-left-color: var(--ok); }
-.imp-dismissed { border-left-color: var(--line2); }
+.imp { display: grid; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-inline-start: 3px solid var(--amber); }
+.imp-taken { border-inline-start-color: var(--cyan); }
+.imp-done { border-inline-start-color: var(--ok); }
+.imp-dismissed { border-inline-start-color: var(--line2); }
 .imp header { display: grid; gap: 2px; }
 .imp h3 { margin: 0; font-size: 15.5px; overflow-wrap: anywhere; }
 .imp-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; font-size: 12.5px; color: var(--muted); }
@@ -1601,7 +1611,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .req-link { justify-self: start; min-width: 0; overflow-wrap: anywhere; }
 .req-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; min-width: 0; }
 /* A choice's ways for someone who reads it without picking. */
-.req-ways { margin: 0; padding-left: 20px; overflow-wrap: anywhere; }
+.req-ways { margin: 0; padding-inline-start: 20px; overflow-wrap: anywhere; }
 .req-option { display: grid; gap: 8px; align-content: start; justify-items: start; min-width: 0; min-height: 40px; padding: 10px 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s; }
 .req-option span { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
 .req-option img { display: block; width: 100%; max-width: 100%; height: 150px; object-fit: contain; border: 1px solid var(--line); background: var(--bg); box-sizing: border-box; }

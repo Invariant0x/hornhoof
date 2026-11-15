@@ -4,6 +4,7 @@ import { errorText, useT } from '../i18n';
 import type { DecidedBy } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
+import { RunDepartments, type RunDepartment } from './OutboundSetup';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -119,6 +120,8 @@ type OutboundOverview = {
   messages: OutboundMessageItem[];
   escalations: OutboundEscalationItem[];
   approvals: BoundOutboundApproval[];
+  /* The departments whose messages this person runs. A server from before this says nothing of them. */
+  departments?: RunDepartment[];
 };
 
 const shortDigest = (digest: string): string => digest.slice(0, 12);
@@ -461,6 +464,7 @@ export function ExternalMessaging({ onOpenTask }: { onOpenTask: (id: string) => 
       <p className="muted">{t.outbound.intro}</p>
       {hasFailure && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       <OutboundBody data={data} loading={!data && !hasFailure} onChanged={load} onOpenTask={onOpenTask} />
+      {data?.departments && <RunDepartments departments={data.departments} />}
     </div>
   );
 }

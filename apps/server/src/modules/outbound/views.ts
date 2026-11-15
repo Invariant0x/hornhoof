@@ -564,13 +564,19 @@ export function outboundViewRoutes(app: FastifyInstance, ctx: Ctx): void {
     const access = await accessOf(ctx.db, me);
     const deptIds = await resolveVisibleDepartmentIds(ctx.db, me, access, query.department);
     const [everyone, places] = await Promise.all([candidates(ctx, me.companyId), departmentNames(ctx, deptIds)]);
-    const { channels, channelMap, accountMap } = await loadChannelDtos(ctx.db, me.companyId, deptIds, id => actsAsCeo(me) || access.owns?.has(id) === true);
+    const runs = (id: string) => actsAsCeo(me) || access.owns?.has(id) === true;
+    const { channels, channelMap, accountMap } = await loadChannelDtos(ctx.db, me.companyId, deptIds, runs);
     const [messages, escalations, approvals] = await Promise.all([
       loadMessageDtos(ctx.db, me.companyId, deptIds, channelMap, accountMap),
       loadEscalationDtos(ctx.db, me, access, everyone, places, deptIds),
       loadOpenApprovalDtos(ctx, me, access, everyone, places, deptIds),
     ]);
-    return { channels, messages, escalations, approvals };
+    /* The departments whose messages this person runs, each named as the screens name it. */
+    const departments = deptIds.filter(runs).flatMap(id => {
+      const place = places.get(id);
+      return place ? [{ id, name: place.name, templateKey: place.templateKey }] : [];
+    });
+    return { channels, messages, escalations, approvals, departments };
   });
 
   app.get('/api/requests/:id/outbound-approval', async req => {
