@@ -106,7 +106,7 @@ for (const lang of LANGUAGES.map(l => l.id)) {
 
     /* By turn and release: what gets ready for release, the work outside releases, and what came out folded. */
     await view.getByRole('radio', { name: t.tasks.board.views.releases }).check({ force: true });
-    await expect(sections).toHaveText([t.tasks.board.preparing(3), t.tasks.board.preparing(5), t.tasks.board.outside, t.tasks.board.released(2)]);
+    await expect(sections).toHaveText([t.tasks.board.preparing(3), t.tasks.board.preparing(5), t.tasks.board.outside, t.tasks.board.released(2, 'v1.2.0')]);
     await expect(card(page, goalOf('Old checkout').number)).toHaveCount(0);
     await expect(board(page, t).getByText(t.tasks.board.pickDepartment)).toBeVisible();
     await department.selectOption({ label: 'Development' });

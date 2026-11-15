@@ -1,17 +1,17 @@
 import type { TemplateKey } from './types';
 
 /* The department templates in card order, as the server has them; kept here so the browser does not load the protocol's validators. */
-export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: 'turns' | 'continuous'; teamMembers: number }[] = [
-  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous', teamMembers: 1 },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns', teamMembers: 2 },
-  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
-  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns', teamMembers: 1 },
+export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; teamMembers: number }[] = [
+  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, teamMembers: 1 },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, teamMembers: 2 },
+  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, teamMembers: 1 },
+  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, teamMembers: 1 },
+  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, teamMembers: 1 },
+  { key: 'design', roleCode: 'DSN', ticked: false, always: false, teamMembers: 1 },
+  { key: 'support', roleCode: 'SUP', ticked: false, always: false, teamMembers: 1 },
+  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, teamMembers: 1 },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, teamMembers: 1 },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false, teamMembers: 1 },
 ];
 
 export type CompanyTemplateKey = 'project' | 'startup' | 'studio' | 'corporation' | 'security' | 'opensource' | 'agency' | 'lab' | 'home';

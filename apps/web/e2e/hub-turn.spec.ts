@@ -78,7 +78,7 @@ for (const lang of ['en', 'ru'] as const) {
     for (const width of [1440, 375, 360]) {
       test(`each department working in the turn shows it in its card and on the hub in ${lang} ${theme} ${width}`, async ({ page }, info) => {
         const t = MESSAGES[lang];
-        const label = (done: number, _total: number) => t.map.readyForRelease(done);
+        const label = (done: number) => t.map.readyForRelease(done);
         const shot = (name: string) => page.screenshot({ path: info.outputPath(`hub-${name}-${lang}-${theme}-${width}.png`), animations: 'disabled' });
         const { live, errors, failures } = await open(page, lang, theme, width);
         const initialDocument = await page.evaluateHandle(() => document);
@@ -89,12 +89,12 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(page.locator('.hub-turn')).toHaveCount(0);
         await expect(page.locator('.hub-lbl')).toHaveCount(0);
         const dev = bar(page, 'Development');
-        await expect(dev).toHaveAttribute('aria-label', label(3, 17));
+        await expect(dev).toHaveAttribute('aria-label', label(3));
         await expect(dev).toHaveAttribute('aria-valuenow', '18');
         await expect(dev.locator('i')).toHaveCount(20);
         await expect(dev.locator('i.on')).toHaveCount(4);
         await expect(card(page, 'Development').locator('.dt-turn')).toHaveText(t.tasks.turn(3));
-        await expect(card(page, 'Development').locator('.dt-cnt')).toHaveText(label(3, 17));
+        await expect(card(page, 'Development').locator('.dt-cnt')).toHaveText(label(3));
         await expect(card(page, 'Operations').locator('.dept-turn')).toHaveCount(0);
         await expect(hub.locator('.hub-hz')).toHaveAttribute('d', 'M 64 120 L 176 120');
         await expect(hub.locator('.hub-eq')).toHaveCount(1);
@@ -112,10 +112,10 @@ for (const lang of ['en', 'ru'] as const) {
         await looksRight(page);
         await shot('one');
 
-        /* The Tasks screen keeps the whole turn's progress as it was, by turn and release. */
+        /* The Tasks screen counts the same, by turn and release: what the turn has ready for its release. */
         await page.getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
         await page.getByRole('radio', { name: t.tasks.board.views.releases, exact: true }).check({ force: true });
-        await expect(page.getByRole('progressbar', { name: label(3, 17) })).toHaveAttribute('aria-valuenow', '18');
+        await expect(page.getByText(label(3), { exact: true })).toBeVisible();
         await page.getByRole('button', { name: t.shell.tabs.map, exact: true }).click();
         await expect(dev).toHaveAttribute('aria-valuenow', '18');
 
@@ -124,7 +124,7 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(dev).toHaveAttribute('aria-valuenow', '24');
         await expect(dev.locator('i.on')).toHaveCount(5);
         await live.show(with_(ONE, 'Development', [1000, 1000]));
-        await expect(dev).toHaveAttribute('aria-label', label(1000, 1000));
+        await expect(dev).toHaveAttribute('aria-label', label(1000));
         await expect(dev).toHaveAttribute('aria-valuenow', '100');
         await expect(dev.locator('i.on')).toHaveCount(20);
         await expect(hub.locator('.turn-sec-fill')).toHaveAttribute('pathLength', '19.72');

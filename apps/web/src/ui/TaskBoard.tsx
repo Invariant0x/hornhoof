@@ -1,13 +1,16 @@
 import { useId, useState, type ReactNode } from 'react';
 import { useT } from '../i18n';
-import { humanStatus, type Goal, type HumanStatus, type Split } from '../task-board';
+import { goalStatus, type Goal, type HumanStatus, type Split } from '../task-board';
 import type { TaskLine } from '../types';
 
-/* How a card opens its task and names where it is: its department or product. */
-export type CardRows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string };
+/* How a card opens its task and names where it is: its department or product. asksYou: whether an open question on a task is
+   the person's to answer. */
+export type CardRows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string; asksYou?: (taskId: string) => boolean };
 
 /* The colours of a state as the task lists already draw them. */
-const STATE_CLASS: Record<HumanStatus, string> = { working: 'working', review: 'review', waiting: 'waiting', paused: 'blocked', done: 'done', cancelled: 'cancelled' };
+const STATE_CLASS: Record<HumanStatus, string> = {
+  notStarted: 'open', working: 'working', review: 'review', waiting: 'waiting', waitingYou: 'waiting', stopped: 'blocked', paused: 'blocked', done: 'done', cancelled: 'cancelled',
+};
 
 function Chevron() {
   return <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>;
@@ -46,7 +49,7 @@ export function GoalCard({ goal, rows, within }: { goal: Goal; rows: CardRows; w
   const t = useT();
   const [open, setOpen] = useState(false);
   const { task } = goal;
-  const status = humanStatus(task);
+  const status = goalStatus(goal, rows.asksYou?.(task.id) ?? false);
   const place = rows.place(task);
   const related = within !== undefined;
   const Title = related ? 'h4' : 'h3';

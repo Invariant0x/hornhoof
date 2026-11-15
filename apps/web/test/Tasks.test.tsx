@@ -402,8 +402,8 @@ describe('decisions read failure', () => {
 
 describe('turns as releases', () => {
   it.each([
-    ['en', 'Tasks', 'By turn and release', 'Turn 2: release v1.2.0', 'Went into the release: 2', 'Turn 3: getting ready for release', 'Ready for release: 2'],
-    ['ru', 'Задачи', 'По ходам и выпускам', 'Ход 2: выпуск v1.2.0', 'Вошло в выпуск: 2', 'Ход 3: готовится к выпуску', 'Готово к выпуску: 2'],
+    ['en', 'Tasks', 'By turn and release', 'Turn 2: release v1.2.0', 'Went into the release: 1', 'Turn 3: getting ready for release', 'Ready for release: 2'],
+    ['ru', 'Задачи', 'По ходам и выпускам', 'Ход 2: выпуск v1.2.0', 'Вошло в выпуск: 1', 'Ход 3: готовится к выпуску', 'Готово к выпуску: 2'],
   ])('names a released turn by its version and counts what each turn holds for its release, with no bar of a share (%s)', async (lang, tasks, releases, released, went, preparing, ready) => {
     localStorage.setItem('hh-lang', lang);
     try {
@@ -459,7 +459,7 @@ describe('turns as releases', () => {
     await openTasks(user);
     await user.click(screen.getByRole('radio', { name: 'By turn and release' }));
     await user.click(await screen.findByRole('button', { name: 'Turn 2: release v1.2.0' }));
-    expect(await screen.findByText('Went into the release: 2')).toBeInTheDocument();
+    expect(await screen.findByText('Went into the release: 1')).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'How the turn runs' })).not.toBeInTheDocument();
     expect(screen.queryByText(/How the turn runs/)).not.toBeInTheDocument();
   });

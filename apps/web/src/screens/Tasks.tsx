@@ -15,7 +15,6 @@ import { Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { BoardSection, GoalList, SplitGoals, type CardRows } from '../ui/TaskBoard';
-import { TurnProgress } from '../ui/TurnProgress';
 import { WaitCards } from '../ui/WaitCards';
 
 type Props = {
@@ -95,15 +94,15 @@ function ViewPicker({ value, onChange }: { value: View; onChange: (view: View) =
   );
 }
 
-/* What a turn is for, the version it came out as, how far it is, and the words it came from on click. */
+/* What a turn is for, what it holds for its release, and the words it came from on click. Every result in a turn is accepted
+   into its branch, so it counts them, not a share done. */
 function TurnAbout({ turn }: { turn: TurnView }) {
   const t = useT();
   return (
     <div className="grp-head">
       <b className="grp-title">{turn.title}</b>
       {turn.goal && turn.goal !== turn.title && <span className="muted">{turn.goal}</span>}
-      {turn.version && <small className="turn-wait">{turn.version}</small>}
-      <TurnProgress tasks={turn.tasks} />
+      <span className="muted">{turn.status === 'open' ? t.tasks.board.readyForRelease(turn.tasks.done) : t.tasks.board.inRelease(turn.tasks.done)}</span>
       {turn.messages.length > 0 && (
         <details className="turn-words">
           <summary>{t.tasks.words(turn.messages.length)}</summary>
@@ -121,8 +120,8 @@ function TurnAbout({ turn }: { turn: TurnView }) {
 
 const releaseHeading = (t: Messages, section: ReleaseSection) => {
   if (!section.turn) return t.tasks.board.outside;
-  const { number } = section.turn;
-  return section.kind === 'preparing' ? t.tasks.board.preparing(number) : t.tasks.board.released(number);
+  const { number, version } = section.turn;
+  return section.kind === 'preparing' ? t.tasks.board.preparing(number) : t.tasks.board.released(number, version);
 };
 
 /* By turn and release: what gets ready for release, what waits for its turn, the work outside every turn and what came out,
@@ -311,7 +310,11 @@ export function Tasks({ decisions, decisionsFailure, onDecisionsChanged, personI
   const { tasks, failure } = useTasks({ status: 'all' });
   const { turns, failure: turnsFailure } = useTurns();
   const place = (p: TaskLine['department']) => placeName(t, org, p);
-  const rows: CardRows = { selected, onOpenTask, place: (task: TaskLine) => [task.department ? place(task.department) : t.tasks.board.orchestrator, task.product?.name].filter(Boolean).join(' / ') };
+  const asking = new Set((decisions?.requests ?? []).filter(r => r.canAnswer).map(r => r.task.id));
+  const rows: CardRows = {
+    selected, onOpenTask, place: (task: TaskLine) => [task.department ? place(task.department) : t.tasks.board.orchestrator, task.product?.name].filter(Boolean).join(' / '),
+    asksYou: id => asking.has(id),
+  };
   const broken = placesFailure ?? failure ?? turnsFailure;
   if (unavailableFailure(broken)) return <RouteUnavailable onHome={onHome} />;
 

@@ -65,6 +65,8 @@ const ROUTES: Record<string, unknown> = {
   '/api/me': ME,
   '/api/org': ORG,
   '/api/requests': DECISIONS,
+  /* No card is kept for the person. */
+  '/api/wait-cards': { cards: [], next: null },
   '/api/nodes/commands': { commands: [] },
   '/api/computer': { available: false, until: null, asked: null },
   '/api/turns': { turns: [TURN] },

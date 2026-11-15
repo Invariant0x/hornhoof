@@ -1,7 +1,8 @@
 import type { TaskLine, TurnView } from './types';
 
-/* The state of a task in plain words, as the tracker shows it. */
-export type HumanStatus = 'working' | 'review' | 'waiting' | 'paused' | 'done' | 'cancelled';
+/* The state of a task in plain words, as the tracker shows it: the table of the Design department, and paused, which a person
+   says. */
+export type HumanStatus = 'notStarted' | 'working' | 'review' | 'waiting' | 'waitingYou' | 'stopped' | 'paused' | 'done' | 'cancelled';
 
 /* A task with the work under it: how many related tasks right under it are done of those that count, and how far it is,
    from 0 to 1. */
@@ -19,17 +20,28 @@ export const ALL_DEPARTMENTS = 'all';
 
 const closed = (task: TaskLine) => task.status === 'done' || task.status === 'cancelled';
 
-export function humanStatus(task: TaskLine): HumanStatus {
+/* asksYou: an open question on the task is the person's to answer. */
+export function humanStatus(task: TaskLine, asksYou = false): HumanStatus {
   if (task.status === 'done' || task.status === 'cancelled') return task.status;
   if (task.paused) return 'paused';
-  if (task.externalWait || task.status === 'waiting' || task.status === 'blocked') return 'waiting';
+  if (asksYou) return 'waitingYou';
+  if (task.status === 'blocked') return 'stopped';
+  if (task.externalWait || task.status === 'waiting') return 'waiting';
   if (task.status === 'review') return 'review';
-  return 'working';
+  return task.status === 'open' ? 'notStarted' : 'working';
 }
 
-/* What needs people first, then what is being checked, what moves and what stands still. */
-const ORDER: HumanStatus[] = ['waiting', 'review', 'working', 'paused', 'done', 'cancelled'];
-const byNeed = (a: Goal, b: Goal) => ORDER.indexOf(humanStatus(a.task)) - ORDER.indexOf(humanStatus(b.task)) || b.task.number - a.task.number;
+/* A goal whose related work began, or which passed a stage of its own, is in progress, though its own task waits for the next
+   turn of its holder. */
+export function goalStatus(goal: Goal, asksYou = false): HumanStatus {
+  const own = humanStatus(goal.task, asksYou);
+  if (own !== 'notStarted') return own;
+  return goal.progress > 0 || goal.children.some(child => !['notStarted', 'cancelled'].includes(goalStatus(child))) ? 'working' : own;
+}
+
+/* What needs people first, then what stopped, is being checked, moves and has not started, and what stands still. */
+const ORDER: HumanStatus[] = ['waitingYou', 'waiting', 'stopped', 'review', 'working', 'notStarted', 'paused', 'done', 'cancelled'];
+const byNeed = (a: Goal, b: Goal) => ORDER.indexOf(goalStatus(a)) - ORDER.indexOf(goalStatus(b)) || b.task.number - a.task.number;
 
 /* Of a task with nothing under it: done or not, and on the way the stages that apply to it, those passed of them. */
 function ownProgress(task: TaskLine): number {
