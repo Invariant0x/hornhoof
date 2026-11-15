@@ -24,9 +24,16 @@ describe('the full run of a manifest', () => {
     ['an unknown profile', { replaces: 'final', profile: 'whole' }],
     ['an unknown profile it covers', { replaces: 'last', profile: 'full' }],
     ['the same profile twice', { replaces: 'final', profile: 'final' }],
-    ['a number of turns, as no release goes without it', { everyTurns: 5, replaces: 'final', profile: 'full' }],
+    ['a number of turns that is not a whole number above zero', { everyTurns: 0, replaces: 'final', profile: 'full' }],
   ])('refuses %s', (_name, value) => {
     expect(TestEnvironmentV1.safeParse(fullRun(value)).success).toBe(false);
+  });
+
+  /* A server or node before 0.24.0 refuses a full run without its number of turns, and repositories wrote it for them:
+     it still reads, and nothing runs by it. */
+  it('takes the number of turns a manifest kept for an earlier server, and nothing runs by it', () => {
+    const parsed = TestEnvironmentV1.parse(fullRun({ everyTurns: 5, replaces: 'final', profile: 'full' }));
+    expect(parsed.execution?.fullRun).toMatchObject({ replaces: 'final', profile: 'full' });
   });
 
   it('refuses a full profile that leaves out a suite of what it covers', () => {

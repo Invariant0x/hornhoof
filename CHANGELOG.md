@@ -48,6 +48,7 @@ board.
   continuous work is gone.
 - Every release runs the full test run, and a version tag that no recorded release names is reported. Autonomous
   release approves a turn's release too, asked only by the task that holds the verdict or a coordination task above it.
+  A test environment manifest that still names `everyTurns` for its full run keeps working, and nothing runs by it.
 - A route skips a check that nobody in the department can do instead of waiting for it, and a department that keeps a
   repository hands its documents in through it.
 - The skills every agent gets describe tasks and turns as releases. A turnkey team does and releases its task end to
@@ -93,7 +94,8 @@ board.
   тоже нет.
 - Каждый выпуск проходит полный прогон тестов, а о теге версии, который не называет ни один записанный выпуск,
   сообщается. Самостоятельный выпуск одобряет и выпуск хода, и просит его только задача с вердиктом или задача
-  координации над ней.
+  координации над ней. Описание тестовой среды, где у полного прогона еще указан `everyTurns`, по-прежнему
+  читается, и по этому числу ничего не запускается.
 - Маршрут пропускает проверку, которую в отделе никто не может сделать, вместо того чтобы ждать ее, а отдел со своим
   репозиторием сдает документы через него.
 - Навыки, которые получает каждый агент, описывают задачи и ходы как выпуски. Команда под ключ делает и выпускает свою

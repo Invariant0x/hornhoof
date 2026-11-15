@@ -68,8 +68,9 @@ export const TestMutation = z.discriminatedUnion('status', [
 const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, commands: z.array(Command).max(1000) })
   .refine(value => value.suiteIds.length + value.commands.length > 0, 'An explicit preparation must contain work.');
 /* The full run every release runs on its exact commit: profile runs every suite of the profile it replaces, and more, and
-   reuses nothing. No turn makes a run of replaces a full run: only asking for profile by name does. */
-const FullRun = z.strictObject({ replaces: Id, profile: Id });
+   reuses nothing. No turn makes a run of replaces a full run: only asking for profile by name does. everyTurns is what a
+   server or node before 0.24.0 requires, so a repository keeps it for them: it is read and nothing runs by it. */
+const FullRun = z.strictObject({ everyTurns: z.number().int().min(1).max(1000).optional(), replaces: Id, profile: Id });
 const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional(), fullRun: FullRun.optional() });
 /* Who reads a file the import graph cannot follow: the named suites whole, or with tests only those of their test files. */
 const ImpactRule = z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1), tests: Inputs.min(1).optional() });
