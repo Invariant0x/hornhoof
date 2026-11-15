@@ -6,6 +6,7 @@ import type { Person } from '../../auth/session.js';
 import { agents, departments, jobs, people, subscriptions, tasks } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { taskSpot } from '../tasks/engine.js';
+import { notStep } from '../tools/steps.js';
 
 /* startedByCeo: null for a turn no person started. One the CEO delegate started answers the delegate, not the CEO. */
 function currentWork(current: { job: typeof jobs.$inferSelect; task: typeof tasks.$inferSelect | null; startedByCeo: boolean | null } | undefined, reach: Access) {
@@ -33,7 +34,7 @@ export async function runningAgents(ctx: Ctx, viewer: Person) {
   const work = await db.select({ job: jobs, task: tasks, startedByCeo: people.isOwner }).from(jobs)
     .leftJoin(tasks, eq(tasks.id, jobs.taskId))
     .leftJoin(people, eq(people.id, jobs.createdBy))
-    .where(and(eq(jobs.companyId, viewer.companyId), eq(jobs.status, 'running')))
+    .where(and(eq(jobs.companyId, viewer.companyId), eq(jobs.status, 'running'), notStep))
     .orderBy(desc(jobs.startedAt), desc(jobs.createdAt));
   return rows.filter(r => seesAgentId(sight, r.agent.id)).sort((a, b) => Number(b.agent.kind === 'orchestrator') - Number(a.agent.kind === 'orchestrator')).map(({ agent: a, department: d, subscription: s }) => {
     const current = work.find(w => w.job.agentId === a.id);

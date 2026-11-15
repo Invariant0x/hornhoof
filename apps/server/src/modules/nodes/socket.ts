@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { ACKS_HEADER } from '@hornhoof/protocol';
+import { ACKS_HEADER, TOOLS_HEADER } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -47,9 +47,10 @@ const SOCKET_PATH = '/api/nodes/socket';
 
 export function nodeSocket(app: FastifyInstance, ctx: Ctx): void {
   const identities = new WeakMap<FastifyRequest, NodeIdentity>();
-  /* A node keeps each numbered message until it is confirmed only when the server says here that it confirms. */
+  /* A node keeps each numbered message until it is confirmed only when the server says here that it confirms, and hands
+     on what an agent's program sends to its tools with no turn running only when it says it answers that. */
   app.websocketServer.on('headers', (headers: string[], req: { url?: string }) => {
-    if (req.url?.split('?')[0] === SOCKET_PATH) headers.push(`${ACKS_HEADER}: 1`);
+    if (req.url?.split('?')[0] === SOCKET_PATH) headers.push(`${ACKS_HEADER}: 1`, `${TOOLS_HEADER}: 1`);
   });
   app.get(
     SOCKET_PATH,

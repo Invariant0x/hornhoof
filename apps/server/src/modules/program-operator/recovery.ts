@@ -8,6 +8,7 @@ import type { MessageParty } from '../events/parties.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { repeatWake, type TaskWake } from '../tasks/wake-state.js';
 import { operatorTransaction } from './transactions.js';
+import { notStep } from '../tools/steps.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
 type Job = typeof jobs.$inferSelect;
@@ -29,7 +30,7 @@ const deliveryOf = async (ctx: Ctx, row: Case) => row.deliveryId ? (await ctx.db
 const programLeft = (delivery: typeof programDeliveries.$inferSelect) => delivery.outcome === 'cancelled' || delivery.outcome === 'not_taken';
 
 export async function runsATurn(ctx: Ctx, agentId: string): Promise<boolean> {
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'), notStep)).limit(1);
   return Boolean(running);
 }
 

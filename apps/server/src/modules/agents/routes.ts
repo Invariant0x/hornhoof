@@ -1,5 +1,5 @@
 import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption, type RoleEffort } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -28,6 +28,7 @@ import { currentAgentTask } from './work.js';
 import { releaseLeftProgram } from './left-programs.js';
 import { telegramOf, type TelegramView } from '../telegram/routes.js';
 import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
+import { notStep } from '../tools/steps.js';
 
 export type AgentCard = FailureState & {
   id: string;
@@ -241,7 +242,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   const named = await cardPlaces(db, agent);
   const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
-  const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
   /* An employee's card shows what people edit. A head's department notebook has its own window and its own access; it
      counts all the same in what every turn sends. */
   const told = await instructionsOf(ctx, agent);
@@ -526,7 +527,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
   await requireDepartmentChanger(db, me, found.departmentId);
   if (found.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
   await changing(ctx, found, async agent => {
-    const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
+    const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
     if (running) throw new ApiError(409, 'conflict', 'This employee is working. Stop it first.', 'agent_working');
     /* A task it holds or does would wait for it for good. */
     const held = await db
@@ -546,7 +547,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
       await tx
         .update(jobs)
         .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
-        .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued')));
+        .where(and(eq(jobs.agentId, agent.id), or(eq(jobs.status, 'queued'), and(eq(jobs.status, 'running'), eq(jobs.kind, 'tools')))));
       await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'removed', before: null, after: null });
     });
     const left = await leaveWork(ctx, actorOf(me), agent);

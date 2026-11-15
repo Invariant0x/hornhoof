@@ -20,6 +20,7 @@ import { clearTurnProgram, failedProgramData, when } from './silent.js';
 import { afterFailure } from './failures.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
+import { notStep } from '../tools/steps.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -137,7 +138,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
 export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent?.switchedOffAt || agent.kind === 'orchestrator') return;
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'), notStep)).limit(1);
   if (running) return;
   const [change] = await ctx.db
     .select({ personId: agentChanges.personId, byOrchestrator: agentChanges.byOrchestrator })

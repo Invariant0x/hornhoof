@@ -24,7 +24,8 @@ import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
 import { outboundRoutes } from './modules/outbound/extension.js';
 import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
-import { NodeHub } from './modules/nodes/hub.js';
+import { NodeHub, type NodeIdentity } from './modules/nodes/hub.js';
+import type { ToolsCall } from './modules/tools/outside.js';
 import { nameBuiltinWork } from './modules/nodes/builtin.js';
 import { applyParkedMessages, handleNodeClose } from './modules/nodes/messages.js';
 import { receiveNodeMessage } from './modules/nodes/lifecycle.js';
@@ -147,6 +148,8 @@ export type Ctx = Deps & {
   /* Applies what nodes said of jobs whose rows were on a machine the server was taken from, once those rows are
      here; how many messages it applied. */
   applyParked: () => Promise<number>;
+  /* Answers what an agent's program sent to its tools with no turn running, which its node handed on. Set with /mcp. */
+  toolsOutside?: (node: NodeIdentity, call: ToolsCall) => Promise<void>;
   computer: Computers;
   templates: Templates;
   links: PublicLinks;

@@ -5,6 +5,7 @@ import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
 import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
+import { notStep } from '../tools/steps.js';
 
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
 
@@ -145,7 +146,7 @@ export async function workingCount(db: Db, companyId: string, among?: string[], 
   const [row] = await db
     .select({ n: countDistinct(jobs.agentId) })
     .from(jobs)
-    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), among ? inArray(jobs.agentId, among) : undefined, employees ? notInArray(jobs.agentId, assistantsOwn) : undefined));
+    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), notStep, among ? inArray(jobs.agentId, among) : undefined, employees ? notInArray(jobs.agentId, assistantsOwn) : undefined));
   return Number(row?.n ?? 0);
 }
 

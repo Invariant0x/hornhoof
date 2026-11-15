@@ -750,7 +750,8 @@ export const personAccess = pgTable(
 );
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed', 'obsolete'] as const;
-export const JOB_KINDS = ['test', 'conversation'] as const;
+/* tools: a step that answers an agent's program, which called its tools with no turn running, and ends with that request. */
+export const JOB_KINDS = ['test', 'conversation', 'tools'] as const;
 /* Why a node started again, as far as Hornhoof can tell: its built-in server started again, Hornhoof updated it, the machine
    started again, its container was made anew, its program started again in the same container, or the connection broke
    and the turn never reached it. */

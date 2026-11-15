@@ -7,10 +7,12 @@ import { appendEvent } from '../src/modules/events/store.js';
 import { disconnectMachines } from '../src/modules/nodes/disconnect.js';
 import { nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { ONLY_CEO, ONLY_DEPARTMENT_OWNER } from '../src/modules/tools/control.js';
 import { BUILTIN } from './builtin.js';
 import { failureCompany } from './failure-company.js';
 import { as } from './helpers.js';
+import { developmentStages } from './templates-once.js';
 
 type Rpc = { jsonrpc: '2.0'; id?: number; method: string; params?: object };
 type Answer = { status: number; body: { id?: number; result?: { content?: { text: string }[]; isError?: boolean; tools?: { name: string }[] }; error?: { code: number; message: string } } | null };
@@ -146,10 +148,13 @@ describe("an agent's tools with no turn of it running", () => {
     const off = await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.agent.id}`, payload: { on: false }, ...as(c.ceo) });
     expect(off.statusCode).toBe(200);
     expect((await c.outside(c.agent.id, rpc(1, 'tools/list'))).body?.result?.tools?.length).toBeGreaterThan(5);
+    const listed = await c.stepsOf(c.agent.id);
 
     const refused = await c.outside(c.agent.id, call(2, 'company'));
     expect(refused).toMatchObject({ status: 200, body: { id: 2, error: { message: expect.stringContaining('switched off') } } });
-    expect(await c.stepsOf(c.agent.id)).toEqual([]);
+    /* The call opened no step and ran nothing. */
+    expect(await c.stepsOf(c.agent.id)).toEqual(listed);
+    expect(await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.agent.id), eq(agentEvents.kind, 'tool')))).toEqual([]);
 
     await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.agent.id}`, payload: { on: true }, ...as(c.ceo) });
     expect(textOf(await c.outside(c.agent.id, call(3, 'company')))).toContain('"departments"');
@@ -212,6 +217,7 @@ describe('a step of the tools', () => {
     expect((await c.stepsOf(rita.id)).map(s => [s.status, s.error])).toEqual([['failed', 'removed']]);
 
     const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
+    await c.db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
     await step(c.agent.id);
     await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.agent.id}`, payload: { on: false }, ...as(c.ceo) });
     expect((await c.db.select({ assignee: tasks.assigneeAgentId }).from(tasks).where(eq(tasks.id, task!.id)))[0]!.assignee).not.toBe(c.agent.id);

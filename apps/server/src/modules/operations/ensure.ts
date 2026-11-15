@@ -11,6 +11,7 @@ import type { Tx } from '../tasks/engine.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { placeableSubscriptions, spotIn, type Serving } from '../tools/staff.js';
 import { holderOf, holds, isOperations, leftOut, missingRoles, PROGRAM_OPERATOR_ROLE, REQUIRED_OPERATIONS_ROLES } from './required.js';
+import { notStep } from '../tools/steps.js';
 
 /* How often Hornhoof looks again, for what no request tells it: an owner switched off, access taken away, a crash. */
 const CHECK_MS = 5 * 60_000;
@@ -97,7 +98,7 @@ type Operator = typeof agents.$inferSelect;
 async function staysOnPlan(tx: Tx, operator: Operator, plans: Serving[]): Promise<boolean> {
   if (!operator.subscriptionId) return false;
   if (plans.some(p => p.id === operator.subscriptionId)) return true;
-  const [running] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, operator.id), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, operator.id), eq(jobs.status, 'running'), notStep)).limit(1);
   return Boolean(running);
 }
 

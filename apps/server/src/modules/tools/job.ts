@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -29,7 +29,8 @@ async function unknownToken(ctx: Ctx, token: string | undefined): Promise<ApiErr
   return new ApiError(503, 'unavailable', 'Hornhoof is bringing back work from another machine. Try again in a few minutes.', 'merge_pending');
 }
 
-/* The token works only while its job runs, and only for a job that belongs to an agent. */
+/* The token works only while its job runs, and only for a job that belongs to an agent still in the company: once a
+   person stops the turn, its tools stop at once, while its program still winds down. */
 export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
   const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
   const [job] = token
@@ -45,7 +46,7 @@ export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
         })
         .from(jobs)
         .innerJoin(agents, eq(agents.id, jobs.agentId))
-        .where(and(eq(jobs.toolTokenHash, hashToken(token)), eq(jobs.status, 'running')))
+        .where(and(eq(jobs.toolTokenHash, hashToken(token)), eq(jobs.status, 'running'), sql`${jobs.error} is distinct from 'cancelled'`, isNull(agents.removedAt)))
     : [];
   if (!job) throw await unknownToken(ctx, token);
   return job;

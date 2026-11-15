@@ -479,7 +479,7 @@ type QueuedTurn = NonNullable<Awaited<ReturnType<typeof queuedWords>>>;
 type OpenedQueued = QueuedTurn & { repeated: RepeatedTurn };
 type AgentTarget = { agent: typeof agents.$inferSelect; sub: NonNullable<Awaited<ReturnType<typeof liveSubscription>>> };
 
-async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string): Promise<AgentTarget | null> {
+export async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string): Promise<AgentTarget | null> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
   const sub = agent ? await liveSubscription(ctx, agent.id) : null;
   const at = sub ? await nodeOfAgent(ctx, agentId) : null;

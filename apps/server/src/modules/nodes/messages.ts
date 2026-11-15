@@ -418,6 +418,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     case 'agent.start':
       await startProgram(ctx, id, msg.agentKey);
       return;
+    case 'tools.call':
+      await ctx.toolsOutside?.(id, msg);
+      return;
     case 'agent.restarted':
       await programRestarted(ctx, id, msg);
       return;
