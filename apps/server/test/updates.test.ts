@@ -179,8 +179,8 @@ const asked = (registry: { digests: Record<string, string> }, id: string) => ({
 });
 
 describe('the node image install.sh names', () => {
-  const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
-  const LAPTOP = { ...MACHINE, machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
+  const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
+  const LAPTOP = { ...MACHINE, machineId: 'laptop-0002-abcd', hostname: 'dev-laptop' };
   const BY_TAG = `ghcr.io/acme/hornhoof-node:${SHA}`;
   const THIS_SERVER = 'curl -fsSL http://localhost:8080/install.sh | bash';
   /* What a machine gets that runs the command: the image in the script at the command's address, which anyone may read. */
@@ -465,7 +465,7 @@ describe('updates', () => {
     const registry = await fakeRegistry({ [SHA]: { commit: SHA, version: '0.4.1' } });
     const { app, ceo } = await company(registry, SHA);
     const made = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) })).json();
-    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: /--join (\S+)/.exec(made.command)![1], machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } })).json();
+    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: /--join (\S+)/.exec(made.command)![1], machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } })).json();
     registry.fail(500);
     const res = await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${joined.nodes[0].key}` }, payload: {} });
     expect(res.statusCode).toBe(200);

@@ -75,7 +75,7 @@ describe('parts on physical computers', () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');
     const two = await c.planless(c.ceo, 'container-two');
-    const mac = await c.machine(c.ceo, 'macbook', idle({ load: 6 }));
+    const mac = await c.machine(c.ceo, 'laptop', idle({ load: 6 }));
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 6 });
@@ -84,7 +84,7 @@ describe('parts on physical computers', () => {
     await nextOf(one.node, 'tests.run');
     await call('run_tests', { command: 'make test' });
     const state = JSON.parse((await call('test_run', { run: 2 })).text);
-    expect(state.parts).toMatchObject([{ status: 'running', machine: 'macbook' }]);
+    expect(state.parts).toMatchObject([{ status: 'running', machine: 'laptop' }]);
     expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
   });
 
@@ -147,7 +147,7 @@ describe('parts on physical computers', () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'stale-container');
     const two = await c.planless(c.ceo, 'current-container');
-    const mac = await c.machine(c.ceo, 'macbook', idle({ load: 6 }));
+    const mac = await c.machine(c.ceo, 'laptop', idle({ load: 6 }));
     /* The second report of the host comes later on a clock the test moves. */
     vi.useFakeTimers({ toFake: ['Date'] });
     reportHost(c, one.nodeId, 'linux', { hostLoad: 1 });
@@ -157,7 +157,7 @@ describe('parts on physical computers', () => {
     vi.useRealTimers();
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
-    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'macbook' }]);
+    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'laptop' }]);
   });
 
   it('reserves the shared host between parts of one run in one queue pass', async () => {
@@ -184,12 +184,12 @@ describe('parts on physical computers', () => {
   it('picks by host resources instead of an idle container on a loaded host', async () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'idle-container');
-    const mac = await c.machine(c.ceo, 'macbook', idle({ load: 6 }));
+    const mac = await c.machine(c.ceo, 'laptop', idle({ load: 6 }));
     reportHost(c, one.nodeId, 'linux', { hostLoad: 15 });
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 2 });
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
-    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'macbook' }]);
+    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'laptop' }]);
   });
 
   it('keeps the host slot occupied while a disconnected node may still run its part', async () => {
@@ -211,7 +211,7 @@ describe('parts on physical computers', () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');
     const two = await c.planless(c.ceo, 'container-two');
-    const mac = await c.machine(c.ceo, 'macbook', idle({ load: 6 }));
+    const mac = await c.machine(c.ceo, 'laptop', idle({ load: 6 }));
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 6 });
@@ -220,7 +220,7 @@ describe('parts on physical computers', () => {
     const first = await nextOf(one.node, 'tests.run');
     one.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], tests: [], load: idle() });
     await until(async () => (await c.db.select().from(testParts)).some(p => p.id !== first.partId));
-    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running', machine: 'macbook' }]);
+    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running', machine: 'laptop' }]);
   });
 
   it('does not give a shared host two parts when run requests arrive together', async () => {

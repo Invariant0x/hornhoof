@@ -9,11 +9,11 @@ import { company, done, gets, GIB, idle, nextOf } from './test-runs-company.js';
 describe('a run of other work', () => {
   it("runs a command with no branch on a free machine, hands its node the task's files it names, and puts what it made on the task", async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
     await c.putFile('data.csv', 'a,b\n');
     const started = await call('run_work', { command: 'python3 make.py', files: ['data.csv'] });
-    expect(started).toMatchObject({ error: false, text: expect.stringMatching(/^Work run 1 of #1 runs on ivan-mac\./) });
+    expect(started).toMatchObject({ error: false, text: expect.stringMatching(/^Work run 1 of #1 runs on dev-mac\./) });
     const run = await nextOf(ivan.node, 'tests.run');
     expect(run).toMatchObject({ kind: 'work', repo: null, branch: null, files: ['data.csv'], command: 'python3 make.py', part: 1, parts: 1, timeoutMs: 30 * 60_000 });
     const node = { authorization: `Bearer ${ivan.key}` };
@@ -23,13 +23,13 @@ describe('a run of other work', () => {
     const put = await c.app.inject({ method: 'PUT', url: `/api/parts/${run.partId}/files/report.txt`, headers: { ...node, 'content-type': 'application/octet-stream' }, payload: Buffer.from('made') });
     expect(put.statusCode).toBe(201);
     const listed = (await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json().machines;
-    expect(listed).toEqual([expect.objectContaining({ hostname: 'ivan-mac', kind: 'computer', running: expect.objectContaining({ parts: [expect.objectContaining({ run: 1, part: 1, kind: 'work' })] }) })]);
+    expect(listed).toEqual([expect.objectContaining({ hostname: 'dev-mac', kind: 'computer', running: expect.objectContaining({ parts: [expect.objectContaining({ run: 1, part: 1, kind: 'work' })] }) })]);
     ivan.node.send(done(run, { commit: null, log: 'Put on the task: report.txt.\n' }));
     await nextOf(ivan.node, 'tests.ack');
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
     const prompt = (await c.wokeWith(c.bruno.id))!;
     expect(prompt).toMatch(/^The work you ran on #1/);
-    expect(prompt).toMatch(/Work run 1 is done[\s\S]*Part 1 of 1 done on ivan-mac/);
+    expect(prompt).toMatch(/Work run 1 is done[\s\S]*Part 1 of 1 done on dev-mac/);
     expect(prompt).toMatch(/What it made is on #1: work-1-1-report\.txt/);
     expect(prompt).toContain('work-1-1.log');
     expect((await c.filesOn()).map(f => f.name).sort()).toEqual(['data.csv', 'work-1-1-report.txt', 'work-1-1.log']);
@@ -40,13 +40,13 @@ describe('a run of other work', () => {
       branch: null,
       files: ['data.csv'],
       status: 'done',
-      parts: [{ part: 1, status: 'done', machine: 'ivan-mac', log: 'work-1-1.log', made: ['work-1-1-report.txt'] }],
+      parts: [{ part: 1, status: 'done', machine: 'dev-mac', log: 'work-1-1.log', made: ['work-1-1-report.txt'] }],
     });
   });
 
   it('drops what a lost attempt put on the task, so the part that runs again makes its own files', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
     await call('run_work', { command: 'make report' });
     const first = await nextOf(ivan.node, 'tests.run');
@@ -65,7 +65,7 @@ describe('a run of other work', () => {
 
   it('runs a part again after its machine went offline only when the run said it may run twice, and says why it did not', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const ann = await c.machine(c.ann, 'ann-pc', idle({ load: 6 }));
     const { call } = await c.turn(c.bruno);
     const away = async (m: { node: FakeNode; nodeId: string }) => {
@@ -78,7 +78,7 @@ describe('a run of other work', () => {
     await nextOf(ivan.node, 'tests.run');
     await away(ivan);
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
-    expect(await c.wokeWith(c.bruno.id)).toMatch(/Work run 1 failed[\s\S]*Part 1 of 1 failed on ivan-mac[^:]*: its machine went offline, and it did not run again elsewhere, as it may still run there and run_work did not say it is repeatable/);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Work run 1 failed[\s\S]*Part 1 of 1 failed on dev-mac[^:]*: its machine went offline, and it did not run again elsewhere, as it may still run there and run_work did not say it is repeatable/);
     expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
 
     await call('run_work', { command: 'make report', repeatable: true });
@@ -89,7 +89,7 @@ describe('a run of other work', () => {
 
   it('clones a branch first when one is named, and splits into parts like a test run', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
     expect((await call('run_work', { command: 'render --frames {part}/{parts}', branch: 'main', parts: 2, minutes: 90 })).error).toBe(false);
@@ -100,7 +100,7 @@ describe('a run of other work', () => {
 
   it("is refused a file its task lacks, a branch with no repository and a split command without {part}, and a part's files reach only the node that runs it", async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const ann = await c.machine(c.ann, 'ann-pc', idle({ load: 7.5 }));
     const { call } = await c.turn(c.bruno);
     await c.putFile('data.csv', 'a,b\n');
@@ -152,7 +152,7 @@ describe('a run of other work', () => {
 describe('the pool of machines', () => {
   it('shows the orchestrator every machine with its load, the parts it runs and why each waiting part waits', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     await c.machine(c.ann, 'ann-pc', idle({ load: 7.6 }));
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test -- --shard={part}/{parts}', parts: 2 });
@@ -162,11 +162,11 @@ describe('the pool of machines', () => {
 
     const pool = JSON.parse((await boss.call('pool')).text);
     expect(pool.machines).toEqual([
-      expect.objectContaining({ name: 'ivan-mac', owner: 'Ivan', kind: 'computer', online: true, lent: true, loaded: false, load: expect.objectContaining({ cpus: 8 }), parts: [expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 1, parts: 2, agent: 'Bruno', command: 'npm test -- --shard=1/2', ranAgain: [] })] }),
+      expect.objectContaining({ name: 'dev-mac', owner: 'Ivan', kind: 'computer', online: true, lent: true, loaded: false, load: expect.objectContaining({ cpus: 8 }), parts: [expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 1, parts: 2, agent: 'Bruno', command: 'npm test -- --shard=1/2', ranAgain: [] })] }),
       expect.objectContaining({ name: 'ann-pc', owner: 'Ann', online: true, lent: true, loaded: true, parts: [] }),
     ]);
     expect(pool.builtin).toMatchObject({ online: false, parts: [] });
-    expect(pool.waiting).toEqual([expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 2, parts: 2, agent: 'Bruno', why: 'Running another part: ivan-mac. Loaded: ann-pc.' })]);
+    expect(pool.waiting).toEqual([expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 2, parts: 2, agent: 'Bruno', why: 'Running another part: dev-mac. Loaded: ann-pc.' })]);
 
     /* Once the first part is done, the second goes out, and nothing waits. */
     ivan.node.send(done(first));
@@ -178,7 +178,7 @@ describe('the pool of machines', () => {
 
   it('says a part waits for a lent machine, for one its department reaches, for one that runs work, or for free memory', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ memFree: 1 * GIB }), { work: false });
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle({ memFree: 1 * GIB }), { work: false });
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const boss = await c.turn(orchestrator!, null);
     const why = async () => JSON.parse((await boss.call('pool')).text).waiting.map((w: { why: string }) => w.why);
@@ -188,7 +188,7 @@ describe('the pool of machines', () => {
     await (await c.turn(c.bruno)).call('run_tests', { command: 'npm test' });
     expect(await why()).toEqual(['No computer lent to runs is online.']);
     await lend(ivan.machineId, true);
-    expect(await why()).toEqual(['Short of the 4 GB of free memory it needs: ivan-mac.']);
+    expect(await why()).toEqual(['Short of the 4 GB of free memory it needs: dev-mac.']);
 
     /* Ann's machine takes the test run; it reaches development only, and its node knows test runs alone. */
     await lend(ivan.machineId, false);
@@ -203,7 +203,7 @@ describe('the pool of machines', () => {
 
   it('shows a person who does not see the whole company only their own machines and what runs there', async () => {
     const c = await company();
-    await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
+    await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test' });
@@ -225,7 +225,7 @@ describe('the pool of machines', () => {
 
   it('shows each machine online and as busy as the machines screen does, a removed plan left out of both', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 3 }));
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 3 }));
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const boss = await c.turn(orchestrator!, null);
     const both = async () => {
@@ -244,26 +244,26 @@ describe('the pool of machines', () => {
 
   it('gives no part to a machine whose node has no user of its own for runs, and shows why', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac', idle(), { noRuns: 'This node runs without a user of its own for runs.' });
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle(), { noRuns: 'This node runs without a user of its own for runs.' });
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test' });
     expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
-    expect(pool.machines).toEqual([expect.objectContaining({ name: 'ivan-mac', online: true, noRuns: 'This node runs without a user of its own for runs.' })]);
+    expect(pool.machines).toEqual([expect.objectContaining({ name: 'dev-mac', online: true, noRuns: 'This node runs without a user of its own for runs.' })]);
     expect(pool.waiting).toEqual([expect.objectContaining({ part: 1, why: 'No computer lent to runs is online.' })]);
   });
 
   it('gives no part to a phone or a browser, which run no commands, and shows what kind each machine is', async () => {
     const c = await company();
-    const phone = await c.machine(c.ceo, 'ivan-phone', idle(), { kind: 'phone' });
+    const phone = await c.machine(c.ceo, 'dev-phone', idle(), { kind: 'phone' });
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test' });
     expect(await gets(c.app.ctx, phone.node, 'tests.run')).toBe(false);
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
-    expect(pool.machines).toEqual([expect.objectContaining({ name: 'ivan-phone', kind: 'phone', online: true, lent: true, parts: [] })]);
-    expect((await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json().machines).toEqual([expect.objectContaining({ hostname: 'ivan-phone', kind: 'phone' })]);
+    expect(pool.machines).toEqual([expect.objectContaining({ name: 'dev-phone', kind: 'phone', online: true, lent: true, parts: [] })]);
+    expect((await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json().machines).toEqual([expect.objectContaining({ hostname: 'dev-phone', kind: 'phone' })]);
     expect(pool.waiting).toEqual([expect.objectContaining({ part: 1, why: 'No computer lent to runs is online.' })]);
     const box = await c.planless(c.ceo, 'build-box');
     expect(await nextOf(box.node, 'tests.run')).toMatchObject({ command: 'npm test' });

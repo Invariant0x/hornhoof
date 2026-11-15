@@ -28,16 +28,16 @@ export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
     bob: await invite('Bob', { departments: [app_!.id] }),
     olga: await invite('Olga', { departments: [dev!.id] }),
     wes: await invite('Wes', { whole: true }),
-    lisa: await invite('Lisa', { whole: true }),
+    clara: await invite('Clara', { whole: true }),
   };
   const rows = await db.select().from(people);
   const personId = (name: string) => rows.find(p => p.name === name)!.id;
-  const ids = { ceo: rows.find(p => p.isOwner)!.id, ann: personId('Ann'), bob: personId('Bob'), olga: personId('Olga'), wes: personId('Wes'), lisa: personId('Lisa') };
-  await app.inject({ method: 'PUT', url: `/api/people/${ids.lisa}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
+  const ids = { ceo: rows.find(p => p.isOwner)!.id, ann: personId('Ann'), bob: personId('Bob'), olga: personId('Olga'), wes: personId('Wes'), clara: personId('Clara') };
+  await app.inject({ method: 'PUT', url: `/api/people/${ids.clara}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
   await app.inject({ method: 'PUT', url: `/api/departments/${dev!.id}/owner`, payload: { personId: ids.olga }, ...as(ceo) });
   const plan = async (ownerPersonId: string, label: string) =>
     (await db.insert(subscriptions).values({ companyId, provider: 'claude', kind: 'personal', label, status: 'ready', ownerPersonId }).returning())[0]!;
-  const plans = { ann: await plan(ids.ann, 'Ann plan'), bob: await plan(ids.bob, 'Bob plan'), olga: await plan(ids.olga, 'Olga plan'), wes: await plan(ids.wes, 'Wes plan'), lisa: await plan(ids.lisa, 'Lisa plan') };
+  const plans = { ann: await plan(ids.ann, 'Ann plan'), bob: await plan(ids.bob, 'Bob plan'), olga: await plan(ids.olga, 'Olga plan'), wes: await plan(ids.wes, 'Wes plan'), clara: await plan(ids.clara, 'Clara plan') };
   const hire = async (name: string, kind: 'head' | 'worker', departmentId: string, subscriptionId: string) =>
     (await db.insert(agents).values({ companyId, kind, name, roleKey: kind === 'head' ? 'DEV-HEAD' : 'DEV-BE', departmentId, productId: departmentId === dev!.id ? app_!.id : null, model: '', subscriptionId }).returning())[0]!;
   const crew = {
@@ -52,7 +52,7 @@ export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
     head: await hire('Hana', 'head', dev!.id, plans.bob.id),
     owned: await hire('Oleg', 'worker', dev!.id, plans.olga.id),
     wide: await hire('Wanda', 'worker', sales!.id, plans.wes.id),
-    deputy: await hire('Lena', 'worker', sales!.id, plans.lisa.id),
+    deputy: await hire('Lena', 'worker', sales!.id, plans.clara.id),
   };
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* Work of one agent, given by the head of Development. */

@@ -18,7 +18,7 @@ describe('how long a department gives its waits', () => {
     expect(await c.db.select().from(waitPolicies)).toEqual([]);
     expect((await put(c, c.tokens.olga, 'after', dates)).statusCode).toBe(200);
     expect((await put(c, c.tokens.ceo, 'review', dates)).statusCode).toBe(200);
-    expect((await put(c, c.tokens.lisa, 'person', dates)).statusCode).toBe(200);
+    expect((await put(c, c.tokens.clara, 'person', dates)).statusCode).toBe(200);
     expect((await c.get(`/api/departments/${c.dev.id}/wait-policy`, c.tokens.ann)).json()).toMatchObject({ canChange: false });
     expect((await c.get(`/api/departments/${c.dev.id}/wait-policy`, c.tokens.olga)).json().policies).toHaveLength(3);
   });

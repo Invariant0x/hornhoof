@@ -17,7 +17,7 @@ const CUT = DEADLINE - BEHIND_MS;
 const TERM = { number: 7, machine: A, split: false };
 
 const handing = (over: Partial<Handing> = {}): Handing => ({
-  switch: SWITCH, to: { machine: 'b', networkId: B, hostname: 'b-host' }, term: TERM, at: T0, deadline: DEADLINE, phase: 'offered', fenced: false, w: null, copies: null, slot: null, reason: null, ...over,
+  switch: SWITCH, to: { machine: 'b', networkId: B, hostname: 'host-b' }, term: TERM, at: T0, deadline: DEADLINE, phase: 'offered', fenced: false, w: null, copies: null, slot: null, reason: null, ...over,
 });
 const move = (over: Partial<NonNullable<HandSample['move']>> = {}): NonNullable<HandSample['move']> => ({ request: SWITCH, networkId: B, state: 'preparing', askedAt: T0, endedAt: null, ...over });
 const READY = { numbered: true, data: true, named: true, onStored: true, pace: true };

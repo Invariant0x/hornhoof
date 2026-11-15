@@ -19,7 +19,7 @@ const shop: Spot = { departmentId: 'shop', parentId: 'dev' };
 const request = (kind: 'question' | 'choice' | 'stuck' | 'approval', topic: string | null, spot: Spot = dev): DecisionSubject => ({ source: 'request', kind, topic: topic as never, spot });
 
 type Row = [string, DecisionSubject, boolean];
-/* The matrix of #49: what each of them may decide. Department people decide their department's tasks and employees only. */
+/* Decision-rights matrix: what each viewer may decide. Department people decide their department's tasks and employees only. */
 const rows: Row[] = [
   ['a question on a department task', request('question', 'task'), true],
   ['a choice about a department employee', request('choice', 'employee'), true],

@@ -4,7 +4,7 @@ import { jobs } from '../src/db/schema.js';
 import { as, until } from './helpers.js';
 import { company, next, open, opened, turnOn, type Company, type Screen } from './terminal-company.js';
 
-/* #393: on the server, before a byte reaches the program. A person who may write a message types words, pastes and presses
+/* Checked on the server, before a byte reaches the program. A person who may write a message types words, pastes and presses
    Enter, and the turn that opens is theirs. Keys that steer the program, and lines that start with / or !, come only from the
    owner of the plan the program runs on, whatever the browser says or sends. */
 type View = { screen: Screen; termId: string };
@@ -71,7 +71,7 @@ const REPORTS = ['\x1b[I', '\x1b[O', '\x1b[?1;2c', '\x1b[>0;276;0c', '\x1b[3;1R'
 describe('what someone who may only write a message sends', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it.each(['ceo', 'lisa'] as const)('%s is told so when the view opens, and the node takes keys from them', async who => {
+  it.each(['ceo', 'clara'] as const)('%s is told so when the view opens, and the node takes keys from them', async who => {
     const c = await company();
     const screen = await opened(c.url, c.tokens[who], c.crew.other.id);
     expect(await next(c.node, 'term.open')).toMatchObject({ agentKey: c.crew.other.id, write: true });
@@ -135,7 +135,7 @@ describe('what someone who may only write a message sends', () => {
     expect((await outcome(c, first)).keys).toEqual(['a']);
     send(first, '\r');
     expect((await outcome(c, first)).keys).toEqual(['\r']);
-    const second = await view(c, c.tokens.lisa, c.crew.other.id);
+    const second = await view(c, c.tokens.clara, c.crew.other.id);
     send(second, '/login');
     expect(await outcome(c, second)).toEqual({ keys: [], refused: ['control'] });
   });

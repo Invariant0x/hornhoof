@@ -30,7 +30,6 @@ it('reads a turn history without scanning thirty thousand unrelated event bodies
   await db.execute(sql`analyze agent_events`);
   const plan = await db.execute(sql`explain (analyze, buffers) ${historyQuery(db, ids)}`);
   const text = plan.rows.map(r => r['QUERY PLAN']).join('\n');
-  console.log(text);
   expect(text).not.toContain('Seq Scan on agent_events');
   expect((await db.execute(historyQuery(db, ids))).rows).toHaveLength(2);
 });

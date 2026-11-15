@@ -18,7 +18,7 @@ const productsOf = async (c: C, departmentId: string) => (await c.db.select().fr
 describe('another repository of a department', () => {
   it('comes as a new product of the department holding it, named after it unless a name is given, and never shows its token', async () => {
     const c = await company();
-    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const author = { name: 'Alex Rivera', email: 'alex@acme.example' };
     const res = await add(c, c.ceoToken, c.dev.id, { url: 'https://github.com/acme/mobile-app.git', token: 'ghp_mobile1111', author });
     expect(res.statusCode).toBe(201);
     expect(res.body).not.toContain('ghp_mobile1111');

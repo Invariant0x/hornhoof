@@ -10,12 +10,12 @@ import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } 
 
 type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null };
 
-const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
-const LAPTOP = { ...MAC, machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
+const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
+const LAPTOP = { ...MAC, machineId: 'laptop-0002-abcd', hostname: 'dev-laptop' };
 const codeOf = (command: string) => command.split('--join ')[1]!;
 const hello = { type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [] };
 
-/* Ivan's Claude plan on his Mac and on his laptop, each node online and signed in, and two employees on the plan. */
+/* The CEO's Claude plan on dev-mac and on dev-laptop, each node online and signed in, and two employees on the plan. */
 async function planOnTwoMachines(env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp(env);
   const url = await listen(app);
@@ -260,7 +260,7 @@ describe('agents of one plan on several machines', () => {
     await write(app, ceo, bruno.id, 'Hi');
     finish(mac, await nextRun(mac), 'bruno-on-mac');
     await until(async () => (await card()).machine !== null);
-    expect((await card()).machine).toMatchObject({ hostname: 'ivan-mac' });
+    expect((await card()).machine).toMatchObject({ hostname: 'dev-mac' });
   });
 
   it('shows the orchestrator the machine it runs on', async () => {
@@ -268,6 +268,6 @@ describe('agents of one plan on several machines', () => {
     const org = async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator;
     expect((await org()).machine).toBeNull();
     await db.update(agents).set({ subscriptionId: plan, nodeId: nodes.laptop.nodeId }).where(eq(agents.kind, 'orchestrator'));
-    expect((await org()).machine).toMatchObject({ hostname: 'ivan-laptop' });
+    expect((await org()).machine).toMatchObject({ hostname: 'dev-laptop' });
   });
 });

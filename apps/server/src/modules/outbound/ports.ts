@@ -2,7 +2,7 @@ import type { CertifiedCheck, CheckBinding, GateCode, InvalidationCode, Verified
 import type { Ctx } from '../../app.js';
 import type { RunModelCheck } from '../model-checks/run.js';
 
-/* The private seams of the outbound gateway between its kernel, its sender and its checks (#403, sections 8 and 10). Types
+/* The private seams of the outbound gateway between its kernel, its sender and its checks. Types
    only: no way around the kernel starts here, and a value of these types grants nothing by itself. */
 
 /* What a transport says about one attempt, in codes that never carry a provider's words. */

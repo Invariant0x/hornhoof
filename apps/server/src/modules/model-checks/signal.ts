@@ -14,8 +14,8 @@ export const signalRecipients = (ctx: Pick<Ctx, 'db'>, place: Pick<SignalPlace, 
   or(eq(agents.kind, 'orchestrator'), and(eq(agents.kind, 'head'), eq(agents.departmentId, place.departmentId))),
 ));
 
-/* One signal to the head of the department and to the orchestrator, through the notices that survive a restart. There is no
-   way yet to call a person directly from outside a task, so the text names the owner for the orchestrator to tell. */
+/* One signal to the head of the department and to the orchestrator, through the notices that survive a restart. Service
+   notices outside a task go to agents, so the text names the owner for the orchestrator to tell. */
 export async function recordCheckSignal(ctx: Pick<Ctx, 'db' | 'templates'>, place: SignalPlace, signal: Signal, report: Report): Promise<void> {
   const owner = await departmentOwner(ctx, place.companyId, place.departmentId);
   const text = `Model check ${place.kind} is off and stays off until a run passes. Tell the owner of its department, ${owner?.name ?? 'the CEO'}.\n${reportText(report)}`;

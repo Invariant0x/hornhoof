@@ -33,7 +33,7 @@ type Call = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string; 
    which everyone of it reads. */
 type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; ownerToo?: boolean; rules?: boolean; company?: boolean; closedStatus?: 403 | 404 };
 /* Who changes the rules of the agents that are open to them: Olga is the named owner of Development. */
-const RULE_MAKERS: readonly Viewer[] = ['ceo', 'lisa', 'olga'];
+const RULE_MAKERS: readonly Viewer[] = ['ceo', 'clara', 'olga'];
 
 const anAgent = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => ({ method, url: `/api/agents/${c.crew[agent].id}${end}`, ...(payload ? { payload } : {}) });
 const aTask = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => {
@@ -108,17 +108,17 @@ const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = 
   { name: "department owner, another's plan, other department", viewer: 'olga', agent: 'far', closed: true },
   { name: 'whole company, own plan', viewer: 'wes', agent: 'wide', closed: false },
   { name: "whole company, another's plan", viewer: 'wes', agent: 'other', closed: true },
-  { name: 'delegate', viewer: 'lisa', agent: 'far', closed: false },
+  { name: 'delegate', viewer: 'clara', agent: 'far', closed: false },
   { name: 'CEO', viewer: 'ceo', agent: 'deputy', closed: false },
 ];
 
 /* Lists, with what each person gets. company: it names every employee and the work of the company, which everyone of it
    sees, and keeps only the words of the agents a person does not open. */
 type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>>; company?: boolean };
-const ALL_OK = { ann: 200, olga: 200, wes: 200, lisa: 200, ceo: 200 };
-const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, lisa: 200, ceo: 200 };
+const ALL_OK = { ann: 200, olga: 200, wes: 200, clara: 200, ceo: 200 };
+const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, clara: 200, ceo: 200 };
 /* Ann has App, a product of Development, and not the department itself: for her it does not exist, and its notebook is closed. */
-const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, lisa: 200, ceo: 200 };
+const DEPARTMENT_ITSELF = { ann: 404, olga: 200, wes: 200, clara: 200, ceo: 200 };
 const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK, company: true },
   { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK, company: true },
@@ -140,14 +140,14 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: { ...DEPARTMENT_ITSELF, ann: 403 } },
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK, company: true },
   { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: ALL_OK, company: true },
-  { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
+  { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, clara: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: DEPARTMENT_ITSELF },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: DEPARTMENT_ITSELF },
   { route: 'GET /api/autonomous-releases', url: () => '/api/autonomous-releases', statuses: ALL_OK, company: true },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: DEPARTMENT_ITSELF },
   /* Ann has App of Development and does not run Development: its branches are closed to her, as its roster is. */
-  { route: 'GET /api/departments/:id/branches', url: c => `/api/departments/${c.dev.id}/branches`, statuses: { ann: 403, olga: 200, wes: 200, lisa: 200, ceo: 200 } },
+  { route: 'GET /api/departments/:id/branches', url: c => `/api/departments/${c.dev.id}/branches`, statuses: { ann: 403, olga: 200, wes: 200, clara: 200, ceo: 200 } },
 ];
 
 /* Elsewhere, with the reason it is not a row above. */

@@ -15,12 +15,11 @@ type Fixture = { root: string; suite: TestSuite; files: string[]; extension: 'js
 const require = createRequire(import.meta.url);
 const repository = fileURLToPath(new URL('../../../', import.meta.url));
 const childDriver = fileURLToPath(new URL('./fixtures/run-planning/invoke.ts', import.meta.url));
-const captures = join(repository, '.metrics/task-588/cli-captures');
 const folders: string[] = [];
 afterEach(async () => { await Promise.all(folders.splice(0).map(folder => rm(folder, { recursive: true, force: true }))); });
 
 async function folder(): Promise<string> {
-  const base = join(repository, '.metrics/task-588/cli-fixtures');
+  const base = join(repository, '.metrics/run-planning/cli-fixtures');
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, 'project-')); folders.push(root);
   await mkdir(join(root, 'tests')); await mkdir(join(root, 'reports'));
@@ -45,8 +44,8 @@ async function plannedVitestFixture(projects = false): Promise<Fixture> {
   return { ...fixture, suite: { ...fixture.suite, split: { kind: 'json-file' }, run: { ...fixture.suite.run, args: [...fixture.suite.run.args, '--reporter=default'] } } };
 }
 function python(): string {
-  if (!process.env.HH588_PYTHON) throw new Error('The authorcheck must prepare its fixture-local pytest interpreter.');
-  return process.env.HH588_PYTHON;
+  if (!process.env.HH_FIXTURE_PYTHON) throw new Error('The authorcheck must prepare its fixture-local pytest interpreter.');
+  return process.env.HH_FIXTURE_PYTHON;
 }
 async function pytestFixture(): Promise<Fixture> {
   const root = await folder(), files = ['first', 'second', 'third'].map(name => `tests/test_${name}.py`);
@@ -74,9 +73,6 @@ async function invoke(fixture: Fixture, name: string, files: string[], options: 
     child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal }));
   });
   const report = await readFile(output, 'utf8').catch(() => null);
-  await mkdir(captures, { recursive: true });
-  await writeFile(join(captures, name + '.json'), JSON.stringify({ fixtureOnly: true, framework: fixture.suite.id, ...result, stdout, stderr, report }, null, 2) + '\n');
-  console.log('HH588_CLI_FIXTURE ' + JSON.stringify({ fixtureOnly: true, name, framework: fixture.suite.id, ...result, stdout, stderr, report }));
   return { ...result, stdout, stderr, report };
 }
 const reportOf = (result: { report: string | null }): VitestReport => JSON.parse(result.report!) as VitestReport;
@@ -207,7 +203,7 @@ describe('real framework invocations of planned fixture selections', () => {
 
   it('keeps pytest collection errors separate from assertion failures', async () => {
     const fixture = await pytestFixture(), file = fixture.files[0]!;
-    await writeFile(join(fixture.root, file), 'import missing_fixture_dependency_588\n');
+    await writeFile(join(fixture.root, file), 'import missing_fixture_dependency\n');
     const result = await invoke(fixture, 'pytest-collection-failed', [file]);
     expect(result.code).toBe(2); expect(result.report).toContain('<error'); expect(result.report).not.toContain('<failure');
   });

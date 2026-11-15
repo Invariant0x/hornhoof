@@ -24,11 +24,11 @@ describe('wait recipient notices', () => {
     const task = await c.task();
     const worker = await c.run();
     const until = new Date(Date.now() + 60_000).toISOString();
-    const result = await worker.client.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Acceptance on a-host', until, on: { kind: 'employee', employee: c.head.id } } });
+    const result = await worker.client.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Acceptance on host-a', until, on: { kind: 'employee', employee: c.head.id } } });
     expect(result.isError).toBeFalsy();
     const [message] = await c.messages(c.head.id);
     expect(message).toMatchObject({ data: { notification: { source: 'wait_requested', tasks: [{ id: task.id, number: task.number }] }, actor: { kind: 'agent', id: c.agent.id } } });
-    expect(message!.data).toMatchObject({ text: expect.stringContaining('Acceptance on a-host') });
+    expect(message!.data).toMatchObject({ text: expect.stringContaining('Acceptance on host-a') });
     expect(message!.data).toMatchObject({ text: expect.stringContaining(c.agent.name) });
     expect(message!.data).toMatchObject({ text: expect.stringContaining(until) });
     expect((await c.turnsOf(c.head.id))[0]).toMatchObject({ status: 'running' });
@@ -93,13 +93,13 @@ describe('wait recipient notices', () => {
       const c = await waitCompany();
       const task = await c.task();
       const worker = await c.run();
-      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on a-host')).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on host-a')).isError).toBeFalsy();
       const until = later(90_000);
-      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on a-host, now with the report read', until)).isError).toBeFalsy();
-      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on a-host, the report read twice', until)).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on host-a, now with the report read', until)).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on host-a, the report read twice', until)).isError).toBeFalsy();
       expect(await c.messages(c.head.id)).toHaveLength(1);
       expect(await c.db.select().from(waitNotices)).toHaveLength(1);
-      expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toMatchObject({ reason: 'Acceptance on a-host, the report read twice', until, on: { kind: 'employee', employee: c.head.id } });
+      expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toMatchObject({ reason: 'Acceptance on host-a, the report read twice', until, on: { kind: 'employee', employee: c.head.id } });
     });
 
     it('tells another employee the wait moved to', async () => {
@@ -107,7 +107,7 @@ describe('wait recipient notices', () => {
       const task = await c.task();
       const worker = await c.run();
       await waitOn(worker.client, task.number, c.head.id, 'Acceptance');
-      expect((await waitOn(worker.client, task.number, c.watcher.id, 'The alert on a-host')).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.watcher.id, 'The alert on host-a')).isError).toBeFalsy();
       expect(await c.messages(c.head.id)).toHaveLength(1);
       expect(await c.messages(c.watcher.id)).toHaveLength(1);
     });
@@ -140,7 +140,7 @@ describe('wait recipient notices', () => {
       const task = await c.task();
       const worker = await c.run(c.agent.id, task.id);
       await waitOn(worker.client, task.number, c.head.id, 'Acceptance');
-      expect((await worker.client.callTool({ name: 'blocked', arguments: { task: task.number, why: 'The a-host key is gone.' } })).isError).toBeFalsy();
+      expect((await worker.client.callTool({ name: 'blocked', arguments: { task: task.number, why: 'The host-a key is gone.' } })).isError).toBeFalsy();
       expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance with the new key')).isError).toBeFalsy();
       const notes = await told(c, c.head.id);
       expect(notes).toHaveLength(2);
@@ -185,7 +185,7 @@ describe('wait recipient notices', () => {
       const task = await c.task();
       const worker = await c.run(c.agent.id, task.id);
       const head = await c.run(c.head.id);
-      expect((await waitOn(worker.client, task.number, c.head.id, 'The report on a-host')).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'The report on host-a')).isError).toBeFalsy();
       const answer = () => how === 'comment'
         ? head.client.callTool({ name: 'comment', arguments: { task: task.number, text: 'Here is the report.' } })
         : head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Here is the report.' } });
@@ -196,18 +196,18 @@ describe('wait recipient notices', () => {
 
     it.each(['comment', 'message'] as const)('tells the employee nothing new when the holder waits on them again after their %s', async how => {
       const c = await answered(how);
-      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on a-host, now read')).isError).toBeFalsy();
+      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on host-a, now read')).isError).toBeFalsy();
       expect((await c.answer()).isError).toBeFalsy();
-      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on a-host, read twice')).isError).toBeFalsy();
+      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on host-a, read twice')).isError).toBeFalsy();
       expect(await c.messages(c.head.id)).toHaveLength(1);
       expect(await c.db.select().from(waitNotices)).toHaveLength(1);
-      expect((await c.db.select().from(tasks).where(eq(tasks.id, c.taskId)))[0]!.externalWait).toMatchObject({ reason: 'The report on a-host, read twice', on: { employee: c.head.id } });
+      expect((await c.db.select().from(tasks).where(eq(tasks.id, c.taskId)))[0]!.externalWait).toMatchObject({ reason: 'The report on host-a, read twice', on: { employee: c.head.id } });
     });
 
     it('tells the employee nothing new however long ago they answered', async () => {
       const c = await answered('comment');
       await c.db.update(taskEvents).set({ createdAt: new Date(Date.now() - 3 * 3_600_000) }).where(and(eq(taskEvents.taskId, c.taskId), eq(taskEvents.kind, 'comment')));
-      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on a-host, asked again')).isError).toBeFalsy();
+      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on host-a, asked again')).isError).toBeFalsy();
       expect(await told(c, c.head.id)).toHaveLength(1);
     });
 
@@ -215,15 +215,15 @@ describe('wait recipient notices', () => {
       const c = await waitCompany();
       const task = await c.task();
       const worker = await c.run(c.agent.id, task.id);
-      await waitOn(worker.client, task.number, c.head.id, 'The report on a-host');
-      await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.watcher.id }, task.id, 'The alert on a-host is gone.')).wakes);
-      expect((await waitOn(worker.client, task.number, c.head.id, 'The report on a-host, asked again')).isError).toBeFalsy();
+      await waitOn(worker.client, task.number, c.head.id, 'The report on host-a');
+      await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.watcher.id }, task.id, 'The alert on host-a is gone.')).wakes);
+      expect((await waitOn(worker.client, task.number, c.head.id, 'The report on host-a, asked again')).isError).toBeFalsy();
       expect(await told(c, c.head.id)).toHaveLength(1);
     });
 
     it('tells another employee the wait moved to after the answer', async () => {
       const c = await answered('comment');
-      expect((await waitOn(c.worker.client, c.number, c.watcher.id, 'The alert on a-host')).isError).toBeFalsy();
+      expect((await waitOn(c.worker.client, c.number, c.watcher.id, 'The alert on host-a')).isError).toBeFalsy();
       expect(await c.messages(c.head.id)).toHaveLength(1);
       expect(await c.messages(c.watcher.id)).toHaveLength(1);
     });

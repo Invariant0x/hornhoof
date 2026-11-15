@@ -91,7 +91,7 @@ describe('a machine with agents that has gone away', () => {
     at(after(5 * MINUTE));
     expect((await waiting(c, c.tokens.ceo)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.ceo]: 1, [c.ids.bob]: 1 } });
     expect((await waiting(c, c.tokens.bob)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.bob]: 1 } });
-    for (const token of [c.tokens.wes, c.tokens.lisa, c.tokens.ann, c.tokens.olga]) {
+    for (const token of [c.tokens.wes, c.tokens.clara, c.tokens.ann, c.tokens.olga]) {
       expect(await cardsOf(c, token)).toEqual([]);
       expect((await waiting(c, token)).counts.total).toBe(0);
     }

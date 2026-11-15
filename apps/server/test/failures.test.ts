@@ -411,8 +411,8 @@ it('holds the whole line until the retry even when task turns were switched off 
   expect((await c.turnsOf()).some(j => j.status === 'running')).toBe(false);
 });
 
-/* What the CEO saw on a-host: a retry gave agy's raw first-run screen as the reason, and "The turn that ended was asked"
-   held the retry before it instead of the turn's work. */
+/* When a retry reported the program's raw first-run screen as the failure reason, "The turn that ended was asked"
+   must keep the original work prompt instead of the previous retry's prompt. */
 describe('a retry of a retry', () => {
   const SCREEN = "    ▄▀▀▄\n   ▀▀▀▀▀▀\n  ▀▀▀▀▀▀▀▀\nWelcome to Antigravity CLI!\nChoose your color scheme:\n  > terminal\n    light\n  [Next]";
   /* A program that never took its prompt, so there is no session to go on in. An older node gave its screen as the reason. */

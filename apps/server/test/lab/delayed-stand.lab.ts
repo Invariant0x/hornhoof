@@ -179,8 +179,8 @@ async function openOverDoor(port: number, label: string, onQuery?: () => void): 
   };
 }
 
-describe('delayed network lab verification of #825 items 1-4', () => {
-  it('#825 item 1: merges a returned leader database over a 2 s RTT peer relay while renewing the lease and allowing writes', async () => {
+describe('delayed network lab verification of peer merge, lease proofs, sync recovery and relay silence', () => {
+  it('merges a returned leader database over a 2 s RTT peer relay while renewing the lease and allowing writes', async () => {
     const clock = virtualClock();
     const gate = createDelayGate({ oneWayMs: 1000, schedule: clock.schedule });
     const peerRelay = await createPeerRelay(gate);
@@ -340,7 +340,7 @@ describe('delayed network lab verification of #825 items 1-4', () => {
     expect(await db.select().from(departments).where(eq(departments.id, onlyOnB!.id))).toHaveLength(1);
   });
 
-  it('#825 item 2: keeps the leader lease when the first copy finishes under a 2.4 s two-hop link probe and logs missing proof on cut', async () => {
+  it('keeps the leader lease when the first copy finishes under a 2.4 s two-hop link probe and logs missing proof on cut', async () => {
     const clock = virtualClock();
     const gate = createDelayGate({ oneWayMs: 600, schedule: clock.schedule });
     const { app, db, config } = await standApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: NET_A });
@@ -426,7 +426,7 @@ describe('delayed network lab verification of #825 items 1-4', () => {
     expect(lines.some(line => line.includes('missing proof'))).toBe(true);
   });
 
-  it('#825 item 3: restores sync record at hornhoof.org after a 10 s peer cut when WAL confirmation RTT is 1.5 s and logs 503 unknown', async () => {
+  it('restores sync record at hornhoof.org after a 10 s peer cut when WAL confirmation RTT is 1.5 s and logs 503 unknown', async () => {
     const clock = virtualClock();
     const relayGate = createDelayGate({ oneWayMs: 300, schedule: clock.schedule });
     const peerGate = createDelayGate({ oneWayMs: 750, schedule: clock.schedule });
@@ -533,7 +533,7 @@ describe('delayed network lab verification of #825 items 1-4', () => {
     expect(lines.some(line => line.includes('503 unknown'))).toBe(true);
   });
 
-  it('#825 item 4: keeps leader on lead and its one peer offer through a 4 s delayed-relay silence and brief mode dip', async () => {
+  it('keeps leader on lead and its one peer offer through a 4 s delayed-relay silence and brief mode dip', async () => {
     const clock = virtualClock();
     const peerGate = createDelayGate({ oneWayMs: 250, schedule: clock.schedule });
     const relayGate = createDelayGate({ oneWayMs: 150, schedule: clock.schedule });

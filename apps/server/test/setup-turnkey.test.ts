@@ -7,7 +7,7 @@ import { modelOnPlan } from '../src/modules/agents/role-model.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
 
 const LATER = { ...SETUP, orchestrator: { mode: 'later' } };
-const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 const codeOf = (command: string) => command.split('--join ')[1]!;
 
 /* The project template: Operations with its four, Development with a head, two developers and a reviewer, and the turnkey

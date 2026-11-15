@@ -200,7 +200,7 @@ describe('updater of a server\'s nodes on another computer', () => {
   });
 
   it('refuses a server address or an image it cannot take as they are', async () => {
-    for (const args of [['nodes', 'https://x.test/"; rm -rf /', SELF, HOST, '--once'], ['nodes', SERVER, 'ubuntu:latest', HOST, '--once'], ['nodes', SERVER, `${UPDATER}:${'c'.repeat(40)}`, HOST, '--once'], ['nodes', SERVER, SELF, 'not-a-host', '--once']]) {
+    for (const args of [['nodes', 'https://x.test/"; rm -rf /', SELF, HOST, '--once'], ['nodes', SERVER, 'ubuntu:latest', HOST, '--once'], ['nodes', SERVER, `${UPDATER}:${'c'.repeat(40)}`, HOST, '--once'], ['nodes', SERVER, SELF, 'invalid-host', '--once']]) {
       const r = await updater(args, { STUB_PLAN_NODES: BEHIND });
       expect(r.code).not.toBe(0);
       expect(r.calls.filter(c => c.startsWith('curl') || c.startsWith('docker'))).toEqual([]);

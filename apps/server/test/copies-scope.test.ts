@@ -73,7 +73,7 @@ async function company() {
   /* Maria's copy and her worker, and a copy of the CEO's. */
   const d = await machine(p!.id, 'maria-mac', D_ID, { role: 'data', serverOrder: 2, copyState: 'ready', copyName: `copy_${D_ID.slice(0, 16)}_1` });
   const w = await machine(p!.id, 'maria-laptop', W_ID);
-  const e = await machine(owner!.id, 'ivan-mac', E_ID, { role: 'data', serverOrder: 3, copyState: 'ready', copyName: `copy_${E_ID.slice(0, 16)}_1` });
+  const e = await machine(owner!.id, 'dev-mac', E_ID, { role: 'data', serverOrder: 3, copyState: 'ready', copyName: `copy_${E_ID.slice(0, 16)}_1` });
   const seen: string[] = [];
   const rowOf = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
   const linkRow = async () => (await db.select().from(publicLinks))[0]!;

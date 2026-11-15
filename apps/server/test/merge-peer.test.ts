@@ -43,7 +43,7 @@ async function stand() {
   await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
-  const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: 'copy-machine', hostname: 'ivan-mac', role: 'data', networkId: NETWORK_ID, copyOld: 1, copyName: 'copy_99bb2233aabbccdd_2', copyState: 'ready' }).returning();
+  const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: 'copy-machine', hostname: 'dev-mac', role: 'data', networkId: NETWORK_ID, copyOld: 1, copyName: 'copy_99bb2233aabbccdd_2', copyState: 'ready' }).returning();
   const state: { old: Side | null; queries: string[]; around?: <T>(text: string, run: () => Promise<T>) => Promise<T> } = { old: null, queries: [] };
   /* The copy's old database as the role that only reads sees it, with every statement it was asked kept. */
   const peers = {
@@ -88,7 +88,7 @@ describe("the old database of a copy on another machine", () => {
     const shaped = vi.spyOn(facts, 'sameShape');
     await s.look();
     const [merge] = await s.merges();
-    expect(merge).toMatchObject({ source: `machine:${s.machine.id}:1`, machine: s.machine.id, status: 'merged', fork: null, path: null, error: null, label: "ivan-mac's copy from before it was made again" });
+    expect(merge).toMatchObject({ source: `machine:${s.machine.id}:1`, machine: s.machine.id, status: 'merged', fork: null, path: null, error: null, label: "dev-mac's copy from before it was made again" });
     expect(merge!.merged_at).not.toBeNull();
     expect(ran).not.toHaveBeenCalled();
     expect(shaped).not.toHaveBeenCalled();
@@ -157,7 +157,7 @@ describe("the old database of a copy on another machine", () => {
     await s.look();
     const [merge, ...more] = await s.merges();
     expect(more).toEqual([]);
-    expect(merge).toMatchObject({ source: `machine:${s.machine.id}:led-7`, label: "ivan-mac's database from when it led", status: 'merged', machine: s.machine.id });
+    expect(merge).toMatchObject({ source: `machine:${s.machine.id}:led-7`, label: "dev-mac's database from when it led", status: 'merged', machine: s.machine.id });
     /* It led, so it is compared the whole way. */
     expect(merge!.path).not.toBeNull();
     expect(await copyOrder(s.app.ctx, { ...s.machine, copyOld: 3, copyOldLed: 7 })).toMatchObject({ old: 'merged' });
@@ -318,7 +318,7 @@ describe("the old database of a copy on another machine", () => {
     await left.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, left.machine.id));
     left.door(true);
     await left.look();
-    expect((await left.merges())[0]).toMatchObject({ status: 'done', error: 'ivan-mac left before its old copy was read.' });
+    expect((await left.merges())[0]).toMatchObject({ status: 'done', error: 'dev-mac left before its old copy was read.' });
     expect(left.state.queries).toEqual([]);
   });
 
@@ -332,7 +332,7 @@ describe("the old database of a copy on another machine", () => {
     await gone.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, gone.machine.id));
     expect(await gone.merger.doors()).toEqual([]);
     await gone.look();
-    expect((await gone.merges())[0]).toMatchObject({ status: 'done', error: 'ivan-mac left before its old copy was read.' });
+    expect((await gone.merges())[0]).toMatchObject({ status: 'done', error: 'dev-mac left before its old copy was read.' });
     const never = await stand();
     await never.db.update(machines).set({ role: 'worker', uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, never.machine.id));
     await never.look();

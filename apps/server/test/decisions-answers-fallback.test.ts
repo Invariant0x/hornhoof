@@ -5,7 +5,7 @@ import { people, proposals, requests } from '../src/db/schema.js';
 import { as } from './helpers.js';
 import { everyKind, staffed, registerAnswerCases } from './decisions-company.js';
 
-describe('who may answer, by the rules of #49', () => {
+describe('who may answer, by decision rights', () => {
   registerAnswerCases(['devPlain', 'mktQuestion']);
 it("refuses the orchestrator's own call that carries no turn of a person with the right", async () => {
     const c = await everyKind();

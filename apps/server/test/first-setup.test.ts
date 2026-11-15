@@ -14,7 +14,7 @@ import { failureCompany } from './failure-company.js';
 async function planOnMachine() {
   const c = await failureCompany();
   await c.db.update(subscriptions).set({ kind: 'personal', provider: 'antigravity' }).where(eq(subscriptions.id, c.sub.id));
-  const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'a-host', hostname: 'a-host' }).returning();
+  const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'host-a', hostname: 'host-a' }).returning();
   const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: c.sub.id, status: 'ready', version: '0.5.2', keyHash: 'hash' }).returning();
   await c.db.update(agents).set({ nodeId: node!.id }).where(eq(agents.id, c.agent.id));
   const id = nodeIdentity(node!.id);
@@ -45,7 +45,7 @@ describe("a program's first setup that only the plan's owner passes", () => {
 
   it('leaves the plan ready while another of its machines is ready', async () => {
     const c = await planOnMachine();
-    const [other] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'b-host', hostname: 'b-host' }).returning();
+    const [other] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'host-b', hostname: 'host-b' }).returning();
     await c.db.insert(nodes).values({ companyId: c.companyId, machineId: other!.id, subscriptionId: c.sub.id, status: 'ready', version: '0.5.2', keyHash: 'hash-b' });
     await handleNodeMessage(c.ctx, c.id, { type: 'hello', version: '0.5.2', loggedIn: true, setupNeeded: true, running: [] });
     expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_setup', 'ready']);
@@ -68,12 +68,12 @@ describe("a program's first setup that only the plan's owner passes", () => {
   it('shows the machine that waits for the first setup before an older one that needs a sign-in', async () => {
     const c = await planOnMachine();
     await c.db.update(nodes).set({ status: 'needs_login', createdAt: new Date(Date.now() - 3_600_000) }).where(eq(nodes.id, c.node.id));
-    const [other] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'b-host', hostname: 'b-host' }).returning();
+    const [other] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'host-b', hostname: 'host-b' }).returning();
     await c.db.insert(nodes).values({ companyId: c.companyId, machineId: other!.id, subscriptionId: c.sub.id, status: 'needs_setup', version: '0.5.2', keyHash: 'hash-b' });
     await settlePlans(c.db, [c.sub.id]);
     const [view] = await subViews(c.db, () => true, c.sub.id);
     expect([view!.status, await c.planStatus()]).toEqual(['needs_setup', 'needs_setup']);
-    expect(view!.machines.map(m => [m.hostname, m.status])).toEqual([['a-host', 'needs_login'], ['b-host', 'needs_setup']]);
+    expect(view!.machines.map(m => [m.hostname, m.status])).toEqual([['host-a', 'needs_login'], ['host-b', 'needs_setup']]);
   });
 
   /* A machine nobody heard from for a day may have lost its sign-in as well. */

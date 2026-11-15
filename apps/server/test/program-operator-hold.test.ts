@@ -560,7 +560,7 @@ it('refuses a program operator who is the one on hold', async () => {
   await expect(releaseRecoveryHold(c.ctx, own, { case: c.incident.id, reason: 'Me.' })).rejects.toMatchObject({ status: 403 });
 });
 
-/* A second machine with a node of another plan, whose program lost its words too: #438 stood on another node than #455. */
+/* A second machine with a node of another plan, whose program lost its words too, while the operator handles another node's case. */
 async function anotherNode(c: Awaited<ReturnType<typeof operatorCompany>>) {
   const [sub] = await c.db.insert(subscriptions).values({ ...c.sub, id: randomUUID(), kind: 'personal', provider: 'kimi', status: 'ready' }).returning();
   const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: randomUUID(), hostname: 'Another node' }).returning();
@@ -610,7 +610,7 @@ it('keeps queue, start and deadline apart for one operator of two nodes: no acti
   expect(await expired(caseA.id)).toMatchObject({ status: 'escalated', recoveryHold: true, resolution: { outcome: 'operator_timeout' } });
   expect(await c.jobOf(notice.id)).toMatchObject({ status: 'queued' });
 
-  /* The work on the other node's case ends, and only now the notice starts, 158 s after the deadline as in #455. */
+  /* The work on the other node's case ends, and only now the notice starts, 158 s after the deadline. */
   await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(+late + 158_000) }).where(eq(jobs.id, noticeB.id));
   await pump(c.ctx, c.operator!.id);
   const started = await c.jobOf(notice.id);

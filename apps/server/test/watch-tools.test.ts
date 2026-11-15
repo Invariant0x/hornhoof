@@ -62,7 +62,7 @@ async function messagesFrom(db: Db, agentId: string): Promise<string[]> {
 describe('tools a skill grants', () => {
   it('exposes node restart evidence to the failure collector separately from agent output', async () => {
     const { app, db, acme, sub, bruno, task } = await company(['ops-failure-review']);
-    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'a-host' }, diagnosis: { kind: 'planned' as const, reason: 'hornhoof_update' as const, startedAt: null, at: null, log: 'Stopping node: hornhoof_update.' } };
+    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'host-a' }, diagnosis: { kind: 'planned' as const, reason: 'hornhoof_update' as const, startedAt: null, at: null, log: 'Stopping node: hornhoof_update.' } };
     await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'Check.', timeoutMs: 1, status: 'failed', error: 'machine_restarted', tail: 'Last agent output.', interruption, finishedAt: new Date() });
     const result = JSON.parse((await call(await mcp(app, TOKEN), 'failures')).content[0]!.text);
     expect(result.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'machine_restarted', tail: 'Last agent output.', interruption })]);
@@ -438,7 +438,7 @@ describe('tools a skill grants', () => {
       /* CUT of 120 falls inside the password of the index address, which a cut before cleaning would leave without its @. */
       { companyId: acme.id, agentId: bruno.id, jobId: asked!.id, kind: 'tool', data: { name: 'Bash', input: `pip install --index-url https://bruno:${'p'.repeat(60)}@pypi.example.com/simple ` + 'x'.repeat(20) + ' pyyaml' }, createdAt: ago(25) },
     ]);
-    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'a-host' }, diagnosis: { kind: 'planned' as const, reason: 'hornhoof_update' as const, startedAt: null, at: null, log: `Stopping node token=${GITHUB_TOKEN} path=${HOME}` } };
+    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'host-a' }, diagnosis: { kind: 'planned' as const, reason: 'hornhoof_update' as const, startedAt: null, at: null, log: `Stopping node token=${GITHUB_TOKEN} path=${HOME}` } };
     await db.insert(jobs).values({ ...turn, status: 'failed', error: 'machine_restarted', tail: 'safe', interruption, finishedAt: ago(5) });
     return { second, output, interruption };
   }

@@ -18,7 +18,7 @@ async function installation(env: NodeJS.ProcessEnv = {}) {
   const [ivan] = await db.select().from(people);
   /* Two machines of the company and one taken back, whose names stay at home. */
   await db.insert(machines).values([
-    { companyId: acme!.id, personId: ivan!.id, machineKey: 'm1', hostname: 'ivans-laptop.acme.lan', os: 'linux', arch: 'x64' },
+    { companyId: acme!.id, personId: ivan!.id, machineKey: 'm1', hostname: 'dev-laptop.acme.test', os: 'linux', arch: 'x64' },
     { companyId: acme!.id, personId: ivan!.id, machineKey: 'm2', hostname: 'build-mac', os: 'darwin', arch: 'arm64' },
     { companyId: acme!.id, personId: ivan!.id, machineKey: 'm3', hostname: 'old', os: 'windows', arch: 'x64', revokedAt: new Date('2026-11-01T00:00:00Z') },
   ]);
@@ -40,7 +40,7 @@ async function finding(db: Awaited<ReturnType<typeof installation>>['db'], compa
   return row!;
 }
 
-const BUG = { kind: 'bug', title: 'Terminal froze for ivan@acme.example', text: 'In /home/ivan/shop the key ghp_0123456789abcdefghijABCDEFGHIJ012345 showed, then nothing.' };
+const BUG = { kind: 'bug', title: 'Terminal froze for alex@acme.example', text: 'In /home/alex/shop the key ghp_0123456789abcdefghijABCDEFGHIJ012345 showed, then nothing.' };
 
 describe('sending feedback to Hornhoof developers', () => {
   it('shows exactly what would go and sends exactly that once the person presses send', async () => {

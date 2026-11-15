@@ -11,7 +11,7 @@ type Crew = keyof AclCompany['crew'];
    in Sales she is no different from Ann. */
 const SEEN: Record<Viewer, Crew[]> = {
   ceo: ['mine', 'other', 'away', 'far', 'head', 'owned', 'wide', 'deputy'],
-  lisa: ['mine', 'other', 'away', 'far', 'head', 'owned', 'wide', 'deputy'],
+  clara: ['mine', 'other', 'away', 'far', 'head', 'owned', 'wide', 'deputy'],
   ann: ['mine'],
   bob: ['other', 'head'],
   olga: ['mine', 'other', 'head', 'owned'],
@@ -65,14 +65,14 @@ describe('one agent', () => {
   it('gives the owner of a plan the events of an own agent, and the CEO and the delegate any', async () => {
     const c = await aclCompany();
     expect((await c.get(`/api/agents/${c.crew.mine.id}/events`, c.tokens.ann)).statusCode).toBe(200);
-    expect((await c.get(`/api/agents/${c.crew.mine.id}/events`, c.tokens.lisa)).statusCode).toBe(200);
+    expect((await c.get(`/api/agents/${c.crew.mine.id}/events`, c.tokens.clara)).statusCode).toBe(200);
     expect((await c.get(`/api/agents/${c.crew.far.id}/events`, c.tokens.ceo)).statusCode).toBe(200);
   });
 
   it('holds the orchestrator to the same rule, with no department to reach', async () => {
     const c = await aclCompany();
     const open = async (token: string) => (await c.get('/api/agents/orchestrator', token)).statusCode;
-    expect([await open(c.tokens.ceo), await open(c.tokens.lisa)]).toEqual([200, 200]);
+    expect([await open(c.tokens.ceo), await open(c.tokens.clara)]).toEqual([200, 200]);
     expect([await open(c.tokens.ann), await open(c.tokens.wes)]).toEqual([403, 403]);
     await c.db.update(agents).set({ subscriptionId: c.plans.wes.id }).where(eq(agents.id, c.orchestrator.id));
     expect(await open(c.tokens.wes)).toBe(200);
@@ -118,10 +118,10 @@ describe('one agent', () => {
 
   it('stops the full view as soon as a delegate is one no more', async () => {
     const c = await aclCompany();
-    expect((await c.get(`/api/agents/${c.crew.far.id}`, c.tokens.lisa)).statusCode).toBe(200);
-    await c.app.inject({ method: 'PUT', url: `/api/people/${c.ids.lisa}/ceo-delegate`, payload: { isCeoDelegate: false }, ...as(c.tokens.ceo) });
-    expect((await c.get(`/api/agents/${c.crew.far.id}`, c.tokens.lisa)).statusCode).toBe(403);
-    expect((await c.get(`/api/agents/${c.crew.deputy.id}`, c.tokens.lisa)).statusCode).toBe(200);
+    expect((await c.get(`/api/agents/${c.crew.far.id}`, c.tokens.clara)).statusCode).toBe(200);
+    await c.app.inject({ method: 'PUT', url: `/api/people/${c.ids.clara}/ceo-delegate`, payload: { isCeoDelegate: false }, ...as(c.tokens.ceo) });
+    expect((await c.get(`/api/agents/${c.crew.far.id}`, c.tokens.clara)).statusCode).toBe(403);
+    expect((await c.get(`/api/agents/${c.crew.deputy.id}`, c.tokens.clara)).statusCode).toBe(200);
   });
 });
 
@@ -174,7 +174,7 @@ describe('the company map', () => {
   it('keeps the whole picture for the CEO and the delegate', async () => {
     const c = await aclCompany();
     await c.work('Hidden work', c.crew.other);
-    for (const viewer of ['ceo', 'lisa'] as const) {
+    for (const viewer of ['ceo', 'clara'] as const) {
       const org = (await c.get('/api/org', c.tokens[viewer])).json();
       expect(org.orchestrator.id).toBe(c.orchestrator.id);
       expect(org.agents.total).toBe(9);
@@ -206,7 +206,7 @@ describe('tasks', () => {
       }
     }
     expect((await c.db.select().from(tasks).where(eq(tasks.id, hidden.id)))[0]!.status).not.toBe('cancelled');
-    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.lisa)).statusCode).toBe(200);
+    expect((await c.get(`/api/tasks/${hidden.id}`, c.tokens.clara)).statusCode).toBe(200);
     expect((await c.get(`/api/tasks/${elsewhere.id}`, c.tokens.ceo)).statusCode).toBe(200);
     expect((await c.get('/api/tasks/00000000-0000-4000-8000-000000000000', c.tokens.ann)).statusCode).toBe(404);
   });
@@ -254,7 +254,7 @@ describe('tasks', () => {
     /* Otto's line says that he wrote, not what. */
     expect(t.log.find((l: { by: { id: string } | null; kind: string }) => l.kind === 'comment' && l.by?.id === c.crew.other.id)).toMatchObject({ by: { name: 'Otto' }, text: '', data: {} });
     expect(t.requests.map((r: { agent: { id: string } }) => r.agent.id)).toEqual([c.crew.mine.id]);
-    const whole = await c.get(`/api/tasks/${task.id}`, c.tokens.lisa);
+    const whole = await c.get(`/api/tasks/${task.id}`, c.tokens.clara);
     expect(whole.json().task.echelons.stages.find((step: { stage: string }) => step.stage === 'review').ownerAgentId).toBe(c.crew.other.id);
     expect(whole.body).toContain('Otto was here');
     expect(whole.json().task.parent.id).toBe(parent.id);
@@ -288,7 +288,7 @@ describe('the department tree', () => {
     expect(tree.lines.map((l: { taskId: string }) => l.taskId).sort()).toEqual([own.id, hidden.id].sort());
     expect((await c.get(`/api/departments/${c.sales.id}/tree`, c.tokens.ann)).statusCode).toBe(200);
     expect((await c.get('/api/departments/00000000-0000-4000-8000-000000000000/tree', c.tokens.ann)).statusCode).toBe(404);
-    const whole = (await c.get(`/api/departments/${c.dev.id}/tree`, c.tokens.lisa)).json().tree;
+    const whole = (await c.get(`/api/departments/${c.dev.id}/tree`, c.tokens.clara)).json().tree;
     expect(whole.lines.map((l: { taskId: string }) => l.taskId).sort()).toEqual([own.id, hidden.id].sort());
   });
 
@@ -309,6 +309,6 @@ describe('a department row', () => {
     const c = await aclCompany();
     const [other] = await c.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const [theirs] = await c.db.insert(departments).values({ companyId: other!.id, name: 'Theirs', roleCode: 'T' }).returning();
-    expect((await c.get(`/api/departments/${theirs!.id}/tree`, c.tokens.lisa)).statusCode).toBe(404);
+    expect((await c.get(`/api/departments/${theirs!.id}/tree`, c.tokens.clara)).statusCode).toBe(404);
   });
 });

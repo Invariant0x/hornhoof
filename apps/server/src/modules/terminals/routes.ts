@@ -18,7 +18,7 @@ const Size = z.object({ cols: cols.catch(120), rows: rows.catch(36) });
 
 /* write: the person owns the subscription the agent runs on. A program's terminal runs commands on its owner's machine
    with the owner's sign-in, so only they steer it. message: the person writes to the agent, which here is everyone who sees
-   the program: #398 opens this view only to them. */
+   the program: programFor opens this view only to them. */
 type Found = { personId: string; companyId: string; agentId: string; node: NodeIdentity | null; write: boolean; message: boolean };
 type Open = Found & { node: NodeIdentity; termId: string };
 

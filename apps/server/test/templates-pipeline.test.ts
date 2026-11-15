@@ -121,7 +121,7 @@ function problemsOf(id: string, body: string): string[] {
   for (const ref of new Set(body.match(localIds) ?? [])) problems.push(`skill dependency ${ref}`);
   const named = [...body.matchAll(/model-check-set:([^\s`.,;:]*)/g)].map(m => m[1]!).sort();
   if (named.join() !== [...(SET_LINKS[id] ?? [])].sort().join()) problems.push('wrong private example set');
-  if (/[Ѐ-ӿ]|\b(?:Ivan|David|Claude|Codex|GitHub)\b|#\d+|\b202\d-\d{2}-\d{2}\b/.test(body)) problems.push('incident or non-English body');
+  if (/[Ѐ-ӿ]|\b(?:Claude|Codex|GitHub)\b|#\d+|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+/.test(body)) problems.push('incident or non-English body');
   if (/\b(?:may|can) waive (?:public|per-item) approval|\bskip the server gateway/i.test(body)) problems.push('approval bypass');
   return problems;
 }
@@ -153,7 +153,7 @@ describe('standalone verification planning abilities', () => {
     ['unvalidated model acceptance', (body: string) => body.replace('Until a set has run for a check, that check proves nothing', 'Before validation, the model check certifies acceptance')],
     ['unknown private set', (body: string) => `${body} model-check-set:invented`],
     ['skill dependency', (body: string) => `${body} Follow sup-support-policy.`],
-    ['incident', (body: string) => `${body} See task #323.`],
+    ['incident', (body: string) => `${body} See task #42.`],
     ['public approval bypass', (body: string) => `${body} You may waive public approval and skip the server gateway.`],
   ])('rejects loss of %s', (_, broken) => {
     const original = bodyOf('sup-work-pipeline');

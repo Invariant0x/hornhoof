@@ -2,8 +2,8 @@ import type { LightMyRequestResponse } from 'fastify';
 import { aclCompanyOn } from './agent-view-fixture.js';
 import { listen, testApp } from './helpers.js';
 
-/* A company for who sees which agent (#398): Development and Sales, Ann and Bob in its product App with a plan each,
-   Olga who owns Development, Wes with the whole company and Lisa the CEO's delegate. Ann has one agent where she works and
+/* A company for who sees which agent: Development and Sales, Ann and Bob in its product App with a plan each,
+   Olga who owns Development, Wes with the whole company and Clara the CEO's delegate. Ann has one agent where she works and
    one in Sales, so own plan and reachable department each go alone. */
 export async function aclCompany(env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp(env);

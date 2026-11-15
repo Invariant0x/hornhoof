@@ -367,14 +367,14 @@ describe('staffing', () => {
 
     const validProposal = await client.callTool({
       name: 'propose_staff',
-      arguments: { department: c.dev.id, brief: 'Urgent lane.', people: [{ checked: true, role: 'DEV-BE', name: 'Simon', team: urgent!.id, subscription: c.teamKey }] },
+      arguments: { department: c.dev.id, brief: 'Urgent lane.', people: [{ checked: true, role: 'DEV-BE', name: 'Robin', team: urgent!.id, subscription: c.teamKey }] },
     });
     expect(failed(validProposal)).toBe(false);
 
     const hired = await hire(c.app, c.ceo, c.dev.id, {
       people: [
         { role: 'DEV-HEAD', name: 'Hanna', model: '', subscription: c.teamKey, skills: headSkills },
-        { role: 'DEV-BE', name: 'Simon', team: urgent!.id, model: '', subscription: c.teamKey, skills: beSkills },
+        { role: 'DEV-BE', name: 'Robin', team: urgent!.id, model: '', subscription: c.teamKey, skills: beSkills },
         { role: 'DEV-BE', name: 'Bruno', model: '', subscription: c.teamKey, skills: beSkills },
       ],
     });

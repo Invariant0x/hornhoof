@@ -48,13 +48,13 @@ describe('what the updater learned of the machine', () => {
   };
 
   it('is its system and its name, as the updater wrote them', () => {
-    expect(hostFound(dirWith(JSON.stringify({ os: 'linux', hostname: 'a-host' })))).toEqual({ os: 'linux', hostname: 'a-host' });
+    expect(hostFound(dirWith(JSON.stringify({ os: 'linux', hostname: 'host-a' })))).toEqual({ os: 'linux', hostname: 'host-a' });
     /* A name it left empty is no name. */
     expect(hostFound(dirWith(JSON.stringify({ os: 'linux', hostname: '' })))).toEqual({ os: 'linux', hostname: null });
   });
 
   it('is nothing without the file, or with one that says something else', () => {
-    for (const text of [null, 'not json', JSON.stringify({ os: 'plan9', hostname: 'a-host' }), JSON.stringify({ hostname: 'a-host' }), JSON.stringify({ os: 'linux', hostname: 'a host; rm' })]) {
+    for (const text of [null, 'not json', JSON.stringify({ os: 'plan9', hostname: 'host-a' }), JSON.stringify({ hostname: 'host-a' }), JSON.stringify({ os: 'linux', hostname: 'a host; rm' })]) {
       expect(hostFound(dirWith(text)), String(text)).toEqual(text?.includes('a host;') ? { os: 'linux', hostname: null } : { os: null, hostname: null });
     }
   });

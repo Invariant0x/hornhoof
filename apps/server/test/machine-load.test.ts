@@ -15,7 +15,7 @@ async function liveCompany(env: NodeJS.ProcessEnv = {}) {
   const ceo = await setUpCompany(app);
   const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(ceo) });
   const code = connected.json().command.split('--join ')[1];
-  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
   const { machine, nodes } = joined.json();
   return { app, db, url, ceo, machineId: machine.id as string, keys: nodes.map((n: { key: string }) => n.key) as string[], ids: nodes.map((n: { nodeId: string }) => n.nodeId) as string[] };
 }
@@ -56,10 +56,10 @@ describe("a machine's load", () => {
     const hostId = (key: string) => createHash('sha256').update(`hornhoof-host:${key}`).digest('hex');
     const { app, ceo, machineId } = await liveCompany({ HORNHOOF_HOST_ID: hostId('mac-0001-abcd') });
     const shown = await machinesOf(app, ceo);
-    expect(shown.builtin.machine).toEqual({ id: machineId, hostname: 'ivan-mac' });
+    expect(shown.builtin.machine).toEqual({ id: machineId, hostname: 'dev-mac' });
     expect(JSON.stringify(shown)).not.toContain('mac-0001-abcd');
     const pool = (await app.inject({ url: '/api/pool', ...as(ceo) })).json();
-    expect(pool.builtin.machine).toEqual({ id: machineId, name: 'ivan-mac' });
+    expect(pool.builtin.machine).toEqual({ id: machineId, name: 'dev-mac' });
     await app.inject({ method: 'POST', url: `/api/machines/${machineId}/disconnect`, ...as(ceo) });
     expect((await machinesOf(app, ceo)).builtin.machine).toBeNull();
 

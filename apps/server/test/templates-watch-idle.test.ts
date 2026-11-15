@@ -69,6 +69,6 @@ describe('what the watchdog is told about people who stand free', () => {
 
   it('stays abstract: no dates, numbers of tasks, names or em dashes', () => {
     expect(step).not.toBe('');
-    expect(step).not.toMatch(/#\d|\b20\d\d\b|—|David|Ivan/);
+    expect(step).not.toMatch(/#\d|\b20\d\d\b|\u2014|@\S+\.\S+|(?<=[a-z,;:]\s)(?!Operations\b)[A-Z][a-z]+/);
   });
 });

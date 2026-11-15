@@ -15,7 +15,7 @@ function tree(c: Awaited<ReturnType<typeof company>>, answer: Awaited<ReturnType
 describe('the test files a run_tests command names', () => {
   it('refuses a run that names a test file its pinned commit does not have, before any part goes out', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const asked = tree(c);
     const { call } = await c.turn(c.bruno);
     const started = await call('run_tests', { command: 'npx vitest run apps/api/test/kept.test.ts apps/api/test/gone.test.ts' });
@@ -31,7 +31,7 @@ describe('the test files a run_tests command names', () => {
 
   it('runs a command whose test files the commit has, named from the folder a workspace or cd runs in', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     tree(c);
     const { call } = await c.turn(c.bruno);
     const started = await call('run_tests', { command: "npm test -w @acme/api -- test/kept.test.ts && cd tests && python -m pytest './test_cart.py' -k 'cart and not slow'" });
@@ -41,7 +41,7 @@ describe('the test files a run_tests command names', () => {
 
   it('reads no tree for a command that names no test file', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const asked = tree(c);
     const { call } = await c.turn(c.bruno);
     expect((await call('run_tests', { command: 'npm test -- --shard={part}/{parts} && node scripts/build.mjs' })).error).toBe(false);
@@ -51,7 +51,7 @@ describe('the test files a run_tests command names', () => {
 
   it('runs as before where the repository cannot list its commit, and says it could not check the names', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     tree(c, { complete: false, reason: 'tree-unavailable' });
     const { call } = await c.turn(c.bruno);
     const started = await call('run_tests', { command: 'npx vitest run apps/api/test/gone.test.ts' });

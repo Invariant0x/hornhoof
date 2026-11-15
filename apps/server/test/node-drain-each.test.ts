@@ -32,7 +32,7 @@ async function computer(env: NodeJS.ProcessEnv = {}) {
   const [company] = await db.select().from(companies);
   const [person] = await db.select({ id: people.id }).from(people);
   const [apiKey] = await db.select().from(subscriptions);
-  const [host] = await db.insert(machines).values({ companyId: company!.id, personId: person!.id, machineKey: HOST_KEY, hostname: 'a-host' }).returning();
+  const [host] = await db.insert(machines).values({ companyId: company!.id, personId: person!.id, machineKey: HOST_KEY, hostname: 'host-a' }).returning();
   const [dept] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
 
   const online = async (key: string) => {
@@ -394,10 +394,10 @@ describe('the update screen', () => {
 
     expect(waits).toHaveLength(3);
     expect(waits.find((w: { node: string }) => w.node === 'builtin')).toMatchObject({ provider: null, hostname: null, drain: { state: 'restarting' }, work: [] });
-    expect(waits.find((w: { node: string }) => w.node === claude.nodeId)).toMatchObject({ provider: 'claude', hostname: 'a-host', drain: { state: 'restarting' }, work: [] });
+    expect(waits.find((w: { node: string }) => w.node === claude.nodeId)).toMatchObject({ provider: 'claude', hostname: 'host-a', drain: { state: 'restarting' }, work: [] });
     expect(waits.find((w: { node: string }) => w.node === google.nodeId)).toMatchObject({
       provider: 'antigravity',
-      hostname: 'a-host',
+      hostname: 'host-a',
       drain: { state: 'waiting', turnsLeft: 1, until },
       work: [{ agent: 'Dev', task: 251 }],
     });

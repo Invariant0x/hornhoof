@@ -6,13 +6,13 @@ import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } 
 type Run = { type: 'job.run'; jobId: string; prompt: string };
 
 const GIB = 1024 ** 3;
-const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 const codeOf = (command: string) => command.split('--join ')[1]!;
 const load = (memFree: number) => ({ cpus: 10, load: 1, memFree, memTotal: 12 * GIB, tests: 0, jobs: 0 });
 /* live: the agents whose programs run on the node, as a node that says so names them. */
 const hello = (memFree: number, live?: string[]) => ({ type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [], load: load(memFree), ...(live ? { live } : {}) });
 
-/* Ivan's Claude plan on his Mac, and two employees on the plan. */
+/* The CEO's Claude plan on dev-mac, and two employees on the plan. */
 async function planOnOneMachine() {
   const { app, db } = await testApp();
   onTestFinished(() => app.close());

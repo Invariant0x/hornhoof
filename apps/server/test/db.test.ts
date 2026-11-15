@@ -61,7 +61,7 @@ describe('database', () => {
     const db = await createTestDb();
     const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
     const [person] = await db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.com', status: 'active', scopeKind: 'company' }).returning();
-    const machine = { companyId: company!.id, personId: person!.id, machineKey: 'mac-1', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+    const machine = { companyId: company!.id, personId: person!.id, machineKey: 'mac-1', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
     await db.insert(machines).values(machine);
     const err = await db.insert(machines).values(machine).catch((e: unknown) => e);
     expect(isUniqueViolation(err)).toBe(true);

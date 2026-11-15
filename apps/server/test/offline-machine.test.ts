@@ -37,14 +37,14 @@ function connect(c: C, nodeId: string): void {
   onTestFinished(() => socket.close());
 }
 
-/* Bruno of Development works on Dana's plan, whose only machine Marselle last spoke at 18:07; her second plan runs on a
+/* Bruno of Development works on Dana's plan, whose only machine Homebox last spoke at 18:07; her second plan runs on a
    machine online now, and Sam's plan serves Sales only. */
 async function staged() {
   const c = await company();
   const away = await plan(c, 'Dana at home', c.ids.dana);
   const spare = await plan(c, 'Dana at work', c.ids.dana);
   const salesPlan = await plan(c, 'Sam', c.ids.sam);
-  await machineOf(c, away, 'Marselle', SEEN);
+  await machineOf(c, away, 'Homebox', SEEN);
   connect(c, (await machineOf(c, spare, 'Office', new Date('2026-11-13T21:00:00.000Z'))).id);
   await c.db.update(agents).set({ subscriptionId: away.id }).where(eq(agents.id, c.worker.id));
   return { ...c, away, spare, salesPlan };
@@ -54,9 +54,9 @@ describe('an employee whose machine is offline', () => {
   it('says on its card and on the card of its task which machine is offline and since when', async () => {
     const c = await staged();
     const card = await send(c, c.ceoToken, 'GET', `/api/agents/${c.worker.id}`);
-    expect(card.json().offline).toEqual({ hostname: 'Marselle', since: SEEN.toISOString() });
+    expect(card.json().offline).toEqual({ hostname: 'Homebox', since: SEEN.toISOString() });
     const task = await send(c, c.danaToken, 'GET', `/api/tasks/${c.task.id}`);
-    expect(task.json().task.assigneeOffline).toEqual({ hostname: 'Marselle', since: SEEN.toISOString() });
+    expect(task.json().task.assigneeOffline).toEqual({ hostname: 'Homebox', since: SEEN.toISOString() });
   });
 
   it('says nothing of a machine once one machine of the plan is online, and nothing for a plan with no machine', async () => {
@@ -83,10 +83,10 @@ describe('the machine of an employee outside the department', () => {
     const task = await send(c, c.samToken, 'GET', `/api/tasks/${c.task.id}`);
     expect(task.statusCode).toBe(200);
     expect(task.json().task.assigneeOffline).toBeNull();
-    expect(task.body).not.toContain('Marselle');
+    expect(task.body).not.toContain('Homebox');
     const card = await send(c, c.samToken, 'GET', `/api/agents/${c.worker.id}`);
     expect(card.statusCode).toBe(403);
-    expect(card.body).not.toContain('Marselle');
+    expect(card.body).not.toContain('Homebox');
     expect((await send(c, c.wholeToken, 'GET', `/api/tasks/${c.task.id}`)).json().task.assigneeOffline).toBeNull();
     expect((await send(c, c.wholeToken, 'GET', `/api/agents/${c.worker.id}`)).statusCode).toBe(403);
   });
@@ -100,9 +100,9 @@ describe('the machine of an employee outside the department', () => {
     };
     const sid = await read(c.seller);
     expect(JSON.parse(sid).assigneeOffline).toBeNull();
-    expect(sid).not.toContain('Marselle');
-    expect(JSON.parse(await read(c.head)).assigneeOffline).toEqual({ hostname: 'Marselle', since: SEEN.toISOString() });
-    expect(JSON.parse(await read(c.orchestrator)).assigneeOffline).toEqual({ hostname: 'Marselle', since: SEEN.toISOString() });
+    expect(sid).not.toContain('Homebox');
+    expect(JSON.parse(await read(c.head)).assigneeOffline).toEqual({ hostname: 'Homebox', since: SEEN.toISOString() });
+    expect(JSON.parse(await read(c.orchestrator)).assigneeOffline).toEqual({ hostname: 'Homebox', since: SEEN.toISOString() });
   });
 
   it('is named to no agent of another department that answers the employee', async () => {
@@ -144,7 +144,7 @@ describe('an agent writing to an employee whose machine is offline', () => {
     const res = (await hana.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text: 'Go on with the leads' } })) as { content: { text: string }[]; isError?: boolean };
     expect(res.isError).toBe(true);
     expect(res.content[0]!.text).toBe(
-      'Bruno cannot run now: Marselle, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.',
+      'Bruno cannot run now: Homebox, the machine of its plan, is offline. The work it pushed stays in the repository: an employee who is on can go on from its branch, and a person who runs the department can move Bruno to a plan of the department that is online.',
     );
   });
 });

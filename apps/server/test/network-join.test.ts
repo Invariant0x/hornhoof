@@ -19,8 +19,8 @@ import { as, invitePerson, setUpCompany, testApp, TEST_SECRET, until } from './h
 const HOST_KEY = 'host-0000-abcd';
 const hostIdOf = (machineKey: string) => hashToken(`hornhoof-host:${machineKey}`);
 const HOST_ID = hostIdOf(HOST_KEY);
-const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
-const LAPTOP = { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop', os: 'linux', arch: 'x86_64' };
+const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
+const LAPTOP = { machineId: 'laptop-0002-abcd', hostname: 'dev-laptop', os: 'linux', arch: 'x86_64' };
 const NOBODY = '00000000-0000-4000-8000-000000000000';
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
 const NODE_LINE = /^[0-9a-f-]{36} machine [A-Za-z0-9_-]{43}$/;

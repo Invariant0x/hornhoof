@@ -270,7 +270,7 @@ describe("following the server's build", () => {
     onTestFinished(() => c.app.close());
     /* The CEO's plan on a computer that became a worker of the network, and the orchestrator on that plan. */
     const connected = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(c.ceo) });
-    const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: (connected.json() as { command: string }).command.split('--join ')[1], machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } })).json() as {
+    const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: (connected.json() as { command: string }).command.split('--join ')[1], machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } })).json() as {
       machine: { id: string };
       nodes: { nodeId: string; subscriptionId: string; key: string }[];
     };
@@ -313,7 +313,7 @@ describe("following the server's build", () => {
     const c = await company({ HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof' });
     const command = async () => ((await c.app.inject({ method: 'POST', url: '/api/machines/command', ...as(c.ceo) })).json() as { command: string }).command.split('--join ')[1];
     const join = (code: string | undefined, extra: object, accept = 'text/plain') =>
-      c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', ...extra }, headers: { accept } });
+      c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64', ...extra }, headers: { accept } });
     const lines = (await join(await command(), { core: true })).body.trim().split('\n');
     expect(lines).toHaveLength(3);
     expect(lines[0]).toBe(`build ${COMMIT} ghcr.io/acme/hornhoof@sha256:app ghcr.io/acme/hornhoof-node@sha256:node ghcr.io/acme/hornhoof-updater@sha256:updater`);
@@ -331,7 +331,7 @@ describe("following the server's build", () => {
     const c = await company({}, registry => void registry.find.mockRejectedValueOnce(new Error('The registry answered 503.')));
     expect(leaderBuild(c.ctx)).toBeNull();
     const code = ((await c.app.inject({ method: 'POST', url: '/api/machines/command', ...as(c.ceo) })).json() as { command: string }).command.split('--join ')[1];
-    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', core: true }, headers: { accept: 'text/plain' } });
+    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64', core: true }, headers: { accept: 'text/plain' } });
     /* A join command works once, so its answer names the build: the core comes up on the server's build, not on the newest. */
     expect(joined.body.split('\n')[0]).toMatch(new RegExp(`^build ${COMMIT} `));
     /* A view still never waits for the registry. */
@@ -349,7 +349,7 @@ describe("following the server's build", () => {
       usedWhenAsked.push((await c.db.select().from(nodeCodes))[0]!.usedAt);
       return BUILD;
     });
-    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', core: true }, headers: { accept: 'text/plain' } });
+    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64', core: true }, headers: { accept: 'text/plain' } });
     expect(joined.body.split('\n')[0]).toMatch(new RegExp(`^build ${COMMIT} `));
     expect(usedWhenAsked).toEqual([null]);
 

@@ -562,34 +562,34 @@ describe('external task wait', () => {
   it('lets a team worker doing a small subtask and its head both message each other with task', async () => {
     const c = await messaging();
     const [team] = await c.db.insert(teams).values({ companyId: c.company.id, departmentId: c.department.id, name: 'Urgent fixes' }).returning();
-    const [simon] = await c.db
+    const [robin] = await c.db
       .insert(agents)
-      .values({ companyId: c.company.id, departmentId: c.department.id, teamId: team!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: 'claude-opus-5-5', subscriptionId: c.sub.id })
+      .values({ companyId: c.company.id, departmentId: c.department.id, teamId: team!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Robin', model: 'claude-opus-5-5', subscriptionId: c.sub.id })
       .returning();
     const parent = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Urgent server fixes', brief: '', body: '', departmentId: c.department.id, assigneeAgentId: c.head.id })).task;
 
     const headTools = await c.tools(c.head.id);
     const created = (await headTools.callTool({
       name: 'create_task',
-      arguments: { title: 'Fix task messages', brief: 'One small code result.', body: '', executor: simon!.id, parent: parent.number, small: true, paths: ['logic/totals.ts'] },
+      arguments: { title: 'Fix task messages', brief: 'One small code result.', body: '', executor: robin!.id, parent: parent.number, small: true, paths: ['logic/totals.ts'] },
     })) as { isError?: boolean; content: { text: string }[] };
     expect(created.isError).toBeFalsy();
 
-    const simonTools = await c.tools(simon!.id);
-    const listed = JSON.parse(((await simonTools.callTool({ name: 'tasks', arguments: {} })) as { content: { text: string }[] }).content[0]!.text) as { id: string; number: number; echelons: { stage: string }; assignee: { id: string } | null }[];
+    const robinTools = await c.tools(robin!.id);
+    const listed = JSON.parse(((await robinTools.callTool({ name: 'tasks', arguments: {} })) as { content: { text: string }[] }).content[0]!.text) as { id: string; number: number; echelons: { stage: string }; assignee: { id: string } | null }[];
     const subtask = listed[0]!;
-    expect(subtask).toMatchObject({ echelons: { stage: 'development' }, assignee: { id: simon!.id } });
+    expect(subtask).toMatchObject({ echelons: { stage: 'development' }, assignee: { id: robin!.id } });
 
-    const toSimon = (await headTools.callTool({
+    const toRobin = (await headTools.callTool({
       name: 'message_employee',
-      arguments: { employee: simon!.id, task: subtask.number, text: 'Please check the edge cases too.' },
+      arguments: { employee: robin!.id, task: subtask.number, text: 'Please check the edge cases too.' },
     })) as { isError?: boolean; content: { text: string }[] };
-    expect(toSimon.isError).toBeFalsy();
+    expect(toRobin.isError).toBeFalsy();
 
     /* The head's turn is over, so its next message starts a turn of its own instead of going into that one. */
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.head.id), eq(jobs.status, 'running')));
 
-    const toHead = (await simonTools.callTool({
+    const toHead = (await robinTools.callTool({
       name: 'message_employee',
       arguments: { employee: c.head.id, task: subtask.number, text: 'Checked and ready to submit.' },
     })) as { isError?: boolean; content: { text: string }[] };
@@ -600,7 +600,7 @@ describe('external task wait', () => {
     expect(headTurn.prompt).toContain('Checked and ready to submit.');
     expect(await discardStaleTurn(c.db, headTurn)).toBe(false);
 
-    const submitted = (await simonTools.callTool({
+    const submitted = (await robinTools.callTool({
       name: 'submit',
       arguments: { task: subtask.number, summary: 'Fixed.', evidence: 'Tests pass.', review: { baseCommit: 'a'.repeat(40) } },
     })) as { isError?: boolean };
@@ -672,38 +672,38 @@ describe('external task wait', () => {
   it('lets the orchestrator oversee any task and a department head oversee its department tasks without granting creators or others', async () => {
     const c = await messaging();
     const [ops] = await c.db.insert(departments).values({ companyId: c.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
-    const [simon, creator, opsHead] = await c.db
+    const [robin, creator, opsHead] = await c.db
       .insert(agents)
       .values([
-        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: 'claude-opus-5-5', subscriptionId: c.sub.id },
+        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Robin', model: 'claude-opus-5-5', subscriptionId: c.sub.id },
         { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Clara', model: '', subscriptionId: c.sub.id },
         { companyId: c.company.id, departmentId: ops!.id, kind: 'head', roleKey: 'OPS-HEAD', name: 'Wanda', model: '', skills: ['ops-task-watch'], subscriptionId: c.sub.id },
       ])
       .returning();
 
-    /* Real company case: the orchestrator laid out the task for Development and Simon does it. */
+    /* The orchestrator laid out the task for Development and Robin does it. */
     const laidOut = (
       await createTask(c.ctx, { agentId: c.orchestrator.id }, {
         title: 'Access team fixes',
         brief: '',
         body: '',
         departmentId: c.department.id,
-        assigneeAgentId: simon!.id,
+        assigneeAgentId: robin!.id,
         executor: true,
       })
     ).task;
-    await c.wait(laidOut.number, 'Build check', new Date(Date.now() + 3_600_000).toISOString(), simon!.id);
+    await c.wait(laidOut.number, 'Build check', new Date(Date.now() + 3_600_000).toISOString(), robin!.id);
 
     const orchTools = await c.tools(c.orchestrator.id);
     const toHead = (await orchTools.callTool({
       name: 'message_employee',
-      arguments: { employee: c.head.id, task: laidOut.number, text: 'Check Simon on this task.' },
+      arguments: { employee: c.head.id, task: laidOut.number, text: 'Check Robin on this task.' },
     })) as { isError?: boolean; content: { text: string }[] };
     expect(toHead.isError, toHead.content[0]?.text).toBeFalsy();
-    /* Messaging the head does not clear Simon's external wait on the task. */
+    /* Messaging the head does not clear Robin's external wait on the task. */
     expect((await c.read(laidOut.id)).externalWait).toMatchObject({ reason: 'Build check' });
     const headTurn = (await c.db.select().from(jobs).where(eq(jobs.agentId, c.head.id))).find(j => j.taskId === laidOut.id)!;
-    expect(headTurn.prompt).toContain('Check Simon on this task.');
+    expect(headTurn.prompt).toContain('Check Robin on this task.');
     expect(await discardStaleTurn(c.db, headTurn)).toBe(false);
 
     /* Orchestrator and the department's own head may write about the task to anyone they may write to at all. */
@@ -716,7 +716,7 @@ describe('external task wait', () => {
     const headTools = await c.tools(c.head.id);
     const headToPeer = (await headTools.callTool({
       name: 'message_employee',
-      arguments: { employee: c.peer.id, task: laidOut.number, text: 'Pair with Simon if needed.' },
+      arguments: { employee: c.peer.id, task: laidOut.number, text: 'Pair with Robin if needed.' },
     })) as { isError?: boolean; content: { text: string }[] };
     expect(headToPeer.isError, headToPeer.content[0]?.text).toBeFalsy();
 
@@ -749,7 +749,7 @@ describe('external task wait', () => {
 
     const personToHolder = await c.app.inject({
       method: 'POST',
-      url: `/api/agents/${simon!.id}/messages`,
+      url: `/api/agents/${robin!.id}/messages`,
       payload: { text: 'Build check finished.', task: laidOut.number },
       ...as(c.owner),
     });

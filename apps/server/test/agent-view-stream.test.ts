@@ -59,7 +59,7 @@ describe('the live stream', () => {
 
   it('carries everything to the CEO and the delegate', async () => {
     const c = await aclCompany();
-    for (const viewer of ['ceo', 'lisa'] as const) {
+    for (const viewer of ['ceo', 'clara'] as const) {
       const stream = await openStream(c.app, c.tokens[viewer]);
       await said(c, c.crew.far, `To ${viewer}`);
       await flush(c, stream);

@@ -120,7 +120,7 @@ describe('migration 0051', () => {
     await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values
       (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company'),
       (${ALICE}, ${C}, 'Alice', 'alice@acme.com', 'active', 'company')`);
-    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${M}, ${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${M}, ${C}, ${P}, 'mac-0001-abcd', 'dev-mac')`);
 
     await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id, removed_at, created_at) values
       (${ALICE_WAITING}, ${C}, 'codex', 'personal', 'Codex', 'waiting_machine', ${ALICE}, null, '2026-11-02T12:30:00Z'),
@@ -218,7 +218,7 @@ describe('migration 0053', () => {
     let db = drizzle(source);
     await migrate(db, { migrationsFolder: await migrationsUpTo('0052_dismissed_command_blocks') });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Demo') returning id`)).rows[0]!.id;
-    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'listed') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Clara', 'clara@example.test', 'active', 'listed') returning id`)).rows[0]!.id;
     const actor = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Author', 'author@example.test', 'active', 'listed') returning id`)).rows[0]!.id;
     const before = (await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows;
     const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
@@ -230,9 +230,9 @@ describe('migration 0053', () => {
 
     /* Migration 0098 gives every person an empty Telegram, and 0100 makes every one a person and no assistant. */
     expect((await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows).toEqual(before.map(row => ({ data: { ...(row.data as object), telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null } })));
-    await db.execute(sql`insert into person_changes (company_id, person_id, actor_id, field, before, after) values (${company}, ${person}, ${actor}, 'name', 'Lisa', 'Lisa Ray')`);
+    await db.execute(sql`insert into person_changes (company_id, person_id, actor_id, field, before, after) values (${company}, ${person}, ${actor}, 'name', 'Clara', 'Clara Ray')`);
     await db.execute(sql`delete from people where id = ${actor}`);
-    expect((await db.execute(sql`select actor_id, before, after from person_changes`)).rows).toEqual([{ actor_id: null, before: 'Lisa', after: 'Lisa Ray' }]);
+    expect((await db.execute(sql`select actor_id, before, after from person_changes`)).rows).toEqual([{ actor_id: null, before: 'Clara', after: 'Clara Ray' }]);
     await db.execute(sql`delete from people where id = ${person}`);
     await db.execute(sql`delete from companies where id = ${company}`);
     expect((await db.execute(sql`select count(*)::int as n from person_changes`)).rows).toEqual([{ n: 0 }]);
@@ -369,8 +369,8 @@ describe('migration 0059', () => {
     await migrate(db, { migrationsFolder: await migrationsUpTo('0058_program_operator') });
     const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
     const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
-    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'company') returning id`);
-    const machine = await one(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'mac-0001-abcd', 'lisa-mac') returning id`);
+    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Clara', 'clara@example.test', 'active', 'company') returning id`);
+    const machine = await one(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'mac-0001-abcd', 'clara-mac') returning id`);
     const node = await one(sql`insert into nodes (company_id, machine_id, status) values (${company}, ${machine}, 'ready') returning id`);
     const before = (await db.execute(sql`select to_jsonb(n) as data from nodes n`)).rows;
     const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
@@ -393,8 +393,8 @@ describe('migration 0059', () => {
     const db = drizzle(client);
     const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
     const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
-    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'company') returning id`);
-    const machine = await one(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'mac-0001-abcd', 'lisa-mac') returning id`);
+    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Clara', 'clara@example.test', 'active', 'company') returning id`);
+    const machine = await one(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'mac-0001-abcd', 'clara-mac') returning id`);
     const node = await one(sql`insert into nodes (company_id, machine_id, status) values (${company}, ${machine}, 'ready') returning id`);
     await expect(db.execute(sql`insert into node_connections (company_id, machine_id, node_id, connected_at, cause) values (${company}, ${machine}, ${node}, now(), 'network')`)).rejects.toThrow();
     await expect(db.execute(sql`insert into node_connections (company_id, machine_id, node_id, connected_at, disconnected_at) values (${company}, ${machine}, ${node}, now(), now())`)).rejects.toThrow();
@@ -420,7 +420,7 @@ describe('migration 0057', () => {
     await migrate(db, { migrationsFolder: await migrationsUpTo('0056_obsolete_wakes') });
     const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
     const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
-    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'listed') returning id`);
+    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Clara', 'clara@example.test', 'active', 'listed') returning id`);
     const sub = await one(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${company}, 'anthropic_api', 'api_key', 'Key', ${person}, 'ready') returning id`);
     const agent = await one(sql`insert into agents (company_id, kind, name, model, subscription_id) values (${company}, 'worker', 'Bruno', '', ${sub}) returning id`);
     const job = await one(sql`insert into jobs (company_id, subscription_id, agent_id, kind, prompt, timeout_ms, status) values (${company}, ${sub}, ${agent}, 'conversation', 'go', 900000, 'done') returning id`);

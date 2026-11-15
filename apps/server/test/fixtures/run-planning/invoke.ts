@@ -10,7 +10,6 @@ const request = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as Request;
 const moduleUrl = new URL('../../../../node/src/test-environment.ts', import.meta.url);
 const adapter = await import(moduleUrl.href) as Adapter;
 const invocation = await adapter.buildTestInvocation(TestSuite.parse(request.suite), request.files, request);
-console.log('HH588_FIXTURE_COMMAND ' + JSON.stringify({ fixtureOnly: true, command: invocation.command }));
 const child = spawn(invocation.command.program, invocation.command.args, {
   cwd: resolve(request.checkout, invocation.command.cwd), stdio: 'inherit',
   env: { ...process.env, ...invocation.env, PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1', PYTEST_ADDOPTS: '', PYTHONDONTWRITEBYTECODE: '1' },
@@ -18,8 +17,7 @@ const child = spawn(invocation.command.program, invocation.command.args, {
 process.once('SIGTERM', () => { child.kill('SIGTERM'); });
 const code = await new Promise<number>((resolve, reject) => {
   child.once('error', reject);
-  child.once('close', (code, signal) => {
-    console.log('HH588_FIXTURE_PROCESS ' + JSON.stringify({ fixtureOnly: true, code, signal }));
+  child.once('close', code => {
     resolve(code ?? 1);
   });
 });

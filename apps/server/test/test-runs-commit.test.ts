@@ -13,7 +13,7 @@ const atCommit = (commitSha: string, branch = 'task-1-checkout') => () => Promis
 describe('one commit for a whole run', () => {
   it('pins the commit before any part goes out, so a branch that moves between parts changes nothing', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const asked: unknown[] = [];
     c.app.ctx.readCommit = async (repo, want) => {
       asked.push({ url: repo.url, token: repo.token, want });
@@ -57,7 +57,7 @@ describe('one commit for a whole run', () => {
 
   it('fails the whole run when one part checked another commit, and names both', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test -- {part}', parts: 2 });
@@ -71,7 +71,7 @@ describe('one commit for a whole run', () => {
 
     const prompt = (await c.wokeWith(c.bruno.id))!;
     expect(prompt).toContain('Test run 1 failed');
-    expect(prompt).toMatch(new RegExp(`part 2 of 2 failed on ivan-mac[^\\n]*it checked ${MOVED}, not the pinned commit ${TEST_COMMIT}`, 'i'));
+    expect(prompt).toMatch(new RegExp(`part 2 of 2 failed on dev-mac[^\\n]*it checked ${MOVED}, not the pinned commit ${TEST_COMMIT}`, 'i'));
     const state = JSON.parse((await call('test_run', { run: 1 })).text);
     expect(state).toMatchObject({ status: 'failed', commitSha: TEST_COMMIT, parts: [{ status: 'passed', commit: TEST_COMMIT }, { status: 'failed', commit: MOVED }] });
     expect(state.parts[1].why).toContain(MOVED);
@@ -79,7 +79,7 @@ describe('one commit for a whole run', () => {
 
   it('fails the run when a part passed without saying which commit it checked', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
     ivan.node.send(done(await nextOf(ivan.node, 'tests.run'), { commit: null }));
@@ -96,7 +96,7 @@ describe('one commit for a whole run', () => {
     { name: 'whose node names no reason', end: { ok: false, exitCode: 2, error: null, commit: TEST_COMMIT }, why: 'exit code 2' },
   ])('keeps its own reason for a part $name', async ({ end, why }) => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
     ivan.node.send(done(await nextOf(ivan.node, 'tests.run'), end));
@@ -110,7 +110,7 @@ describe('one commit for a whole run', () => {
 
   it('starts nothing and says why when the repository cannot say where the branch is', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     c.app.ctx.readCommit = async () => ({ problem: 'The repository has no branch task-1 or task-1-...' });
     const { call } = await c.turn(c.bruno);
     const refused = await call('run_tests', { command: 'make test' });
@@ -133,7 +133,7 @@ describe('one commit for a whole run', () => {
 
   it('runs a lost part again at the same commit, whatever its branch is at by then', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
     const lost = await nextOf(ivan.node, 'tests.run');
@@ -146,7 +146,7 @@ describe('one commit for a whole run', () => {
 
   it('leaves a run of work as it was: no commit is read or asked of its parts', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const asked: unknown[] = [];
     c.app.ctx.readCommit = async (_repo, want) => {
       asked.push(want);
@@ -164,7 +164,7 @@ describe('one commit for a whole run', () => {
 
   it('lets a run from before commits were pinned end as it always did', async () => {
     const c = await company();
-    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ivan = await c.machine(c.ceo, 'dev-mac');
     const { job, call } = await c.turn(c.bruno);
     const [row] = await c.db.insert(testRuns).values({ companyId: job.companyId, number: 1, taskId: c.task.id, agentId: c.bruno.id, jobId: job.id, departmentId: c.dev.id, command: 'make test', timeoutMs: 60_000 }).returning();
     await c.db.insert(testParts).values({ companyId: job.companyId, runId: row!.id, part: 1 });
@@ -178,7 +178,7 @@ describe('one commit for a whole run', () => {
 
   it('shows the pinned commit in the pool, for a part that runs and one that waits', async () => {
     const c = await company();
-    await c.machine(c.ceo, 'ivan-mac');
+    await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test -- {part}', parts: 2 });
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));

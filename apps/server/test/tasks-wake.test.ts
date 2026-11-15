@@ -958,13 +958,13 @@ describe("working in the product's repository", () => {
 
   it('gives the clone who its commits are by, and puts it in no message', async () => {
     const { ctx, builtin, dev, hire, repository, task } = await withRepositories();
-    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const author = { name: 'Alex Rivera', email: 'alex@acme.example' };
     await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main', author });
     const pia = await hire('Pia', null);
     await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
     const run = await nextRun(builtin);
     expect(run.workspace?.repo?.author).toEqual(author);
-    for (const words of ['Ivan Korol', 'Commit as', 'Co-Authored-By', 'read its own rules first', 'a branch per task']) expect(run.prompt).not.toContain(words);
+    for (const words of ['Alex Rivera', 'Commit as', 'Co-Authored-By', 'read its own rules first', 'a branch per task']) expect(run.prompt).not.toContain(words);
   });
 
   it('starts an agent for its window with its instructions alone, telling it nothing of its repository', async () => {
@@ -998,7 +998,7 @@ describe("working in the product's repository", () => {
     const { app, db, url, ceo, ctx, dev, hire, repository, task } = await withRepositories();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
-    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
     const mac = await connectNode(url, node.key);
     mac.send({ type: 'hello', version: '0.4.0', loggedIn: true, running: [] });

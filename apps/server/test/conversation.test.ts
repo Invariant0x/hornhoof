@@ -376,7 +376,7 @@ describe('the orchestrator\'s conversation', () => {
     const { app, url, ceo } = await live();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: [provider] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
-    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } });
     const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
     const mac = await connectNode(url, node.key);
     mac.send({ type: 'hello', version, loggedIn: true, running: [], skillFiles: true, ...hello });

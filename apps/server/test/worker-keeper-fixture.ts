@@ -20,7 +20,7 @@ import { as, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 /* The computer the server runs on, and a computer that joins the company. */
 export const hostIdOf = (machineKey: string) => hashToken(`hornhoof-host:${machineKey}`);
 export const HOST_ID = hostIdOf('host-0000-abcd');
-export const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+export const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 export const DAY_MS = 86_400_000;
 /* A stand-in for an frpc child: it sleeps until it is stopped. */
 export const SLEEPER = { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
