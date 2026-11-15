@@ -1,9 +1,10 @@
-import { useEffect, useId, useState, type DragEvent, type FormEvent, type MouseEvent } from 'react';
+import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, type MouseEvent } from 'react';
 import { addToBacklog, moved, orderBacklog, removeFromBacklog, scheduleBacklog, useBacklog } from '../backlog';
-import { errorText, useT } from '../i18n';
+import { errorText, useLanguage, useT } from '../i18n';
 import type { BacklogItem } from '../types';
 import { Edge } from './Edge';
 import { Field } from './Field';
+import { useEntriesFit } from './SortTable';
 
 const COLUMNS = 3;
 /* A click on a control of a row does only what the control does, not open the row as well. */
@@ -124,6 +125,10 @@ export function Backlog({ departmentId }: { departmentId: string }) {
     setProblem(null);
   }, [departmentId]);
   const list = order ?? items ?? [];
+  /* As a sorting table does, the list stands as entries where it does not fit its frame by whole words. */
+  const { language } = useLanguage();
+  const frame = useRef<HTMLDivElement>(null);
+  useEntriesFit(frame, `${language} ${list.map(i => i.id).join(' ')}`);
 
   async function act(fn: () => Promise<void>): Promise<boolean> {
     setBusy(true);
@@ -181,7 +186,7 @@ export function Backlog({ departmentId }: { departmentId: string }) {
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {items && !list.length && <p className="muted">{t.backlog.empty}</p>}
       {list.length > 0 && (
-        <Edge className="tbl-frame"><div className="tbl">
+        <Edge className="tbl-frame"><div className="tbl" ref={frame}>
           <table className="dt task-table bl-table" aria-label={t.backlog.heading}>
             <thead><tr>
               <th scope="col">{t.tasks.table.task}</th>

@@ -637,7 +637,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* The deputy CEO's mark by the name: a hat before a short word, which as one flex line never wraps. */
 .badge.deputy { flex: none; display: inline-flex; align-items: center; gap: 3px; }
 .badge.deputy .ic { width: 11px; height: 11px; }
-.status { font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); }
+/* A status is one whole frame of whole words: its words wrap inside the frame, never the frame across lines, and a word
+   breaks only where it does not fit a line of its own, so no column or row is narrower than its longest word. */
+.status { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); overflow-wrap: break-word; }
 .status.active { color: var(--ok); border-color: currentColor; }
 .status.invited { color: var(--amber-ink); border-color: currentColor; }
 .fit { container: fit / inline-size; min-width: 0; }
@@ -682,14 +684,16 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* Subscriptions */
 .lend { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin-right: 8px; }
 .people-head > .head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-.where-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+/* A column of lines, each as wide as the list: as wide as its longest word in a table, as wide as its place as an entry. */
+.where-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .add-plan { display: grid; gap: 10px; }
 .add-plan .actions { display: flex; justify-content: flex-end; }
 .share { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .share select { background-color: var(--surface); }
 .bar.none { background: repeating-linear-gradient(90deg, var(--idle) 0 6px, transparent 6px 10px); }
 .sub-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; color: var(--pink-ink); border: 1px solid currentColor; vertical-align: 1px; }
+/* A badge, like a status, breaks a word only where it does not fit a line of its own. */
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; color: var(--pink-ink); border: 1px solid currentColor; vertical-align: 1px; overflow-wrap: break-word; }
 .status.ready { color: var(--ok); border-color: currentColor; }
 .status.needs_login, .status.needs_setup, .status.waiting_machine { color: var(--amber-ink); border-color: currentColor; }
 .subs .status { display: inline-block; white-space: nowrap; }
@@ -758,7 +762,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .badge.orch-role { color: var(--muted); border-color: var(--line2); }
 .nmg + .badge { margin-inline-end: 6px; }
 /* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
-.ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; }
+.ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; overflow-wrap: break-word; }
 .ast.work { color: var(--cyan-ink); }
 .ast.person { color: var(--pink-ink); }
 .ast.alarm { border-color: var(--red); color: var(--on-red); background: var(--red); }
@@ -2098,8 +2102,10 @@ th.k-prio .sorth { white-space: nowrap; }
 .grp-toggle:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .task-table > tbody > tr.grp-empty > td { color: var(--muted); }
 .task-table > tbody > tr.on > td { box-shadow: inset 0 1px 0 var(--cyan); }
-.rowbtn .nm { display: grid; gap: 2px; }
-.rowbtn .nm small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+/* A name may be one long word, an address or a machine's name: it breaks only where it does not fit a line of its own,
+   inside a button as wide as its cell at most. */
+.rowbtn .nm { display: flex; flex-direction: column; gap: 2px; min-inline-size: 0; }
+.rowbtn .nm small { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .task-sum { display: grid; gap: 8px; padding-top: 4px; min-width: 0; }
 .task-sum p { margin: 0; overflow-wrap: anywhere; }
 .task-sum h3 { margin: 0; font-size: 13px; }
@@ -2135,6 +2141,8 @@ th.k-prio .sorth { white-space: nowrap; }
 .tbl-frame > .edge-in { padding: 0; }
 .tbl { container: tbl / inline-size; min-width: 0; }
 .dt { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* Both values of a merge in columns of one width: a long value wraps inside its own cell instead of widening the table. */
+.merge-table { table-layout: fixed; }
 .dt > thead > tr > th { text-align: left; vertical-align: bottom; padding: 0; border-bottom: 1px solid var(--line2); }
 /* A header breaks only between its words: a button as wide as its cell would let the table squeeze the column below its
    longest word, so it takes its own width and fills the cell from there. */
@@ -2154,12 +2162,12 @@ th.k-prio .sorth { white-space: nowrap; }
 .dt > tbody > tr.rm:hover > td { background: var(--surface2); }
 .dt > tbody > tr.rm.open > td { background: var(--surface2); border-bottom-color: transparent; }
 .dt > tbody > tr.det > td { padding: 0 12px 14px; background: var(--surface2); }
-.rowbtn { position: relative; display: inline-flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; border: 0; background: none; padding: 0 0 0 20px; text-align: left; cursor: pointer; color: var(--ink); }
+.rowbtn { position: relative; display: inline-flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; max-inline-size: 100%; border: 0; background: none; padding: 0 0 0 20px; text-align: left; cursor: pointer; color: var(--ink); }
 .rowbtn .nmg { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .rowbtn .nmg > .pm { margin-top: 3px; }
 .rowbtn .chev { position: absolute; left: 0; top: 3px; width: 12px; height: 12px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.8; transition: transform .15s; }
 .rowbtn[aria-expanded="true"] .chev { transform: rotate(90deg); }
-.rowbtn .nm b { font-size: 14px; overflow-wrap: anywhere; }
+.rowbtn .nm b { font-size: 14px; overflow-wrap: break-word; }
 .rowbtn > .badge { margin-top: 2px; }
 .rowbtn:hover .nm b { color: var(--cyan-ink); }
 .cell-load { display: flex; align-items: center; gap: 8px; }
@@ -2243,8 +2251,16 @@ th.k-prio .sorth { white-space: nowrap; }
 
 
 .result { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 13px; color: var(--muted); }
+/* A cell breaks a word only where it does not fit a line of its own, so no column is narrower than its longest word. As a
+   table, a sorting table keeps each status whole on one line as well; one that does not fit so stands as entries
+   (useEntriesFit), where a status wraps its words inside its frame. */
+.dt td, .dt th, .cell-lim, .where-list { overflow-wrap: break-word; }
 .dt .status { white-space: normal; }
-.dt td, .dt th, .cell-lim, .where-list { overflow-wrap: anywhere; }
+@container tbl (width > 780px) {
+  .dt:not([data-fit="entries"]) > tbody > tr.rm .status { white-space: nowrap; }
+  /* A button with a width in percent gives a table no width of its own, so the name's column would shrink below its words. */
+  .dt:not([data-fit="entries"]) > tbody > tr.rm .rowbtn { max-inline-size: none; }
+}
 
 /* Program history uses the same alarm color as the live agent state. */
 .tview .seg.ls, .tview .seg.al { stroke: var(--red); stroke-width: 3; }
