@@ -1,11 +1,12 @@
 import { deferred } from '../../../../test-support/deferred.mjs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { onTestFinished } from 'vitest';
@@ -78,9 +79,11 @@ async function requirePostgres17(pool: pg.Pool): Promise<void> {
 }
 
 /* A migration holds a lock on each object it makes until it commits, some 3000 for the candidate's, and the cluster has room
-   for a few thousand in all: six test files migrating at once on one part ran it out of shared memory. So the test databases
-   of one cluster migrate one at a time, each in its turn under a lock of the database every test file shares; the session
-   that holds the turn gives it up as it ends, and a file waits for its turn with no deadline. */
+   for a few thousand in all: six test files migrating at once on one part ran it out of shared memory. So the databases of
+   one cluster migrate one at a time, each in its turn under a lock of the database every test file shares; the session
+   that holds the turn gives it up as it ends, and a file waits for its turn with no deadline. A test database that needs
+   the candidate's schema is a copy of a template migrated once (migratedTemplate), so only the tests of migrations
+   themselves and that one template wait in the line. */
 const TAKE_TURN = "SELECT pg_advisory_lock(hashtext('hornhoof: one test database migrates at a time'))";
 
 export async function holdMigrationTurn(label: string): Promise<() => Promise<void>> {
@@ -105,15 +108,56 @@ export async function migrateFolder(fixture: Pick<PostgresFixture, 'name' | 'db'
 
 export const migrateCandidate = (fixture: Pick<PostgresFixture, 'name' | 'db'>): Promise<void> => migrateFolder(fixture, MIGRATIONS);
 
-/* Every test owns a new database, including grants and migration history. The supplied database is never reset. */
-export async function privatePostgres(options: { migrate?: boolean } = {}): Promise<PostgresFixture> {
+/* The database the test databases of a cluster copy for these migrations: its name carries what they hold, so two candidates
+   on one cluster keep their own. */
+export const templateName = (migrationsFolder: string): string => `hh_tpl_${createHash('sha256')
+  .update(JSON.stringify(readMigrationFiles({ migrationsFolder }).map(migration => [migration.hash, migration.folderMillis])))
+  .digest('hex').slice(0, 24)}`;
+
+const templateState = async (control: pg.Pool, name: string): Promise<'whole' | 'half' | 'none'> => {
+  const [row] = (await control.query<{ whole: boolean }>('SELECT datistemplate AND NOT datallowconn AS whole FROM pg_database WHERE datname = $1', [name])).rows;
+  return row ? (row.whole ? 'whole' : 'half') : 'none';
+};
+
+/* Migrated in the turn, then marked a template no session may connect to, which is what a copy needs of it. One a stopped run
+   left half made, never marked, is made again; a whole one is copied at once, without the turn. */
+export async function migratedTemplate(control: pg.Pool, migrationsFolder: string): Promise<string> {
+  const name = templateName(migrationsFolder);
+  if (await templateState(control, name) === 'whole') return name;
+  const release = await holdMigrationTurn(`${name}_migration`);
+  try {
+    const state = await templateState(control, name);
+    if (state === 'whole') return name;
+    if (state === 'half') {
+      await control.query(`ALTER DATABASE "${name}" WITH IS_TEMPLATE false`);
+      await control.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    }
+    await control.query(`CREATE DATABASE "${name}"`);
+    const url = sourceUrl();
+    url.pathname = `/${name}`;
+    const cleanups: Cleanup[] = [];
+    try {
+      const db = drizzle(ownedPool(url.toString(), `${name}_migration`, cleanups), { schema });
+      await migrate(db, { migrationsFolder });
+      await applyMissingMigrations(db, { migrationsFolder });
+    } finally { await dispose(cleanups); }
+    await control.query(`ALTER DATABASE "${name}" WITH IS_TEMPLATE true ALLOW_CONNECTIONS false`);
+    return name;
+  } finally { await release(); }
+}
+
+/* Every test owns a new database, including grants and migration history: a copy of the template of its migrations, the
+   candidate's unless it names others, or an empty one. The supplied database is never reset. */
+export async function privatePostgres(options: { migrate?: boolean; migrations?: string } = {}): Promise<PostgresFixture> {
   const source = sourceUrl();
   const cleanups: Cleanup[] = [];
   onTestFinished(() => dispose(cleanups));
   const name = `hh_pg_${randomBytes(12).toString('hex')}`;
   const control = ownedPool(source.toString(), `${name}_control`, cleanups);
   await requirePostgres17(control);
-  await control.query(`CREATE DATABASE "${name}"`);
+  const migrated = options.migrate !== false;
+  const template = migrated ? ` TEMPLATE "${await migratedTemplate(control, options.migrations ?? MIGRATIONS)}"` : '';
+  await control.query(`CREATE DATABASE "${name}"${template}`);
   cleanups.push(async () => {
     await control.query(`DROP DATABASE "${name}" WITH (FORCE)`);
     await control.query(`DROP ROLE IF EXISTS "${agentRole(name)}", "${readerRole(name)}"`);
@@ -124,11 +168,9 @@ export async function privatePostgres(options: { migrate?: boolean } = {}): Prom
   const admin = pool('admin');
   const db = drizzle(admin, { schema });
   const fixture: PostgresFixture = { name, url: url.toString(), db, admin, pool, cleanup: close => { cleanups.push(close); } };
-  if (options.migrate !== false) {
-    await migrateCandidate(fixture);
-    /* The lease every PGlite test database holds too (prepare-environment.ts): agent SQL writes only under one. */
-    await admin.query(ENDLESS_LEASE);
-  }
+  /* The lease every PGlite test database holds too (prepare-environment.ts): agent SQL writes only under one. Other
+     migrations may not have its table yet. */
+  if (migrated && !options.migrations) await admin.query(ENDLESS_LEASE);
   return fixture;
 }
 

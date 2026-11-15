@@ -55,6 +55,8 @@ export async function migrationHistory(fixture: PostgresFixture): Promise<Histor
   return (await fixture.admin.query<HistoryRow>('SELECT hash, created_at::text FROM drizzle.__drizzle_migrations ORDER BY created_at, hash')).rows;
 }
 
-export function candidateHistory(): HistoryRow[] {
-  return readMigrationFiles({ migrationsFolder: MIGRATIONS }).map(migration => ({ hash: migration.hash, created_at: String(migration.folderMillis) })).sort((a, b) => Number(a.created_at) - Number(b.created_at) || a.hash.localeCompare(b.hash));
+export const candidateHistory = (): HistoryRow[] => folderHistory(MIGRATIONS);
+
+export function folderHistory(migrationsFolder: string): HistoryRow[] {
+  return readMigrationFiles({ migrationsFolder }).map(migration => ({ hash: migration.hash, created_at: String(migration.folderMillis) })).sort((a, b) => Number(a.created_at) - Number(b.created_at) || a.hash.localeCompare(b.hash));
 }
