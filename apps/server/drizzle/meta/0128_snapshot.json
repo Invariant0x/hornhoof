@@ -1,5 +1,5 @@
 {
-  "id": "29e5d45b-37f2-491a-a6d3-811c085b4ced",
+  "id": "0b990079-9105-47e6-80f5-b19196c7db3e",
   "prevId": "fa2ed2b9-0deb-407d-a49d-92404be74884",
   "version": "7",
   "dialect": "postgresql",
@@ -2607,13 +2607,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "autonomous_release": {
-          "name": "autonomous_release",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",

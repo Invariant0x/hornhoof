@@ -90,9 +90,6 @@ export const companies = pgTable('companies', {
      task-N or a version 0.N.0 never names two pieces of work. */
   taskNumbersUsed: integer('task_numbers_used').notNull().default(0),
   turnNumbersUsed: integer('turn_numbers_used').notNull().default(0),
-  /* Autonomous release as the whole company had it before each department got its own (departments.autonomous_release);
-     read by nothing now, kept until a later migration drops it. */
-  autonomousRelease: boolean('autonomous_release').notNull().default(false),
   createdAt: createdAt(),
 });
 

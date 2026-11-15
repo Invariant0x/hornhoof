@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, tasks } from '../src/db/schema.js';
+import { agents, departments, tasks } from '../src/db/schema.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
 import { releasing } from './turn-release-fixture.js';
@@ -117,11 +117,11 @@ describe('whether everything a release brings was checked', () => {
   });
 });
 
-/* Autonomous release, by the human CEO's switch: a release whose every commit was checked needs no person to approve it,
+/* Autonomous release, by the switch of the people who run the department: a release whose every commit was checked needs no person to approve it,
    and its approval is the entry of the autonomous release log, with the full run and the checkers that passed it. */
 describe('the release step with autonomous release on', () => {
   const autonomous = async (f: Awaited<ReturnType<typeof releasing>>, on = true) => {
-    await f.db.update(companies).set({ autonomousRelease: on }).where(eq(companies.id, f.task.companyId));
+    await f.db.update(departments).set({ autonomousRelease: on }).where(eq(departments.id, f.task.departmentId!));
   };
   const journal = async (f: Awaited<ReturnType<typeof releasing>>) =>
     (await f.app.inject({ method: 'GET', url: '/api/autonomous-releases', ...as(f.ceoToken) })).json().entries as Record<string, unknown>[];

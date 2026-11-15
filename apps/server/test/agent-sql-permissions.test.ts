@@ -119,14 +119,6 @@ it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model
   }
 });
 
-it('keeps companies.autonomous_release readable and not writable by either SQL role', async () => {
-  const run = await roles();
-  for (const mode of ['write', 'read'] as const) {
-    expect((await run(mode, 'SELECT autonomous_release FROM companies'))[0]!.rows).toEqual([]);
-    await expect(run(mode, 'UPDATE companies SET autonomous_release = true WHERE false'), mode).rejects.toThrow(/permission denied/);
-  }
-});
-
 it('keeps departments.autonomous_release readable and not writable by either SQL role', async () => {
   const run = await roles();
   for (const mode of ['write', 'read'] as const) {
