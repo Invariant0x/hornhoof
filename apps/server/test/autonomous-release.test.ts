@@ -621,13 +621,37 @@ describe('autonomous release for exact commits to main', () => {
     expect((await f.journal()).json().entries).toEqual([]);
   });
 
-  it('forbids agents, employee/external words, assistants, delegates and department owners from enabling or disabling autonomous release', async () => {
+  it('lets a signed-in person who runs a department turn its own autonomous release on and off, and no other department\'s', async () => {
     const c = await company();
-    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    const toggle = (token: string, departmentId: string, enabled: boolean) =>
+      c.app.inject({ method: 'PUT', url: `/api/departments/${departmentId}/approval-policy/autonomous-release`, payload: { enabled }, ...as(token) });
+
+    /* Sam runs Sales without being the CEO: Sales is his to switch, from its own approvals. */
+    expect((await c.policy(c.samToken, c.sales.id)).json()).toMatchObject({ autonomousRelease: false, canSetAutonomousRelease: true });
+    const on = await toggle(c.samToken, c.sales.id, true);
+    expect(on.statusCode).toBe(200);
+    expect(on.json()).toMatchObject({ autonomousRelease: true, canSetAutonomousRelease: true });
+    /* It is Sales' alone: Development keeps its own, off. */
+    expect((await c.policy(c.ceoToken, c.dev.id)).json()).toMatchObject({ autonomousRelease: false });
+    expect((await c.db.select({ on: departments.autonomousRelease }).from(departments).where(eq(departments.id, c.dev.id)))[0]!.on).toBe(false);
+
+    /* Another department's is not his: Development refuses him, and so does Dana for Sales. */
+    expect((await toggle(c.samToken, c.dev.id, true)).statusCode).toBe(403);
+    expect((await toggle(c.danaToken, c.sales.id, false)).statusCode).toBe(403);
+    expect((await c.policy(c.ceoToken, c.sales.id)).json()).toMatchObject({ autonomousRelease: true });
+
+    /* Dana runs Development and the CEO every department. */
+    expect((await toggle(c.danaToken, c.dev.id, true)).json()).toMatchObject({ autonomousRelease: true });
+    expect((await toggle(c.ceoToken, c.sales.id, false)).json()).toMatchObject({ autonomousRelease: false });
+    expect((await toggle(c.danaToken, c.dev.id, false)).json()).toMatchObject({ autonomousRelease: false });
+  });
+
+  it('forbids agents, employee/external words, assistants, delegates and people who do not run the department from enabling or disabling autonomous release', async () => {
+    const c = await company();
     await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, c.ids.wes));
 
-    /* Non-CEO humans (department owner Dana, CEO delegate Wes, unrelated Sam) cannot toggle it. */
-    for (const token of [c.danaToken, c.wholeToken, c.samToken]) {
+    /* The CEO delegate Wes runs no department of his own, and Sam runs Sales only: neither switches Development. */
+    for (const token of [c.wholeToken, c.samToken]) {
       const res = await c.app.inject({
         method: 'PUT',
         url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
@@ -635,11 +659,20 @@ describe('autonomous release for exact commits to main', () => {
         ...as(token),
       });
       expect(res.statusCode).toBe(403);
+      expect(res.json().error.reason).toBe('autonomous_release_not_allowed');
       expect((await c.policy(c.ceoToken, c.dev.id)).json()).toMatchObject({ autonomousRelease: false });
-      expect((await c.policy(token === c.samToken ? c.wholeToken : token, c.dev.id)).json()).toMatchObject({
-        canSetAutonomousRelease: false,
-      });
     }
+    expect((await c.policy(c.wholeToken, c.dev.id)).json()).toMatchObject({ canSetAutonomousRelease: false });
+
+    /* Development's head, acting for Dana who runs it, is an agent and MUST be refused too. */
+    const headDirect = await c.app.inject({
+      method: 'PUT',
+      url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
+      headers: orchestratorHeaders(c.ids.dana, c.head.id),
+      payload: { enabled: true },
+    });
+    expect(headDirect.statusCode).toBe(403);
+    expect(headDirect.json().error.reason).toBe('autonomous_release_not_allowed');
 
     /* Someone without department access cannot inspect that department's autonomous release journal. */
     const hiddenDeptJournal = await c.app.inject({
@@ -664,7 +697,7 @@ describe('autonomous release for exact commits to main', () => {
       payload: { enabled: true },
     });
     expect(orchDirect.statusCode).toBe(403);
-    expect(orchDirect.json().error.reason).toBe('autonomous_release_ceo_only');
+    expect(orchDirect.json().error.reason).toBe('autonomous_release_not_allowed');
 
     /* Orchestrator cannot relax the commit channel via set_approval_policy either. */
     const orchTools = await c.tools(c.orchestrator, c.ids.ceo);

@@ -7,18 +7,19 @@ import { accessOf, listsDepartment } from '../../auth/access.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { approvalPolicies, companies, departments, people, requests, tasks } from '../../db/schema.js';
+import { approvalPolicies, departments, people, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import {
   hasAutonomousReleaseEntries,
   isAutonomousReleaseEnabled,
-  isHumanCeo,
   listAutonomousReleases,
+  maySetAutonomousRelease,
 } from '../tasks/autonomous-release.js';
 import { candidates, departmentOwners } from '../tasks/decisions.js';
 
 /* A department's owner and how its approvals go. The CEO names the owner; the owner, the CEO and the delegate set the rules.
-   The rules belong to the department, so nothing here that changes the owner touches them. */
+   Its autonomous release is switched by a signed-in person who runs it, never an agent. The rules belong to the department,
+   so nothing here that changes the owner touches them. */
 
 type DeptRow = typeof departments.$inferSelect;
 
@@ -80,8 +81,8 @@ async function policyView(ctx: Pick<Ctx, 'db'>, me: Person, dept: DeptRow) {
     mayChangeRules(ctx.db, me, dept.id),
     canSetOwner ? ownerCandidates(ctx, me.companyId, dept.id) : Promise.resolve([]),
     departmentRules(ctx.db, dept.id),
-    isAutonomousReleaseEnabled(ctx.db, me.companyId),
-    isHumanCeo(ctx.db, me),
+    isAutonomousReleaseEnabled(ctx.db, dept.id),
+    maySetAutonomousRelease(ctx.db, me, dept.id),
     hasAutonomousReleaseEntries(ctx.db, me.companyId, dept.id),
   ]);
   return {
@@ -154,12 +155,12 @@ export function approvalPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.put('/api/departments/:id/approval-policy/autonomous-release', async req => {
     const me = await requirePerson(req, db);
-    if (!(await isHumanCeo(db, me))) {
-      throw new ApiError(403, 'forbidden', 'Only the signed-in human CEO can turn autonomous release on or off.', 'autonomous_release_ceo_only');
-    }
     const dept = await ownDepartment(db, me.companyId, IdParams.parse(req.params).id);
+    if (!(await maySetAutonomousRelease(db, me, dept.id))) {
+      throw new ApiError(403, 'forbidden', 'Only a signed-in person who runs this department, or the CEO, turns its autonomous release on or off; never an agent.', 'autonomous_release_not_allowed');
+    }
     const { enabled } = AutonomousBody.parse(req.body);
-    await db.update(companies).set({ autonomousRelease: enabled }).where(eq(companies.id, me.companyId));
+    await db.update(departments).set({ autonomousRelease: enabled }).where(and(eq(departments.id, dept.id), eq(departments.companyId, me.companyId)));
     logged(req, me, { departmentId: dept.id, autonomousRelease: enabled });
     changed(me.companyId, dept.id);
     return policyView(ctx, me, dept);
@@ -177,7 +178,7 @@ export function approvalPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!(await mayChangeRules(db, me, dept.id))) throw new ApiError(403, 'forbidden', 'Only this department\'s owner, the CEO or the CEO delegate changes how its approvals go.', 'policy_not_allowed');
     const rule = parseRule(req.body);
     if (channel === 'commit' && rule.mode !== 'every') {
-      throw new ApiError(400, 'validation', 'Commit approvals always check the exact commit; only the human CEO can enable autonomous release.', 'policy_invalid');
+      throw new ApiError(400, 'validation', 'Commit approvals always check the exact commit; a person who runs the department enables autonomous release instead.', 'policy_invalid');
     }
     const stored = { mode: rule.mode, limitAmount: rule.mode === 'within_limits' ? rule.limit : null, limitUnit: rule.mode === 'within_limits' ? (rule.unit ?? null) : null, updatedBy: me.id, updatedAt: new Date() };
     await db

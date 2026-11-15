@@ -3,6 +3,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { BUILTIN_SKINS } from '../src/skins/registry';
 import type { SubView, TokenPeriods, TokenSum } from '../src/types';
+import { subName } from '../src/ui/subscription';
 import { tokenCount } from '../src/ui/token-count';
 import { CARD } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
@@ -254,6 +255,59 @@ for (const { lang, skin, width } of LOOKS) {
     expect(await page.evaluate(key => document.body.innerHTML.includes(key), KEY)).toBe(false);
     expect(errors).toEqual([]);
   });
+}
+
+/* A person who runs Marketing, without the whole company, connects an API key there alone and changes and removes the one
+   that serves it; the form offers only Marketing and its sub-units. */
+const DANA = { person: { id: 'p2', companyId: 'c1', name: 'Dana', email: 'dana@acme.com', title: 'CMO', status: 'active' as const, scopeKind: 'listed' as const, isOwner: false }, company: { id: 'c1', name: 'Acme' } };
+const MARKETING_KEY: SubView = {
+  ...CLAUDE_API, id: 's-mkt', label: 'Marketing key', last4: 'MKT1', owner: OWNER, place: { kind: 'department', id: 'd1', name: 'Marketing' },
+  target: { kind: 'department', id: 'd1' }, canChange: true,
+};
+const department = (id: string, name: string, teams: { id: string; name: string }[]) => ({
+  id, name, templateKey: null, roleCode: 'CMO', about: '', agents: { total: 0, working: 0 }, products: [], people: [], employees: [], roles: [],
+  teams: teams.map(team => ({ ...team, about: '', stage: 0, gate: false, turnkey: false })),
+});
+
+for (const lang of ['en', 'ru'] as const) {
+  for (const width of [1440, 375]) {
+    test(`Subscriptions & API: a person who runs a department keeps its API keys there alone, ${lang} light ${width}`, async ({ page }, info) => {
+      const t = messages[lang];
+      const errors = watch(page);
+      await page.setViewportSize({ width, height: 900 });
+      await page.clock.install({ time: NOW });
+      await page.addInitScript(lang => { localStorage.setItem('hh-lang', lang); localStorage.setItem('hh-theme', 'light'); }, lang);
+      await serveSection(page, [], [MARKETING_KEY]);
+      await page.route(url => pathOf(url) === '/api/subscriptions', route => route.fulfill({ json: { subscriptions: [MARKETING_KEY], apiPlaces: ['d1'] } }));
+      await page.route(url => pathOf(url) === '/api/me', route => route.fulfill({ json: DANA }));
+      await page.route(url => pathOf(url) === '/api/org', route => route.fulfill({ json: {
+        company: DANA.company, people: [], agents: { total: 0, working: 0 },
+        orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
+        departments: [department('d1', 'Marketing', [{ id: 't1', name: 'Social media and long-form content' }]), department('d2', 'Development', [])],
+      } }));
+      await page.goto('/');
+      await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
+      await expect(page.getByRole('heading', { level: 1, name: t.subs.heading, exact: true })).toBeVisible();
+
+      await page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn').click();
+      const card = page.getByRole('article', { name: /MKT1/ });
+      const name = subName(t, MARKETING_KEY);
+      await expect(card.getByRole('button', { name: t.subs.editApiLabel(name), exact: true })).toBeVisible();
+      await expect(card.getByRole('button', { name: t.subs.removeLabel(name), exact: true })).toBeVisible();
+      expect(await fits(page)).toBe(true);
+      await page.screenshot({ path: info.outputPath(`owner-card-${lang}-${width}.png`), fullPage: true });
+
+      await page.getByRole('button', { name: t.subs.connectApi, exact: true }).click();
+      const form = page.getByRole('form', { name: t.subs.connectApi });
+      const serves = form.getByLabel(t.subs.apiServes, { exact: true });
+      await expect(serves).toHaveValue('department:d1');
+      await expect(serves.locator('option')).toHaveText(['Marketing', 'Marketing, Social media and long-form content']);
+      expect(await fits(page)).toBe(true);
+      await form.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: info.outputPath(`owner-form-${lang}-${width}.png`), fullPage: true });
+      expect(errors).toEqual([]);
+    });
+  }
 }
 
 /* Every filter group with two values or more starts with All and its count, pressed until a value is; each button is a

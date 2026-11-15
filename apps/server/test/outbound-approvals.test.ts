@@ -67,6 +67,21 @@ describe('what a person must approve', () => {
     expect(approvalNeed(lenient, { ...work, escalated: true })).toBe('message');
     expect(approvalNeed({ sending: newKinds, price: newKinds }, { ...work, hasSegment: false })).toBe('message');
   });
+  it('a channel its owner lets send by itself asks nothing for sending, while its price still goes by its own rule', () => {
+    const auto = { ...work, autoSend: true };
+    expect(approvalNeed({ sending: every, price: within(100, 'USD') }, auto)).toBe('none');
+    expect(approvalNeed({ sending: every, price: every }, { ...auto, money: [] })).toBe('none');
+    expect(approvalNeed({ sending: every, price: every }, auto)).toBe('message');
+    expect(approvalNeed({ sending: every, price: within(9.99, 'USD') }, auto)).toBe('message');
+    expect(approvalNeed({ sending: every, price: newKinds }, auto)).toBe('approach');
+    expect(approvalNeed({ sending: every, price: newKinds }, { ...auto, hasSegment: false })).toBe('message');
+  });
+  it('autoSend never lets a public post or an escalated message go without a person', () => {
+    const lenient = { sending: within(100, 'USD'), price: within(100, 'USD') };
+    expect(approvalNeed(lenient, { ...work, autoSend: true, audience: 'public' })).toBe('message');
+    expect(approvalNeed(lenient, { ...work, autoSend: true, escalated: true })).toBe('message');
+    expect(approvalNeed({ sending: every, price: every }, { ...work, autoSend: false, money: [] })).toBe('message');
+  });
 });
 
 describe('the authority behind an approval', () => {

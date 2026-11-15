@@ -153,6 +153,19 @@ function checkLineSkills(templates: Ctx['templates'], role: Role, skills: Line['
   return checkLockedSkills(role, skills, roleId);
 }
 
+/* A skill a line turns on beyond its role's own that grants tools: through such an employee the whole company shows, so
+   only people who see it give one, as on an employee's card. */
+export function grantingSkillOn(templates: Ctx['templates'], lines: readonly Line[]): string | null {
+  for (const line of lines) {
+    const role = templates.roles.get(line.role);
+    const on = Array.isArray(line.skills) ? line.skills : line.skills.on;
+    const usual = new Set(role?.skills.filter(s => s.on).map(s => s.id) ?? []);
+    const found = on.find(id => !usual.has(id) && (templates.skills.get(id)?.grants.length ?? 0) > 0);
+    if (found) return found;
+  }
+  return null;
+}
+
 /* What is wrong with these lines for the department, in plain English for the agent or the card to fix, or null. */
 export async function checkStaff(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, dept: Dept, lines: Line[]): Promise<string | null> {
   const { db, templates } = ctx;

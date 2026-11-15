@@ -41,7 +41,7 @@ import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
 
-export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind };
+export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind; departmentId: string | null };
 type Agent = typeof agents.$inferSelect;
 type ToolMoveResult = { text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } };
 
@@ -417,7 +417,7 @@ class TaskTools {
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'An approval tells you and the person which passed test run checked that very commit, or that none did; when the CEO enabled autonomousRelease and that commit has a green full run_tests run with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
+          'An approval tells you and the person which passed test run checked that very commit, or that none did; when its department enabled autonomousRelease and that commit has a green full run_tests run with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
         inputSchema: {
           task: Ref,
@@ -431,7 +431,7 @@ class TaskTools {
             .enum(DECISION_TOPICS)
             .optional()
             .describe(
-              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; repositories or release for your department\'s repository and releases, which its owner answers, or the CEO when it has none; people, access, subscriptions, machines, public_link or updates for what only the CEO decides. Name it on every question; without it the CEO answers.',
+              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; repositories or release for your department\'s repository and releases, which its owner answers, or the CEO when it has none; people, access, subscriptions, machines, public_link or updates for what only the CEO decides: people and their access, the company\'s plans, machines and links. Name it on every question; without it the CEO answers.',
             ),
         },
       },
@@ -641,11 +641,13 @@ class TaskTools {
   private registerCancelTask(): void {
     this.server.registerTool(
       'cancel_task',
-      { description: this.boss ? 'Cancels any task, with every open task under it.' : 'Cancels a task you created, with every open task under it.', inputSchema: { task: Ref, why: z.string().trim().min(1).max(1000) } },
+      { description: this.boss ? 'Cancels any task, with every open task under it.' : this.job.agentKind === 'head' ? 'Cancels a task of your department or one you created, with every open task under it.' : 'Cancels a task you created, with every open task under it.', inputSchema: { task: Ref, why: z.string().trim().min(1).max(1000) } },
       async ({ task: ref, why }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
-          if (!this.boss && task.createdByAgentId !== this.job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} was not created by you.`);
+          /* A head runs its department's work, whoever gave it: the orchestrator or a person's schedule too. */
+          const headsIt = this.job.agentKind === 'head' && this.job.departmentId !== null && task.departmentId === this.job.departmentId;
+          if (!this.boss && !headsIt && task.createdByAgentId !== this.job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} is neither of your department nor created by you.`);
           const moved = await cancel(this.ctx, { agentId: this.job.agentId }, task.id, why);
           await stopTurns(this.ctx, moved.closed, this.job.agentId);
           const left = moved.waiting.length

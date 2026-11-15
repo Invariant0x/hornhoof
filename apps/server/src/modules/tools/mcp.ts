@@ -16,7 +16,7 @@ import { readKeeperState } from '../keeper/state.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
 import { answerOutside } from './outside.js';
-import { registerApprovalControlTools, registerApprovalTools } from './approval-policy.js';
+import { registerApprovalControlTools, registerApprovalTools, registerHeadPolicyTools } from './approval-policy.js';
 import { registerControlTools } from './control.js';
 import { registerDepartmentControlTools } from './department-control.js';
 import { registerComputerTools } from '../computer/tools.js';
@@ -33,7 +33,7 @@ import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerBriefingTool } from '../briefings/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
-import { registerOutboundControlTools, registerOutboundTools } from '../outbound/extension.js';
+import { registerOutboundControlTools, registerOutboundHeadTools, registerOutboundTools } from '../outbound/extension.js';
 import { assistantAgentTools } from '../assistants/mcp.js';
 import { registerAssignmentTools } from '../agents/assignment.js';
 import { registerProgramAccessTools } from '../program-operator/tools.js';
@@ -86,6 +86,8 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
       registerHeadNotebookTools(server, ctx, job);
       registerAssignmentTools(server, ctx, job);
       registerDepartmentControlTools(server, ctx, app, job);
+      registerHeadPolicyTools(server, ctx, app, job);
+      registerOutboundHeadTools(server, ctx, app, job);
     }
     if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
     if (job.agentKind === 'head' && job.roleKey !== null && DATABASE_ROLES.includes(job.roleKey)) registerDatabaseTool(server, ctx, job, 'read');

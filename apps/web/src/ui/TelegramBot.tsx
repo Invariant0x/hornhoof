@@ -8,7 +8,8 @@ type Bot = NonNullable<AgentCardView['telegram']>;
 type Props = { agentId: string; telegram: Bot | null; editable: boolean; onChange(telegram: Bot | null): void };
 
 /* The bot people write to a head or the orchestrator through in Telegram. Its token goes to the server once and never
-   comes back: the card shows the bot by its name, and only people with the whole company connect or remove one. */
+   comes back: the card shows the bot by its name, and a person who runs the head's department, or one with the whole
+   company, connects or removes one from their own screen. */
 export function TelegramBot({ agentId, telegram, editable, onChange }: Props) {
   const t = useT();
   const id = useId();

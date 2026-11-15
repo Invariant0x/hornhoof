@@ -61,11 +61,12 @@ async function personApproval(db: Ctx['db'] | Tx, task: Task, commit: string): P
 const needsPerson = (task: Task, commit: string, why: string) =>
   refuse(403, 'decision_not_allowed', `A release needs a person's approval of exactly ${commit}: ask for it on #${task.number} with ask_person, kind approval, naming the commit.${why}`);
 
-/* Autonomous release is on, held so the CEO's switch waits for the record, for a repository whose main line is main. */
-async function autonomousOn(db: Ctx['db'] | Tx, companyId: string, repo: Repo, hold = false): Promise<boolean> {
-  const query = db.select({ on: companies.autonomousRelease }).from(companies).where(eq(companies.id, companyId));
-  const [company] = hold ? await query.for('share') : await query;
-  return !!company?.on && repo.branch === 'main';
+/* The department has autonomous release on, held so a switch of its people waits for the record, for a repository whose main
+   line is main. */
+async function autonomousOn(db: Ctx['db'] | Tx, departmentId: string, repo: Repo, hold = false): Promise<boolean> {
+  const query = db.select({ on: departments.autonomousRelease }).from(departments).where(eq(departments.id, departmentId));
+  const [department] = hold ? await query.for('share') : await query;
+  return !!department?.on && repo.branch === 'main';
 }
 
 /* Who passed the results of a release, by their verdicts on the exact commits: each still at work, or null. */
@@ -189,7 +190,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   /* A person's approval stands first; without one, autonomous release approves only what was checked whole. */
   const asked = await personApproval(ctx.db, task, input.commit);
   if (!asked) {
-    if (!(await autonomousOn(ctx.db, companyId, target.repo))) throw needsPerson(task, input.commit, '');
+    if (!(await autonomousOn(ctx.db, turn.departmentId!, target.repo))) throw needsPerson(task, input.commit, '');
     if (uncovered.length) throw needsPerson(task, input.commit, ` Autonomous release approves only a release every commit of which was checked, and this one brings what was not: ${uncovered.join(' ')}`);
   }
   const record = await ctx.db.transaction(async tx => {
@@ -202,7 +203,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     const approvalRequestId = await personApproval(tx, task, input.commit);
     let autonomousReleaseId: string | null = null;
     if (!approvalRequestId) {
-      if (!(await autonomousOn(tx, companyId, target.repo, true))) throw needsPerson(task, input.commit, ' Autonomous release was turned off meanwhile.');
+      if (!(await autonomousOn(tx, turn.departmentId!, target.repo, true))) throw needsPerson(task, input.commit, ' Autonomous release was turned off meanwhile.');
       autonomousReleaseId = await logAutonomous(tx, turn, task, agentId, input.commit, base, input.runId, released);
       if (!autonomousReleaseId) throw needsPerson(task, input.commit, ' A checker of what it brings is no longer at work, so autonomous release cannot approve it.');
     }
@@ -286,9 +287,9 @@ async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolea
     return !!approval;
   }
   if (!record.autonomousReleaseId || !record.covered) return false;
-  const [company] = await tx.select({ on: companies.autonomousRelease }).from(companies).where(eq(companies.id, turn.companyId)).for('share');
+  const [department] = await tx.select({ on: departments.autonomousRelease }).from(departments).where(eq(departments.id, turn.departmentId!)).for('share');
   const [entry] = await tx.select({ id: autonomousReleases.id }).from(autonomousReleases).where(and(eq(autonomousReleases.id, record.autonomousReleaseId), eq(autonomousReleases.commitSha, record.commit)));
-  return !!company?.on && !!entry && (await liveCheckers(tx, record.tasks)) !== null;
+  return !!department?.on && !!entry && (await liveCheckers(tx, record.tasks)) !== null;
 }
 
 /* The tag closes the turn: it keeps the version and commit, the results of its record stay in it, and every other result of it,

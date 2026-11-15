@@ -23,7 +23,12 @@ export const Proposal = z.object({ brief: z.string().trim().min(1).max(1500), it
 export type NewItem = z.infer<typeof NewItem>;
 export type ChangeItem = z.infer<typeof ChangeItem>;
 /* What the CEO's click sends: the ticked items, without the tick. */
-export const BuildItem = z.union([NewItem.omit({ checked: true }).extend({ note: Note.default('') }), ChangeItem.omit({ checked: true }).extend({ note: Note.default('') })]);
+/* about: a new description of a department that is there, such as the measures its own pipeline report counts; set by
+   the people who run it, or by its head on their word. */
+export const BuildItem = z.union([
+  NewItem.omit({ checked: true }).extend({ note: Note.default('') }),
+  ChangeItem.omit({ checked: true }).extend({ note: Note.default(''), about: z.string().trim().max(160).optional() }),
+]);
 export type BuildItem = z.infer<typeof BuildItem>;
 
 type NewPart = Omit<NewItem, 'checked'>;

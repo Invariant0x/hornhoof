@@ -5,7 +5,7 @@ import { asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, subscriptions, turnTokens } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, subscriptions, teams, turnTokens } from '../src/db/schema.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import type { ModelsAnswer, ModelsRequest } from '../src/modules/subscriptions/api-models.js';
 import { BUILTIN } from './builtin.js';
@@ -197,13 +197,20 @@ describe('the models of an API', () => {
     expect(asked).toEqual([]);
   });
 
-  it('lets only company scope load a list', async () => {
+  it('lets only company scope, or a person who runs a department, load a list', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
     const person = await maria(app, ceo);
+    const [marketing] = await app.ctx.db.select().from(departments).where(eq(departments.name, 'Marketing'));
+    const [team] = await app.ctx.db.insert(teams).values({ companyId: marketing!.companyId, departmentId: marketing!.id, name: 'Social' }).returning();
+    /* Someone with only a team of Marketing runs no department, so the server asks no API for them. */
+    const member = await invitePerson(app, ceo, { name: 'Tia', email: 'tia@acme.com', access: { teams: [team!.id] } });
     const asked = apis(app, () => ({ ok: true, body: { data: [] } }));
-    expect((await post(app, person, '/api/subscriptions/models', { provider: 'openrouter', apiKey: OPENROUTER_KEY })).statusCode).toBe(403);
+    expect((await post(app, member, '/api/subscriptions/models', { provider: 'openrouter', apiKey: OPENROUTER_KEY })).statusCode).toBe(403);
     expect(asked).toEqual([]);
+    /* Maria runs Marketing, where she connects keys herself. */
+    expect((await post(app, person, '/api/subscriptions/models', { provider: 'openrouter', apiKey: OPENROUTER_KEY })).statusCode).toBe(200);
+    expect(asked).toHaveLength(1);
   });
 });
 

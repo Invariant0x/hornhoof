@@ -273,7 +273,7 @@ async function restoredOver(tx: Tx, m: Pick<Message, 'createdAt'>): Promise<Date
    restored database goes only on a person's word for this very message, given after the restore, whatever the rules. */
 async function approvalGate(tx: Tx, a: ToApprove): Promise<Asked> {
   const rules = await rulesFor(tx, a.channel.departmentId, a.channel.audience);
-  const need = a.restored ? 'message' : approvalNeed(rules, { audience: a.channel.audience, money: a.money, escalated: a.escalated, hasSegment: a.segmentId !== null });
+  const need = a.restored ? 'message' : approvalNeed(rules, { audience: a.channel.audience, money: a.money, escalated: a.escalated, hasSegment: a.segmentId !== null, autoSend: a.policy.value.autoSend === true });
   if (need === 'none') return { need, state: 'approved', bound: null };
   const bound = boundFor(a, need);
   if (a.restored) await withdrawAskedBefore(tx, a.channel.companyId, bound, a.restored, new Date());

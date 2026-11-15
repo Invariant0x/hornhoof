@@ -47,7 +47,7 @@ const RULES: Record<string, string> = {
   test_suite_memory: 'Hornhoof keeps what test runs leave for their next run itself: the tool only reads it.',
   harness_builds: HARNESS,
   harness_products: HARNESS,
-  departments: "A department's repository changes only with set_repository, which only the CEO may ask for.",
+  departments: "A department's repository changes only on its screen or with set_repository, on the word of the CEO or a person who runs it; its owner and autonomous release change only on the screen.",
   agents:
     "Employees come by hire and go by fire_employee, and their skills and subscription change by change_employee, which make the CEO's checks; kind and role_key never change, a head stays in its department, and an assistant's own agent belongs to its owner.",
   jobs: 'Hornhoof starts the turns: the tool changes only their status, error and finished_at.',

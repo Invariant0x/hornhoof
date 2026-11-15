@@ -196,7 +196,7 @@ function AutonomousToggleOrState({
   );
 }
 
-/* CEO-only toggle and company journal for exact-commit autonomous release to main. */
+/* The department's own switch for exact-commit autonomous release to main, for the people who run it, and its journal. */
 function AutonomousReleaseControl({
   departmentId,
   path,

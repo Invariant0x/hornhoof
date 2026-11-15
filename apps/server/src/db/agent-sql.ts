@@ -46,6 +46,7 @@ export const SECRET: Record<string, string[]> = {
   program_operator_cases: ['capability'],
   attachments: ['bytes'],
   assistants: ['key_hash', 'wake_secret_enc'],
+  telegram_bots: ['token_enc'],
   requests: ['text', 'options', 'explained', 'answer', 'link', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
   proposals: ['material_snapshot', 'brief', 'items', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
 };
@@ -60,13 +61,14 @@ export const SECRET: Record<string, string[]> = {
    or quiet what its head hears. A department's rules of approval, which say what a person must see first, and change only
    through a person's guarded API. An employee's inbox, whose letters name who wrote them: a forged one would put words in
    a person's or an employee's mouth, so only Hornhoof keeps it and the employee marks it with inbox_mark. What each turn
-   used of its subscription, which Hornhoof writes as the node told it, so that what a connection costs can be believed. */
+   used of its subscription, which Hornhoof writes as the node told it, so that what a connection costs can be believed. A
+   head's Telegram bot, which only a person sets on its card, with its token kept from both roles. */
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
-  'autonomous_releases', 'agent_inbox', 'turn_tokens',
+  'autonomous_releases', 'agent_inbox', 'turn_tokens', 'telegram_bots',
   'assistants', 'assistant_events', 'assistant_replies', 'assistant_requests',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
@@ -76,8 +78,8 @@ const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id', 'node_id']
 /* Where a department's agents push their work, and what lets a commit past GitHub's tests: set only with set_repository. */
 const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email', 'repo_full_test_command'];
 /* Settings change only through a person's guarded API, never through generic SQL. So does who owns a department, as its
-   owner decides what its agents send out. */
-const DEPARTMENT_SETTINGS = [...REPOSITORY, 'owner_person_id'];
+   owner decides what its agents send out, and its autonomous release, which lets its commits reach main without a person. */
+const DEPARTMENT_SETTINGS = [...REPOSITORY, 'owner_person_id', 'autonomous_release'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 /* How urgent work is changes only through the CEO's route and tools, which keep a tree of tasks as urgent as its top. */

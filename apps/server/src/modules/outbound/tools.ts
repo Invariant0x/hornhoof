@@ -67,7 +67,8 @@ async function optionsOf(ctx: Ctx, job: ToolJob, now = new Date()) {
   };
 }
 
-/* An agent proposes for its own department; the orchestrator, which has none, for any. Either way nothing is usable yet. */
+/* An agent proposes for its own department; the orchestrator, which has none, for any. Either way nothing is usable until
+   a person who runs the department, or its head on their word, publishes it. */
 async function proposeAs(ctx: Ctx, job: ToolJob, input: ProposalInput) {
   const dept = await ownDepartment(ctx.db, job.companyId, input.departmentId);
   if (job.agentKind !== 'orchestrator' && job.departmentId !== dept.id) throw new ApiError(403, 'forbidden', 'You propose for your own department.', 'outbound_not_allowed');
@@ -130,7 +131,10 @@ export function registerOutboundTools(server: McpServer, ctx: Ctx, job: ToolJob)
   server.registerTool(
     'outbound_propose',
     {
-      description: 'Proposes a revision of a catalog entry: a template, price, link, claim and so on. No message may use it until a person publishes it, which no tool can do; say in your task what you proposed and why. entryId: the entry this is the next revision of, left out for a new one. Words with a link, markup, a secret or someone\'s address are refused.',
+      description:
+        'Proposes a revision of a catalog entry: a template, price, link, claim and so on. No message may use it until it is published: by your department\'s head with outbound_publish, ' +
+        'or by a person who runs the department, under Department catalog: in Settings under External messaging, or on the department\'s screen under About the department. Say in your task what you proposed and why. ' +
+        'entryId: the entry this is the next revision of, left out for a new one. Words with a link, markup, a secret or someone\'s address are refused.',
       inputSchema: ProposalInput,
     },
     input => answer(() => proposeAs(ctx, job, input)),

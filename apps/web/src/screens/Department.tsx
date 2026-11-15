@@ -15,6 +15,7 @@ import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { Repositories } from '../ui/RepoSettings';
 import { DeptBranchesIfKept } from '../ui/DeptBranches';
+import { DepartmentMessaging } from '../ui/OutboundSetup';
 import { StaffCard } from '../ui/StaffCard';
 import { BriefingPanel } from '../ui/Briefing';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
@@ -150,6 +151,12 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
       <ApprovalPolicy departmentId={department.id} ownerPersonId={department.ownerPersonId} />
     </section>
   );
+}
+
+/* What the department sends outside and how, for the people who run its messages: the server says who they are. */
+function DeptMessaging({ department, shown }: { department: Department; shown: boolean }) {
+  const t = useT();
+  return shown ? <DepartmentMessaging departmentId={department.id} title={t.settings.groups.messaging} /> : null;
 }
 
 function Wire({ l }: { l: Line }) {
@@ -605,6 +612,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                   </section>
                 )}
                 {runs && <Repositories department={d} />}
+                <DeptMessaging department={d} shown={runs} />
                 <DeptBranchesIfKept department={d} shown={runs} />
                 {d.products.length > 0 && (
                   <section aria-labelledby={`${id}-products`}>

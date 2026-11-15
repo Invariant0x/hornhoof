@@ -90,8 +90,8 @@ export const companies = pgTable('companies', {
      task-N or a version 0.N.0 never names two pieces of work. */
   taskNumbersUsed: integer('task_numbers_used').notNull().default(0),
   turnNumbersUsed: integer('turn_numbers_used').notNull().default(0),
-  /* Only the human CEO toggles this: when on, exact commits for main with a green full run, an independent PASS verdict and
-     a fast-forward path from main pass without a human approval card. */
+  /* Autonomous release as the whole company had it before each department got its own (departments.autonomous_release);
+     read by nothing now, kept until a later migration drops it. */
   autonomousRelease: boolean('autonomous_release').notNull().default(false),
   createdAt: createdAt(),
 });
@@ -303,6 +303,10 @@ export const departments = pgTable('departments', {
   /* The person the CEO named to take the department's approvals and set its policy; none means the CEO. Only the CEO sets it,
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
+  /* A top-level department's autonomous release, set only by a signed-in person who runs it, never an agent: when on, exact
+     commits for its main line with a green full run, an independent PASS verdict and a fast-forward path from main pass
+     without a human approval card. Its products and parts go by it. */
+  autonomousRelease: boolean('autonomous_release').notNull().default(false),
   createdAt: createdAt(),
 }, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 
@@ -2468,6 +2472,28 @@ export const outboundEvents = pgTable('outbound_events', {
   unique('outbound_events_once').on(t.companyId, t.source, t.providerEventId),
   sameCompany('outbound_events_attempt', t.companyId, t.attemptId, outboundAttempts),
   check('outbound_events_kind', sql`${t.kind} IN ('delivered', 'bounce', 'refusal', 'complaint')`),
+]);
+
+/* What was set up for a department's messages, and by whom: a person, or the department's head carrying out that person's
+   word. The owner reads it; it holds no setting, address or secret, only what changed and the ids it changed. */
+export const OUTBOUND_SETUP_KINDS = ['channel_created', 'policy_set', 'auto_send_on', 'auto_send_off', 'channel_stopped', 'channel_reopened', 'catalog_published', 'catalog_revoked', 'account_set_up', 'account_rotated', 'account_revoked', 'account_bound', 'account_released'] as const;
+export type OutboundSetupKind = (typeof OUTBOUND_SETUP_KINDS)[number];
+export const outboundSetupEvents = pgTable('outbound_setup_events', {
+  id: id(),
+  companyId: companyId(),
+  departmentId: uuid('department_id').notNull(),
+  channelId: uuid('channel_id'),
+  kind: text('kind', { enum: OUTBOUND_SETUP_KINDS }).notNull(),
+  subjectId: uuid('subject_id'),
+  detail: jsonb('detail').$type<Record<string, string | number | boolean | null>>().notNull().default({}),
+  personId: uuid('person_id').notNull().references(() => people.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  createdAt: createdAt(),
+}, t => [
+  index('outbound_setup_events_department').on(t.companyId, t.departmentId, t.createdAt),
+  sameCompany('outbound_setup_events_place', t.companyId, t.departmentId, departments),
+  sameCompany('outbound_setup_events_channel', t.companyId, t.channelId, outboundChannels),
+  check('outbound_setup_events_kind', sql`${t.kind} IN (${sql.raw(OUTBOUND_SETUP_KINDS.map(k => `'${k}'`).join(', '))})`),
 ]);
 
 /* The numbers sampling goes by: one counter of a channel, of a segment or of an author. It only goes on, whatever is

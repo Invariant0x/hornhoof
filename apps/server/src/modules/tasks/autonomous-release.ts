@@ -2,9 +2,10 @@ import { EnvironmentSnapshot, validateEnvironmentDescription } from '@hornhoof/p
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
+import { accessOf } from '../../auth/access.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agents, autonomousReleases, companies, departments, people, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
+import { agents, autonomousReleases, departments, people, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { evidenceOf } from '../testruns/evidence.js';
 import { coversEveryPart } from '../testruns/github-status.js';
@@ -60,19 +61,24 @@ export type AutonomousReleaseEntry = {
   createdAt: string;
 };
 
-/* Only the signed-in human CEO toggles autonomous release: never an agent, an assistant, a delegate or an owner. */
-export async function isHumanCeo(db: Pick<Db, 'select'>, me: Person): Promise<boolean> {
-  if (me.status !== 'active' || !me.isOwner || Boolean(me.via) || Boolean(me.assistant)) return false;
+/* Who turns a department's autonomous release on or off: a signed-in person, never an agent or an assistant acting for one,
+   who runs that department. The CEO runs every department. */
+export async function maySetAutonomousRelease(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
+  if (me.status !== 'active' || Boolean(me.via) || Boolean(me.assistant)) return false;
   const [row] = await db
     .select({ id: people.id })
     .from(people)
-    .where(and(eq(people.id, me.id), eq(people.companyId, me.companyId), eq(people.status, 'active'), eq(people.isOwner, true), eq(people.isAgent, false)));
-  return Boolean(row);
+    .where(and(eq(people.id, me.id), eq(people.companyId, me.companyId), eq(people.status, 'active'), eq(people.isAgent, false)));
+  if (!row) return false;
+  return me.isOwner || (await accessOf(db, me)).owns?.has(departmentId) === true;
 }
 
-export async function isAutonomousReleaseEnabled(db: Pick<QueryDb, 'select'>, companyId: string): Promise<boolean> {
-  const [row] = await db.select({ autonomousRelease: companies.autonomousRelease }).from(companies).where(eq(companies.id, companyId));
-  return Boolean(row?.autonomousRelease);
+/* Whether a department has autonomous release on: a top-level one its own, a product or part the department that holds it. */
+export async function isAutonomousReleaseEnabled(db: Pick<QueryDb, 'select'>, departmentId: string): Promise<boolean> {
+  const [dept] = await db.select({ parentId: departments.parentId, on: departments.autonomousRelease }).from(departments).where(eq(departments.id, departmentId));
+  if (!dept?.parentId) return Boolean(dept?.on);
+  const [top] = await db.select({ on: departments.autonomousRelease }).from(departments).where(eq(departments.id, dept.parentId));
+  return Boolean(top?.on);
 }
 
 export async function hasAutonomousReleaseEntries(db: Pick<QueryDb, 'select'>, companyId: string, departmentId?: string): Promise<boolean> {
@@ -450,9 +456,10 @@ async function verifiedMainLine(ctx: Reader, repo: Repo, candidateBaseSha: strin
    a repository of its own. A top-level department releases turns: its results join the open turn, and main moves for it
    only by the release of that turn, which autonomous release approves at release_turn. */
 async function enabledMainRepo(ctx: Reader, task: Task): Promise<{ department: Dept; repo: Repo } | null> {
-  if (!ctx.config || !(await isAutonomousReleaseEnabled(ctx.db, task.companyId))) return null;
+  if (!ctx.config) return null;
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]).catch(() => null);
-  return found && found.department.parentId && isMainRepository(found.department, found.repo) ? { department: found.department, repo: found.repo } : null;
+  if (!found || !found.department.parentId || !isMainRepository(found.department, found.repo)) return null;
+  return (await isAutonomousReleaseEnabled(ctx.db, found.department.id)) ? { department: found.department, repo: found.repo } : null;
 }
 
 async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Promise<VerifiedProof | null> {
@@ -466,11 +473,12 @@ async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Pro
   return run ? { department: found.department, repo: found.repo, run, verdict, baseCommitSha } : null;
 }
 
+/* Held so a switch of the department that holds the repository waits for the record. */
 async function enabledMainInTransaction(tx: Tx, companyId: string, departmentId: string): Promise<boolean> {
-  const [companyRow] = await tx.select({ autonomousRelease: companies.autonomousRelease }).from(companies).where(eq(companies.id, companyId)).for('share');
-  if (!companyRow?.autonomousRelease) return false;
-  const [deptRow] = await tx.select({ repoBranch: departments.repoBranch }).from(departments).where(eq(departments.id, departmentId));
-  return Boolean(deptRow && (deptRow.repoBranch ?? 'main') === 'main');
+  const [deptRow] = await tx.select({ repoBranch: departments.repoBranch, parentId: departments.parentId }).from(departments).where(and(eq(departments.id, departmentId), eq(departments.companyId, companyId)));
+  if (!deptRow) return false;
+  const [top] = await tx.select({ on: departments.autonomousRelease }).from(departments).where(eq(departments.id, deptRow.parentId ?? departmentId)).for('share');
+  return Boolean(top?.on) && (deptRow.repoBranch ?? 'main') === 'main';
 }
 
 async function reverifyInTransaction(tx: Tx, task: Task, commit: string, department: Dept): Promise<{ run: VerifiedRun; verdict: VerifiedVerdict } | null> {
