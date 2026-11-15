@@ -199,9 +199,10 @@ const Id = z.string().regex(/^[A-Za-z0-9-]{1,64}$/);
    written to the prompt cache, and all of them together. A part the program does not tell is null; a turn whose program
    tells none has no counts at all. */
 const Count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable();
+/* model: the one the turn ran on, as its program told, else the one the turn asked for; none when neither is known. */
 export const TurnTokens = z
-  .object({ input: Count, output: Count, cacheRead: Count, cacheWrite: Count, total: Count })
-  .refine(t => Object.values(t).some(v => v !== null), 'A turn without any count has no tokens.');
+  .object({ input: Count, output: Count, cacheRead: Count, cacheWrite: Count, total: Count, model: z.string().min(1).max(200).optional() })
+  .refine(t => [t.input, t.output, t.cacheRead, t.cacheWrite, t.total].some(v => v !== null), 'A turn without any count has no tokens.');
 export type TurnTokens = z.infer<typeof TurnTokens>;
 
 /* An API's address, as the company named it: http or https, with no sign-in in it, nothing after a #. */

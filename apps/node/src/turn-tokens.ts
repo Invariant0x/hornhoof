@@ -35,6 +35,22 @@ export function agyTokens(usage: unknown): TurnTokens | null {
   return told({ input, output, cacheRead, cacheWrite: null, total: count(usage.total_tokens) ?? sum(read, output) });
 }
 
+/* A model's name as a turn's tokens carry it: a program's word that is no name, or one too long, names none. */
+export const modelName = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 && value.length <= 200 ? value : null);
+
+/* The turn's tokens with the model it ran on: the one its program told, else the one the turn asked for. */
+export function withModel(tokens: TurnTokens | null | undefined, model: unknown): TurnTokens | null {
+  const named = modelName(model);
+  if (!tokens || tokens.model || !named) return tokens ?? null;
+  return { ...tokens, model: named };
+}
+
+/* The model a line of Claude Code's output says it runs: its start, or a message of the model. */
+export function claudeModel(line: Record<string, unknown>, before: string | null): string | null {
+  const model = line.type === 'system' ? line.model : isRecord(line.message) ? line.message.model : null;
+  return modelName(model) ?? before;
+}
+
 /* Both turns' counts together, null where neither told one. */
 export function addTokens(a: TurnTokens | null, b: TurnTokens | null): TurnTokens | null {
   if (!a || !b) return a ?? b;
@@ -48,14 +64,17 @@ export class TurnTally {
   private messages = new Map<string, TurnTokens>();
   private codex: TurnTokens | null = null;
   private codexTotal = -1;
+  private model: string | null = null;
 
   begin(): void {
     this.messages.clear();
     this.codex = null;
+    this.model = null;
   }
 
   claudeLine(line: unknown): void {
     if (!isRecord(line) || line.type !== 'assistant' || !isRecord(line.message) || typeof line.message.id !== 'string') return;
+    this.model = claudeModel(line, this.model);
     const tokens = anthropicTokens(line.message.usage);
     if (tokens) this.messages.set(line.message.id, tokens);
   }
@@ -77,6 +96,6 @@ export class TurnTally {
   }
 
   tokens(): TurnTokens | null {
-    return [...this.messages.values()].reduce<TurnTokens | null>(addTokens, null) ?? this.codex;
+    return withModel([...this.messages.values()].reduce<TurnTokens | null>(addTokens, null) ?? this.codex, this.model);
   }
 }

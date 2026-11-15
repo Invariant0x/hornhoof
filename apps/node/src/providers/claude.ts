@@ -11,7 +11,7 @@ import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
-import { anthropicTokens } from '../turn-tokens.js';
+import { anthropicTokens, claudeModel, withModel } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
@@ -172,6 +172,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       let sessionId: string | null = input.sessionId;
       let limits: Limits | null = null;
       let signedOut = false;
+      let model: string | null = null;
       const done = await runProgram({
         bin,
         args,
@@ -184,11 +185,12 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
           const ev = objectLine(line);
           if (!ev) return;
           if (typeof ev.session_id === 'string') sessionId = ev.session_id;
+          model = claudeModel(ev, model);
           if (ev.type === 'assistant' && ev.error === 'authentication_failed') signedOut = true;
           if (ev.type === 'rate_limit_event' && ev.rate_limit_info) limits = limitsFrom(ev.rate_limit_info as RateInfo);
           /* A finished background task adds an empty result after the real one, which must not replace it. */
           const text = String(ev.result ?? '');
-          if (ev.type === 'result' && (text || ev.is_error === true || !result)) result = { text, isError: ev.is_error === true, sessionId, tokens: anthropicTokens(ev.usage) };
+          if (ev.type === 'result' && (text || ev.is_error === true || !result)) result = { text, isError: ev.is_error === true, sessionId, tokens: withModel(anthropicTokens(ev.usage), model) };
           for (const event of claudeEvents(ev)) input.onEvent?.(event);
         },
       }).finally(() => {

@@ -5,6 +5,7 @@ import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
+import { withModel } from './turn-tokens.js';
 import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
 import { placeSkills } from './skills.js';
 import { readSessions, rememberSession } from './state.js';
@@ -284,5 +285,5 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   /* Everything the program held at any point of the run, so a token it had only in between is hidden too. */
   for (const s of await adapter.secrets().catch(() => [])) known.add(s);
-  return jobDone(msg.jobId, res, [...known]);
+  return jobDone(msg.jobId, { ...res, tokens: withModel(res.tokens, msg.model) }, [...known]);
 }

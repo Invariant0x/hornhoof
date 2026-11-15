@@ -834,6 +834,8 @@ export const turnTokens = pgTable(
     cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' }),
     cacheWriteTokens: bigint('cache_write_tokens', { mode: 'number' }),
     totalTokens: bigint('total_tokens', { mode: 'number' }),
+    /* The model the turn ran on, as its node told: its program's word, else the one the turn asked for; null when neither. */
+    model: text('model'),
     at: timestamp('at', { withTimezone: true }).notNull(),
   },
   t => [

@@ -19,7 +19,7 @@ import { builtinOf, nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { liveNode, planNodes } from '../nodes/nodes.js';
 import { internalAddress, modelsFrom, modelsRequest, type ModelsAnswer } from './api-models.js';
 import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
-import { periodsOf, together, tokensBySubscription, TokensQuery } from './tokens.js';
+import { periodsOf, together, tokensByModel, tokensBySubscription, TokensQuery } from './tokens.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
@@ -239,7 +239,8 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [sub] = await db.select({ id: subscriptions.id, ownerPersonId: subscriptions.ownerPersonId }).from(subscriptions).where(and(eq(subscriptions.id, IdParams.parse(req.params).id), eq(subscriptions.companyId, me.companyId)));
     if (!sub) throw unknown();
     if (!ownsOrCompany(me, sub.ownerPersonId)) throw notOwner();
-    return { tokens: periodsOf(await tokensBySubscription(db, me.companyId, ctx.clock(), zone, [sub.id]), sub.id) };
+    const now = ctx.clock();
+    return { tokens: periodsOf(await tokensBySubscription(db, me.companyId, now, zone, [sub.id]), sub.id), models: await tokensByModel(db, me.companyId, sub.id, now) };
   });
 
   /* What all the subscriptions a person sees used together: the whole company's for company scope, their own plans' else. */

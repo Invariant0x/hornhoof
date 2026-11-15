@@ -1,5 +1,5 @@
 import type { TurnTokens } from '@hornhoof/protocol';
-import { and, count, eq, gte, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { turnTokens } from '../../db/schema.js';
@@ -40,9 +40,9 @@ export function dayStart(now: number, zone: string): Date {
 
 /* A turn's counts as kept: its total from the counts it told when the program gave none. */
 export function tokenRow(tokens: TurnTokens | null | undefined) {
-  if (!tokens) return { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, totalTokens: null };
+  if (!tokens) return { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, totalTokens: null, model: null };
   const told = [tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite].filter((n): n is number => n !== null);
-  return { inputTokens: tokens.input, outputTokens: tokens.output, cacheReadTokens: tokens.cacheRead, cacheWriteTokens: tokens.cacheWrite, totalTokens: tokens.total ?? told.reduce((a, n) => a + n, 0) };
+  return { inputTokens: tokens.input, outputTokens: tokens.output, cacheReadTokens: tokens.cacheRead, cacheWriteTokens: tokens.cacheWrite, totalTokens: tokens.total ?? told.reduce((a, n) => a + n, 0), model: tokens.model ?? null };
 }
 
 const summed = (column: AnyPgColumn) => sql<number>`coalesce(sum(${column}), 0)`.mapWith(Number);
@@ -77,6 +77,19 @@ export async function tokensBySubscription(db: Db, companyId: string, now: numbe
     for (const [id, sum] of found[i]!) out.set(id, { ...(out.get(id) ?? noPeriods()), [period]: sum });
   });
   return out;
+}
+
+/* What each model a subscription's turns ran on used in the last 30 days, the most first; null for turns whose model is
+   not known. A turn that told no tokens counts for none. */
+export type ModelTokens = { model: string | null; total: number };
+
+export async function tokensByModel(db: Db, companyId: string, subscriptionId: string, now: number): Promise<ModelTokens[]> {
+  const rows = await db
+    .select({ model: turnTokens.model, total: summed(turnTokens.totalTokens) })
+    .from(turnTokens)
+    .where(and(eq(turnTokens.companyId, companyId), eq(turnTokens.subscriptionId, subscriptionId), gte(turnTokens.at, new Date(now - 30 * DAY_MS)), isNotNull(turnTokens.totalTokens)))
+    .groupBy(turnTokens.model);
+  return rows.filter(row => row.total > 0).sort((a, b) => b.total - a.total || (a.model ?? '').localeCompare(b.model ?? ''));
 }
 
 const add = (a: TokenSum, b: TokenSum): TokenSum => ({

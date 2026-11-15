@@ -8,6 +8,7 @@ CREATE TABLE "turn_tokens" (
 	"cache_read_tokens" bigint,
 	"cache_write_tokens" bigint,
 	"total_tokens" bigint,
+	"model" text,
 	"at" timestamp with time zone NOT NULL,
 	CONSTRAINT "turn_tokens_counts" CHECK (coalesce("turn_tokens"."input_tokens", 0) >= 0 and coalesce("turn_tokens"."output_tokens", 0) >= 0 and coalesce("turn_tokens"."cache_read_tokens", 0) >= 0 and coalesce("turn_tokens"."cache_write_tokens", 0) >= 0 and coalesce("turn_tokens"."total_tokens", 0) >= 0)
 );

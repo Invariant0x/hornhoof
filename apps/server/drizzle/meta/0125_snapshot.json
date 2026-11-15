@@ -1,5 +1,5 @@
 {
-  "id": "6367b267-3a31-471e-b023-e36dbc407e50",
+  "id": "f56a03d6-cbce-43a1-849b-9b9a95daa556",
   "prevId": "a49d3c54-bb45-401e-a4b6-336e32e62bb8",
   "version": "7",
   "dialect": "postgresql",
@@ -16025,6 +16025,12 @@
         "total_tokens": {
           "name": "total_tokens",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
