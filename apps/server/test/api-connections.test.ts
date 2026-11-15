@@ -64,7 +64,7 @@ describe('connecting an API that is paid by the token', () => {
     const res = await addKey(app, ceo, custom({ baseUrl: 'https://llm.acme.example/v1/' }));
     expect(res.statusCode).toBe(201);
     const shown = res.json().subscription;
-    expect(shown).toMatchObject({ provider: 'custom_api', label: 'Acme LLM', last4: 'Q7R8', api: { baseUrl: 'https://llm.acme.example/v1', protocol: 'openai' }, models: OWN });
+    expect(shown).toMatchObject({ provider: 'custom_api', label: 'Acme LLM', last4: 'Q7R8', api: { baseUrl: 'https://llm.acme.example/v1', protocol: 'openai' }, models: OWN, target: { kind: 'any', id: null } });
     expect(await rowOf(app, shown.id)).toMatchObject({ baseUrl: 'https://llm.acme.example/v1', apiProtocol: 'openai' });
   });
 
@@ -78,6 +78,7 @@ describe('connecting an API that is paid by the token', () => {
     await post(app, ceo, '/api/subscriptions/connect', { providers: ['claude'] });
     const plan = (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { provider: string }) => s.provider === 'claude');
     expect(plan.api).toBeNull();
+    expect(plan.target).toBeNull();
   });
 
   it('refuses a compatible API without its address or protocol, a sign-in in the address, and an address or protocol a provider does not take', async () => {
@@ -122,7 +123,7 @@ describe('connecting an API that is paid by the token', () => {
     const models = [...OWN, { id: 'qwen-3-coder', name: 'Qwen 3 Coder' }];
     const res = await app.inject({ method: 'PATCH', url: `/api/subscriptions/${id}`, payload: { models, label: 'Acme models', target: { kind: 'orchestrator' } }, ...as(ceo) });
     expect(res.statusCode).toBe(200);
-    expect(res.json().subscription).toMatchObject({ label: 'Acme models', models, place: { kind: 'company' } });
+    expect(res.json().subscription).toMatchObject({ label: 'Acme models', models, place: { kind: 'company' }, target: { kind: 'orchestrator', id: null } });
     expect(await rowOf(app, id)).toMatchObject({ label: 'Acme models', models, targetKind: 'orchestrator' });
     const tooMany = Array.from({ length: 101 }, (_, i) => ({ id: `m-${i}`, name: `M ${i}` }));
     expect((await app.inject({ method: 'PATCH', url: `/api/subscriptions/${id}`, payload: { models: tooMany }, ...as(ceo) })).statusCode).toBe(400);

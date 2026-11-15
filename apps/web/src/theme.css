@@ -706,6 +706,17 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .plan-steps li.now > span:first-child { font-weight: 600; }
 .plan-steps li p { margin: 0; }
 .key-form { max-width: 640px; }
+.api-form { max-width: 760px; }
+.api-models .model-list, .api-models .model-found { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; min-width: 0; }
+.api-models .model-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding-block: 4px; border-block-end: 1px solid var(--line); min-width: 0; }
+.api-models .model-list .nm { min-width: 0; overflow-wrap: anywhere; }
+.api-models .model-list small { display: block; color: var(--muted); font-size: 12.5px; }
+.api-models .model-found { max-block-size: 260px; overflow-y: auto; scrollbar-gutter: stable; padding-inline-end: 4px; }
+.api-models .model-found label { display: flex; align-items: flex-start; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.api-models .field { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.api-models .field > :is(label, .label) { padding-block-start: 0; }
+.api-models .model-actions, .api-models .model-add { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.api-models .model-add input { flex: 1 1 12em; min-width: 0; }
 .ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ask span { flex: 1 1 280px; }
 .test { display: grid; gap: 6px; }
@@ -732,6 +743,9 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
 /* A machine whose nodes are not the server's build waits for its owner to update them. */
 .badge.old { color: var(--amber-ink); }
+.badge.pay-plan { color: var(--cyan-ink); }
+.badge.pay-tokens { color: var(--amber-ink); }
+.nmg + .badge { margin-inline-end: 6px; }
 /* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
 .ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; }
 .ast.work { color: var(--cyan-ink); }

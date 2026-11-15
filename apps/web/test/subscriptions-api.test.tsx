@@ -39,7 +39,7 @@ describe('Subscriptions & API', () => {
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
     const rows = () => screen.getAllByRole('row').slice(1);
-    expect(within(rows().find(r => r.textContent!.startsWith('Claude'))!).getByText(plan)).toHaveClass('badge');
+    expect(within(screen.getByRole('row', { name: /^Claude\b/ })).getByText(plan)).toHaveClass('badge');
     expect(within(rows().find(r => r.textContent!.includes('WXYZ'))!).getByText(tokens)).toHaveClass('badge');
     fireEvent.click(within(screen.getByRole('group', { name: payment })).getByRole('button', { name: new RegExp(`^${tokens}`) }));
     expect(rows().map(r => r.textContent!.includes('By tokens') || r.textContent!.includes('По токенам'))).toEqual([true, true]);

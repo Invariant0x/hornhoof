@@ -22,7 +22,7 @@ const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('
 
 async function openList(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(tab(name));
-  await user.click(await screen.findByRole('button', { name: name === 'Subscriptions' ? 'Open the card of Claude' : 'Open the card of ivan-mbp' }));
+  await user.click(await screen.findByRole('button', { name: name === 'Subscriptions & API' ? 'Open the card of Claude' : 'Open the card of ivan-mbp' }));
 }
 
 describe("an employee's inbox in its window", () => {
@@ -39,7 +39,7 @@ describe("an employee's inbox in its window", () => {
     });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await openList(user, 'Subscriptions');
+    await openList(user, 'Subscriptions & API');
     await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
     return { calls, user, window: await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' }) };
   }
@@ -79,7 +79,7 @@ describe("an employee's inbox in its window", () => {
 });
 
 describe('one agent window', () => {
-  it.each(['Subscriptions', 'Machines'])('shows an error when opening from %s while the company cannot load', async name => {
+  it.each(['Subscriptions & API', 'Machines'])('shows an error when opening from %s while the company cannot load', async name => {
     const agents = [{ ...RUNNING_AGENTS[0]!, canOpen: true }];
     mockApi({
       'GET /api/org': [503, { error: { code: 'internal', message: 'Company temporarily unavailable' } }],
@@ -95,7 +95,7 @@ describe('one agent window', () => {
     expect(screen.getByText('Company temporarily unavailable')).toHaveFocus();
   });
 
-  it.each(['Subscriptions', 'Machines'])('leaves inaccessible agents as text in %s', async name => {
+  it.each(['Subscriptions & API', 'Machines'])('leaves inaccessible agents as text in %s', async name => {
     const agents = [{ ...RUNNING_AGENTS[0]!, canOpen: false }, { ...RUNNING_AGENTS[1]!, canOpen: true }];
     mockApi({
       'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents }] }],
@@ -109,7 +109,7 @@ describe('one agent window', () => {
     expect(screen.getByRole('button', { name: 'Open Vera' })).toBeInTheDocument();
   });
 
-  it.each(['Subscriptions', 'Machines'])('opens a working or sleeping employee from %s and sends a personal message', async name => {
+  it.each(['Subscriptions & API', 'Machines'])('opens a working or sleeping employee from %s and sends a personal message', async name => {
     const calls = company(false);
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
@@ -120,7 +120,7 @@ describe('one agent window', () => {
     await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/agents/b1/messages', body: { text: 'Please check the cart' } }));
   });
 
-  it.each(['Subscriptions', 'Machines'])('opens the working employee from %s', async name => {
+  it.each(['Subscriptions & API', 'Machines'])('opens the working employee from %s', async name => {
     company(true);
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
@@ -133,7 +133,7 @@ describe('one agent window', () => {
     company(false);
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await openList(user, 'Subscriptions');
+    await openList(user, 'Subscriptions & API');
     await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
     const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
     await user.type(within(window).getByRole('textbox'), 'Draft');
@@ -157,7 +157,7 @@ describe('one agent window', () => {
     });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await openList(user, 'Subscriptions');
+    await openList(user, 'Subscriptions & API');
     await user.click(screen.getByRole('button', { name: 'Open Orchestrator' }));
     await act(async () => {
       answer([200, ORG]);

@@ -148,7 +148,7 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
     render(<Shell me={ME} onSignOut={() => {}} />);
 
     const navButtons = within(screen.getByRole('navigation')).getAllByRole('button').map(b => b.textContent);
-    expect(navButtons).toEqual(['Map', 'Tasks', 'People', 'Subscriptions', 'Machines']);
+    expect(navButtons).toEqual(['Map', 'Tasks', 'People', 'Subscriptions & API', 'Machines']);
 
     await user.click(screen.getByRole('button', { name: 'Account' }));
     await user.click(screen.getByRole('button', { name: 'Outbound' }));

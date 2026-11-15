@@ -15,8 +15,8 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     const words = lang === 'en'
-      ? { subscriptions: 'Subscriptions', machines: 'Machines', card: 'Open the card of', open: 'Open Bruno', privateOpen: 'Open Private agent', task: 'Task', back: 'Back to conversation', close: 'Close' }
-      : { subscriptions: 'Подписки', machines: 'Машины', card: 'Открыть карточку', open: 'Открыть: Bruno', privateOpen: 'Открыть: Private agent', task: 'Задача', back: 'К переписке', close: 'Закрыть' };
+      ? { subscriptions: 'Subscriptions & API', machines: 'Machines', card: 'Open the card of', open: 'Open Bruno', privateOpen: 'Open Private agent', task: 'Task', back: 'Back to conversation', close: 'Close' }
+      : { subscriptions: 'Подписки и API', machines: 'Машины', card: 'Открыть карточку', open: 'Открыть: Bruno', privateOpen: 'Открыть: Private agent', task: 'Задача', back: 'К переписке', close: 'Закрыть' };
     for (const source of ['subscriptions', 'machines'] as const) {
       await page.goto('/');
       await page.getByRole('navigation').getByRole('button', { name: words[source], exact: true }).click();

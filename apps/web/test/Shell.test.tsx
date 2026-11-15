@@ -35,12 +35,12 @@ describe('Shell', () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
-    expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions', 'Machines']);
+    expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions & API', 'Machines']);
     expect(decl('.tabs button + button', 'border-left')).toBe('1px solid var(--line)');
     expect(decl('.tabs button.on', 'background')).toBe('var(--glow)');
-    await user.click(screen.getByRole('button', { name: 'Subscriptions' }));
-    expect(await screen.findByRole('heading', { name: 'Subscriptions' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Subscriptions' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: 'Subscriptions & API' }));
+    expect(await screen.findByRole('heading', { name: 'Subscriptions & API' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Subscriptions & API' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('keeps a page from showing under the floating top bar as it scrolls, while the map still runs under it', async () => {
@@ -48,7 +48,7 @@ describe('Shell', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     expect(screen.getByRole('main')).not.toHaveClass('page');
-    for (const name of ['Tasks', 'People', 'Subscriptions', 'Machines']) {
+    for (const name of ['Tasks', 'People', 'Subscriptions & API', 'Machines']) {
       await user.click(tab(name));
       expect(screen.getByRole('main')).toHaveClass('page');
     }

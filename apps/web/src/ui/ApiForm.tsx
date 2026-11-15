@@ -1,0 +1,231 @@
+import { useState, type FormEvent } from 'react';
+import { api } from '../api';
+import { deptLabel, errorText, useT } from '../i18n';
+import { useOrg } from '../org';
+import type { ModelOption, SubView } from '../types';
+import { subName } from './subscription';
+import { BusyLabel } from './BusyLabel';
+import { Field } from './Field';
+
+/* A company connects an API paid by the token, and changes its name, models and the place it serves: company scope
+   alone, as the server checks. The key goes to the server once and never comes back; changing a connection asks for it no
+   more. */
+
+const PROVIDERS = ['anthropic_api', 'openai_api', 'openrouter', 'custom_api'] as const;
+type ApiProvider = (typeof PROVIDERS)[number];
+type Protocol = 'anthropic' | 'openai';
+type Model = Pick<ModelOption, 'id' | 'name'>;
+type Target = { kind: 'any' | 'orchestrator' } | { kind: 'department' | 'team'; id: string };
+
+/* How many listed models the form shows at once; the search finds the rest. */
+const SHOWN = 100;
+
+const targetValue = (target: Target) => ('id' in target ? `${target.kind}:${target.id}` : target.kind);
+function targetOf(value: string): Target {
+  const [kind, id] = value.split(':');
+  return id && (kind === 'department' || kind === 'team') ? { kind, id } : { kind: kind === 'orchestrator' ? 'orchestrator' : 'any' };
+}
+const startTarget = (sub?: SubView): Target => {
+  const target = sub?.target;
+  if (target && target.id && (target.kind === 'department' || target.kind === 'team')) return { kind: target.kind, id: target.id };
+  return { kind: target?.kind === 'orchestrator' ? 'orchestrator' : 'any' };
+};
+const ownModels = (sub?: SubView): Model[] => (sub?.models ?? []).map(({ id, name }) => ({ id, name }));
+const isApi = (provider: string): provider is ApiProvider => (PROVIDERS as readonly string[]).includes(provider);
+
+function ScopeField({ value, onChange }: { value: string; onChange(value: string): void }) {
+  const t = useT();
+  const { org } = useOrg();
+  return (
+    <Field label={t.subs.apiServes}>
+      {p => (
+        <select {...p} className="sel" value={value} onChange={e => onChange(e.target.value)}>
+          <option value="any">{t.subs.serves.any}</option>
+          <option value="orchestrator">{t.subs.serves.orchestrator}</option>
+          {(org?.departments ?? []).map(d => (
+            <optgroup key={d.id} label={deptLabel(t, d)}>
+              <option value={`department:${d.id}`}>{deptLabel(t, d)}</option>
+              {d.teams.map(team => <option key={team.id} value={`team:${team.id}`}>{`${deptLabel(t, d)}, ${team.name}`}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+}
+
+/* The models the connection runs: the ones kept, the API's list to tick from, and an id written by hand. */
+function ModelsField({ models, setModels, load }: { models: Model[]; setModels(models: Model[]): void; load(): Promise<Model[]> }) {
+  const t = useT();
+  const [listed, setListed] = useState<Model[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const kept = new Set(models.map(m => m.id));
+  const toggle = (model: Model) => setModels(kept.has(model.id) ? models.filter(m => m.id !== model.id) : [...models, model]);
+  const add = () => {
+    const id = typed.trim();
+    if (id && !kept.has(id)) setModels([...models, { id, name: id }]);
+    setTyped('');
+  };
+  async function ask() {
+    setBusy(true);
+    setProblem(null);
+    try {
+      setListed(await load());
+    } catch (err) {
+      setProblem(errorText(t, err));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const found = (listed ?? []).filter(m => `${m.id} ${m.name}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, SHOWN);
+  return (
+    <div className="field">
+      <span className="label">{t.subs.apiModels}</span>
+      <div className="field-control api-models">
+        {models.length ? (
+          <ul className="model-list">
+            {models.map(m => (
+              <li key={m.id}>
+                <span className="nm"><b>{m.name}</b>{m.name !== m.id && <small>{m.id}</small>}</span>
+                <button className="btn ghost small" type="button" aria-label={t.subs.removeModel(m.name)} onClick={() => toggle(m)}>{t.subs.remove}</button>
+              </li>
+            ))}
+          </ul>
+        ) : <span className="hint">{t.subs.noModels}</span>}
+        <span className="hint">{t.subs.apiModelsHint}</span>
+        <div className="model-actions">
+          <button className="btn ghost" type="button" aria-busy={busy} disabled={busy} onClick={() => void ask()}>
+            <BusyLabel busy={busy} idle={t.subs.loadModels} working={t.subs.loadingModels} />
+          </button>
+        </div>
+        {problem && <p className="alert" role="alert">{problem}</p>}
+        {listed && (
+          <>
+            <span className="hint">{t.subs.modelsFound(listed.length)}</span>
+            {listed.length > 12 && <input type="search" aria-label={t.subs.findModel} placeholder={t.subs.findModel} value={query} onChange={e => setQuery(e.target.value)} />}
+            <ul className="model-found">
+              {found.map(m => (
+                <li key={m.id}>
+                  <label><input type="checkbox" checked={kept.has(m.id)} onChange={() => toggle(m)} /><span>{m.name}</span></label>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <Field label={t.subs.modelId}>
+          {p => (
+            <div className="model-add">
+              <input {...p} className="mono" autoComplete="off" spellCheck={false} value={typed} onChange={e => setTyped(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+              <button className="btn ghost" type="button" disabled={!typed.trim()} onClick={add}>{t.subs.addModel}</button>
+            </div>
+          )}
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+/* A new connection: its service, name, key, and for a compatible API its address and protocol. */
+function NewFields({ form, set }: { form: NewForm; set(patch: Partial<NewForm>): void }) {
+  const t = useT();
+  return <>
+    <Field label={t.subs.apiService}>
+      {p => (
+        <select {...p} className="sel" value={form.provider} onChange={e => set({ provider: e.target.value as ApiProvider })}>
+          {PROVIDERS.map(provider => <option key={provider} value={provider}>{t.subs.apiProviders[provider]}</option>)}
+        </select>
+      )}
+    </Field>
+    <Field label={t.subs.apiKey} hint={t.subs.apiIntro}>
+      {p => <input {...p} className="mono" type="password" autoComplete="off" spellCheck={false} value={form.apiKey} onChange={e => set({ apiKey: e.target.value })} />}
+    </Field>
+    {form.provider === 'custom_api' && (
+      <Field label={t.subs.apiAddress} hint={t.subs.apiAddressHint}>
+        {p => <input {...p} type="url" inputMode="url" autoComplete="off" spellCheck={false} value={form.baseUrl} onChange={e => set({ baseUrl: e.target.value })} />}
+      </Field>
+    )}
+    {(form.provider === 'custom_api' || form.provider === 'openrouter') && (
+      <Field label={t.subs.apiProtocol}>
+        {p => (
+          <select {...p} className="sel" value={form.protocol} onChange={e => set({ protocol: e.target.value as Protocol })}>
+            <option value="anthropic">{t.subs.protocols.anthropic}</option>
+            <option value="openai">{t.subs.protocols.openai}</option>
+          </select>
+        )}
+      </Field>
+    )}
+  </>;
+}
+
+type NewForm = { provider: ApiProvider; apiKey: string; baseUrl: string; protocol: Protocol };
+
+/* sub: the connection to change; without it the form connects a new one. */
+export function ApiForm({ sub, onSaved, onCancel }: { sub?: SubView; onSaved(sub: SubView): void; onCancel(): void }) {
+  const t = useT();
+  const editing = Boolean(sub);
+  const [fresh, setFresh] = useState<NewForm>({ provider: 'anthropic_api', apiKey: '', baseUrl: '', protocol: 'anthropic' });
+  const [label, setLabel] = useState(sub?.label ?? '');
+  const [scope, setScope] = useState(targetValue(startTarget(sub)));
+  const [models, setModels] = useState<Model[]>(ownModels(sub));
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const set = (patch: Partial<NewForm>) => setFresh(was => ({ ...was, ...patch }));
+  const custom = fresh.provider === 'custom_api';
+  const title = sub ? t.subs.editApiLabel(subName(t, sub)) : t.subs.connectApi;
+
+  async function load(): Promise<Model[]> {
+    if (sub) return (await api.post<{ models: Model[] }>(`/api/subscriptions/${sub.id}/models`)).models;
+    const where = custom ? { baseUrl: fresh.baseUrl.trim(), protocol: fresh.protocol } : {};
+    return (await api.post<{ models: Model[] }>('/api/subscriptions/models', { provider: fresh.provider, apiKey: fresh.apiKey.trim(), ...where })).models;
+  }
+
+  function body() {
+    const target = targetOf(scope);
+    if (sub) return { label: label.trim(), target, models };
+    return {
+      kind: 'api_key', provider: fresh.provider, label: label.trim(), apiKey: fresh.apiKey.trim(), target,
+      ...(custom ? { baseUrl: fresh.baseUrl.trim() } : {}),
+      ...(custom || fresh.provider === 'openrouter' ? { protocol: fresh.protocol } : {}),
+      ...(models.length ? { models } : {}),
+    };
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      const { subscription } = sub
+        ? await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, body())
+        : await api.post<{ subscription: SubView }>('/api/subscriptions', body());
+      onSaved(subscription);
+    } catch (err) {
+      setProblem(errorText(t, err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = label.trim() && (editing || (fresh.apiKey.trim().length >= 8 && (!custom || fresh.baseUrl.trim())));
+  return (
+    <form className="key-form form-grid api-form" aria-label={title} onSubmit={e => void save(e)}>
+      {!editing && <NewFields form={fresh} set={set} />}
+      <Field label={t.subs.apiName}>
+        {p => <input {...p} autoComplete="off" maxLength={80} value={label} onChange={e => setLabel(e.target.value)} />}
+      </Field>
+      {(editing ? sub && isApi(sub.provider) : true) && <ModelsField models={models} setModels={setModels} load={load} />}
+      <ScopeField value={scope} onChange={setScope} />
+      {problem && <p className="alert" role="alert">{problem}</p>}
+      <div className="form-foot">
+        <button className="btn" type="submit" aria-busy={busy} disabled={busy || !ready}>
+          <BusyLabel busy={busy} idle={editing ? t.subs.saveChanges : t.subs.saveApi} working={editing ? t.subs.savingChanges : t.subs.savingApi} />
+        </button>
+        <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+      </div>
+    </form>
+  );
+}
