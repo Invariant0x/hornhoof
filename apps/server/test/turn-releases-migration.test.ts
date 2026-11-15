@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
+import { MIGRATIONS } from '../src/db/client.js';
 import { agents, people, subscriptions } from '../src/db/schema.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { appOn, TEST_API_KEY } from './helpers.js';
@@ -113,6 +114,8 @@ describe('turns become releases', () => {
 
   it('wakes the head the planned work went to at the next check of lost wakes', async () => {
     const client = await migrated();
+    /* The server that wakes it runs on every later migration too, as an upgrade applies them all. */
+    await migrate(drizzle(client), { migrationsFolder: MIGRATIONS });
     const { app, db } = await appOn(client);
     /* Its employees on the company's key, on the machine Hornhoof keeps, ready to run. */
     const [owner] = await db.insert(people).values({ companyId: ACME, name: 'Owner', email: 'owner@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();

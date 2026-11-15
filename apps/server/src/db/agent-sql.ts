@@ -83,7 +83,7 @@ const DEPARTMENT_SETTINGS = [...REPOSITORY, 'owner_person_id', 'autonomous_relea
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 /* How urgent work is changes only through the CEO's route and tools, which keep a tree of tasks as urgent as its top. */
-const URGENCY: Record<string, string[]> = { tasks: ['urgent'], teams: ['urgent_only'], companies: ['autonomous_release'] };
+const URGENCY: Record<string, string[]> = { tasks: ['urgent'], teams: ['urgent_only'] };
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
 /* Whether the orchestrator's own SQL may change this column: what its role is granted below, said once more for

@@ -15,6 +15,9 @@
 # "schema.table.column". STUB_LED words name the databases that once led the company. STUB_STATE/volume-gone is there
 # once the database's volume is removed. STUB_STATE/slots holds the replication slots of the database, one a line; a
 # drop empties it unless STUB_SLOTS_STAY is set.
+# STUB_NETWORKS: the project's networks as they were made, "plain" by a compose file that named no subnets or "subnets"
+# by one that did; STUB_STATE/networks holds how they are now, "none" once compose's down removed them. STUB_SUBNET_BUILDS
+# names the builds whose compose file names the subnets.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
 word() {
   local key=$1 w
@@ -110,6 +113,24 @@ services_in() {
     return
   fi
   for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done
+}
+# The networks a compose file makes: with the subnets when it names them.
+networks_in() { if grep -q HORNHOOF_SUBNET "$1" 2> /dev/null; then echo subnets; else echo plain; fi; }
+# An up makes the networks its file asks for when there are none. Compose takes networks made otherwise for changed and
+# removes them to make them again, which it cannot while other containers are on them, so it starts nothing.
+networks_up() {
+  local nets="$STUB_STATE/networks" asks
+  [ -n "${STUB_NETWORKS:-}" ] || return 0
+  [ -f "$nets" ] || printf '%s' "$STUB_NETWORKS" > "$nets"
+  asks=$(networks_in "$1")
+  case "$(cat "$nets")" in
+    none) printf '%s' "$asks" > "$nets" ;;
+    "$asks") ;;
+    *)
+      [ -z "${STUB_COMPOSE_SAYS:-}" ] || printf '%s\n' "$STUB_COMPOSE_SAYS" >&2
+      echo 'Error response from daemon: error while removing network: network hornhoof_default id 3f1e9a has active endpoints' >&2
+      return 1 ;;
+  esac
 }
 case "$1 $2" in
   # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server,
@@ -303,6 +324,10 @@ case "$1 $2" in
       # STUB_PULL=images: the app image comes, the other images of its compose file do not.
       compose)
         case " $* " in
+          *' down '*) [ -z "${STUB_NETWORKS:-}" ] || printf 'none' > "$STUB_STATE/networks" ;;
+          *' up '*) networks_up "$(compose_file "$@")" || exit 1 ;;
+        esac
+        case " $* " in
           *' pull '*)
             printf 'pull with HORNHOOF_VERSION=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_VERSION:-}" "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
             [ "${STUB_PULL:-ok}" = images ] && { echo "manifest unknown" >&2; exit 1; } ;;
@@ -325,9 +350,13 @@ case "$1 $2" in
           *' up '*' updater '*)
             printf 'updater up HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
             case "${STUB_UPDATER_UP:-ok}" in
-              never) exit 1 ;;
+              never) [ -z "${STUB_COMPOSE_SAYS:-}" ] || printf '%s\n' "$STUB_COMPOSE_SAYS" >&2; exit 1 ;;
               fail) [ -n "${HORNHOOF_UPDATER_REF:-}" ] || exit 1 ;;
             esac ;;
+          # Every service of the compose file, with the images compose is told. STUB_ALL_UP=fail: they do not start.
+          *' up -d --no-build ')
+            printf 'all up HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
+            [ "${STUB_ALL_UP:-ok}" != fail ] || exit 1 ;;
         esac ;;
       pull)
         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
@@ -443,6 +472,16 @@ if [ -z "\${HORNHOOF_UPDATER_REV:-}" ]; then
       exit 0 ;;
   esac
 fi
+# Its compose cannot make the networks again while other containers are on them, so the build does not start.
+if [ -n "${STUB_NETWORKS:-}" ]; then
+  [ -f "$STUB_STATE/networks" ] || printf '%s' "$STUB_NETWORKS" > "$STUB_STATE/networks"
+  if grep -q HORNHOOF_SUBNET "\$HORNHOOF_COMPOSE_FILE"; then asks=subnets; else asks=plain; fi
+  case "\$(cat "$STUB_STATE/networks")" in
+    none) printf '%s' "\$asks" > "$STUB_STATE/networks" ;;
+    "\$asks") ;;
+    *) echo 'Hornhoof did not start: network hornhoof_default has active endpoints' >&2; exit 1 ;;
+  esac
+fi
 printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s HORNHOOF_UPDATER_REV=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" "\${HORNHOOF_UPDATER_REV:-}" >> "$STUB_LOG"
 # front holds the web port from a build that has it on, so a build without it cannot take the port.
 case ",$(build_services "$tag")," in
@@ -459,7 +498,11 @@ SCRIPT
           *:/app/apps/server/drizzle/meta/_journal.json)
             jq -n --argjson n "$(word "$tag" ${STUB_MIGRATIONS:-} | grep -E '^[0-9]+$' || echo 0)" '{entries: [range($n) | {idx: .}]}' > "$3" ;;
           # The build's name in a comment, so services_in can tell whose file it is.
-          *:/app/compose.yaml) printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
+          *:/app/compose.yaml)
+            printf '# build %s\nservices: {}\n' "$tag" > "$3"
+            case " ${STUB_SUBNET_BUILDS:-} " in
+              *" $tag "*) printf 'networks:\n  default:\n    ipam:\n      config:\n        - subnet: ${HORNHOOF_SUBNET:-10.200.0.0/24}\n' >> "$3" ;;
+            esac ;;
           # The overlay a worker adds. STUB_NO_OVERLAY names builds that have none.
           *:/app/compose.worker.yaml)
             case " ${STUB_NO_OVERLAY:-} " in *" $tag "*) exit 1 ;; esac

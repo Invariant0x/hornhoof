@@ -852,7 +852,7 @@ worker_core() {
   WANT_WEB=$CORE_PORT
   reserve_ports
   say "Starting the company's core on this machine, in $SERVER_DIR."
-  if [ -n "$SUBNET_MOVED" ]; then compose_step "${COMPOSE[@]}" down || true; fi
+  if [ -n "$SUBNET_MOVED" ]; then compose_step "${COMPOSE[@]}" down --remove-orphans || true; fi
   start_keeper_and_front "${COMPOSE[@]}"
   compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
   web=$(port_of "$env_file")
@@ -2000,6 +2000,12 @@ choose_subnets() {
     { [ -n "$LIVE_INTERNAL_SUBNET" ] && [ "$LIVE_INTERNAL_SUBNET" != "$int_sub" ]; }; then
     SUBNET_MOVED=1
   fi
+  # Networks made before compose.yaml named their subnets have none in .env. Compose takes them for changed and cannot
+  # make them again while other containers are on them, so they are made again here, with their subnets when those
+  # stay free.
+  if [ -n "$LIVE_DEFAULT_SUBNET$LIVE_INTERNAL_SUBNET" ] && { [ -z "$(env_value HORNHOOF_SUBNET)" ] || [ -z "$(env_value HORNHOOF_INTERNAL_SUBNET)" ]; }; then
+    SUBNET_MOVED=1
+  fi
   CHOSEN_DEFAULT_SUBNET=$def_sub
   CHOSEN_INTERNAL_SUBNET=$int_sub
 }
@@ -2134,6 +2140,7 @@ start_keeper_and_front() {
       sub_moved=$((sub_moved + 1))
       continue
     fi
+    if held_networks; then return 0; fi
     port=$(refused_port "$STEP_OUTPUT")
     [ -n "$port" ] || start_failed
     if [ "$moved" -ge 5 ] || ! port_is_new "$port"; then
@@ -2159,13 +2166,45 @@ compose_step() {
 
 start_failed() {
   if [ -n "$FROM_UPDATER" ]; then fail "Hornhoof did not start."; fi
+  networks_failed
   fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+}
+
+# A network compose.yaml asks for otherwise than Docker made it, even with the same subnet, as one made before the file
+# named its subnets, compose removes to make it again, which Docker refuses while containers are on it that this up does
+# not start: the built-in node, the updater, a tunnel the file names no more. A run by hand then stops the project whole
+# and makes its networks again, once: NETWORKS_MAY_REMAKE says it still may, and NETWORKS_HELD that a step was refused so.
+NETWORKS_MAY_REMAKE=''
+NETWORKS_HELD=''
+held_networks() {
+  [ -n "$NETWORKS_MAY_REMAKE" ] || return 1
+  case "$STEP_OUTPUT" in *'has active endpoints'*) NETWORKS_HELD=1 ;; *) return 1 ;; esac
+}
+
+# remake_networks <compose command...>: the built-in node hears that it stops for an update, then the project stops whole
+# with its networks and the containers of services its file no longer names, its data staying in its volumes. The next
+# up makes the networks as compose.yaml asks, with the subnets .env names.
+remake_networks() {
+  NETWORKS_MAY_REMAKE=''
+  prepare_builtin_stop "$@"
+  compose_step "$@" down --remove-orphans || true
+}
+
+# What a person reads when Docker still keeps a network of this server after the project stopped whole: something outside
+# it is on that network.
+networks_failed() {
+  local project
+  [ -z "$FROM_UPDATER" ] || return 0
+  case "$STEP_OUTPUT" in *'has active endpoints'*) ;; *) return 0 ;; esac
+  project=$(server_project)
+  fail "Hornhoof did not start: Docker would not make the networks of this server again, as containers outside it are still on them. Stop the containers on the networks ${project}_default and ${project}_internal, then run this command again."
 }
 
 # The app waits for migrate, so compose runs it first and a failed start may be the database not reaching this build.
 # Older versions of Compose 2 say "didn't completed", so the check stops before that word.
 start_app() {
   compose_step "$@" && return 0
+  if held_networks; then return 0; fi
   case "$STEP_OUTPUT" in
     *'"migrate" didn'*) fail "Hornhoof could not bring its database up to this build. Run docker compose logs migrate in $SERVER_DIR to see why." ;;
   esac
@@ -2173,27 +2212,43 @@ start_app() {
 }
 
 # The old build never runs on a schema it does not know, so the app stops first. The keeper and front start before it
-# comes back, so the maintenance answer is up while migrate runs.
+# comes back, so the maintenance answer is up while migrate runs. Run by hand, it makes the project's networks again
+# first when their subnets move, or once when compose says it cannot make one again while containers are on it.
 start_server_services() {
-  local sub_moved=0
   say "Starting Hornhoof${FROM_UPDATER:+ ${PIN:-latest}}."
   if [ -n "$NODES_ONLY" ]; then
     replace_named_nodes "$@"
     return 0
   fi
-  if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
-    prepare_builtin_stop "$@"
-    compose_step "$@" down || true
+  if [ -z "$FROM_UPDATER" ]; then
+    NETWORKS_MAY_REMAKE=1
+    if [ -n "$SUBNET_MOVED" ]; then remake_networks "$@"; fi
   fi
+  NETWORKS_HELD=''
+  start_services "$@"
+  [ -n "$NETWORKS_HELD" ] || return 0
+  say "Docker keeps the networks of this server as they were made while containers are on them, so Hornhoof stops for a moment and makes them again."
+  remake_networks "$@"
+  NETWORKS_HELD=''
+  start_services "$@"
+}
+
+# start_services <compose command...>: the services in their order. A step compose refused as held_networks says ends it
+# early, with NETWORKS_HELD set.
+start_services() {
+  local sub_moved=0
   (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
   until compose_step "$@" up -d --no-build --remove-orphans --wait db; do
     if [ "$sub_moved" -lt 5 ] && subnet_overlap_error "$STEP_OUTPUT" && retry_subnet_overlap "$@"; then
       sub_moved=$((sub_moved + 1))
       continue
     fi
+    if held_networks; then return 0; fi
+    networks_failed
     fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
   done
   start_keeper_and_front "$@"
+  [ -z "$NETWORKS_HELD" ] || return 0
   if [ -n "$FROM_UPDATER" ]; then
     if nodes_stay "$@"; then
       start_app "$@" up -d --no-build app
@@ -2206,6 +2261,7 @@ start_server_services() {
   fi
   if nodes_stay "$@"; then
     start_app "$@" up -d --no-build app updater
+    [ -z "$NETWORKS_HELD" ] || return 0
     node_unchanged "$@" || say "The updater replaces the built-in node and the other nodes on this computer when what they run has ended."
   else
     prepare_builtin_stop "$@"
@@ -2384,7 +2440,7 @@ worker_core_update() {
   reserve_ports
   say "Starting the company's core${PIN:+ $PIN}."
   if [ -z "$FROM_UPDATER" ] && [ -n "$SUBNET_MOVED" ]; then
-    compose_step "${COMPOSE[@]}" down || true
+    compose_step "${COMPOSE[@]}" down --remove-orphans || true
     compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
     return 0
   fi

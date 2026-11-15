@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agents, companies, tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
+import { agents, departments, tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { loadTask } from '../src/modules/tasks/engine.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
@@ -23,7 +23,7 @@ async function released(options: { record?: boolean; tag?: string; at?: string; 
   await round();
   const run = await f.fullRun();
   /* With autonomous release on, a release every commit of which was checked is approved by the log, by no person. */
-  if (options.autonomous) await f.db.update(companies).set({ autonomousRelease: true }).where(eq(companies.id, f.task.companyId));
+  if (options.autonomous) await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
   else await f.approve();
   if (options.record !== false) expect((await f.recordRelease({ runId: run.id })).isError).toBe(false);
   f.repo.heads.main = f.R;
@@ -161,7 +161,7 @@ describe('the server closes a turn by the tag of its release', () => {
   });
 
   it.each([
-    ['the CEO turned autonomous release off', async (f: Awaited<ReturnType<typeof released>>) => { await f.db.update(companies).set({ autonomousRelease: false }).where(eq(companies.id, f.task.companyId)); }],
+    ['the department turned autonomous release off', async (f: Awaited<ReturnType<typeof released>>) => { await f.db.update(departments).set({ autonomousRelease: false }).where(eq(departments.id, f.task.departmentId!)); }],
     ['a checker it relied on was switched off', async (f: Awaited<ReturnType<typeof released>>) => { await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id)); }],
   ])('keeps the turn of an autonomously approved release open, and tells them, when %s before the tag', async (_what, change) => {
     const f = await released({ autonomous: true });
