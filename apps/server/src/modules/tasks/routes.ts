@@ -196,6 +196,14 @@ async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string
   return task && seesTask(viewer, task) ? task.id : null;
 }
 
+/* Whether the department keeps a repository, so its turn comes out as a release; one without has nothing to release, and its
+   work stays outside releases. Only the yes or no, never the repository. */
+async function releasesTurns(db: Db, departmentId: string | null): Promise<boolean> {
+  if (!departmentId) return false;
+  const [department] = await db.select({ repoUrl: departments.repoUrl }).from(departments).where(eq(departments.id, departmentId));
+  return !!department?.repoUrl;
+}
+
 /* Turns show to the whole company, each with the department it belongs to: the open one gets its release ready, a closed one
    is the release its tag made. The words they were laid out from only reach people with the full view. */
 async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
@@ -210,6 +218,7 @@ async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
     commit: turn.commit,
     baseVersion: turn.baseVersion,
     departmentId: turn.departmentId,
+    releases: await releasesTurns(db, turn.departmentId),
     messages: viewer.full ? turn.messages.map(({ by, text, at }) => ({ by, text, at })) : [],
     taskId: await turnTask(db, turn, viewer),
     startedAt: (turn.openedAt ?? turn.createdAt).toISOString(),

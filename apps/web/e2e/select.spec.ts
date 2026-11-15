@@ -274,7 +274,9 @@ test('keeps the department choice and the search box inside a 375 px phone scree
   await page.getByRole('button', { name: /^Tasks/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible();
 
-  /* The department choice is a select since the tracker shows goals: a long name stays inside it. */
+  /* The department choice is a select since the tracker shows goals: a long name stays inside it. It is picked by
+     department, not on what is in progress. */
+  await page.getByRole('radio', { name: 'By department' }).check({ force: true });
   const department = page.getByRole('combobox', { name: 'Department' });
   for (const name of [LONG_DEPT.name, "The orchestrator's own work"]) {
     await department.selectOption({ label: name });
@@ -315,6 +317,7 @@ test('keeps the department choice and the search box inside a 375 px phone scree
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
   await page.getByRole('button', { name: /^Tasks/ }).click();
+  await page.getByRole('radio', { name: 'By department' }).check({ force: true });
   await page.getByRole('combobox', { name: 'Department' }).selectOption({ label: LONG_DEPT.name });
   await expectChoiceInside(page, false);
 });

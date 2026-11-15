@@ -461,9 +461,9 @@ describe('decisions read failure', () => {
 /* The screen answers at a glance where the person is needed (the Design department's review of the tracker, #889). */
 describe('the tracker at a glance', () => {
   it.each([
-    ['en', /^Tasks/, 'At a glance', ['1 Waiting for your answer', '1 Going on now', '2 Ready for release'], 'Nothing waits for your answer'],
-    ['ru', /^Задачи/, 'Коротко', ['1 Ждут вашего ответа', '1 Идут сейчас', '2 Готово к выпуску'], 'Вашего ответа ничего не ждет'],
-  ])('counts under the heading what waits for the answer of the person, what goes on now and what is ready for release (%s)', async (lang, tasks, label, tiles, calm) => {
+    ['en', /^Tasks/, 'At a glance', ['1 Waiting for your answer', '1 Going on now', '2 Ready for release']],
+    ['ru', /^Задачи/, 'Коротко', ['1 Ждут вашего ответа', '1 Идут сейчас', '2 Готово к выпуску']],
+  ])('counts under the heading what waits for the answer of the person, what goes on now and what is ready for release (%s)', async (lang, tasks, label, tiles) => {
     localStorage.setItem('hh-lang', lang);
     try {
       const user = userEvent.setup();
@@ -472,13 +472,19 @@ describe('the tracker at a glance', () => {
       const summary = await screen.findByRole('list', { name: label });
       await waitFor(() => expect(within(summary).getAllByRole('listitem').map(tile => tile.textContent)).toEqual(tiles));
       expect(within(summary).getAllByRole('listitem')[0]).toHaveClass('you');
+      expect(within(summary).getAllByRole('listitem')[0]).not.toHaveClass('calm');
     } finally {
       localStorage.removeItem('hh-lang');
     }
+  });
+
+  it.each([
+    ['en', /^Tasks/, 'At a glance', '0 Nothing waits for your answer'],
+    ['ru', /^Задачи/, 'Коротко', '0 Вашего ответа ничего не ждет'],
+  ])('says calmly when nothing waits for the answer of the person (%s)', async (lang, tasks, label, calm) => {
     localStorage.setItem('hh-lang', lang);
     try {
       const user = userEvent.setup();
-      document.body.innerHTML = '';
       shell({ 'GET /api/requests': [200, decisions([])] });
       await user.click(await screen.findByRole('button', { name: tasks }));
       const first = within(await screen.findByRole('list', { name: label })).getAllByRole('listitem')[0]!;
@@ -707,9 +713,9 @@ describe('cards for the person', () => {
 
   it.each([
     ['en', 'A version was marked without a release', 'Version v1.7.0 was marked in the code, but its release was not recorded and approved beforehand. So the tasks of Turn 24 are not counted as released, and the turn stays open. The head of the department was told.',
-      'Version v1.7.1 was marked in the code, but the full check or the approval its release relied on no longer holds.', 'Turn 23 is over', 'Turn 23 came out as version v1.6.0. What went into it is under “By turn and release”.', 'Open task'],
+      'Version v1.7.1 was marked in the code, but the full check or the approval its release relied on no longer holds.', 'Turn 23 is over', 'Turn 23 came out as version v1.6.0. What went into it is under “Turns and releases”.', 'Open task'],
     ['ru', 'Версия отмечена без записи выпуска', 'Версия v1.7.0 отмечена в коде, но ее выпуск не был записан и одобрен заранее. Поэтому задачи хода 24 не считаются выпущенными, и ход остается открытым. Глава отдела уже знает.',
-      'Версия v1.7.1 отмечена в коде, но полная проверка или одобрение, на которых держался ее выпуск, больше не действуют.', 'Ход 23 закончен', 'Ход 23 вышел версией v1.6.0. Что в него вошло, видно в разделе «По ходам и выпускам».', 'Открыть задачу'],
+      'Версия v1.7.1 отмечена в коде, но полная проверка или одобрение, на которых держался ее выпуск, больше не действуют.', 'Ход 23 закончен', 'Ход 23 вышел версией v1.6.0. Что в него вошло, видно в разделе «Ходы и выпуски».', 'Открыть задачу'],
   ])('shows a version marked without a release and a turn that is over in plain words, and opens the task (%s)', async (lang, tagTitle, tagWords, staleWords, summaryTitle, summaryWords, open) => {
     localStorage.setItem('hh-lang', lang);
     try {

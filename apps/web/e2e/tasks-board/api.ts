@@ -1,11 +1,12 @@
 import type { Page } from '@playwright/test';
 import { taskRoute } from '../../test/task-route';
-import type { BacklogItem, Me, Org, TaskDepartments, TaskLine, TurnView } from '../../src/types';
+import type { BacklogItem, Decisions, Me, Org, TaskDepartments, TaskLine, TurnView } from '../../src/types';
 import { detail, ME, serveApi } from '../api';
 
 /* A company of two departments and the orchestrator's own work, with 138 tasks: Development runs turn 3 with six goals,
-   each with three related tasks of six tasks each, plans turn 4, finished turn 2, and has urgent work outside turns; Sales
-   runs turn 5. The person has Development of their own, so its list for later turns shows; Sales they only read. */
+   each with three related tasks of six tasks each, finished turn 2 as release v1.2.0, and has urgent work outside turns that
+   waits for the person's answer; Sales, with no repository, runs turn 5 outside releases. The person has Development of their
+   own, so its list for later turns shows; Sales they only read. */
 export const DEV = { id: 'd2', name: 'Development' };
 export const SALES = { id: 'd3', name: 'Sales' };
 const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: { en: 'Developer', ru: 'Разработчик' } };
@@ -65,6 +66,18 @@ function company(): TaskLine[] {
 
 export const TASKS = company();
 
+/* The head of development asks the person on the urgent goal outside turns. */
+const SIGN_IN = TASKS.find(x => x.title === 'Fix the sign-in page')!;
+export const QUESTION = 'Keep the old sign-in address for a month, or switch at once?';
+const DECISIONS: Decisions = {
+  requests: [{
+    id: 'r1', kind: 'question', text: QUESTION, commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false,
+    at: '2026-11-14T10:00:00.000Z', agent: { id: HANA.id, name: HANA.name }, task: { id: SIGN_IN.id, number: SIGN_IN.number, title: SIGN_IN.title, department: DEV },
+    ownerPersonId: ME.person.id, canAnswer: true,
+  }],
+  proposals: [], machineAccess: [], counts: { byPerson: { [ME.person.id]: 1 }, byAgent: { [HANA.id]: 1 }, total: 1 },
+};
+
 const item = (id: string, title: string, text: string): BacklogItem => ({ id, departmentId: DEV.id, title, text, by: { id: 'p1', name: 'Ivan' }, at: '2026-11-14T10:00:00.000Z' });
 
 /* Serves the screen to the CEO: every department, Development of their own. reads: the task lists the page asked for. */
@@ -79,6 +92,7 @@ export async function serveTasksBoard(page: Page, me: Me = ME) {
     if (path === '/api/org') return route.fulfill({ json: ORG });
     if (path === '/api/turns') return route.fulfill({ json: { turns: TURNS } });
     if (path === '/api/task-departments') return route.fulfill({ json: places });
+    if (path === '/api/requests') return route.fulfill({ json: DECISIONS });
     if (path === '/api/tasks') {
       reads.push(url.search);
       return route.fulfill({ json: { tasks: TASKS } });

@@ -1,30 +1,40 @@
 import { useId, useState, type ReactNode } from 'react';
 import { useT } from '../i18n';
-import { goalStatus, type Goal, type HumanStatus, type Split } from '../task-board';
+import { askingTask, goalStatus, stateOf, type Asks, type Goal, type HumanStatus, type Split } from '../task-board';
 import type { TaskLine } from '../types';
 
 /* How a card opens its task and names where it is: its department or product. asksYou: whether an open question on a task is
-   the person's to answer. */
-export type CardRows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string; asksYou?: (taskId: string) => boolean };
+   the person's to answer; question: the words of that question. */
+export type CardRows = {
+  selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string; asksYou?: Asks; question?: (taskId: string) => string | null;
+};
 
-/* The colours of a state as the task lists already draw them. */
+/* The colours of a state as the task lists already draw them; the person's own answer in the colour of attention. */
 const STATE_CLASS: Record<HumanStatus, string> = {
-  notStarted: 'open', working: 'working', review: 'review', waiting: 'waiting', waitingYou: 'waiting', stopped: 'blocked', paused: 'blocked', done: 'done', cancelled: 'cancelled',
+  notStarted: 'open', working: 'working', review: 'review', waiting: 'waiting', waitingYou: 'you', stopped: 'blocked', paused: 'blocked', done: 'done', cancelled: 'cancelled',
 };
 
 function Chevron() {
   return <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>;
 }
 
-/* How far a task is, as a bar and in words. */
-function Progress({ value }: { value: number }) {
+/* A state in plain words, marked when it waits for the person. */
+function StateChip({ status }: { status: HumanStatus }) {
   const t = useT();
-  const percent = Math.round(value * 100);
-  const label = t.tasks.board.progress(percent);
   return (
-    <div className="goal-progress">
-      <span className="turn-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-        <i style={{ width: `${percent}%` }} />
+    <span className={`tstate ${STATE_CLASS[status]}`}>
+      {status === 'waitingYou' && <b aria-hidden="true">!</b>}
+      <span>{t.tasks.board.statuses[status]}</span>
+    </span>
+  );
+}
+
+/* How much of a whole is done, in whole goals or tasks, as a bar and in words. */
+export function Progress({ done, total, label, wide = false }: { done: number; total: number; label: string; wide?: boolean }) {
+  return (
+    <div className={`goal-progress${wide ? ' wide' : ''}`}>
+      <span className="turn-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
+        <i style={{ inlineSize: `${total ? (done / total) * 100 : 0}%` }} />
       </span>
       <small aria-hidden="true">{label}</small>
     </div>
@@ -32,7 +42,7 @@ function Progress({ value }: { value: number }) {
 }
 
 /* A button that shows or hides what follows it, with its state for screen readers. */
-function Fold({ open, onToggle, children }: { open: boolean; onToggle: () => void; children: ReactNode }) {
+export function Fold({ open, onToggle, children }: { open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
     <button className="goal-fold" type="button" aria-expanded={open} onClick={onToggle}>
       <Chevron />
@@ -41,47 +51,79 @@ function Fold({ open, onToggle, children }: { open: boolean; onToggle: () => voi
   );
 }
 
-/* One task as a card: its title, what it does and why, its state in plain words, where it is, who has it and how far it
-   is. The related tasks under it stay folded until one click opens them as a compact list of cards of their own, each
-   with its state, holder and progress on one line. within: the place of the card a related task is in, which it names
-   only when its own differs. */
-export function GoalCard({ goal, rows, within }: { goal: Goal; rows: CardRows; within?: string }) {
+/* A task in one short line: its state, its title to open it and who has it. The work under it is not unfolded here; a link
+   opens the task with it. */
+export function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
+  const t = useT();
+  const { task } = goal;
+  const open = () => rows.onOpenTask(task.id);
+  return (
+    <li className={`goal-row${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
+      <StateChip status={stateOf(goal, rows.asksYou)} />
+      <button className="linkish goal-row-title" type="button" onClick={open}>{task.title}</button>
+      <span className="goal-row-who">{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
+      {goal.children.length > 0 && <button className="linkish goal-row-open" type="button" onClick={open}>{t.tasks.board.openTask}</button>}
+    </li>
+  );
+}
+
+/* Tasks in short lines, one under another. */
+export function GoalRows({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
+  if (!goals.length) return null;
+  return <ul className="goal-rows">{goals.map(goal => <GoalRow key={goal.task.id} goal={goal} rows={rows} />)}</ul>;
+}
+
+/* What waits for the person on a goal: the words of the question, which a button opens to answer. */
+function AskBlock({ question }: { question: string | null }) {
+  const t = useT();
+  const id = useId();
+  return (
+    <div className="goal-ask" role="group" aria-labelledby={id}>
+      <b id={id}>{t.tasks.board.askHead}</b>
+      {question && <p>{question}</p>}
+    </div>
+  );
+}
+
+/* One goal as a card: its title, what it does and why, its state in plain words, where it is, who has it and how many of
+   its related tasks are done. A goal whose work waits for the person's answer is framed, with the question and a button to
+   the task that asks. The related tasks stay folded until one click opens them as short lines. */
+export function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const { task } = goal;
-  const status = goalStatus(goal, rows.asksYou?.(task.id) ?? false);
+  const asking = askingTask(goal, rows.asksYou);
+  const status = goalStatus(goal, asking !== null);
   const place = rows.place(task);
-  const related = within !== undefined;
-  const Title = related ? 'h4' : 'h3';
-  const progress = <Progress value={goal.progress} />;
   return (
-    <article className={`goal${related ? ' sub' : ''}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
+    <article className={`goal${asking ? ' you' : ''}${rows.selected === task.id ? ' on' : ''}`} aria-label={`#${task.number} ${task.title}`}>
       <div className="goal-head">
-        <Title className="goal-title">
+        <h3 className="goal-title">
           <button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button>
-        </Title>
+        </h3>
         <span className="goal-no">#{task.number}</span>
       </div>
       {task.brief && <p className="goal-brief">{task.brief}</p>}
       <div className="goal-meta">
-        <span className={`tstate ${STATE_CLASS[status]}`}>{t.tasks.board.statuses[status]}</span>
+        <StateChip status={status} />
         {task.urgent && <span className="badge urgent">{t.tasks.board.urgent}</span>}
-        {place && place !== within && <span className="badge goal-place">{place}</span>}
-        {!related && <span>{task.turn === null ? t.tasks.board.outsideTurns : t.tasks.turn(task.turn)}</span>}
+        {place && <span className="badge goal-place">{place}</span>}
+        <span>{task.turn === null ? t.tasks.board.outsideTurns : t.tasks.turn(task.turn)}</span>
         <span>{task.assignee ? t.tasks.board.assignee(task.assignee.name) : t.tasks.board.noAssignee}</span>
-        {related && progress}
       </div>
-      {!related && progress}
+      {asking && <AskBlock question={rows.question?.(asking.id) ?? null} />}
+      {goal.total > 0 && <Progress done={goal.done} total={goal.total} label={t.tasks.board.progress(goal.done, goal.total)} />}
       {goal.children.length > 0 && (
         <>
           <Fold open={open} onToggle={() => setOpen(!open)}>{t.tasks.board.related(goal.done, goal.total)}</Fold>
           {open && (
             <ul className="goal-subs">
-              {goal.children.map(child => <li key={child.task.id}><GoalCard goal={child} rows={rows} within={place} /></li>)}
+              {goal.children.map(child => <GoalRow key={child.task.id} goal={child} rows={rows} />)}
             </ul>
           )}
         </>
       )}
+      {asking && <button className="btn small goal-answer" type="button" onClick={() => rows.onOpenTask(asking.id)}>{t.tasks.board.openTask}</button>}
     </article>
   );
 }

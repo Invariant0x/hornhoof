@@ -7,11 +7,12 @@ import { BUILTIN_SKINS, builtinSkin } from '../../src/skins/registry';
 import type { Skin } from '../../src/skins/roles';
 import { builtinFile } from '../../src/skins/validate';
 import { captureWith } from '../capture';
-import { serveTasksBoard, TASKS } from './api';
+import { QUESTION, serveTasksBoard, TASKS } from './api';
 
-/* The tracker as a person meets it: the goals of every department with their related tasks folded under them, three views
-   to switch, a department to pick, a search, and what is over folded apart. 138 tasks never spill into one long list. Shots
-   of every built-in skin and one of a person's own, at a desk and on a phone, also mirrored right to left, go to
+/* The tracker as a person meets it: three numbers at a glance, the goals of every department with the one that waits for the
+   person's answer first and their related tasks folded under them as short lines, three views to switch, a department to
+   pick by department and by release, a search, and what is over folded apart. 138 tasks never spill into one long list.
+   Shots of every built-in skin and one of a person's own, at a desk and on a phone, also mirrored right to left, go to
    HH_SCREENSHOT_DIR when it is set. */
 
 const MESSAGES: Record<Language, Messages> = { en, ru };
@@ -33,9 +34,10 @@ async function open(page: Page, lang: Language, width: number, skin = 'cyberpunk
 }
 
 const board = (page: Page, t: Messages) => page.getByRole('region', { name: t.tasks.board.label });
-/* Cards at the top of what shows, and cards of related tasks unfolded under them. */
-const goals = (page: Page) => page.locator('article.goal:not(.sub)');
-const related = (page: Page) => page.locator('article.goal.sub');
+/* Cards at the top of what shows, and the short lines of related tasks unfolded under them. */
+const goals = (page: Page) => page.locator('article.goal');
+const related = (page: Page) => page.locator('.goal-subs > .goal-row');
+const row = (page: Page, number: number) => page.getByRole('listitem', { name: `#${number} ${TASKS.find(x => x.number === number)!.title}`, exact: true });
 const card = (page: Page, number: number) => page.getByRole('article', { name: `#${number} ${TASKS.find(x => x.number === number)!.title}`, exact: true });
 const sideways = (page: Page) => page.getByRole('main').evaluate(el => el.scrollWidth - el.clientWidth);
 const goalOf = (title: string) => TASKS.find(x => x.title === title)!;
@@ -57,28 +59,45 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     const view = page.getByRole('group', { name: t.tasks.board.view });
     await expect(view.getByRole('radio', { name: t.tasks.board.views.active })).toBeChecked();
 
-    /* In progress: the goals alone, the related tasks folded. */
+    /* At a glance: one goal waits for the person's answer, seven go on now, nothing is ready for release yet. */
+    const summary = page.getByRole('list', { name: t.tasks.board.summary.label });
+    await expect(summary.getByRole('listitem')).toHaveText([`1 ${t.tasks.board.summary.you}`, `7 ${t.tasks.board.summary.running}`, `0 ${t.tasks.board.summary.ready}`]);
+
+    /* In progress: the goals alone, the related tasks folded, the one that waits for the person first with the question. */
     await expect(goals(page)).toHaveCount(9);
     await expect(related(page)).toHaveCount(0);
+    const signIn = card(page, goalOf('Fix the sign-in page').number);
+    await expect(goals(page).first()).toHaveAttribute('aria-label', `#${goalOf('Fix the sign-in page').number} Fix the sign-in page`);
+    await expect(signIn).toContainText(t.tasks.board.statuses.waitingYou);
+    await expect(signIn.getByRole('group', { name: t.tasks.board.askHead })).toContainText(QUESTION);
+    await expect(signIn).toContainText(t.tasks.board.urgent);
+    await expect(signIn).toContainText(t.tasks.board.outsideTurns);
     const payments = card(page, goalOf('Take card payments').number);
     await expect(payments).toContainText('Take card payments: what it does for the shop and why it is needed.');
     await expect(payments).toContainText(t.tasks.board.statuses.working);
     await expect(payments).toContainText('Development');
     await expect(payments).toContainText(t.tasks.board.assignee('Hana'));
-    await expect(payments.getByRole('progressbar', { name: t.tasks.board.progress(67) })).toBeVisible();
-    await expect(card(page, goalOf('Fix the sign-in page').number)).toContainText(t.tasks.board.urgent);
-    await expect(card(page, goalOf('Fix the sign-in page').number)).toContainText(t.tasks.board.outsideTurns);
+    await expect(payments.getByRole('progressbar', { name: t.tasks.board.progress(1, 3) })).toHaveAttribute('aria-valuemax', '3');
+    await expect(payments.getByRole('button', { name: t.tasks.board.openTask })).toHaveCount(0);
+    /* A department names where a goal is, in the neutral colour, not in the colour of attention. */
+    const badge = payments.locator('.badge.goal-place');
+    expect(await badge.evaluate(el => getComputedStyle(el).color)).toBe(await page.locator('.goal-no').first().evaluate(el => getComputedStyle(el).color));
+    await expect(page.getByRole('combobox', { name: t.tasks.department })).toHaveCount(0);
     await capture(page, info, `active-${lang}`);
 
-    /* One click opens the related tasks of a goal, another the work under one of them, and the first folds them all again. */
+    /* One click opens the related tasks of a goal as short lines; the work under one of them is not unfolded here, a link
+       opens its task. Another click folds them again. */
     const fold = payments.getByRole('button', { name: t.tasks.board.related(1, 3) });
     await expect(fold).toHaveAttribute('aria-expanded', 'false');
     await fold.click();
     await expect(related(page)).toHaveCount(3);
-    const build = card(page, goalOf('Build: take card payments').number);
-    await expect(build.getByRole('progressbar', { name: t.tasks.board.progress(50) })).toBeVisible();
-    await build.getByRole('button', { name: t.tasks.board.related(3, 6) }).click();
-    await expect(related(page)).toHaveCount(9);
+    const build = row(page, goalOf('Build: take card payments').number);
+    await expect(build).toContainText(t.tasks.board.statuses.working);
+    await expect(build).toContainText(t.tasks.board.assignee('Bruno'));
+    await expect(build).not.toContainText('what it does for the shop');
+    await expect(build.getByRole('progressbar')).toHaveCount(0);
+    await expect(build.getByRole('button', { name: /^Related tasks|^Сопутствующие/ })).toHaveCount(0);
+    await expect(build.getByRole('button', { name: t.tasks.board.openTask })).toBeVisible();
     await capture(page, info, `unfolded-${lang}`);
     await fold.click();
     await expect(related(page)).toHaveCount(0);
@@ -88,7 +107,13 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await expect(goals(page)).toHaveCount(11);
     await expect(card(page, goalOf('Old checkout').number)).toContainText(t.tasks.board.statuses.done);
 
-    /* One department at a time, the orchestrator's own work among them for someone with the whole company. */
+    /* By department: every department under its own name, with what is in progress in it; one department at a time, the
+       orchestrator's own work among them for someone with the whole company. */
+    await view.getByRole('radio', { name: t.tasks.board.views.departments }).check({ force: true });
+    const sections = board(page, t).getByRole('heading', { level: 2 });
+    await expect(sections).toHaveText(['Development', 'Sales', t.tasks.board.orchestrator]);
+    await expect(board(page, t).getByRole('region', { name: 'Development' })).toContainText(t.tasks.board.inProgress(7));
+    await capture(page, info, `departments-${lang}`);
     const department = page.getByRole('combobox', { name: t.tasks.department });
     await department.selectOption({ label: 'Sales' });
     await expect(goals(page)).toHaveCount(1);
@@ -97,22 +122,30 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     await expect(goals(page)).toHaveCount(1);
     await department.selectOption({ label: t.tasks.board.allDepartments });
 
-    /* By department: every department under its own name, with what is in progress in it. */
-    await view.getByRole('radio', { name: t.tasks.board.views.departments }).check({ force: true });
-    const sections = board(page, t).getByRole('heading', { level: 2 });
-    await expect(sections).toHaveText(['Development', 'Sales', t.tasks.board.orchestrator]);
-    await expect(board(page, t).getByRole('region', { name: 'Development' })).toContainText(t.tasks.board.inProgress(7));
-    await capture(page, info, `departments-${lang}`);
-
-    /* By turn and release: what gets ready for release, the work outside releases, and what came out folded. */
+    /* Turns and releases: the next release of Development getting ready with its goals counted, the release out already
+       folded to a line, and on its own choice the work outside releases. */
     await view.getByRole('radio', { name: t.tasks.board.views.releases }).check({ force: true });
-    await expect(sections).toHaveText([t.tasks.board.preparing(3), t.tasks.board.preparing(5), t.tasks.board.outside, t.tasks.board.released(2, 'v1.2.0')]);
-    await expect(card(page, goalOf('Old checkout').number)).toHaveCount(0);
+    await expect(board(page, t).getByText(t.tasks.board.relsWhy)).toBeVisible();
+    await expect(sections).toHaveText([t.tasks.board.preparing(3, 'v1.2.0'), t.tasks.board.closedReleases]);
+    const next = board(page, t).getByRole('region', { name: t.tasks.board.preparing(3, 'v1.2.0') });
+    await expect(next.getByRole('progressbar', { name: t.tasks.board.goalsDone(0, 7) })).toHaveAttribute('aria-valuemax', '7');
+    await expect(next.getByRole('listitem')).toHaveCount(7);
+    const closed = board(page, t).getByRole('region', { name: t.tasks.board.closedReleases });
+    await expect(closed.getByRole('listitem')).toHaveCount(0);
+    await closed.getByRole('button', { name: new RegExp(`${t.tasks.board.released(2, 'v1.2.0')}.*${t.tasks.board.relCount(1)}`) }).click();
+    await expect(row(page, goalOf('Old checkout').number)).toContainText(t.tasks.board.statuses.done);
     await expect(board(page, t).getByText(t.tasks.board.pickDepartment)).toBeVisible();
     await department.selectOption({ label: 'Development' });
     await expect(page.getByRole('table', { name: t.backlog.heading })).toContainText('Gift cards for shops');
     await capture(page, info, `releases-${lang}`);
     await department.selectOption({ label: t.tasks.board.allDepartments });
+    const show = board(page, t).getByRole('group', { name: t.tasks.board.show });
+    await show.getByRole('radio', { name: t.tasks.board.showOutside }).check({ force: true });
+    await expect(goals(page)).toHaveCount(2);
+    await expect(card(page, goalOf('Call the shop owners back').number)).toBeVisible();
+    await expect(next).toHaveCount(0);
+    await show.getByRole('radio', { name: t.tasks.board.showReleases }).check({ force: true });
+    await expect(next).toBeVisible();
 
     /* A search looks through every task, the related ones too, by number or words. */
     const deep = goalOf('Part 4 of build');
@@ -126,6 +159,23 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     /* One read of all the tasks the person reads, whatever view or department shows. */
     expect([...new Set(served.reads)]).toEqual(['?status=all']);
+  });
+
+  /* On a phone the three views stand as three equal tabs in one row, a long name wrapping inside its own tab. */
+  test(`shows what is in progress on a phone, the three views as equal tabs: ${lang} 375`, async ({ page }, info) => {
+    const t = MESSAGES[lang];
+    await serveTasksBoard(page);
+    await open(page, lang, 375);
+    await expect(goals(page).first()).toHaveAttribute('aria-label', `#${goalOf('Fix the sign-in page').number} Fix the sign-in page`);
+    const tabs = await page.getByRole('group', { name: t.tasks.board.view }).locator('label').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ y: r.y, width: r.width })));
+    expect(tabs).toHaveLength(3);
+    for (const tab of tabs) {
+      expect(Math.abs(tab.y - tabs[0]!.y)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(tab.width - tabs[0]!.width)).toBeLessThanOrEqual(1);
+    }
+    expect(await sideways(page)).toBeLessThanOrEqual(0);
+    await inside(page, t);
+    await capture(page, info, `active-${lang}-375`);
   });
 }
 
