@@ -5,7 +5,7 @@ import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { ApprovalPolicyView, AutonomousReleaseEntry, Org } from '../src/types';
 import { ME, serveApi } from './api';
-import { around, focusRing, heights, offences } from './owner-screens-look';
+import { around, focusRing, offences, sizes } from './owner-screens-look';
 import type { Measured } from './owner-screens-sizes';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
@@ -198,7 +198,7 @@ const OWNER_LOOKS: Look[] = [
   { lang: 'en', skin: 'light', width: 1440, dir: 'rtl' },
   { lang: 'ru', skin: 'cyberpunk', width: 375, dir: 'rtl' },
 ];
-const PIECES = { owner: '.appr-owner', rules: '.appr-rules', rule: '.appr-rule', limit: '.appr-limit', release: '.appr-auto' };
+const PIECES = { owner: '.appr-owner', rules: '.appr-rules', rule: '.appr-rule', limit: '.appr-limit', save: '.appr-limit .btn', release: '.appr-auto', state: '.appr-auto-toggle .status' };
 
 for (const { lang, skin, width, dir } of OWNER_LOOKS) {
   const mode = skin === 'light' ? 'light' : `dark ${skin}`;
@@ -222,7 +222,7 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await fitsTheScreen(page, width);
     const words = { danger: [], groups: '.appr-limit' };
     expect.soft(await offences(part, words)).toEqual([]);
-    const measured: Measured[] = [{ browser: browserName, look, screen: 'approvals', heights: await heights(part, PIECES) }];
+    const measured: Measured[] = [{ browser: browserName, look, screen: 'approvals', sizes: await sizes(part, PIECES) }];
     await page.locator('.dv-drawer').screenshot({ path: info.outputPath(`approvals-panel-off-${look}-${browserName}.png`) });
 
     /* The keyboard reaches the switch and shows where it is. */
@@ -240,8 +240,8 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await expect(part.getByText('d7a1eb2b34edb970a2c5abbaadf25e50d4dc4031')).toBeVisible();
     await fitsTheScreen(page, width);
     expect.soft(await offences(part, words)).toEqual([]);
-    measured.push({ browser: browserName, look, screen: 'approvals on', heights: await heights(part, PIECES) });
-    writeFileSync(info.outputPath('heights.json'), JSON.stringify(measured));
+    measured.push({ browser: browserName, look, screen: 'approvals on', sizes: await sizes(part, PIECES) });
+    writeFileSync(info.outputPath('sizes.json'), JSON.stringify(measured));
     await page.locator('.dv-drawer').screenshot({ path: info.outputPath(`approvals-panel-on-${look}-${browserName}.png`) });
     expect(errors).toEqual([]);
   });

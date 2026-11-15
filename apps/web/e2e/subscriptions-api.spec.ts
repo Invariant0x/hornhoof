@@ -10,7 +10,7 @@ import { tokenCount } from '../src/ui/token-count';
 import { CARD } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
 import { box, brokenHeaderWords, serveApi, tableFits } from './api';
-import { around, focusRing, heights, markClear, offences, tabsWhole, wholePage } from './owner-screens-look';
+import { around, focusRing, markClear, offences, sizes, tabsWhole, wholePage } from './owner-screens-look';
 import type { Measured } from './owner-screens-sizes';
 
 /* One section holds the plans and the APIs paid by the token: each says how it is paid, the table filters by it and shows
@@ -308,10 +308,10 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await expect(page.getByRole('heading', { level: 1, name: t.subs.heading, exact: true })).toBeVisible();
     await page.evaluate(async () => { await document.fonts.ready; });
     const section = page.locator('section.subs');
-    const pieces = { head: '.people-head', tools: '.tools', table: '.tbl' };
+    const pieces = { head: '.people-head', connect: '.head-actions > .btn', tools: '.tools', table: '.tbl' };
     expect(await tabsWhole(page)).toEqual([]);
     expect.soft(await offences(section, { danger: [], groups: '.head-actions' })).toEqual([]);
-    const measured: Measured[] = [{ browser: browserName, look, screen: 'subscriptions', heights: await heights(section, pieces) }];
+    const measured: Measured[] = [{ browser: browserName, look, screen: 'subscriptions', sizes: await sizes(section, pieces) }];
     await wholePage(page, info.outputPath(`subs-list-${look}-${browserName}.png`));
 
     await page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn').click();
@@ -322,7 +322,7 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await expect(remove).toBeVisible();
     expect(await fits(page)).toBe(true);
     expect.soft(await offences(card, { danger: [t.subs.remove], groups: '.machine-actions' })).toEqual([]);
-    measured.push({ browser: browserName, look, screen: 'subscriptions card', heights: await heights(card, { side: '.blk-side', actions: '.machine-actions' }) });
+    measured.push({ browser: browserName, look, screen: 'subscriptions card', sizes: await sizes(card, { side: '.blk-side', actions: '.machine-actions', action: '.machine-actions > button' }) });
     await wholePage(page, info.outputPath(`subs-card-${look}-${browserName}.png`));
 
     /* The keyboard reaches Remove and shows where it is. */
@@ -345,8 +345,8 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await form.getByRole('checkbox', { name: 'Qwen 3 Coder', exact: true }).check();
     expect(await fits(page)).toBe(true);
     expect.soft(await offences(form, { danger: [], groups: '.form-foot' })).toEqual([]);
-    measured.push({ browser: browserName, look, screen: 'subscriptions form', heights: await heights(form, { fields: '.field' }) });
-    writeFileSync(info.outputPath('heights.json'), JSON.stringify(measured));
+    measured.push({ browser: browserName, look, screen: 'subscriptions form', sizes: await sizes(form, { fields: '.field', foot: '.form-foot > .btn' }) });
+    writeFileSync(info.outputPath('sizes.json'), JSON.stringify(measured));
     await form.getByRole('button', { name: t.common.cancel, exact: true }).scrollIntoViewIfNeeded();
     expect(await markClear(page)).toEqual([]);
     await page.screenshot({ path: info.outputPath(`subs-form-foot-${look}-${browserName}.png`) });

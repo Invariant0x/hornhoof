@@ -23,7 +23,7 @@ h1 { font-size: 26px; }
 h2 { font-size: 18px; }
 p { margin: 0; }
 a { color: var(--cyan-ink); }
-button, input, select, textarea { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; }
+button, input, select, textarea { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-rendering: inherit; }
 :focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* A number is typed as any text, with no arrows of the browser, so its field is the same in every browser. */
 input[type='number'] { -moz-appearance: textfield; appearance: textfield; }

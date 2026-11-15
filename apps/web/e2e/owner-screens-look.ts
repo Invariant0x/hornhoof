@@ -74,14 +74,20 @@ export async function offences(part: Locator, words: Words): Promise<string[]> {
   }, words);
 }
 
-/* The heights of a part's pieces in whole pixels, to compare one browser with another. Each piece found by its selector;
-   one found more than once is numbered. */
-export async function heights(part: Locator, pieces: Record<string, string>): Promise<Record<string, number>> {
+/* The heights and widths of a part's pieces in whole pixels, to compare one browser with another. Each piece found by
+   its selector; one found more than once is numbered. */
+export async function sizes(part: Locator, pieces: Record<string, string>): Promise<Record<string, number>> {
   return part.evaluate((root, pieces) => {
-    const out: Record<string, number> = { part: Math.round(root.getBoundingClientRect().height) };
+    const out: Record<string, number> = {};
+    const measure = (key: string, el: Element) => {
+      const box = el.getBoundingClientRect();
+      out[`${key} height`] = Math.round(box.height);
+      out[`${key} width`] = Math.round(box.width);
+    };
+    measure('part', root);
     for (const [key, selector] of Object.entries(pieces)) {
-      const found = root.matches(selector) ? [root] : [...root.querySelectorAll(selector)];
-      found.forEach((el, i) => { out[found.length > 1 ? `${key} ${i + 1}` : key] = Math.round(el.getBoundingClientRect().height); });
+      const found = [...root.querySelectorAll(selector)];
+      found.forEach((el, i) => measure(found.length > 1 ? `${key} ${i + 1}` : key, el));
     }
     return out;
   }, pieces);
