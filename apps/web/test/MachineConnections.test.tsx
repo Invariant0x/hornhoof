@@ -49,10 +49,56 @@ function show(language: 'en' | 'ru' = 'en', online = true) {
 }
 
 const heading = { en: 'Connection to the server', ru: 'Связь с сервером' };
+const SHOW_DETAILS = /^(Show technical details|Показать технические подробности)$/;
+/* The technical facts of the drops stay folded until a person asks for them. */
+const details = async () => fireEvent.click(await screen.findByRole('button', { name: SHOW_DETAILS }));
 
 afterEach(() => {
   localStorage.clear();
   vi.useRealTimers();
+});
+
+describe('what the card of a machine says first of its connection (#1027)', () => {
+  const away = event({ back: null, offlineMs: null }, [nodeDrop({ back: null, offlineMs: null })]);
+  it.each([
+    ['en', { summary: { drops: 0, averageMs: null, cause: null }, events: [] }, 'Stable', 'No drops so far. If the connection breaks, its time and cause appear here.'],
+    ['en', history({ summary: { drops: 0, averageMs: null, cause: null } }), 'Stable', 'No drops in the last 24 hours.'],
+    ['en', history(), 'Had drops', '5 drops in the last 24 hours, 40 s on average. Most often: the network cut the connection.'],
+    ['en', history({ summary: { drops: 1, averageMs: null, cause: 'network' }, events: [away] }), 'Offline now', '1 drop in the last 24 hours. Cause: the network cut the connection.'],
+    ['ru', { summary: { drops: 0, averageMs: null, cause: null }, events: [] }, 'Стабильна', 'Обрывов пока не было. Если связь прервется, здесь появятся время и причина.'],
+    ['ru', history(), 'Были обрывы', 'За сутки 5 обрывов, в среднем 40 с. Чаще всего: сеть оборвала соединение.'],
+    ['ru', history({ summary: { drops: 1, averageMs: null, cause: 'network' }, events: [away] }), 'Сейчас нет связи', 'За сутки 1 обрыв. Причина: сеть оборвала соединение.'],
+  ] as const)('says in a word whether it holds, then the day in a sentence, in %s: %s', async (language, answer, word, sentence) => {
+    mockApi({ [`GET ${PATH}`]: [200, answer] });
+    show(language);
+    const state = await screen.findByText(word);
+    expect(state).toHaveClass('status');
+    expect(state.closest('p')).toHaveTextContent(`${word} ${sentence}`);
+    expect(screen.getByRole('region', { name: heading[language] })).toContainElement(state);
+  });
+
+  it.each([
+    ['en', 'Offline for 40 s', 'The network cut the connection', 'Show technical details', 'Hide technical details', 'code 1006'],
+    ['ru', 'Без связи 40 с', 'Сеть оборвала соединение', 'Показать технические подробности', 'Скрыть технические подробности', 'код 1006'],
+  ] as const)('lists each drop as when, how long it was off and why, and folds the technical details until asked, in %s', async (language, off, cause, open, hide, code) => {
+    mockApi({ [`GET ${PATH}`]: [200, history()] });
+    show(language);
+    const line = within(await screen.findByRole('list')).getAllByRole('listitem')[0]!;
+    expect([...line.children].slice(0, 3).map(part => part.textContent)).toEqual([when(language), off, cause]);
+    expect(line).not.toHaveTextContent(code);
+    const toggle = screen.getByRole('button', { name: open });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(within(screen.getByRole('list')).getAllByRole('listitem')[0]).toHaveTextContent(code);
+    expect(screen.getByRole('button', { name: hide })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('offers no technical details where no drop has any', async () => {
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ closeCode: null })])] })] });
+    show();
+    await screen.findByRole('list');
+    expect(screen.queryByRole('button', { name: SHOW_DETAILS })).toBeNull();
+  });
 });
 
 describe('what the card of a machine says of its connection', () => {
@@ -145,11 +191,12 @@ describe('the drops the card of a machine lists', () => {
   const row = async () => within(await screen.findByRole('list')).getAllByRole('listitem')[0]!;
 
   it.each([
-    ['en', 'back after 40 s', 'The network cut the connection', 'code 1006'],
-    ['ru', 'вернулась через 40 с', 'Сеть оборвала соединение', 'код 1006'],
+    ['en', 'Offline for 40 s', 'The network cut the connection', 'code 1006'],
+    ['ru', 'Без связи 40 с', 'Сеть оборвала соединение', 'код 1006'],
   ] as const)('says when, for how long, why and with what code in %s', async (language, back, cause, code) => {
     mockApi({ [`GET ${PATH}`]: [200, history()] });
     show(language);
+    await details();
     const line = await row();
     expect(line).toHaveTextContent(when(language));
     expect(line).toHaveTextContent(back);
@@ -158,10 +205,10 @@ describe('the drops the card of a machine lists', () => {
   });
 
   it.each([
-    ['en', 999, 'back at once'],
-    ['ru', 999, 'вернулась сразу'],
-    ['en', 1000, 'back after 1 s'],
-    ['ru', 1000, 'вернулась через 1 с'],
+    ['en', 999, 'Offline for under a second'],
+    ['ru', 999, 'Без связи меньше секунды'],
+    ['en', 1000, 'Offline for 1 s'],
+    ['ru', 1000, 'Без связи 1 с'],
   ] as const)('says one that was over within a second was over at once, in %s, at %i ms', async (language, offlineMs, text) => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ offlineMs })] })] });
     show(language);
@@ -175,8 +222,8 @@ describe('the drops the card of a machine lists', () => {
   });
 
   it.each([
-    ['en', 'not back yet'],
-    ['ru', 'еще не вернулась'],
+    ['en', 'Still offline'],
+    ['ru', 'Связи пока нет'],
   ] as const)('marks one the machine is not back from in %s', async (language, text) => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ back: null, offlineMs: null }, [nodeDrop({ back: null, offlineMs: null })])] })] });
     show(language);
@@ -216,6 +263,7 @@ describe('the drops the card of a machine lists', () => {
   it('leaves out the words the server closed a socket with, which its cause says in the language of the screen', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'replaced' }, [nodeDrop({ cause: 'replaced', closeCode: 4000, closeReason: 'Replaced by a newer connection.' })])] })] });
     show('ru');
+    await details();
     const line = await row();
     expect(line).toHaveTextContent('код 4000');
     expect(line).not.toHaveTextContent('Replaced by a newer connection.');
@@ -224,6 +272,7 @@ describe('the drops the card of a machine lists', () => {
   it('shows the words a machine closed with and those of the error, as they are and never as markup', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'node_closed' }, [nodeDrop({ cause: 'node_closed', closeCode: 1002, closeReason: '<b>Bad frame</b>', error: 'Invalid WebSocket frame' })])] })] });
     show();
+    await details();
     const line = await row();
     expect(line).toHaveTextContent('code 1002');
     expect(line).toHaveTextContent('<b>Bad frame</b>');
@@ -232,14 +281,18 @@ describe('the drops the card of a machine lists', () => {
   });
 
   it('writes no empty line when there is nothing more to say of a drop', async () => {
-    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ closeCode: null })])] })] });
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ closeCode: null })]), event({ at: '2026-11-04T16:15:00.000Z' })] })] });
     show();
-    expect((await row()).querySelector('small')).toBeNull();
+    await details();
+    const [quiet, coded] = within(screen.getByRole('list')).getAllByRole('listitem');
+    expect(quiet!.querySelector('.mc-tech')).toBeNull();
+    expect(coded!.querySelector('.mc-tech')).toHaveTextContent('code 1006');
   });
 
   it('gives a code of zero, which is one', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ closeCode: 0 })])] })] });
     show();
+    await details();
     expect(await row()).toHaveTextContent('code 0');
   });
 
@@ -255,12 +308,14 @@ describe('the drops the card of a machine lists', () => {
   ] as const)('says how many connections broke together in %s', async (language, text) => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop(), nodeDrop({ nodeId: 'n2' }), nodeDrop({ nodeId: 'n3' })])] })] });
     show(language);
+    await details();
     expect(await row()).toHaveTextContent(text);
   });
 
   it('says nothing of a count for one connection', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history()] });
     show();
+    await details();
     expect(await row()).not.toHaveTextContent('connections');
   });
 
@@ -271,6 +326,7 @@ describe('the drops the card of a machine lists', () => {
     const said = report({ errorCode: 'ECONNRESET', error: 'read ECONNRESET', attempts: 3, dnsFailed: true, watchdogTimedOut: true, clockJumpMs: 120_000, networkChanged: true });
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ report: said })])] })] });
     show(language);
+    await details();
     const line = await row();
     expect(line).toHaveTextContent(text);
     expect(line).toHaveTextContent(language === 'en' ? 'The network cut the connection' : 'Сеть оборвала соединение');
@@ -279,6 +335,7 @@ describe('the drops the card of a machine lists', () => {
   it('says only what the machine has to add', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'socket_error' }, [nodeDrop({ report: report({ error: 'read ECONNRESET' }) })])] })] });
     show();
+    await details();
     const saw = await screen.findByText(/^The machine saw:/);
     /* Its cause is the one already given, it connected at the first try, and nothing else happened. */
     expect(saw).toHaveTextContent(/^The machine saw: read ECONNRESET\.$/);
@@ -287,6 +344,7 @@ describe('the drops the card of a machine lists', () => {
   it('says nothing of what the machine saw when it adds nothing', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'socket_error' }, [nodeDrop({ report: report() })])] })] });
     show();
+    await details();
     await row();
     expect(screen.queryByText(/^The machine saw:/)).toBeNull();
   });
@@ -294,6 +352,7 @@ describe('the drops the card of a machine lists', () => {
   it('says nothing of what the machine saw for a node from before', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history()] });
     show();
+    await details();
     await row();
     expect(screen.queryByText(/saw/)).toBeNull();
   });
@@ -301,6 +360,7 @@ describe('the drops the card of a machine lists', () => {
   it('finds what a machine saw in whichever of its connections said it', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop(), nodeDrop({ nodeId: 'n2', report: report({ dnsFailed: true, cause: 'dns_error' }) })])] })] });
     show();
+    await details();
     expect(await screen.findByText(/^The machine saw:/)).toHaveTextContent(/the server's address could not be found/);
   });
 
@@ -311,6 +371,7 @@ describe('the drops the card of a machine lists', () => {
       nodeDrop({ nodeId: 'n3', report: report({ errorCode: 'LATER', attempts: 4, networkChanged: true }) }),
     ])] })] });
     show();
+    await details();
     await row();
     expect(screen.queryByText(/^The machine saw:/)).toBeNull();
     expect(screen.getByRole('listitem')).not.toHaveTextContent('LATER');
@@ -323,6 +384,7 @@ describe('the drops the card of a machine lists', () => {
   ] as const)('prefers the report code %s to its raw error, including an empty code', async (errorCode, error, text) => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'socket_error' }, [nodeDrop({ report: report({ errorCode, error }) })])] })] });
     show();
+    await details();
     await row();
     const saw = screen.queryByText(/^The machine saw:/);
     if (text === null) expect(saw).toBeNull();
@@ -337,12 +399,14 @@ describe('the drops the card of a machine lists', () => {
   ] as const)('keeps a report clock jump of %i ms, including zero', async (clockJumpMs, length) => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'socket_error' }, [nodeDrop({ report: report({ clockJumpMs }) })])] })] });
     show();
+    await details();
     expect(await screen.findByText(/^The machine saw:/)).toHaveTextContent(`The machine saw: the machine slept or its clock jumped by ${length}.`);
   });
 
   it('does not repeat that the name was not found when that is the cause it gives', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ report: report({ cause: 'dns_error', dnsFailed: true }) })])] })] });
     show();
+    await details();
     const saw = await screen.findByText(/^The machine saw:/);
     expect(saw).toHaveTextContent(/^The machine saw: the server's address could not be found\.$/);
   });
@@ -350,6 +414,7 @@ describe('the drops the card of a machine lists', () => {
   it('does not repeat that it stopped hearing the server when that is the cause it gives', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ report: report({ cause: 'watchdog_timeout', watchdogTimedOut: true }) })])] })] });
     show();
+    await details();
     const saw = await screen.findByText(/^The machine saw:/);
     expect(saw).toHaveTextContent(/^The machine saw: the machine stopped hearing the server\.$/);
   });
@@ -380,7 +445,7 @@ describe('the drops the card of a machine lists', () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: many(5) })] });
     show();
     await screen.findByRole('list');
-    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Show all/ })).toBeNull();
   });
 });
 

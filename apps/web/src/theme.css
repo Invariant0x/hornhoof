@@ -2135,14 +2135,6 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .blk-run { grid-area: run; }
 .blk-side { grid-area: side; }
 .blk-link { grid-column: 1 / -1; }
-.conn-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px 32px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
-.conn-list li { display: grid; gap: 2px; align-content: start; min-width: 0; padding-left: 10px; border-left: 3px solid var(--line2); font-size: 13px; overflow-wrap: anywhere; }
-.conn-list li.away { border-left-color: var(--amber-ink); }
-.conn-list small { font-size: 12.5px; color: var(--muted); }
-.conn-when { display: flex; flex-wrap: wrap; gap: 0 10px; }
-.conn-when span { color: var(--muted); }
-.conn-list li.away .conn-when span { color: var(--amber-ink); }
-.blk-link > .btn { justify-self: start; }
 .blk h4 { font-size: 14px; }
 .blk-side .machine-actions { margin-top: 4px; }
 /* A plan that does not work has one block, filling the card whatever its columns and rows, so no empty row leaves a gap. */
@@ -2178,13 +2170,50 @@ th.k-prio .sorth { white-space: nowrap; }
 .pm-opt input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--cyan-ink); }
 .pm-opt input:disabled, .pm-opt:has(input:disabled) { cursor: not-allowed; }
 /* The question about moving the server takes the part's whole width, its answers under the words when they do not fit. */
-.prio > .ask, .prio > .alert, .prio > .machine-note { justify-self: stretch; }
+.prio > .ask, .prio > .alert, .prio > p, .prio > .entry-actions { justify-self: stretch; }
 
 /* A block in parts: a small heading with a rule, then its meters, facts or list. Both cards use them. */
 .part { display: grid; gap: 8px; min-width: 0; }
 .blk > .part + .part, .blk > .plist + .part, .blk > p + .part { margin-top: 6px; }
 .part-h { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); }
 .part-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* The lower part of a machine's card (#1027): its blocks side by side as the card widens, one under the other on a
+   phone, each in calm lines of text. Its choices and switches are a touch's height; its buttons stand in groups. */
+.mc-blocks { grid-column: 1 / -1; display: grid; gap: 18px 32px; grid-template-columns: minmax(0, 1fr); align-items: start; min-width: 0; }
+@container card (min-width: 700px) {
+  .mc-blocks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container card (min-width: 1180px) {
+  .mc-blocks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.mc-blk { gap: 12px; }
+.mc-blk p:not([class]) { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.mc-blk .pmode { gap: 0 16px; }
+.mc-blk .pm-opt { min-block-size: 44px; }
+.mc-blk .pmode select { block-size: 44px; }
+.mc-blk .lend { min-block-size: 44px; margin: 0; }
+/* Beside its box, the name of a setting stands level with it, whose line is a touch's height; on a phone it stands above. */
+@media (min-width: 421px) {
+  .mc-blk .facts dt:has(+ dd > .lend) { align-self: start; display: flex; align-items: center; min-block-size: 44px; }
+}
+.mc-blk .facts dd > .muted { font-size: 13px; }
+
+/* Connection to the server: whether it holds, in a word and a sentence, then a line for each drop: when, how long the
+   machine was off and why. The codes and what the machine saw wait behind their button. */
+.status.unsteady { color: var(--amber-ink); border-color: currentColor; }
+.mc-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.mc-drops { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); font-size: 13.5px; }
+.mc-drops > li { display: grid; gap: 2px 24px; min-width: 0; padding-block: 10px; border-block-start: 1px solid var(--line); overflow-wrap: anywhere; }
+.mc-drop-when { font-weight: 600; }
+.mc-drop-off { color: var(--muted); }
+.mc-drops > li.away .mc-drop-off { color: var(--amber-ink); }
+.mc-tech { display: grid; gap: 2px; min-width: 0; font-size: 12.5px; color: var(--muted); }
+@container card (min-width: 700px) {
+  .mc-drops { grid-template-columns: max-content max-content minmax(0, 1fr); }
+  .mc-drops > li { grid-column: 1 / -1; grid-template-columns: subgrid; }
+  .mc-tech { grid-column: 1 / -1; }
+}
 
 /* Meters with big figures, like the pool's: what a machine has, and how much of its limits a plan has used. */
 .gauges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

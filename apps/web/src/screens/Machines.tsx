@@ -8,7 +8,7 @@ import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
-import { CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
+import { CardBlock, CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
@@ -18,6 +18,7 @@ import { cannotOpen, givesLines, isOpen, machineName, useAccess } from '../ui/ac
 import { useNow } from '../ui/reset';
 import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
+import { TickBox } from '../ui/TickBox';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
@@ -251,7 +252,7 @@ function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: Machine
   const t = useT();
   const lends = editable ? (
     <label className="lend">
-      <input type="checkbox" aria-label={t.machines.lendLabel(machine.hostname)} checked={machine.lendsTests} onChange={e => onLend(e.target.checked)} />
+      <TickBox aria-label={t.machines.lendLabel(machine.hostname)} checked={machine.lendsTests} onChange={e => onLend(e.target.checked)} />
       <span aria-hidden="true">{t.machines.lend}</span>
     </label>
   ) : <span className="muted">{machine.lendsTests ? t.machines.lent : t.machines.notLent}</span>;
@@ -259,13 +260,13 @@ function OwnerSettings({ machine, editable, onLend, onKeep }: { machine: Machine
   if (typeof machine.keepsBackups === 'boolean') {
     const keeps = editable ? (
       <label className="lend">
-        <input type="checkbox" aria-label={t.machines.keepBackupsLabel(machine.hostname)} checked={machine.keepsBackups} onChange={e => onKeep(e.target.checked)} />
+        <TickBox aria-label={t.machines.keepBackupsLabel(machine.hostname)} checked={machine.keepsBackups} onChange={e => onKeep(e.target.checked)} />
         <span aria-hidden="true">{t.machines.keepBackups}</span>
       </label>
     ) : <span className="muted">{machine.keepsBackups ? t.machines.keepsBackups : t.machines.keepsNoBackups}</span>;
     items.push([t.backups.title, <>{keeps}{(machine.heldBackups ?? 0) > 0 && <> <span className="muted">{t.machines.backupsHeld(machine.heldBackups ?? 0)}</span></>}</>]);
   }
-  return <Part title={t.tables.settings}><Facts items={items} /></Part>;
+  return <Facts items={items} />;
 }
 
 function PlanPicker({ machine, addable, shown, picking, controls }: { machine: MachineView; addable: SubView[]; shown: ActiveCommand | null; picking: boolean; controls: MachineControls }) {
@@ -305,18 +306,34 @@ function CoreCommand({ machine, shown, controls }: { machine: MachineView; shown
 const disconnectQuestion = (t: Messages, m: MachineView): string =>
   m.plans.some(plan => plan.provider === 'claude') ? `${t.machines.disconnectAsk(m.hostname)} ${t.machines.disconnectClaude}` : t.machines.disconnectAsk(m.hostname);
 
-function MachineSettings({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
+/* What the owner can do with the machine: add a plan or bring the core while no command stands open, and disconnect it,
+   last. The machine the company was installed on is no computer someone joined: it is not disconnected. */
+type OwnerAction = { key: string; text: string; label?: string; danger?: boolean; run: () => unknown };
+
+function ownerActions(t: Messages, m: MachineView, editable: boolean, addable: SubView[], busy: boolean, controls: MachineControls): OwnerAction[] {
+  const free: OwnerAction[] = busy ? [] : [
+    ...(addable.length ? [{ key: 'add', text: t.machines.addPlan, label: t.machines.addPlanLabel(m.hostname), run: () => controls.setPicking(m.id) }] : []),
+    ...(m.needsCore ? [{ key: 'core', text: t.machines.makeCore(m.hostname), run: () => controls.makeCore(m) }] : []),
+  ];
+  return editable && !m.serverInstall ? [...free, { key: 'off', text: t.machines.disconnect, label: t.machines.disconnectLabel(m.hostname), danger: true, run: () => controls.setConfirm(m.id) }] : free;
+}
+
+function OwnerActions({ actions }: { actions: OwnerAction[] }) {
+  if (!actions.length) return null;
+  return <div className="machine-actions entry-actions">{actions.map(action => <button key={action.key} className={action.danger ? 'act danger' : 'act'} type="button" aria-label={action.label} onClick={action.run}>{action.text}</button>)}</div>;
+}
+
+/* The third block: what the owner lets the company use the machine for, then what they can do with it, the question
+   before Disconnect standing under the buttons. */
+function OwnerBlock({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
   const t = useT();
-  return <>
-    <OwnerSettings machine={m} editable={editable} onLend={value => controls.lend(m, value)} onKeep={value => controls.keepBackups(m, value)} />
-    <div className="machine-actions">
-      {addable.length > 0 && !busy && <button className="act" type="button" aria-label={t.machines.addPlanLabel(m.hostname)} onClick={() => controls.setPicking(m.id)}>{t.machines.addPlan}</button>}
-      {m.needsCore && !busy && <button className="act" type="button" onClick={() => controls.makeCore(m)}>{t.machines.makeCore(m.hostname)}</button>}
-      {/* The machine the company was installed on is no computer someone joined: it is not disconnected. */}
-      {editable && !m.serverInstall && <button className="act danger" type="button" aria-label={t.machines.disconnectLabel(m.hostname)} onClick={() => controls.setConfirm(m.id)}>{t.machines.disconnect}</button>}
-    </div>
-    {controls.confirm === m.id && <Ask text={disconnectQuestion(t, m)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
-  </>;
+  return (
+    <CardBlock title={t.cards.ownerBlock}>
+      <OwnerSettings machine={m} editable={editable} onLend={value => controls.lend(m, value)} onKeep={value => controls.keepBackups(m, value)} />
+      <OwnerActions actions={ownerActions(t, m, editable, addable, busy, controls)} />
+      {controls.confirm === m.id && <Ask text={disconnectQuestion(t, m)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
+    </CardBlock>
+  );
 }
 
 /* Where the company opens on the machine itself, and on the server's card whom the server could not take. */
@@ -467,10 +484,10 @@ function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataV
   if (!said && !offered && !led) return null;
   const question = words.ask(row.hostname);
   return <>
-    {led && <p className="machine-note">{led}</p>}
-    {said && <p className="machine-note">{said}</p>}
-    {target?.state === 'preparing' && canMove && <button className="act" type="button" disabled={busy} onClick={() => void send(() => api.del(`/api/machines/${row.id}/move`))}>{words.stop}</button>}
-    {offered && !asking && <button ref={hereButton} className="act" type="button" onClick={() => setAsking(true)}>{words.here}</button>}
+    {led && <p>{led}</p>}
+    {said && <p>{said}</p>}
+    {target?.state === 'preparing' && canMove && <div className="entry-actions"><button className="act" type="button" disabled={busy} onClick={() => void send(() => api.del(`/api/machines/${row.id}/move`))}>{words.stop}</button></div>}
+    {offered && !asking && <div className="entry-actions"><button ref={hereButton} className="act" type="button" onClick={() => setAsking(true)}>{words.here}</button></div>}
     {offered && asking && (
       <div className="ask">
         <span className="entry-main">{question}</span>
@@ -484,40 +501,76 @@ function MovePart({ row, data, moving, refresh }: { row: MachineRow; data: DataV
   </>;
 }
 
+/* What the server order shows on a card: the number of the machine the server runs on; for the CEO's order, a machine
+   that cannot take the server and why, one with a place or kept out, or one the server was asked to move to; nothing
+   for a machine with no place. */
+type Order = { shown: boolean; last: number; moving: Moving };
+type PriorityKind = 'server' | 'unfit' | 'placed' | 'asked' | null;
+
+function priorityKind(row: MachineRow, order: Order): PriorityKind {
+  if (!order.shown) return row.source && row.server ? 'server' : null;
+  if (placeOf(row) === 1) return 'server';
+  return row.data ? placedKind(row.data, order.moving.move?.machine === row.id) : null;
+}
+
+function placedKind(data: DataView, asked: boolean): PriorityKind {
+  if (data.unfit) return 'unfit';
+  if (data.number !== null || data.pin === 'none') return 'placed';
+  return asked ? 'asked' : null;
+}
+
+/* How the machine's copy of the company's data does, and when it stopped holding the data: in the CEO's order only,
+   and not on the machine the server runs on, whose data is the company's own. */
+function copyLines(t: Messages, language: Language, row: MachineRow, order: Order): string[] {
+  const data = row.data;
+  if (!order.shown || !data) return [];
+  return [
+    data.copy && placeOf(row) !== 1 ? copyText(t, language, data.copy) : null,
+    data.leftAt ? t.machines.copy.left(new Date(data.leftAt).toLocaleDateString(language)) : null,
+  ].filter((line): line is string => line !== null);
+}
+
 /* The Priority part of a card: the machine's number and why it has it, or a dash and why it has none; for the CEO, on
-   every machine that may take the server but the one it runs on, the choice of its place and the move of the server;
-   then how its copy does and when it stopped holding the data. last: the highest number there is. */
-function PriorityPart({ row, me, last, moving, refresh }: { row: MachineRow; me: Me; last: number; moving: Moving; refresh: () => Promise<void> }) {
+   every machine that may take the server but the one it runs on, the choice of its place and the move of the server.
+   last: the highest number there is. */
+function PriorityPart({ row, me, order, kind, refresh }: { row: MachineRow; me: Me; order: Order; kind: NonNullable<PriorityKind>; refresh: () => Promise<void> }) {
   const t = useT();
   const { language } = useLanguage();
   const p = t.machines.priority;
-  const c = t.machines.copy;
-  const data = row.data ?? null;
-  const notes = [
-    data?.copy && placeOf(row) !== 1 ? copyText(t, language, data.copy) : null,
-    data?.leftAt ? c.left(new Date(data.leftAt).toLocaleDateString(language)) : null,
-  ].filter((line): line is string => line !== null);
-  const below = notes.map(line => <p key={line} className="machine-note">{line}</p>);
   /* Number 1 is wherever the server runs, and moves only with the server: nothing to choose there. */
-  if (placeOf(row) === 1) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span><small>{p.line}</small></div>{below}</Part>;
-  if (!data) return null;
-  const moved = <MovePart row={row} data={data} moving={moving} refresh={refresh} />;
-  if (data.unfit) return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pdash" aria-hidden="true" /><span>{p.unfit.lead(unfitText(t, language, data.unfit, row.hostname))}</span></span>{moved}</div>{below}</Part>;
-  const out = data.pin === 'none';
+  if (kind === 'server') return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span>{order.shown && <small>{p.line}</small>}</div></Part>;
+  const data = row.data!;
+  const moved = <MovePart row={row} data={data} moving={order.moving} refresh={refresh} />;
+  if (kind === 'unfit') return <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pdash" aria-hidden="true" /><span>{p.unfit.lead(unfitText(t, language, data.unfit!, row.hostname))}</span></span>{moved}</div></Part>;
   /* A machine with no place says nothing here, unless the server was asked to move to it and stayed. */
-  const asked = moving.move?.machine === row.id;
-  if (data.number === null && !out) return notes.length || asked ? <Part title={t.cards.priority}>{asked && <div className="prio">{moved}</div>}{below}</Part> : null;
+  if (kind === 'asked') return <Part title={t.cards.priority}><div className="prio">{moved}</div></Part>;
+  const out = data.pin === 'none';
   const why = out ? p.why.out : whyText(t, data.why);
   return (
     <Part title={t.cards.priority}>
       <div className="prio">
         <span className="prio-n">{out ? <span className="pdash" aria-hidden="true" /> : <span className="pn">{data.number}</span>}<span>{why}</span></span>
-        {me.person.isOwner && <PriorityChoice row={row} data={data} last={last} refresh={refresh} />}
+        {me.person.isOwner && <PriorityChoice row={row} data={data} last={order.last} refresh={refresh} />}
         <small>{p.line}</small>
         {moved}
       </div>
-      {below}
     </Part>
+  );
+}
+
+/* The first block: what the machine is for the company's server, its place in the order and its copy of the data.
+   A machine with no part in either has no such block. */
+function ServerBlock({ row, me, order, refresh }: { row: MachineRow; me: Me; order: Order; refresh: () => Promise<void> }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const kind = priorityKind(row, order);
+  const copy = copyLines(t, language, row, order);
+  if (!kind && !copy.length) return null;
+  return (
+    <CardBlock title={t.cards.serverBlock}>
+      {kind && <PriorityPart row={row} me={me} order={order} kind={kind} refresh={refresh} />}
+      {copy.length > 0 && <Part title={t.cards.copyPart}>{copy.map(line => <p key={line}>{line}</p>)}</Part>}
+    </CardBlock>
   );
 }
 
@@ -548,8 +601,8 @@ function MachineAccess({ view, controls }: { view: ComputerAccessView; controls:
   if (isOpen(view)) {
     return (
       <Part title={t.machines.access}>
-        <p className="machine-note">{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
-        {view.canClose && <button className="act" type="button" onClick={() => void answer(view, 'close')}>{t.window.computerClose}</button>}
+        <p>{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
+        {view.canClose && <div className="entry-actions"><button className="act" type="button" onClick={() => void answer(view, 'close')}>{t.window.computerClose}</button></div>}
       </Part>
     );
   }
@@ -557,13 +610,29 @@ function MachineAccess({ view, controls }: { view: ComputerAccessView; controls:
   const blocked = cannotOpen(t, view);
   return (
     <Part title={t.machines.access}>
-      {prompt ?? (blocked ? <p className="machine-note">{blocked}</p> : <button className="act" type="button" onClick={() => void answer(view, 'open')}>{t.window.computerOpenFor(machine)}</button>)}
-      {!blocked && givesLines(t, view).map(line => <p key={line} className="machine-note">{line}</p>)}
+      {prompt ?? (blocked ? <p>{blocked}</p> : <div className="entry-actions"><button className="act" type="button" onClick={() => void answer(view, 'open')}>{t.window.computerOpenFor(machine)}</button></div>)}
+      {!blocked && givesLines(t, view).map(line => <p key={line}>{line}</p>)}
     </Part>
   );
 }
 
-function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; order: { shown: boolean; last: number; moving: Moving }; controls: MachineControls }) {
+/* The second block: whose machine it is and what system it runs, where the company opens on it, its agent programs
+   and who may reach the computer. */
+function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: boolean; controls: MachineControls }) {
+  const t = useT();
+  const m = row.source;
+  const openHere: [string, string][] = row.openAt ? [[t.machines.openHere, `localhost:${row.openAt}`]] : [];
+  const facts: [string, string][] = m ? [[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere] : openHere;
+  return (
+    <CardBlock title={t.cards.systemBlock}>
+      {facts.length > 0 && <Facts items={facts} />}
+      <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
+      {row.access && <MachineAccess view={row.access} controls={controls} />}
+    </CardBlock>
+  );
+}
+
+function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; order: Order; controls: MachineControls }) {
   const t = useT();
   const { language } = useLanguage();
   const m = row.source;
@@ -573,7 +642,6 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const shown = liveCommand(controls.addCommands[row.id], now);
   const core = liveCommand(controls.coreCommands[row.id], now);
   const picking = controls.picking === row.id;
-  const openHere: [string, string][] = row.openAt ? [[t.machines.openHere, `localhost:${row.openAt}`]] : [];
   return (
     <CardFrame label={row.hostname} accent={row.server}
       head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
@@ -587,18 +655,17 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
           <BrowserNote row={row} />
           <NetworkPlace row={row} />
         </Part>
-        {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere]} /></Part>}
-        {!m && openHere.length > 0 && <Part title={t.cards.ownerSystem}><Facts items={openHere} /></Part>}
-        {order.shown ? <PriorityPart row={row} me={me} last={order.last} moving={order.moving} refresh={controls.refresh} /> : m && row.server && <Part title={t.cards.priority}><div className="prio"><span className="prio-n"><span className="pn one">1</span><span>{t.cards.serverHere}</span></span></div></Part>}
-        {row.access && <MachineAccess view={row.access} controls={controls} />}
-        <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">
         <h4>{t.cards.plansOn}</h4>
         <PlansOnMachine row={row} subs={subs} />
-        {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
       </section>
+      <div className="mc-blocks">
+        <ServerBlock row={row} me={me} order={order} refresh={controls.refresh} />
+        <SystemBlock row={row} editable={editable} controls={controls} />
+        {m && <OwnerBlock machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
+      </div>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
   );

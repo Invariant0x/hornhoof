@@ -678,7 +678,9 @@ export const en = {
     settings: 'Settings', serves: 'Serves', owner: 'Owner',
   },
   cards: {
-    aboutMachine: 'About the machine', aboutPlan: 'About the plan', resources: 'Resources', ownerSystem: 'Owner and system',
+    aboutMachine: 'About the machine', aboutPlan: 'About the plan', resources: 'Resources',
+    /* The blocks of the lower part of a machine's card, and the part of its copy. */
+    serverBlock: 'Server and data copy', systemBlock: 'System, programs and access', ownerBlock: 'Settings and actions', copyPart: 'Data copy',
     priority: 'Priority', serverHere: 'The company server runs here',
     ownerAccount: 'Owner and account', ownerKey: 'Owner and key', account: 'Account', key: 'Key',
     keyEnds: (last: string) => `ends in ${last}`,
@@ -874,9 +876,12 @@ export const en = {
       one: (length: string | null, cause: string) => `1 drop in the last 24 hours${length ? `, ${length}` : ''}. Cause: ${cause}.`,
       many: (n: number, average: string | null, cause: string) => `${n} drops in the last 24 hours${average ? `, ${average} on average` : ''}. Most often: ${cause}.`,
       list: (machine: string) => `Latest drops of ${machine}`,
-      back: (length: string) => `back after ${length}`,
-      backAtOnce: 'back at once',
-      notBack: 'not back yet',
+      /* How the connection stands, in a word before the day's sentence. */
+      health: { stable: 'Stable', drops: 'Had drops', away: 'Offline now' },
+      offFor: (length: string) => `Offline for ${length}`,
+      stillOff: 'Still offline',
+      showDetails: 'Show technical details',
+      hideDetails: 'Hide technical details',
       code: (code: number) => `code ${code}`,
       together: (n: number) => `${n} connections`,
       saw: (what: string) => `The machine saw: ${what}.`,

@@ -223,9 +223,10 @@ describe('Machines', () => {
     expect(meter(own, 'Processor').querySelector('.g-f')?.textContent).toBe('4 cores');
     expect(meter(own, 'Memory').textContent).toBe('Memory2.5GB freeof 8 GB');
     expect(meter(own, 'Disk').querySelector('b')?.textContent).toBe('unknown');
+    /* The programs stand in the block at the bottom of the card (#1027), under what runs on it. */
     expect(within(own).getAllByRole('button')).toEqual([
-      within(own).getByRole('button', { name: 'Update programs' }),
       within(own).getByRole('button', { name: 'Open Orchestrator' }),
+      within(own).getByRole('button', { name: 'Update programs' }),
     ]);
     expect(within(own).getByRole('button', { name: 'Update programs' })).toBeDisabled();
     expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
@@ -580,8 +581,10 @@ describe('Machines', () => {
     shown(language, [{ ...MACHINES[0]!, data: held({ number: 2, copy: { line: 'making', progress: 40 } }) }]);
     const mac = await openCard('dev-laptop');
     expect(within(mac).getByText(line)).toBeInTheDocument();
-    /* Its place stands in the same part, above the line. */
-    expect(within(within(mac).getByText(line).closest('section')!).getByText('2')).toBeInTheDocument();
+    /* Its place stands in the same block, above the line, which has a part of its own (#1027). */
+    const role = within(mac).getByRole('region', { name: language === 'en' ? 'Server and data copy' : 'Сервер и копия данных' });
+    expect(within(role).getByText('2')).toBeInTheDocument();
+    expect(within(role).getByText(line).closest('section')?.querySelector('h5')?.textContent).toBe(language === 'en' ? 'Data copy' : 'Копия данных');
   });
 
   it("writes every state of a copy, and a machine's place without one", async () => {

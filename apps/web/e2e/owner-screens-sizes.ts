@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
    only is compared with none. */
 export type Measured = { browser: string; look: string; screen: string; sizes: Record<string, number> };
 
-function measured(dir: string): Measured[] {
+export function measured(dir: string): Measured[] {
   let names: string[];
   try {
     names = readdirSync(dir);
