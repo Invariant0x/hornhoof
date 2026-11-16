@@ -12,14 +12,13 @@ import { deptName } from '../departments/templates.js';
    password and the code secret go in through here and come out only sealed to a node; no view, log or answer holds them. */
 
 export type Entry = typeof vaultEntries.$inferSelect;
-export type LogRow = typeof vaultLog.$inferSelect;
 
 const Scope = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('company') }),
   z.strictObject({ kind: z.literal('department'), departmentId: z.uuid() }),
   z.strictObject({ kind: z.literal('agent'), agentId: z.uuid() }),
 ]);
-export type ScopeInput = z.infer<typeof Scope>;
+type ScopeInput = z.infer<typeof Scope>;
 
 const Name = z.string().trim().min(1).max(80);
 const Site = z.string().trim().min(1).max(2048);
@@ -69,7 +68,7 @@ const badCode = () => invalid('The one-time code secret is not one an authentica
 
 /* The code of a site: its secret as an authenticator app shows it, in groups and any case, or the otpauth://totp/ address
    of its QR code with its digits, period and algorithm. */
-export function parseCode(raw: string): FillTotp {
+function parseCode(raw: string): FillTotp {
   const text = raw.trim();
   let secret = text;
   let digits = 6;
