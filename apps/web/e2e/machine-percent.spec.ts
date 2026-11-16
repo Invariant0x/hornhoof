@@ -13,7 +13,8 @@ import { ME, serveApi } from './api';
    disk and processor and a plan's limit, keeps its own size, colour and font. Each number of a plan's limits stands with
    its unit in one piece that reads left to right, and each phrase around such pieces reads whole, in the order and the
    direction its dictionary writes it, on a page laid out either way. The stripe beside what running a machine's command
-   means, on the screen and on a machine's card, stands on the side its lines start from, with its gap, either way. */
+   means, on the screen and on a machine's card, stands on the side its lines start from, with its gap, either way, and
+   its words read whole in their own direction, their full stop after them. */
 test.describe.configure({ timeout: 180_000 });
 
 const GIB = 1024 ** 3;
@@ -186,9 +187,10 @@ async function expectUnitAsBefore(meter: Locator, text: string) {
 }
 
 /* Where a piece of an element's text stands against another on screen: before it is to its left. Each is found by its
-   text, the second after the first when both stand in the text in that order, else anywhere. */
-async function place(el: Locator, first: string, second: string): Promise<'left' | 'right' | 'mixed'> {
-  return el.evaluate((root, [first, second]) => {
+   text, the first where it first stands or, with from 'last', where it last does, the second after the first when both
+   stand in the text in that order, else anywhere. */
+async function place(el: Locator, first: string, second: string, from: 'first' | 'last' = 'first'): Promise<'left' | 'right' | 'mixed'> {
+  return el.evaluate((root, [first, second, from]) => {
     const nodes: { node: Text; from: number }[] = [];
     let text = '';
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -207,13 +209,13 @@ async function place(el: Locator, first: string, second: string): Promise<'left'
       range.setEnd(range.endContainer, range.endOffset + 1);
       return range.getBoundingClientRect();
     };
-    const a = text.indexOf(first);
+    const a = from === 'last' ? text.lastIndexOf(first) : text.indexOf(first);
     const b = text.indexOf(second, a + first.length) >= 0 ? text.indexOf(second, a + first.length) : text.indexOf(second);
     if (a < 0 || b < 0) throw new Error(`"${first}" or "${second}" is not in "${text}"`);
     const [x, y] = [box(a, first.length), box(b, second.length)];
     if (!x.width || !y.width) throw new Error(`"${first}" or "${second}" in "${text}" is not on screen`);
     return x.right <= y.left + 1 ? 'left' : y.right <= x.left + 1 ? 'right' : 'mixed';
-  }, [first, second] as const);
+  }, [first, second, from] as const);
 }
 
 /* A number with its unit, as «3 дня»: the number stands to the left of its unit in either direction. */
@@ -362,6 +364,8 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
     const card = page.getByRole('article', { name: 'build-a', exact: true });
     if (!(await card.isVisible())) await page.getByRole('button', { name: t.tables.openCard('build-a'), exact: true }).click();
     const stripes: [string, Locator][] = [['screen', page.locator('.panel .trust')], ['card', card.locator('.trust')]];
+    /* The phrase's last word and the full stop after it. */
+    const [word, stop] = [t.machines.trust.slice(0, -1).split(' ').at(-1)!, t.machines.trust.at(-1)!];
     for (const [, stripe] of stripes) await expect(stripe).toHaveText(t.machines.trust);
     /* Pictures first, both ways, so a look that fails still leaves them. */
     for (const dir of ['ltr', 'rtl'] as const) {
@@ -385,6 +389,8 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
           return `start ${side(start)}, end ${side(end)}, text after ${Math.round(gap)}px`;
         }, dir);
         expect.soft(`${dir} ${where}: ${seen}`).toBe(`${dir} ${where}: start 3px 10px, end 0px 0px, text after 13px`);
+        /* The phrase reads in its own language's direction on a page laid out either way: its full stop follows its last word. */
+        expect.soft(`${dir} ${where} ${word}${stop}: ${await place(stripe, word, stop, 'last')}`).toBe(`${dir} ${where} ${word}${stop}: ${READS[language]}`);
       }
       expect(await noSideScroll(page)).toBe(true);
     }

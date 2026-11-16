@@ -129,7 +129,8 @@ export function CommandBox({ command, trust, password }: { command: string; trus
         prompt ?? <p className="muted">{t.subs.ownerKeyMaking}</p>
       )}
       {keyless && <p className="muted">{t.subs.ownerKeyNotHere}</p>}
-      <p className="trust">{trust ?? t.subs.trust}</p>
+      {/* The stripe and the lines start where the page does; the words read whole in their own direction. */}
+      <p className="trust"><bdi>{trust ?? t.subs.trust}</bdi></p>
     </div>
   );
 }
