@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { knowsAgentId, type AgentViewer } from '../../auth/agent-view.js';
+import type { actorOf } from '../../auth/session.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { agents, people, tasks, vaultEntries, vaultLog } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -11,8 +12,8 @@ import { parseTotp, Totp } from './totp.js';
    password and the code secret go in through here and come out only to an agent that takes the entry to sign in. */
 
 export type Entry = typeof vaultEntries.$inferSelect;
-/* Who saves or takes an entry: a person, or an agent, such as the orchestrator acting for one. */
-export type Actor = { personId: string } | { agentId: string };
+/* Who saves an entry: a person, or an agent, such as the orchestrator acting for one. */
+type Actor = ReturnType<typeof actorOf>;
 
 const Name = z.string().trim().min(1).max(80);
 const Site = z.string().trim().min(1).max(2048);
