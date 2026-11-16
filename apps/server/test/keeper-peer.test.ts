@@ -820,23 +820,24 @@ describe('the peer link in the keeper', () => {
     expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('alone');
   });
 
-  it('keeps mode and the word to the app on lead through four-second relay hiccups every six minutes', async () => {
-    const { vi } = await import('vitest');
+  it('keeps mode and the word to the app on lead through four-second relay hiccups every six minutes', async ({ signal }) => {
     const c = await company(true);
     const target = await listening(c.app);
     const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
     const { catalog } = syncCatalog(copy);
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
+    const clock = { wall: Date.now(), mono: 0 };
+    const mono = vi.spyOn(performance, 'now').mockImplementation(() => clock.mono);
     onTestFinished(() => {
+      mono.mockRestore();
       vi.useRealTimers();
     });
-    const startMono = performance.now();
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
     let unknownReads = 0;
     const relayClient: NonNullable<KeeperOptions['sync']>['relay'] = {
       route: async () => {
-        const elapsed = performance.now() - startMono;
+        const elapsed = clock.mono;
         if ((elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000)) {
           unknownReads += 1;
           return { known: false, why: 'unreachable' };
@@ -850,7 +851,7 @@ describe('the peer link in the keeper', () => {
     };
     const { keeper, controlDir } = await keeperBeside(c, target, folder(), {
       lease: fakeLease({ othersHoldData: true }),
-      now: () => ({ wall: Date.now(), mono: performance.now() }),
+      now: () => ({ ...clock }),
       throughput: { start: ignore, stop: ignore, best: () => ({}) },
       everyMs: 3000,
       linkEveryMs: 3000,
@@ -860,20 +861,29 @@ describe('the peer link in the keeper', () => {
       copies: { everyMs: 60_000 },
       sync: { catalog, relay: relayClient, everyMs: 1000, routeEveryMs: 1000, linkPauseMs: 30_000 },
     });
-    while (!(keeper.mode() === 'lead' && readKeeperState(controlDir)?.mode === 'lead')) {
-      await vi.advanceTimersByTimeAsync(1000);
-      await new Promise<void>(resolve => setImmediate(resolve));
-    }
+    /* Drive the lease, controller and word directly. Advancing every interval would also reread the unchanged
+       database hundreds of times. Quiet steps keep the original three-second lease cadence. */
+    const step = async (ms: number) => {
+      signal.throwIfAborted();
+      clock.wall += ms;
+      clock.mono += ms;
+      vi.setSystemTime(clock.wall);
+      await keeper['sync']!.look();
+      await keeper['holder'].look();
+      await keeper['holder'].tick();
+      keeper['giveWord']();
+    };
+    while (!(keeper.mode() === 'lead' && readKeeperState(controlDir)?.mode === 'lead')) await step(1000);
 
     const modes: string[] = [];
     for (const windowStartMs of [355_000, 715_000]) {
-      await vi.advanceTimersByTimeAsync(windowStartMs - (performance.now() - startMono));
+      while (clock.mono < windowStartMs) await step(Math.min(3000, windowStartMs - clock.mono));
       for (let second = 0; second < 12; second++) {
-        await vi.advanceTimersByTimeAsync(1000);
-        await new Promise<void>(resolve => setImmediate(resolve));
-        modes.push(`${Math.round((performance.now() - startMono) / 1000)}s:${keeper.mode()}/${readKeeperState(controlDir)?.mode}`);
+        await step(1000);
+        modes.push(`${Math.round(clock.mono / 1000)}s:${keeper.mode()}/${readKeeperState(controlDir)?.mode}`);
       }
     }
+    expect(clock.mono).toBe(727_000);
     expect(unknownReads).toBeGreaterThanOrEqual(8);
     expect(modes.filter(entry => entry.includes('read'))).toEqual([]);
   });
