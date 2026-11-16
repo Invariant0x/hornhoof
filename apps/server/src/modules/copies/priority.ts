@@ -2,7 +2,6 @@ import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines, publicLinks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { queryOf } from '../merge/leader.js';
 import { builtinMachine } from '../nodes/nodes.js';
 import { findThisMachine } from '../network/store.js';
 import { candidates, rankOf, readyCopies } from './order.js';
@@ -37,9 +36,8 @@ export async function setPriority(ctx: Ctx, machineId: string, pin: Pin): Promis
     if (ready.has(row.id) && ready.size === 1) throw onlyCopy(row.hostname);
   }
   if (typeof pin === 'number') {
-    const [sized] = await queryOf(db)<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
     const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
-    const fit = { dbSize: Number(sized?.size ?? 0), link: Boolean(link) };
+    const fit = { link: Boolean(link) };
     const all = await candidates(db, now);
     const mine = all.find(m => m.id === row.id);
     if (!mine || unfit(mine, fit) !== null) throw cannotTake();
