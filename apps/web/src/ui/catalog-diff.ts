@@ -51,7 +51,7 @@ function grouped(pieces: readonly Piece[]): Piece[] {
 }
 
 /* Neighbouring words of one kind of change read as one piece; a place stays a piece of its own. */
-function joined(pieces: readonly Piece[]): Piece[] {
+function merged(pieces: readonly Piece[]): Piece[] {
   const out: Piece[] = [];
   for (const piece of pieces) {
     const last = out[out.length - 1];
@@ -61,24 +61,24 @@ function joined(pieces: readonly Piece[]): Piece[] {
   return out;
 }
 
+/* The next step from the token at i of the one version and at j of the other: both the same, one taken out, or one put
+   in, as keeps the longest run of tokens both have. */
+function stepAt(kept: number[][], before: readonly Token[], after: readonly Token[], i: number, j: number): Piece['change'] {
+  if (i >= before.length) return 'added';
+  if (j >= after.length) return 'removed';
+  if (keyOf(before[i]!) === keyOf(after[j]!)) return 'same';
+  return kept[i + 1]![j]! >= kept[i]![j + 1]! ? 'removed' : 'added';
+}
+
 export function changes(before: readonly Token[], after: readonly Token[]): Piece[] {
-  if (before.length * after.length > MOST_PAIRS) return joined([...before.map(t => ({ ...t, change: 'removed' as const })), ...after.map(t => ({ ...t, change: 'added' as const }))]);
+  if (before.length * after.length > MOST_PAIRS) return merged([...before.map(t => ({ ...t, change: 'removed' as const })), ...after.map(t => ({ ...t, change: 'added' as const }))]);
   const kept = common(before, after);
   const pieces: Piece[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < before.length || j < after.length) {
-    if (i < before.length && j < after.length && keyOf(before[i]!) === keyOf(after[j]!)) {
-      pieces.push({ ...after[j]!, change: 'same' });
-      i += 1;
-      j += 1;
-    } else if (j >= after.length || (i < before.length && kept[i + 1]![j]! >= kept[i]![j + 1]!)) {
-      pieces.push({ ...before[i]!, change: 'removed' });
-      i += 1;
-    } else {
-      pieces.push({ ...after[j]!, change: 'added' });
-      j += 1;
-    }
+  for (let i = 0, j = 0; i < before.length || j < after.length; ) {
+    const change = stepAt(kept, before, after, i, j);
+    pieces.push({ ...(change === 'removed' ? before[i]! : after[j]!), change });
+    if (change !== 'added') i += 1;
+    if (change !== 'removed') j += 1;
   }
-  return joined(grouped(pieces));
+  return merged(grouped(pieces));
 }

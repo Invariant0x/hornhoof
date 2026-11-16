@@ -455,14 +455,11 @@ function byWhom(s: Messages['outboundSetup'], person: Named, agent: Named): stri
 
 /* A revision with its view, the newest one open at once: what is published or taken back is the revision shown, as its
    entry stood when it was shown, so a newer version since makes the server refuse and the catalog is read again. */
-function RevisionLine({ entry, revision, onChanged }: { entry: Entry; revision: Revision; onChanged(): void }) {
-  const s = useT().outboundSetup;
+const MOVES: Partial<Record<Revision['status'], 'publish' | 'revoke'>> = { proposed: 'publish', published: 'revoke' };
+
+/* Publishes or takes back the revision shown, with the newest one of its entry then; a newer one since reads it again. */
+function useRevisionMove(revision: Revision, newest: number, onChanged: () => void) {
   const { busy, failure, run } = useMove(onChanged);
-  const newest = entry.revisions[0]!.revision;
-  const [open, setOpen] = useState(revision.revision === newest);
-  const viewId = useId();
-  const author = revision.createdBy.name ?? '';
-  const move = revision.status === 'proposed' ? 'publish' : revision.status === 'published' ? 'revoke' : null;
   const act = (to: 'publish' | 'revoke') =>
     run(async () => {
       try {
@@ -472,14 +469,33 @@ function RevisionLine({ entry, revision, onChanged }: { entry: Entry; revision: 
         throw err;
       }
     });
+  return { busy, failure, act };
+}
+
+function RevisionHead({ revision }: { revision: Revision }) {
+  const s = useT().outboundSetup;
   return (
-    <li className="outbound-entry">
+    <>
       <span className="outbound-title">
         <b>{s.revision(revision.revision)}</b>
         <Status of={revision.status}>{s.statuses[revision.status]}</Status>
       </span>
       <span>{revision.summary}</span>
-      <small>{joined([s.wrote(author), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
+      <small>{joined([s.wrote(revision.createdBy.name ?? ''), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
+    </>
+  );
+}
+
+function RevisionLine({ entry, revision, onChanged }: { entry: Entry; revision: Revision; onChanged(): void }) {
+  const s = useT().outboundSetup;
+  const newest = entry.revisions[0]!.revision;
+  const { busy, failure, act } = useRevisionMove(revision, newest, onChanged);
+  const [open, setOpen] = useState(revision.revision === newest);
+  const viewId = useId();
+  const move = MOVES[revision.status];
+  return (
+    <li className="outbound-entry">
+      <RevisionHead revision={revision} />
       <EntryActions>
         <button className="btn ghost" type="button" aria-expanded={open} aria-controls={viewId} onClick={() => setOpen(!open)}>{open ? s.hide(revision.revision) : s.show(revision.revision)}</button>
       </EntryActions>
