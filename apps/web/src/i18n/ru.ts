@@ -506,6 +506,7 @@ export const ru: Messages = {
     heading: 'Подписки и API',
     intro: 'Тарифы и API, на которых работают агенты. Личный тариф работает на машинах владельца и служит там, где работает владелец. API оплачивается по токенам, которые тратят агенты.',
     pay: { personal: 'По подписке', api_key: 'По токенам' },
+    kindHint: { personal: 'Личная подписка, оплата по тарифу', api_key: 'API-ключ, оплата по токенам' },
     payFilter: 'Тип',
     tokensColumn: 'Токены, 30 дней',
     tokens: {
@@ -583,6 +584,7 @@ export const ru: Messages = {
     machinesOf: name => `Машины ${name}`,
     waitsThere: { needs_login: 'ждет входа', needs_setup: 'ждет первой настройки', offline: 'не в сети' },
     keyEnding: (provider, last4) => `Ключ ${provider}, заканчивается на ${last4}`,
+    keyShort: (provider, last4) => `${provider} …${last4}`,
     noMachine: 'Машины пока нет',
     builtin: 'Встроенная нода',
     states: { waiting_machine: 'Ждет машину', needs_login: 'Ждет входа', needs_setup: 'Ждет первой настройки', ready: 'Готова', offline: 'Машина не в сети', builtin_offline: 'Встроенная машина не в сети' },

@@ -482,6 +482,8 @@ export const en = {
     heading: 'Subscriptions & API',
     intro: 'The plans and APIs the agents run on. A personal plan runs on its owner\'s machines and serves wherever its owner works. An API is paid by the tokens its agents use.',
     pay: { personal: 'By subscription', api_key: 'By tokens' },
+    /* How a connection is paid, in full: the name and tooltip of the sign by its name in the list and its card. */
+    kindHint: { personal: 'Personal plan, paid by subscription', api_key: 'API key, paid by tokens' },
     payFilter: 'Type',
     tokensColumn: 'Tokens, 30 days',
     tokens: {
@@ -560,6 +562,8 @@ export const en = {
     /* A plan's state on one of its several machines, after the machine's name. */
     waitsThere: { needs_login: 'waiting for the login', needs_setup: 'waiting for the first setup', offline: 'offline' },
     keyEnding: (provider: string, last4: string) => `${provider} key ending ${last4}`,
+    /* A key's name in the list and its card, where its sign says it is a key. */
+    keyShort: (provider: string, last4: string) => `${provider} …${last4}`,
     noMachine: 'No machine yet',
     builtin: 'Built-in node',
     states: { waiting_machine: 'Waiting for the machine', needs_login: 'Waiting for the login', needs_setup: 'Waiting for the first setup', ready: 'Ready', offline: 'Machine offline', builtin_offline: 'Built-in node offline' },
