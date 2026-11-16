@@ -26,7 +26,7 @@ import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type Hello, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
-import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
+import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
@@ -469,7 +469,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
 /* Jobs keep running on the node while it is away and report after it reconnects, so only the time is kept. */
 export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void> {
   /* A newer connection of the same node keeps the views. */
-  if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueLost(ctx, id); }
+  if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueAway(ctx, id); }
   if (id.kind !== 'node') return;
   await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));
 }

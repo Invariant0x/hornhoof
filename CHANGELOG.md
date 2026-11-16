@@ -5,6 +5,23 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.29.1] - 2026-11-16
+
+Parts of test runs no longer stop when a machine's connection drops for a moment.
+
+### Fixed
+
+- A part of a test run stopped with "Machine check queue lease was lost." when its machine's connection dropped for a
+  moment, or when the server handled the machine's reports late. A machine now keeps its check slots for 90 seconds
+  after a drop and takes them back once it returns, and its parts go on; the server counts a machine as present while
+  anything it sends arrives. A machine silent for 90 seconds still loses its slots, and a part run again on another
+  machine takes no result from the first one. The connections of each machine's built-in node now go into the
+  connection history with no node of their own, and the server log names them by the machine. Known limits: a machine
+  back between 90 seconds and 3 minutes reports its part as failed, and the part does not run again; after a server
+  restart the slots still end and their parts stop; a node and a server of different versions get no slot back after
+  a drop, and an older node's slot stays taken for up to 3 minutes; the machine's connection screen does not show the
+  built-in node yet.
+
 ## [0.29.0] - 2026-11-15
 
 A department runs its own outbound messages and its own work without the CEO, Settings is one window in four groups
