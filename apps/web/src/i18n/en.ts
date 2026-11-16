@@ -687,6 +687,7 @@ export const en = {
     /* Its machines are online, but their nodes are from before the sign-in from Hornhoof. */
     oldNodes: (hosts: string) => `The nodes on ${hosts} are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on ${hosts}, then sign in again.`,
     updateTrust: 'It moves the Hornhoof nodes on that machine to the new build and keeps their sign-ins and files.',
+    signInEnded: (code: number | null, line: string) => `The sign-in ended${code === null ? '' : ` with code ${code}`}, so nothing changed. The program said: ${line}`,
     signInErrors: {
       stopped: 'The sign-in was stopped.',
       unfinished: 'The sign-in ended before it finished, so nothing changed.',
@@ -787,6 +788,8 @@ export const en = {
     programsUpdating: 'Updating programs...',
     programUpdating: 'Updating...',
     programUpdateFailed: 'Update failed. Try again.',
+    programReinstalling: 'Installed only in part, installing it again.',
+    programBroken: (reason: string | null) => (reason ? `It does not start, even installed again: ${reason}` : 'It does not start, even installed again.'),
     programVersionUnknown: 'Version unknown',
     programsOffline: 'Reconnect this machine to see its program versions.',
     programsUnknown: 'This machine has not reported its program versions yet.',

@@ -707,6 +707,7 @@ export const ru: Messages = {
     stopSignIn: 'Остановить вход',
     oldNodes: hosts => `Ноды на ${hosts} старше, чем нужно для входа из Hornhoof. Чтобы обновить их, выполните эту команду в терминале на ${hosts}, затем войдите снова.`,
     updateTrust: 'Она переводит ноды Hornhoof на этой машине на новую сборку, а их вход и файлы сохраняет.',
+    signInEnded: (code: number | null, line: string) => `Вход завершился${code === null ? '' : ` с кодом ${code}`}, ничего не изменилось. Программа написала: ${line}`,
     signInErrors: {
       stopped: 'Вход остановлен.',
       unfinished: 'Вход закончился раньше времени, ничего не изменилось.',
@@ -805,6 +806,8 @@ export const ru: Messages = {
     programsUpdating: 'Обновляем программы...',
     programUpdating: 'Обновляем...',
     programUpdateFailed: 'Не удалось обновить. Попробуйте еще раз.',
+    programReinstalling: 'Установлена не полностью, ставим заново.',
+    programBroken: (reason: string | null) => (reason ? `Не запускается, даже установленная заново: ${reason}` : 'Не запускается, даже установленная заново.'),
     programVersionUnknown: 'Версия неизвестна',
     programsOffline: 'Подключите эту машину, чтобы увидеть версии программ.',
     programsUnknown: 'Эта машина пока не сообщила версии программ.',
