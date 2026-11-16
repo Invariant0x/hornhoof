@@ -158,7 +158,7 @@ describe('Subscriptions', () => {
     expect(within(card).getByRole('region', { name: 'Agents on it' })).toHaveTextContent('2 agents, 1 working');
     expect(within(card).getByRole('region', { name: 'Development' })).toHaveTextContent('Bruno');
     expect(within(card).getByTitle('Checkout API')).toHaveTextContent('#12');
-    await userEvent.selectOptions(within(card).getByRole('combobox'), '80');
+    await userEvent.selectOptions(within(card).getByRole('combobox', { name: 'Share of Claude for tasks' }), '80');
     expect(calls.some(c => c.method === 'PATCH')).toBe(true);
     expect(within(card).getByRole('region', { name: 'Agents on it' })).toHaveTextContent('2 agents, 1 working');
     expect(button).toHaveAttribute('aria-expanded', 'true');
@@ -597,7 +597,67 @@ describe('Subscriptions', () => {
     await user.selectOptions(share, '80');
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { budget: 80 } }));
     expect(within(rowOf('Claude')).getByRole('combobox', { name: 'Share of Claude for tasks' })).toHaveValue('80');
-    expect(within(rowOf('Anthropic key ending 9f3a')).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(rowOf('Anthropic key ending 9f3a')).queryByRole('combobox', { name: /^Share of / })).not.toBeInTheDocument();
+  });
+
+  it('names no fallback plan at first, and adds one a person picks', async () => {
+    const calls = lists({ 'PATCH /api/subscriptions/s-claude': [200, { subscription: { ...SUBS[0]!, fallbacks: [{ subscription: 's-codex', model: null }] } }] });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = rowOf('Claude');
+    expect(await within(card).findByText('Any plan of the company with room for the employee')).toBeInTheDocument();
+    const add = within(card).getByRole('combobox', { name: 'Add a fallback plan for Claude, Ivan' });
+    expect([...add.querySelectorAll('option')].map(o => o.textContent)).toEqual(['Add a fallback plan', 'Codex, Ivan', 'Kimi, Ivan', 'Orchestrator (Anthropic)']);
+    await user.selectOptions(add, 's-codex');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { fallbacks: [{ subscription: 's-codex', model: null }] } }));
+    expect(await within(rowOf('Claude')).findByText('Codex, Ivan')).toBeInTheDocument();
+  });
+
+  it('orders the fallback plans, picks the model on one, and removes one', async () => {
+    const named = [{ subscription: 's-codex', model: null }, { subscription: 's-key', model: null }];
+    const subs = [{ ...SUBS[0]!, fallbacks: named }, ...SUBS.slice(1, 3), { ...SUBS[3]!, models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }] }];
+    const calls = lists({ 'GET /api/subscriptions': [200, { subscriptions: subs }], 'PATCH /api/subscriptions/s-claude': [200, { subscription: subs[0] }] });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = rowOf('Claude');
+    expect([...card.querySelectorAll('.fallback-name')].map(name => name.textContent)).toEqual(['Codex, Ivan', 'Orchestrator (Anthropic)']);
+    expect(within(card).getByRole('button', { name: 'Move Codex, Ivan higher' })).toBeDisabled();
+    await user.click(within(card).getByRole('button', { name: 'Move Codex, Ivan lower' }));
+    await user.selectOptions(within(card).getByRole('combobox', { name: 'Model on Orchestrator (Anthropic)' }), 'claude-sonnet-5-5');
+    await user.click(within(card).getByRole('button', { name: 'Remove Codex, Ivan from the fallback plans' }));
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => c.body)).toEqual([
+      { fallbacks: [named[1], named[0]] },
+      { fallbacks: [named[0], { subscription: 's-key', model: 'claude-sonnet-5-5' }] },
+      { fallbacks: [named[1]] },
+    ]));
+  });
+
+  it('shows the fallback plans without changing them to someone who may not change the plan', async () => {
+    const fallbacks = [{ subscription: 's-codex', model: null }, { subscription: 's-key', model: 'claude-sonnet-5-5' }];
+    const subs = [{ ...SUBS[0]!, owner: { id: 'p9', name: 'Olga' }, fallbacks }, ...SUBS.slice(1, 3), { ...SUBS[3]!, models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }] }];
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: subs }] });
+    render(<Subscriptions me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} />);
+    await openAll();
+    const card = rowOf('Claude');
+    expect(await within(card).findByText('Codex, Ivan')).toBeInTheDocument();
+    /* The model named for a fallback shows by its name; the role's own shows nothing. */
+    expect([...card.querySelectorAll('.fallback-list li')].map(item => item.textContent)).toEqual(['Codex, Ivan', 'Orchestrator (Anthropic)Claude Sonnet 5.5']);
+    expect(within(card).queryByRole('combobox', { name: /fallback|Model on/ })).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: /^(Move|Remove) Codex/ })).not.toBeInTheDocument();
+  });
+
+  it('names the fallback plans in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, fallbacks: [{ subscription: 's-codex', model: null }] }, ...SUBS.slice(1)] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+    const card = rowOf('Claude');
+    expect(await within(card).findByText('Запасные тарифы')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Опустить Codex, Ivan ниже' })).toBeDisabled();
+    expect(within(card).getByRole('combobox', { name: 'Добавить запасной тариф для Claude, Ivan' })).toBeInTheDocument();
   });
 
   it('offers no orchestrator choice to a department-scope viewer', async () => {

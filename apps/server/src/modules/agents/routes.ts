@@ -14,6 +14,7 @@ import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
 import { keyEndFor, onlineIn, subViews, type SubView } from '../subscriptions/views.js';
+import { endFallback, fallbackOf } from '../subscriptions/fallback.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
@@ -44,6 +45,9 @@ export type AgentCard = FailureState & {
   /* The level a person picked, or null to follow its role. */
   effort: string | null;
   subscription: SubView | null;
+  /* Hornhoof put it on its subscription for a while, as its own plan is at its limit: that plan, and until when that limit
+     holds as far as it is known, after which it goes back between turns. */
+  fallback: { home: SubView; until: string | null } | null;
   /* The machine its program is on; none on the built-in node and before it first ran. */
   machine: { id: string; hostname: string } | null;
   /* The machine its plan was heard from last while none of the plan's machines is online; none while it can run. */
@@ -228,6 +232,12 @@ function cardSubscription(agent: AgentRow, views: Map<string, SubView>): SubView
   return agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null;
 }
 
+async function cardFallback(ctx: Ctx, agent: AgentRow, views: Map<string, SubView>): Promise<AgentCard['fallback']> {
+  const on = await fallbackOf(ctx, agent);
+  const home = on && views.get(on.home);
+  return home ? { home, until: on.until } : null;
+}
+
 async function cardMachine(ctx: Ctx, agent: AgentRow): Promise<AgentCard['machine']> {
   return machineOf(ctx.db, (await programNode(ctx, agent.id))?.node ?? null);
 }
@@ -274,6 +284,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     model: agent.model,
     effort: agent.effort,
     subscription: cardSubscription(agent, views),
+    fallback: await cardFallback(ctx, agent, views),
     machine: await cardMachine(ctx, agent),
     offline: await offlineMachine(ctx, agent.subscriptionId),
     state: cardState(agent, Boolean(running)),
@@ -299,6 +310,8 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
 
 /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
 export async function afterPlanMove(ctx: Ctx, agent: AgentRow, next: AgentRow): Promise<void> {
+  /* A person put it where it works now: it no longer goes back to the plan Hornhoof moved it from. */
+  await endFallback(ctx, agent.id);
   if (agent.subscriptionId) await releaseLeftProgram(ctx, agent.id, agent.subscriptionId);
   if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
   await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
