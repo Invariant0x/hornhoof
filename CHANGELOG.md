@@ -7,20 +7,85 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.29.1] - 2026-11-16
 
-Parts of test runs no longer stop when a machine's connection drops for a moment.
+A program no longer closes under a turn it has just begun, an update that waits for the agents no longer stops the
+company's work without end, and parts of test runs no longer stop when a machine's connection drops for a moment.
+
+### Before you update
+
+- Migration 0129 comes with this release. It lets `node_id` of `node_connections` be empty, so the connections of a
+  machine's built-in node can go into its connection history. It is one change of the table, it changes no rows, and
+  nothing needs doing before or after the update.
+
+### Changed
+
+- The server log now names a machine's built-in node by the machine it runs on, as in machine "home-api", node
+  "builtin", instead of machine "built-in". A built-in node of a server with no machine of a company is still named
+  machine "built-in", node "builtin".
 
 ### Fixed
 
+- A node could close or put to sleep an agent's program at the moment the program began a new turn: Codex takes the
+  words it held once its turn is over, and Kimi Code takes the words it queued and tells of them through its hook late.
+  The turn then stood running with no program, the agent's next turns waited behind it and live words found no
+  program, until a person stopped it, as the programs of Operations on a Mac showed on 15 and 16 November. The node now
+  looks for a new turn right before it closes a program or puts it to sleep and keeps a program that began one, and a
+  turn that opens on a program already asleep ends as one whose program is gone, so the next turn starts the program
+  again in its session.
+- An update asked for when the agents finish held every new turn of the company until no agent worked, and a turn whose
+  machine had stopped reporting never let it go. A turn whose node said nothing of its program for ten minutes is no
+  longer waited for, and the wait has a deadline: 30 minutes, or `idleWaitMinutes` from 1 to 240. If the agents have
+  not finished by then, the update is called off: nothing running stops, the turns start again, and the orchestrator
+  and the update banner say why. The banner, the answer to the request and `check_updates` name the turns the update
+  waits for and until when. Known limits: right after a server restart a long turn counts from its start until its node
+  reports again; only agents' turns can be lost, so other running work still holds the wait; and the wait lives in the
+  server's memory, so a restart drops it and the update has to be asked for again.
 - A part of a test run stopped with "Machine check queue lease was lost." when its machine's connection dropped for a
   moment, or when the server handled the machine's reports late. A machine now keeps its check slots for 90 seconds
   after a drop and takes them back once it returns, and its parts go on; the server counts a machine as present while
   anything it sends arrives. A machine silent for 90 seconds still loses its slots, and a part run again on another
   machine takes no result from the first one. The connections of each machine's built-in node now go into the
-  connection history with no node of their own, and the server log names them by the machine. Known limits: a machine
-  back between 90 seconds and 3 minutes reports its part as failed, and the part does not run again; after a server
-  restart the slots still end and their parts stop; a node and a server of different versions get no slot back after
-  a drop, and an older node's slot stays taken for up to 3 minutes; the machine's connection screen does not show the
-  built-in node yet.
+  connection history with no node of their own. Known limits: a machine back between 90 seconds and 3 minutes reports
+  its part as failed, and the part does not run again; after a server restart the slots still end and their parts stop;
+  a node and a server of different versions get no slot back after a drop, and an older node's slot stays taken for up
+  to 3 minutes; the machine's connection screen does not show the built-in node yet.
+
+### Russian
+
+Программа больше не закрывается под ходом, который она только что начала, обновление, ждущее агентов, больше не
+останавливает работу компании без конца, а части тестовых прогонов больше не обрываются, когда связь машины на миг
+пропадает.
+
+- Перед обновлением: в выпуске миграция 0129. Она разрешает пустой `node_id` в `node_connections`, чтобы подключения
+  встроенного узла машины попадали в ее историю подключений. Это одно изменение таблицы, строки она не меняет, и ни до,
+  ни после обновления ничего делать не нужно.
+- Журнал сервера теперь называет встроенный узел машины по машине, на которой он работает, например machine
+  "home-api", node "builtin", а не machine "built-in". Встроенный узел сервера без машины компании по-прежнему
+  называется machine "built-in", node "builtin".
+- Узел мог закрыть программу агента или усыпить ее в тот самый миг, когда она начинала новый ход: Codex берет слова,
+  которые придержал, когда его ход закончен, а Kimi Code берет слова из своей очереди и сообщает о них через хук с
+  опозданием. Тогда ход висел running без программы, следующие ходы агента ждали за ним, а живые слова не находили
+  программу, пока человек его не останавливал; так было у программ Операций на Mac 15 и 16 ноября. Теперь узел прямо
+  перед тем, как закрыть или усыпить программу, проверяет, не начался ли новый ход, и оставляет программу, которая его
+  начала, а ход, открывшийся у уже спящей программы, завершается как ход без программы, и следующий ход снова запускает
+  программу в ее сеансе.
+- Обновление, которое попросили провести, когда агенты закончат, держало каждый новый ход компании, пока не замрет
+  последний агент, а ход, машина которого перестала отчитываться, не отпускал его никогда. Ход, узел которого десять
+  минут ничего не сообщал о своей программе, больше не ждут, а у ожидания есть срок: 30 минут или `idleWaitMinutes` от
+  1 до 240. Если агенты к этому сроку не закончили, обновление отменяется: ничего из идущего не останавливается, ходы
+  снова запускаются, а оркестратор и баннер обновления говорят почему. Баннер, ответ на запрос и `check_updates`
+  называют ходы, которых ждет обновление, и до какого времени. Известные пределы: сразу после перезапуска сервера
+  долгий ход считается с его начала, пока его узел снова не отчитается; потерянными могут быть только ходы агентов,
+  поэтому другая идущая работа по-прежнему держит ожидание; ожидание живет в памяти сервера, поэтому перезапуск его
+  сбрасывает, и обновление нужно попросить снова.
+- Часть тестового прогона обрывалась с «Machine check queue lease was lost.», когда связь ее машины на миг пропадала
+  или сервер поздно обрабатывал отчеты машины. Теперь машина держит свои места для проверок 90 секунд после обрыва и
+  забирает их обратно, как только вернется, а ее части идут дальше; сервер считает машину на месте, пока от нее
+  приходит что угодно. Машина, молчащая 90 секунд, по-прежнему теряет свои места, а часть, запущенная заново на другой
+  машине, не берет результата у первой. Подключения встроенного узла каждой машины теперь попадают в историю
+  подключений без своего узла. Известные пределы: машина, вернувшаяся позже 90 секунд, но раньше 3 минут, сообщает о
+  своей части как о проваленной, и часть заново не запускается; после перезапуска сервера места все равно кончаются, и
+  их части останавливаются; узел и сервер разных версий после обрыва места обратно не получают, а место старого узла
+  остается занятым до 3 минут; экран подключений машины встроенный узел пока не показывает.
 
 ## [0.29.0] - 2026-11-15
 
