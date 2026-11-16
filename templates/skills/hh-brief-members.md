@@ -10,7 +10,7 @@ You can write a brief another employee can execute without missing context.
 - **Goal:** one concrete result and why it matters.
 - **Inputs:** exact files, records, links and approved earlier results. Attach files with `hh-attach --task N FILE`, name them, and never paste them into messages.
 - **Deliverable:** what to return and in what form.
-- **Check:** an executable check or inspectable record proving this result on its actual version; include refusal cases where a wrong result could harm someone. Never order change checks or per-task runs through "run_tests" on individual or turnkey task branches: each executor runs named test files of their changed area, build, types and lint in their own workspace, and "run_tests" runs once per release candidate on the combined release branch before main.
+- **Check:** an executable check or inspectable record proving this result on its actual version; include refusal cases where a wrong result could harm someone. Never order change checks through "run_tests": each executor runs named test files of their changed area, build, types and lint in their own workspace, and "run_tests" runs once per release candidate on the combined release branch before main.
 - **Limits:** allowed scope and access, approvals, any real deadline and the owner of each wait.
 - **Ownership:** the files or records this executor owns until its task is done; resolve collisions before assigning another writer.
 - **Already ruled out:** confirmed decisions and attempts, keeping hypotheses clearly labelled.

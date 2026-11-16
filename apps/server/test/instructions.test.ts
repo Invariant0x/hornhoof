@@ -622,7 +622,6 @@ describe('renderInstructions', () => {
       expect(Buffer.byteLength(policy), `${roleKey} dev-testing-policy`).toBeLessThan(22_000);
       expect(impl, roleKey).toMatch(/run affected checks in your own workspace right away/i);
       expect(impl, roleKey).toMatch(/project's explicit selector[\s\S]*new tests and callers/i);
-      expect(impl, roleKey).toMatch(/never call `?run_tests`? on (?:an )?individual or (?:parallel )?turnkey task branch/i);
       expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact[\s\S]*complete affected package[\s\S]*combined release candidate/i);
       expect(impl, roleKey).toMatch(/install from the lockfile and run builds, types and quality checks locally/i);
       expect(policy, roleKey).toContain('NOT_RUN');
@@ -740,12 +739,11 @@ describe('single pre-release full suite and DEV-HEAD inline byte budget', () => 
     }
   });
 
-  it('forbids per-task and parallel-turnkey run_tests and requires one full run per release candidate on the combined release branch before main', () => {
+  it('requires one full run per release candidate on the combined release branch before main', () => {
     for (const roleId of ['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-TEST'] as const) {
       const whole = renderRole(roleId).whole;
       expect(whole, roleId).not.toMatch(/from code and checks to merge and release|code, checks, your own review and security check, tests, merge and release/i);
       expect(whole, roleId).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it|\bstrictly once\b/i);
-      expect(whole, roleId).toMatch(/never (?:assign|order|call|run)[^.!?\n]*`?"?run_tests"?`?[^.!?\n]*task branch/i);
       expect(whole, roleId).toMatch(/once per release candidate[\s\S]*combined release (?:branch|candidate)[^.!?\n]*before `?main`?/i);
     }
   });

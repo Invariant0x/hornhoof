@@ -134,7 +134,7 @@ describe('turnkey work', () => {
     for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).not.toMatch(/plan_turn|\bmode\b/);
   });
 
-  it('tells the member of a turnkey team to carry its task end to end alone, skip per-task run_tests except on a standalone release, and close it with report', () => {
-    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*no per-task run_tests \(unless this task itself assembles the final release to main\)[^.]*report done true/);
+  it('tells the member of a turnkey team to carry its task end to end alone and close it with report', () => {
+    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*nobody else called onto it[^.]*report done true/);
   });
 });

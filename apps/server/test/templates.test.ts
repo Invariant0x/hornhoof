@@ -1885,17 +1885,11 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
       ]),
   },
   {
-    id: 'local-branch-checks-and-no-per-task-run-tests',
+    id: 'local-branch-checks-and-hand-in',
     holds: s =>
-      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devTdd, s.devTestEnv, s.devImplement, s.briefMembers], text =>
-        matchesAll(text, [
-          /\b(?:individual|turnkey|task)\b[\s\S]*\b(?:named|affected|area)\b[\s\S]*\brun_tests\b|\brun_tests\b[\s\S]*\b(?:individual|turnkey|task)\b/i,
-        ]),
-      ) &&
       forEvery([s.leadTasks, s.devLead, s.devTaskFlow], text =>
         matchesAll(text, [/\bbuild\b[\s\S]*\btypes\b[\s\S]*\blint\b/i, /\bhand\w*\s+in\b[\s\S]*\bbranch\b|\bbranch\b[\s\S]*\bhand\w*\s+in\b/i]),
-      ) &&
-      matchesAll(s.devTaskFlow, [/no per-task run_tests \(unless this task itself assembles the final release to main\)/i]),
+      ),
   },
   {
     id: 'single-full-run-on-combined-release-branch-before-main',
