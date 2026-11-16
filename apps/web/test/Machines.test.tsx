@@ -498,7 +498,29 @@ describe('Machines', () => {
   });
 
   it.each([
-    ['en', 'Other build', "Its nodes are not the server's build (3fe094e here, 8de55ce on the server). To update them, run the install command on it again without --join.", "Its nodes are not the server's build (an older one here, 8de55ce on the server). To update them, run the install command on it again without --join."],
+    ['en', 'Off checks', 'Taken off checks: none of its nodes, the built-in one too, takes parts of test runs or work runs.'],
+    ['ru', 'Снята с проверок', 'Снята с проверок: ни одна ее нода, и встроенная тоже, не берет части прогонов тестов и работ.'],
+  ])('marks a machine taken off checks, in its row and its card, and no lent one, in %s', async (language, mark, note) => {
+    localStorage.setItem('hh-lang', language);
+    lists();
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    expect(within(screen.getByRole('row', { name: 'build-box' })).getByTitle(note)).toHaveTextContent(mark);
+    expect(within(screen.getByRole('row', { name: 'dev-laptop' })).queryByText(mark)).not.toBeInTheDocument();
+    const box = card('build-box');
+    expect(within(box).getByTitle(note)).toHaveTextContent(mark);
+    expect(within(box).getByTitle(note)).toHaveClass('badge', 'off');
+    expect(within(box).getByText(note, { selector: 'p' })).toBeInTheDocument();
+    const laptop = card('dev-laptop');
+    expect(within(laptop).queryByText(mark)).not.toBeInTheDocument();
+    expect(within(laptop).queryByText(note)).not.toBeInTheDocument();
+    /* The server's own card, on no machine of the company, lends always and says nothing of it. */
+    const server = screen.getAllByRole('row').find(r => r.classList.contains('rm') && !['build-box', 'dev-laptop'].includes(r.getAttribute('aria-label') ?? ''))!;
+    expect(within(server).queryByText(mark)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Other build',"Its nodes are not the server's build (3fe094e here, 8de55ce on the server). To update them, run the install command on it again without --join.", "Its nodes are not the server's build (an older one here, 8de55ce on the server). To update them, run the install command on it again without --join."],
     ['ru', 'Другая сборка', 'Ее ноды не той сборки, что у сервера (здесь 3fe094e, у сервера 8de55ce). Чтобы обновить их, выполните на ней команду установки еще раз без --join.', 'Ее ноды не той сборки, что у сервера (здесь старая, у сервера 8de55ce). Чтобы обновить их, выполните на ней команду установки еще раз без --join.'],
   ])('marks a machine whose nodes are not the server build, in its row and its card, and no other, in %s', async (language, mark, note, older) => {
     localStorage.setItem('hh-lang', language);

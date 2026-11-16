@@ -917,6 +917,9 @@ export const en = {
     lend: 'Lend to test runs',
     lent: 'Lent to test runs',
     notLent: 'Not lent to test runs',
+    /* Its owner took it back from the company's runs: none of its nodes takes their parts, its built-in node too. */
+    offChecks: 'Off checks',
+    offChecksNote: 'Taken off checks: none of its nodes, the built-in one too, takes parts of test runs or work runs.',
     keepBackupsLabel: (host: string) => `Keep the company's backups on ${host}`,
     keepBackups: 'Keep company backups',
     keepsBackups: 'Keeps company backups',
