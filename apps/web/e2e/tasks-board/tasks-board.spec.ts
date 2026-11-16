@@ -187,6 +187,9 @@ for (const lang of LANGUAGES.map(l => l.id)) {
     const box = (await side.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(16);
     expect(box.x + box.width).toBeLessThanOrEqual(375 - 16);
+    /* It runs to the bottom of the screen, so nothing of the page shows under it. */
+    expect(box.y + box.height).toBe(page.viewportSize()!.height);
+    expect(await page.evaluate(() => [16, 187, 358].every(x => !!document.elementFromPoint(x, innerHeight - 1)?.closest('.tr-side')))).toBe(true);
     await touchable(page, `drawer ${lang}`);
     await capture(page, info, `drawer-${lang}-375`);
     await side.getByRole('button', { name: new RegExp(`^${t.tracker.side.working}`) }).click();

@@ -1843,7 +1843,8 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
 
 @media (max-width: 760px) {
   .tracker { grid-template-columns: minmax(0, 1fr); }
-  .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 16px; inset-inline: 16px; max-height: none; box-shadow: 0 24px 60px var(--shadow); }
+  /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
+  .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-height: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
   .tr-side.open { display: grid; }
   .tr-side-close { display: flex; }
   .tr-top { grid-template-columns: minmax(0, 1fr); }
