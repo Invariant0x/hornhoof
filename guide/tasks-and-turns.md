@@ -49,7 +49,9 @@ A goal says what the work is for, like "500 subscribers by March". A company goa
 
 A goal can have a number to reach. Its progress is that number against the target, or else how many of the tasks under it are done. Cancelled tasks do not count.
 
-The CEO and the CEO's delegates set company goals. A department's goals are set by anyone whose access lists the department, by its head, by its product manager and by the orchestrator.
+The CEO and the CEO's delegates set company goals. A department's goals are set by anyone whose access lists the department, by its head, by its product manager and by the orchestrator. A product manager makes responsible for a goal only the person who decides for the department or the one already on it.
+
+When a department is removed, its goals stay as goals of the company, and its pipelines go.
 
 ## Who answers for a task?
 

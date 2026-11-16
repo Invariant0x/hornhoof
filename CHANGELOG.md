@@ -25,7 +25,7 @@ and a map. Every department gets a product manager who keeps its work clear for 
   who answers for it, a date and a number to reach; its progress is that number against the target, or else how many
   tasks under it are done, cancelled ones not counted. The CEO and the CEO's delegates set company goals; a department's
   goals are set by whoever reaches the department, its head, its product manager and the orchestrator. A goal keeps the
-  history of its changes.
+  history of its changes. When a department is removed, its goals stay as the company's and its pipelines go.
 - Each task has one person who answers for it: the one named, else the one of the task above it, else of its goal, else
   the person who decides for its department. When that person is switched off or loses access to the department, their
   open tasks and goals pass to the person who decides for it, with a line in the history. A task also has a short why
@@ -74,7 +74,8 @@ and a map. Every department gets a product manager who keeps its work clear for 
 - Цели. Цель компании делится на цели отделов и цели поменьше, на любую глубину. У цели есть зачем, ответственный,
   срок и число, к которому идем; прогресс считается по этому числу, а без него по доле готовых задач под целью,
   отмененные не в счет. Цели компании ставят CEO и его заместители, цели отдела ставят те, у кого есть доступ к отделу,
-  его руководитель, продакт-менеджер и оркестратор. Цель хранит историю изменений.
+  его руководитель, продакт-менеджер и оркестратор. Цель хранит историю изменений. Если отдел удалить, его цели
+  остаются целями компании, а его конвейеры удаляются.
 - У каждой задачи один ответственный: названный, иначе тот же, что у задачи выше, иначе у ее цели, иначе тот, кто решает
   за отдел. Если ответственного выключили или он потерял доступ к отделу, его открытые задачи и цели переходят к тому,
   кто решает за отдел, с записью в истории. У задачи есть короткое "зачем" и срок.
