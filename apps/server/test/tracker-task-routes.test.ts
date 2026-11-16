@@ -98,6 +98,15 @@ describe('a person edits what the tracker keeps of a task', () => {
     expect([circle.statusCode, circle.json().error.message]).toEqual([400, '#1 would wait for itself through what it comes after.']);
   });
 
+  it('names in each line of the list both who holds the task now and who does its work', async () => {
+    const { db, oleg, dev, head, get, work } = await company();
+    const { task } = await work();
+    /* In review: the head holds it, the developer still does the work. */
+    await db.update(tasks).set({ assigneeAgentId: head.id }).where(eq(tasks.id, task.id));
+    const line = (await get(oleg, `/api/tasks?department=${dev.id}`)).json().tasks.find((t: { id: string }) => t.id === task.id);
+    expect([line.assignee?.name, line.executor?.name]).toEqual(['Hana', 'Bruno']);
+  });
+
   it('lists the tasks a person answers for', async () => {
     const { ceo, olegId, ivanId, send, get, work } = await company();
     const { task: mine } = await work('Prices');

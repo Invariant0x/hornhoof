@@ -78,7 +78,7 @@ const shownWho = (viewer: AgentViewer, who: TaskLine['time']['waitsOn'][number][
 const shownTime = (viewer: AgentViewer, time: TaskLine['time']): TaskLine['time'] => ({ ...time, waitsOn: time.waitsOn.map(w => ({ ...w, who: shownWho(viewer, w.who) })) });
 
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart), time: shownTime(viewer, line.time) };
+  return { ...line, echelons: shownEchelons(viewer, line.echelons, line.department?.id ?? null), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), executor: shownRef(viewer, line.executor), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart), time: shownTime(viewer, line.time) };
 }
 
 /* Task lines as this person reads them. */
@@ -122,7 +122,6 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
   return {
     ...maskLine(viewer, detail, detail.parent !== null),
     echelonFindings: shownFindings(viewer, detail.echelonFindings, detail.department?.id ?? null),
-    executor: shownRef(viewer, detail.executor),
     createdBy: detail.createdBy?.kind === 'agent' && !knowsAgentId(viewer, detail.createdBy.id) ? null : detail.createdBy,
     subtasks: detail.subtasks.map(s => maskLine(viewer, s, true)),
     log: shownLog(viewer, detail.log),

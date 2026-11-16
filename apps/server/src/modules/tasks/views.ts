@@ -54,6 +54,8 @@ export type TaskLine = {
   why: string;
   dueAt: string | null;
   time: TimeFacts;
+  /* Who does its work, while the assignee is whoever holds it now, such as a reviewer. */
+  executor: AgentRef | null;
   /* The department's pipeline it goes along and the stage it stands in. */
   pipelineId: string | null;
   pipelineStageId: string | null;
@@ -92,7 +94,6 @@ export type TaskDetail = TaskLine & {
   after: AfterView[];
   /* The tasks that come after this one, of those the reader sees. */
   neededFor: AfterView[];
-  executor: AgentRef | null;
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
   subtasks: TaskLine[];
   log: LogLine[];
@@ -169,6 +170,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   department: n.place(t.departmentId),
   product: n.place(t.productId),
   assignee: n.agent(t.assigneeAgentId),
+  executor: n.agent(t.executorAgentId),
   turn: n.turn(t.turnId),
   parentId: t.parentId,
   waitsFor: n.after(t).filter(a => a.status !== 'done' && sees(a)).map(a => a.number),
@@ -276,7 +278,6 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     parent,
     after: after.map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),
     neededFor: (await db.select().from(tasks).where(sql`${tasks.after} @> ${JSON.stringify([task.id])}::jsonb`).orderBy(asc(tasks.number))).filter(sees).map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),
-    executor: n.agent(task.executorAgentId),
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n, sees)),
     log: await logOf(db, events, id => n.agent(id)?.name),
