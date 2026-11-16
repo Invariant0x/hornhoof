@@ -147,15 +147,26 @@ const lines = new WeakMap<Ctx['config'], { machine: string; commit: string; sinc
    the build, said so a moment ago and may try it, the one that joined first. Only the work that runs there keeps it from
    its turn, so new work keeps off it, one machine at a time, and the others work on meanwhile. */
 export async function nextToInstall(ctx: Ctx, now = new Date()): Promise<NextToInstall | null> {
-  const build = leaderBuild(ctx);
-  /* Only a server that leads and does not install an update itself lets a worker begin. */
-  if (!build || ctx.mode.current() !== 'lead' || ctx.updater.status()?.state === 'running') return null;
+  const build = buildToBegin(ctx);
+  if (!build) return null;
   const rows = await installRows(ctx.db, ctx.config, build);
   if (rows.some(row => installs(row, now))) return null;
-  const waiting = rows.filter(row => row.commit !== build.commit && mayTry(row, build, now) && within(row.reportAt, INSTALLING_SAID_MS, now));
-  const [next] = waiting.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1));
+  const [next] = rows.filter(row => waitsInLine(row, build, now)).sort(joinedFirst);
   return next ? { id: next.id, networkId: next.networkId, since: nextSince(ctx, next.id, build.commit, now) } : null;
 }
+
+/* The server's build, while it lets a worker begin: only a server that leads and does not install an update itself does. */
+function buildToBegin(ctx: Ctx): LeaderBuild | null {
+  const build = leaderBuild(ctx);
+  return build && ctx.mode.current() === 'lead' && ctx.updater.status()?.state !== 'running' ? build : null;
+}
+
+/* Whether the machine waits for its turn: it runs another build, may try this one, and said so a moment ago. */
+const waitsInLine = (row: typeof machines.$inferSelect, build: LeaderBuild, now: Date): boolean =>
+  row.commit !== build.commit && mayTry(row, build, now) && within(row.reportAt, INSTALLING_SAID_MS, now);
+
+const joinedFirst = (a: typeof machines.$inferSelect, b: typeof machines.$inferSelect): number =>
+  a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1);
 
 /* From when the machine was first found next. Nothing else starts the turns of the orchestrator and the heads that waited
    for it when their limit comes, so the queue is woken then. */
