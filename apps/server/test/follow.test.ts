@@ -1,11 +1,15 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHmac, generateKeyPairSync } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, jobs, machines, nodeCodes, nodes, people, subscriptions, testParts, testRuns } from '../src/db/schema.js';
-import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, buildSoon, followOf, goodGrant, holdsBuiltin, holdsMachine, installingBuiltins, installingMachines, installs, leaderBuild, machineInstalls, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
+import { agents, companies, departments, jobs, machines, nodeCodes, nodes, people, subscriptions, testParts, testRuns } from '../src/db/schema.js';
+import { enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
+import { pickBuiltin } from '../src/modules/nodes/builtin.js';
+import { builtinOf } from '../src/modules/nodes/hub.js';
+import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, buildSoon, followOf, goodGrant, holdsBuiltin, holdsMachine, installingBuiltins, installingMachines, installs, leaderBuild, machineInstalls, nextToInstall, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
 import type { Build } from '../src/modules/updates/registry.js';
-import { as, connectNode, listen, ownPlan, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, listen, nextOf, ownPlan, setUpCompany, testApp, until } from './helpers.js';
+import { gets } from './test-runs-company.js';
 
 const COMMIT = 'b'.repeat(40);
 const OLD = 'a'.repeat(40);
@@ -366,5 +370,129 @@ describe("following the server's build", () => {
     const { workerView } = await import('../src/modules/network/join.js');
     expect(await workerView(c.ctx, w)).toMatchObject({ build: null, go: null });
     expect(await c.view(w)).toMatchObject({ build: B, go: { commit: COMMIT } });
+  });
+});
+
+/* The CEO's plan on a computer that joined as a worker of the network, with its node connected, and the people who work
+   there: a worker agent busy with a long turn, another that waits for one, and the orchestrator and a head of that plan. */
+async function busyWorker(env: NodeJS.ProcessEnv = {}) {
+  const c = await company(env);
+  const url = await listen(c.app);
+  onTestFinished(() => c.app.close());
+  const connected = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(c.ceo) });
+  const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: (connected.json() as { command: string }).command.split('--join ')[1], machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' } })).json() as {
+    machine: { id: string };
+    nodes: { nodeId: string; subscriptionId: string; key: string }[];
+  };
+  const { nodeId, subscriptionId, key } = joined.nodes[0]!;
+  const w = joined.machine.id;
+  await c.db.update(machines).set({ role: 'worker', signKey: newKey(), networkId: hashToken('mac'), commit: OLD }).where(eq(machines.id, w));
+  const node = await connectNode(url, key);
+  onTestFinished(() => node.close());
+  node.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+  await until(async () => (await c.db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status === 'ready');
+  const [dept] = await c.db.insert(departments).values({ companyId: c.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const hire = async (name: string, kind: 'head' | 'worker') =>
+    (await c.db.insert(agents).values({ companyId: c.companyId, departmentId: dept!.id, subscriptionId, nodeId, kind, model: '', roleKey: kind === 'head' ? 'DEV-HEAD' : 'DEV-BE', name }).returning())[0]!;
+  const orchestrator = (await orchestratorOf(c.ctx, c.companyId))!;
+  await c.db.update(agents).set({ subscriptionId, nodeId }).where(eq(agents.id, orchestrator.id));
+  const [dev, bob, head] = [await hire('Dev', 'worker'), await hire('Bob', 'worker'), await hire('Hana', 'head')];
+  const [long] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId, agentId: dev.id, nodeId, kind: 'conversation', prompt: 'A long one', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 }).returning();
+  const turnFor = (agentId: string) => enqueueTurn(c.ctx, { companyId: c.companyId, agentId, prompt: 'Your turn', createdBy: null });
+  const statusOf = async (jobId: string) => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId)))[0]!.status;
+  const end = (jobId: string) => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, jobId));
+  /* Whether the node got a turn of this agent: once a pump of its own has run, every earlier one has sent what it would. */
+  const gotTurnOf = async (agentId: string) => {
+    await pump(c.ctx, agentId);
+    return gets(c.ctx, node, 'job.run');
+  };
+  return { ...c, w, node, nodeId, orchestrator: orchestrator.id, bob: bob.id, head: head.id, long: long!.id, turnFor, statusOf, end, gotTurnOf };
+}
+
+describe('a busy worker that waits for its turn to install', () => {
+  const HOLD = 400;
+
+  it('keeps one machine at a time off new work: of those with the build, the first that joined, while none installs', async () => {
+    const c = await company();
+    const [one, two] = [await c.worker('one'), await c.worker('two')];
+    expect(await nextToInstall(c.ctx)).toBeNull();
+    await c.ready(two);
+    expect(await nextToInstall(c.ctx)).toMatchObject({ id: two });
+    await c.ready(one);
+    expect(await nextToInstall(c.ctx)).toMatchObject({ id: one });
+    /* While one installs, none waits for it: the others work on. */
+    expect((await c.view(one)).go).not.toBeNull();
+    expect(await nextToInstall(c.ctx)).toBeNull();
+    /* Its try failed, so it is not tried again for hours, and the next one is. */
+    await c.report(one, { update: { commit: COMMIT, state: 'failed' } });
+    expect(await nextToInstall(c.ctx)).toMatchObject({ id: two });
+    /* A machine that stopped saying it has the build waits for nothing. */
+    await c.db.update(machines).set({ reportAt: new Date(Date.now() - 3 * MINUTE) }).where(eq(machines.id, two));
+    expect(await nextToInstall(c.ctx)).toBeNull();
+  });
+
+  it("sends the work of the company's keys to another built-in node while this machine is next to install", async () => {
+    const NODE_KEY = 'builtin-follow-key-0123456789abcdef';
+    const c = await company({ NODE_KEY });
+    const url = await listen(c.app);
+    onTestFinished(() => c.app.close());
+    const w = await c.worker('mac');
+    const machine = hashToken('mac');
+    const node = await connectNode(url, `builtin.${machine}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${machine}`).digest('hex')}`);
+    onTestFinished(() => node.close());
+    node.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+    await until(() => c.ctx.hub.isReady(builtinOf(machine)));
+    expect(await pickBuiltin(c.ctx, c.db, machine)).toBe(machine);
+    await c.ready(w);
+    /* The server's own built-in node is not connected here, so no built-in node takes it now. */
+    expect(await pickBuiltin(c.ctx, c.db, machine)).toBeNull();
+    await c.report(w, { commit: COMMIT, update: null });
+    expect(await pickBuiltin(c.ctx, c.db, machine)).toBe(machine);
+  });
+
+  /* As on 16.11: the MacBook had the build from 10:01 and installed it at 14:02, as a turn always ran there. */
+  it('takes no new turn while it waits, and hears its turn once the turns that run there ended', async () => {
+    const m = await busyWorker();
+    await m.ready(m.w);
+    expect((await m.view(m.w)).go).toBeNull();
+
+    const job = await m.turnFor(m.bob);
+    expect(await m.gotTurnOf(m.bob)).toBe(false);
+    expect(await m.statusOf(job)).toBe('queued');
+
+    await m.end(m.long);
+    expect((await m.view(m.w)).go).toMatchObject({ commit: COMMIT });
+    /* It installs and runs the build: the turn that waited goes out by itself. */
+    await m.report(m.w, { commit: COMMIT, update: null });
+    expect(await nextOf(m.node, 'job.run')).toMatchObject({ jobId: job });
+  });
+
+  it('lets the orchestrator and a head in past their limit while other work runs there, and then holds them for the install', async () => {
+    const m = await busyWorker({ NODE_LEADER_HOLD_MS: String(HOLD) });
+    /* The clock and the wake at the limit go only as far as the test moves them. */
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    await m.ready(m.w);
+    expect((await m.view(m.w)).go).toBeNull();
+
+    const led = await m.turnFor(m.orchestrator);
+    await vi.advanceTimersByTimeAsync(HOLD - 1);
+    expect(await m.gotTurnOf(m.orchestrator)).toBe(false);
+    /* At the limit the orchestrator's turn goes by itself, and a head's goes as it comes; the worker's long turn runs. */
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await nextOf(m.node, 'job.run')).toMatchObject({ jobId: led });
+    const headed = await m.turnFor(m.head);
+    expect(await nextOf(m.node, 'job.run')).toMatchObject({ jobId: headed });
+
+    /* Once only their own turns are left, they wait too, so they never keep the machine from its turn. */
+    await m.end(m.long);
+    const next = await m.turnFor(m.bob);
+    await m.end(led);
+    const later = await m.turnFor(m.orchestrator);
+    expect(await m.gotTurnOf(m.orchestrator)).toBe(false);
+    expect((await m.view(m.w)).go).toBeNull();
+    await m.end(headed);
+    expect((await m.view(m.w)).go).toMatchObject({ commit: COMMIT });
+    expect([await m.statusOf(later), await m.statusOf(next)]).toEqual(['queued', 'queued']);
   });
 });

@@ -41,7 +41,7 @@ it('lays a run out by what each machine took for the same files before, and give
   const { nodeIdentity } = await import('../src/modules/nodes/hub.js');
   await until(() => [fast, slow].every(machine => testCapabilities(c.app.ctx, nodeIdentity(machine.nodeId)).testEnvironmentVersion === 1));
   const { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const [run] = await c.db.select().from(testRuns);
   const describer = (await c.db.select().from(testRuns))[0]!.environmentRequest!.nodeId === fast.nodeId ? fast : slow;
   const request = await nextOf(describer.node, 'tests.describe');
@@ -99,7 +99,7 @@ it('lays a later run out by what the parts of the earlier ones said each file to
   /* A run of the whole product, each part answered by the machine that got it, at its pace and four files at a time, with a log that
      says nothing of the files: what each took is only in what its runner reported. */
   const runOnce = async () => {
-    expect((await call('run_tests', {})).error).toBe(false);
+    expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
     const [run] = await c.db.select().from(testRuns).where(eq(testRuns.status, 'running'));
     const describer = machines.find(machine => machine.nodeId === run!.environmentRequest!.nodeId)!;
     describer.node.send(await described(await nextOf(describer.node, 'tests.describe')));
@@ -142,7 +142,7 @@ it('reads how long a preparation that passed took before, at the middle pace of 
   for (const machine of [fast, slow]) machine.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: RUNTIMES });
   await until(() => [fast, slow].every(machine => testCapabilities(c.app.ctx, nodeIdentity(machine.nodeId)).testEnvironmentVersion === 1));
   const { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const [run] = await c.db.select().from(testRuns);
   const describer = run!.environmentRequest!.nodeId === fast.nodeId ? fast : slow;
   const request = await nextOf(describer.node, 'tests.describe');

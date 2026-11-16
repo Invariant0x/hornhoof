@@ -11,11 +11,11 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agentEvents, agents, jobs, nodes, subscriptions, tasks, type AgentKind } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import type { TurnRefusal } from '../terminals/relay.js';
-import { nodeDrain, nodeHeld, nodeHeldFrom, turnsHeld } from '../updates/drain.js';
+import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../updates/drain.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { builtinOf, identityOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
+import { holdsBuiltin, holdsMachine, machineInstalls, nextToInstallHolds } from '../network/follow.js';
 import { pickBuiltin } from '../nodes/builtin.js';
 import { cameBack } from '../nodes/connections.js';
 import { shownAway } from '../nodes/machine-away.js';
@@ -802,8 +802,8 @@ type Placement = { node: NodeIdentity; nodeId: string | null; builtinMachine: st
 
 type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; builtinMachine: string | null; roleKey: string | null };
 
-/* The ones the company waits for, whom a busy node does not keep waiting for room, see roomFor. An assistant's own agent
-   works for its owner alone, so it waits as a worker does. */
+/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. An
+   assistant's own agent works for its owner alone, so it waits as a worker does. */
 const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
 
 /* Whether a node has room for the agent's turn, only asked: the agent is not put among the turns that wait for room. */
@@ -822,19 +822,28 @@ async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 
     const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
     if (!machine) return null;
     const node = builtinOf(machine);
-    return !nodeHeldFrom(ctx, node, agent.roleKey) && roomy(node) ? { node, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
+    return !nodeHeldFrom(ctx, node, agent.roleKey, isLeader(agent)) && roomy(node) ? { node, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
   }
   const all = await planNodes(ctx.db, [sub.id]);
   const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : await freest(ctx, able));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need, roomy)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
 }
 
-/* Whether the agent has work in progress on a node of its plan and waits for that one, the orchestrator and a head too,
-   also while that node waits for an update. */
+/* Whether the agent has work in progress on a node of its plan and waits for that one: not the orchestrator or a head whom
+   an update kept off it past their limit, who go to another machine of the plan when one can take them. */
 async function waitsForOwnNode(ctx: Ctx, agent: PlacedAgent, all: NodeRow[]): Promise<boolean> {
   if (!all.some(n => n.id === agent.nodeId)) return false;
+  if (isLeader(agent) && nodeHeldLong(ctx, nodeIdentity(agent.nodeId!))) return false;
   return holdsWork(ctx, agent.id);
+}
+
+/* With no other machine, the node an update keeps the orchestrator's or a head's turn off past their limit: its own, if it
+   is one of those. */
+async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[], roomy: (node: NodeIdentity) => boolean): Promise<NodeRow | null> {
+  if (!isLeader(agent)) return null;
+  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
+  return open.find(n => n.id === agent.nodeId) ?? freest(ctx, open);
 }
 
 /* Whether the agent holds a task it works on, or stopped on to ask: its folder may hold work it has not pushed, so it
@@ -1131,8 +1140,11 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
-     Asked here, before the turn's words are put together, and once more when the turn is taken. */
+     Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine
+     next to install, so the turns that run there end and it has its turn: the orchestrator's and the heads' wait up to
+     their limit. */
   if (await machineInstalls(db, place.nodeId)) return;
+  if (await nextToInstallHolds(ctx, place.nodeId, isLeader(agent))) return;
   const along: Along[] = [];
   for (const j of await goingAlong(ctx, agent, job, place.nodeId)) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
 
@@ -1182,6 +1194,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       nodeId: place.nodeId,
       builtinMachine: place.builtinMachine,
       role: agent.roleKey,
+      leader: isLeader(agent),
       prompt,
       freshPrompt: sessionId === null ? null : fresh,
       sessionId,

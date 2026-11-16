@@ -31,6 +31,7 @@ export type Config = {
   image: string;
   registryUrl?: string;
   updateCheckMs: number;
+  nodeLeaderHoldMs: number;
   /* The folder the app shares with the updater service. */
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
@@ -104,6 +105,10 @@ const Env = z.object({
   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
   MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
+  /* How long the orchestrator and the heads wait for a machine next to install the server's build, and for a node an
+     updater was told is free while it does not stop. Replacing a free node takes under a minute. A node that waits for
+     its work to end before an update takes none of their turns, however long. */
+  NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   FEEDBACK_INBOX: z.preprocess(unset, z.enum(['true', 'false'], { error: 'FEEDBACK_INBOX must be true or false.' }).optional()),
@@ -205,13 +210,14 @@ function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScri
 }
 
 /* Intervals and limits, with their defaults. */
-function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes'> {
+function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes' | 'nodeLeaderHoldMs'> {
   return {
     port: set.PORT ?? 8080,
     nodePingMs: set.NODE_PING_MS ?? 20000,
     streamPingMs: set.STREAM_PING_MS ?? 25000,
     runsPerHost: set.MAX_RUNS_PER_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+    nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
   };
 }
 
