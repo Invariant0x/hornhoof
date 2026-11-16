@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, programOperatorCases } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { authorizeOperator, operatorRefused, type OperatorCaller } from './authorization.js';
 import { escalateCase, syncOperatorCases } from './cases.js';
@@ -42,7 +42,7 @@ async function recordReport(tx: Tx, inside: Ctx, caller: OperatorCaller, input: 
 }
 
 async function deniedDecision(ctx: Ctx, caller: OperatorCaller, row: typeof programOperatorCases.$inferSelect) {
-  const [fact] = await ctx.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.companyId, caller.companyId), eq(agentEvents.jobId, row.jobId), sql`${agentEvents.data}->'operatorAction'->>'case' = ${row.id}`, sql`${agentEvents.data}->'operatorAction'->>'operatorJobId' = ${caller.id}`, sql`${agentEvents.data}->'operatorAction'->'actor'->>'id' = ${caller.agentId}`, sql`${agentEvents.data}->'operatorAction'->>'decision' = 'denied'`, sql`${agentEvents.data}->'operatorAction'->>'result' = 'applied'`)).limit(1);
+  const [fact] = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.companyId, caller.companyId), eq(agentEvents.jobId, row.jobId), sql`${agentEvents.data}->'operatorAction'->>'case' = ${row.id}`, sql`${agentEvents.data}->'operatorAction'->>'operatorJobId' = ${caller.id}`, sql`${agentEvents.data}->'operatorAction'->'actor'->>'id' = ${caller.agentId}`, sql`${agentEvents.data}->'operatorAction'->>'decision' = 'denied'`, sql`${agentEvents.data}->'operatorAction'->>'result' = 'applied'`)).limit(1);
   const data = fact?.data as { operatorAction?: unknown } | undefined;
   const parsed = z.object({ key: z.literal('Enter'), decision: z.literal('denied'), permissionDecision: z.literal(true), question: OperatorQuestion.refine(question => question.kind === 'permission') }).safeParse(data?.operatorAction);
   return parsed.success && row.evidence.some(e => e.reason === 'question_waiting' && e.evidenceKey === parsed.data.question.id) ? parsed.data : null;

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { and, desc, eq, gt, gte, inArray, isNotNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { refusePaused } from './pause.js';
@@ -84,13 +84,13 @@ export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: 
 
 /* The last of the agent's events, which a call to wait counts words on its task from. */
 export async function lastEventOf(ctx: Ctx, agentId: string): Promise<number> {
-  const [last] = await ctx.db.select({ seq: agentEvents.seq }).from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(desc(agentEvents.seq)).limit(1);
+  const [last] = await ctx.db.select(only(agentEvents, 'seq')).from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(desc(agentEvents.seq)).limit(1);
   return last?.seq ?? 0;
 }
 
 /* Words on the task that came after the call to wait: into the running turn, they cannot have been read before it. */
 async function newMessage(ctx: Ctx, agentId: string, taskId: string, heard: number): Promise<boolean> {
-  const [message] = await ctx.db.select({ seq: agentEvents.seq }).from(agentEvents).where(and(
+  const [message] = await ctx.db.select(only(agentEvents, 'seq')).from(agentEvents).where(and(
     eq(agentEvents.agentId, agentId), gt(agentEvents.seq, heard), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->'task'->>'id' = ${taskId}`,
   )).limit(1);
   return Boolean(message);
@@ -264,7 +264,7 @@ async function notWaiting(ctx: Ctx, agentId: string, id: string): Promise<string
 
 /* A letter in the inbox waits there for the turn that takes it, which other letters wait for too, whatever holds that turn back. */
 async function inInbox(ctx: Ctx, id: string): Promise<boolean> {
-  const [kept] = await ctx.db.select({ inboxWake: jobs.inboxWake }).from(jobs).where(eq(jobs.id, id));
+  const [kept] = await ctx.db.select(only(jobs, 'inboxWake')).from(jobs).where(eq(jobs.id, id));
   return kept?.inboxWake === true;
 }
 

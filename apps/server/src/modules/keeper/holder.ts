@@ -210,7 +210,7 @@ export class HolderKeeper {
     let outcome: 'answered' | 'refused' | 'unreachable' = 'unreachable';
     try {
       const res = await (survivor.fetch ?? fetch)(`${target}${CHALLENGE_PATH}`, {
-        method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: Buffer.from(file) as unknown as BodyInit, signal: AbortSignal.timeout(CHALLENGE_MS), redirect: 'error',
+        method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: Buffer.from(file), signal: AbortSignal.timeout(CHALLENGE_MS), redirect: 'error',
       });
       const said = res.status === 200 ? ((await res.json().catch(() => null)) as { proof?: unknown } | null) : null;
       outcome = said?.proof === answerProof(nonce) ? 'answered' : 'refused';

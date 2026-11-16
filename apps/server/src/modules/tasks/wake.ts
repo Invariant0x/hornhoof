@@ -1,7 +1,7 @@
 import { isStaged } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
@@ -236,7 +236,7 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
   let text: string;
   if (request.kind === 'stuck' && request.audience === 'internal') {
     if (request.triageAgentId !== w.agentId) return null;
-    const [recipient] = await ctx.db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, w.agentId));
+    const [recipient] = await ctx.db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, w.agentId));
     const action = recipient?.kind === 'orchestrator'
       ? `Read the task, then close this request yourself with "answer_request" and request ${request.id}, with answer or retry true. Do not ask a person.`
       : `Read the task, then answer it with "comment" on #${task.number}. Do not ask a person.`;
@@ -624,7 +624,7 @@ function planHandoffText(name: string | undefined, other: PlanStandIn, until: st
 }
 
 async function handOverAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string, other: PlanStandIn): Promise<Moved | null> {
-  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const [me] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   return handOver(ctx, task, other.id, planHandoffText(me?.name, other, until)).catch(changedWhileResuming);
 }
 
@@ -669,7 +669,7 @@ async function wakeBrokenTurn(ctx: Ctx, job: HeldJob, task: Task): Promise<boole
 }
 
 async function brokenTurnText(ctx: Ctx, job: HeldJob, task: Task, quick: boolean): Promise<string> {
-  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
+  const [me] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId));
   return crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task, quick);
 }
 

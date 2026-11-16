@@ -4,6 +4,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, subscriptions, taskEvents } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import type { CompareResult } from '../testruns/compare.js';
 import type { CommitWanted, RepoAddress } from '../testruns/refs.js';
@@ -35,7 +36,7 @@ const comparedLines = (compared: Extract<CompareResult, { complete: true }>): nu
 export const exactComparison = (result: CompareResult, base: string, head: string): result is Extract<CompareResult, { complete: true }> => result.complete && result.baseSha === base && result.headSha === head;
 
 export async function authorVendor(db: Store, authorId: string): Promise<string | null> {
-  const [row] = await db.select({ provider: subscriptions.provider }).from(agents)
+  const [row] = await db.select(only(subscriptions, 'provider')).from(agents)
     .leftJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, authorId));
   return row?.provider ? modelProvider(row.provider) : null;
 }
@@ -73,7 +74,7 @@ export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typ
 
 /* Event records, rather than a live branch lookup, define what a reviewer was assigned. */
 export async function reviewContext(db: Store, taskId: string): Promise<Review | null> {
-  const records = await db.select({ data: taskEvents.data }).from(taskEvents)
+  const records = await db.select(only(taskEvents, 'data')).from(taskEvents)
     .where(and(eq(taskEvents.taskId, taskId), inArray(taskEvents.kind, ['submitted', 'created']))).orderBy(desc(taskEvents.id));
   for (const record of records) {
     const parsed = ReviewRecord.safeParse(record.data.review);

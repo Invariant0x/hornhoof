@@ -1,6 +1,7 @@
 import { and, asc, eq, gt } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, assistantReplies, jobs, type AssistantEventKind } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { turnGoingOn } from '../conversation/queue.js';
 import { storeEvent } from './events.js';
 
@@ -46,7 +47,7 @@ async function passOn(ctx: Ctx, row: ReplyRow, told: Told): Promise<boolean> {
    the grace, its end. Returns when to look again for an end that waits for the grace, if it does. */
 async function collectOne(ctx: Ctx, row: ReplyRow, told: Told, graceMs: number, now: Date): Promise<number | null> {
   /* Whether the turn is over is read before its words, so none it said before its end is missed. */
-  const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, row.jobId));
+  const [job] = await ctx.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, row.jobId));
   const over = !job || !OPEN.includes(job.status);
   const answered = await passOn(ctx, row, told);
   if (!over) return null;
