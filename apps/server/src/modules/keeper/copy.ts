@@ -29,6 +29,9 @@ const ENABLE_EVERY_MS = 60_000;
 /* How often the saver of a database that led is asked to go on. */
 const SAVE_EVERY_MS = 10_000;
 const RETRY_MS = 600_000;
+/* The longest an attempt waits after attempts were given up in a row, each twice as long as the one before. */
+const RETRY_MAX_MS = 7_200_000;
+const OTHER_VERSION = 'the company server runs another version of the database';
 /* How long the app gets to read that it is off before the databases change places. */
 const OFF_FOR_MS = 2_000;
 const FIRST_DB = 'hornhoof';
@@ -84,6 +87,8 @@ const Kept = z.object({
   swap: z.enum(['off', 'disable', 'rename', 'enable', 'drop_sub', 'drop_db', 'read']).nullable().default(null),
   stamp: z.string().regex(/^[0-9]{8}t[0-9]{6}$/).nullable().default(null),
   swapAt: z.string().nullable().default(null),
+  /* How many attempts in a row were given up since the copy was last whole: the next waits the longer. */
+  given: z.number().int().min(0).default(0),
 });
 type Kept = z.infer<typeof Kept>;
 type Subscription = { name: string; oid: number; enabled: boolean; slot: string | null };
@@ -325,7 +330,7 @@ export class CopyMaker {
     if (this.kept.phase === 'join') return this.join(sql, order);
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
-    if (this.kept.phase === 'subscribe') return this.subscribe(sql);
+    if (this.kept.phase === 'subscribe') return this.subscribe(sql, order);
     if (this.kept.phase === 'sync') return this.sync(sql, order);
     return this.ready(sql, order);
   }
@@ -441,7 +446,8 @@ export class CopyMaker {
   /* The copy answers the leader each second, so the leader knows within seconds when it falls silent. The password is
      read from a file in the database's own folder, so no statement holds it. A subscription of that name already
      there counts as made. */
-  private async subscribe(sql: Sql): Promise<void> {
+  private async subscribe(sql: Sql, order: CopyOrder | null): Promise<void> {
+    if (await this.otherSchema(sql, order)) return this.schemaChanged();
     if (!(await this.subscription(sql))) {
       await sql.query(`ALTER SYSTEM SET wal_receiver_status_interval = '1s'`);
       await sql.query('SELECT pg_reload_conf()');
@@ -457,13 +463,15 @@ export class CopyMaker {
     this.keep({ phase: 'sync', seen: false, missing: 0 });
   }
 
-  /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row. */
+  /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row: one that was
+     enabled again holds only once it still runs a minute later, so one that stops on its first error each time it
+     starts, however often a look finds it running in between, counts as stopped all along, and is given up. */
   private async stoppedFor(sql: Sql, enabled: boolean): Promise<number> {
+    const now = this.now();
     if (enabled) {
-      this.disabledSince = null;
+      if (now - this.enabledAt >= ENABLE_EVERY_MS) this.disabledSince = null;
       return 0;
     }
-    const now = this.now();
     this.disabledSince ??= now;
     if (now - this.enabledAt >= ENABLE_EVERY_MS) {
       this.enabledAt = now;
@@ -483,15 +491,19 @@ export class CopyMaker {
   private async sync(sql: Sql, order: CopyOrder | null): Promise<void> {
     const sub = await this.subscription(sql);
     if (!sub) return this.keep({ phase: 'subscribe' });
-    const stopped = await this.stoppedFor(sql, sub.enabled);
     /* While the server moved and the new leader has not said its word yet, nothing is given up; once it has, the first
        copy this machine was still making is begun anew, from that leader. */
     const elsewhere = this.elsewhere(order);
     if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    /* The leader's schema changed while its rows were copied, as with an update that added a column: a subscription
+       enabled again would stop on the first row of that table, so it is not, and the next attempt loads the schema the
+       leader has now. */
+    if (!elsewhere && (await this.otherSchema(sql, order))) return this.schemaChanged();
+    const stopped = await this.stoppedFor(sql, sub.enabled);
     if (elsewhere ? elsewhere.moved : order?.slot === 'lost' || stopped >= ENABLE_FOR_MS) return this.giveUp();
     const tables = await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [sub.oid]);
     if (tables && tables.total > 0 && tables.ready === tables.total) {
-      this.keep({ phase: 'ready' });
+      this.keep({ phase: 'ready', given: 0 });
       return this.ready(sql, order);
     }
     const size = Number((await this.one<{ size: number }>(sql, 'SELECT pg_database_size(current_database())::float8 AS size'))?.size ?? 0);
@@ -521,8 +533,31 @@ export class CopyMaker {
     if (order?.slot === 'lost') return 'the company server no longer keeps what this copy had still to read';
     if (this.kept.missing >= MISSING_VIEWS) return 'the company server no longer lists this copy';
     if (stopped >= ENABLE_FOR_MS) return 'its changes stopped coming in and would not start again';
-    if (order && order.migrations !== null && this.kept.migrations !== null && order.migrations !== this.kept.migrations) return 'the company server runs another version of the database';
+    if (order && order.migrations !== null && this.kept.migrations !== null && order.migrations !== this.kept.migrations) return OTHER_VERSION;
     return null;
+  }
+
+  /* How many migrations this copy's schema has: as written down, or, for a copy a build of before made without writing
+     it down, counted once in its database. Null when it cannot tell. */
+  private async ownMigrations(sql: Sql): Promise<number | null> {
+    if (this.kept.migrations !== null) return this.kept.migrations;
+    const counted = await this.one<{ n: number }>(sql, `SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations`).catch(() => undefined);
+    if (counted) this.keep({ migrations: counted.n });
+    return counted?.n ?? null;
+  }
+
+  /* Whether the leader's schema has another count of migrations than this copy's. */
+  private async otherSchema(sql: Sql, order: CopyOrder | null): Promise<boolean> {
+    if (order?.migrations == null) return false;
+    const own = await this.ownMigrations(sql);
+    return own !== null && own !== order.migrations;
+  }
+
+  /* An attempt made with the leader's schema of before is given up, and the next asks for the schema now: at once the
+     first time, as any other attempt given up after that. */
+  private schemaChanged(): void {
+    this.opts.log("This copy was being made with the company server's schema of before the server's update: it is made again with the schema the server has now.");
+    this.giveUp(true);
   }
 
   /* The copy follows. One whose subscription stopped says why, as far as it can tell: no room left, or a change that
@@ -537,6 +572,9 @@ export class CopyMaker {
     }
     const sub = await this.subscription(sql);
     const at = await this.pulse(sql);
+    /* A copy a build of before made says now how many migrations its schema has, so a leader of another version makes
+       it again and does not start it. */
+    await this.ownMigrations(sql);
     /* A view of another leader than the one this copy follows counts toward none of the reasons to make it again,
        until that leader named no slot for it twice in a row: then it did not hold everything, and is made again. */
     const elsewhere = this.elsewhere(order);
@@ -546,7 +584,7 @@ export class CopyMaker {
     const known = elsewhere ? null : this.broken(order, 0);
     const stopped = sub && !known ? await this.stoppedFor(sql, sub.enabled) : 0;
     const why = elsewhere ? (elsewhere.moved ? 'the company server moved to a machine that does not hold a place for this copy' : null) : (known ?? this.broken(order, sub ? stopped : ENABLE_FOR_MS));
-    if (why) return this.kept.old ? this.giveUp() : this.remake(why);
+    if (why) return this.kept.old ? this.giveUp(why === OTHER_VERSION) : this.remake(why);
     if (!sub || stopped > 0) {
       const free = this.opts.diskFree();
       this.said = this.stopped(free !== null && free < DISK_FULL ? 'disk_full' : 'apply', at);
@@ -574,18 +612,31 @@ export class CopyMaker {
   }
 
   /* An attempt is given up whole before the next begins: the next number and the phase are written down first, so a
-     keeper that starts in the middle goes on with what is left. */
-  private giveUp(): void {
-    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: new Date(this.now() + RETRY_MS).toISOString(), seen: false, missing: 0 });
+     keeper that starts in the middle goes on with what is left. The next asks for its schema ten minutes later, twice
+     as long after each attempt given up in a row, two hours at most; soon: at once, when none was given up before. */
+  private giveUp(soon = false): void {
+    const { given } = this.kept;
+    const wait = soon && given === 0 ? 0 : Math.min(RETRY_MS * 2 ** given, RETRY_MAX_MS);
+    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: wait === 0 ? null : new Date(this.now() + wait).toISOString(), seen: false, missing: 0, given: given + 1 });
     this.disabledSince = null;
     this.said = this.making(0);
   }
 
   /* Each subscription of a database is given up: disabled, parted from its slot, which the leader then drops, and
-     dropped. Each step is skipped when it is done. */
+     dropped. Each step is skipped when it is done. One that is dropped goes with its slot where the leader is in reach:
+     Postgres then drops on the leader that slot and those of its tables' first copies that are not through, which
+     would else stay there until the leader's sweep, and reserve its log meanwhile. Out of reach, it is parted first. */
   private async release(sql: Sql, drop: boolean): Promise<void> {
     for (const sub of await this.subscriptions(sql)) {
       if (sub.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} DISABLE`);
+      if (drop && sub.slot) {
+        try {
+          await sql.query(`DROP SUBSCRIPTION ${ident(sub.name)}`);
+          continue;
+        } catch (err) {
+          this.opts.log(`Could not drop the slots of a copy given up on the company server, which drops them itself later: ${reasonOf(err)}`);
+        }
+      }
       if (sub.slot) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} SET (slot_name = NONE)`);
       if (drop) await sql.query(`DROP SUBSCRIPTION ${ident(sub.name)}`);
     }
