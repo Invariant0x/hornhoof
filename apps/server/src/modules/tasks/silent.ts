@@ -124,8 +124,16 @@ export function signInTurn(program: Pick<TurnProgram, 'signAt'>, job: Pick<Job, 
   return program.signAt === 0 ? (job.startedAt ?? job.createdAt).getTime() : program.signAt;
 }
 
+/* When Hornhoof last heard of a turn's program: its node's last report, or the turn's start before the first one. */
+const heardAt = (job: Pick<Job, 'startedAt' | 'createdAt'>, program: TurnProgram | null): number => program?.reportedAt ?? (job.startedAt ?? job.createdAt).getTime();
+
+/* A running turn whose node said nothing of its program for SILENT_TURN_MS, the node_silent alarm: nothing tells when it
+   ends, so nothing waits for it to end. */
+export function lostTurn(ctx: Ctx, job: Pick<Job, 'id' | 'startedAt' | 'createdAt'>, nowMs: number): boolean {
+  return nowMs - heardAt(job, mapOf(turnPrograms, ctx).get(job.id)?.program ?? null) >= SILENT_TURN_MS;
+}
+
 function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number): TurnAlarm | null {
-  if (nowMs - program.reportedAt >= SILENT_TURN_MS) return { reason: 'node_silent', since: program.reportedAt };
   if (signAt !== null) {
     if (program.state === 'asking') return null;
     const threshold = program.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
@@ -136,9 +144,9 @@ function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: num
 }
 
 function alarmForTurn(job: Job, program: TurnProgram | null, nowMs: number): TurnAlarm | null {
-  if (program) return alarmForProgram(program, signInTurn(program, job), nowMs);
-  const startedAt = (job.startedAt ?? job.createdAt).getTime();
-  return nowMs - startedAt >= SILENT_TURN_MS ? { reason: 'node_silent', since: startedAt } : null;
+  const heard = heardAt(job, program);
+  if (nowMs - heard >= SILENT_TURN_MS) return { reason: 'node_silent', since: heard };
+  return program ? alarmForProgram(program, signInTurn(program, job), nowMs) : null;
 }
 
 function alarmForTask(job: Job, program: TurnProgram | null, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {

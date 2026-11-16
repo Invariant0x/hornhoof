@@ -1,5 +1,5 @@
 import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
@@ -26,7 +26,7 @@ import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type Hello, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
-import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
+import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
@@ -63,6 +63,12 @@ export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   const ofKeys = inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
   const here = id.machine === ownMachine(ctx.config) ? or(eq(jobs.builtinMachine, id.machine), isNull(jobs.builtinMachine)) : eq(jobs.builtinMachine, id.machine);
   return and(ofKeys, here)!;
+}
+
+/* The turns that run on the node now, as Hornhoof has them. */
+async function workingOn(ctx: Ctx, id: NodeIdentity): Promise<number> {
+  const [row] = await ctx.db.select({ n: count() }).from(jobs).where(and(jobsOf(id, ctx), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
+  return Number(row?.n ?? 0);
 }
 
 type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };
@@ -345,7 +351,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
       /* Every waiting turn is sent below, with what the node says of the programs that run on it. */
-      programsLive(ctx, id, msg.live);
+      programsLive(ctx, id, msg.live, await workingOn(ctx, id));
       await testsHello(ctx, id, msg.tests);
       await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));
       await settleListed(ctx, id, msg.running, now);
@@ -377,7 +383,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await checkQueueLoad(ctx, id);
       /* A machine that freed up takes a part that waits, and starts the programs that waited for its memory. */
       await pumpTests(ctx);
-      for (const agentId of programsLive(ctx, id, live)) await pump(ctx, agentId);
+      for (const agentId of programsLive(ctx, id, live, await workingOn(ctx, id))) await pump(ctx, agentId);
       return;
     }
 
@@ -469,7 +475,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
 /* Jobs keep running on the node while it is away and report after it reconnects, so only the time is kept. */
 export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void> {
   /* A newer connection of the same node keeps the views. */
-  if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueLost(ctx, id); }
+  if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueAway(ctx, id); }
   if (id.kind !== 'node') return;
   await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));
 }

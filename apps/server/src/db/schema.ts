@@ -607,14 +607,15 @@ export const nodes = pgTable(
 
 /* Each connection of a node, from when it came to how it ended; a node that stays connected has an open one. How long the
    node was away is the time to its next one. A connection's end and cause come together. report: what the node itself said
-   of this drop once it was back; a node from before says nothing. */
+   of this drop once it was back; a node from before says nothing. nodeId: none for the machine's built-in node, which has
+   no node of its own (#1060). */
 export const nodeConnections = pgTable(
   'node_connections',
   {
     id: id(),
     companyId: companyId(),
     machineId: uuid('machine_id').notNull().references(() => machines.id),
-    nodeId: uuid('node_id').notNull().references(() => nodes.id, { onDelete: 'cascade' }),
+    nodeId: uuid('node_id').references(() => nodes.id, { onDelete: 'cascade' }),
     connectedAt: timestamp('connected_at', { withTimezone: true }).notNull(),
     disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
     cause: text('cause', { enum: CONNECTION_ENDS }),

@@ -72,7 +72,7 @@ describe('the Versions screen', () => {
     latest: null,
     versions: [],
     error: null,
-    updater: { present: true, status: null, waiting: null },
+    updater: { present: true, status: null, waiting: null, calledOff: null },
   };
   const updates = (next: UpdatesView): Updates => ({
     view: next, busy: false, starting: false, target: null, offline: false, maintenance: false, asking: false, cut: null,
