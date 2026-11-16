@@ -112,7 +112,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
   return (
     <div className={`sslot${head.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={style}>
       <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} aria-pressed={on} onClick={() => onOpen(head.id)}>
-        <Edge cut={14} corner>
+        <Edge cut={14} corner halo>
           <span className="hr">
             <AgentIcon />
             <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
@@ -548,7 +548,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           {reach.map((p, k) => (
             <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
               <PersonButton person={p} frame={{ w: PW, h: PH, cut: 8 }} onOpen={() => openDecisions(p.id)}>
-                <Edge cut={8}>
+                <Edge cut={8} halo>
                   <PersonIcon />
                   <span className="pn">
                     <b>{p.name}</b>
