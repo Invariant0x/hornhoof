@@ -1,12 +1,5 @@
 import { z } from 'zod';
 
-/* The bridge sends authorization metadata only, never typed values or the UI tree. */
-export const PhoneBridgeAuthorization = z.discriminatedUnion('scope', [
-  z.strictObject({ scope: z.literal('probe'), serial: z.string().max(200).nullable() }),
-  z.strictObject({ scope: z.literal('session'), phoneId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), serial: z.string().max(200), hardwareKey: z.string().regex(/^[0-9a-f]{64}$/) }),
-]);
-export type PhoneBridgeAuthorization = z.infer<typeof PhoneBridgeAuthorization>;
-
 export const PHONE_LEASE_MS = 30_000;
 export const PHONE_FRAME_MAX = 3 * 1024 * 1024;
 export const PhoneSerial = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/);
@@ -46,16 +39,15 @@ export const PhoneCapture = z.strictObject({
   elements: z.array(PhoneElement).max(5000),
 });
 export type PhoneCapture = z.infer<typeof PhoneCapture>;
-export const PhoneBinding = z.strictObject({
-  phoneId: z.uuid(), serial: PhoneSerial, transport: z.enum(['network', 'usb']), endpoint: PhoneEndpoint.nullable(), hardwareKey: PhoneHardwareKey,
-});
+/* serial is the phone's address on the network, host and port, as adb names a phone it reaches by wireless debugging. */
+export const PhoneBinding = z.strictObject({ phoneId: z.uuid(), serial: PhoneEndpoint, hardwareKey: PhoneHardwareKey });
 export type PhoneBinding = z.infer<typeof PhoneBinding>;
 export const PhoneGrant = z.strictObject({
   sessionId: z.uuid(), generation: z.number().int().nonnegative(), binding: PhoneBinding, expiresAt: z.iso.datetime(),
 });
 export type PhoneGrant = z.infer<typeof PhoneGrant>;
 
-export const PhoneProbe = z.strictObject({ type: z.literal('phone.probe'), requestId: z.uuid(), transport: z.enum(['network', 'usb']), endpoint: PhoneEndpoint.nullable(), pairing: PhonePairing.optional() });
+export const PhoneProbe = z.strictObject({ type: z.literal('phone.probe'), requestId: z.uuid(), endpoint: PhoneEndpoint, pairing: PhonePairing.optional() });
 export const PhoneOpen = z.strictObject({ type: z.literal('phone.open'), requestId: z.uuid(), grant: PhoneGrant });
 export const PhoneAction = z.strictObject({ type: z.literal('phone.action'), requestId: z.uuid(), sessionId: z.uuid(), generation: z.number().int().nonnegative(), operation: PhoneOperation });
 export const PhoneRenew = z.strictObject({ type: z.literal('phone.renew'), sessionId: z.uuid(), generation: z.number().int().nonnegative(), expiresAt: z.iso.datetime() });

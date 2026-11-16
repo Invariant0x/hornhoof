@@ -10,8 +10,6 @@ const STUBS = fileURLToPath(new URL('./install-stubs/', import.meta.url));
 export const SERVER = 'https://hornhoof.example.test';
 export const IMAGE = 'ghcr.io/invariant0x/hornhoof-node:latest';
 export const CODE = 'Ab3_d-Ef'.repeat(5) + 'xyz';
-/* A USB helper is a separate service, not an agent node or a subscription. */
-export const isNodeRun = (call: string): boolean => call.startsWith('docker run -d') && call.includes('--label hornhoof.subscription=');
 export const SUB_A = '1c07dac4-c52e-48b4-b316-81c19de61bd7';
 export const SUB_B = '9f1e2d3c-0000-4000-8000-000000000002';
 const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex node-key-bbbbbbbbbbbbbbbb\\n`;

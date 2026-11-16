@@ -7,7 +7,7 @@ import type { PhoneView } from '../src/ui/Phones';
 
 const NOW = Date.parse('2026-11-16T12:00:00Z');
 const machine: MachineView = { id: 'm1', hostname: 'Company computer', os: 'linux', arch: 'arm64', owner: { id: ME.person.id, name: ME.person.name }, online: true, lastSeenAt: null, plans: [], load: null, lendsTests: false, running: { agents: [], parts: [] } };
-const phone: PhoneView = { id: 'ph1', name: 'Android компании с длинным названием телефона', machineId: machine.id, owner: { id: ME.person.id, name: ME.person.name }, lending: true, online: true, verified: true, stopping: false, state: 'available', queued: 2 };
+const phone: PhoneView = { id: 'ph1', name: 'Android компании с длинным названием телефона', machineId: machine.id, owner: { id: ME.person.id, name: ME.person.name }, lending: true, online: true, stopping: false, state: 'available', queued: 2 };
 
 async function words(language: Language): Promise<Messages> {
   const dictionary = await import(`../src/i18n/${language}.ts`) as Record<string, Messages>;
@@ -40,7 +40,7 @@ async function setup(page: Page, language: Language, skin: string) {
 async function fits(host: Locator) {
   const result = await host.evaluate(el => {
     const frame = el.getBoundingClientRect();
-    return [...el.querySelectorAll<HTMLElement>('button,input:not([type="radio"]),select')].filter(n => n.getBoundingClientRect().height > 0).map(n => {
+    return [...el.querySelectorAll<HTMLElement>('button,input,select')].filter(n => n.getBoundingClientRect().height > 0).map(n => {
       const box = n.getBoundingClientRect();
       return { text: n.textContent ?? n.getAttribute('name'), height: box.height, overflow: Math.max(frame.left - box.left, box.right - frame.right, 0) };
     });
@@ -61,12 +61,11 @@ for (const width of [375, 1440]) {
       await expect(form.getByLabel(t.phones.name, { exact: true })).toBeFocused();
       await expect(form.getByLabel(t.phones.name, { exact: true })).toHaveAttribute('aria-invalid', 'true');
       await form.getByLabel(t.phones.name, { exact: true }).fill(phone.name);
-      await form.getByLabel(t.phones.connection, { exact: true }).selectOption('network');
       await form.getByLabel(t.phones.address, { exact: true }).fill('192.168.1.80:5555');
       await fits(form);
       if (info.project.name === 'phones-chromium' && skin.id === 'cyberpunk' && language.id === 'ru') await page.screenshot({ path: info.outputPath(`add-${width}.png`), fullPage: true });
       await form.getByRole('button', { name: t.phones.find, exact: true }).click();
-      await expect(form.getByRole('radio')).toBeChecked();
+      await expect(form.getByText(t.phones.devices.device, { exact: true })).toBeVisible();
       await form.getByRole('button', { name: t.phones.add, exact: true }).click();
       const card = section.getByRole('article', { name: phone.name });
       await expect(card).toBeVisible();

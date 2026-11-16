@@ -17,10 +17,9 @@ describe('the phone adb boundary', () => {
     expect(calls[0]!.input).toBe('246810\n');
   });
 
-  it('identifies the same real device behind USB and network transports without returning its hardware serial', async () => {
+  it('identifies the real device behind its network address without returning its hardware serial', async () => {
     const adb = new PhoneAdb(async call => Buffer.from(call.args.at(-1) === 'ro.serialno' ? 'R58MIDENTITY\n' : call.args.at(-1) === 'ro.product.manufacturer' ? 'Samsung\n' : '0\n'));
     const expected = createHash('sha256').update('android:samsung:R58MIDENTITY').digest('hex');
-    await expect(adb.identity('R58MIDENTITY', new AbortController().signal)).resolves.toBe(expected);
     await expect(adb.identity('192.168.1.80:5555', new AbortController().signal)).resolves.toBe(expected);
     await expect(adb.identity('emulator-5554', new AbortController().signal)).resolves.toBeNull();
   });

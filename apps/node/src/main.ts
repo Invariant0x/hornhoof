@@ -25,7 +25,6 @@ import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, take
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { PhoneAdb, privateAdb } from './phones/adb.js';
 import { PhoneExecutor } from './phones/executor.js';
-import { openUsbBridge } from './phones/usb-server.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -298,8 +297,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     for (const s of await (single?.secrets() ?? Promise.resolve([])).catch(() => [])) known.add(s);
   };
   await learn();
-  const usbBridge = !builtin && process.env.HORNHOOF_PHONE_BRIDGE === '1' ? await openUsbBridge(state.key).catch(() => { log('The USB phone bridge could not start.'); return null; }) : null;
-  const phones = new PhoneExecutor({ drivers: { network: new PhoneAdb(privateAdb('adb', join(dir, 'phone-adb'))), usb: usbBridge ? grant => usbBridge.driver(grant) : null }, revokeUsb: usbBridge ? (binding, session, generation) => usbBridge.revoke(binding, session, generation) : undefined, send: m => void send?.(m) });
+  /* Company phones this node reaches by wireless debugging, through its own adb. */
+  const phones = new PhoneExecutor({ adb: new PhoneAdb(privateAdb('adb', join(dir, 'phone-adb'))), send: m => void send?.(m) });
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
   /* What agents' programs send their tools with no turn running goes on the link as it is now, and waits for no other. */
@@ -697,7 +696,6 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     stopNode(life, send, boot.startedAt, reason);
     stopped = true;
     phones.close();
-    usbBridge?.close();
     stopChecks(checks, testing); testMessages.cancelDescriptions();
     clearInterval(timer);
     if (learning) clearInterval(learning);

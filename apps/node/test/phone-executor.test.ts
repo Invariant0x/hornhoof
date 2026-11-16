@@ -31,8 +31,8 @@ function phone() {
     return Buffer.alloc(0);
   });
   const out: (PhoneReply | PhoneFrame)[] = [];
-  const phones = new PhoneExecutor({ drivers: { network: adb, usb: null }, send: m => out.push(m) });
-  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: id(3), serial: SERIAL, endpoint: SERIAL, transport: 'network', hardwareKey: HARDWARE }, expiresAt: '2026-11-16T12:00:30Z' };
+  const phones = new PhoneExecutor({ adb, send: m => out.push(m) });
+  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: id(3), serial: SERIAL, hardwareKey: HARDWARE }, expiresAt: '2026-11-16T12:00:30Z' };
   const act = (n: number, operation: Extract<Parameters<PhoneExecutor['handle']>[0], { type: 'phone.action' }>['operation']) =>
     phones.handle({ type: 'phone.action', requestId: id(n), sessionId: SESSION, generation: 1, operation });
   const reply = (n: number) => out.find((m): m is PhoneReply => m.type === 'phone.reply' && m.requestId === id(n));
@@ -45,7 +45,7 @@ afterEach(() => { vi.useRealTimers(); });
 describe('phone messages on the execution node', () => {
   it('probes the registered network phone without opening a session', async () => {
     const p = phone();
-    await p.phones.handle({ type: 'phone.probe', requestId: id(1), transport: 'network', endpoint: SERIAL });
+    await p.phones.handle({ type: 'phone.probe', requestId: id(1), endpoint: SERIAL });
     expect(p.reply(1)).toEqual({ type: 'phone.reply', requestId: id(1), status: 'ok', devices: [{ serial: SERIAL, status: 'device', model: 'Pixel_8', hardwareKey: HARDWARE }] });
   });
 
