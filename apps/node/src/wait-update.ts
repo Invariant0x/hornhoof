@@ -4,9 +4,11 @@ import { readState } from './state.js';
 
 /* The server is from before nodes wait for their work, so the installer leaves the node and its turns as they are. */
 const SERVER_TOO_OLD = 3;
-/* A server that restarts comes back within these tries, 5 minutes in all. */
-const TRIES = 60;
-const TRY_MS = 5000;
+/* A server that restarts comes back within 5 minutes. Away, it is asked again soon and then less often, each time well
+   within the 2 minutes it holds a node for an updater that stopped asking, so the node keeps its place in the wait. */
+const AWAY_MS = 5 * 60_000;
+const FIRST_TRY_MS = 1000;
+const LAST_TRY_MS = 30_000;
 const ASK_MS = 30_000;
 
 const Answer = z.object({ ready: z.boolean(), drain: MachineDrain, pollAfterMs: z.number().positive() });
@@ -26,6 +28,9 @@ function sayOnce(io: Io, line: string, said: string): string {
 }
 
 const Refusal = z.object({ error: z.object({ message: z.string().max(500) }) });
+/* How a Hornhoof server from before this wait refuses the path: as any path it does not know, in its own words. A 404 from
+   anything else on the way, as the public link with no machine behind it for a moment, says nothing of the server. */
+const UnknownPath = z.object({ error: z.object({ code: z.literal('not_found') }) });
 
 /* What the server says, when it says it the usual way: it may be something the person who runs the installer can act on. */
 async function refusal(res: Response): Promise<string> {
@@ -36,7 +41,7 @@ async function refusal(res: Response): Promise<string> {
 async function ask(server: string, key: string): Promise<Asked> {
   try {
     const res = await fetch(`${server}/api/nodes/update`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(ASK_MS) });
-    if (res.status === 404) return { kind: 'too_old' };
+    if (res.status === 404) return UnknownPath.safeParse(await res.json().catch(() => null)).success ? { kind: 'too_old' } : { kind: 'away', why: 'The server answered 404.' };
     if (res.status >= 500) return { kind: 'away', why: `The server answered ${res.status}.` };
     if (!res.ok) return { kind: 'refused', why: await refusal(res) };
     return { kind: 'answer', answer: Answer.parse(await res.json()) };
@@ -55,22 +60,27 @@ export async function waitUpdate(dir: string, io: Io, sleep = (ms: number) => ne
     return 1;
   }
   let said = '';
-  let tries = 0;
+  /* How long the server has been away, and the pause before the next try: 1, 2, 4, 8 and 16 seconds, then 30 each time. */
+  let away = 0;
+  let nap = FIRST_TRY_MS;
   for (;;) {
     const asked = await ask(state.server, state.key);
     if (asked.kind === 'too_old') return SERVER_TOO_OLD;
     if (asked.kind === 'answer') {
       if (asked.answer.ready) return 0;
-      tries = 0;
+      away = 0;
+      nap = FIRST_TRY_MS;
       said = sayOnce(io, saying(asked.answer.drain), said);
       await sleep(asked.answer.pollAfterMs);
       continue;
     }
-    tries += 1;
-    if (asked.kind === 'refused' || tries >= TRIES) {
+    if (asked.kind === 'refused' || away >= AWAY_MS) {
       io.stderr.write(`Could not ask ${state.server} about this node: ${asked.why}\n`);
       return 1;
     }
-    await sleep(TRY_MS);
+    const pause = Math.min(nap, AWAY_MS - away);
+    away += pause;
+    nap = Math.min(nap * 2, LAST_TRY_MS);
+    await sleep(pause);
   }
 }
