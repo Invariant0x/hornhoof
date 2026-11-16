@@ -23,8 +23,6 @@ type JobToSend = {
   builtinMachine?: string | null;
   /* The role of the agent it is for: the one role that may go to a node waiting for an update. */
   role?: string | null;
-  /* It is for the orchestrator or a head, whom a node that waits for an update holds up to a limit. */
-  leader?: boolean;
   prompt: string;
   /* An assistant's whole conversation, which the node types in place of the prompt when the session begins anew there. */
   freshPrompt?: string | null;
@@ -69,7 +67,7 @@ const ownModel = (sub: { provider: ProviderId; models: { id: string }[] | null }
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
   const node = sub && identityOf(sub, job.nodeId, job.builtinMachine ?? null, ownBuiltin(ctx.config));
-  if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role, job.leader)) return false;
+  if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role)) return false;
   const secret = sub.kind === 'api_key' ? secretOf(ctx, sub) : null;
   const api = sub.kind === 'api_key' ? apiEndpoint(sub.provider, { baseUrl: sub.baseUrl, protocol: sub.apiProtocol }) : null;
   return ctx.hub.send(node, {
