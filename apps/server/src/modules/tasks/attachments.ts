@@ -364,7 +364,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
-      checkAttachmentTask(job, task?.id ?? null, toChat);
+      checkAttachmentTask(job, task, toChat);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
       const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, ref !== undefined, raw);
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
