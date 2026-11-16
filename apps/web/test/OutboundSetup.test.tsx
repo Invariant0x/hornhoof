@@ -320,10 +320,34 @@ describe('a catalog revision shown before it is published', () => {
     show();
     const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
     const changed = within(shown).getByRole('group', { name: 'What changed from revision 1, which messages use' });
-    expect([...changed.querySelectorAll('ins')].map(e => e.textContent)).toEqual(['sale, last days', 'on Sunday. ', ' ', 'How to stop messages']);
-    expect([...changed.querySelectorAll('del')].map(e => e.textContent)).toEqual(['sale', 'soon. ']);
+    expect([...changed.querySelectorAll('ins')].map(e => e.textContent)).toEqual(['sale, last days', 'on Sunday.', 'How to stop messages']);
+    expect([...changed.querySelectorAll('del')].map(e => e.textContent)).toEqual(['sale', 'soon.']);
     await user.click(within(shown).getByRole('button', { name: 'Publish' }));
     await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => [c.path, c.body])).toEqual([['/api/outbound/catalog/r2/publish', { revision: 2, newest: 2 }]]));
+  });
+
+  /* Design #1181, V1 and V2: a space outside the marks between words taken out and words put in, in either direction, and
+     no space marked; words put in read in the text's own colour, the change shown by the success underline. */
+  it('puts a space outside the marks between the words taken out and those put in, and marks words only', async () => {
+    withCatalog([twoVersions]);
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
+    const changed = within(shown).getByRole('group', { name: 'What changed from revision 1, which messages use' });
+    const marked = (p: Element) => [...p.childNodes].map(n => (n.nodeName === 'DEL' ? `[-${n.textContent}-]` : n.nodeName === 'INS' ? `{+${n.textContent}+}` : n.textContent)).join('');
+    expect([...changed.querySelectorAll('.outbound-words')].map(marked)).toEqual([
+      'Spring [-sale-] {+sale, last days+}',
+      'The spring sale ends [-soon.-] {+on Sunday.+} Price {+How to stop messages+}',
+    ]);
+    expect(decl('.outbound-changes del + ins', 'margin-inline-start')).toBeUndefined();
+  });
+
+  it('shows the words put in in the text\'s own colour, underlined 2 px in the colour of success', () => {
+    expect(decl('.outbound-changes ins', 'color')).toBe('var(--ink)');
+    expect(decl('.outbound-changes ins', 'text-decoration-line')).toBe('underline');
+    expect(decl('.outbound-changes ins', 'text-decoration-thickness')).toBe('2px');
+    expect(decl('.outbound-changes ins', 'text-decoration-color')).toBe('var(--ok)');
+    expect(decl('.outbound-changes del', 'color')).toBe('var(--pink-ink)');
+    expect(decl('.outbound-changes del', 'text-decoration')).toBe('line-through');
   });
 
   it('marks an entry nothing of which is in use yet as new', async () => {

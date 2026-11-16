@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { useLanguage, useT, type Language } from '../i18n';
 import { changes, partsAsTokens, wordsOf, type Piece, type Token } from './catalog-diff';
 
@@ -38,15 +38,37 @@ function Slot({ type }: { type: string }) {
   return <span className="outbound-slot">{slots[type] ?? type}</span>;
 }
 
+const MARKS = { added: 'ins', removed: 'del' } as const;
+
+/* A text with the spaces at its edges apart from its words. */
+const edgesOf = (text: string): [string, string, string] => {
+  const [, lead = '', words = '', trail = ''] = /^(\s*)(.*?)(\s*)$/s.exec(text)!;
+  return [lead, words, trail];
+};
+
+/* One change, its mark covering words only: the spaces at its edges stand outside it, and words put in right after words
+   taken out with no space between get one outside both, so that neither direction runs them together. */
+function Change({ piece, afterTakenOut }: { piece: Piece & { change: 'added' | 'removed' }; afterTakenOut: boolean }) {
+  const Mark = MARKS[piece.change];
+  const [lead, words, trail] = piece.slot === undefined ? edgesOf(piece.text) : ['', '', ''];
+  const gap = piece.change === 'added' && afterTakenOut && !lead ? ' ' : '';
+  const marked = piece.slot === undefined ? words : <Slot type={piece.slot} />;
+  return <>{gap}{lead}{marked && <Mark>{marked}</Mark>}{trail}</>;
+}
+
+/* Whether a piece ends in words taken out, with no space after them. */
+const endsTakenOut = (piece: Piece | undefined): boolean => piece?.change === 'removed' && (piece.slot !== undefined || (/\S$/.test(piece.text)));
+
 function Words({ pieces }: { pieces: readonly Piece[] }) {
   return (
     <>
-      {pieces.map((piece, at) => {
-        const said = piece.slot === undefined ? piece.text : <Slot type={piece.slot} />;
-        if (piece.change === 'added') return <ins key={at}>{said}</ins>;
-        if (piece.change === 'removed') return <del key={at}>{said}</del>;
-        return <span key={at}>{said}</span>;
-      })}
+      {pieces.map((piece, at) =>
+        piece.change === 'same' ? (
+          <span key={at}>{piece.slot === undefined ? piece.text : <Slot type={piece.slot} />}</span>
+        ) : (
+          <Fragment key={at}><Change piece={{ ...piece, change: piece.change }} afterTakenOut={endsTakenOut(pieces[at - 1])} /></Fragment>
+        ),
+      )}
     </>
   );
 }
