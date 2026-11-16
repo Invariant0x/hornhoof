@@ -19,6 +19,16 @@ export type ToolJob = {
 };
 export type RunJob = Pick<ToolJob, 'id' | 'companyId' | 'agentId' | 'agentKind'> & Partial<Pick<ToolJob, 'departmentId'>>;
 
+export const toolJobFields = {
+  id: jobs.id,
+  companyId: jobs.companyId,
+  agentId: agents.id,
+  agentKind: agents.kind,
+  roleKey: agents.roleKey,
+  departmentId: agents.departmentId,
+  skills: agents.skills,
+};
+
 const notValid = () => new ApiError(401, 'unauthorized', 'This tool token is not valid.', 'tool_token_invalid');
 
 /* A token no running job has. While the database of a machine the server was taken from waits to be merged, the job
@@ -37,15 +47,7 @@ export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
   const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
   const [job] = token
     ? await ctx.db
-        .select({
-          id: jobs.id,
-          companyId: jobs.companyId,
-          agentId: agents.id,
-          agentKind: agents.kind,
-          roleKey: agents.roleKey,
-          departmentId: agents.departmentId,
-          skills: agents.skills,
-        })
+        .select(toolJobFields)
         .from(jobs)
         .innerJoin(agents, eq(agents.id, jobs.agentId))
         .where(and(eq(jobs.toolTokenHash, hashToken(token)), eq(jobs.status, 'running'), sql`${jobs.error} is distinct from 'cancelled'`, isNull(agents.removedAt)))
