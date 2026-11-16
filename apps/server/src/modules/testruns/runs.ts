@@ -11,7 +11,7 @@ import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
-import { liveNode, shownMachine } from '../nodes/nodes.js';
+import { builtinMachine, liveNode, shownMachine } from '../nodes/nodes.js';
 import { bindCandidateRun, candidateForRun, type CandidateRun, type EchelonRun } from '../tasks/echelons-run.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
@@ -224,6 +224,19 @@ const builtinsFirstOwn = (ctx: Ctx): string[] => {
   return ctx.hub.builtins().sort((a, b) => Number(b === own) - Number(a === own) || (a < b ? -1 : 1));
 };
 
+/* The company's computer a built-in node runs on, and whether that computer lends itself to runs: taken back, it lends
+   none of its nodes. The server's own runs on the computer whose key install.sh named as its host, another machine's on
+   the row that holds its id in the network. One on no computer of the company is lent, as it always was. machineId: the
+   computer, none for the server's own. */
+async function builtinHost(ctx: Ctx, companyId: string, machine: string): Promise<{ machineId: string | null; lent: boolean }> {
+  if (machine === ownMachine(ctx.config)) {
+    const host = await builtinMachine(ctx.db, ctx.config.hostId, companyId, ctx.config.machineId);
+    return { machineId: null, lent: host?.lendsTests ?? true };
+  }
+  const [row] = await ctx.db.select({ id: machines.id, lent: machines.lendsTests }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+  return { machineId: row?.id ?? null, lent: row?.lent ?? true };
+}
+
 const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
   !nodeHeld(ctx, node) && ctx.hub.isReady(node) && ctx.hub.loadOf(node) !== null && ctx.hub.noRunsOf(node) === null;
 
@@ -258,11 +271,10 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   for (const machine of builtins) {
     const node = builtinOf(machine);
     if (!takesParts(ctx, node)) continue;
-    const own = machine === ownMachine(ctx.config);
-    const [row] = own ? [] : await db.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+    const { machineId, lent } = await builtinHost(ctx, companyId, machine);
     places.push({
-      key: builtinPlaceKey(ctx, machine), node, name: await builtinName(ctx, db, machine), machineId: row?.id ?? null, nodeId: null, builtin: true, builtinMachine: machine,
-      lent: true, busy: false, running: 0, load: together([hub.loadOf(node)]), access: null, works: hub.runsWork(node),
+      key: builtinPlaceKey(ctx, machine), node, name: await builtinName(ctx, db, machine), machineId, nodeId: null, builtin: true, builtinMachine: machine,
+      lent, busy: false, running: 0, load: together([hub.loadOf(node)]), access: null, works: hub.runsWork(node),
     });
   }
   const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), ...builtins.map(machine => hub.loadOf(builtinOf(machine)))];
@@ -282,7 +294,7 @@ export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<Br
   for (const machine of builtinsFirstOwn(ctx)) {
     const node = builtinOf(machine);
     const builtinError = hub.browserHoldOf(node);
-    if (builtinError) held.push({ name: await builtinName(ctx, db, machine), lent: true, access: null, works: hub.runsWork(node), browserError: builtinError });
+    if (builtinError) held.push({ name: await builtinName(ctx, db, machine), lent: (await builtinHost(ctx, companyId, machine)).lent, access: null, works: hub.runsWork(node), browserError: builtinError });
   }
   return held;
 }
