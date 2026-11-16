@@ -41,6 +41,37 @@ input[type='number']::-webkit-outer-spin-button, input[type='number']::-webkit-i
 }
 .edge > .edge-in { height: 100%; background: var(--surface); clip-path: inherit; }
 .edge.accent { background: var(--cyan); }
+/* The halo of a framed button (style book 1.4, section 3): under its frame, outside the frame's clip-path, with the same
+   cut. The glow is a drop-shadow of a copy of the frame's shape, so it follows the cut and breathes by opacity alone, which
+   every engine composites. The focus ring is a band of the same shape where an outline stands, --ring-gap out and --ring
+   wide. In a skin with no cut both are square. The button that holds a halo is its box. */
+:where(:has(> .halo)) { position: relative; }
+:focus-visible:has(> .halo) { outline: none; }
+.halo { --halo-blur: 12px; --ring: 2px; --ring-gap: 2px; position: absolute; inset: 0; pointer-events: none; }
+.halo > .halo-glow, .halo > .halo-ring { display: none; position: absolute; }
+/* --halo-blur is the blur of a box-shadow; drop-shadow takes its standard deviation, half of it, in all three engines. */
+.halo-glow { inset: 0; opacity: 0; filter: drop-shadow(0 0 calc(var(--halo-blur) / 2) color-mix(in srgb, var(--glow) 45%, transparent)); }
+.halo-glow > i { position: absolute; inset: 0; background: var(--glow); clip-path: polygon(0 0, calc(100% - var(--cut) * var(--cut-k)) 0, 100% calc(var(--cut) * var(--cut-k)), 100% 100%, calc(var(--cut) * var(--cut-k)) 100%, 0 calc(100% - var(--cut) * var(--cut-k))); }
+:focus-visible > .halo > .halo-ring { display: block; }
+/* The ring's outer and inner edges are the frame's shape moved out by --ring-gap + --ring and by --ring-gap: a slanted cut
+   moved out by d keeps its slant and its legs grow by d(2 - √2), 0.5858 d; a square corner stays square. One polygon
+   traces both edges, so the even-odd rule leaves the band between them. */
+.halo-ring {
+  --c: calc(var(--cut) * var(--cut-k));
+  --grow: calc(0.5858 * min(1, var(--cut-k) * 1000));
+  --lo: calc(var(--c) + (var(--ring-gap) + var(--ring)) * var(--grow));
+  --li: calc(var(--c) + var(--ring-gap) * var(--grow));
+  inset: calc(-1 * (var(--ring-gap) + var(--ring)));
+  background: var(--cyan-ink);
+  clip-path: polygon(evenodd,
+    0 0, calc(100% - var(--lo)) 0, 100% var(--lo), 100% 100%, var(--lo) 100%, 0 calc(100% - var(--lo)), 0 0,
+    var(--ring) var(--ring), var(--ring) calc(100% - var(--ring) - var(--li)), calc(var(--ring) + var(--li)) calc(100% - var(--ring)),
+    calc(100% - var(--ring)) calc(100% - var(--ring)), calc(100% - var(--ring)) calc(var(--ring) + var(--li)), calc(100% - var(--ring) - var(--li)) var(--ring), var(--ring) var(--ring)
+  );
+}
+/* In forced colours the system paints every background its own way, so the ring, drawn as a background, takes the system's
+   colour of a highlight and stays as visible as the outline it stands for. */
+@media (forced-colors: active) { .halo-ring { forced-color-adjust: none; background: Highlight; } }
 
 /* Buttons */
 .btn {
@@ -1228,13 +1259,13 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* A department card on the map opens the department. */
 button.dept { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 button.dept:hover > .edge, button.dept:focus-visible > .edge { background: var(--cyan); }
-button.dept:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* While someone works the frame breathes cyan, while the department waits for people it breathes amber, and it flashes
    once when work reaches or leaves it. Both layers animate opacity outside .edge's clip-path so WebKit composites them. */
 button.dept.busy { --glow: var(--cyan); --frame: var(--cyan); }
 button.dept.waits { --glow: var(--amber); --frame: var(--amber); }
 button.dept.flash { --frame: var(--cyan); }
-button.dept.busy::before, button.dept.waits::before, button.chip-btn.attn::before, .hub.attn::before {
+:is(button.dept.busy, button.dept.waits, button.chip-btn.attn) > .halo > .halo-glow { display: block; animation: dglow 2.6s ease-in-out infinite; }
+.hub.attn::before {
   content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0;
   box-shadow: 0 0 12px color-mix(in srgb, var(--glow) 45%, transparent);
   animation: dglow 2.6s ease-in-out infinite;
@@ -1249,7 +1280,7 @@ button.dept:hover > .frame-breathe, button.dept:focus-visible > .frame-breathe, 
 @keyframes dglow { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 @keyframes frame-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  button.dept.busy::before, button.dept.waits::before, button.chip-btn.attn::before, .hub.attn::before, .frame-breathe { animation: none; display: none; }
+  :is(button.dept.busy, button.dept.waits, button.chip-btn.attn) > .halo > .halo-glow, .hub.attn::before, .frame-breathe { animation: none; display: none; }
   button.dept.busy > .edge, button.dept.waits > .edge { background: var(--glow); }
 }
 /* A person's card opens the decisions waiting for them; while any wait, it shows their number and breathes amber, and so
@@ -1257,7 +1288,6 @@ button.dept:hover > .frame-breathe, button.dept:focus-visible > .frame-breathe, 
 button.chip-btn { position: relative; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 button.chip-btn > .edge { height: 100%; }
 button.chip-btn:hover > .edge, button.chip-btn:focus-visible > .edge { background: var(--cyan); }
-button.chip-btn:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .chip-count { position: absolute; top: -8px; right: -8px; margin: 0; }
 button.chip-btn.attn { --glow: var(--amber); --frame: var(--amber); }
 .hub.attn .hub-ring, .hub.attn .hub-in { stroke: var(--amber); }
@@ -1353,7 +1383,6 @@ button.shead, button.schip { cursor: pointer; }
 .schip .r3 .ast { margin-right: 6px; }
 button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2); }
 .shead.on > .edge, .schip.on > .edge, button.shead:focus-visible > .edge, button.schip:focus-visible > .edge { background: var(--cyan); }
-button.shead:focus-visible, button.schip:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .shead.flash > .edge, .schip.flash > .edge { animation: eflash 1.4s ease-out; }
 /* An agent's place on the schema: its chip, and the tick that switches it off for now. An agent that is off fades. */
 .sslot > .schip, .sslot > .shead { width: 100%; height: 100%; }
@@ -2551,6 +2580,7 @@ th.k-prio .sorth { white-space: nowrap; }
 :where(:root[data-cut='steps']) .btn,
 :where(:root[data-cut='steps']) .tview .lchip,
 :where(:root[data-cut='steps']) .tview .tv-card-edge,
+:where(:root[data-cut='steps']) .halo-glow > i,
 .skin-preview[data-cut='steps'] .sp-btn {
   --step: calc(2px * var(--cut-k));
   clip-path: polygon(
@@ -2580,4 +2610,20 @@ th.k-prio .sorth { white-space: nowrap; }
   animation: none !important; transition: none !important;
   filter: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   box-shadow: none !important; text-shadow: none !important;
+}
+/* A ring of steps: a frame in steps moved out keeps steps of the same size, so both edges of the band step by --step. */
+:where(:root[data-cut='steps']) .halo-ring {
+  --step: calc(2px * var(--cut-k));
+  --s2: calc(2 * var(--step));
+  clip-path: polygon(evenodd,
+    0 0, calc(100% - var(--s2)) 0, calc(100% - var(--s2)) var(--step), calc(100% - var(--step)) var(--step),
+    calc(100% - var(--step)) var(--s2), 100% var(--s2), 100% 100%, var(--s2) 100%,
+    var(--s2) calc(100% - var(--step)), var(--step) calc(100% - var(--step)), var(--step) calc(100% - var(--s2)), 0 calc(100% - var(--s2)), 0 0,
+    var(--ring) var(--ring), calc(100% - var(--ring) - var(--s2)) var(--ring), calc(100% - var(--ring) - var(--s2)) calc(var(--ring) + var(--step)),
+    calc(100% - var(--ring) - var(--step)) calc(var(--ring) + var(--step)), calc(100% - var(--ring) - var(--step)) calc(var(--ring) + var(--s2)),
+    calc(100% - var(--ring)) calc(var(--ring) + var(--s2)), calc(100% - var(--ring)) calc(100% - var(--ring)),
+    calc(var(--ring) + var(--s2)) calc(100% - var(--ring)), calc(var(--ring) + var(--s2)) calc(100% - var(--ring) - var(--step)),
+    calc(var(--ring) + var(--step)) calc(100% - var(--ring) - var(--step)), calc(var(--ring) + var(--step)) calc(100% - var(--ring) - var(--s2)),
+    var(--ring) calc(100% - var(--ring) - var(--s2)), var(--ring) var(--ring)
+  );
 }
