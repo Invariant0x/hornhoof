@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { onTestFinished } from 'vitest';
 import type { Bridge } from '../src/terminal/bridge.js';
+import type { Capture } from '../src/terminal/peer.js';
 import type { Tmux } from '../src/terminal/tmux.js';
 
 /* A controlled process table for real HTTP connections; it never reads the machine's /proc. */
@@ -15,6 +16,7 @@ export function procFixture(key: string, belongs: (req: IncomingMessage) => bool
   onTestFinished(() => rmSync(proc, { recursive: true, force: true }));
   const rows = new Map<Socket, string>();
   const inodes = new WeakMap<Socket, number>();
+  const peers = new Map<string, string>();
   const links = new WeakMap<Socket, string[]>();
   let next = 100;
   const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
@@ -28,9 +30,12 @@ export function procFixture(key: string, belongs: (req: IncomingMessage) => bool
     server.prependListener('connection', socket => {
       const inode = next++;
       inodes.set(socket, inode);
+      const peer = `${socket.remotePort}:${socket.localPort}`;
+      peers.set(peer, String(inode));
       rows.set(socket, `0: 0100007F:${hex(socket.remotePort!)} 0100007F:${hex(socket.localPort!)} 01 0 0 0 0 0 ${inode}`);
       table();
       socket.once('close', () => {
+        peers.delete(peer);
         for (const link of links.get(socket) ?? []) rmSync(link, { force: true });
         rows.delete(socket);
         table();
@@ -47,7 +52,9 @@ export function procFixture(key: string, belongs: (req: IncomingMessage) => bool
       links.set(req.socket, [...(links.get(req.socket) ?? []), link]);
     });
   };
-  return { proc, listen };
+  /* Capture the accepted connection before a later table refresh or close can change its filesystem view. */
+  const capture: Capture = async peer => ({ acceptedInode: peers.get(`${peer.port}:${peer.bridgePort}`) ?? null });
+  return { proc, listen, capture };
 }
 
 function panePid(pane: Tmux | (() => number), key: string): number {
