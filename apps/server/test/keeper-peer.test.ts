@@ -11,6 +11,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
 import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
@@ -62,8 +63,8 @@ async function company(withLink = true) {
   return { app, db, config, companyId: acme!.id, ownerId: owner!.id };
 }
 
-async function listening(app: FastifyInstance): Promise<Target> {
-  await app.listen({ host: '127.0.0.1', port: 0 });
+async function listening(app: FastifyInstance, port = 0): Promise<Target> {
+  await app.listen({ host: '127.0.0.1', port });
   return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
 }
 
@@ -527,40 +528,64 @@ describe('the peer link in the keeper', () => {
     return { proofs, did, probes };
   }
 
-  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async () => {
+  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async ({ signal }) => {
+    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const c = await company();
-    const now = fastClock();
+    const clock = { wall: Date.now(), mono: 0 };
+    const now = () => ({ ...clock });
     const said = { needed: false, link: 'self' as 'self' | 'other' | 'silent', name: { state: 'held', client: OWN_CLIENT, generation: 7 } as Name };
     const p = proving(now, said);
+    /* A deferred answer, on the event loop rather than a real-time deadline. Machine load cannot age the lease. */
+    const probe = p.proofs.probe;
+    p.proofs.probe = async (nonce, link) => {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      return probe(nonce, link);
+    };
     const lease = fakeLease();
-    const { keeper, lines } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs });
+    const ports = { front: await testPort(), linkHttp: await testPort(), linkTls: await testPort(), peer: await testPort(), peerApp: await testPort() };
+    const { keeper, lines } = await keeperBeside(c, await listening(c.app, await testPort()), folder(), { lease, now, proofs: p.proofs, ports });
+    await until(() => Boolean(keeper['ownLink']()));
+    const step = async (ms = 20) => {
+      clock.wall += ms;
+      clock.mono += ms;
+      vi.setSystemTime(clock.wall);
+      await keeper['readNeeded']();
+      if (said.needed) {
+        if (keeper['holder'].standing()) await keeper['leaseProofs']!.tick();
+        else await keeper['reentry']!.tick();
+      }
+      await keeper['holder'].tick();
+      keeper['giveWord']();
+    };
+    const stepUntil = (check: () => boolean) => until(async () => { signal.throwIfAborted(); await step(); return check(); });
     const renewals = () => lease.calls.filter(call => call.method === 'renew').length;
-    await until(() => keeper.mode() === 'lead' && renewals() > 3);
+    await stepUntil(() => keeper.mode() === 'lead' && renewals() > 3);
     /* Alone with the data it asks nobody: its lease is its own word. */
     expect([p.probes, keeper.linkWanted()]).toEqual([[], true]);
     /* Another machine holds a copy that finished: each renewal now rests on an answer at the company's link. */
     said.needed = true;
-    await until(() => p.probes.length > 3);
+    await stepUntil(() => p.probes.length > 3);
     const before = renewals();
-    await until(() => renewals() > before + 2);
+    await stepUntil(() => renewals() > before + 2);
     expect(keeper.mode()).toBe('lead');
     /* Nobody answers at the link: nothing new is renewed. */
     said.link = 'silent';
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await step(1_200);
     const stopped = renewals();
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await step(2_000);
     expect(renewals()).toBe(stopped);
     /* Another machine answers there: the lease ends at once, and the link's client stops with it. */
     said.link = 'other';
-    await until(() => lease.calls.some(call => call.method === 'fence'));
-    await until(() => keeper.mode() === 'read');
+    await stepUntil(() => lease.calls.some(call => call.method === 'fence'));
+    await stepUntil(() => keeper.mode() === 'read');
     expect(lines.some(line => line.includes('The lease ended (another machine answers at the link)'))).toBe(true);
     expect(keeper.linkWanted()).toBe(false);
     expect(keeper.beats().own().stance.kind).toBe('idle');
     /* The name is another client's now: this machine follows, and takes no term again. */
     const taken = lease.calls.filter(call => call.method === 'take').length;
     said.name = { state: 'held', client: linkClientId('acme', 'b0'.repeat(16)), generation: 8 };
-    await until(() => p.did.includes('follow'));
+    await stepUntil(() => p.did.includes('follow'));
     expect([lease.calls.filter(call => call.method === 'take').length, keeper.linkWanted()]).toEqual([taken, false]);
   });
 

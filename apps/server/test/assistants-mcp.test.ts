@@ -99,7 +99,7 @@ describe("the assistant's MCP server", () => {
     c.builtin.send({ type: 'job.started', jobId: run.jobId });
     c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it.' } });
     const first = (await waiting).json;
-    expect(first.events).toEqual([{ seq: expect.any(Number), kind: 'reply', at: expect.any(String), data: { messageId: sent.json.message.id, agent: { id: c.orchestrator.id, name: c.orchestrator.name, kind: 'orchestrator' }, text: 'On it.' } }]);
+    expect(first.events).toEqual([{ seq: expect.any(Number), kind: 'reply', at: expect.any(String), data: { messageId: sent.json.message.id, agent: { id: c.orchestrator.id, name: c.orchestrator.name, kind: 'orchestrator' }, byOwnAgent: false, text: 'On it.' } }]);
     expect(first.next).toBe(first.events[0].seq);
 
     const again = await call(client, 'send_message', { agentId: c.orchestrator.id, text: 'And the budget?' });
