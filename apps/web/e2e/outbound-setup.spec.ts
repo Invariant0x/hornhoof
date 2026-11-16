@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Measured } from './outbound-setup-edges';
-import { edges, offences, type Words } from './outbound-setup-look';
+import { edges, fits, offences, shooter, small, type Words } from './outbound-setup-look';
 import { serveRoutes } from './routes-api';
 
 /* A department's own outbound setup as the people who run it meet it, in Settings and on the department's screen: every
@@ -12,6 +12,7 @@ import { serveRoutes } from './routes-api';
 test.use({ reducedMotion: 'reduce' });
 const SHOTS = 'e2e/results/outbound-setup-shots';
 mkdirSync(SHOTS, { recursive: true });
+const shot = shooter(SHOTS);
 
 const DEPT = 'd2';
 const POLICY = {
@@ -79,27 +80,6 @@ async function open(page: Page, { lang, dir, width }: Look) {
   }, { lang, dir });
 }
 
-/* Nothing sideways: the page and the panel take their width, and no line or button sticks out of its card. */
-async function fits(page: Page, panel: Locator) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  expect(await panel.evaluate(el => [...el.querySelectorAll('.imp, .repo-actions, .imp-meta, li, h3, h4, p')].filter(n => (n as HTMLElement).scrollWidth > (n as HTMLElement).clientWidth + 1).length)).toBe(0);
-}
-
-/* Every field, list and button of the part is a touch target of 44px, as in the Settings window: what is smaller. */
-async function small(panel: Locator) {
-  return panel.evaluate(root => [...root.querySelectorAll('input:not([type=checkbox]), select, button')].flatMap(el => {
-    const high = Math.round(el.getBoundingClientRect().height);
-    const fits = el.tagName === 'BUTTON' ? high >= 44 : high === 44;
-    return fits ? [] : [`${el.tagName} ${(el.textContent ?? '').trim()} ${high}`];
-  }));
-}
-
-/* What a person sees with this part of the panel scrolled into view. */
-async function shot(page: Page, what: Locator, file: string) {
-  await what.evaluate(el => el.scrollIntoView({ block: 'start' }));
-  await page.screenshot({ path: `${SHOTS}/${file}.png`, animations: 'disabled' });
-}
-
 for (const look of LOOKS) {
   const t = look.lang === 'en' ? en : ru;
   const name = `${look.lang}-${look.dir}-${look.width}`;
@@ -144,11 +124,12 @@ for (const look of LOOKS) {
     await expect.poll(() => published).toEqual(['/api/outbound/catalog/r2/publish']);
 
     await page.goto(`/departments/${DEPT}`);
-    await page.getByRole('button', { name: t.dept.about, exact: true }).click();
-    const own = page.getByRole('complementary').getByRole('region', { name: t.settings.groups.messaging });
+    await page.getByRole('button', { name: t.settings.groups.messaging, exact: true }).click();
+    /* The part itself, under the panel's own head and its close button. */
+    const own = page.getByRole('complementary', { name: t.settings.groups.messaging }).locator('.outbound-setup');
     await expect(own.getByRole('heading', { name: t.outboundSetup.channelsTitle })).toBeVisible();
     await fits(page, own);
-    await shot(page, own.getByRole('heading', { name: t.settings.groups.messaging }), `department-${browserName}-${name}`);
+    await shot(page, own.getByRole('heading', { name: t.outboundSetup.channelsTitle }), `department-${browserName}-${name}`);
     expect(await small(own)).toEqual([]);
     expect.soft(await offences(own, words)).toEqual([]);
     measured.push({ browser: browserName, look: name, screen: 'department', ...(await edges(own)) });
