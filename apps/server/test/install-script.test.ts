@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { IMAGE, SCRIPT, SERVER, indexOf, install } from './install-script-helpers.js';
+import { isNodeRun, IMAGE, SCRIPT, SERVER, indexOf, install } from './install-script-helpers.js';
 
 /* The installer as an updater runs it: in a server folder that has a .env, with the compose file the build brought. */
 function fromUpdater(env: Record<string, string> = {}, dotEnv = 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n') {
@@ -178,7 +178,7 @@ describe('install.sh', () => {
   it("tells each node on a Mac the Mac's processor, cores and memory, as Docker there runs in a smaller system", () => {
     const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_NCPU: '10', STUB_MEMSIZE: String(32 * 1024 ** 3), STUB_CPU_BRAND: 'Apple M2 Pro' } });
     expect(r.code).toBe(0);
-    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    const runs = r.calls.filter(isNodeRun);
     expect(runs).toHaveLength(2);
     for (const run of runs) expect(run).toContain(`-e HORNHOOF_HOST_CPU=Apple M2 Pro -e HORNHOOF_HOST_CPUS=10 -e HORNHOOF_HOST_MEMORY=${32 * 1024 ** 3}`);
   });
@@ -186,7 +186,7 @@ describe('install.sh', () => {
   it('tells a node on Linux nothing of the machine, which it sees itself', () => {
     const r = install();
     expect(r.code).toBe(0);
-    expect(r.calls.filter(c => c.startsWith('docker run -d')).some(c => c.includes('HORNHOOF_HOST'))).toBe(false);
+    expect(r.calls.filter(isNodeRun).some(c => c.includes('HORNHOOF_HOST'))).toBe(false);
   });
 
   it("tells each node the Windows computer's processor, cores and memory that install.ps1 hands over, and nothing malformed", () => {
@@ -194,7 +194,7 @@ describe('install.sh', () => {
     const facts = { HORNHOOF_HOST_CPU: 'Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz', HORNHOOF_HOST_CPUS: '8', HORNHOOF_HOST_MEMORY: memory };
     const r = install({ env: facts });
     expect(r.code).toBe(0);
-    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    const runs = r.calls.filter(isNodeRun);
     expect(runs).toHaveLength(2);
     for (const run of runs) for (const [name, value] of Object.entries(facts)) expect(run).toContain(` -e ${name}=${value} `);
     const odd = install({ env: { HORNHOOF_HOST_CPU: 'Intel; rm -rf /', HORNHOOF_HOST_CPUS: 'eight', HORNHOOF_HOST_MEMORY: memory } });
@@ -628,7 +628,7 @@ describe('install.sh', () => {
       },
     });
     expect(r.code).toBe(0);
-    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    const runs = r.calls.filter(isNodeRun);
     expect(runs.map(c => c.match(/--name (\S+)/)![1]).sort()).toEqual(['hornhoof-claude-1c07dac4', 'hornhoof-glm-33333333']);
     expect(runs.find(c => c.includes('--name hornhoof-glm-33333333'))).toMatch(/--label hornhoof\.server=https:\/\/acme\.hornhoof\.test .*hornhoof-node:0\.4\.1$/);
     expect(r.out).not.toContain('secret');
@@ -649,7 +649,7 @@ describe('install.sh', () => {
       },
     });
     expect(r.code).toBe(0);
-    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    const runs = r.calls.filter(isNodeRun);
     expect(runs.map(c => c.match(/--name (\S+)/)![1])).toEqual(['hornhoof-claude-1c07dac4']);
     expect(r.out).not.toContain('secret');
   });
@@ -668,7 +668,7 @@ describe('install.sh', () => {
       },
     });
     expect(r.code).toBe(0);
-    expect(r.calls.filter(c => c.startsWith('docker run -d'))).toHaveLength(1);
+    expect(r.calls.filter(isNodeRun)).toHaveLength(1);
   });
 
   it("moves this server's nodes on this machine to the new build from the updater", () => {
@@ -684,7 +684,7 @@ describe('install.sh', () => {
       },
     });
     expect(r.code).toBe(0);
-    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    const runs = r.calls.filter(isNodeRun);
     expect(runs).toHaveLength(2);
     expect(runs.find(c => c.includes('--name hornhoof-claude-1c07dac4'))).toMatch(/--label hornhoof\.server=http:\/\/localhost:8081 .*--add-host host\.docker\.internal:host-gateway ghcr\.io\/invariant0x\/hornhoof-node:0\.4\.1$/);
     expect(runs.find(c => c.includes('--name hornhoof-kimi-22222222'))).toMatch(/--label hornhoof\.server=https:\/\/hh\.acme\.test .*hornhoof-node:0\.4\.1$/);

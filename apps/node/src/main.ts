@@ -25,8 +25,9 @@ import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, take
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { holdExact, redact } from './redact.js';
 import { SecretFills } from './secret-fill/index.js';
-import { PhoneAdb, systemAdb } from './phones/adb.js';
+import { PhoneAdb, privateAdb } from './phones/adb.js';
 import { PhoneExecutor } from './phones/executor.js';
+import { openUsbBridge } from './phones/usb-server.js';
 import { browserFillAdapter, type FillLauncher } from './secret-fill/browser.js';
 import { systemDeps as browseDeps } from './web-page/cli.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
@@ -314,7 +315,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   });
   /* The node's own browser, in the node's process: a sign-in typed there never passes a process an agent runs. */
   fills.register(browserFillAdapter({ ...browseDeps(), launcher: () => browseDeps().launcher() as unknown as FillLauncher }));
-  const phones = new PhoneExecutor({ drivers: { network: new PhoneAdb(systemAdb), usb: null }, send: m => void send?.(m), hide: text => redact(text, [...known]) });
+  const usbBridge = !builtin && process.env.HORNHOOF_PHONE_BRIDGE === '1' ? await openUsbBridge(state.key).catch(() => { log('The USB phone bridge could not start.'); return null; }) : null;
+  const phones = new PhoneExecutor({ drivers: { network: new PhoneAdb(privateAdb('adb', join(dir, 'phone-adb'))), usb: usbBridge ? grant => usbBridge.driver(grant) : null }, revokeUsb: usbBridge ? (binding, session, generation) => usbBridge.revoke(binding, session, generation) : undefined, send: m => void send?.(m), hide: text => redact(text, [...known]) });
   fills.register(phones.fillAdapter());
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
@@ -711,6 +713,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     stopNode(life, send, boot.startedAt, reason);
     stopped = true;
     phones.close();
+    usbBridge?.close();
     stopChecks(checks, testing); testMessages.cancelDescriptions();
     clearInterval(timer);
     if (learning) clearInterval(learning);

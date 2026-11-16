@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { PhoneAdb, type AdbCall } from '../src/phones/adb.js';
+import { PhoneAdb, privateAdbEnvironment, type AdbCall } from '../src/phones/adb.js';
 
 describe('the phone adb boundary', () => {
+  it('keeps the adb server off TCP and its keys and trace out of agent users', () => {
+    const env = privateAdbEnvironment('/data/phone-adb');
+    expect(env.ADB_SERVER_SOCKET).toMatch(/^localfilesystem:\/tmp\/hornhoof-adb-[a-f0-9]+\/server$/);
+    expect(env.ANDROID_USER_HOME).toBe('/data/phone-adb');
+    expect(env.ADB_TRACE).toBe('');
+  });
   it('pairs with the Android screen code through stdin, never argv or a returned message', async () => {
     const calls: AdbCall[] = [];
     const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.from('Enter pairing code: Successfully paired to 192.168.1.80:37123 [guid=recorded]\n'); });

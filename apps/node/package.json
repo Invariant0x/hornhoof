@@ -15,7 +15,7 @@
     "hornhoof-node": "dist/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node bundle-phone-bridge.mjs",
     "pretest": "npm run build -w @hornhoof/protocol && npm run build",
     "test": "vitest run",
     "lint:part": "eslint"
@@ -34,6 +34,7 @@
     "@types/pngjs": "6.0.5",
     "@types/ws": "^8.18.2",
     "@vitest/coverage-v8": "^5.0.5",
+    "esbuild": "0.28.0",
     "vitest": "^5.0.5"
   }
 }

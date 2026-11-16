@@ -7,7 +7,7 @@ import { PhoneSessions, type PhoneSessionView } from './sessions.js';
 import { holdExact } from '../redact.js';
 
 export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act' | 'type'>;
-export type PhoneExecutorDeps = { drivers: { network: PhoneDriver; usb: ((grant: PhoneGrant | null) => PhoneDriver) | null }; send(message: PhoneReply | PhoneFrame): void; hide(text: string): string };
+export type PhoneExecutorDeps = { drivers: { network: PhoneDriver; usb: ((grant: PhoneGrant | null) => PhoneDriver) | null }; revokeUsb?(binding: PhoneBinding, sessionId: string, generation: number): Promise<boolean>; send(message: PhoneReply | PhoneFrame): void; hide(text: string): string };
 const hiddenFrame = (): PhoneCapture => ({ png: null, width: 0, height: 0, elements: [], masked: true });
 const FRAME_MS = 1500;
 
@@ -28,7 +28,8 @@ export class PhoneExecutor {
       this.#sessions.revoke(m.sessionId, m.generation);
       this.clearTimer(m.sessionId);
       await this.#sessions.drained(m.sessionId);
-      this.deps.send({ type: 'phone.reply', requestId: m.requestId, status: 'ok' });
+      const stopped = m.binding.transport !== 'usb' || await this.deps.revokeUsb?.(m.binding, m.sessionId, m.generation) === true;
+      this.deps.send({ type: 'phone.reply', requestId: m.requestId, status: stopped ? 'ok' : 'failed' });
       return;
     }
     const now = Date.now();
