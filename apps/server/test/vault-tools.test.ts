@@ -150,7 +150,7 @@ describe('the vault for agents', () => {
     const { token } = await c.startTurn(c.nora.id);
     const pending = call(c, token, 'vault_fill', { entry: 'Partner site', target: 'phone', phoneSession: session, element: 'node-12', fields: ['password'] });
     const fill = await answerFill(c.node, { status: 'filled', filled: ['password'] });
-    expect(fill.target).toEqual({ kind: 'phone', phoneSessionId: session, generation: 7, element: 'node-12' });
+    expect(fill.target).toEqual({ kind: 'phone', phoneSessionId: session, generation: 7, element: 'node-12', site: 'https://partner.example/login' });
     expect(fill.fields).toEqual(['password']);
     expect(JSON.parse(textOf(await pending))).toEqual({ entry: 'Partner site', target: 'phone', status: 'filled', filled: ['password'] });
     const foreign = await call(c, token, 'vault_fill', { entry: 'Partner site', target: 'phone', phoneSession: '20000000-0000-4000-8000-000000000002', fields: ['password'] });

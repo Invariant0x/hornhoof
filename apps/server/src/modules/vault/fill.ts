@@ -118,9 +118,10 @@ async function targetFor(ctx: Ctx, state: State, agent: VaultAgent, entry: Entry
     return { node, target: { kind: 'browser', address } };
   }
   if (!req.phoneSession) throw invalid('Name the phone session you hold.');
-  if (!state.phones) return { node: null, target: { kind: 'phone', phoneSessionId: req.phoneSession, generation: 0, element: req.element ?? null } };
+  const site = webAddress(entry.site) ? entry.site : null;
+  if (!state.phones) return { node: null, target: { kind: 'phone', phoneSessionId: req.phoneSession, generation: 0, element: req.element ?? null, site } };
   const { node, generation } = await state.phones(ctx, agent, req.phoneSession);
-  return { node, target: { kind: 'phone', phoneSessionId: req.phoneSession, generation, element: req.element ?? null } };
+  return { node, target: { kind: 'phone', phoneSessionId: req.phoneSession, generation, element: req.element ?? null, site } };
 }
 
 async function sealFor(recipient: string, plain: string): Promise<string> {

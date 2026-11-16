@@ -110,7 +110,7 @@ describe('filling a vault sign-in on the node', () => {
     const { fills, sent, seen } = setup();
     const late = await request({ expiresAt: new Date(Date.now() - 1).toISOString() });
     await fills.handle(late);
-    const phone = await request({ target: { kind: 'phone', phoneSessionId: '10000000-0000-4000-8000-000000000004', generation: 1, element: null } });
+    const phone = await request({ target: { kind: 'phone', phoneSessionId: '10000000-0000-4000-8000-000000000004', generation: 1, element: null, site: null } });
     await fills.handle(phone);
     expect(sent.map(m => m.status)).toEqual(['expired', 'unsupported']);
     expect(seen.order).toEqual([]);
