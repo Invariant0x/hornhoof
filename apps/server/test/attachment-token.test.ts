@@ -38,12 +38,18 @@ describe('attachment authorization over the node link', () => {
     expect(JSON.stringify(await c.db.select().from(agentEvents)).includes(token)).toBe(false);
     const mcp = await c.app.inject({ method: 'POST', url: '/mcp', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
     expect(mcp.statusCode).toBe(401);
+    const download = await c.app.inject({ url: `/api/attachments/file?task=${c.task.number}&file=review.md`, headers: { authorization: `Bearer ${token}` } });
+    expect(download.statusCode).toBe(401);
   });
 
   it('refuses another agent, another node, and a program with no conversation', async () => {
     const c = await company();
     expect((await c.grant(c.watcher.id)).result).toBeUndefined();
-    expect((await c.grant(c.agent.id, builtinOf('another-machine'))).result).toBeUndefined();
+    expect((await c.grant(c.agent.id, builtinOf('a'.repeat(64)))).result).toBeUndefined();
+    await c.db.update(jobs).set({ taskId: null }).where(eq(jobs.id, c.job.id));
+    expect((await c.grant()).result).toBeUndefined();
+    await c.db.update(jobs).set({ taskId: c.task.id, kind: 'tools' }).where(eq(jobs.id, c.job.id));
+    expect((await c.grant()).result).toBeUndefined();
     await c.db.delete(jobs).where(eq(jobs.id, c.job.id));
     expect((await c.grant()).result).toBeUndefined();
     expect(await c.db.select().from(attachments)).toEqual([]);
@@ -84,8 +90,17 @@ describe('attachment authorization over the node link', () => {
     } finally {
       vi.useRealTimers();
     }
-    await c.db.update(jobs).set({ builtinMachine: 'another-machine' }).where(eq(jobs.id, c.job.id));
+    await c.db.update(jobs).set({ builtinMachine: 'a'.repeat(64) }).where(eq(jobs.id, c.job.id));
     expect((await c.send(granted.result!.token)).statusCode).toBe(401);
+  });
+
+  it('does not authorize a different agent with a permission for the original one', async () => {
+    const c = await company();
+    const granted = await c.grant();
+    expect(typeof granted.result?.token).toBe('string');
+    await c.db.update(jobs).set({ agentId: c.watcher.id }).where(eq(jobs.id, c.job.id));
+    expect((await c.send(granted.result!.token)).statusCode).toBe(401);
+    expect(await c.db.select().from(attachments)).toEqual([]);
   });
 
   it('preserves the headless direct tool token', async () => {
