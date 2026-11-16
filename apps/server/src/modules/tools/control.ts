@@ -330,8 +330,10 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool('check_updates', 'Looks for a newer Hornhoof now.', {}, () => ({ method: 'POST', url: '/api/updates/check' }));
   tool(
     'update_hornhoof',
-    'Installs a Hornhoof version: version "latest" or a tag from check_updates. whenIdle waits until no agent works. Hornhoof restarts, and so does your turn. ' +
-      'It goes for the CEO or the CEO delegate who asked you last, in this turn or an earlier one.',
+    'Installs a Hornhoof version: version "latest" or a tag from check_updates. whenIdle (the default) starts no new turn of the company and waits until no agent works, ' +
+      'for idleWaitMinutes at most: when the agents have not finished by then, the update is called off, nothing running stops, the turns start again and you are told. ' +
+      'A turn whose node said nothing of its program for ten minutes is not waited for. The answer, and check_updates later, say which turns it waits for and until when. ' +
+      'Hornhoof restarts, and so does your turn. It goes for the CEO or the CEO delegate who asked you last, in this turn or an earlier one.',
     UpdateBody.shape,
     body => ({ method: 'POST', url: '/api/updates', payload: body }),
   );
