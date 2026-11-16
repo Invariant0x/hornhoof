@@ -145,3 +145,11 @@ it('gives no snapshot of a pane out of bounds', async () => {
   c.state.cells = 'x'.repeat(OPERATOR_CELLS_BYTES + 1);
   expect(await c.look()).toMatchObject({ result: 'refused', reason: 'input_not_proven', snapshot: null });
 });
+
+
+it('passes the completed-response proof without changing the visible terminal cells', async () => {
+  const c = fixture();
+  const completion = 'a'.repeat(64);
+  c.state.facts = { ...c.state.facts!, completion };
+  expect(await c.look()).toMatchObject({ completion, cells: c.state.cells });
+});

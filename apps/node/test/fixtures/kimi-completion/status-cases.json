@@ -1,0 +1,117 @@
+[
+  {
+    "name": "root done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\",
+    "done": true
+  },
+  {
+    "name": "tmux root done",
+    "output": "\u001bPtmux;\u001b\u001b]7501;state=done:app=kimi-code\u001b\u001b\\\u001b\\",
+    "done": true
+  },
+  {
+    "name": "working",
+    "output": "\u001b]7501;state=working:app=kimi-code\u001b\\",
+    "done": false
+  },
+  {
+    "name": "question",
+    "output": "\u001b]7501;state=blocked:app=kimi-code:kind=question\u001b\\",
+    "done": false
+  },
+  {
+    "name": "permission",
+    "output": "\u001b]7501;state=blocked:app=kimi-code:kind=permission\u001b\\",
+    "done": false
+  },
+  {
+    "name": "auth",
+    "output": "\u001b]7501;state=blocked:app=kimi-code:kind=auth\u001b\\",
+    "done": false
+  },
+  {
+    "name": "child done",
+    "output": "\u001b]7501;state=done:id=agent-1:app=kimi-code\u001b\\",
+    "done": false
+  },
+  {
+    "name": "other app",
+    "output": "\u001b]7501;state=done:app=other\u001b\\",
+    "done": false
+  },
+  {
+    "name": "missing app",
+    "output": "\u001b]7501;state=done\u001b\\",
+    "done": false
+  },
+  {
+    "name": "error",
+    "output": "\u001b]7501;state=error:app=kimi-code\u001b\\",
+    "done": false
+  },
+  {
+    "name": "idle",
+    "output": "\u001b]7501;state=idle:app=kimi-code\u001b\\",
+    "done": false
+  },
+  {
+    "name": "unknown state",
+    "output": "\u001b]7501;state=new:app=kimi-code\u001b\\",
+    "done": false
+  },
+  {
+    "name": "no status",
+    "output": "BLOCKED\n",
+    "done": false
+  },
+  {
+    "name": "working after done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=working:app=kimi-code\u001b\\",
+    "done": false
+  },
+  {
+    "name": "clear after done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=clear\u001b\\",
+    "done": false
+  },
+  {
+    "name": "child after working",
+    "output": "\u001b]7501;state=working:app=kimi-code\u001b\\\u001b]7501;state=done:id=child\u001b\\",
+    "done": false
+  },
+  {
+    "name": "child after root done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=done:id=child\u001b\\",
+    "done": true
+  },
+  {
+    "name": "duplicate state",
+    "output": "\u001b]7501;state=working:state=done:app=kimi-code\u001b\\",
+    "done": false
+  },
+  {
+    "name": "incomplete next root",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=working",
+    "done": false
+  },
+  {
+    "name": "malformed root after done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;bad\u001b\\",
+    "done": false
+  },
+  {
+    "name": "quoted status in DCS output",
+    "output": "\u001bP\u001b]7501;state=done:app=kimi-code\u001b\\\u001b\\",
+    "done": false
+  },
+  {
+    "name": "invalid kind on done",
+    "output": "\u001b]7501;state=done:app=kimi-code:kind=question\u001b\\",
+    "done": false
+  },
+  {
+    "name": "unterminated root before another control",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=working\u001b[31m",
+    "done": false
+  }
+]

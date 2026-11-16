@@ -60,11 +60,17 @@ export async function askOfRunningTurns(ctx: Ctx, now: Date): Promise<void> {
 /* What the node answered: a turn it was asked about and no longer runs, whose program shows no work, is over. A node speaks
    only of its own turns, and only of the ones asked about once they ran long enough to have reached it. */
 export async function turnsHeld(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'jobs.held' }>, now = new Date()): Promise<void> {
+  if (!msg.asked.length) return;
   const held = new Set(msg.held);
-  const gone = msg.asked.filter(jobId => !held.has(jobId));
-  if (!gone.length) return;
-  const lost = await ctx.db.select().from(jobs).where(and(inArray(jobs.id, gone), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), jobsOf(id, ctx), lte(jobs.startedAt, new Date(now.getTime() - ASK_AFTER_MS))));
-  for (const job of lost) if (!working(ctx, job, now.getTime())) await endLost(ctx, job, NOT_HELD);
+  const asked = await ctx.db.select().from(jobs).where(and(inArray(jobs.id, msg.asked), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), jobsOf(id, ctx), lte(jobs.startedAt, new Date(now.getTime() - ASK_AFTER_MS))));
+  for (const job of asked) {
+    if (!held.has(job.id)) {
+      if (!working(ctx, job, now.getTime())) await endLost(ctx, job, NOT_HELD);
+      continue;
+    }
+    const program = agentProgramState(ctx, job).program;
+    if (program?.state === 'gone' && now.getTime() - program.reportedAt >= IDLE_END_MS) await closeExitedTurn(ctx, job, id, now);
+  }
 }
 
 /* How long a program may stand idle at its prompt in a turn its node still runs while the agent's next messages wait: the
@@ -82,7 +88,7 @@ const closesOf = (ctx: Ctx) => {
   closedAt.set(ctx, map);
   return map;
 };
-type IdleView = { instance: string; cells: string; signAt: number; since: number; at: number };
+type IdleView = { instance: string; proof: string; signAt: number; since: number; at: number };
 const idleViews = new WeakMap<Ctx, Map<string, IdleView>>();
 
 function emptyView(view: ProgramView): boolean {
@@ -90,7 +96,7 @@ function emptyView(view: ProgramView): boolean {
 }
 
 function continuousView(old: IdleView | undefined, current: IdleView): boolean {
-  return old !== undefined && old.instance === current.instance && old.cells === current.cells && old.signAt === current.signAt && current.at >= old.at && current.at - old.at <= PULSE_MS;
+  return old !== undefined && old.instance === current.instance && old.proof === current.proof && old.signAt === current.signAt && current.at >= old.at && current.at - old.at <= PULSE_MS;
 }
 
 /* Query the running job's exact node, not the newest queued job's placement. A failed look, a new instance, work or a draft
@@ -105,7 +111,8 @@ async function idleOnScreen(ctx: Ctx, job: Job, node: NodeIdentity, now: number)
   }
   const old = known.get(job.id);
   const signAt = agentProgramState(ctx, job).program?.signAt ?? 0;
-  const current = { instance: view.instance, cells: view.cells, signAt, since: now, at: now };
+  const proof = view.completion ? `completion:${view.completion}` : `screen:${view.cells}`;
+  const current = { instance: view.instance, proof, signAt, since: now, at: now };
   if (continuousView(old, current)) current.since = old!.since;
   known.set(job.id, current);
   return now - current.since >= IDLE_END_MS;
@@ -145,6 +152,18 @@ async function closeIdleTurn(ctx: Ctx, job: Job, node: NodeIdentity, now: Date, 
   closesOf(ctx).set(job.agentId!, now.getTime());
   ctx.hub.send(node, { type: 'job.cancel', jobId: job.id });
   await logTurnFact(ctx, job, why, { idleClosed: true });
+  await publishWorking(ctx, job.companyId);
+  await afterJob(ctx, job.id);
+}
+
+/* A final result can be lost while the node keeps it in its outbox. An authenticated report of this exact job's actual
+   exit is independent evidence, unlike no_program or silence. Allow the normal result two minutes to arrive first. */
+async function closeExitedTurn(ctx: Ctx, job: Job, node: NodeIdentity, now: Date): Promise<void> {
+  const [closed] = await ctx.db.update(jobs).set({ status: 'failed', error: 'agent_failed', finishedAt: now })
+    .where(and(eq(jobs.id, job.id), eq(jobs.status, 'running'), jobsOf(node, ctx))).returning({ id: jobs.id });
+  if (!closed) return;
+  ctx.hub.send(node, { type: 'job.cancel', jobId: job.id });
+  await logTurnFact(ctx, job, 'Hornhoof ended this turn as failed: its node reported that the program exited, but the final job result did not arrive within 2 minutes.', { exitedTurn: true });
   await publishWorking(ctx, job.companyId);
   await afterJob(ctx, job.id);
 }

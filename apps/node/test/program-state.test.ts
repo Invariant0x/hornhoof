@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { PROGRAM_SCREEN_MAX, type NodeMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { READY, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
+import { READY, idleScreen, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
+import { real } from './real-screens.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}.txt`, import.meta.url), 'utf8');
 const agy = (name: string) => readFileSync(new URL(`./fixtures/agy-tui/screen-${name}`, import.meta.url), 'utf8');
@@ -129,5 +130,48 @@ describe("the node's word on what a turn's program does", () => {
     expect(watch.due(0)).toBe(false);
     watch.look(0, waiting, null, false);
     expect(sent).toEqual([]);
+  });
+});
+
+
+describe('independent completion after a lost end', () => {
+  it('recognizes the current completed response of recorded Codex', () => {
+    expect(idleScreen('codex', real('codex-0.166.0-long-session'))).toBe(true);
+  });
+
+  it.each(['first', 'idle', 'busy', 'retrying', 'draft', 'empty-rows-draft', 'paragraphs-draft'])('keeps recorded Codex %s uncertain or working', name => {
+    expect(idleScreen('codex', real(`codex-0.166.0-${name}`))).toBe(false);
+  });
+
+  it('does not reuse an older Codex completion before new work or a question', () => {
+    const done = real('codex-0.166.0-long-session');
+    expect(idleScreen('codex', done + real('codex-0.166.0-busy'))).toBe(false);
+    expect(idleScreen('codex', done + real('codex-0.167.0-rate-limits-question'))).toBe(false);
+    expect(idleScreen('codex', done.replaceAll('Worked for 6s', 'Still working for 6s'))).toBe(false);
+  });
+
+  it('recognizes the completed recorded Antigravity response at its idle footer', () => {
+    expect(idleScreen('antigravity', agy('done.ansi'))).toBe(true);
+  });
+
+  it.each(['idle.ansi', 'busy.ansi', 'queued.txt', 'interrupted.txt', 'trust.ansi'])('keeps recorded Antigravity %s working or waiting for someone', name => {
+    expect(idleScreen('antigravity', agy(name))).toBe(false);
+  });
+
+  it('rejects Antigravity drafts and an old idle footer before new work', () => {
+    const done = agy('done.ansi');
+    expect(idleScreen('antigravity', done.replace(/>\x1b\[39m\n/, '>draft\x1b[39m\n'))).toBe(false);
+    expect(idleScreen('antigravity', done + agy('busy.ansi'))).toBe(false);
+    expect(idleScreen('antigravity', done + agy('trust.ansi'))).toBe(false);
+    expect(idleScreen('antigravity', done + '\nUnknown dialog')).toBe(false);
+  });
+
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('rejects an unknown %s layout', kind => {
+    expect(idleScreen(kind, 'Done.\n> ')).toBe(false);
+  });
+
+  it('does not infer Kimi completion from a bare empty prompt or a failed login', () => {
+    expect(idleScreen('kimi', fixture('kimi-empty-screen'))).toBe(false);
+    expect(idleScreen('kimi', real('kimi-2.5.1-after'))).toBe(false);
   });
 });

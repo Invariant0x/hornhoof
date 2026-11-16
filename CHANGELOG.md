@@ -5,6 +5,19 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.31.0] - 2026-11-16
+
+Completed Codex, Kimi and Antigravity turns can recover when their end notification is lost.
+
+### Fixed
+
+- Recover a lost turn end from two fresh observations of the same completed response and empty input, at least two
+  minutes apart. Codex uses its completion line; Antigravity uses its current idle footer; Kimi uses the renderer's
+  explicit root completion status. Questions, tools, drafts, unknown layouts and missing status keep the turn open.
+- Kimi's rotating toolbar tips no longer interrupt the observation of an unchanged completed response.
+- A program that exited can no longer leave its job running indefinitely when the node retains the job but its final
+  result was lost. A verified exit gets two minutes for that result, then the job fails and waiting messages continue.
+
 ## [0.29.2] - 2026-11-16
 
 The orchestrator does everything in the company in any turn, as its owner, and limits a company wants are written in

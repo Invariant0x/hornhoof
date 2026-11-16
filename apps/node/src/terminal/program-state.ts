@@ -29,15 +29,71 @@ export function programState(screen: string | null, pending: Pending | null, run
   return retry ? 'retrying' : 'thinking';
 }
 
-/* An empty input stays visible during work. Only Claude's completed-duration line immediately above its current empty
-   prompt proves a finished response independently of hooks. Unknown layouts and other programs give no such proof. */
-export function idleScreen(kind: Kind, screen: string): boolean {
-  if (kind !== 'claude' || !atEmptyPrompt(kind, screen)) return false;
+/* Empty input stays visible during work. Each recognized layout must also positively identify its current completed
+   response. Older responses, unknown layouts and a draft give no evidence of completion. */
+export function idleScreen(kind: Kind, screen: string, output = ''): boolean {
+  if (!atEmptyPrompt(kind, screen)) return false;
+  if (kind === 'antigravity') return completedAgy(screen);
+  if (kind === 'kimi') return READY.kimi(screen) && kimiDone(output);
   const plain = stripEscapes(screen);
-  const prompt = [...plain.matchAll(/^[ \t]*❯[^\n]*$/gm)].at(-1);
+  const marker = kind === 'claude' ? '❯' : '›';
+  const prompt = [...plain.matchAll(new RegExp(`^[ \t]*${marker}[^\n]*$`, 'gm'))].at(-1);
   if (!prompt) return false;
   const above = plain.slice(0, prompt.index).trimEnd().replace(/(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/, '').trimEnd();
-  return /(?:^|\n)[ \t]*[✻✽✢✳✶✹] [^\n…]+ for \d[^\n…]* · done [^\n]+$/.test(above);
+  return kind === 'codex'
+    ? /(?:^|\n)[ \t]*Worked for \d[^\n]* • \d{1,2}:\d{2}$/.test(above)
+    : /(?:^|\n)[ \t]*[✻✽✢✳✶✹] [^\n…]+ for \d[^\n…]* · done [^\n]+$/.test(above);
+}
+
+/* The explicit root status of Kimi's renderer, independent of hooks. tmux passthrough doubles ESC. Other DCS payloads
+   are opaque, and truncated or malformed root reports invalidate older completion evidence. Child records never set it. */
+function kimiDone(output: string): boolean {
+  const unwrapped = output.replace(/\x1bPtmux;((?:\x1b\x1b|[^\x1b])*)\x1b\\/g, (_frame, body: string) => body.replace(/\x1b\x1b/g, '\x1b'));
+  if (unwrapped.includes('\x1bP')) return false;
+  let done = false;
+  for (const frame of unwrapped.split('\x1b]7501;').slice(1)) {
+    const end = frame.search(/\x07|\x1b\\/);
+    if (end < 0) return false;
+    const fields = new Map<string, string>();
+    let valid = true;
+    for (const pair of frame.slice(0, end).split(':')) {
+      const equal = pair.indexOf('=');
+      const key = pair.slice(0, equal);
+      if (equal < 1 || fields.has(key) || !['state', 'app', 'kind', 'id', 'title', 'msg'].includes(key)) valid = false;
+      fields.set(key, pair.slice(equal + 1));
+    }
+    if (fields.has('id')) {
+      if (!valid || !/^[A-Za-z0-9_.+-]{1,32}(?:\/[A-Za-z0-9_.+-]{1,32}){0,7}$/.test(fields.get('id')!)) done = false;
+      continue;
+    }
+    done = valid && !fields.has('kind') && fields.get('state') === 'done' && fields.get('app') === 'kimi-code';
+  }
+  return done;
+}
+
+/* Keep the completed response in the continuity proof, excluding Kimi's rotating toolbar below its current input. */
+export function completionText(kind: Kind, screen: string, output = ''): string | null {
+  if (!idleScreen(kind, screen, output)) return null;
+  const plain = stripEscapes(screen).trimEnd();
+  if (kind !== 'kimi') return plain;
+  const prompt = [...plain.matchAll(/^[ \t]*╭─[^\n]*\n[ \t]*│[ \t]*>/gm)].at(-1);
+  return prompt ? plain.slice(0, prompt.index).trimEnd() || null : null;
+}
+
+/* Antigravity's idle footer is its explicit state indicator. A first-launch prompt has no response, and an interrupted
+   turn asks for different words rather than completing its response. */
+function completedAgy(screen: string): boolean {
+  if (!agyPrompt(screen)?.footer.startsWith('? for shortcuts')) return false;
+  const plain = stripEscapes(screen);
+  const prompt = [...plain.matchAll(/^[ \t]*>[ \t]*$/gm)].at(-1);
+  if (!prompt) return false;
+  const below = plain.slice(prompt.index + prompt[0].length);
+  if (!/^\n[ \t]*[─━═]{2,}[ \t]*\n[ \t]*\? for shortcuts[^\n]*(?:\n[ \t]*)*$/.test(below)) return false;
+  const above = plain.slice(0, prompt.index).trimEnd().replace(/(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/, '').trimEnd();
+  const user = [...above.matchAll(/^[ \t]*> [^\n]+$/gm)].at(-1);
+  if (!user) return false;
+  const response = above.slice(user.index + user[0].length).trim();
+  return Boolean(response) && !response.includes('Interrupted · What should Antigravity CLI do instead?');
 }
 
 /* The last 40 lines a gone program showed, rows left blank counted as one, cut to what Hornhoof takes of them. */

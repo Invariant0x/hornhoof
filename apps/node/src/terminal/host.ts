@@ -24,7 +24,7 @@ import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type
 import { sendTerminalOutput, ViewHistory } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
-import { ProgramWatch, READY, REPORT_MS, idleScreen, programState, type Pending } from './program-state.js';
+import { ProgramWatch, READY, REPORT_MS, completionText, programState, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
@@ -197,6 +197,8 @@ type Agent = {
   agyAnswered: boolean;
   /* Diagnostics visible before this invocation cannot classify its failure. */
   agyCursor: RecordingCursor | null;
+  /* Recording position before this turn: an older completion must never answer a new prompt. */
+  completionStart: Promise<RecordingCursor | null> | null;
   /* Interruption notices already on screen when this turn started belong to older turns. */
   interruptions: number;
   /* The running turn's tool calls the program began and did not end yet, by id, oldest first. */
@@ -486,15 +488,27 @@ export class TerminalHost {
     const a = this.agents.get(key);
     if (!a?.program || !a.instance || !(await this.opts.tmux.alive(a.name))) return null;
     this.drain(a);
+    const turn = a.turn, instance = a.instance;
     const screen = await this.opts.tmux.screen(a.name, 0, true);
     const input = inputOf(a.program.kind, screen);
-    return { ...this.programIdentity(key, a), working: a.busy && !this.screenCompleted(a, screen), ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
+    const completion = await this.screenCompleted(a, screen);
+    if (a.turn !== turn || a.instance !== instance) return null;
+    return { ...this.programIdentity(key, a), working: a.busy && !completion, ...(completion ? { completion } : {}), ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
   }
 
-  private screenCompleted(a: Agent, screen: string): boolean {
-    if (!a.program || !a.took || a.typing != null) return false;
-    if (a.calls.size || a.question || a.operatorQuestion || a.retry || a.restarting) return false;
-    return idleScreen(a.program.kind, screen);
+  private async screenCompleted(a: Agent, screen: string): Promise<string | null> {
+    const program = a.program, start = a.completionStart;
+    if (!program || this.completionBlocked(a)) return null;
+    const cursor = program.kind === 'kimi' ? await start : null;
+    if (a.program !== program || a.completionStart !== start || this.completionBlocked(a)) return null;
+    if (program.kind === 'kimi' && !cursor) return null;
+    const output = cursor ? this.opts.tmux.programOutput(a.name, cursor) ?? '' : '';
+    const text = completionText(program.kind, screen, output);
+    return text ? createHash('sha256').update(text).digest('hex') : null;
+  }
+
+  private completionBlocked(a: Agent): boolean {
+    return !a.took || a.typing != null || Boolean(a.calls.size || a.question || a.operatorQuestion || a.retry || a.restarting);
   }
 
   /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
@@ -585,7 +599,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), blank: null, tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, tally: new TurnTally(), agyAnswered: false, agyCursor: null, completionStart: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, queuedTurns: 0, sinceRun: new Set(), leaving: null, tryingToLeave: false, asleep: false, tryingToSleep: false };
       this.agents.set(key, a);
     }
     return a;
@@ -756,7 +770,10 @@ export class TerminalHost {
   private async runRequested(a: Agent, job: TermJob, turn: Turn, tools: Promise<unknown> | null, goesOn: boolean, ended: Deferred<string>): Promise<RunResult> {
     /* Nothing to type: the turn only starts the program for the person who opened its window. */
     if (!job.input.prompt) return this.started(a, turn, tools, goesOn ? null : job.input.sessionId === null);
-    return (await this.toolsMissing(a, job)) ?? (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
+    const missing = await this.toolsMissing(a, job);
+    if (missing) return missing;
+    if (job.program.kind === 'kimi') a.completionStart = this.opts.tmux.programCursor(a.name).catch(() => null);
+    return (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
   }
 
   /* agy 1.4.12 connects to the MCP servers of its folder only once it takes its first input or opens its /mcp panel, and
@@ -1700,6 +1717,7 @@ export class TerminalHost {
   }
 
   private beginTurn(a: Agent): void {
+    a.completionStart = a.program?.kind === 'kimi' ? this.opts.tmux.programCursor(a.name).catch(() => null) : null;
     this.clearQuestion(a);
     a.tally.begin();
     a.personWords = false;
