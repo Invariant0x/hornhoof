@@ -4,8 +4,9 @@ import { CHECK_LEASE_MS, CheckSlotQueue, checkCapacity, type CheckQueueReply, ty
 type Acquire = Extract<CheckQueueRequest, { type: 'check.acquire' }>;
 type Sample = { cpus: number; load: number; at?: number };
 type Member = { host: string; sample: Sample; online: boolean; at: number };
-type Entry = { node: string; request: Acquire; state: CheckQueueReply['state']; position: number; stop: AbortController; finish(): void };
-type Options = { send(node: string, reply: CheckQueueReply): void; now?(): number; warmupMs?: number };
+type Entry = { node: string; request: Acquire; state: CheckQueueReply['state']; position: number; stop: AbortController; finish(): void; retired: boolean };
+/* heard: when the server last took in a frame from the node, whether or not it has handled it yet (#1060). */
+type Options = { send(node: string, reply: CheckQueueReply): void; now?(): number; warmupMs?: number; heard?(node: string): number | null };
 
 /* A disconnected worker must stop its process group before another worker gets its CPU budget.
    The startup hold covers old workers discovering a server restart and performing that cleanup. */
@@ -26,7 +27,7 @@ export class CheckCoordinator {
 
   node(node: string, host: string, sample: Sample): void {
     const at = sample.at ?? this.now();
-    if (this.now() - at >= CHECK_LEASE_MS) { this.lost(node); return; }
+    if (this.now() - this.heardSince(node, at) >= CHECK_LEASE_MS) { this.lost(node); return; }
     this.nodes.set(node, { host, sample, online: true, at });
     if (!this.pools.has(host)) this.pools.set(host, new CheckSlotQueue(() => this.capacity(host)));
     this.refresh();
@@ -34,10 +35,11 @@ export class CheckCoordinator {
 
   acquire(node: string, request: Acquire): void {
     const key = `${node}:${request.id}`, previous = this.entries.get(key);
-    if (previous) { this.tell(previous); return; }
+    if (previous && !previous.retired) { this.tell(previous); return; }
     const member = this.nodes.get(node);
-    if (!member?.online) { this.options.send(node, { type: 'check.state', id: request.id, state: 'ended', position: 0 }); return; }
-    const entry: Entry = { node, request, state: 'queued', position: 1, stop: new AbortController(), finish: () => {} };
+    /* A claim to resume a lease this machine no longer holds here is late, or not its own: it is ended, never queued anew. */
+    if (previous || !member?.online || request.resume) { this.options.send(node, { type: 'check.state', id: request.id, state: 'ended', position: 0 }); return; }
+    const entry: Entry = { node, request, state: 'queued', position: 1, stop: new AbortController(), finish: () => {}, retired: false };
     this.entries.set(key, entry);
     const run = this.pools.get(member.host)!.withSlot(() => new Promise<void>(resolve => {
       entry.finish = resolve;
@@ -57,6 +59,13 @@ export class CheckCoordinator {
     if (entry.state === 'queued') this.rememberEnd(entry);
     entry.stop.abort(new Error('Check released.'));
     entry.finish();
+  }
+
+  /* The machine's connection dropped. Its leases stay while it may come back and claim them again; one not heard again
+     within a lease loses them as a silent machine does. */
+  away(node: string): void {
+    if (!this.nodes.get(node)?.online) return;
+    this.later(() => { if (!this.live(node)) this.lost(node); }, CHECK_LEASE_MS);
   }
 
   lost(node: string): void {
@@ -92,9 +101,15 @@ export class CheckCoordinator {
     this.queueEnds.clear();
   }
 
+  /* A machine is live while it was heard within a lease: its last load handled, or any frame that came after it, as a frame
+     can wait behind others of the node and behind the shared pump of test runs long after it came. */
   private live(node: string, now = this.now()): boolean {
     const member = this.nodes.get(node);
-    return Boolean(member?.online && now - member.at < CHECK_LEASE_MS);
+    return Boolean(member?.online && now - this.heardSince(node, member.at) < CHECK_LEASE_MS);
+  }
+
+  private heardSince(node: string, at: number): number {
+    return Math.max(at, this.options.heard?.(node) ?? Number.NEGATIVE_INFINITY);
   }
 
   private capacity(host: string): number {
@@ -105,6 +120,7 @@ export class CheckCoordinator {
   }
 
   private retire(entry: Entry): void {
+    entry.retired = true;
     this.options.send(entry.node, { type: 'check.state', id: entry.request.id, state: 'ended', position: 0 });
     if (entry.state === 'queued') { this.release(entry.node, entry.request.id); return; }
     this.later(() => this.release(entry.node, entry.request.id), CHECK_LEASE_MS);

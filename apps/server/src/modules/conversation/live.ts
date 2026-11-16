@@ -3,7 +3,7 @@ import { NEXT_TURN_WORDS } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
+import { agents, jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
@@ -37,9 +37,10 @@ export async function sayLive(
   before: (jobId: string) => Promise<void> = nothingBefore,
 ): Promise<string | null> {
   const [running] = await ctx.db
-    .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, createdBy: jobs.createdBy, sub: subscriptions })
+    .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, createdBy: jobs.createdBy, sub: subscriptions, agentKind: agents.kind })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
+    .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), isNull(jobs.error)))
     .limit(1);
   const node = running && identityOf(running.sub, running.nodeId, running.builtinMachine, ownBuiltin(ctx.config));
@@ -75,9 +76,12 @@ const takesLiveWords = (ctx: Ctx, node: NodeIdentity, provider: string): boolean
 
 type Words = { agentKey: string; text: string; ref: string };
 
+const tracksLiveOperator = (ctx: Ctx, node: NodeIdentity, agentKind: string): node is Extract<NodeIdentity, { kind: 'node' }> =>
+  agentKind !== 'assistant' && node.kind === 'node' && ctx.hub.hasProgramOperator(node);
+
 /* The delivery of these words on a node that tracks them: the one they have in this turn already, when they are tried again. */
-async function liveDelivery(ctx: Ctx, node: NodeIdentity, words: Words, running: { id: string; companyId: string }, source?: MessageSource): Promise<OperatorDelivery | undefined> {
-  if (node.kind !== 'node' || !ctx.hub.hasProgramOperator(node)) return undefined;
+async function liveDelivery(ctx: Ctx, node: NodeIdentity, words: Words, running: { id: string; companyId: string; agentKind: string }, source?: MessageSource): Promise<OperatorDelivery | undefined> {
+  if (!tracksLiveOperator(ctx, node, running.agentKind)) return undefined;
   const { agentKey: agentId, text, ref } = words;
   const digest = wordsDigest(text);
   const previous = liveInputOf(source?.data, agentId);
@@ -109,7 +113,7 @@ async function typeWords(ctx: Ctx, node: NodeIdentity, words: Words, operatorDel
   return typed;
 }
 
-async function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, running: { id: string; companyId: string }, source?: MessageSource): Promise<boolean> {
+async function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, running: { id: string; companyId: string; agentKind: string }, source?: MessageSource): Promise<boolean> {
   const words = { agentKey: agentId, text, ref: randomUUID() };
   const delivery = await liveDelivery(ctx, node, words, running, source);
   const typed = await typeWords(ctx, node, words, delivery);

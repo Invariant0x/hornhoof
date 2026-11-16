@@ -84,7 +84,7 @@ describe('the settings of a sending account', () => {
     expect((await w.c.db.select().from(outboundAccounts).where(eq(outboundAccounts.id, smtp.accountId)))[0]!.configEnc).toMatch(/^v1\./);
   });
 
-  it('do not reach a tool as a field either: no tool takes or names an address, a host, a key or a password', async () => {
+  it('do not reach a tool as a field either: no tool takes or names a host, a key or a password, and only a new account its own sender address', async () => {
     const { w } = await usedOnMail();
     const tools = await w.c.tools(w.c.orchestrator);
     const { tools: all } = await tools.listTools();
@@ -92,7 +92,8 @@ describe('the settings of a sending account', () => {
     expect(outbound.length).toBeGreaterThan(3);
     for (const tool of outbound) {
       const fields = Object.keys((tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {});
-      expect(fields.filter(field => /^(host|port|password|username|signingKey|eventKey|endpoint|config|from|recipient|url|headers?)$/i.test(field))).toEqual([]);
+      const own = tool.name === 'outbound_account_add' ? ['from'] : [];
+      expect(fields.filter(field => !own.includes(field) && /^(host|port|password|username|signingKey|eventKey|endpoint|config|from|recipient|url|headers?)$/i.test(field)), tool.name).toEqual([]);
     }
   });
 

@@ -58,7 +58,7 @@ describe('check command bridge', () => {
     client.online(true); setCheckClient(client);
     const bridge = new Bridge('http://127.0.0.1:1', () => {});
     await bridge.start(); bridge.setToken(key, 'turn');
-    onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
+    onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
     const url = bridge.agent(key).hookUrl.replace('/hook/', '/check/');
     const response = await fetch(url, { method: 'POST', body: JSON.stringify({ command: [process.execPath, '-e', 'process.stdout.write("check output");process.stderr.write("check error");process.exit(7)'], cwd: '/tmp', env: { PATH: process.env.PATH } }) });
     expect(response.status).toBe(200);
@@ -76,7 +76,7 @@ describe('check command bridge', () => {
     });
     client.online(true); setCheckClient(client);
     const bridge = new Bridge('http://127.0.0.1:1', () => {}); await bridge.start(); bridge.setToken(key, 'turn');
-    onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
+    onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
     const child = spawn(process.execPath, [cli, '--', process.execPath, '-e', 'process.stdout.write("from CLI");process.exit(7)'], {
       cwd: '/tmp', env: { PATH: process.env.PATH, HH_BRIDGE: bridge.agent(key).hookUrl }, stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -97,7 +97,7 @@ describe('check command bridge', () => {
     const owner = procOwner('/proc')(async agent => agent === key ? [pane] : []);
     const bridge = new Bridge('http://127.0.0.1:1', () => {}, owner.owns, { capture: owner.capture });
     await bridge.start(); bridge.setToken(key, 'turn'); bridge.setToken(other, 'other-turn');
-    onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
+    onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
     const script = `
       const { spawnSync } = await import('node:child_process');
       const nested = spawnSync(process.execPath, [${JSON.stringify(cli)}, '--', process.execPath, '-e', 'process.stdout.write("nested")'], { env: process.env, encoding: 'utf8' });
@@ -129,7 +129,7 @@ describe('check command bridge', () => {
     });
     client.online(true); setCheckClient(client);
     const bridge = new Bridge('http://127.0.0.1:1', () => {}); await bridge.start(); bridge.setToken(key, 'turn');
-    onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
+    onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
     const response = await fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
       method: 'POST', body: JSON.stringify({ command: ['/bin/bash', '-c', 'sleep 60 & echo leader-exiting; exit 0'], cwd: '/tmp', env: { PATH: process.env.PATH } }),
     });
@@ -159,7 +159,7 @@ describe('check command bridge', () => {
     });
     client.online(true); setCheckClient(client);
     const bridge = new Bridge('http://127.0.0.1:1', () => {}); await bridge.start(); bridge.setToken(key, 'turn');
-    onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
+    onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
     const scratch = mkdtempSync(join(tmpdir(), 'hh-check-term-')), termed = join(scratch, 'termed');
     giveToUser(scratch);
     onTestFinished(() => { rmSync(scratch, { recursive: true, force: true }); });
@@ -193,7 +193,7 @@ describe('check command bridge', () => {
         return true;
       });
       client.online(true); setCheckClient(client);
-      onTestFinished(() => { client.online(false); setCheckClient(null); });
+      onTestFinished(() => { client.stop(); setCheckClient(null); });
       return asked;
     }
     async function bridgeWith(checkStep: OpensCheck) {
@@ -286,7 +286,7 @@ async function guardedCommandFixture() {
   giveToUser(dir);
   const bridge = new Bridge('http://127.0.0.1:1', () => {});
   await bridge.start(); bridge.setToken(key, 'current-fixture-turn');
-  onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); configureCheckCommands(null); rmSync(dir, { recursive: true, force: true }); });
+  onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); configureCheckCommands(null); rmSync(dir, { recursive: true, force: true }); });
   const run = async (lease?: string, command = ['vitest', 'run'], signal?: AbortSignal) => {
     const response = await fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
       method: 'POST', signal, body: JSON.stringify({ command, cwd: root, env: { PATH: bin, HH_GUARD_SENTINEL: sentinel, HH_CHECK_SLOT: lease ?? 'forged-claim' }, ...(lease ? { lease } : {}) }),

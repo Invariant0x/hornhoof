@@ -64,7 +64,7 @@ it('commits the first subtask report in a running turn alongside its live tool e
   await installReportAndEventBarriers(pg);
 
   const barrier = await pg.pool('report_barrier').connect();
-  let pending: Promise<[Awaited<ReturnType<typeof report>>, void]> | undefined;
+  let pending: Promise<[Awaited<ReturnType<typeof report>>, boolean]> | undefined;
   try {
     await barrier.query('SELECT pg_advisory_lock(885, 1), pg_advisory_lock(885, 2)');
     pending = Promise.all([
