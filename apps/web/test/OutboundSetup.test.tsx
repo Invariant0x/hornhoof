@@ -85,11 +85,13 @@ describe('a department\'s own outbound setup', () => {
     expect(catalog).toHaveTextContent('by Mia on the word of Mona');
     expect(within(catalog).getByText('proposed')).toHaveClass('status', 'invited');
     expect(within(catalog).getByText('published')).toHaveClass('status', 'active');
+    expect(within(catalog).queryByRole('button', { name: 'Take back' })).toBeNull();
+    await user.click(within(catalog).getByRole('button', { name: 'Show revision 1' }));
     expect(within(catalog).getByRole('button', { name: 'Publish' })).not.toHaveClass('danger');
     expect(within(catalog).getByRole('button', { name: 'Take back' })).toHaveClass('danger');
     await user.click(within(catalog).getByRole('button', { name: 'Publish' }));
     await user.click(within(catalog).getByRole('button', { name: 'Take back' }));
-    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.path)).toEqual(['/api/outbound/catalog/r2/publish', '/api/outbound/catalog/r1/revoke']));
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => [c.path, c.body])).toEqual([['/api/outbound/catalog/r2/publish', { revision: 2, newest: 2 }], ['/api/outbound/catalog/r1/revoke', { revision: 1, newest: 2 }]]));
     expect(calls.filter(c => c.path === `/api/outbound/catalog?${Q}`).length).toBeGreaterThan(1);
   });
 
@@ -280,5 +282,82 @@ describe('a department\'s own outbound setup', () => {
     expect(await screen.findByRole('heading', { name: 'Каталог отдела' })).toBeInTheDocument();
     expect(screen.getByText(/отправляет без одобрения каждого письма/)).toBeInTheDocument();
     expect(screen.getAllByText(/решение: Mona, выполнил агент Mia/).length).toBeGreaterThan(0);
+  });
+});
+
+/* Nobody publishes blind: each revision of an entry shows what a message would say, the newest one at once, and what
+   changed from the version messages use now. What is published is the version shown. */
+describe('a catalog revision shown before it is published', () => {
+  const SALE = { kind: 'template', locale: 'en', subject: 'Spring sale', parts: [{ kind: 'text', text: 'The spring sale ends soon. ' }, { kind: 'slot', slotId: 's1', type: 'price' }] };
+  const LAST_DAYS = {
+    kind: 'template', locale: 'en', subject: 'Spring sale, last days',
+    parts: [{ kind: 'text', text: 'The spring sale ends on Sunday. ' }, { kind: 'slot', slotId: 's1', type: 'price' }, { kind: 'text', text: ' ' }, { kind: 'slot', slotId: 's2', type: 'unsubscribe' }],
+  };
+  const entry = (current: number | null, revisions: object[]) => ({ entryId: 'e1', kind: 'template', locale: 'en', productId: null, channel: { id: 'ch1', name: 'Spring letters' }, current, revisions });
+  const twoVersions = entry(1, [
+    revision('r2', 2, 'proposed', { value: LAST_DAYS, summary: 'Spring sale, last days', createdAt: '2026-03-02T09:30:00.000Z' }),
+    revision('r1', 1, 'published', { value: SALE, summary: 'Spring sale', publishedBy: { id: 'p-mona', name: 'Mona' } }),
+  ]);
+  const withCatalog = (entries: object[], extra: Record<string, [number, unknown]> = {}) => mockApi({ ...routes(), [`GET /api/outbound/catalog?${Q}`]: [200, { departmentId: DEPT, entries }], ...extra });
+  const catalogOf = async () => (await screen.findByRole('heading', { name: 'Department catalog' })).closest('section') as HTMLElement;
+
+  it('shows the subject, the words with the places a message fills in, the language, the version and who proposed it when', async () => {
+    withCatalog([twoVersions]);
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
+    expect(shown).toHaveTextContent('Spring sale, last days');
+    expect(shown).toHaveTextContent('The spring sale ends on Sunday.');
+    expect(within(shown).getAllByText('Price', { selector: '.outbound-slot' }).length).toBeGreaterThan(0);
+    expect(within(shown).getAllByText('How to stop messages', { selector: '.outbound-slot' }).length).toBeGreaterThan(0);
+    expect(shown).toHaveTextContent('English');
+    expect(shown).toHaveTextContent('Proposed by Max on 02/03/2026');
+  });
+
+  it('shows what changed from the version messages use, and publishes the version shown', async () => {
+    const calls = withCatalog([twoVersions], { 'POST /api/outbound/catalog/r2/publish': [200, { id: 'r2', status: 'published' }] });
+    const user = userEvent.setup();
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
+    const changed = within(shown).getByRole('group', { name: 'What changed from revision 1, which messages use' });
+    expect([...changed.querySelectorAll('ins')].map(e => e.textContent)).toEqual(['sale, last days', 'on Sunday. ', ' ', 'How to stop messages']);
+    expect([...changed.querySelectorAll('del')].map(e => e.textContent)).toEqual(['sale', 'soon. ']);
+    await user.click(within(shown).getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => [c.path, c.body])).toEqual([['/api/outbound/catalog/r2/publish', { revision: 2, newest: 2 }]]));
+  });
+
+  it('marks an entry nothing of which is in use yet as new', async () => {
+    withCatalog([entry(null, [revision('r1', 1, 'proposed', { value: SALE, summary: 'Spring sale' })])]);
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 1' });
+    expect(shown).toHaveTextContent('New: no version of this entry is in use yet.');
+    expect(shown.querySelector('ins, del')).toBeNull();
+  });
+
+  it('shows a price by its value', async () => {
+    const price = { kind: 'price', amount: '10.00', currency: 'USD', scale: 2, rounding: 'half_up', discountId: null, termsId: null, validFrom: '2026-01-01T00:00:00.000Z', validUntil: null };
+    withCatalog([{ ...entry(null, [revision('r1', 1, 'proposed', { value: price, summary: '10.00 USD' })]), kind: 'price', locale: null }]);
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 1' });
+    expect(shown).toHaveTextContent('10.00 USD');
+  });
+
+  it('says in plain words that the entry changed while it was shown, and reads it again', async () => {
+    const calls = withCatalog([twoVersions], { 'POST /api/outbound/catalog/r2/publish': [409, { error: { code: 'conflict', message: 'This entry changed after you looked at it.', reason: 'outbound_changed' } }] });
+    const user = userEvent.setup();
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
+    await user.click(within(shown).getByRole('button', { name: 'Publish' }));
+    expect(await screen.findByText('This entry got another version while you were looking at it. Look at it again before you publish or take it back.')).toBeInTheDocument();
+    expect(calls.filter(c => c.path === `/api/outbound/catalog?${Q}`).length).toBeGreaterThan(1);
+  });
+
+  it('speaks Russian', async () => {
+    withCatalog([twoVersions]);
+    show('ru');
+    const catalog = (await screen.findByRole('heading', { name: 'Каталог отдела' })).closest('section') as HTMLElement;
+    const shown = within(catalog).getByRole('region', { name: 'Ревизия 2' });
+    expect(within(shown).getAllByText('Цена', { selector: '.outbound-slot' }).length).toBeGreaterThan(0);
+    expect(shown).toHaveTextContent('английский');
+    expect(within(shown).getByRole('group', { name: 'Что изменилось по сравнению с ревизией 1, которую используют письма' })).toBeInTheDocument();
   });
 });

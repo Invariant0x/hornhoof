@@ -28,7 +28,7 @@ describe('forward candidate timing', () => {
   });
 
   it('does not treat a failed verification report as integration readiness', () => {
-    const result = facts([submitted(10, 'development'), event('verdict', 20, { pass: true, stage: 'review' }), event('report', 50, { failedVerification: { kind: 'content' } })]);
+    const result = facts([submitted(10, 'development'), event('verdict', 20, { pass: true, stage: 'review' }), event('report', 50, { failedVerification: { candidateId: 'candidate', routeRevision: 4 } })]);
     expect(result.stages).toEqual({ work: 600, review: 4800, fixes: 0, merge: 0, turnReview: 0 });
   });
 });

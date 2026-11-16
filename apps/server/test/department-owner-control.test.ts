@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, approvalPolicies, departments, requests, subscriptions, tasks, teams, waitPolicies } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { company } from './department-owner-fixture.js';
 import { TEST_API_KEY } from './helpers-company.js';
@@ -35,7 +36,7 @@ describe("a department's API keys", () => {
     expect((await send(c, c.samToken, 'GET', `/api/subscriptions/${id}/tokens`)).statusCode).toBe(200);
     expect((await send(c, c.samToken, 'PATCH', `/api/subscriptions/${id}`, { label: 'Sales API' })).json().subscription.label).toBe('Sales API');
     expect((await send(c, c.samToken, 'DELETE', `/api/subscriptions/${id}`)).statusCode).toBe(204);
-    expect((await c.db.select({ removedAt: subscriptions.removedAt }).from(subscriptions).where(eq(subscriptions.id, id)))[0]!.removedAt).not.toBeNull();
+    expect((await c.db.select(only(subscriptions, 'removedAt')).from(subscriptions).where(eq(subscriptions.id, id)))[0]!.removedAt).not.toBeNull();
   });
 
   it('include one the CEO placed in the department, which its person keeps as the CEO does', async () => {
@@ -67,7 +68,7 @@ describe("a department's API keys", () => {
     const own = (await send(c, c.samToken, 'POST', '/api/subscriptions', key('Sales key', { kind: 'department', id: c.sales.id }))).json().subscription.id as string;
     expect((await send(c, c.samToken, 'PATCH', `/api/subscriptions/${own}`, { target: { kind: 'department', id: c.dev.id } })).statusCode).toBe(403);
     expect((await send(c, c.samToken, 'PATCH', `/api/subscriptions/${own}`, { target: { kind: 'any' } })).statusCode).toBe(403);
-    expect((await c.db.select({ targetId: subscriptions.targetId }).from(subscriptions).where(eq(subscriptions.id, own)))[0]!.targetId).toBe(c.sales.id);
+    expect((await c.db.select(only(subscriptions, 'targetId')).from(subscriptions).where(eq(subscriptions.id, own)))[0]!.targetId).toBe(c.sales.id);
   });
 
   it("never show another person's personal plan or its secret, and are never added by an agent", async () => {
@@ -94,7 +95,7 @@ describe('hiring with a skill that shows the whole company', () => {
     expect([refused.statusCode, refused.json().error.reason]).toEqual([403, 'skill_company_only']);
     expect((await send(c, c.samToken, 'POST', `/api/departments/${c.sales.id}/staff`, { people: [line(c, 'SAL-AE', 'Ola')] })).statusCode).toBe(201);
     expect((await send(c, c.ceoToken, 'POST', `/api/departments/${c.sales.id}/staff`, { people: [line(c, 'SAL-AE', 'Pia', [GRANTING])] })).statusCode).toBe(201);
-    expect((await c.db.select({ name: agents.name }).from(agents).where(and(eq(agents.departmentId, c.sales.id), isNull(agents.removedAt)))).map(a => a.name).sort()).toEqual(['Ola', 'Pia', 'Sid', 'Sue']);
+    expect((await c.db.select(only(agents, 'name')).from(agents).where(and(eq(agents.departmentId, c.sales.id), isNull(agents.removedAt)))).map(a => a.name).sort()).toEqual(['Ola', 'Pia', 'Sid', 'Sue']);
   });
 
   it('is never done by a head, even on the CEO\'s word, for a new employee or one there is', async () => {
@@ -104,7 +105,7 @@ describe('hiring with a skill that shows the whole company', () => {
     expect(hired.isError, hired.content[0]!.text).toBe(true);
     const changed = await call(head, 'change_employee', { employee: c.seller.id, skills: { [GRANTING]: true } });
     expect(changed.isError, changed.content[0]!.text).toBe(true);
-    expect((await c.db.select({ skills: agents.skills }).from(agents).where(eq(agents.id, c.seller.id)))[0]!.skills).not.toContain(GRANTING);
+    expect((await c.db.select(only(agents, 'skills')).from(agents).where(eq(agents.id, c.seller.id)))[0]!.skills).not.toContain(GRANTING);
     expect(await c.db.select().from(agents).where(eq(agents.name, 'Ola'))).toEqual([]);
   });
 });
@@ -121,7 +122,7 @@ describe("a head's own approval and wait policies", () => {
     const dates = await call(head, 'set_wait_policy', { department: c.sales.id, ...DATES });
     expect(dates.isError, dates.content[0]!.text).toBeFalsy();
     expect(await c.db.select({ departmentId: approvalPolicies.departmentId, mode: approvalPolicies.mode }).from(approvalPolicies)).toEqual([{ departmentId: c.sales.id, mode: 'new_kinds' }]);
-    expect((await c.db.select({ departmentId: waitPolicies.departmentId }).from(waitPolicies)).map(p => p.departmentId)).toEqual([c.sales.id]);
+    expect((await c.db.select(only(waitPolicies, 'departmentId')).from(waitPolicies)).map(p => p.departmentId)).toEqual([c.sales.id]);
     for (const [name, args] of [['set_approval_policy', { department: c.dev.id, ...RULE }], ['set_wait_policy', { department: c.dev.id, ...DATES }]] as const) {
       const refused = await call(head, name, args);
       expect([refused.isError, refused.content[0]!.text], name).toEqual([true, "This department is not yours. Nothing was changed. You set only your own department's approvals and wait dates."]);
@@ -155,7 +156,7 @@ describe("a head and its department's work", () => {
     expect(cancelled.isError, cancelled.content[0]!.text).toBeFalsy();
     const refused = await call(head, 'cancel_task', { task: elsewhere.number, why: 'Not ours.' });
     expect([refused.isError, refused.content[0]!.text]).toEqual([true, `There is no task ${elsewhere.number} you can see. Call tasks for yours.`]);
-    const status = async (id: string) => (await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, id)))[0]!.status;
+    const status = async (id: string) => (await c.db.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, id)))[0]!.status;
     expect([await status(given.id), await status(elsewhere.id)]).toEqual(['cancelled', 'open']);
     /* A worker still cancels only what it created. */
     const worker = await call(await c.tools(c.seller, c.ids.sam), 'cancel_task', { task: elsewhere.number, why: 'Mine to drop?' });
@@ -173,7 +174,7 @@ describe("a head and its department's work", () => {
 
   it('sets the department description on the word of a person who runs it, as that person does on the screen', async () => {
     const c = await company();
-    const about = async (id: string) => (await c.db.select({ about: departments.about }).from(departments).where(eq(departments.id, id)))[0]!.about;
+    const about = async (id: string) => (await c.db.select(only(departments, 'about')).from(departments).where(eq(departments.id, id)))[0]!.about;
     const told = await call(await c.tools(c.salesHead, c.ids.sam), 'change_department', { about: 'Measures: replies and first reply time.' });
     expect(told.isError, told.content[0]!.text).toBeFalsy();
     expect(await about(c.sales.id)).toBe('Measures: replies and first reply time.');
