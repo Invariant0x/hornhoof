@@ -1,17 +1,19 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { jobs, testParts, testRuns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { checkTestTimes } from '../src/modules/testruns/runs.js';
 import { company, done, idle, nextOf } from './test-runs-company.js';
 
 type Company = Awaited<ReturnType<typeof company>>;
 
-/* Bruno starts a run of this many parts and ends his turn; each part goes to a machine of its own. */
+/* Bruno starts a run of this many parts on main, as shared runs go only to a release's branches, and ends his turn; each
+   part goes to a machine of its own. */
 async function started(c: Company, parts = 1) {
   const machines = [await c.machine(c.ceo, 'dev-mac')];
   if (parts > 1) machines.push(await c.machine(c.ann, 'ann-pc', idle({ load: 1 })));
   const t = await c.turn(c.bruno);
-  expect((await t.call('run_tests', parts > 1 ? { command: 'make check -- {part}', parts } : { command: 'make check' })).error).toBe(false);
+  expect((await t.call('run_tests', parts > 1 ? { branch: 'main', command: 'make check -- {part}', parts } : { branch: 'main', command: 'make check' })).error).toBe(false);
   await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));
   const given = [];
   for (const m of machines) given.push(await nextOf(m.node, 'tests.run'));
@@ -26,7 +28,7 @@ const runRow = async (c: Company) => (await c.db.select().from(testRuns))[0]!;
 
 /* What Bruno was told on the task since he ended his turn. */
 const toldBruno = async (c: Company) =>
-  (await c.db.select({ prompt: jobs.prompt }).from(jobs).where(and(eq(jobs.agentId, c.bruno.id), eq(jobs.taskId, c.task.id), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt))).map(j => j.prompt);
+  (await c.db.select(only(jobs, 'prompt')).from(jobs).where(and(eq(jobs.agentId, c.bruno.id), eq(jobs.taskId, c.task.id), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt))).map(j => j.prompt);
 
 describe('a run whose every part ended', () => {
   it('ends when the node says again that its last part ended, after the server stopped between the part and the run', async () => {
