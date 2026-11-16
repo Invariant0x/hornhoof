@@ -160,6 +160,8 @@ export type ErrorReason =
   | 'vault_unknown'
   | 'vault_not_allowed'
   | 'vault_name_taken'
+  | 'sign_in_unknown'
+  | 'browse_invalid'
   | 'attachment_invalid'
   | 'attachment_unknown'
   | 'file_empty'

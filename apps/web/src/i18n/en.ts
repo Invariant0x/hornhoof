@@ -2280,6 +2280,7 @@ export const en = {
     google_sheets_invalid: 'Paste valid Google service account or OAuth JSON credentials, and enter a valid share email address or leave it empty.',
     google_sheets_share_needed: 'A service account opens the spreadsheets it creates to no one else. Enter the email of the Google account to share them with.',
     vault_invalid: 'Check the fields of the sign-in and try again.',
+    sign_in_unknown: 'This sign-in is not saved any more. Open the card again to see the ones saved now.',
     vault_unknown: 'This sign-in is no longer saved.',
     vault_not_allowed: 'Only the person who added this sign-in and the CEO change or remove it.',
     vault_name_taken: 'A sign-in with this name is already saved.',
