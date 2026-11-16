@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 
@@ -43,6 +44,26 @@ export const systemAdb: AdbRun = call => new Promise((resolve, reject) => {
 
 export class PhoneAdb {
   constructor(private readonly run: AdbRun) {}
+
+  async pair(endpoint: string, code: string, signal: AbortSignal): Promise<'paired' | 'needs_person'> {
+    if (!networkEndpoint(endpoint) || !/^[0-9]{6}$/.test(code)) throw new Error('phone_pairing_invalid');
+    const output = await this.execute({ args: ['pair', endpoint], input: `${code}\n`, signal });
+    return output.toString().includes(`Successfully paired to ${endpoint}`) ? 'paired' : 'needs_person';
+  }
+
+  async identity(serial: string, signal: AbortSignal): Promise<string | null> {
+    if (serial.startsWith('emulator-')) return null;
+    const qemu = await this.call(serial, ['shell', 'getprop', 'ro.kernel.qemu'], signal);
+    if (qemu.toString().trim() === '1') return null;
+    const [number, maker] = await Promise.all([
+      this.call(serial, ['shell', 'getprop', 'ro.serialno'], signal),
+      this.call(serial, ['shell', 'getprop', 'ro.product.manufacturer'], signal),
+    ]);
+    const hardware = number.toString().trim();
+    const manufacturer = maker.toString().trim().toLowerCase();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{3,199}$/.test(hardware) || /^(unknown|null|none)$/i.test(hardware) || !/^[\p{L}\p{N} ._-]{1,100}$/u.test(manufacturer)) return null;
+    return createHash('sha256').update(`android:${manufacturer}:${hardware}`).digest('hex');
+  }
 
   async connect(endpoint: string, signal: AbortSignal): Promise<'connected' | 'needs_person'> {
     if (!networkEndpoint(endpoint)) throw new Error('phone_endpoint_invalid');

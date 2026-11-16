@@ -4,7 +4,7 @@ import { PhoneSessions } from '../src/phones/sessions.js';
 
 const grant: PhoneGrant = {
   sessionId: '11111111-1111-4111-8111-111111111111', generation: 1,
-  binding: { phoneId: '22222222-2222-4222-8222-222222222222', serial: '192.168.1.80:5555', transport: 'network', endpoint: '192.168.1.80:5555' },
+  binding: { phoneId: '22222222-2222-4222-8222-222222222222', serial: '192.168.1.80:5555', transport: 'network', endpoint: '192.168.1.80:5555', hardwareKey: 'a'.repeat(64) },
   expiresAt: '2026-11-16T12:00:30.000Z',
 };
 

@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { PhoneAdb, type AdbCall } from '../src/phones/adb.js';
 
 describe('the phone adb boundary', () => {
+  it('pairs with the Android screen code through stdin, never argv or a returned message', async () => {
+    const calls: AdbCall[] = [];
+    const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.from('Enter pairing code: Successfully paired to 192.168.1.80:37123 [guid=recorded]\n'); });
+    await expect(adb.pair('192.168.1.80:37123', '246810', new AbortController().signal)).resolves.toBe('paired');
+    expect(calls[0]!.args).toEqual(['pair', '192.168.1.80:37123']);
+    expect(calls[0]!.input).toBe('246810\n');
+  });
+
+  it('identifies the same real device behind USB and network transports without returning its hardware serial', async () => {
+    const adb = new PhoneAdb(async call => Buffer.from(call.args.at(-1) === 'ro.serialno' ? 'R58MIDENTITY\n' : call.args.at(-1) === 'ro.product.manufacturer' ? 'Samsung\n' : '0\n'));
+    const expected = createHash('sha256').update('android:samsung:R58MIDENTITY').digest('hex');
+    await expect(adb.identity('R58MIDENTITY', new AbortController().signal)).resolves.toBe(expected);
+    await expect(adb.identity('192.168.1.80:5555', new AbortController().signal)).resolves.toBe(expected);
+    await expect(adb.identity('emulator-5554', new AbortController().signal)).resolves.toBeNull();
+  });
   it('connects only the network endpoint the person registered', async () => {
     const calls: AdbCall[] = [];
     const adb = new PhoneAdb(async call => {

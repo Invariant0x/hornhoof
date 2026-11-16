@@ -21,7 +21,7 @@ export async function phoneCompany() {
       calls.push(m);
       if (m.type === 'phone.revoke' && holdRevoke) { revokes.push(m.requestId); return; }
       const answer: PhoneReply = { type: 'phone.reply', requestId: m.requestId, status: 'ok' };
-      if (m.type === 'phone.probe') answer.devices = [{ serial: '192.168.1.80:5555', status: 'device', model: 'Pixel_8' }];
+      if (m.type === 'phone.probe') answer.devices = [{ serial: m.endpoint ?? 'R58MIDENTITY', status: 'device', model: 'Pixel_8', hardwareKey: 'a'.repeat(64) }];
       node.send(answer);
     }
   });

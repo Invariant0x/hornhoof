@@ -14,7 +14,7 @@ const tree = (password = true, address = 'accounts.example/login') => `<hierarch
 function setup(options: { password?: boolean; address?: string } = {}) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
-  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: '33333333-3333-4333-8333-333333333333', serial: '192.168.1.80:5555', endpoint: '192.168.1.80:5555', transport: 'network' }, expiresAt: '2026-11-16T12:00:30Z' };
+  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: '33333333-3333-4333-8333-333333333333', serial: '192.168.1.80:5555', endpoint: '192.168.1.80:5555', transport: 'network', hardwareKey: 'a'.repeat(64) }, expiresAt: '2026-11-16T12:00:30Z' };
   const outputs: (PhoneFrame | PhoneReply)[] = [];
   const fillsOut: SecretFilled[] = [];
   const typed: string[] = [];
@@ -22,7 +22,7 @@ function setup(options: { password?: boolean; address?: string } = {}) {
   const png = new PNG({ width: 3, height: 3 });
   png.data.fill(255);
   const driver: PhoneDriver = {
-    connect: async () => 'connected', devices: async () => [{ serial: grant.binding.serial, status: 'device', model: 'Pixel_8' }],
+    connect: async () => 'connected', pair: async () => 'paired', identity: async () => 'a'.repeat(64), devices: async () => [{ serial: grant.binding.serial, status: 'device', model: 'Pixel_8' }],
     tree: async () => tree(options.password, options.address), screenshot: async () => PNG.sync.write(png),
     act: async () => {}, type: async (_serial, value) => { typed.push(value); },
   };
@@ -41,12 +41,12 @@ afterEach(() => { forgetExact(); vi.useRealTimers(); });
 describe('phone messages on the execution node', () => {
   it('probes the registered network phone without opening a session or exposing adb output', async () => {
     const outputs: (PhoneFrame | PhoneReply)[] = [];
-    const adb = new PhoneAdb(async call => Buffer.from(call.args[0] === 'connect' ? 'connected to 192.168.1.80:5555\n' : 'List of devices attached\n192.168.1.80:5555 device model:Pixel_8 transport_id:1\nOTHER device model:Other\n'));
+    const adb = new PhoneAdb(async call => Buffer.from(call.args[0] === 'connect' ? 'connected to 192.168.1.80:5555\n' : call.args[0] === 'devices' ? 'List of devices attached\n192.168.1.80:5555 device model:Pixel_8 transport_id:1\nOTHER device model:Other\n' : call.args.at(-1) === 'ro.serialno' ? 'R58MIDENTITY\n' : call.args.at(-1) === 'ro.product.manufacturer' ? 'Samsung\n' : '0\n'));
     const phones = new PhoneExecutor({ drivers: { network: adb, usb: null }, send: message => outputs.push(message), hide: value => value });
     await phones.handle({ type: 'phone.probe', requestId: '11111111-1111-4111-8111-111111111111', transport: 'network', endpoint: '192.168.1.80:5555' });
     expect(outputs).toEqual([{
       type: 'phone.reply', requestId: '11111111-1111-4111-8111-111111111111', status: 'ok',
-      devices: [{ serial: '192.168.1.80:5555', status: 'device', model: 'Pixel_8' }],
+      devices: [{ serial: '192.168.1.80:5555', status: 'device', model: 'Pixel_8', hardwareKey: '8d29ea04a9efd53e779b8f1e97c6f99ba0df485be36e7dddb6b5bebf90a5a5df' }],
     }]);
   });
 
