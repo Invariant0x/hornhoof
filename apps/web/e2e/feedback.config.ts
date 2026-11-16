@@ -11,7 +11,7 @@ const origin = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'feedback.spec.ts',
+  testMatch: 'feedback-*.spec.ts',
   outputDir: 'results/feedback',
   forbidOnly: Boolean(process.env.CI),
   retries: 0,

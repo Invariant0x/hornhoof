@@ -124,22 +124,47 @@ export function directImports(file, text) {
   });
 }
 
-/* The tests an author runs of what the import graph reaches: those that import a changed file themselves, are named after a
-   changed source, or changed. The rest is left to the full run, which runs again every file whose fingerprint changed. A test
-   a rule names is no test of the graph and always runs. A package none of whose tests reaches the change directly runs all
-   the graph reaches there. */
-function nearTests(packages, changes, reached, ports) {
-  const keyOf = unit => `${unit.suiteId}\0${unit.file}`, graph = new Set(reached.map(keyOf));
+const changePaths = change => (change.previousPath ? [change.path, change.previousPath] : [change.path]);
+
+function nearChecker(changes, ports) {
   const changed = new Set(changes.filter(change => change.kind !== 'deleted').map(change => change.path));
-  const sources = [...changed].filter(isSource);
+  const touched = new Set(changes.flatMap(changePaths));
+  const sources = [...touched].filter(isSource), cache = new Map();
   const imports = file => { const text = ports.read(file); return text === null ? [] : directImports(file, text); };
-  const near = unit => changed.has(unit.file) || sources.some(source => ports.namedAfter(unit.file, source)) || imports(unit.file).some(path => changed.has(path));
-  const left = new Set();
-  const kept = packages.map(item => {
-    const far = item.mode === 'related' ? item.units.filter(unit => graph.has(keyOf(unit)) && !near(unit)) : [];
-    if (!far.length || !item.units.some(unit => graph.has(keyOf(unit)) && near(unit))) return item;
-    for (const unit of far) left.add(unit.file);
-    return { ...item, units: item.units.filter(unit => !far.includes(unit)) };
+  return unit => {
+    if (!cache.has(unit.file)) {
+      cache.set(unit.file, changed.has(unit.file) || sources.some(source => ports.namedAfter(unit.file, source)) || imports(unit.file).some(path => touched.has(path)));
+    }
+    return cache.get(unit.file);
+  };
+}
+
+function relatedNear(item, inGraph, isNear, left) {
+  const far = item.units.filter(unit => inGraph(unit) && !isNear(unit));
+  if (!far.length || !item.units.some(unit => inGraph(unit) && isNear(unit))) return [item];
+  const farSet = new Set(far);
+  for (const unit of far) left.add(unit.file);
+  return [{ ...item, units: item.units.filter(unit => !farSet.has(unit)) }];
+}
+
+function wholeNear(item, isNear, left) {
+  const kept = item.units.filter(isNear), far = item.units.filter(unit => !isNear(unit));
+  for (const unit of far) left.add(unit.file);
+  if (!kept.length) return [];
+  return far.length ? [{ ...item, mode: 'related', units: kept }] : [item];
+}
+
+/* The tests an author runs of what the import graph or a package rule reaches: those that import a changed file themselves, are
+   named after a changed source, or changed. The rest is left to the full run, which runs again every file whose fingerprint
+   changed. A test a rule names is no test of the graph and always runs. A related package none of whose tests reaches the change
+   directly runs all the graph reaches there; a whole-package rule without --allow-whole keeps only near tests locally. */
+function nearTests(packages, changes, reached, { suites, allowWhole }, ports) {
+  const keyOf = unit => `${unit.suiteId}\0${unit.file}`, graph = new Set(reached.map(keyOf));
+  const adapted = new Set(suites.filter(suite => adapterOf(suite.run)).map(suite => suite.id));
+  const isNear = nearChecker(changes, ports), left = new Set();
+  const kept = packages.flatMap(item => {
+    if (item.mode === 'related') return relatedNear(item, unit => graph.has(keyOf(unit)), isNear, left);
+    return allowWhole || !adapted.has(item.packageId) ? [item] : wholeNear(item, isNear, left);
   });
   return { packages: kept, leftToFullRun: [...left].sort() };
 }
@@ -159,6 +184,10 @@ async function documentReaders(documents, environment, { manifest, tracked }, po
   return { packages, left, unread };
 }
 
+const isBlockedWhole = (reached, suites, { allowWhole, everyReached }) => (
+  everyReached && !allowWhole && isWholeSuite(reached, suites) && !reachesEveryone(reached)
+);
+
 /* everyReached keeps every test the import graph reaches, for a check no full run follows, such as GitHub's tests of a commit. */
 export async function selectTests({ changes, manifest, tracked, allowWhole, everyReached = false }, ports) {
   const suites = fastSuites(manifest);
@@ -176,8 +205,8 @@ export async function selectTests({ changes, manifest, tracked, allowWhole, ever
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
   if (problem) return { unavailable: problem.code, notes };
   const reached = mergePackages([...selection.packages, ...wholeOf(environment, suites, opaque)]);
-  if (isWholeSuite(reached, suites) && !allowWhole && !reachesEveryone(reached)) return { unavailable: 'selection_is_whole_suite', notes };
-  const near = everyReached ? { packages: reached, leftToFullRun: [] } : nearTests(reached, changes, selection.reached ?? [], ports);
+  if (isBlockedWhole(reached, suites, { allowWhole, everyReached })) return { unavailable: 'selection_is_whole_suite', notes };
+  const near = everyReached ? { packages: reached, leftToFullRun: [] } : nearTests(reached, changes, selection.reached ?? [], { suites, allowWhole }, ports);
   const packages = mergePackages([...near.packages, ...read.packages]);
   const selected = new Set(packages.flatMap(item => item.units.map(unit => unit.file)));
   const leftToFullRun = [...new Set([...near.leftToFullRun, ...read.left])].filter(file => !selected.has(file)).sort();

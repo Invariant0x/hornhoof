@@ -113,7 +113,8 @@ async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId' | 'depart
   return (await openTurnOf(db, run.companyId, run.departmentId))?.number ?? null;
 }
 /* What a release relies on was proved on its own line: the repository's main branch or the turn's. A job writes its own report, so
-   what another branch says holds for that branch's work and no further, and a turn's full run is of the turn's branch. */
+   what another branch says holds for that branch's work and no further, until the main branch holds its commit (ofMainLine), and a
+   turn's full run is of the turn's branch. */
 async function onMainLine(db: Db, branch: string | null, scope: RepositoryScope, turn: number | null): Promise<boolean> {
   if (turn !== null && branch === `turn-${turn}`) return true;
   const [owner] = await db.select({ branch: departments.repoBranch }).from(departments).where(eq(departments.id, scope.repositoryOwnerId));
@@ -130,12 +131,27 @@ export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEn
 
 const ofRepository = (table: typeof testFileResults | typeof testSuiteMemory, scope: RepositoryScope) => and(eq(table.companyId, scope.companyId), eq(table.repositoryOwnerId, scope.repositoryOwnerId), eq(table.repoUrlHash, scope.repoUrlHash));
 
+/* Which of these commits the main line holds now. A commit it cannot tell of is not there. */
+export type MainLineCommits = (commits: string[]) => Promise<ReadonlySet<string>>;
+/* Only the newest commits another branch proved results on are asked about: each question goes to the repository's host. */
+const ASKED_COMMITS = 8;
+
 /* What was green at these fingerprints in this one repository, with what each result came to. */
 type GreenSource = Pick<typeof testFileResults.$inferSelect, 'suiteId' | 'file' | 'fingerprint' | 'note' | 'runId' | 'commitSha'>;
-async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], onlyMainLine: boolean): Promise<Map<string, GreenSource>> {
+type GreenRow = GreenSource & Pick<typeof testFileResults.$inferSelect, 'mainLine' | 'createdAt'>;
+/* What another branch proved on a commit the main line holds now ran the line's own code, at a fingerprint that names the file and all
+   it reads: it holds for the line. */
+async function ofMainLine(rows: GreenRow[], inMainLine: MainLineCommits | undefined): Promise<GreenRow[]> {
+  const others = rows.filter(row => !row.mainLine).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const commits = [...new Set(others.map(row => row.commitSha))].slice(0, ASKED_COMMITS);
+  const held = inMainLine && commits.length ? await inMainLine(commits) : new Set<string>();
+  return rows.filter(row => row.mainLine || held.has(row.commitSha));
+}
+async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], onlyMainLine: boolean, inMainLine?: MainLineCommits): Promise<Map<string, GreenSource>> {
   if (!prints.length) return new Map();
-  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha }).from(testFileResults).where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), onlyMainLine ? eq(testFileResults.mainLine, true) : undefined));
-  return new Map(rows.map(row => [printKey(row, row.fingerprint), row]));
+  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha, mainLine: testFileResults.mainLine, createdAt: testFileResults.createdAt }).from(testFileResults).where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))])));
+  const kept = onlyMainLine ? await ofMainLine(rows, inMainLine) : rows;
+  return new Map(kept.map(row => [printKey(row, row.fingerprint), row]));
 }
 /* The profiles of a release, which take a result only from its own line. */
 function ofRelease(manifest: TestEnvironmentV1, profile: string): boolean {
@@ -166,11 +182,11 @@ function reuseCache(mode: NonNullable<RunMode>, snapshot: EnvironmentSnapshot, u
 }
 
 /* A full run decides as well, reuses nothing and remembers what it would have reused. */
-export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[]): Promise<RunReuse> {
+export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[], inMainLine?: MainLineCommits): Promise<RunReuse> {
   if (!mode) return { decision: NO_REUSE, fileCache: null };
   const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
   const once = !snapshot.candidate && policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
-  const known = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile));
+  const known = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile), inMainLine);
   const green = await candidateGreen(ctx, snapshot, known);
   const decision = decideReuse({ units, prints, green, once });
   return reuseCache(mode, snapshot, units, prints, green, decision);
