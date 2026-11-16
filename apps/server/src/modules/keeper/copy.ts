@@ -282,6 +282,14 @@ export class CopyMaker {
     return { moved: this.kept.moved?.leader === order.leader && this.kept.moved.views >= MOVED_VIEWS };
   }
 
+  /* The same, and once that leader has said often enough that it holds no place for this copy, the copy is of that
+     leader from now on. */
+  private moving(order: CopyOrder | null): { moved: boolean } | null {
+    const elsewhere = this.elsewhere(order);
+    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    return elsewhere;
+  }
+
   /* One connection to a database of the copy, opened anew after it was closed. */
   private on(database: string): Closable {
     if (this.open?.database === database) return this.open.sql;
@@ -493,8 +501,7 @@ export class CopyMaker {
     if (!sub) return this.keep({ phase: 'subscribe' });
     /* While the server moved and the new leader has not said its word yet, nothing is given up; once it has, the first
        copy this machine was still making is begun anew, from that leader. */
-    const elsewhere = this.elsewhere(order);
-    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    const elsewhere = this.moving(order);
     /* The leader's schema changed while its rows were copied, as with an update that added a column: a subscription
        enabled again would stop on the first row of that table, so it is not, and the next attempt loads the schema the
        leader has now. */
@@ -577,8 +584,7 @@ export class CopyMaker {
     await this.ownMigrations(sql);
     /* A view of another leader than the one this copy follows counts toward none of the reasons to make it again,
        until that leader named no slot for it twice in a row: then it did not hold everything, and is made again. */
-    const elsewhere = this.elsewhere(order);
-    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    const elsewhere = this.moving(order);
     /* A copy that is to be made again whatever its subscription does is not started first: one that stood still for
        the leader's update takes nothing from a database of another version. */
     const known = elsewhere ? null : this.broken(order, 0);
