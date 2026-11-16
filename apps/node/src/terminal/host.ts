@@ -1554,8 +1554,9 @@ export class TerminalHost {
   }
 
   private async look(a: Agent): Promise<void> {
-    /* A program that sleeps did not end: nothing of it is left to tell. */
-    if (a.restarting || a.asleep) return;
+    /* A program that sleeps did not end: nothing of it is left to tell, unless a turn opened as it slept, as one its hook
+       told of late does. That turn has no program, and ends as one whose program is gone. */
+    if (a.restarting || (a.asleep && !a.turn)) return;
     this.drain(a);
     const turn = a.turn;
     if (managedTurn(turn)) return;

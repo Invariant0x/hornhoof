@@ -150,6 +150,19 @@ describe('a turn a program begins as it is about to sleep', () => {
 
   type AtWork = Awaited<ReturnType<typeof atWorkThatSleeps>>;
 
+  /* The turn the program began stands with no program: its node tells Hornhoof so and ends it, and the next turn starts the
+     program again in its session. */
+  async function endsGoneAndStartsAgain(c: AtWork): Promise<void> {
+    expect(programOf(c, 'typed').at(-1)).toMatchObject({ state: 'gone' });
+    expect(doneOf(c, 'typed')).toMatchObject({ ok: false, error: 'agent_failed' });
+    const before = c.launch.mock.calls.length;
+    const next = c.run();
+    await c.until(() => c.launch.mock.calls.length > before);
+    await c.until(() => c.host['agents'].get('receipt')!.busy);
+    c.finish();
+    expect(await c.on(next)).toMatchObject({ ok: true, sessionId: SESSION });
+  }
+
   /* Codex logs a new turn of words it held once its turn is over, right after the node read its log for the last time
      before it lets the program go: as the node reads the program's input, or looks whether it still runs. */
   function heldWordsAtLastLook(c: AtWork, at: 'screen' | 'alive'): void {
@@ -217,13 +230,20 @@ describe('a turn a program begins as it is about to sleep', () => {
     await c.until(() => c.sent.some(m => m.type === 'turn.open'));
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token' });
     await c.pass(2000);
-    expect(programOf(c, 'typed').at(-1)).toMatchObject({ state: 'gone' });
-    expect(doneOf(c, 'typed')).toMatchObject({ ok: false, error: 'agent_failed' });
-    const before = c.launch.mock.calls.length;
-    const next = c.run();
-    await c.until(() => c.launch.mock.calls.length > before);
-    await c.until(() => c.host['agents'].get('receipt')!.busy);
+    await endsGoneAndStartsAgain(c);
+  });
+
+  /* Seen on the same Mac: a turn of Kimi opened 16 s after its program went to sleep, and stood with no program as well. */
+  it('ends the turn kimi begins once it sleeps, so the next turn starts it again', async () => {
+    const c = await atWorkThatSleeps('kimi');
     c.finish();
-    expect(await c.on(next)).toMatchObject({ ok: true, sessionId: SESSION });
+    await c.on(c.running);
+    await c.until(() => c.stop.mock.calls.length > 0);
+    const late = c.host['hook']('receipt', 'prompt', { prompt: 'Words it queued.' });
+    await c.until(() => c.sent.some(m => m.type === 'turn.open'));
+    c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token' });
+    await c.on(late);
+    await c.pass(2000);
+    await endsGoneAndStartsAgain(c);
   });
 });
