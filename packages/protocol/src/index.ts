@@ -17,7 +17,9 @@ import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
 import { FileOutcome, KeptFiles, RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
 import { HarnessSynced } from './harness.js';
+import { FillKind, SecretFill, SecretFilled } from './secret-fill.js';
 export { HarnessClaim, HarnessDone, HarnessFailed, HarnessSynced, HarnessUnit } from './harness.js';
+export * from './secret-fill.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
@@ -482,7 +484,7 @@ export const HELLO_IDS_MAX = 20_000;
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced,
+  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, SecretFilled,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -512,6 +514,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     skillFiles: z.boolean().optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
     publicKey: AgeRecipient.optional(),
+    /* The targets it fills a vault sign-in into, with secret.fill; none fills nothing. */
+    fills: z.array(FillKind).max(2).optional(),
     account: Account.nullable().optional(),
     boot: Boot.optional(),
     programs: Programs.optional(),
@@ -702,7 +706,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
-  CheckQueueReply,
+  CheckQueueReply, SecretFill,
   z.object({
     type: z.literal('job.run'),
     jobId: Id,

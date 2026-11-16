@@ -1,14 +1,17 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { assistantOfAgent, requireAssistant } from '../../auth/assistant.js';
 import type { Person } from '../../auth/session.js';
+import { agents } from '../../db/schema.js';
 import { ApiError, refusal } from '../../errors.js';
 import { lastSeqOf } from './events.js';
 import { tellOwner } from './replies.js';
 import { callSkill, hasSkills } from './skills.js';
+import { registerVaultTools } from '../vault/tools.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, writeFor } from './routes.js';
 
 /* What the program's model reads first: what Hornhoof is to it, and how the tools go together. */
@@ -110,6 +113,12 @@ export async function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: 
   const owner = () => (actor ??= assistantOfAgent(ctx.db, job.agentId));
   const server = new McpServer({ name: 'hornhoof', version: ctx.config.version });
   registerTools(server, ctx, owner, new AbortController().signal, job.agentId);
+  /* The company's vault, as for every agent of the company: the assistant's own agent, in this turn. */
+  registerVaultTools(server, ctx, async () => {
+    const [me] = await ctx.db.select({ companyId: agents.companyId, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, job.agentId));
+    if (!me) throw new ApiError(401, 'unauthorized', 'This tool token is not valid.', 'tool_token_invalid');
+    return { id: job.agentId, companyId: me.companyId, departmentId: me.departmentId, jobId: job.id };
+  });
   server.registerTool(
     'tell_owner',
     {
