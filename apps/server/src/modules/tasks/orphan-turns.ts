@@ -99,6 +99,10 @@ function continuousView(old: IdleView | undefined, current: IdleView): boolean {
   return old !== undefined && old.instance === current.instance && old.proof === current.proof && old.signAt === current.signAt && current.at >= old.at && current.at - old.at <= PULSE_MS;
 }
 
+function completionProof(view: ProgramView): string {
+  return view.completion ? `completion:${view.completion}` : `screen:${view.cells}`;
+}
+
 /* Query the running job's exact node, not the newest queued job's placement. A failed look, a new instance, work or a draft
    breaks the observation. Fresh looks are required throughout: a disconnected node cannot accrue idle time. */
 async function idleOnScreen(ctx: Ctx, job: Job, node: NodeIdentity, now: number): Promise<boolean> {
@@ -111,7 +115,7 @@ async function idleOnScreen(ctx: Ctx, job: Job, node: NodeIdentity, now: number)
   }
   const old = known.get(job.id);
   const signAt = agentProgramState(ctx, job).program?.signAt ?? 0;
-  const proof = view.completion ? `completion:${view.completion}` : `screen:${view.cells}`;
+  const proof = completionProof(view);
   const current = { instance: view.instance, proof, signAt, since: now, at: now };
   if (continuousView(old, current)) current.since = old!.since;
   known.set(job.id, current);

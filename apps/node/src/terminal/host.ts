@@ -493,18 +493,28 @@ export class TerminalHost {
     const input = inputOf(a.program.kind, screen);
     const completion = await this.screenCompleted(a, screen);
     if (a.turn !== turn || a.instance !== instance) return null;
+    return this.observedFacts(key, a, input, completion);
+  }
+
+  private observedFacts(key: string, a: Agent, input: string | null, completion: string | null): ProgramFacts {
     return { ...this.programIdentity(key, a), working: a.busy && !completion, ...(completion ? { completion } : {}), ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
   }
 
   private async screenCompleted(a: Agent, screen: string): Promise<string | null> {
-    const program = a.program, start = a.completionStart;
+    const program = a.program;
     if (!program || this.completionBlocked(a)) return null;
-    const cursor = program.kind === 'kimi' ? await start : null;
-    if (a.program !== program || a.completionStart !== start || this.completionBlocked(a)) return null;
-    if (program.kind === 'kimi' && !cursor) return null;
-    const output = cursor ? this.opts.tmux.programOutput(a.name, cursor) ?? '' : '';
+    const output = await this.completionOutput(a, program.kind);
+    if (a.program !== program || this.completionBlocked(a)) return null;
+    if (output === null) return null;
     const text = completionText(program.kind, screen, output);
     return text ? createHash('sha256').update(text).digest('hex') : null;
+  }
+
+  private async completionOutput(a: Agent, kind: TermProgram['kind']): Promise<string | null> {
+    if (kind !== 'kimi') return '';
+    const start = a.completionStart, cursor = await start;
+    if (!cursor || a.completionStart !== start) return null;
+    return this.opts.tmux.programOutput(a.name, cursor);
   }
 
   private completionBlocked(a: Agent): boolean {

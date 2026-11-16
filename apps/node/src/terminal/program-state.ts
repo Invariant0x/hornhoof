@@ -54,21 +54,29 @@ function kimiDone(output: string): boolean {
   for (const frame of unwrapped.split('\x1b]7501;').slice(1)) {
     const end = frame.search(/\x07|\x1b\\/);
     if (end < 0) return false;
-    const fields = new Map<string, string>();
-    let valid = true;
-    for (const pair of frame.slice(0, end).split(':')) {
-      const equal = pair.indexOf('=');
-      const key = pair.slice(0, equal);
-      if (equal < 1 || fields.has(key) || !['state', 'app', 'kind', 'id', 'title', 'msg'].includes(key)) valid = false;
-      fields.set(key, pair.slice(equal + 1));
-    }
-    if (fields.has('id')) {
-      if (!valid || !/^[A-Za-z0-9_.+-]{1,32}(?:\/[A-Za-z0-9_.+-]{1,32}){0,7}$/.test(fields.get('id')!)) done = false;
-      continue;
-    }
-    done = valid && !fields.has('kind') && fields.get('state') === 'done' && fields.get('app') === 'kimi-code';
+    const fields = statusFields(frame.slice(0, end));
+    if (fields?.has('id')) continue;
+    done = rootDone(fields);
   }
   return done;
+}
+
+function statusFields(body: string): Map<string, string> | null {
+  const fields = new Map<string, string>();
+  for (const pair of body.split(':')) {
+    const equal = pair.indexOf('=');
+    if (equal < 1) return null;
+    const key = pair.slice(0, equal);
+    if (fields.has(key) || !['state', 'app', 'kind', 'id', 'title', 'msg'].includes(key)) return null;
+    fields.set(key, pair.slice(equal + 1));
+  }
+  const id = fields.get('id');
+  if (id !== undefined && (id.length > 128 || !/^[A-Za-z0-9_.+-]{1,32}(?:\/[A-Za-z0-9_.+-]{1,32}){0,7}$/.test(id))) return null;
+  return fields;
+}
+
+function rootDone(fields: Map<string, string> | null): boolean {
+  return fields !== null && !fields.has('kind') && fields.get('state') === 'done' && fields.get('app') === 'kimi-code';
 }
 
 /* Keep the completed response in the continuity proof, excluding Kimi's rotating toolbar below its current input. */

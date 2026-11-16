@@ -113,5 +113,25 @@
     "name": "unterminated root before another control",
     "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=working\u001b[31m",
     "done": false
+  },
+  {
+    "name": "BEL terminated root",
+    "output": "\u001b]7501;state=done:app=kimi-code\u0007",
+    "done": true
+  },
+  {
+    "name": "empty child id after done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=done:id=\u001b\\",
+    "done": false
+  },
+  {
+    "name": "oversized child id after done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=done:id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u001b\\",
+    "done": false
+  },
+  {
+    "name": "malformed pair after done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=done:app=kimi-code:\u001b\\",
+    "done": false
   }
 ]
