@@ -2,6 +2,7 @@ import type { WaitOwnerBinding, WaitSourceKind } from '@hornhoof/protocol/waits'
 import { and, asc, eq, isNull, like, lte, not, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { notificationMessage } from '../events/notifications.js';
 import { ownNote, type Task, type Tx } from './engine.js';
@@ -29,7 +30,7 @@ type Found = { task: Task; wait: TaskWait };
 
 /* The task first and then its wait, in the order everything else takes them, and as they are now. */
 async function lockedWait(tx: Tx, id: string): Promise<Found | null> {
-  const [seen] = await tx.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, id));
+  const [seen] = await tx.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, id));
   if (!seen) return null;
   const [task] = await tx.select().from(tasks).where(eq(tasks.id, seen.taskId)).for('update');
   const [wait] = await tx.select().from(taskWaits).where(eq(taskWaits.id, id)).for('update');
@@ -40,13 +41,13 @@ async function lockedWait(tx: Tx, id: string): Promise<Found | null> {
 async function ownerToTell(tx: Tx, wait: TaskWait): Promise<WaitOwnerBinding | null> {
   const owner = waitOwner(wait);
   if (!owner || 'agentId' in owner) return owner;
-  const [person] = await tx.select({ isOwner: people.isOwner }).from(people).where(eq(people.id, owner.personId));
+  const [person] = await tx.select(only(people, 'isOwner')).from(people).where(eq(people.id, owner.personId));
   return person?.isOwner ? null : owner;
 }
 
 async function liveAgent(tx: Tx, id: string | undefined): Promise<string | null> {
   if (!id) return null;
-  const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, id), isNull(agents.removedAt)));
+  const [agent] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, id), isNull(agents.removedAt)));
   return agent?.id ?? null;
 }
 
@@ -149,8 +150,8 @@ async function eachDue(ctx: Ctx, ids: { id: string }[], step: (id: string) => Pr
 
 /* Called with the rest of the wait checks, once a minute. A wait that fails is taken again in the next round, whole. */
 export async function sweepWaits(ctx: Ctx, now = new Date()): Promise<void> {
-  const late = await ctx.db.select({ id: taskWaits.id }).from(taskWaits).where(dueBy(taskWaits.nextActionAt, now, sql`${taskWaits.level} < ${LEVELS.department}`)).orderBy(asc(taskWaits.nextActionAt)).limit(SWEEP_SIZE);
+  const late = await ctx.db.select(idOnly(taskWaits)).from(taskWaits).where(dueBy(taskWaits.nextActionAt, now, sql`${taskWaits.level} < ${LEVELS.department}`)).orderBy(asc(taskWaits.nextActionAt)).limit(SWEEP_SIZE);
   await eachDue(ctx, late, id => stepWait(ctx, id, now));
-  const reviews = await ctx.db.select({ id: taskWaits.id }).from(taskWaits).where(dueBy(taskWaits.nextReviewAt, now)).orderBy(asc(taskWaits.nextReviewAt)).limit(SWEEP_SIZE);
+  const reviews = await ctx.db.select(idOnly(taskWaits)).from(taskWaits).where(dueBy(taskWaits.nextReviewAt, now)).orderBy(asc(taskWaits.nextReviewAt)).limit(SWEEP_SIZE);
   await eachDue(ctx, reviews, id => reviewWait(ctx, id, now));
 }

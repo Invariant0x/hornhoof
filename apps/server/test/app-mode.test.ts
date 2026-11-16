@@ -8,6 +8,7 @@ import WebSocket from 'ws';
 import { agents, nodes, sessions, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import type { AgentSql } from '../src/db/agent-sql.js';
+import { idOnly } from '../src/db/selections.js';
 import { agentSqlFollowsMode, AppMode, modeGate, refusalOf, whileLeading } from '../src/modules/keeper/app-mode.js';
 import { NODE_STALE_MS } from '../src/modules/nodes/nodes.js';
 import { freshState, KEEPER_FILE, readKeeperState, writeKeeperState, type KeeperState, type Mode } from '../src/modules/keeper/state.js';
@@ -536,7 +537,7 @@ describe('the app behind a keeper', () => {
     const { ceo, nodeId, subId } = await companyWithNode(app);
     await db.update(nodes).set({ status: 'ready', lastSeenAt: new Date(Date.now() - NODE_STALE_MS - 60_000) }).where(eq(nodes.id, nodeId));
     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
-    const [orchestrator] = await db.select({ id: agents.id }).from(agents);
+    const [orchestrator] = await db.select(idOnly(agents)).from(agents);
     say('read');
     await reaches('read');
     for (const url of ['/api/org', '/api/subscriptions', `/api/agents/${orchestrator!.id}`, '/api/machines', '/api/pool']) {

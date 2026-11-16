@@ -1,6 +1,7 @@
 import { and, eq, gte, inArray, lte, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, taskEvents } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { conversationOf, GONE_ALONG, onAgent } from '../conversation/queue.js';
 import { waitedForReturn } from '../nodes/connections.js';
 import { turnAgain } from './again.js';
@@ -19,7 +20,7 @@ type Ended = Pick<typeof jobs.$inferSelect, 'agentId' | 'status' | 'error' | 'ta
 export async function carriedTasks(ctx: Ctx, job: { agentId: string; taskId: string; startedAt: Date | null; finishedAt: Date | null }): Promise<string[]> {
   if (!job.startedAt) return [];
   const rows = await ctx.db
-    .selectDistinct({ taskId: jobs.taskId })
+    .selectDistinct(only(jobs, 'taskId'))
     .from(jobs)
     .where(and(conversationOf(job.agentId), eq(jobs.status, 'done'), eq(jobs.result, GONE_ALONG), ne(jobs.taskId, job.taskId), gte(jobs.startedAt, job.startedAt), lte(jobs.startedAt, job.finishedAt ?? new Date())));
   return rows.flatMap(r => (r.taskId ? [r.taskId] : []));
@@ -32,7 +33,7 @@ export async function doneIfRecorded(ctx: Ctx, jobId: string, job: Ended): Promi
   if (job.status !== 'failed' || !job.agentId || !job.taskId || !job.startedAt || !UNFINISHED.includes(job.error ?? '')) return false;
   const taskIds = [job.taskId, ...(await carriedTasks(ctx, { agentId: job.agentId, taskId: job.taskId, startedAt: job.startedAt, finishedAt: job.finishedAt }))];
   const [recorded] = await ctx.db
-    .select({ id: taskEvents.id })
+    .select(idOnly(taskEvents))
     .from(taskEvents)
     .where(and(eq(taskEvents.agentId, job.agentId), inArray(taskEvents.taskId, taskIds), inArray(taskEvents.kind, [...RECORDED]), gte(taskEvents.createdAt, job.startedAt), lte(taskEvents.createdAt, job.finishedAt ?? new Date())))
     .limit(1);

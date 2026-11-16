@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { agentEvents, agents, companies, departments, jobs, nodes, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { BUILTIN } from './builtin.js';
 import { restartCause } from '../src/modules/nodes/restarts.js';
@@ -273,7 +274,7 @@ describe('a turn cut off by a node restart', () => {
     expect(turns.map(j => j.continueOf)).toEqual([null, first.jobId]);
     expect(turns[0]!.interruption).toBeNull();
     expect(await c.notes()).toEqual([]);
-    expect((await c.db.select({ kind: taskEvents.kind }).from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).map(e => e.kind)).toContain('continued');
+    expect((await c.db.select(only(taskEvents, 'kind')).from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).map(e => e.kind)).toContain('continued');
   });
 
   it("shows the turns a node restart cut off on the employee's card, the latest first", async () => {

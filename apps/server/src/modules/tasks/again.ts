@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, type agents, type tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { insertTurn, NoSubscription } from '../conversation/queue.js';
 import { requestedPromptOf } from '../conversation/requested-prompt.js';
 import { waitingTaskTurn, type TaskWake } from './wake-state.js';
@@ -18,7 +19,7 @@ type Link = { retryOf: string } | { continueOf: string };
 export async function turnAgain(ctx: Ctx, { job, task, agent, taskWake }: Ended, note: string, link: Link, prompt = `${note}\n\n${requestedPromptOf(job)}`, notBefore: Date | null = null, repeated?: RepeatedTurn): Promise<string | null> {
   const waiting = await waitingTaskTurn(ctx.db, agent.id, task.id);
   if (waiting) {
-    const [kept] = await ctx.db.select({ prompt: jobs.prompt }).from(jobs).where(eq(jobs.id, waiting.id));
+    const [kept] = await ctx.db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.id, waiting.id));
     await ctx.db.update(jobs).set({ ...link, notBefore, prompt: `${note}\n\n${kept!.prompt}` }).where(eq(jobs.id, waiting.id));
     return waiting.id;
   }
