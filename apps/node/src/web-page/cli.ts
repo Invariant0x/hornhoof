@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { browseAsAgent, type AgentBrowseDeps } from './agent.js';
 import { browse, realClock, type BrowseDeps, type BrowseRequest, type Launcher } from './browse.js';
 import { systemFolders, systemProcesses } from './processes.js';
 import { exitCode, formatResult, type BrowseResult } from './read.js';
@@ -24,7 +25,8 @@ const range = (limit: Limit) => `${LIMITS[limit].min} to ${LIMITS[limit].max}, $
 export const USAGE = `Usage: hh-browse [options] URL
 
 Opens one public http or https address in a real browser on this machine, waits until the page has loaded and drawn what
-its scripts build, and prints its visible text and its links. It signs in nowhere and gets past no robot check.
+its scripts build, and prints its visible text and its links. It types no password and gets past no robot check. In a
+Hornhoof turn, a sign-in a person saved for you opens the pages of its site, read in your machine's own browser.
 
 Options:
   --screenshot FILE.png  also save a picture of the page; show it to a person with hh-attach FILE, or put it on a task
@@ -114,7 +116,7 @@ export function parseArgs(argv: string[]): Parsed {
 type Io = { out(text: string): void; err(text: string): void };
 type Run = (request: BrowseRequest) => Promise<BrowseResult>;
 
-export async function main(argv: string[], io: Io, run: Run = request => browse(request, systemDeps())): Promise<number> {
+export async function main(argv: string[], io: Io, run: Run = request => browseAsAgent(request, agentDeps())): Promise<number> {
   const parsed = parseArgs(argv);
   if (parsed.kind === 'help') {
     io.out(USAGE);
@@ -159,10 +161,15 @@ export function systemDeps(): BrowseDeps {
   };
 }
 
+/* In a turn, Hornhoof is asked first for a sign-in saved for the agent; the page is read here when there is none. */
+export function agentDeps(env: NodeJS.ProcessEnv = process.env): AgentBrowseDeps {
+  return { url: env.HH_ATTACH_URL, pass: env.HH_ATTACH_PASS, fetch: (url, init) => fetch(url, init), local: request => browse(request, systemDeps()), writeFile: (path, bytes) => writeFileSync(path, bytes) };
+}
+
 /* The command itself: a stop of the terminal or the agent's program ends the call, with its browser, before it exits. */
 export async function run(argv: string[]): Promise<void> {
   const stop = new AbortController();
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, () => stop.abort());
-  const code = await main(argv, { out: text => process.stdout.write(text), err: text => process.stderr.write(text) }, request => browse({ ...request, signal: stop.signal }, systemDeps()));
+  const code = await main(argv, { out: text => process.stdout.write(text), err: text => process.stderr.write(text) }, request => browseAsAgent({ ...request, signal: stop.signal }, agentDeps()));
   process.exit(code);
 }

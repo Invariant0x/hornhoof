@@ -1,7 +1,7 @@
 import type { PageLink, PageSample } from './collect.js';
 
 /* What a page read in the browser comes to. A sign-in or a robot check is no failure of the call: the page was reached, and
-   what stands in the way is for a person, as hh-browse signs in nowhere and gets past no check. */
+   what stands in the way is for a person, as hh-browse types no password and gets past no check. */
 
 export type PageStatus = 'ok' | 'login_required' | 'robot_check' | 'http_error' | 'refused' | 'failed';
 export type Answer = { status: number; headers: Record<string, string> } | null;
@@ -97,7 +97,7 @@ export function judgePage({ requested, finalUrl, answer, sample }: { requested: 
 }
 
 const NEXT: Partial<Record<PageStatus, string>> = {
-  login_required: 'Never try to get past it, and ask nobody for a way in. Note this address and what it asks for in your report for a person, and go on with the other addresses.',
+  login_required: 'Never try to get past it. Tell a person that you need to be signed in to this site: they sign you in from your card in Hornhoof, with Sign in as employee, and then you open the page again. Go on with the other addresses meanwhile.',
   robot_check: 'Never try to get past it, and ask nobody for a way in. Note this address and what it asks for in your report for a person, and go on with the other addresses.',
   refused: 'This address stays refused: go on with the other addresses.',
   failed: 'Try the address once more if the reason allows it; otherwise note it for a person and go on with the other addresses.',

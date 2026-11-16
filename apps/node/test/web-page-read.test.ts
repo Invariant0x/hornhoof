@@ -92,7 +92,7 @@ describe('what hh-browse makes of a page', () => {
     expect(printed).toMatch(/Screenshot: \/work\/catalogue\.png[^\n]*hh-attach/);
     const login = formatResult({ ...result, status: 'login_required', reason: 'The page asks to sign in.', screenshot: null });
     expect(login).toMatch(/^Status: login_required\n/);
-    expect(login).toMatch(/note this address[^\n]*for a person[^\n]*go on with the other addresses/i);
+    expect(login).toMatch(/Next: [^\n]*tell a person that you need to be signed in to this site[^\n]*Sign in as employee[^\n]*go on with the other addresses/i);
     expect(login).toMatch(/never try to get past/i);
     const cut = formatResult({ ...result, text: 'a'.repeat(10), textLength: 50 });
     expect(cut).toMatch(/first 10 of 50 characters/);
