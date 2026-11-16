@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { userMessage } from './fakes/word-receipts.mjs';
 import { atWork, cleanups, SESSION } from './terminal-host-receipts-helpers.js';
 
 /* An agent's program sleeps once its turn is over and nothing waits for it: the program ends, and its pane stays with what
@@ -128,5 +129,101 @@ describe('a program that sleeps between turns', () => {
     await c.until(() => c.host['agents'].get('receipt')!.busy);
     c.finish();
     await c.on(next);
+  });
+});
+
+/* A program can begin a turn of its own just as the node is about to let it sleep: Codex takes the words it held once its
+   turn is over and logs them as a new turn, Kimi Code takes the words it queued and says so through its hook. Seen on a
+   Mac on 15.11: the program slept all the same, its node no longer watched it, and the turn it began stood running with
+   no word of its program for an hour, the agent's next messages waiting behind it, until a person stopped it. */
+describe('a turn a program begins as it is about to sleep', () => {
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0)) await cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const programOf = (c: { sent: { type: string }[] }, jobId: string) =>
+    c.sent.filter((m): m is { type: 'job.program'; jobId: string; state: string } => m.type === 'job.program' && (m as { jobId?: string }).jobId === jobId);
+  const doneOf = (c: { sent: { type: string }[] }, jobId: string) =>
+    c.sent.find((m): m is { type: 'job.done'; jobId: string; ok: boolean } => m.type === 'job.done' && (m as { jobId?: string }).jobId === jobId);
+
+  type AtWork = Awaited<ReturnType<typeof atWorkThatSleeps>>;
+
+  /* Codex logs a new turn of words it held once its turn is over, right after the node read its log for the last time
+     before it lets the program go: as the node reads the program's input, or looks whether it still runs. */
+  function heldWordsAtLastLook(c: AtWork, at: 'screen' | 'alive'): void {
+    const look = vi.mocked(c.tmux[at]) as unknown as { getMockImplementation(): (...args: unknown[]) => Promise<unknown>; mockImplementation(f: (...args: unknown[]) => Promise<unknown>): void };
+    const shows = look.getMockImplementation();
+    let held = true;
+    look.mockImplementation(async (...args) => {
+      if (held && !c.host['agents'].get('receipt')!.turn) {
+        held = false;
+        c.record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'typed' } });
+        c.record(userMessage('Words it held.', 'typed'));
+      }
+      return shows(...args);
+    });
+  }
+
+  /* The turn Codex began opens, and its program stays while the turn runs: its node tells what the program does, and the
+     turn ends with its answer. gone: how often the node ended the program so far. */
+  async function typedTurnGoesOn(c: AtWork, gone: () => number): Promise<void> {
+    await c.pass(1000);
+    expect(c.sent.filter(m => m.type === 'turn.open')).toHaveLength(1);
+    c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token' });
+    await c.pass(2000);
+    expect(gone()).toBe(0);
+    expect(programOf(c, 'typed').at(-1)).toMatchObject({ state: 'thinking' });
+    c.record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'typed', last_agent_message: 'Typed answer.' } });
+    c.drain();
+    await c.pass(500);
+    expect(doneOf(c, 'typed')).toMatchObject({ ok: true, result: 'Typed answer.' });
+  }
+
+  it('keeps codex up for the turn it logged from words it held while the node looked whether it may sleep', async () => {
+    const c = await atWorkThatSleeps('codex');
+    heldWordsAtLastLook(c, 'screen');
+    c.finish();
+    await c.on(c.running);
+    await typedTurnGoesOn(c, () => c.stop.mock.calls.length);
+    /* Once that turn is over, nothing waits for the program: it sleeps. */
+    await c.until(() => c.stop.mock.calls.length > 0);
+  });
+
+  it('keeps codex up for the turn it logged from words it held while the node looked whether it may close it for a plan it left', async () => {
+    const c = await atWorkThatSleeps('codex');
+    const has = vi.spyOn(c.tmux, 'has').mockResolvedValue(true);
+    c.kill.mockImplementation(async () => { c.alive.mockResolvedValue(false); has.mockResolvedValue(false); });
+    heldWordsAtLastLook(c, 'alive');
+    void c.host.release('receipt', 'job-receipt');
+    c.finish();
+    await c.on(c.running);
+    await typedTurnGoesOn(c, () => c.kill.mock.calls.length);
+    /* Once that turn is over, the program of the plan the agent left goes. */
+    await c.until(() => c.kill.mock.calls.length > 0);
+    expect(c.stop).not.toHaveBeenCalled();
+  });
+
+  it('ends the turn kimi began from queued words while it went to sleep, so the next turn starts it again', async () => {
+    const c = await atWorkThatSleeps('kimi');
+    /* Kimi takes the words it queued as tmux ends it. */
+    c.stop.mockImplementation(async () => {
+      await c.host['hook']('receipt', 'prompt', { prompt: 'Words it queued.' });
+      c.alive.mockResolvedValue(false);
+    });
+    c.finish();
+    await c.on(c.running);
+    await c.until(() => c.sent.some(m => m.type === 'turn.open'));
+    c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token' });
+    await c.pass(2000);
+    expect(programOf(c, 'typed').at(-1)).toMatchObject({ state: 'gone' });
+    expect(doneOf(c, 'typed')).toMatchObject({ ok: false, error: 'agent_failed' });
+    const before = c.launch.mock.calls.length;
+    const next = c.run();
+    await c.until(() => c.launch.mock.calls.length > before);
+    await c.until(() => c.host['agents'].get('receipt')!.busy);
+    c.finish();
+    expect(await c.on(next)).toMatchObject({ ok: true, sessionId: SESSION });
   });
 });
