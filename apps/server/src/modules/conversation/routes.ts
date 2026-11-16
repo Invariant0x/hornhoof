@@ -37,11 +37,13 @@ export type TelegramOrigin = { bot: string; chat: number; update: number };
 export type AssistantOrigin = { message: string; own?: boolean; fresh?: string };
 
 /* The words of the person's assistant, which the agent takes as the person's own and answers in its window for the
-   assistant to read. The assistant's own agent takes them as they are: its rules say what they carry. */
-function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> }, text: string, origin: AssistantOrigin, standing: Standing) {
+   assistant to read. The assistant's own agent takes them as they are: its rules say what they carry. Files come with
+   both, with the commands that open them. */
+function byAssistant(me: Person & { assistant: NonNullable<Person['assistant']> }, text: string, pictures: MessagePicture[], origin: AssistantOrigin, standing: Standing) {
   const assistant = { id: me.assistant.id, name: me.assistant.name, message: origin.message };
-  const prompt = origin.own ? text : `${turnPrompt(me, text)}\n\n${answerForAssistant(me, me.assistant, standing)}`;
-  return { actor: { personId: me.id }, turn: { prompt, createdBy: me.id, ...(origin.own && origin.fresh ? { fresh: origin.fresh } : {}), message: { personId: me.id, text, channel: 'assistant' as const, assistant } } };
+  const prompt = origin.own ? withPictures(text, pictures) : `${turnPrompt(me, withPictures(text, pictures))}\n\n${answerForAssistant(me, me.assistant, standing)}`;
+  const fresh = origin.own && origin.fresh ? { fresh: withPictures(origin.fresh, pictures) } : {};
+  return { actor: { personId: me.id }, turn: { prompt, createdBy: me.id, ...fresh, message: { personId: me.id, text, channel: 'assistant' as const, assistant, ...(pictures.length ? { pictures } : {}) } } };
 }
 
 /* from: the machine of the company the person sits at as they write in the window; none through Telegram or an assistant. */
@@ -52,7 +54,7 @@ function writtenBy(me: Person, text: string, pictures: MessagePicture[], { teleg
     actor: { agentId: me.via },
     turn: { prompt: `${turnPrompt({ name: 'Orchestrator', title: '' }, text)}\n\n${answerBy({ id: me.via, name: 'Orchestrator' })}`, createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
   };
-  if (me.assistant && assistant && standing) return byAssistant({ ...me, assistant: me.assistant }, text, assistant, standing);
+  if (me.assistant && assistant && standing) return byAssistant({ ...me, assistant: me.assistant }, text, pictures, assistant, standing);
   if (telegram && standing) {
     return {
       actor: { personId: me.id },
