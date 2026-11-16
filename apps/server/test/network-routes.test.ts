@@ -5,11 +5,12 @@ import { join } from 'node:path';
 import * as x509 from '@peculiar/x509';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { authority, certificates, companies, machines, peerSecrets, people } from '../src/db/schema.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
+import { LEFT_SLOTS_FRESH_MS } from '../src/modules/copies/left-slots.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
 import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
 
@@ -186,7 +187,7 @@ describe('the network routes the keeper calls', () => {
   it('hands the peer secrets to the machine that offers them', async () => {
     const c = await company();
     const before = (await c.peers()).json();
-    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null, data: [], doors: [], uploads: [] });
+    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null, data: [], doors: [], uploads: [], leftSlots: [] });
 
     const tunnel = { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' };
     await saveLink(c.db, c.config, c.companyId, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel });
@@ -302,6 +303,40 @@ describe('the network routes the keeper calls', () => {
     expect(await rowOf(worker.id)).toMatchObject({ copyState: null, copyProgress: null, copyName: null });
     for (const bad of [{ ...said, progress: 100 }, { ...said, state: 'other' }, { ...said, error: 'other' }, { ...said, name: 'x'.repeat(64) }, { ...said, old: { attempt: 0 } }]) {
       expect((await report({ copy: bad }, copy.id)).statusCode, JSON.stringify(bad)).toBe(400);
+    }
+  });
+
+  it("hands its own keeper the leader's slots of broken-off tables that a copy named in its last report, while that report is fresh", async () => {
+    const c = await company();
+    const copy = await c.joined('data', newKey());
+    const other = await c.joined('data', newKey());
+    const worker = await c.joined('worker', newKey());
+    const report = (payload: object, machine: string) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(machine) });
+    const leftSlots = async () => ((await c.peers()).json() as { leftSlots?: string[] }).leftSlots;
+    const making = { state: 'making', progress: 40, error: null, at: null, name: 'copy_0f0f0f0f0f0f0f0f_2', old: null };
+    const [one, two, three] = ['pg_16500_sync_16384_7300000000000000000', 'pg_16500_sync_16390_7300000000000000000', 'pg_16611_sync_16384_7311111111111111111'];
+    let now = Date.parse('2026-11-16T20:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    onTestFinished(() => clock.mockRestore());
+    expect(await leftSlots()).toEqual([]);
+    expect((await report({ copy: { ...making, left: [one, two] } }, copy.id)).statusCode).toBe(204);
+    expect((await report({ copy: { ...making, name: 'copy_1e1e1e1e1e1e1e1e_1', left: [three] } }, other.id)).statusCode).toBe(204);
+    /* A worker holds no copy, whatever it says. */
+    expect((await report({ copy: { ...making, left: ['pg_1_sync_2_3'] } }, worker.id)).statusCode).toBe(204);
+    expect(await leftSlots()).toEqual([one, two, three]);
+    /* Only the leader's own keeper sweeps slots: a peer hears of none. */
+    expect((await c.peers(from(copy.id))).json()).not.toHaveProperty('leftSlots');
+    /* The next report says what is left now, and a report that says nothing of the copy keeps it. */
+    expect((await report({ copy: { ...making, left: [two] } }, copy.id)).statusCode).toBe(204);
+    expect((await report({ uptimeS: 3 }, copy.id)).statusCode).toBe(204);
+    expect(await leftSlots()).toEqual([two, three]);
+    expect((await report({ copy: making }, other.id)).statusCode).toBe(204);
+    expect(await leftSlots()).toEqual([two]);
+    /* A copy that stopped reporting may have started those tables again by now: its names go stale. */
+    now += LEFT_SLOTS_FRESH_MS + 1;
+    expect(await leftSlots()).toEqual([]);
+    for (const bad of [['copy_0f0f0f0f0f0f0f0f_2'], ['pg_16500_sync_16384'], ["pg_1_sync_2_3'; DROP"], Array.from({ length: 201 }, (_, i) => `pg_1_sync_${i}_3`)]) {
+      expect((await report({ copy: { ...making, left: bad } }, copy.id)).statusCode, bad[0]).toBe(400);
     }
   });
 
