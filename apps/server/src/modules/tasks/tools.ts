@@ -33,11 +33,9 @@ import { decisionPerson } from './decisions.js';
 import { TaskReference as Ref, WaitInput, lastEventOf, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
-import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
-import { reviewContext, ReviewSha, ReviewSubmission } from './review-context.js';
+import { ReviewSha, ReviewSubmission } from './review-context.js';
 import { pipelineFindings, reviewDetails } from './review-details.js';
 import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
-import { bindReviewEvidence } from './review-verdict.js';
 import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
@@ -342,7 +340,7 @@ class TaskTools {
       {
         description:
           'One task in full: its body (the current truth), stages and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
-          "task.echelons is the required ordered route and current owner. Candidates and producing identities are immutable. Review and Security own their repairs in the same branch; optional Cleanup follows Review only when the head enabled it. review contains exact author receipts and quality evidence or unavailable; testEvidence proves only its exact current commit. echelonFindings contains deduplicated stage findings and independent confirmations.",
+          "task.echelons is the required ordered route and current owner. Candidates and producing identities are immutable. Review and Security own their repairs in the same branch; optional Cleanup follows Review only when the head enabled it. review names the pinned commit and its change; testEvidence proves only its exact current commit. echelonFindings contains deduplicated stage findings and independent confirmations.",
         inputSchema: { task: Ref },
       },
       async ({ task: ref }) =>
@@ -418,7 +416,7 @@ class TaskTools {
           "Ask only once every instruction and material the question promises is ready, attached to it instead of a pointer to a task's log, and let one sender ask it once. " +
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-          'An approval tells you and the person which passed test run checked that very commit, or that none did; when its department enabled autonomousRelease and that commit has a green full run_tests run with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
+          'An approval tells you and the person which passed test run checked that very commit, or that none did; when its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
           `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
         inputSchema: {
           task: Ref,
@@ -574,9 +572,9 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is the head of the turn branch turn-<number>, runId a full run of it that passed every test with nothing reused, and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked needs none, and its entry in the autonomous release log approves it. " +
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is the head of the turn branch turn-<number>, runId a passed whole run of it: the first run of its release, or a later one that took only what its release proved; and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked needs none, and its entry in the autonomous release log approves it. " +
           'It says what the release brings and whether each of its commits was checked. Then fast-forward main to the commit and tag it vX.Y.Z: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
-        inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact head commit of the turn branch.'), runId: z.uuid().describe('The full run of that commit.') },
+        inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact head commit of the turn branch.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },
       async input =>
         this.run(async () => {
@@ -626,7 +624,7 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision (with completed runIds only when integrating directly to main; non-main task branches verify named local checks without run_tests); the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision it checked with local tests, and done false gives a failing one to the head; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
         inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional() },
       },
       async ({ task: ref, done, summary, verification, acceptance }) =>
@@ -701,10 +699,8 @@ class TaskTools {
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, why);
-          const review = await reviewContext(this.ctx.db, task.id);
-          const evidence = bindReviewEvidence(await taskEvidence(this.ctx, task), review?.commit ?? null);
-          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, reviewedCommit, candidateId, issues, security, escalate, evidence: keptEvidence(evidence) });
-          return { text: `Recorded. ${await this.where(moved.task)}${noProofNote(evidence, pass)}`, moved };
+          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, reviewedCommit, candidateId, issues, security, escalate });
+          return { text: `Recorded. ${await this.where(moved.task)}`, moved };
         }),
     );
   }
