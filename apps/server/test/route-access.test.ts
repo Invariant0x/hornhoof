@@ -33,11 +33,12 @@ const publicRoutes = new Map([
   ['DELETE /api/assistant/mcp', 'public method rejection'],
   ['POST /api/feedback/inbound', "public feedback receiver, only on Hornhoof's own installation: a report of the strict shape, at most 16 KB and 10 an hour from one installation, which adds a signal to the inbox and does nothing else"],
 ]);
-const guards: { name: string; path: RegExp; rule: string }[] = [
+const guards: { name: string; path: RegExp; method?: string; rule: string }[] = [
   { name: 'requirePerson', path: /^\/api\//, rule: 'human session and company scope' },
   { name: 'agentFor', path: /^\/api\/agents\//, rule: 'human session and reachable agent' },
   { name: 'programFor', path: /^\/api\/agents\/:id\/terminal$/, rule: 'human session and the plan the program really runs on' },
   { name: 'jobOf', path: /^(?:\/mcp|\/api\/attachments(?:\/file)?|\/api\/outbound\/messages(?:\/:id)?)$/, rule: 'agent job token' },
+  { name: 'attachmentJobOf', path: /^\/api\/attachments$/, method: 'POST', rule: 'agent job token or short-lived attachment permission bound to the running turn and its task' },
   { name: 'openEventReceipts', path: /^\/api\/outbound\/accounts\/:id\/events$/, rule: 'body signed with the key of that account, which records what became of its messages and does nothing else' },
   { name: 'openUnsubscribe', path: /^\/api\/outbound\/unsubscribe\/\*$/, rule: 'signed stop link, which opts out and does nothing else' },
   { name: 'setupOnly', path: /^\/api\/setup(?:\/names\/:name)?$/, rule: 'first setup code' },
@@ -94,7 +95,7 @@ function ruleForMethod(route: RouteOptions, registered: string): string | undefi
   const publicRule = publicRoutes.get(`${method} ${route.url}`);
   if (publicRule) return publicRule;
   const calls = new Set([route.handler, ...[route.preValidation ?? []].flat()].flatMap(handler => [...directCalls(handler)]));
-  const declared = guards.find(guard => guard.path.test(route.url) && calls.has(guard.name));
+  const declared = guards.find(guard => (guard.method === undefined || guard.method === method) && guard.path.test(route.url) && calls.has(guard.name));
   if (declared) return declared.rule;
   if (method === 'POST' && route.url === '/api/auth/login' && calls.has('verifyPassword') && calls.has('startSession')) return 'verified credentials';
   if (method === 'POST' && route.url === '/api/auth/logout' && calls.has('endSession')) return 'end only the supplied session';
@@ -113,6 +114,7 @@ function assertDeclared(routes: RouteOptions[]): void {
 }
 
 const requirePerson = () => undefined;
+const attachmentJobOf = () => undefined;
 
 describe('route access declarations', () => {
   it('requires an explicit access rule for every registered HTTP and WS route, including static assets', async () => {
@@ -142,6 +144,15 @@ describe('route access declarations', () => {
     expect(directCalls(async () => { const later = () => requirePerson(); return later; })).not.toContain('requirePerson');
     expect(directCalls(async () => { if (false) requirePerson(); })).not.toContain('requirePerson');
     expect(accessRule({ method: 'POST', url: '/api/health', handler: async () => ({}) })).toBeUndefined();
+  });
+
+  it('recognizes the attachment guard only for its exact upload method and path', () => {
+    const upload: RouteOptions = { method: 'POST', url: '/api/attachments', handler: async () => { attachmentJobOf(); return {}; } };
+    expect(accessRule(upload)).toBeDefined();
+    expect(accessRule({ ...upload, method: 'GET' })).toBeUndefined();
+    expect(accessRule({ ...upload, url: '/api/attachments/file' })).toBeUndefined();
+    expect(accessRule({ ...upload, url: '/api/undeclared' })).toBeUndefined();
+    expect(accessRule({ ...upload, handler: async () => ({}) })).toBeUndefined();
   });
 });
 
