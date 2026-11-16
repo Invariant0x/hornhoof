@@ -174,10 +174,12 @@ describe('the sender of an assistant message', () => {
     const c = await company();
     c.app.ctx.assistants.replyGraceMs = 0;
     const { ava, run } = await talking(c);
+    await c.db.update(agents).set({ subscriptionId: c.plan, model: '' }).where(eq(agents.id, c.orchestrator.id));
     const client = await mcp(c.app, run.toolToken!);
     const result = await client.callTool({ name: 'send_message', arguments: { agentId: c.orchestrator.id, text: 'Plan from my own agent.' } }) as { content: { text: string }[]; isError?: boolean };
     expect(result.isError).toBeFalsy();
     const sent = JSON.parse(result.content[0]!.text) as { message: { id: string } };
+    finish(c, run, 'caller');
     const reply = await runWith(c.node, 'Plan from my own agent.');
     await c.app.ctx.assistants.stop();
     await c.app.ctx.assistants.start();
