@@ -23,6 +23,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A database copy's first sync survives a slow link, and its drops no longer wait on the leader.
 - The leader frees at its next sweep the slots and origins of tables whose first copy broke off.
 - No test harness build is taken from the built-in node of a machine taken off the company's checks.
+- External messaging is a button on the department screen, where whoever runs its messaging finds the channels.
+- The machine next to install the server's build takes no new work, so what runs there ends and it installs.
+- The orchestrator and the heads get onto a node whose updater went away before stopping it, within 3 minutes.
+- `program_screen` shows a busy employee's program from its running turn, without a false `no_program`.
 
 ### Added
 
@@ -33,6 +37,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
 - An employee on a personal plan at its limit goes on to a fallback plan with room, and back after the reset.
 - An employee's card shows its fallback plan, and a person sets the order of a plan's fallback plans.
+- A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
+- A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
+- Settings, Passwords keeps the company's site sign-ins, each with its login, password and one-time code.
+- Agents take a sign-in with `vault_entry`, which gives the current one-time code, and save one with `vault_save`.
+- Each channel of a department to its contacts takes an address, with the person's consent to its purpose.
 
 ### Changed
 
@@ -52,6 +61,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
 - Subscriptions show how each is paid as a sign by its short name, with the orchestrator under it.
 - Token counts and the names of token tiles stay in one piece and read left to right in any language.
+- The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent it.
+- A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
+- Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
+- The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16
 
