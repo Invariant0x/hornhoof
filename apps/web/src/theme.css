@@ -1549,6 +1549,13 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .ac-history ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
 /* The timer: a tick to wake, then how often, what to do and when the next round comes, each on its own line. */
 .ac-timer, .ac-timer form, .ac-telegram, .ac-telegram form { display: grid; gap: 10px; justify-items: start; }
+/* Each saved sign-in on its own row: what was saved, by whom and when, then its revoke at the row's end. */
+.ac-sign-ins { display: grid; gap: 10px; }
+.ac-sign-ins > p { margin: 0; font-size: 13px; }
+.ac-sign-ins ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ac-sign-ins li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-block: 8px; border-block-start: 1px solid var(--line); }
+.ac-sign-ins li > .entry-main { flex: 1 1 16rem; font-size: 13px; }
+.ac-sign-ins li > .entry-actions { flex: 0 0 auto; inline-size: auto; }
 .ac-timer > p, .ac-telegram p { margin: 0; font-size: 13px; }
 .ac-timer .field, .ac-telegram .field { justify-self: stretch; }
 .ac-timer label.check { display: flex; gap: 8px; align-items: start; font-size: 13px; cursor: pointer; }

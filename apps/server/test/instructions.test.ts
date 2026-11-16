@@ -679,7 +679,7 @@ describe('reading web pages in a browser on the node', () => {
     }
   });
 
-  it('says when to take hh-browse, and that a sign-in or a robot check is noted for a person while the work goes on, never got past or taken to the orchestrator or the CEO', () => {
+  it('says when to take hh-browse, that a saved sign-in opens its site, and that a sign-in or a robot check goes to a person in the report while the work goes on, never got past', () => {
     const body = shipped.skills.get('hh-web-pages')!.body;
     expect(body).toContain('`hh-browse URL`');
     expect(body).toMatch(/scripts build/);
@@ -687,8 +687,8 @@ describe('reading web pages in a browser on the node', () => {
     expect(body).toMatch(/only public http and https addresses/);
     expect(body).toMatch(/`login_required`[\s\S]*`robot_check`/);
     expect(body).toMatch(/never try to get past it/i);
-    expect(body).toMatch(/never ask the orchestrator or the CEO/i);
-    expect(body).toMatch(/note the address[^.]*for a person[^.]*go on with the other addresses/i);
+    expect(body).toMatch(/sign-in a person saved for you[^.]*opens the pages of its site/i);
+    expect(body).toMatch(/in your report that a person needs to sign you in \(Sign in as employee, on your card\)[^.]*go on with the other addresses/i);
     expect(body).not.toMatch(/[—ё]/);
   });
 });

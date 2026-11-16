@@ -26,13 +26,16 @@ export const TEST_KEY = { publicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE'.padE
 export const withKey = (command: string): string => `${command} --owner-key ${TEST_KEY.publicKey}`;
 const KEY_ROUTES: Record<string, Route> = { 'GET /api/me/key': [200, { key: TEST_KEY }], 'PUT /api/me/key': [204] };
 
+/* Every employee's card reads its saved sign-ins; a test that names none gets an empty list. */
+const noSignIns = (method: string, path: string): Route | undefined => (method === 'GET' && /^\/api\/agents\/[^/]+\/sign-ins$/.test(path) ? [200, { signIns: [] }] : undefined);
+
 export function mockApi(routes: Record<string, Route>): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
     const method = init.method ?? 'GET';
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     calls.push({ method, path, body });
-    const route = routes[`${method} ${path}`] ?? KEY_ROUTES[`${method} ${path}`] ?? (path === '/api/task-departments' ? taskDepartments(routes) : undefined);
+    const route = routes[`${method} ${path}`] ?? KEY_ROUTES[`${method} ${path}`] ?? (path === '/api/task-departments' ? taskDepartments(routes) : undefined) ?? noSignIns(method, path);
     const [status, data] = typeof route === 'function' ? await route(body) : route ?? [404, { error: { code: 'not_found', message: 'Not found.' } }];
     return new Response(data === undefined ? null : JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
   }));

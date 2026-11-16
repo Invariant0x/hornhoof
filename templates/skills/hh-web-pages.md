@@ -8,4 +8,4 @@ You can read a web page that scripts build, without asking anyone for a browser.
 
 When a plain download shows too little, run `hh-browse URL`; `--screenshot FILE.png` takes a picture to send with `hh-attach`, and `--help` lists the rest. It opens only public http and https addresses.
 
-At `login_required` or `robot_check`, never try to get past it and never ask the orchestrator or the CEO for a way in: note the address and what it asks for a person in your report, and go on with the other addresses.
+A sign-in a person saved for you in Hornhoof opens the pages of its site. At `login_required` or `robot_check`, never try to get past it: say in your report that a person needs to sign you in (Sign in as employee, on your card) or to pass the check, and go on with the other addresses.

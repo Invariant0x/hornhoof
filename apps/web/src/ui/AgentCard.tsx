@@ -7,6 +7,7 @@ import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
+import { SavedSignIns } from './SavedSignIns';
 import { TelegramBot } from './TelegramBot';
 import { Ask } from './Ask';
 import { PanelFrame } from './SidePanels';
@@ -377,6 +378,8 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
         {!orchestrator && <TimerSettings timer={card.timer} editable={editable} onChange={body => void change(body)} />}
         {/* Whoever may remove this agent keeps its bot too: the whole company, or the person responsible for its department. */}
         {(orchestrator || card.kind === 'head') && <TelegramBot agentId={agentId} telegram={card.telegram ?? null} editable={card.canRemove} onChange={telegram => setCard(c => c && { ...c, telegram })} />}
+        {/* Where the agent's hh-browse opens pages as signed in; whoever sees the agent may take a sign-in back. */}
+        <SavedSignIns agentId={agentId} />
 
         {!orchestrator && (
           <section className="ac-skills" aria-labelledby={`${id}-skills`}>
