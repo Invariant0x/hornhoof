@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { eq } from 'drizzle-orm';
 import type { FastifyServerOptions, RouteOptions } from 'fastify';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
+import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { as, testApp } from './helpers.js';
@@ -65,6 +65,14 @@ const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
 };
 
+/* The company's saved sign-in this agent used for its task: the log names the agent and the task's number. */
+let vaultUses = 0;
+const aVaultUse = async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [entry] = await c.db.insert(vaultEntries).values({ companyId: c.companyId, name: `Sign-in ${++vaultUses} of ${String(agent)}`, site: 'https://partner.example', login: 'team', passwordEnc: 'x', createdBy: c.ids.ceo, updatedBy: c.ids.ceo }).returning();
+  await c.db.insert(vaultLog).values({ companyId: c.companyId, entryId: entry!.id, entryName: entry!.name, site: entry!.site, kind: 'used', agentId: c.crew[agent].id, target: 'browser', fields: ['password'], status: 'signed_in' });
+  return { method: 'GET', url: `/api/vault/${entry!.id}/log` };
+};
+
 const POINTED: Pointed[] = [
   { route: 'GET /api/agents/:id', of: anAgent('GET', '') },
   { route: 'PATCH /api/agents/:id', of: anAgent('PATCH', '', { effort: null }) },
@@ -87,6 +95,8 @@ const POINTED: Pointed[] = [
   { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true, ownerToo: true },
   { route: 'GET /api/tasks/:id', of: aTask('GET', ''), company: true },
   { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits'), company: true },
+  /* Who used a sign-in of the vault is the company's work; another person's own assistant stays out of it. */
+  { route: 'GET /api/vault/:id/log', of: aVaultUse, company: true },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
   { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },
   { route: 'GET /api/jobs/:id', of: aJob('GET', '') },
@@ -147,6 +157,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: { ann: 403, olga: 200, wes: 200, clara: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: DEPARTMENT_ITSELF },
   { route: 'GET /api/autonomous-releases', url: () => '/api/autonomous-releases', statuses: ALL_OK, company: true },
+  { route: 'GET /api/vault', url: () => '/api/vault', statuses: ALL_OK, company: true },
   { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: DEPARTMENT_ITSELF },
   /* Ann has App of Development and does not run Development: its branches are closed to her, as its roster is. */
@@ -196,6 +207,7 @@ const ELSEWHERE: Record<string, string> = {
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
 const NO_AGENT_DATA: string[] = [
   'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/auth/login', 'POST /api/auth/logout',
+  'POST /api/vault', 'PATCH /api/vault/:id', 'DELETE /api/vault/:id',
   'POST /api/outbound/accounts', 'POST /api/outbound/accounts/:id/events', 'POST /api/outbound/accounts/:id/bind', 'POST /api/outbound/accounts/:id/release', 'POST /api/outbound/accounts/:id/revoke', 'POST /api/outbound/accounts/:id/rotate', 'POST /api/outbound/attempts/:id/settle', 'GET /api/outbound/channels/:id/accounts',
   'POST /api/outbound/messages', 'GET /api/outbound/messages/:id', 'POST /api/outbound/channels', 'POST /api/outbound/channels/:id/policies', 'POST /api/outbound/channels/:id/stop', 'POST /api/outbound/channels/:id/reopen',
   'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',

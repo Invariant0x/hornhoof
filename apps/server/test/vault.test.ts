@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { decryptSecret } from '../src/crypto/secrets.js';
-import { agents, vaultEntries, vaultLog } from '../src/db/schema.js';
+import { agents, assistants, people, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { as } from './helpers.js';
 import { vaultCompany } from './vault-fixture.js';
 
@@ -109,5 +109,31 @@ describe('the company vault for people', () => {
     expect(log.statusCode).toBe(200);
     expect(log.json().log).toMatchObject([{ kind: 'created', person: { name: c.ceo.name }, agent: null, task: null }]);
     expect(log.body).not.toContain(PASSWORD);
+  });
+
+  it("shows a person's own assistant's use only to its owner, and a task only by its number", async () => {
+    const c = await vaultCompany();
+    const id = (await c.add(c.ceoSession, entry())).json().id as string;
+    /* Aide is Clara's own assistant. */
+    const [aidePerson] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Aide', status: 'active', isAgent: true, assistantOf: c.clara.id, scopeKind: 'listed' }).returning();
+    await c.db.insert(assistants).values({ personId: aidePerson!.id, companyId: c.companyId, program: 'avaclone', agentId: c.aide.id });
+    const used = { companyId: c.companyId, entryId: id, entryName: 'Partner site', site: 'https://partner.example/login', kind: 'used' as const, taskId: c.task.id, target: 'browser' as const, fields: ['login' as const, 'password' as const], status: 'signed_in' };
+    await c.db.insert(vaultLog).values([{ ...used, agentId: c.aide.id }, { ...used, agentId: c.nora.id }]);
+
+    const users = async (session: string) => {
+      const res = await c.app.inject({ url: `/api/vault/${id}/log`, ...as(session) });
+      expect(res.statusCode).toBe(200);
+      return { body: res.body, agents: (res.json().log as { agent: { name: string } | null }[]).flatMap(l => (l.agent ? [l.agent.name] : [])).sort() };
+    };
+    expect((await users(c.claraSession)).agents).toEqual(['Aide', 'Nora']);
+    for (const session of [c.samSession, c.ceoSession]) {
+      const seen = await users(session);
+      expect(seen.agents).toEqual(['Nora']);
+      expect(seen.body).not.toContain(c.aide.id);
+    }
+    /* Sam has Sales only and does not open the task of Marketing: its number, never its title. */
+    const sam = await c.app.inject({ url: `/api/vault/${id}/log`, ...as(c.samSession) });
+    expect(sam.json().log).toEqual(expect.arrayContaining([expect.objectContaining({ task: { id: c.task.id, number: c.task.number } })]));
+    expect(sam.body).not.toContain(c.task.title);
   });
 });
