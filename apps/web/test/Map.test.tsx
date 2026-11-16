@@ -276,13 +276,19 @@ describe('Map', () => {
     expect(container.querySelector('.ticker')).not.toBeInTheDocument();
   });
 
-  it('shows the zoom as a percentage', async () => {
+  it('shows the zoom as a percentage across short and three-digit scales', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Marketing');
-    expect(container.querySelector('.zoom .zv')).toHaveTextContent('100%');
+    const label = container.querySelector('.zoom .zv')!;
+    expect(label).toHaveTextContent('100%');
+    expect(container.querySelectorAll('.zoom .zbtn')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
-    expect(container.querySelector('.zoom .zv')).toHaveTextContent('120%');
+    expect(label).toHaveTextContent('120%');
+    for (let i = 0; i < 6; i++) fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(label).toHaveTextContent('250%');
+    for (let i = 0; i < 12; i++) fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(label).toHaveTextContent('30%');
   });
 
   it('leaves the view where the person put it as the company changes live, the arrangement comes, panels open and a department closes, and opens it there again', async () => {
