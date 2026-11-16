@@ -157,6 +157,43 @@ describe("an assistant's own agent", () => {
   });
 });
 
+describe('the sender of an assistant message', () => {
+  type Event = { kind: string; data: { messageId: string | null; byOwnAgent: boolean } };
+  const eventsOf = async (c: Company, key: string): Promise<Event[]> => (await c.app.inject({ url: '/api/assistant/events', ...bearer(key) })).json().events;
+
+  /* A node sample answers immediately; collection waits for the state, never for a real-time grace. */
+  async function answer(c: Company, run: Run, key: string, messageId: string) {
+    c.node.send({ type: 'job.started', jobId: run.jobId });
+    c.node.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Ready.' } });
+    c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 'replied', result: '', tail: '', error: null });
+    await until(async () => (await eventsOf(c, key)).some(e => e.kind === 'reply_end' && e.data.messageId === messageId));
+    return (await eventsOf(c, key)).filter(e => e.data.messageId === messageId).map(e => [e.kind, e.data.byOwnAgent]);
+  }
+
+  it('marks replies and their end when the own agent sent the message, and keeps the origin after a restart', async () => {
+    const c = await company();
+    c.app.ctx.assistants.replyGraceMs = 0;
+    const { ava, run } = await talking(c);
+    await c.db.update(agents).set({ subscriptionId: c.plan, model: '' }).where(eq(agents.id, c.orchestrator.id));
+    const client = await mcp(c.app, run.toolToken!);
+    const result = await client.callTool({ name: 'send_message', arguments: { agentId: c.orchestrator.id, text: 'Plan from my own agent.' } }) as { content: { text: string }[]; isError?: boolean };
+    expect(result.isError).toBeFalsy();
+    const sent = JSON.parse(result.content[0]!.text) as { message: { id: string } };
+    finish(c, run, 'caller');
+    const reply = await runWith(c.node, 'Plan from my own agent.');
+    await c.app.ctx.assistants.stop();
+    await c.app.ctx.assistants.start();
+    expect(await answer(c, reply, ava.key, sent.message.id)).toEqual([['reply', true], ['reply_end', true]]);
+  });
+
+  it('marks replies and their end false for a message from the program, even when its own agent answers', async () => {
+    const c = await company();
+    c.app.ctx.assistants.replyGraceMs = 0;
+    const { ava, message, run } = await talking(c);
+    expect(await answer(c, run, ava.key, message.id)).toEqual([['reply', false], ['reply_end', false]]);
+  });
+});
+
 describe("an assistant's own agent, for the company", () => {
   it("is changed on its assistant's card, not as an employee: its own card neither edits nor removes it", async () => {
     const c = await company();
@@ -549,9 +586,9 @@ describe('tell_owner', () => {
     expect(result.isError).toBeFalsy();
     const from = { id: agent.id, name: 'Ava', kind: 'assistant' };
     const [heard] = (await waiting).json().events as Event[];
-    expect(heard).toMatchObject({ kind: 'reply', data: { messageId: null, agent: from, text: '7' } });
+    expect(heard).toMatchObject({ kind: 'reply', data: { messageId: null, agent: from, byOwnAgent: true, text: '7' } });
     expect(heard!.data.agent).toMatchObject({ id: (await me(c, ava.key)).assistant.agentId });
-    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply', { messageId: null, agent: from, text: '7' }]]);
+    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply', { messageId: null, agent: from, byOwnAgent: true, text: '7' }]]);
     await until(() => address.wakes.length > 0);
     expect(JSON.parse(address.wakes[0]!)).toEqual({ type: 'wake', after: heard!.seq - 1 });
   });

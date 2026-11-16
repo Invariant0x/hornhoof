@@ -24,7 +24,7 @@ import { waitingFor } from './requests.js';
 export const MessageBody = z.object({ agentId: z.uuid().optional(), text: z.string().trim().min(1).max(50_000), freshText: z.string().trim().min(1).max(200_000).optional() }).strict();
 /* A program may send each letter of both texts as an escape of six bytes. */
 export const MESSAGE_BYTES = 2 * 1024 * 1024;
-export const ASSISTANT_CONTRACT = 2;
+export const ASSISTANT_CONTRACT = 3;
 /* An assistant reads its events after the last number it saw, and waits at most 50 seconds for a new one. */
 export const LONGEST_WAIT_S = 50;
 export const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), wait: z.coerce.number().int().min(0).max(LONGEST_WAIT_S).default(0) }).strict();
@@ -74,8 +74,8 @@ export async function whoAmI(ctx: Ctx, me: Person) {
       telegram: { username: view.telegram?.username ?? null, id: view.telegram?.id ?? null },
     },
     company: { name: company!.name },
-    /* Which contract of this API the server keeps: 2 takes freshText and up to 50000 characters of text. A server with
-       no contract here keeps the first, which refuses a body with freshText. */
+    /* Contract 3 includes attachment downloads and reply origin. A server with no contract here keeps the first,
+       which refuses a body with freshText. */
     contract: ASSISTANT_CONTRACT,
   };
 }
@@ -94,13 +94,14 @@ export async function agentsFor(ctx: Ctx, me: Person) {
   return { agents: await Promise.all((await writable(ctx, me)).map(a => agentView(ctx, a, depts))) };
 }
 
-export async function writeFor(ctx: Ctx, me: Person, body: unknown) {
+/* senderAgentId comes from the authenticated MCP job, never from the message body. */
+export async function writeFor(ctx: Ctx, me: Person, body: unknown, senderAgentId?: string) {
   const { agentId, text, freshText } = MessageBody.parse(body);
   const mine = await ownAgentOf(ctx, me.assistant!.id);
   const own = agentId ?? mine;
   if (!own) throw new ApiError(409, 'conflict', "This assistant has no agent of its own yet: its owner picks a plan for it on the assistant's card in People.", 'agent_not_ready');
   const agent = await writableAgent(ctx, me, own);
-  const id = await sendForOwner(ctx, me, agent, text, agent.id === mine ? freshText : undefined);
+  const id = await sendForOwner(ctx, me, agent, text, agent.id === mine ? freshText : undefined, senderAgentId === mine);
   return { message: { id, agentId: agent.id } };
 }
 
