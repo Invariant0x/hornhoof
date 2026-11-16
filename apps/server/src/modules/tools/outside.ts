@@ -122,11 +122,15 @@ async function answerOf(app: FastifyInstance, ctx: Ctx, node: NodeIdentity, call
   /* A program connects and lists its tools at any time of its life; it calls them only while its employee is on. */
   if (!connecting(all) && target.agent.switchedOffAt) return refused(all, SWITCHED_OFF);
   if (all.length === 1 && all[0]!.method === 'attachments/token') {
-    if (await holdsMachine(ctx.db, node.kind === 'node' ? node.nodeId : null)) return refused(all, INSTALLING);
-    const token = await attachmentToken(ctx, node, target.agent.id);
-    return token ? { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: all[0]!.id, result: { token } }) } : refused(all, 'No Hornhoof turn is running for this agent.');
+    return attachmentPermission(ctx, node, target.agent.id, all);
   }
   return inStep(app, ctx, node, call, target, all);
+}
+
+async function attachmentPermission(ctx: Ctx, node: NodeIdentity, agentId: string, all: Rpc[]): Promise<Answer> {
+  if (await holdsMachine(ctx.db, node.kind === 'node' ? node.nodeId : null)) return refused(all, INSTALLING);
+  const token = await attachmentToken(ctx, node, agentId);
+  return token ? { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: all[0]!.id, result: { token } }) } : refused(all, 'No Hornhoof turn is running for this agent.');
 }
 
 /* Hornhoof's answer to what a program sent with no turn running, to the node that handed it on. */

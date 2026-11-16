@@ -16,7 +16,7 @@ import { mayOpenRequest } from './decisions.js';
 import { refuse, type Task } from './engine.js';
 import { seesTask } from './sight.js';
 import { taskByRef } from './views.js';
-import { attachmentJobOf } from './attachment-token.js';
+import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
 
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */
 export const PICTURE_BYTES = 3 * 1024 * 1024;
@@ -364,7 +364,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
-      if (job.attachmentTaskId && (task?.id !== job.attachmentTaskId || toChat)) throw new ApiError(403, 'forbidden', 'This attachment permission is only for files on the task of this turn.', 'attachment_hidden');
+      checkAttachmentTask(job, task?.id ?? null, toChat);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
       const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, ref !== undefined, raw);
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));

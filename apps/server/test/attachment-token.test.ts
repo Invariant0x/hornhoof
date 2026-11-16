@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { attachments, agentEvents, jobs } from '../src/db/schema.js';
-import { builtinOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
+import { attachments, agentEvents, agents, jobs, machines, nodes, people, subscriptions } from '../src/db/schema.js';
+import { builtinOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { BUILTIN } from './builtin.js';
@@ -106,5 +106,19 @@ describe('attachment authorization over the node link', () => {
   it('preserves the headless direct tool token', async () => {
     const c = await company();
     expect((await c.send('headless-turn-token')).statusCode).toBe(201);
+  });
+
+  it('authorizes Kimi on its personal plan node and refuses the built-in node for that turn', async () => {
+    const c = await company();
+    await c.db.update(subscriptions).set({ kind: 'personal', provider: 'kimi' }).where(eq(subscriptions.id, c.sub.id));
+    const [owner] = await c.db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
+    const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: owner!.id, machineKey: 'kimi-laptop' }).returning();
+    const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: c.sub.id, status: 'ready', keyHash: 'test-node-key-hash', version: '0.31.0' }).returning();
+    await c.db.update(agents).set({ nodeId: node!.id }).where(eq(agents.id, c.agent.id));
+    await c.db.update(jobs).set({ nodeId: node!.id }).where(eq(jobs.id, c.job.id));
+    expect((await c.grant()).result).toBeUndefined();
+    const granted = await c.grant(c.agent.id, nodeIdentity(node!.id));
+    expect(typeof granted.result?.token).toBe('string');
+    expect((await c.send(granted.result!.token)).statusCode).toBe(201);
   });
 });
