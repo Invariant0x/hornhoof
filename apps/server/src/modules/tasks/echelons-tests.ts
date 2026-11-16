@@ -58,9 +58,12 @@ export async function requireTestsReport(db: Ctx['db'] | Tx, task: Task, route: 
   if (!route.state.stages.some(step => step.stage === 'tests' && step.status !== 'skipped')) return;
   const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents)
     .where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`${taskEvents.data} ? 'verifiedCandidate'`)).orderBy(desc(taskEvents.id)).limit(1);
-  const proof = Verified.safeParse(event?.data.verifiedCandidate);
   const tester = route.state.stages.find(step => step.stage === 'tests')?.ownerAgentId;
-  if (!proof.success || event?.agentId !== tester || proof.data.candidateId !== candidate.id || proof.data.commit !== candidate.commit || proof.data.routeRevision !== verifiedRevision) {
-    throw refuse(409, 'task_changed', 'The current candidate has no valid Tests report.');
-  }
+  if (!provesCandidate(event, tester, candidate, verifiedRevision)) throw refuse(409, 'task_changed', 'The current candidate has no valid Tests report.');
+}
+
+/* A report proves the candidate when the Tests owner made it on the candidate's commit at that route revision. */
+function provesCandidate(event: { data: Record<string, unknown>; agentId: string | null } | undefined, tester: string | null | undefined, candidate: EchelonCandidate, revision: number): boolean {
+  const proof = Verified.safeParse(event?.data.verifiedCandidate);
+  return proof.success && event?.agentId === tester && proof.data.candidateId === candidate.id && proof.data.commit === candidate.commit && proof.data.routeRevision === revision;
 }
