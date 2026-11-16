@@ -5,10 +5,11 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
-## [0.31.0]
+## [0.31.0] - 2026-11-16
 
-The orchestrator clears any employee's inbox, and a machine its owner opened stays open to the orchestrator for as
-long as access lasts.
+The orchestrator clears any employee's inbox and keeps a machine its owner opened for as long as access lasts, a
+message to a busy or reconnecting employee waits for it instead of being lost, the release check goes out in parts of up
+to an hour, and a machine's card stands in plain blocks.
 
 ### Added
 
@@ -17,6 +18,11 @@ long as access lasts.
   for which there is no screen yet. Each such mark goes into the employee's log: who marked how many letters, and why.
   Another employee gets 403 on an inbox not its own, and an assistant key gets 401. Every new company gets this in the
   orchestrator's skills.
+- `failures` gives each blocked task `next`: the last Next section of its holder's report, else the report's last 500
+  characters, cleaned for every reader.
+- Every working employee of the company downloads the files and request pictures of any company task with `hh-fetch`,
+  of other departments too; the work of personal assistants stays closed to them. The paths a task may change can be
+  globs, and test files and `test`, `tests` and `e2e` folders are always allowed beside them.
 
 ### Changed
 
@@ -28,6 +34,115 @@ long as access lasts.
   request on in a letter, which counts as an employee's words; a turn woken by a task, comment, answer or cancel of a
   person without rights, or by a department owner on a machine not theirs, now refuses commands there, and the work
   goes on in the next turn; merges from the network wake the orchestrator as Hornhoof and count as no one's words.
+- A message to an employee whose running turn did not take it, or whose machine is getting back on the line, waits in
+  the employee's line for its next turn instead of being refused and lost. A machine counts as off only once its card
+  says so. A message that still cannot go names a reason code, the recipient and the task, and `failures` lists it
+  under undelivered with that reason, cleaned of credentials and private paths.
+- Personal assistants are hidden from Operations: its SQL reads see none of their tables and none of them among the
+  agents, and the program operator neither delivers to nor recovers their turns.
+- The full release check goes out in two to four parts of up to an hour each, sized by the pace of the machines that
+  take them. The full run itself still reuses nothing; the profiles of a release now also take a green result proved
+  on any branch at a commit main holds.
+- A full machine of the company keeps its place whatever its memory, free disk or disk speed measure: the measures
+  only order the machines that fit. Machines gives the reason for any machine without a place, and the dash in the
+  list says it too. A disk that fills up while a copy is made still stops that copy.
+- The lower part of a machine's open card stands in three blocks with a heading each: the server and the data copy,
+  the system with the programs and the computer access, and the owner's settings and actions. Connection to the server
+  says first whether it holds, then a line for each drop: when, for how long and why; codes wait behind Show technical
+  details. Copy and Cancel stand under their command, the owner's buttons stand in one group, and an install command
+  reads left to right in any language, with its flags never broken.
+- The Provider, Status and Tests filters on Machines start with All and a count, their chips are at least 44 px, and
+  phones show a short search hint. Figures and counts keep whole phrases in right-to-left languages.
+- Table headers and row buttons are 44 px in every table, and a department's approvals use the same borderless groups
+  as its outbound setup.
+- A field you have to correct shows a pink frame, with the focus ring outside it, as Design set it for fields, and the
+  error of a Feedback title clears as you type.
+
+### Fixed
+
+- The first result of a new turn was refused with "turn-N could not be read" until someone made the branch by hand.
+  The server now makes `turn-N` itself as the turn opens, or before its first result, and never moves a branch that
+  is there.
+- A program with no screen raised `node_silent` again and again while its turn streamed its work and called Hornhoof
+  tools. The turn's own work now counts as a sign of life, also after a restart, and in the wait of an update, which
+  could cut such a turn short. A held turn whose program is gone ends as interrupted, and the next turn goes out.
+- Hornhoof's words that arrived as Claude Code started a turn for its own notice opened a false "assignment words not
+  recorded" case. They now join that turn. Releasing a hold calls a program busy exactly when `program_screen` does,
+  so an idle program at an empty prompt is no longer refused as busy.
+- A machine its owner took off the company's checks still lent its built-in node to test runs and work runs. It lends
+  none now, and Machines marks such a machine in its row and its card.
+- A read whose answer broke off, as when a page reloads, gave null and made Feedback, Machines and the line about where
+  Hornhoof runs throw. It now fails as a read that reached no server, which every screen already shows or tries again.
+- The glow of a busy or waiting card and its focus ring follow the cut corner of the card's frame, so no dark triangle
+  of the map shows there (style book 1.4).
+- The zoom label of the map, such as 115%, is no longer cut off.
+
+### Russian
+
+Оркестратор разбирает ящик любого сотрудника и держит открытую владельцем машину, пока открыт доступ; сообщение занятому
+или переподключающемуся сотруднику ждет его, а не теряется; проверка выпуска идет частями до часа, а карточка машины
+стоит простыми блоками.
+
+- Оркестратор читает ящик любого сотрудника и отмечает его письма прочитанными или сделанными, выбирая их по id, виду,
+  источнику, задаче или «получено до», с причиной. CEO и его заместитель делают то же через
+  `POST /api/agents/:id/inbox/mark`, экрана для этого пока нет. Каждая такая отметка попадает в журнал сотрудника: кто
+  отметил сколько писем и почему. Другой сотрудник получает 403 на чужой ящик, а ключ ассистента 401. Каждая новая
+  компания получает это в навыках оркестратора.
+- `failures` дает каждой заблокированной задаче `next`: последний раздел Next из отчета ее исполнителя, а без него
+  последние 500 знаков отчета, очищенные для любого читателя.
+- Каждый работающий сотрудник компании скачивает через `hh-fetch` файлы и картинки вопросов любой задачи компании, в
+  том числе других отделов; работа личных ассистентов для них закрыта. Пути, которые задача может менять, могут быть
+  шаблонами, а файлы тестов и папки `test`, `tests` и `e2e` рядом с ними разрешены всегда.
+- Когда владелец машины открывает ее, оркестратор работает на ней в любом своем ходе, пока доступ открыт: уведомления,
+  письма сотрудников, пробуждения и следующие ходы, а не только пока этот человек снова не напишет. Другие машины
+  остаются закрыты. Ход, последние слова которого от человека без прав на машину или от того, кого Hornhoof не может
+  назвать, по-прежнему получает отказ. Известные пределы: правило смотрит на слова хода, а не на данные, поэтому
+  оркестратор по-прежнему читает задачи и ящики, сессия программы может помнить слова такого человека из прошлого хода,
+  а глава может передать его просьбу письмом, которое считается словами сотрудника; ход, разбуженный задачей,
+  комментарием, ответом или отменой человека без прав или владельцем отдела на чужой машине, теперь не выполняет там
+  команд, и работа продолжается в следующем ходе; слияния из сети будят оркестратора от имени Hornhoof и не считаются
+  ничьими словами.
+- Сообщение сотруднику, чей идущий ход его не принял или чья машина снова выходит на связь, ждет в его очереди
+  следующего хода, а не получает отказ и не теряется. Машина считается выключенной, только когда так говорит ее
+  карточка. Сообщение, которое все же не может уйти, называет код причины, получателя и задачу, а `failures` показывает
+  его среди недоставленных с этой причиной, очищенной от учетных данных и личных путей.
+- Личные ассистенты скрыты от Operations: его SQL-чтение не видит ни их таблиц, ни их самих среди агентов, а оператор
+  программ не доставляет в их ходы и не восстанавливает их.
+- Полная проверка выпуска идет двумя-четырьмя частями до часа каждая, по скорости машин, которые их берут. Сам полный
+  прогон по-прежнему ничего не берет из прошлых; профили выпуска теперь берут и зеленый результат, доказанный на любой
+  ветке на коммите, который есть в main.
+- Полная машина компании сохраняет свое место, что бы ни показали ее память, свободный диск или скорость диска: замеры
+  только упорядочивают подходящие машины. «Машины» называют причину для любой машины без места, и прочерк в списке
+  тоже ее говорит. Диск, заполнившийся во время снятия копии, по-прежнему останавливает эту копию.
+- Нижняя часть раскрытой карточки машины стоит тремя блоками со своими заголовками: сервер и копия данных, система с
+  программами и доступом к компьютеру, настройки и действия владельца. «Связь с сервером» сначала говорит, держится ли
+  она, затем строка на каждый обрыв: когда, на сколько и почему; коды ждут за «Показать технические подробности».
+  «Копировать» и «Отмена» стоят под своей командой, кнопки владельца стоят одной группой, а команда установки читается
+  слева направо на любом языке, и ее флаги никогда не рвутся.
+- Фильтры «Провайдер», «Статус» и «Тесты» на «Машинах» начинаются с «Все» и числа, их кнопки не меньше 44 px, а на
+  телефоне есть короткая подсказка поиска. Числа и счетчики держат целые фразы в языках с письмом справа налево.
+- Заголовки таблиц и кнопки строк высотой 44 px во всех таблицах, а одобрения отдела стоят такими же группами без
+  рамки, как настройка его рассылок.
+- Поле, которое нужно исправить, обведено розовой рамкой, с кольцом фокуса снаружи, как Дизайн задал для полей, а
+  ошибка заголовка в «Обратной связи» пропадает, пока вы печатаете.
+- Первый результат нового хода получал отказ «turn-N could not be read», пока кто-нибудь не создаст ветку руками. Теперь
+  сервер сам создает `turn-N` при открытии хода или перед его первым результатом и никогда не двигает уже существующую
+  ветку.
+- Программа без экрана снова и снова поднимала `node_silent`, пока ее ход передавал свою работу и вызывал инструменты
+  Hornhoof. Теперь работа самого хода считается признаком жизни, и после перезапуска, и в ожидании обновления, которое
+  могло оборвать такой ход. Удержанный ход, чья программа пропала, заканчивается как прерванный, и уходит следующий ход.
+- Слова Hornhoof, пришедшие в момент, когда Claude Code начинал ход по своему уведомлению, открывали ложный случай
+  «assignment words not recorded». Теперь они входят в этот ход. Снятие удержания считает программу занятой ровно тогда,
+  когда так говорит `program_screen`, поэтому простаивающая программа у пустой строки больше не получает отказ как
+  занятая.
+- Машина, которую владелец снял с проверок компании, все еще отдавала свой встроенный узел тестовым и рабочим прогонам.
+  Теперь она не отдает ни одного, а «Машины» отмечают такую машину в ее строке и карточке.
+- Чтение, ответ на которое оборвался, например при перезагрузке страницы, давало null, и «Обратная связь», «Машины» и
+  строка о том, где работает Hornhoof, падали. Теперь оно завершается как чтение, не дошедшее до сервера, что каждый
+  экран уже показывает или повторяет.
+- Свечение занятой или ждущей карточки и ее кольцо фокуса идут по срезанному углу рамки, и в углу больше не видно
+  темного треугольника карты (книга стиля 1.4).
+- Подпись масштаба карты, например 115%, больше не обрезается.
 
 ## [0.29.2] - 2026-11-16
 
