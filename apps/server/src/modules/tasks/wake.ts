@@ -21,6 +21,7 @@ import { afterFailure } from './failures.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
+import { releaseJobPhones } from '../phones/queue.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -701,6 +702,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure, inboxWake: jobs.inboxWake })
     .from(jobs)
     .where(eq(jobs.id, jobId));
+  await releaseJobPhones(ctx, jobId, job?.status === 'done' ? 'completed' : job?.error === 'cancelled' ? 'cancelled' : 'lost');
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
   /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
@@ -751,6 +753,7 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const job = await requestCancellation(ctx, jobId);
   if (!job) return;
+  await releaseJobPhones(ctx, jobId);
   const node = identityOf(job.sub, job.job.nodeId, job.job.builtinMachine, ownBuiltin(ctx.config));
   if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db

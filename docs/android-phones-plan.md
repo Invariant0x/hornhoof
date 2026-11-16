@@ -124,14 +124,21 @@ truthfully; an unverified claim of zero administrator prompts is not acceptable.
 
 ## One credential mechanism and recording privacy
 
-Before implementation, agree with the authors of tasks 1075 and 1076 on the exact
-shared node API and its owner. Proposed owner: 1076. Proposed boundary: a
-credential reference, a server-derived company/principal/job/task context and
-opaque field targets; the shared executor resolves the secret only on the trusted
-execution path, registers it with redaction, calls the local browser or phone
-adapter and returns a value-free receipt. The phone implementation supplies an
-adapter, never a second credential resolver or a parallel secret transport.
-This proposal is pending their responses; it is not an agreed contract yet.
+The three authors agreed before the phone fill implementation. Task 1076 owns
+`SecretFills`, `FillAdapter`, `SecretValue`, `SecretFill`, `sameSite` and the vault
+server's `usePhoneTargets` hook. Task 1075 confirmed the same mechanism on
+2026-11-16 at 14:17 UTC. With the head's permission, dependency
+`21cf42d02cc0dcd7d3978e94ef0a19da1516f5e7` was merged into this isolated task
+branch as `fb7f43efc5a7f5df9758a1a440f269bd2cd26e91`. No dependency or phone
+change is authorized for the turn before the dependency passes Security and enters
+the turn through its own route. If its contract changes in review, take its new
+head and repeat the phone integration checks.
+
+The phone uses `apps/node/src/secret-fill/index.ts` and its `values.ts` wrapper,
+the protocol exports in `packages/protocol/src/secret-fill.ts`, and
+`apps/server/src/modules/vault/fill.ts`. It supplies only the phone adapter and
+active-session target resolver. Values enter adb through stdin. There is no second
+resolver, credential tool or secret transport.
 
 Secret substitution runs on the phone execution machine, even when the borrowing
 agent runs elsewhere. Values and current TOTP codes never enter tool arguments,
@@ -207,3 +214,53 @@ requirement-to-test evidence. Independent Review and required Security must pass
 before any shared-branch integration; Tests checks the final repaired candidate.
 No main/turn integration, deployment or live device action is authorized by this
 architecture document.
+
+## First Development checkpoint
+
+The network backend is implemented in the first code checkpoint, not handed in as
+the completed task. This includes person-owned registration, the company boundary,
+agent tools, a transactional FIFO queue, local fenced leases, owner Stop, job
+cancellation, sanitized frame storage, owner live-view routes and task recordings.
+Queue order uses a database sequence, including when timestamps are equal. A Stop
+fence also rejects an open message that arrives after its own revocation. The
+executing node's current key and machine binding are checked on the server.
+
+The node uses pinned `pngjs` 7.0.0 and `saxes` 6.0.0, and development types
+`@types/pngjs` 6.0.5. PNGs are bounded before decompression, decoded and re-encoded
+with no source metadata; XML with a DTD or uncertain bounds is rejected. These
+packages do not introduce a second mobile MCP server. Text entry currently accepts
+printable ASCII, including quotes, spaces and a literal `%s`; other scripts return
+a needs-person result instead of silently altering input.
+
+Executed checkpoint checks on the source of that commit:
+
+- Node: `vitest run test/phone-adb.test.ts test/phone-redaction.test.ts
+  test/phone-session.test.ts test/phone-executor.test.ts test/secret-fill.test.ts
+  test/redact.test.ts`, 6 files and 32 tests passed. The password marker is checked
+  across replies, frames, logs and the decoded masked pixels.
+- Node callers: `main.test.ts`, `commands.test.ts`, `credentials.test.ts`,
+  `login.test.ts`, `first-setup.test.ts`, `account.test.ts`,
+  `terminal-mac-peer.test.ts`, `wait-update.test.ts`, 8 files and 171 tests passed.
+- Protocol: `phones.test.ts` and `secret-fill.test.ts`, 2 files and 10 tests passed.
+- Server: `phones.test.ts`, `phone-tools.test.ts`, `phone-lifecycle.test.ts`,
+  `phone-recording.test.ts`, `phones-migration.test.ts`, 5 files and 6 tests passed.
+  The migration check covers a fresh database, an upgrade retaining existing
+  company/task rows and repeat application. This repository supplies no down
+  migration. The added tables leave the previous release's existing tables intact.
+- Production TypeScript checks for server/node and lint of the changed sources
+  and tests passed. Server test TypeScript first exhausted its default 2 GB heap
+  (exit 134). With a 4 GB heap it reported only two dependency errors, TS18046 in
+  `apps/server/test/vault-leak.test.ts` lines 60 and 62, where `tables` and `rows`
+  are unknown. The same code was checked on dependency head `7af23826`; its author
+  was asked to fix it on that branch. This stage is not a pass and those tests
+  were not weakened or edited here. Node test types and affected-file lint are
+  checked separately. No whole run or `run_tests` was used. Some setup-heavy
+  server tests and existing node callers exceed one second locally; no performance
+  guarantee or full-release verdict is claimed.
+
+Still required: person-facing UI and its browser evidence, Android wireless
+pairing setup, the USB host bridge and its installer/updater integration, a combined
+server/node unique-marker integration check, concurrent allocation and broader
+caller checks, the final exact-candidate author evidence, Review, Security and
+Tests. There is no real-phone evidence yet. Do not present this checkpoint as a
+finished feature or integrate it into a shared branch.

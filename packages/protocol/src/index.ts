@@ -20,6 +20,8 @@ import { HarnessSynced } from './harness.js';
 import { FillKind, SecretFill, SecretFilled } from './secret-fill.js';
 export { HarnessClaim, HarnessDone, HarnessFailed, HarnessSynced, HarnessUnit } from './harness.js';
 export * from './secret-fill.js';
+export * from './phones.js';
+import { PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
@@ -484,7 +486,7 @@ export const HELLO_IDS_MAX = 20_000;
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, SecretFilled,
+  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, SecretFilled, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -498,6 +500,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     running: z.array(z.string()).max(HELLO_IDS_MAX),
     models: Models.optional(),
     terminals: z.boolean().optional(),
+    phones: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
@@ -706,7 +709,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
-  CheckQueueReply, SecretFill,
+  CheckQueueReply, SecretFill, PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
     type: z.literal('job.run'),
     jobId: Id,
