@@ -155,7 +155,7 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
   const place: TableColumn<MachineRow>[] = priority ? [{ key: 'priority', label: t.cards.priority, direction: 1, className: 'k-prio', lead: true, value: placeOf, cell: m => <PriorityCell row={m} /> }] : [];
   return [
     ...place,
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OtherBuild row={m} /><BrowserIssue row={m} /></> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b>{load(m)}%</b></span> },
@@ -222,6 +222,19 @@ function OtherBuild({ row }: { row: MachineRow }) {
 function BuildNote({ row }: { row: MachineRow }) {
   const t = useT();
   return row.otherBuild ? <p className="machine-note">{buildNote(t, row.otherBuild)}</p> : null;
+}
+
+/* The mark of a machine its owner took back from the company's runs, in its row and its card; the server's own card on
+   no machine of the company lends always and has none. */
+function OffChecks({ row }: { row: MachineRow }) {
+  const t = useT();
+  return row.lendsTests === false ? <span className="badge off" title={t.machines.offChecksNote}>{t.machines.offChecks}</span> : null;
+}
+
+/* The same in words in its card, for a screen with no pointer to show the mark's title. */
+function OffChecksNote({ row }: { row: MachineRow }) {
+  const t = useT();
+  return row.lendsTests === false ? <p className="machine-note">{t.machines.offChecksNote}</p> : null;
 }
 
 function BrowserIssue({ row }: { row: MachineRow }) {
@@ -577,13 +590,14 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const openHere: [string, string][] = row.openAt ? [[t.machines.openHere, `localhost:${row.openAt}`]] : [];
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
         <Part title={t.cards.resources}>
           <Resources row={row} />
           {row.server && <p className="machine-note">{m ? t.machines.builtinHere : t.machines.builtinAbout}</p>}
+          <OffChecksNote row={row} />
           <BuildNote row={row} />
           <BrowserNote row={row} />
           <NetworkPlace row={row} />
