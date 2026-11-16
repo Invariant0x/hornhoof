@@ -2076,8 +2076,16 @@ export class TerminalHost {
   }
 
   private dequeuedWords(a: Agent, text: string): void {
+    if (this.joinsOwnWords(a, text)) return;
     if (!a.turn || !a.busy || this.overIn(a)) { void this.openTyped(a, text, true); return; }
     this.dequeuedInTurn(a, text);
+  }
+
+  /* Claude starts a turn by itself for a notice of its own, a background command that ended, just as Hornhoof's words go
+     in: they join that turn. The notice is no person's, so it opens no turn of a person's, and the turn stays the one whose
+     words they are, for them to be taken in. */
+  private joinsOwnWords(a: Agent, text: string): boolean {
+    return isProgramOwnPrompt(text) && Boolean(a.turn && !a.turn.typed && !this.overIn(a) && a.turn.words.originalPending());
   }
 
   /* Claude took what it queued in a turn that seems to run. That turn may have ended already, with its Stop refused and its

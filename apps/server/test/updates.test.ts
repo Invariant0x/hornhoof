@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
@@ -778,6 +778,15 @@ describe('updates', () => {
     await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: orchestrator.id, prompt: 'y', kind: 'conversation', status: 'running', startedAt: new Date(), timeoutMs: 1000 });
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
     expect(res.json().waiting).toMatchObject({ turns: [{ agent: orchestrator.name, task: null }], lost: [{ agent: 'Zed', task: null }] });
+  });
+
+  it('waits for a turn whose node reports no program but streams its work, as the node_silent alarm counts it alive', async () => {
+    const { app, db, ceo, control, acme, zed, job } = await companyAtWork(new Date(Date.now() - LOST_AFTER_MS - 60_000));
+    await db.insert(agentEvents).values({ companyId: acme.id, agentId: zed.id, jobId: job.id, kind: 'text', data: { text: 'Working.' }, createdAt: new Date(Date.now() - 60_000) });
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toBeNull();
+    expect(res.json().waiting).toMatchObject({ turns: [{ agent: 'Zed', task: null }], lost: [] });
   });
 
   it('calls the update off at its deadline: it stops no running work, lets the held turns go, says why and tells the orchestrator', async () => {

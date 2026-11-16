@@ -54,13 +54,14 @@ it.each<[string, Partial<RecoverySource>, Record<string, unknown>]>([
   expect(await stateOf(c)).toMatchObject({ program: 'here', current: c.identity.instance, ...facts });
 });
 
-it('counts what a program did since the words as work it is on, and says which generation of it that is', async () => {
+/* program_screen calls a program idle when it works on no turn; the release is told the same, whatever it did since. */
+it('counts no work a program did since the words as work it is on, and says which generation of it that is', async () => {
   const c = fixture(), key = c.identity.agentKey;
   c.runtime.typed(key);
   const typed = await stateOf(c) as OperatorRecoveryState;
   expect(typed).toMatchObject({ input: 'empty', busy: false });
   c.runtime.activity(key);
-  expect(await stateOf(c)).toMatchObject({ input: 'empty', busy: true, generation: typed.generation + 1 });
+  expect(await stateOf(c)).toMatchObject({ input: 'empty', busy: false, generation: typed.generation + 1 });
 });
 
 it('ignores an older revoke and does not move a case deadline on replay', async () => {

@@ -87,17 +87,16 @@ export async function dataViews(ctx: Ctx, now = new Date()): Promise<Map<string,
 
 async function viewsOf(ctx: Ctx, { rows, lines }: Read, now: Date): Promise<Map<string, DataView>> {
   const { db } = ctx;
-  const [sized] = await queryOf(db)<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
   const [link] = await db.select({ name: publicLinks.name }).from(publicLinks).limit(1);
-  const fit = { dbSize: Number(sized?.size ?? 0), link: Boolean(link), now };
+  const fit = { link: Boolean(link) };
   const byId = new Map((await candidates(db, now, { shares: false })).map(candidate => [candidate.id, candidate]));
   const old = await oldLeader(ctx);
   return new Map(
     rows.map(row => {
       const candidate = byId.get(row.id);
-      /* A machine with a place, or one that holds the data, needs no reason; any other says the first thing that keeps
-         it from holding a copy. */
-      const reason = row.serverOrder === null && row.role !== 'data' && candidate ? unfit(candidate, fit) : null;
+      /* A machine with a place needs no reason; any other says the first thing that keeps it from holding a copy, one
+         that holds the data too, so no card shows a dash with nothing said of it. */
+      const reason = row.serverOrder === null && candidate ? unfit(candidate, fit) : null;
       return [row.id, { number: row.serverOrder, why: row.serverWhy, pin: pinOf(row.serverPin), unfit: reason, copy: lines.get(row.id) ?? null, leftAt: row.dataLeftAt?.toISOString() ?? null, led: ledOf(row, lines.get(row.id) ?? null, old) }];
     }),
   );

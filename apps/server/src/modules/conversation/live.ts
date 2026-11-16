@@ -3,8 +3,7 @@ import { NEXT_TURN_WORDS } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
-import { ApiError } from '../../errors.js';
+import { agents, jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
@@ -22,15 +21,13 @@ const waiting = new WeakMap<Ctx, Map<string, Waiting>>();
 
 const nothingBefore = async (): Promise<void> => {};
 
-export const messageNotDelivered = (): ApiError => new ApiError(409, 'conflict', 'The message did not reach the employee. Check its window and try again.', 'agent_not_ready');
-
 function liveEnvelope(ctx: Ctx, companyId: string, agentId: string, source?: MessageSource) {
   return incomingEnvelope(ctx, companyId, agentId, source?.personId, source?.data);
 }
 
 /* Words for an agent whose turn runs in a live terminal go into that turn at once, typed as a person types; with taskId,
-   only into a turn on that task. The running turn's job, or null when none runs or the words could not go in. before
-   runs once the turn is found, before the words go. */
+   only into a turn on that task. The running turn's job, or null when none runs or the words could not go in, which then
+   wait in the agent's line for its next turn. before runs once the turn is found, before the words go. */
 export async function sayLive(
   ctx: Ctx,
   agentId: string,
@@ -38,12 +35,12 @@ export async function sayLive(
   taskId?: string,
   source?: MessageSource,
   before: (jobId: string) => Promise<void> = nothingBefore,
-  required = false,
 ): Promise<string | null> {
   const [running] = await ctx.db
-    .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, createdBy: jobs.createdBy, sub: subscriptions })
+    .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, createdBy: jobs.createdBy, sub: subscriptions, agentKind: agents.kind })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
+    .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), isNull(jobs.error)))
     .limit(1);
   const node = running && identityOf(running.sub, running.nodeId, running.builtinMachine, ownBuiltin(ctx.config));
@@ -52,8 +49,7 @@ export async function sayLive(
   if (await answersSomeoneElse(ctx, running, source)) return null;
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
-  if (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) return running.id;
-  return missedLive(required);
+  return (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) ? running.id : null;
 }
 
 /* Whether a person's words would go into a turn that answers someone else in Telegram. Every word of a turn goes back to
@@ -78,16 +74,14 @@ const fromTelegram = (data: unknown): boolean => !!data && typeof data === 'obje
    they wait for the next one. */
 const takesLiveWords = (ctx: Ctx, node: NodeIdentity, provider: string): boolean => ctx.hub.hasTerminals(node) && !NEXT_TURN_WORDS.includes(provider);
 
-function missedLive(required: boolean): null {
-  if (required) throw messageNotDelivered();
-  return null;
-}
-
 type Words = { agentKey: string; text: string; ref: string };
 
+const tracksLiveOperator = (ctx: Ctx, node: NodeIdentity, agentKind: string): node is Extract<NodeIdentity, { kind: 'node' }> =>
+  agentKind !== 'assistant' && node.kind === 'node' && ctx.hub.hasProgramOperator(node);
+
 /* The delivery of these words on a node that tracks them: the one they have in this turn already, when they are tried again. */
-async function liveDelivery(ctx: Ctx, node: NodeIdentity, words: Words, running: { id: string; companyId: string }, source?: MessageSource): Promise<OperatorDelivery | undefined> {
-  if (node.kind !== 'node' || !ctx.hub.hasProgramOperator(node)) return undefined;
+async function liveDelivery(ctx: Ctx, node: NodeIdentity, words: Words, running: { id: string; companyId: string; agentKind: string }, source?: MessageSource): Promise<OperatorDelivery | undefined> {
+  if (!tracksLiveOperator(ctx, node, running.agentKind)) return undefined;
   const { agentKey: agentId, text, ref } = words;
   const digest = wordsDigest(text);
   const previous = liveInputOf(source?.data, agentId);
@@ -119,7 +113,7 @@ async function typeWords(ctx: Ctx, node: NodeIdentity, words: Words, operatorDel
   return typed;
 }
 
-async function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, running: { id: string; companyId: string }, source?: MessageSource): Promise<boolean> {
+async function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, running: { id: string; companyId: string; agentKind: string }, source?: MessageSource): Promise<boolean> {
   const words = { agentKey: agentId, text, ref: randomUUID() };
   const delivery = await liveDelivery(ctx, node, words, running, source);
   const typed = await typeWords(ctx, node, words, delivery);

@@ -4,6 +4,7 @@ import { and, desc, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundReviewReceipts, outboundSamplingCounters, supportClassifications, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { isOn } from '../model-checks/lifecycle.js';
@@ -99,7 +100,7 @@ function targetFits(channel: Channel, target: Target): void {
 }
 
 const hasPermission = async (tx: Tx, contact: Contact, channel: Channel): Promise<boolean> =>
-  (await tx.select({ id: outboundPermissions.id }).from(outboundPermissions).where(and(eq(outboundPermissions.contactId, contact.id), eq(outboundPermissions.channelId, channel.id), eq(outboundPermissions.purpose, channel.purpose), eq(outboundPermissions.status, 'granted')))).length > 0;
+  (await tx.select(idOnly(outboundPermissions)).from(outboundPermissions).where(and(eq(outboundPermissions.contactId, contact.id), eq(outboundPermissions.channelId, channel.id), eq(outboundPermissions.purpose, channel.purpose), eq(outboundPermissions.status, 'granted')))).length > 0;
 
 const contactReasons = async (tx: Tx, contact: Contact, channel: Channel): Promise<GateCode[]> => {
   if (contact.doNotContact) return ['contact_suppressed'];
@@ -398,7 +399,7 @@ async function askOrCancel(ctx: Ctx, messageId: string, ask: ReturnType<typeof a
     if (!(err instanceof ApiError)) throw err;
     await ctx.db.transaction(async tx => {
       const [message] = await tx.select({ channelId: outboundMessages.channelId }).from(outboundMessages).where(eq(outboundMessages.id, messageId));
-      await tx.select({ id: outboundChannels.id }).from(outboundChannels).where(eq(outboundChannels.id, message!.channelId)).for('update');
+      await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, message!.channelId)).for('update');
       await tx.update(outboundMessages).set({ status: 'cancelled', reasonCodes: ['stale_binding'], updatedAt: new Date() }).where(and(eq(outboundMessages.id, messageId), inArray(outboundMessages.status, [...RESERVABLE])));
     });
   }
@@ -603,7 +604,7 @@ const reservationOf = async (db: Pick<Ctx['db'], 'select'>, messageId: string): 
 /* A stop is said by the stop itself: its reservation goes back and its message stays. Any other new generation ends it. */
 const sameGenerations = (attempt: Attempt, way: Way): boolean => (way.channel!.status === 'stopped' || attempt.channelGeneration === way.channel!.generation) && attempt.configGeneration === way.account!.configGeneration;
 
-const anyOnItsWay = async (tx: Tx, m: Message): Promise<boolean> => (await tx.select({ id: outboundAttempts.id }).from(outboundAttempts).where(and(eq(outboundAttempts.companyId, m.companyId), eq(outboundAttempts.accountId, m.accountId), inArray(outboundAttempts.status, ['sending', 'unknown'])))).length > 0;
+const anyOnItsWay = async (tx: Tx, m: Message): Promise<boolean> => (await tx.select(idOnly(outboundAttempts)).from(outboundAttempts).where(and(eq(outboundAttempts.companyId, m.companyId), eq(outboundAttempts.accountId, m.accountId), inArray(outboundAttempts.status, ['sending', 'unknown'])))).length > 0;
 
 type Begin = { result: DispatchAdmission; ask: Gates['ask'] };
 
@@ -686,7 +687,7 @@ export const settleAttempt: (...args: [...Parameters<SettleAttempt>, now?: Date]
   if (!seen) return;
   const [owner] = await ctx.db.select({ channelId: outboundMessages.channelId }).from(outboundMessages).where(eq(outboundMessages.id, seen.messageId));
   await ctx.db.transaction(async tx => {
-    await tx.select({ id: outboundChannels.id }).from(outboundChannels).where(eq(outboundChannels.id, owner!.channelId)).for('update');
+    await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, owner!.channelId)).for('update');
     await lockBuckets(tx, [seen]);
     const [attempt] = await tx.select().from(outboundAttempts).where(eq(outboundAttempts.id, attemptId)).for('update');
     if (settled(attempt!, outcome)) return;

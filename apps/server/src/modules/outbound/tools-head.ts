@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders } from '../../auth/internal.js';
 import { outboundAccounts, outboundCatalogRevisions, outboundChannels } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { standingPrincipal } from '../conversation/decision-context.js';
 import type { ToolJob } from '../tools/job.js';
 import { catalogOf } from './catalog-view.js';
@@ -50,7 +51,7 @@ async function ours({ ctx, job }: Head, { kind, id }: Place): Promise<boolean> {
   const own = job.departmentId;
   if (!own) return false;
   const table = TABLE[kind];
-  const [row] = await ctx.db.select({ id: table.id }).from(table).where(and(eq(table.id, id), eq(table.companyId, job.companyId), eq(table.departmentId, own)));
+  const [row] = await ctx.db.select(idOnly(table)).from(table).where(and(eq(table.id, id), eq(table.companyId, job.companyId), eq(table.departmentId, own)));
   return row !== undefined;
 }
 

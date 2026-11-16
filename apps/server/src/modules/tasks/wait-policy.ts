@@ -2,6 +2,7 @@ import type { WaitFinalReview, WaitPlan, WaitSourceKind } from '@hornhoof/protoc
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, waitPolicies } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { departmentOwners } from './decisions.js';
 import type { Task, Tx } from './engine.js';
 
@@ -17,7 +18,7 @@ export function nextReview(review: WaitFinalReview, due: Date, at: Date): { at: 
 type PolicyPlace = { companyId: string; departmentId: string; kind: WaitSourceKind; stage: string; at: Date };
 
 export async function departmentHead(tx: Tx, departmentId: string): Promise<string | null> {
-  const [head] = await tx.select({ id: agents.id }).from(agents)
+  const [head] = await tx.select(idOnly(agents)).from(agents)
     .where(and(eq(agents.departmentId, departmentId), eq(agents.kind, 'head'), isNull(agents.removedAt)))
     .orderBy(asc(agents.createdAt)).limit(1);
   return head?.id ?? null;
@@ -27,7 +28,7 @@ export async function departmentHead(tx: Tx, departmentId: string): Promise<stri
    excepted. Not while it has no head: no dates can be made without one to look at what they miss, and setting more would not
    help whoever is refused. */
 export async function setsWaitDates(tx: Tx, companyId: string, departmentId: string): Promise<boolean> {
-  const [any] = await tx.select({ id: waitPolicies.id }).from(waitPolicies).where(and(eq(waitPolicies.companyId, companyId), eq(waitPolicies.departmentId, departmentId))).limit(1);
+  const [any] = await tx.select(idOnly(waitPolicies)).from(waitPolicies).where(and(eq(waitPolicies.companyId, companyId), eq(waitPolicies.departmentId, departmentId))).limit(1);
   return Boolean(any) && (await departmentHead(tx, departmentId)) !== null;
 }
 
@@ -65,6 +66,6 @@ export async function waitRoute(tx: Tx, task: Pick<Task, 'companyId' | 'departme
   const [department] = task.departmentId ? await tx.select({ id: departments.id, parentId: departments.parentId }).from(departments).where(eq(departments.id, task.departmentId)) : [];
   const owner = department ? (await departmentOwners({ db: tx as unknown as Db }, task.companyId)).get(department.parentId ?? department.id) : undefined;
   if (owner) return { finalDecisionPersonId: owner, fallbackToCeo: false };
-  const [ceo] = await tx.select({ id: people.id }).from(people).where(and(eq(people.companyId, task.companyId), eq(people.isOwner, true), eq(people.status, 'active'))).limit(1);
+  const [ceo] = await tx.select(idOnly(people)).from(people).where(and(eq(people.companyId, task.companyId), eq(people.isOwner, true), eq(people.status, 'active'))).limit(1);
   return { finalDecisionPersonId: ceo?.id ?? null, fallbackToCeo: true };
 }

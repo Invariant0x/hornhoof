@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { departments, outboundCatalogRevisions, outboundChannels } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf, scanText, unsafeLink } from './checks.js';
@@ -52,7 +53,7 @@ const samePlace = (a: Place, b: Place): boolean => a.departmentId === b.departme
 /* A product named here is of this department and company. */
 export async function requireProductOf(db: Pick<Db, 'select'>, at: { companyId: string; departmentId: string; productId?: string | undefined }): Promise<void> {
   if (!at.productId) return;
-  const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, at.productId), eq(departments.parentId, at.departmentId), eq(departments.companyId, at.companyId)));
+  const [product] = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, at.productId), eq(departments.parentId, at.departmentId), eq(departments.companyId, at.companyId)));
   if (!product) throw noSuch('product');
 }
 

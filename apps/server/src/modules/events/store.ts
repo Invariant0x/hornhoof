@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
 import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 import { notStep } from '../tools/steps.js';
 
@@ -56,8 +57,9 @@ export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e:
   return event;
 }
 
-/* Serialize a stream write with Stop and completion on the same job row, before publishing it. */
-export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<void> {
+/* Serialize a stream write with Stop and completion on the same job row, before publishing it. Whether it was stored: only
+   for a turn of the node's own that runs. */
+export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<boolean> {
   const stored = await ctx.db.transaction(async tx => {
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('no key update');
@@ -66,13 +68,14 @@ export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: strin
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
   });
   if (stored) await publishEvent(ctx, stored.companyId, stored.agentId, stored.id);
+  return stored !== null;
 }
 
 /* Only the receiving copy carries by, which the per-turn send quota counts after a restart. */
 async function outgoingLetter(db: Db, e: NewEvent, message?: MessageEnvelope): Promise<EventValues | null> {
   if (!message || message.direction !== 'in' || message.notification || message.from.kind !== 'agent' || !message.from.id || message.from.id === e.agentId) return null;
   const senderId = message.from.id;
-  const [senderJob] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, senderId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
+  const [senderJob] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, senderId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
   return {
     companyId: e.companyId, agentId: senderId, jobId: senderJob?.id ?? null, kind: 'message',
     data: hideCodes(messageData({ text: (e.data as { text?: unknown }).text }, { ...message, direction: 'out' })), personId: null,
@@ -142,7 +145,7 @@ export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { i
    screens count them; an assistant's own agent works for its owner, not for the company. apart: jobs left out. */
 export async function workingCount(db: Db, companyId: string, among?: string[], employees = false, apart: string[] = []): Promise<number> {
   if (among?.length === 0) return 0;
-  const assistantsOwn = db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant')));
+  const assistantsOwn = db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant')));
   const [row] = await db
     .select({ n: countDistinct(jobs.agentId) })
     .from(jobs)
@@ -153,7 +156,7 @@ export async function workingCount(db: Db, companyId: string, among?: string[], 
 /* The last people's messages and his answers from turns that are over, oldest first, for a new session to catch up. */
 export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<EventView[]> {
   /* Unsent task wakes stay in the log: a new session must not receive them as catch-up instructions. */
-  const unspoken = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), inArray(jobs.error, ['stale', 'waiting']))));
+  const unspoken = db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), inArray(jobs.error, ['stale', 'waiting']))));
   const rows = await db
     .select(columns)
     .from(agentEvents)

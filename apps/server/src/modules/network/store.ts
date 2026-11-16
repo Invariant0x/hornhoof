@@ -4,6 +4,7 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { authority, certificates, companies, machines, peerSecrets, people, type MachineRole } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { issueCertificate, makeAuthority, type Authority, type Issued } from './authority.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
@@ -30,7 +31,7 @@ export async function makeAuthorityOnce(db: Db, config: Config, companyId: strin
 
 /* The person a row nobody joined belongs to: the owner, who cannot be disabled, else the company's first person. */
 async function ownerOf(tx: Db, companyId: string): Promise<string> {
-  const [person] = await tx.select({ id: people.id }).from(people).where(eq(people.companyId, companyId)).orderBy(desc(people.isOwner), asc(people.createdAt)).limit(1);
+  const [person] = await tx.select(idOnly(people)).from(people).where(eq(people.companyId, companyId)).orderBy(desc(people.isOwner), asc(people.createdAt)).limit(1);
   if (!person) throw new ApiError(409, 'conflict', 'This company has no person yet.');
   return person.id;
 }
@@ -49,10 +50,10 @@ export async function thisMachine(db: Db, config: Config, companyId: string): Pr
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT 1 FROM ${companies} WHERE ${companies.id} = ${companyId} FOR UPDATE`);
     const values = { companyId, personId: await ownerOf(tx, companyId), machineKey: `${SERVER_KEY}${networkId}`, networkId, role: 'data' as const };
-    const [found] = await tx.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, networkId), live));
+    const [found] = await tx.select(idOnly(machines)).from(machines).where(and(eq(machines.networkId, networkId), live));
     /* An identity retired earlier that this install comes back to is this machine again. */
     await tx.insert(machines).values(values).onConflictDoUpdate({ target: machines.networkId, set: { revokedAt: null, role: 'data' } });
-    const [mine] = await tx.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, networkId), live));
+    const [mine] = await tx.select(idOnly(machines)).from(machines).where(and(eq(machines.networkId, networkId), live));
     if (found) return mine!;
     const older = await tx.update(machines).set({ revokedAt: new Date() }).where(and(serverRow, live, ne(machines.id, mine!.id))).returning({ id: machines.id });
     for (const { id } of older) await tx.update(certificates).set({ revokedAt: new Date() }).where(and(eq(certificates.machineId, id), isNull(certificates.revokedAt)));

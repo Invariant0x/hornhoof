@@ -330,6 +330,17 @@ describe('templates', () => {
     expect(hornhoof).not.toMatch(/\u2014/);
   });
 
+  it("tells the orchestrator it clears any employee's inbox with a reason, and works on an open machine in any turn but one a person without the right spoke last in", () => {
+    const trouble = body('orch-trouble');
+    expect(trouble).toMatch(/Any employee's inbox is open to you[\s\S]*inbox and the employee's id in employee[\s\S]*inbox_mark[\s\S]*kind, source, task and receivedBefore[\s\S]*reason/);
+    expect(trouble).toMatch(/goes in that employee's log with your name, the reason and how many letters/);
+    expect(trouble).toMatch(/employees mark only their own letters/);
+    const resources = body('orch-resources');
+    expect(resources).toMatch(/while it stays open you work there in any turn of yours[\s\S]*with no new word of anyone, except a turn whose last words came from a person other than its owner, the CEO or the CEO delegate/);
+    expect(resources).not.toMatch(/runs only in a turn that answers/);
+    for (const id of ['orch-trouble', 'orch-resources']) expect(body(id), id).not.toMatch(/[\u2014ё]/);
+  });
+
   it('asks for reports to people and heads in ordinary words with spaces', () => {
     for (const id of ['hh-report-to-head', 'hh-hornhoof']) expect(body(id), id).toMatch(/ordinary words[^.]*with spaces/);
   });
@@ -833,7 +844,12 @@ describe('templates', () => {
     it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', async () => {
       const root = join(DIR, '..');
       const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
-      expect(styleBook).toContain('Version 1.3, approved by the head of Design on 2026-11-13.');
+      expect(styleBook).toContain('Version 1.4, approved by the head of Design on 2026-11-16.');
+      const sizesSection = styleBook.slice(styleBook.indexOf('## 3. Spacing and sizes'), styleBook.indexOf('## 4. Components'));
+      expect(sizesSection).toContain(
+        '**RULE, all skins.** The frame, selection border and glow of an element follow its shape, cut corner included. A rectangular `box-shadow` or `outline` around a `clip-path` shape is not allowed',
+      );
+      expect(styleBook).toContain('| 1.4 | 2026-11-16 | Frame, selection and glow follow the cut corner in all skins, section 3 (#1070) | Head of Design |');
       expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
       for (const heading of [
         '## 1. Colours',

@@ -31,18 +31,19 @@ afterEach(() => localStorage.clear());
 
 describe('Subscriptions & API', () => {
   it.each([
-    ['en', 'Subscriptions & API', 'By subscription', 'By tokens', 'Type'],
-    ['ru', 'Подписки и API', 'По подписке', 'По токенам', 'Тип'],
-  ])('names the section in %s, marks how each connection is paid and filters by it', async (language, heading, plan, tokens, payment) => {
+    ['en', 'Subscriptions & API', 'Personal plan, paid by subscription', 'API key, paid by tokens', 'By tokens', 'Type'],
+    ['ru', 'Подписки и API', 'Личная подписка, оплата по тарифу', 'API-ключ, оплата по токенам', 'По токенам', 'Тип'],
+  ])('names the section in %s, marks how each connection is paid by a sign with its words and filters by it', async (language, heading, plan, key, tokens, payment) => {
     localStorage.setItem('hh-lang', language);
     lists();
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
     const rows = () => screen.getAllByRole('row').slice(1);
-    expect(within(screen.getByRole('row', { name: /^Claude\b/ })).getByText(plan)).toHaveClass('badge');
-    expect(within(rows().find(r => r.textContent!.includes('WXYZ'))!).getByText(tokens)).toHaveClass('badge');
+    expect(within(screen.getByRole('row', { name: /^Claude\b/ })).getByRole('img', { name: plan })).toHaveAttribute('title', plan);
+    expect(within(rows().find(r => r.textContent!.includes('WXYZ'))!).getByRole('img', { name: key })).toHaveAttribute('title', key);
+    expect(rows().map(r => r.textContent!.includes(tokens))).toEqual(rows().map(() => false));
     fireEvent.click(within(screen.getByRole('group', { name: payment })).getByRole('button', { name: new RegExp(`^${tokens}`) }));
-    expect(rows().map(r => r.textContent!.includes('By tokens') || r.textContent!.includes('По токенам'))).toEqual([true, true]);
+    expect(rows().map(r => within(r).queryByRole('img', { name: key }) !== null)).toEqual([true, true]);
   });
 
   it.each([['en', 'Tokens, 30 days', 'Tokens', 'Today', '7 days', '30 days', 'All time', 'Input', 'turn told no tokens'], ['ru', 'Токены, 30 дней', 'Токены', 'Сегодня', '7 дней', '30 дней', 'Всего', 'Ввод', 'ход без данных']])(
@@ -76,7 +77,8 @@ describe('Subscriptions & API', () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [ROUTER, acme, codexRouter] }] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
-    const mark = (last4: string) => within(screen.getAllByRole('row').find(r => r.textContent!.includes(last4))!).getByRole('img').getAttribute('aria-label');
+    /* The program's mark comes first in a row, before the sign of how it is paid. */
+    const mark = (last4: string) => within(screen.getAllByRole('row').find(r => r.textContent!.includes(last4))!).getAllByRole('img')[0]!.getAttribute('aria-label');
     expect([mark('WXYZ'), mark('M3N4'), mark('QRST')]).toEqual(['Claude', 'Codex', 'Codex']);
   });
 

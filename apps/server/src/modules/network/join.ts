@@ -8,6 +8,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { certificates, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people, publicLinks, type MachineRole } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { dropAccess } from '../computer/access.js';
 import { holdsData } from '../copies/holds.js';
@@ -96,7 +97,7 @@ export async function dropPeerSecrets(tx: Db): Promise<void> {
 export async function revokeMachineRows(tx: Db, machineIds: string[], now: Date): Promise<boolean> {
   if (machineIds.length === 0) return false;
   const these = inArray(machines.id, machineIds);
-  const cored = await tx.select({ id: machines.id }).from(machines).where(and(these, isNotNull(machines.networkId)));
+  const cored = await tx.select(idOnly(machines)).from(machines).where(and(these, isNotNull(machines.networkId)));
   await tx.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.machineId, machineIds), isNull(certificates.revokedAt)));
   await dropAccess(tx, machineIds, now);
   await tx.update(machines).set({ networkId: null }).where(and(these, eq(machines.role, 'worker')));

@@ -58,7 +58,7 @@ function ProgramControls({ id, online, programs, canUpdate, onUpdated }: Props) 
   const { pending, failure, update } = useProgramUpdate(id, onUpdated);
   const busy = pending || (online && updating(programs));
   return <>
-    {canUpdate && <div className="machine-actions"><button type="button" className="btn small" disabled={!hasPrograms(online, programs) || busy} onClick={() => void update()}>{t.machines.updatePrograms}</button></div>}
+    {canUpdate && <div className="entry-actions"><button type="button" className="act" disabled={!hasPrograms(online, programs) || busy} onClick={() => void update()}>{t.machines.updatePrograms}</button></div>}
     {busy && <p className="part-note" role="status">{t.machines.programsUpdating}</p>}
     {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
   </>;

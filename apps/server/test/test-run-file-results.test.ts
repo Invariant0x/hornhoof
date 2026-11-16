@@ -46,11 +46,11 @@ async function fixture(turnNumber = 3, preparation = false) {
   let number = 0;
 
   /* A run through the real path: requested, described by the node, planned, given out. It is of the turn's branch unless it says. */
-  const start = async (request: { profile?: string; suite?: string }, given?: ReturnType<typeof fingerprints> | null, branch = `turn-${turnNumber}`, described = runtimes) => {
+  const start = async ({ minutes, ...request }: { profile?: string; suite?: string; minutes?: number }, given?: ReturnType<typeof fingerprints> | null, branch = `turn-${turnNumber}`, described = runtimes) => {
     const prints = given === undefined ? [...fingerprints(), ...(preparation ? [{ ...PREPARATION_UNIT, fingerprint: print('e') }] : [])] : given;
     number += 1;
-    const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, branch, command: '', commitSha: TEST_COMMIT, timeoutMs: 600_000,
-      environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }) }).returning();
+    const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, branch, command: '', commitSha: TEST_COMMIT, timeoutMs: (minutes ?? 10) * 60_000,
+      environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }, undefined, minutes) }).returning();
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
     const value = manifest(preparation), manifestSource = JSON.stringify(value);
@@ -66,11 +66,16 @@ async function fixture(turnNumber = 3, preparation = false) {
     const selection = part.environmentSelection!.selection;
     return selection.kind === 'batch' ? selection.selections.flatMap(member => member.files) : [];
   }).sort();
-  /* The node's end of every open part of a run. */
+  /* The node's end of every open part of a run, also of a part that waited for the node until another ended. */
   const finish = async (runId: string, how: { ok?: boolean; files?: { suiteId: string; file: string; status: 'passed' | 'failed'; note?: string }[]; commit?: string; runtimes?: typeof runtimes } = {}) => {
+    const ended = new Set<string>();
+    while ((await partsOf(runId)).some(part => part.status === 'running' && !ended.has(part.id))) await finishRunning(runId, how, ended);
+  };
+  const finishRunning = async (runId: string, how: Parameters<typeof finish>[1] = {}, ended: Set<string>) => {
     const { ok = true, commit = TEST_COMMIT } = how, run = await runOf(runId);
     for (const part of await partsOf(runId)) {
-      if (part.status !== 'running') continue;
+      if (part.status !== 'running' || ended.has(part.id)) continue;
+      ended.add(part.id);
       const selection = part.environmentSelection!.selection;
       if (selection.kind !== 'batch' && selection.kind !== 'prepare') throw new Error('This fixture plans versioned parts.');
       const count = selection.kind === 'batch' ? selection.selections.length : run.environmentSnapshot!.description.manifest.execution!.oncePreparation!.commands.length + run.environmentSnapshot!.description.manifest.execution!.oncePreparation!.suiteIds.length;
@@ -180,6 +185,46 @@ describe('reusing green test results', () => {
     const next = await f.start({ profile: 'final' });
     expect(await f.ranFiles(next)).toEqual([]);
     expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: number, reused: 3 });
+  });
+
+  /* A part that runs into its limit sends the whole release check again, so the full run takes an hour a part and at least two. */
+  it('gives each part of a full run an hour when no limit was asked and splits it in two on one machine, and keeps a limit that was asked', async () => {
+    const f = await fixture(5);
+    const full = await f.start({ profile: 'full' });
+    expect((await f.runOf(full)).timeoutMs).toBe(3_600_000);
+    expect((await f.partsOf(full)).filter(part => part.environmentSelection!.selection.kind === 'batch')).toHaveLength(2);
+    expect(await f.ranFiles(full)).toEqual(FILES);
+    expect((await f.runOf(await f.start({ profile: 'full', minutes: 45 }))).timeoutMs).toBe(45 * 60_000);
+    expect((await f.runOf(await f.start({ profile: 'final' }))).timeoutMs).toBe(600_000);
+  });
+
+  /* A fingerprint names a file and all it reads, and a commit in the main line ran the line's own code: what a task branch proved on
+     such a commit holds for the line. */
+  it('takes for the release profile what a task branch proved on a commit that is in the main line now', async () => {
+    const f = await fixture(5);
+    await f.finish(await f.start({ profile: 'fast' }, undefined, 'task-7'));
+    const asked: string[] = [];
+    f.app.ctx.readMerged = async (_repo, refs) => { asked.push(`${refs.base}...${refs.head}`); return refs.head === TEST_COMMIT; };
+    const release = await f.start({ profile: 'final' });
+    expect(await f.ranFiles(release)).toEqual([]);
+    expect((await f.runOf(release)).fileCache).toMatchObject({ mode: 'cached', turn: 5, reused: 3 });
+    expect(asked).toEqual([`main...${TEST_COMMIT}`]);
+  });
+
+  it.each([false, null])('runs again for the release profile what a task branch proved on a commit the main line does not hold (%s)', async merged => {
+    const f = await fixture(5);
+    await f.finish(await f.start({ profile: 'fast' }, undefined, 'task-7'));
+    f.app.ctx.readMerged = async () => merged;
+    expect(await f.ranFiles(await f.start({ profile: 'final' }))).toEqual(FILES);
+  });
+
+  it('runs a file again whose dependency changed since a commit of the main line proved it, and takes the rest', async () => {
+    const f = await fixture(5);
+    await f.finish(await f.start({ profile: 'fast' }, undefined, 'task-7'));
+    f.app.ctx.readMerged = async () => true;
+    const release = await f.start({ profile: 'final' }, fingerprints({ 'test/b.test.ts': print('d') }));
+    expect(await f.ranFiles(release)).toEqual(['test/b.test.ts']);
+    expect((await f.runOf(release)).fileCache).toMatchObject({ mode: 'cached', reused: 2 });
   });
 
   it('counts a task without a turn by the turn open now, and by none with none open', async () => {

@@ -197,6 +197,7 @@ export const assistantReplies = pgTable(
     assistantId: uuid('assistant_id').notNull().references(() => people.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     messageId: uuid('message_id').notNull(),
+    byOwnAgent: boolean('by_own_agent').notNull().default(false),
     jobId: uuid('job_id').notNull().references(() => jobs.id),
     afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
     answered: boolean('answered').notNull().default(false),
@@ -563,6 +564,9 @@ export const subscriptions = pgTable(
     budget: integer('budget'),
     /* The models its node says it can run; null until a node reports them. An API connection's are the ones it was given. */
     models: jsonb('models').$type<ModelOption[]>(),
+    /* The plans its employees go on to, in this order, when it reaches its limit or the share set for tasks, each with the
+       model to run there or none for the one their role asks for. Empty: any plan of the company that may serve them. */
+    fallbacks: jsonb('fallbacks').$type<PlanFallback[]>().notNull().default([]),
     /* Where a compatible API answers, which a person named; null for every other subscription, whose address is known. */
     baseUrl: text('base_url'),
     /* The protocol an API connection's program talks to it in: OpenRouter's choice, a compatible API's own. */
@@ -576,6 +580,9 @@ export const subscriptions = pgTable(
   },
   t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
 );
+
+/* One plan a plan's employees go on to at its limit: model null runs the one their role asks for there. */
+export type PlanFallback = { subscription: string; model: string | null };
 
 export const NODE_STATUSES = ['needs_login', 'needs_setup', 'ready'] as const;
 export type NodeStatus = (typeof NODE_STATUSES)[number];
@@ -700,6 +707,18 @@ export const agents = pgTable(
 );
 
 export type AgentKind = (typeof agents.$inferSelect)['kind'];
+
+/* An employee Hornhoof put on a fallback plan while its own was at its limit: the plan, model and effort it goes back to
+   between turns once that limit starts over, and the fallback it went to. A person who moves it by hand ends it. */
+export const agentFallbacks = pgTable('agent_fallbacks', {
+  agentId: uuid('agent_id').primaryKey().references(() => agents.id),
+  companyId: companyId(),
+  homeSubscriptionId: uuid('home_subscription_id').notNull().references(() => subscriptions.id),
+  homeModel: text('home_model').notNull(),
+  homeEffort: text('home_effort'),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  createdAt: createdAt(),
+});
 
 /* base keeps its stored key for compatibility; it is the assignment, separate from role identity. */
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
@@ -1427,6 +1446,8 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
   version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
+  /* The time limit of a part the run asked for, when it asked for one. */
+  minutes?: number;
   requestId: string | null; nodeId: string | null; builtin: boolean;
   /* The machine whose built-in node was asked, when one was; a request from before machines had theirs names none,
      and was this server's own. */
@@ -1612,7 +1633,7 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
-    /* Proved on the repository's main branch or the turn's, the only results a release takes. */
+    /* Proved on the repository's main branch or the turn's. A release takes these, and those proved on a commit the main branch holds now. */
     mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },
@@ -2767,3 +2788,36 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
   check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
 ]);
+
+/* The company's vault of site sign-ins. A person types them into Hornhoof's form, or gives them to an agent that saves
+   them; the password and the code secret are kept encrypted with the server's key, and every agent of the company takes
+   them as text to sign in. Who added an entry is a person or an agent. */
+export const vaultEntries = pgTable('vault_entries', {
+  id: id(),
+  companyId: companyId(),
+  name: text('name').notNull(),
+  site: text('site').notNull(),
+  login: text('login').notNull(),
+  passwordEnc: text('password_enc').notNull(),
+  /* The one-time code's secret, digits, period and algorithm, as JSON; none when the site asks for no code. */
+  totpEnc: text('totp_enc'),
+  createdBy: uuid('created_by').references(() => people.id),
+  createdByAgent: uuid('created_by_agent').references(() => agents.id),
+  createdAt: createdAt(),
+}, t => [uniqueIndex('vault_entries_company_name').on(t.companyId, sql`lower(${t.name})`)]);
+
+/* Who added, changed, removed or took which entry, when, and for which task; never a value. The name and site stay as they
+   were, so the log still reads after the entry is gone. */
+const VAULT_LOG_KINDS = ['created', 'changed', 'removed', 'taken'] as const;
+export const vaultLog = pgTable('vault_log', {
+  id: id(),
+  companyId: companyId(),
+  entryId: uuid('entry_id').references(() => vaultEntries.id, { onDelete: 'set null' }),
+  entryName: text('entry_name').notNull(),
+  site: text('site').notNull(),
+  kind: text('kind', { enum: VAULT_LOG_KINDS }).notNull(),
+  personId: uuid('person_id').references(() => people.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  at: createdAt(),
+}, t => [index('vault_log_entry_at').on(t.entryId, t.at), index('vault_log_company_at').on(t.companyId, t.at)]);
