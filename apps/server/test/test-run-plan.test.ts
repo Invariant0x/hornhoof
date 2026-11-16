@@ -127,3 +127,46 @@ describe('historical test part planning', () => {
     expect(() => planTestParts({ ...input([10]), unknownFileMs: 0 })).toThrow(/estimate/i);
   });
 });
+
+/* The full run checks a release on its exact commit, and one part that ran into its limit sends the whole of it again. */
+describe('the full run, in two to four parts', () => {
+  const HOUR = 3_600_000;
+  const full = (request: TestPartPlanInput, ceilingMs = HOUR): TestPartPlanInput => ({ ...request, spread: { min: 2, max: 4, ceilingMs } });
+
+  it('takes two parts even where one would cost less or only one machine is free', () => {
+    expect(planTestParts(full(input([10, 20, 30, 40]))).parts).toHaveLength(2);
+    expect(planTestParts(full(input(Array(8).fill(30_000), 1))).parts).toHaveLength(2);
+    expect(planTestParts(full(input(Array(8).fill(30_000), 0))).parts).toHaveLength(2);
+  });
+
+  it('takes no more than four parts however many machines are free', () => {
+    const plan = planTestParts(full(input(Array(40).fill(100_000), 10)));
+    expect(plan.parts).toHaveLength(4);
+    expect(plan.parts.map(part => part.testMs)).toEqual([1_000_000, 1_000_000, 1_000_000, 1_000_000]);
+  });
+
+  it('adds a part when two would run past the limit of one, though only two machines are free', () => {
+    const request = full(input(Array(6).fill(1_000_000), 2), 2_500_000);
+    const plan = planTestParts(request);
+    expect(plan.parts).toHaveLength(3);
+    expect(plan.parts.every(part => part.testMs + request.costs.setupMs <= 2_500_000)).toBe(true);
+    expect(selected(plan)).toEqual(request.units.map(u => `${u.suiteId}:${u.file}`).sort());
+    expect(plan.reason).toContain('2 to 4 parts');
+  });
+
+  it('counts a part that may go to any machine at the pace of the slowest one', () => {
+    const request: TestPartPlanInput = { ...full(input(Array(8).fill(1_000_000), 2), 4_500_000), machines: [{ key: 'fast', pace: 1 }, { key: 'slow', pace: 2 }] };
+    const plan = planTestParts(request);
+    expect(plan.parts).toHaveLength(4);
+    expect(plan.parts.every(part => part.machine === undefined)).toBe(true);
+    expect(Math.max(...plan.parts.map(part => part.testMs)) * 2).toBeLessThanOrEqual(4_500_000);
+  });
+
+  it('keeps the count whose longest part is shortest when no count fits, and the fewer parts on a tie', () => {
+    expect(planTestParts(full(input([5_000_000, 1, 1], 4))).parts).toHaveLength(2);
+  });
+
+  it('leaves the choice of other runs to cost', () => {
+    expect(planTestParts(input([10, 20, 30, 40])).parts).toHaveLength(1);
+  });
+});

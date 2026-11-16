@@ -309,13 +309,28 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await expect(page.getByRole('heading', { level: 1, name: t.subs.heading, exact: true })).toBeVisible();
     await page.evaluate(async () => { await document.fonts.ready; });
     const section = page.locator('section.subs');
-    const pieces = { head: '.people-head', connect: '.head-actions > .btn', tools: '.tools', table: '.tbl' };
+    const pieces = { head: '.people-head', connect: '.head-actions > .btn', tools: '.tools', table: '.tbl', sortHeader: 'thead .sorth', sortButton: '.sortbar .sortb', rowButton: '.rowbtn' };
     expect(await tabsWhole(page)).toEqual([]);
     expect.soft(await offences(section, { danger: [], groups: '.head-actions' })).toEqual([]);
     const measured: Measured[] = [{ browser: browserName, look, screen: 'subscriptions', sizes: await sizes(section, pieces) }];
     await wholePage(page, info.outputPath(`subs-list-${look}-${browserName}.png`));
 
-    await page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn').click();
+    const rowButton = page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn');
+    const sortControl = (await section.locator('thead').isVisible()) ? section.locator('button.sorth').first() : section.locator('button.sortb').first();
+    for (const [label, target] of [['header', sortControl], ['row', rowButton]] as const) {
+      await target.focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await expect(target).toBeFocused();
+      expect(await focusRing(page)).toBe('ring');
+      await around(page, target, info.outputPath(`subs-${label}-focus-${look}-${browserName}.png`));
+    }
+    if (dir === 'rtl') {
+      const [btnBox, chevBox] = [await box(rowButton), await box(rowButton.locator('.chev'))];
+      expect(btnBox.x + btnBox.width - (chevBox.x + chevBox.width)).toBeLessThanOrEqual(2);
+    }
+
+    await rowButton.click();
     const card = page.getByRole('article', { name: /MKT1/ });
     const name = subName(t, MARKETING_KEY);
     const remove = card.getByRole('button', { name: t.subs.removeLabel(name), exact: true });

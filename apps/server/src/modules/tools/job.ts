@@ -5,6 +5,7 @@ import { hashToken } from '../../crypto/tokens.js';
 import { agents, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { mergePending } from '../nodes/parked.js';
+import { turnSign } from '../tasks/turn-signs.js';
 
 export type ToolJob = {
   id: string;
@@ -49,5 +50,7 @@ export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
         .where(and(eq(jobs.toolTokenHash, hashToken(token)), eq(jobs.status, 'running'), sql`${jobs.error} is distinct from 'cancelled'`, isNull(agents.removedAt)))
     : [];
   if (!job) throw await unknownToken(ctx, token);
+  /* A call of a Hornhoof tool is a sign that the turn goes on, whether or not its program has a screen to report. */
+  turnSign(ctx, job.id);
   return job;
 }

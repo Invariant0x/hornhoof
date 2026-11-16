@@ -5,13 +5,13 @@ import type { Ctx } from '../../app.js';
 import { hiddenParty, knowsAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
-import { agents, companies, departments, INBOX_MODES, tasks } from '../../db/schema.js';
+import { agents, companies, departments, INBOX_MODES, LETTER_KINDS, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { mayChangeRules } from '../departments/approval-policy.js';
 import { agentParty, HORNHOOF, personParty, type MessageParty } from '../events/parties.js';
 import { seesTask } from '../tasks/sight.js';
-import { inboxChanged, inboxModeOf, letterTotal, lettersPage, readByPerson, unreadCount, type InboxRow } from './inbox.js';
+import { inboxChanged, inboxModeOf, letterTotal, lettersPage, logMarked, markMail, picksLetters, readByPerson, unreadCount, type InboxRow } from './inbox.js';
 import { pump } from './queue.js';
 
 const IdParams = z.strictObject({ id: z.uuid() });
@@ -22,8 +22,21 @@ const PAGE = 50;
 const InboxQuery = z.object({ limit: z.coerce.number().int().min(1).max(200).optional(), before: z.uuid().optional() });
 const ReadBody = z.union([z.strictObject({ ids: z.array(z.uuid()).min(1).max(200) }), z.strictObject({ all: z.literal(true) })]);
 
+/* Any of the employee's letters marked read or done by a choice of them, with why: kind, source, task and a moment apply
+   together, on these ids or on all. */
+const MarkBody = z.strictObject({
+  status: z.enum(['read', 'done']),
+  ids: z.array(z.uuid()).min(1).max(200).optional(),
+  kind: z.enum(LETTER_KINDS).optional(),
+  source: z.string().trim().min(1).max(64).optional(),
+  task: z.number().int().positive().optional(),
+  receivedBefore: z.iso.datetime({ offset: true }).optional(),
+  reason: z.string().trim().min(1).max(500),
+});
+
 const NOT_YOURS = 'Only the CEO, the CEO delegate or the owner of its department changes how this employee takes its mail.';
 const NOT_YOURS_TO_MARK = 'Only the CEO, the CEO delegate or the owner of its department marks this employee\'s letters.';
+const NOT_CEOS = "Only the CEO and the CEO delegate mark another employee's letters this way.";
 
 /* Who sent each letter as this person reads it: an employee they do not know of, or one no longer in the company, is
    "Employee", as in the window. */
@@ -112,6 +125,21 @@ export function inboxRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (unread === null) throw new ApiError(404, 'not_found', 'Some of these letters are not in this employee\'s inbox.', 'letter_unknown');
     await inboxChanged(ctx, agent.id);
     return { unreadCount: unread };
+  });
+  /* The CEO and the CEO delegate mark any of the employee's letters read or done, by a choice of them; the employee's log
+     tells who, why and how many. Not the owner of its department, whose buttons mark its letters read as before, and not
+     an assistant's key, which opens its own routes alone. */
+  app.post('/api/agents/:id/inbox/mark', async req => {
+    const { me, agent } = await agentFor(ctx, req);
+    if (!actsAsCeo(me)) throw new ApiError(403, 'forbidden', NOT_CEOS, 'not_owner');
+    const { status, reason, receivedBefore, ...rest } = MarkBody.parse(req.body);
+    const pick = { ...rest, ...(receivedBefore ? { receivedBefore: new Date(receivedBefore) } : {}) };
+    if (!picksLetters(pick)) throw new ApiError(400, 'validation', 'Name the letters: ids, or a kind, a source, a task or receivedBefore.');
+    const marked = await markMail(db, agent.id, pick, status);
+    if (marked === null) throw new ApiError(404, 'not_found', 'Some of these letters are not in this employee\'s inbox.', 'letter_unknown');
+    await logMarked(ctx, agent, { party: { ...(await personParty(ctx, me.companyId, me.id)), kind: 'person', id: me.id }, reason }, status, marked);
+    await inboxChanged(ctx, agent.id);
+    return { marked, unreadCount: await unreadCount(db, agent.id) };
   });
   app.put('/api/agents/:id/inbox-mode', async req => {
     const { me, agent } = await agentFor(ctx, req);

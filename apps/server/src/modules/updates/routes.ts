@@ -11,18 +11,25 @@ import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
 import { nodeWaits } from './node-drain.js';
-import { sendToUpdater, UpdateWait } from './wait.js';
+import { IDLE_WAIT_MINUTES, sendToUpdater, UpdateWait } from './wait.js';
 import { STARTS_FIRST } from '../sources/requests.js';
 
-/* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. */
-export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional(), urgent: z.boolean().optional() });
+/* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. idleWaitMinutes:
+   how long an update that waits for the agents waits at most before it is called off. */
+export const UpdateBody = z.object({
+  version: z.string().min(1).max(128),
+  whenIdle: z.boolean().default(true),
+  idleWaitMinutes: z.number().int().min(1).max(240).optional().describe(`With whenIdle: how many minutes to wait at most for the agents to finish, ${IDLE_WAIT_MINUTES} if left out.`),
+  confirmTurns: z.number().int().nonnegative().optional(),
+  urgent: z.boolean().optional(),
+});
 
 const onOffer = (state: UpdateState, commit: string): boolean => Boolean(state.latest?.commit && state.latest.commit !== commit);
 
 async function updatesView(ctx: Ctx, wait: UpdateWait, companyId: string) {
   const { version, commit, migrations } = ctx.config;
   const state = ctx.updates.state();
-  const updater: UpdaterView = { present: ctx.updater.present(), status: ctx.updater.status(), waiting: wait.shown() };
+  const updater: UpdaterView = { present: ctx.updater.present(), status: ctx.updater.status(), waiting: await wait.shown(companyId), calledOff: wait.shownCalledOff(companyId) };
   return { current: { version, commit, migrations }, available: onOffer(state, commit), ...state, updater, nodeWaits: await nodeWaits(ctx, companyId) };
 }
 
@@ -110,14 +117,15 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       await modeGate(ctx.mode)(req);
       wait.callOff();
       if (request.urgent || request.immediate) sendToUpdater(ctx, request);
-      else await wait.sendWhenIdle(me.companyId, request);
+      else await wait.sendWhenIdle(me.companyId, request, body.idleWaitMinutes);
     } catch (err) {
       ctx.updater.free(id);
       /* An update that waited before this one still waits, and holds the updater as it did. */
       wait.keepClaim();
       throw err;
     }
-    return reply.code(202).send({ id });
+    /* What it waits for, when it waits: the agents' turns and until when. */
+    return reply.code(202).send({ id, waiting: await wait.shown(me.companyId) });
   });
 
   app.delete('/api/updates', STARTS_FIRST, async (req, reply) => {

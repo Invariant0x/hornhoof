@@ -695,6 +695,45 @@ describe('the peer link in the keeper', () => {
     await until(() => keeper.mode() === 'lead');
   });
 
+  it('keeps its link when its lease ends while no other machine holds a copy that finished', async () => {
+    const c = await company(true);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    relay.bindings.set('acme', { key: 'k'.repeat(32) });
+    relay.register('acme', `acme-${MACHINE_ID.slice(0, 8)}-link`);
+    const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
+    /* The copy is listed and still being made: nobody but this machine could lead. */
+    const { catalog } = syncCatalog(copy);
+    const clock = { wall: Date.now(), mono: 1_000_000 };
+    const renews = { hold: true };
+    const lease = fakeLease({ othersHoldData: true, renew: async () => renews.hold });
+    let started = 0;
+    const { keeper, lines } = await keeperBeside(c, target, folder(), {
+      lease, now: () => ({ ...clock }),
+      clientFor: () => (started++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      sync: { catalog, relay: new Relay(relay.url), everyMs: 20, routeEveryMs: 0, linkPauseMs: 30_000 },
+      proofs: {
+        needed: async () => false,
+        probe: async () => null,
+        ownTerm: async () => null,
+        poll: async () => { throw new Error('no machine needs the relay to come back in here'); },
+        follow: async () => undefined,
+      },
+    });
+    await until(() => keeper.mode() === 'lead');
+    await until(() => started === 1);
+
+    /* Its disk holds every renewal back for ten seconds: the lease ends, and the link the company is reached by stays. */
+    renews.hold = false;
+    clock.wall += 11_000;
+    clock.mono += 11_000;
+    await until(() => lines.some(line => line.startsWith('The lease ended')));
+    expect(keeper.linkWanted()).toBe(true);
+    renews.hold = true;
+    await until(() => keeper.mode() === 'lead');
+    expect([keeper.linkWanted(), started, lines.includes('No public link: the tunnel waits.')]).toEqual([true, 1, false]);
+  });
+
   it('never leads alone while its controller says a copy is listed and the relay cannot be told', async () => {
     const c = await company(true);
     const target = await listening(c.app);

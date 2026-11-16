@@ -75,3 +75,30 @@ describe('machine check waiting and the watchdog', () => {
     expect(agentProgramState(c.ctx, { id }).alarm?.reason).toBe('node_silent');
   });
 });
+
+/* #1060: the load of home-api waited behind its other frames and the shared pump of test runs, so the one handled was old
+   while frames kept coming. The lease of a machine heard within 90 s holds; one silent for 90 s ends. */
+describe('a machine check lease and the frames heard from the machine', () => {
+  it('grants a slot to a machine heard just now whose last handled load is 90 s old, and ends the one of a silent machine', async () => {
+    const c = await failureCompany();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'check', createdBy: null });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const now = Date.now();
+    let heard = now;
+    vi.spyOn(c.ctx.hub, 'loadOf').mockReturnValue({ cpus: 10, load: 0, tests: 0, jobs: 1, memFree: 1e9, memTotal: 2e9, at: now - 90_000 });
+    vi.spyOn(c.ctx.hub, 'lastSeenAt').mockImplementation(() => heard);
+    const request = { type: 'check.acquire' as const, id: randomUUID(), label: 'build', agentId: c.agent.id, jobId: id };
+    await handleNodeMessage(c.ctx, BUILTIN, request);
+    await new Promise(done => setImmediate(done));
+    /* A server that just started holds its slots for a lease, so the request waits in the queue instead of ending. */
+    const states = (slot: string) => c.sent.mock.calls.map(([, m]) => m).filter(m => m.type === 'check.state' && m.id === slot).map(m => m.type === 'check.state' ? m.state : null);
+    expect(states(request.id)).toEqual(['queued']);
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'check.release', id: request.id });
+    heard = now - 90_000;
+    const late = { ...request, id: randomUUID() };
+    await handleNodeMessage(c.ctx, BUILTIN, late);
+    await new Promise(done => setImmediate(done));
+    expect(states(late.id)).toEqual(['ended']);
+  });
+});
