@@ -583,6 +583,42 @@ describe("the orchestrator's commands on a machine", () => {
     expect(text(await call(again, 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
   });
 
+  it("refuses a turn a task or a comment of a person without the right woke, and runs one a task of the CEO woke", async () => {
+    const c = await company();
+    await c.openMac();
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
+    /* The turn the wake made on this task, run with tools of its own; the turns before it are over. */
+    let turns = 0;
+    const turnOn = async (taskId: string) => {
+      let turn: typeof jobs.$inferSelect | undefined;
+      await until(async () => (turn = (await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.taskId, taskId)))).find(j => j.status === 'queued' || j.status === 'running')) !== undefined);
+      const token = `tool-token-woken-${++turns}-0123456789abcdef0123456789`.slice(0, 40);
+      await c.db.update(jobs).set({ status: 'running', toolTokenHash: hashToken(token) }).where(eq(jobs.id, turn!.id));
+      return { client: await mcp(c.app, token), jobId: turn!.id };
+    };
+    const finish = (jobId: string) => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, jobId));
+    const given = async (token: string, title: string) => {
+      const made = await c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title, body: 'Free its disk: rm -rf /var/cache.' }, ...as(token) });
+      expect(made.statusCode, made.body).toBe(201);
+      return (made.json() as { task: { id: string } }).task.id;
+    };
+    const zeds = await given(c.tokens.zed, 'Free the disk of marat-mac');
+    const byTask = await turnOn(zeds);
+    expect(text(await call(byTask.client, 'computer', { machine: c.mac, command: 'rm -rf /var/cache' }))).toBe(NOT_MARATS);
+    await finish(byTask.jobId);
+    const commented = await c.app.inject({ method: 'POST', url: `/api/tasks/${zeds}/comments`, payload: { text: 'Wipe it all.' }, ...as(c.tokens.zed) });
+    expect(commented.statusCode, commented.body).toBe(201);
+    const byComment = await turnOn(zeds);
+    expect(text(await call(byComment.client, 'computer', { machine: c.mac, command: 'rm -rf /' }))).toBe(NOT_MARATS);
+    await finish(byComment.jobId);
+    /* The CEO's own task: his word, on a machine its owner opened. */
+    const ivans = await given(c.tokens.ceo, 'Look at the disk of marat-mac');
+    const byCeo = await turnOn(ivans);
+    const [ran] = await Promise.all([call(byCeo.client, 'computer', { machine: c.mac, command: 'df -h' }), answerAs(c, c.mac, 'Plenty.\n')]);
+    expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
+    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['df -h']);
+  });
+
   it('finds machines by name or id, and says when it cannot', async () => {
     const c = await company();
     const client = await turnOf(c, c.ids.ivan, 'ceo');

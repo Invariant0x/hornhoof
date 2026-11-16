@@ -132,7 +132,7 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
     {
       description:
         'Runs a bash command as root on a machine of the company, while its owner keeps access to it open, and gives back its exit code and the end of its output. ' +
-        'It works in any turn of yours for as long as access stays open, with no new word of anyone, but not in one whose last words came from a person other than the CEO, the CEO delegate or the machine\'s owner. ' +
+        'It works in any turn of yours for as long as access stays open, with no new word of anyone, but not in one whose last words came from a person other than the CEO, the CEO delegate or the machine\'s owner, their task, comment or answer included. ' +
         "It runs in a helper container with every privilege, in the machine's processes and network: docker reaches the machine's Docker, the machine's files are at /host, " +
         "and chroot /host sh -c '...' runs a command on the machine itself (Linux; on a Mac the machine is Docker's own Linux system). Commands get no input, so pass -y and the like. " +
         'A command that takes longer than a tool call answers that it still runs, with an id for computer_result. Look before you change anything, and say in your answer what you ran, where and why.',

@@ -40,25 +40,29 @@ export const byPerson = (w: { personId: string | null; kind: string; data: unkno
 const SPOKE = 'machineSpeaker';
 
 /* Who said these words, for a command on a machine: the person by id, null when whose words went in is not known (an
-   Enter in the terminal, or words that may have gone in without being kept), and undefined for nobody's: a notice, an
-   employee's letter or report, or Hornhoof repeating a click or a notice. A repeat goes by who spoke last in the turn
-   it repeats. */
+   Enter in the terminal, words that may have gone in without being kept, or several people's at once), and undefined for
+   nobody's: an employee's letter or report, Hornhoof's own notice, or the note of a click that opened a machine. A notice of
+   what a person did or said, a task or a comment of theirs, their answer or an improvement they gave, is theirs. A repeat
+   goes by whose words it repeats. */
 export function machineSpeaker(w: { personId: string | null; kind: string; data: unknown }): string | null | undefined {
   if (w.personId) return w.personId;
-  return w.kind === 'typed' ? typedSpeaker(w.data) : undefined;
-}
-
-function typedSpeaker(data: unknown): string | null | undefined {
-  const spoke = (data as Record<string, unknown> | null)?.[SPOKE];
+  const spoke = w.kind === 'typed' ? (w.data as Record<string, unknown> | null)?.[SPOKE] : undefined;
   if (spoke === null || typeof spoke === 'string') return spoke;
-  return computerClick(data) ? undefined : envelopeSpeaker(readMessage(data).message);
+  if (accessNote(w.data)) return undefined;
+  const envelope = readMessage(w.data).message;
+  if (envelope) return envelopeSpeaker(envelope);
+  return w.kind === 'typed' ? null : undefined;
 }
 
-/* A person's own words name them; a notice, or an agent's or Hornhoof's words, nobody; no envelope, nobody known. */
-const envelopeSpeaker = (envelope: MessageEnvelope | undefined): string | null | undefined => {
-  if (!envelope) return null;
-  return envelope.notification || envelope.from.kind !== 'person' ? undefined : envelope.from.id;
-};
+const accessNote = (data: unknown): boolean => computerClick(data) || Boolean((data as { computerAccess?: unknown } | null)?.computerAccess);
+
+/* The people an envelope names as its senders: one is the speaker, none is nobody, and more than one is not known. */
+function envelopeSpeaker(envelope: MessageEnvelope): string | null | undefined {
+  const people = new Set([envelope.from, ...(envelope.senders ?? [])].filter(p => p.kind === 'person').map(p => p.id));
+  if (!people.size) return undefined;
+  const [only] = people;
+  return people.size === 1 && only ? only : null;
+}
 
 /* Whom a turn answers: the last person who wrote or typed into it; whoever started it when nothing came into it yet. */
 export function answeredWords<T extends { seq: number; personId: string | null; kind: string; data: unknown }>(
@@ -228,14 +232,18 @@ export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Pick<Standing, 'id
   return {
     createdBy: current.createdBy,
     answersCeo: current.answersCeo,
-    repeated: withSpeaker(withUnheardFrom(repeatedWords(said, turnPrincipal(current, said), grants, source), unheardFrom), lastSpeaker(current, said)),
+    repeated: withSpeaker(withUnheardFrom(repeatedWords(said, turnPrincipal(current, said), grants, source), unheardFrom), repeatedSpeaker(current, said, source)),
   };
 }
 
-/* Who spoke last in the turn, for a machine: unknown while words were on their way into it, which may have gone in
-   without being kept; undefined when no person did. */
-const lastSpeaker = (current: Standing, said: readonly WordEvent[]): string | null | undefined =>
-  current.decisionInputPending ? null : said.map(machineSpeaker).find(speaker => speaker !== undefined);
+/* Who spoke the words a repeat carries, for a machine: the person whose words they are when it repeats some, else who spoke
+   last in the turn; unknown while words were on their way into it, which may have gone in without being kept, and
+   undefined when no person did. */
+function repeatedSpeaker(current: Standing, said: readonly WordEvent[], source: TurnWords | null | undefined): string | null | undefined {
+  if (current.decisionInputPending) return null;
+  const own = source ? machineSpeaker({ ...source, kind: 'typed' }) : undefined;
+  return own !== undefined ? own : said.map(machineSpeaker).find(speaker => speaker !== undefined);
+}
 
 function withSpeaker(words: TurnWords, spoke: string | null | undefined): TurnWords {
   return spoke === undefined ? words : { ...words, data: { ...(words.data as Record<string, unknown>), [SPOKE]: spoke } };
