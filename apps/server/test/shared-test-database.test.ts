@@ -421,6 +421,14 @@ describe('rows a test was still making when it ended', { shuffle: false }, () =>
     expect(await db.select({ seq: agentEvents.seq }).from(agentEvents).orderBy(agentEvents.seq)).toEqual([{ seq: firstSeq }, { seq: firstSeq + 1 }]);
     expect(await db.select({ name: agents.name }).from(agents).orderBy(agents.name)).toEqual([{ name: 'Bruno' }, { name: 'Orchestrator' }]);
   });
+
+  it('do not hold up the end of a test that left the clock not real', async () => {
+    /* Hooks run last first: the clock is real again only after the wait for rows. */
+    onTestFinished(() => vi.useRealTimers());
+    const db = await createTestDb();
+    await acme(db);
+    vi.useFakeTimers();
+  });
 });
 
 describe('a test run', () => {
