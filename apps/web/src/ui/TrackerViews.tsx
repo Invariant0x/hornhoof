@@ -87,6 +87,15 @@ function Group({ group, rows }: { group: ListGroup; rows: Rows }) {
   );
 }
 
+/* What a search found, best match first, each task with its state in words. */
+export function TrackerFound({ tasks, rows }: { tasks: TaskLine[]; rows: Rows }) {
+  return (
+    <div className="tr-list">
+      <ul className="tr-rows">{tasks.map(task => <ListRow key={task.id} tree={{ task, children: [], done: 0, total: 0, progress: 0 }} rows={rows} sub />)}</ul>
+    </div>
+  );
+}
+
 /* The list: the tasks at the top grouped by their state in words, newest first, their subtasks folded under them. */
 export function TrackerList({ tasks, rows, empty }: { tasks: TaskLine[]; rows: Rows; empty: string }) {
   const t = useT();

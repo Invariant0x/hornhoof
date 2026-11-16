@@ -278,10 +278,11 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
   );
 }
 
-/* A task for a department, from a person who gives it work: it goes to the department's head. */
+/* A task for a department, from a person who gives it work: it goes to the department's head, named unless it is called
+   after its role. */
 export function TrackerNewTask({ department, onCreated, onCancel }: { department: Department; onCreated: (task: TaskDetail) => void; onCancel: () => void }) {
-  const t = useT();
+  const { language } = useLanguage();
   const head = department.employees.find(e => e.kind === 'head');
-  if (!head) return <p className="muted">{t.dept.needsHead}</p>;
-  return <NewTask department={department} head={head.name} onCreated={onCreated} onCancel={onCancel} />;
+  if (!head) return null;
+  return <NewTask department={department} head={head.title?.[language] === head.name ? null : head.name} onCreated={onCreated} onCancel={onCancel} />;
 }

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { parseRoute, routePath, useRoute } from '../src/routes';
+import { parseRoute, placeOf, routePath, useRoute } from '../src/routes';
 
 describe('workspace addresses', () => {
   it.each([
@@ -77,5 +77,12 @@ describe('workspace addresses', () => {
     act(() => result.current.closeOverlay());
     expect(location.pathname).toBe('/');
     expect(location.host).toBe('localhost:3000');
+  });
+});
+
+describe('the place of the tracker', () => {
+  it('keeps where the tracker is and leaves out the card on top of it', () => {
+    expect(placeOf({ kind: 'tasks', department: 'd2', view: 'graph', personId: 'p2' })).toEqual({ department: 'd2', view: 'graph', personId: 'p2' });
+    expect(placeOf({ kind: 'tasks', id: 'g1', card: 'goal' })).toEqual({});
   });
 });

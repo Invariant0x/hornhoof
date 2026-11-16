@@ -32,6 +32,13 @@ const unavailable = (): Route => ({ kind: 'unavailable' });
 
 /* The query of the tracker, in the order an address writes it; each id the same safe kind as a path's. */
 const PLACE_KEYS = [['show', 'show'], ['department', 'department'], ['product', 'product'], ['pipeline', 'pipeline'], ['goal', 'goal'], ['root', 'root'], ['responsible', 'responsible'], ['personId', 'person'], ['view', 'view']] as const;
+/* Where the tracker is, without the card that sits on top of it. */
+export function placeOf(route: TasksRoute): TrackerPlace {
+  const place: TrackerPlace = {};
+  for (const [key] of PLACE_KEYS) if (route[key]) Object.assign(place, { [key]: route[key] });
+  return place;
+}
+
 const placeValue = (key: (typeof PLACE_KEYS)[number][0], value: string | null | undefined): string | undefined => {
   if (!value) return undefined;
   if (key === 'show') return TRACKER_SHOWS.find(s => s === value);

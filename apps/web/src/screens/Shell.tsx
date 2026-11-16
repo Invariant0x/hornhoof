@@ -32,7 +32,7 @@ import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 import { takeEscape } from '../ui/escape';
-import { useRoute, type Route, type SettingsGroup, type TrackerPlace } from '../routes';
+import { placeOf, useRoute, type Route, type SettingsGroup, type TrackerPlace } from '../routes';
 import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { GuardBoundary, LightNotice } from '../ui/GuardBoundary';
 
@@ -280,9 +280,9 @@ function departmentFallback(deptId: string | null, org: Org | null, orgFailure: 
   return deptId && !org && orgFailure === null ? <div className="dview" aria-busy="true"><div className="dcanvas" /></div> : null;
 }
 
-function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, taskId, panel, goHome, openAgent, openTask, openDecisions, onHire }: MapRouteProps & {
-  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; taskId: string | null; panel: 'window' | 'task' | null;
-  openTask: (id: string) => void; onHire: (dept: Department) => void;
+function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment, org, orgFailure, shown, panel, goHome, openAgent, openTask, openDecisions, openTracker, onHire }: MapRouteProps & {
+  deptId: string | null; denied: boolean; org: Org | null; orgFailure: unknown; shown: string | null; panel: 'window' | 'task' | null;
+  openTask: (id: string) => void; openTracker: (departmentId: string) => void; onHire: (dept: Department) => void;
 }) {
   if (tab !== 'map' || denied || missingDepartment) return null;
   if (!dept) return departmentFallback(deptId, org, orgFailure);
@@ -292,13 +292,13 @@ function DepartmentWorkspace({ tab, me, dept, deptId, denied, missingDepartment,
       department={dept}
       deputies={org?.people ?? []}
       selected={shown}
-      selectedTask={taskId}
       panel={panel}
       serverNow={org?.serverNow}
       onBack={goHome}
       onOpen={openAgent}
       onOpenTask={openTask}
       onOpenDecisions={openDecisions}
+      onOpenTracker={openTracker}
       onHire={() => onHire(dept)}
     />
   );
@@ -345,7 +345,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   /* The tracker's graph grown from a task or a goal. */
   const openGraph = (root: { task?: string; goal?: string }) => navigate(root.task ? { kind: 'tasks', root: root.task, view: 'graph' } : { kind: 'tasks', goal: root.goal, view: 'graph' });
   const toPlace = (place: TrackerPlace) => navigate({ kind: 'tasks', ...place });
-  const trackerPlace: TrackerPlace = pageRoute.kind === 'tasks' ? (({ kind: _kind, id: _id, card: _card, ...place }) => place)(pageRoute) : {};
+  const trackerPlace: TrackerPlace = pageRoute.kind === 'tasks' ? placeOf(pageRoute) : {};
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   const missingDepartment = departmentIsMissing({ deptId, org, orgFailure });
@@ -411,7 +411,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
         </GuardBoundary>
         <GuardBoundary block="department" reset={deptId}>
-        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} taskId={taskId} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} onHire={dept => {
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} org={org} orgFailure={orgFailure} shown={windows.shown} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} openTracker={id => navigate({ kind: 'tasks', department: id })} onHire={dept => {
           setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
           openAgent('orchestrator');
         }} />

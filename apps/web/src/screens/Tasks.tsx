@@ -1,10 +1,11 @@
 import { useId, useRef, useState } from 'react';
+import { ApiFailure } from '../api';
 import { deptLabel, errorText, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
-import { filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, type BoardStatus, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
+import { filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
 import type { ComputerAccessDecision, Decisions, GoalView, MachineAwayCard, Me, MergeDecision, Org, Pipeline, ProposalDecision, TaskDepartments, TaskLine } from '../types';
 import { ComputerCard } from '../ui/ComputerCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
@@ -18,7 +19,7 @@ import { StructureCard } from '../ui/StructureCard';
 import { Progress } from '../ui/TaskBoard';
 import { GoalForm, PipelineForm, TrackerNewTask } from '../ui/TrackerForms';
 import { TrackerSide } from '../ui/TrackerSide';
-import { TrackerBoard, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
+import { TrackerBoard, TrackerFound, TrackerGraph, TrackerList, type Rows } from '../ui/TrackerViews';
 import { TurnsAndReleases } from '../ui/TurnsAndReleases';
 import { waitText } from '../ui/tracker-words';
 import { WaitCards } from '../ui/WaitCards';
@@ -247,7 +248,7 @@ function ViewTabs({ value, onChange }: { value: (typeof TRACKER_VIEWS)[number]; 
   const t = useT();
   const name = useId();
   return (
-    <fieldset className="segments tr-views">
+    <fieldset className="segments board-views tr-views">
       <legend className="sr">{t.tracker.views.label}</legend>
       {TRACKER_VIEWS.map(view => (
         <label key={view} className={view === value ? 'on' : ''}>
@@ -294,11 +295,13 @@ function MakeHere({ me, places, org, department, pipeline, making, setMaking, on
   if (department === 'none' || !reaches || (department && !known)) return null;
   const close = () => setMaking(null);
   const named = known ? { id: known.id, name: deptLabel(t, known) } : null;
+  const head = known?.employees.some(e => e.kind === 'head');
   return (
     <>
+      {known && !head && <p className="muted">{t.dept.needsHead}</p>}
       {!making && (
         <div className="entry-actions tr-make">
-          {known && <button className="btn small ghost" type="button" onClick={() => setMaking('task')}>{words.newTask}</button>}
+          {known && head && <button className="btn small ghost" type="button" onClick={() => setMaking('task')}>{words.newTask}</button>}
           <button className="btn small ghost" type="button" onClick={() => setMaking('goal')}>{words.newGoal}</button>
           {known && <button className="btn small ghost" type="button" onClick={() => setMaking('pipeline')}>{words.newPipeline}</button>}
           {known && pipeline && <button className="btn small ghost" type="button" onClick={() => setMaking('editPipeline')}>{words.editPipeline}</button>}
@@ -403,16 +406,18 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     }
   })();
 
-  const broken = placesFailure ?? failure ?? goalsFailure ?? pipelinesFailure;
-  if (unavailableFailure(broken)) return <RouteUnavailable onHome={onHome} />;
+  /* A server without goals and pipelines yet answers that it has none: the tracker shows the tasks without them. */
+  const tracked = (f: unknown) => (f instanceof ApiFailure && f.status === 404 ? null : f);
+  if (unavailableFailure(placesFailure ?? failure)) return <RouteUnavailable onHome={onHome} />;
+  const broken = placesFailure ?? failure ?? tracked(goalsFailure) ?? tracked(pipelinesFailure);
   const clearPerson = () => onPlace({ show: place.show === 'waits' ? 'waits' : undefined, view: place.view });
   const waiting = (
     <WaitingForYou
       decisions={decisions}
       decisionsFailure={decisionsFailure}
       onDecisionsChanged={onDecisionsChanged}
-      personId={other ? who : null}
-      onClearPerson={viewAs ? undefined : clearPerson}
+      personId={place.personId ?? null}
+      onClearPerson={clearPerson}
       tasks={waitsOnWho}
       onOpenTask={onOpenTask}
       onOpenAgent={onOpenAgent}
@@ -437,7 +442,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         goals={goals}
         pipelines={pipelines}
         tasks={all}
-        counts={{ waits: countOf(shownOf(decisions, other ? who : null), waitsOnWho), working: working.length }}
+        counts={{ waits: countOf(shownOf(decisions, place.personId ?? null), waitsOnWho), working: working.length }}
         open={drawer}
         onClose={() => setDrawer(false)}
       />
@@ -465,10 +470,14 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         </header>
         {broken !== null && <p className="alert" role="alert">{errorText(t, broken)}</p>}
         {found ? (
-          <section className="tr-found" aria-label={t.tracker.search.results}>
-            <h2>{t.tracker.search.results}</h2>
-            {found.length ? <TrackerList tasks={found} rows={rows} empty="" /> : <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
-          </section>
+          <>
+            <section className="tr-found" aria-label={t.tracker.search.results}>
+              <h2>{t.tracker.search.results}</h2>
+              {found.length ? <TrackerFound tasks={found} rows={rows} /> : <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
+            </section>
+            {/* A search leaves what waits for the person where it was. */}
+            {(section.kind === 'waits' || section.kind === 'mine') && waiting}
+          </>
         ) : section.kind === 'waits' ? waiting
           : section.kind === 'turns' ? <TurnsAndReleases tasks={tasks} places={places} rows={{ selected, onOpenTask, asksYou, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
           : (
