@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, tasks, teams, turns } from '../src/db/schema.js';
 import { answer, ask, loadTask, report } from '../src/modules/tasks/engine.js';
-import { fixture } from './development-echelons-fixture.js';
+import { BASE, fixture } from './development-echelons-fixture.js';
 import { as, listen, mcp, SETUP, testApp } from './helpers.js';
 import { sessionFrom } from './helpers-basic.js';
-import { readyInTurn, serve } from './turn-release-fixture.js';
+import { readyInTurn, serve, type Repository } from './turn-release-fixture.js';
 
 const MERGED = 'd'.repeat(40);
 const PAST = 'e'.repeat(40);
@@ -122,6 +122,94 @@ describe('a result joins the open turn of its department as its head accepts it'
   });
 });
 
+describe('a turn whose branch the repository does not have yet', () => {
+  const refusal = (moving: Promise<unknown>) => moving.then(() => null, (err: { status: number; message: string }) => err);
+
+  it('makes it from the head of main for a first turn and says to fast-forward it, then the result joins it', async () => {
+    const f = await readyInTurn();
+    delete f.repo.heads[f.branch];
+    const refused = await refusal(f.accept());
+    expect(refused).toMatchObject({ status: 409, message: expect.stringContaining('fast-forward') as unknown });
+    expect(refused!.message).not.toMatch(/could not be read/);
+    expect(f.repo.made).toEqual([{ branch: f.branch, commit: BASE }]);
+    expect(await f.openTurn()).toMatchObject({ id: f.turn.id, startCommit: BASE });
+    f.repo.heads[f.branch] = f.finalCommit;
+    expect((await f.accept()).task).toMatchObject({ status: 'done', turnId: f.turn.id });
+    expect(f.repo.made).toHaveLength(1);
+  });
+
+  it('makes it from where the turn starts, before the release the turn came from or main', async () => {
+    const f = await readyInTurn();
+    delete f.repo.heads[f.branch];
+    await f.db.update(turns).set({ startCommit: START, baseCommit: MERGED }).where(eq(turns.id, f.turn.id));
+    await refusal(f.accept());
+    expect(f.repo.made).toEqual([{ branch: f.branch, commit: START }]);
+    await f.db.update(turns).set({ startCommit: null }).where(eq(turns.id, f.turn.id));
+    delete f.repo.heads[f.branch];
+    await refusal(f.accept());
+    expect(f.repo.made!.at(-1)).toEqual({ branch: f.branch, commit: MERGED });
+  });
+
+  it('never makes or moves a turn branch that is there, and refuses as before what it does not hold', async () => {
+    const f = await readyInTurn();
+    f.repo.heads[f.branch] = PAST;
+    const refused = await refusal(f.accept());
+    expect(refused).toMatchObject({ status: 409, message: expect.stringContaining(`does not hold ${f.finalCommit}`) as unknown });
+    expect(f.repo.heads[f.branch]).toBe(PAST);
+    expect(f.repo.made).toBeUndefined();
+    expect(await f.openTurn()).toMatchObject({ startCommit: null });
+  });
+
+  it('says why it could not make the branch, not that it could not be read, and changes nothing', async () => {
+    const f = await readyInTurn();
+    delete f.repo.heads[f.branch];
+    f.repo.refusing = `Hornhoof could not create the branch ${f.branch} in https://github.com/acme/app.git: it answered 403, so its token may not push to it.`;
+    const refused = await refusal(f.accept());
+    expect(refused).toMatchObject({ status: 409, message: expect.stringContaining('it answered 403') as unknown });
+    expect(refused!.message).not.toMatch(/could not be read/);
+    expect(f.repo.heads[f.branch]).toBeUndefined();
+    expect(await f.openTurn()).toMatchObject({ startCommit: null });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'open', turnId: null });
+  });
+
+  it('says what the repository said when its branches cannot be read', async () => {
+    const f = await readyInTurn();
+    delete f.repo.heads[f.branch];
+    f.ctx.readBranches = async () => ({ problem: 'Hornhoof could not read the branches of https://github.com/acme/app.git: it could not be reached.' });
+    const refused = await refusal(f.accept());
+    expect(refused).toMatchObject({ status: 409, message: expect.stringContaining('it could not be reached') as unknown });
+    expect(f.repo.made).toBeUndefined();
+  });
+
+  it('lets one of two results that come at once make it; the other finds it made and goes the usual way', async () => {
+    const f = await turnkeyInTurn();
+    const second = await f.create({ assigneeAgentId: f.player.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+    const theirs = 'b'.repeat(40);
+    f.repo.heads[`task-${second.task.number}`] = theirs;
+    f.repo.holds[theirs] = ['a'.repeat(40)];
+    delete f.repo.heads[`turn-${f.turn.number}`];
+    let release: () => void = () => undefined;
+    const both = new Promise<void>(done => { release = done; });
+    let pushes = 0;
+    f.repo.hold = async () => { if (++pushes === 2) release(); await both; };
+    const doneOf = (id: string) => report(f.ctx, f.player.id, id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.' });
+    const answers = await Promise.all([refusal(f.done()), refusal(doneOf(second.task.id))]);
+    expect(pushes).toBe(2);
+    expect(f.repo.made).toEqual([{ branch: `turn-${f.turn.number}`, commit: 'a'.repeat(40) }]);
+    for (const refused of answers) {
+      expect(refused).toMatchObject({ status: 409, message: expect.stringContaining('fast-forward') as unknown });
+      expect(refused!.message).not.toMatch(/could not be (read|created)/);
+    }
+    f.repo.hold = undefined;
+    const both2 = 'f'.repeat(40);
+    f.repo.heads[`turn-${f.turn.number}`] = both2;
+    f.repo.holds[both2] = [f.own, theirs, 'a'.repeat(40)];
+    expect((await f.done()).task).toMatchObject({ status: 'done', turnId: f.turn.id });
+    expect((await doneOf(second.task.id)).task).toMatchObject({ status: 'done', turnId: f.turn.id });
+    expect(f.repo.made).toHaveLength(1);
+  });
+});
+
 /* A member of a turnkey team in a department with a repository, its task-N branch and the department's open turn. */
 async function turnkeyInTurn() {
   const f = await fixture();
@@ -131,7 +219,7 @@ async function turnkeyInTurn() {
   const { task } = await f.create({ assigneeAgentId: player.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
   const [turn] = await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open')));
   const own = 'c'.repeat(40);
-  const repo = { heads: { main: 'a'.repeat(40), [`turn-${turn!.number}`]: PAST, [`task-${task.number}`]: own } as Record<string, string>, tags: {}, holds: { [PAST]: [own, 'a'.repeat(40)], [own]: ['a'.repeat(40)] } as Record<string, string[]>, between: {}, cut: new Set<string>() };
+  const repo: Repository = { heads: { main: 'a'.repeat(40), [`turn-${turn!.number}`]: PAST, [`task-${task.number}`]: own }, tags: {}, holds: { [PAST]: [own, 'a'.repeat(40)], [own]: ['a'.repeat(40)] }, between: {}, cut: new Set<string>() };
   serve(f.ctx, repo);
   const done = () => report(f.ctx, player.id, task.id, { done: true, summary: 'Fast-forwarded the turn to task-N, checks in the log.' });
   const lastReport = async () => (await f.detail(task.id)).log.findLast(event => event.kind === 'report')?.data;
