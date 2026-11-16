@@ -1,6 +1,6 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
-import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
+import type { FillField, QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { API_PROTOCOLS, APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, PROVIDER_IDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
@@ -2768,3 +2768,51 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
   check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
 ]);
+
+/* The company's vault of site sign-ins. A person types the password and the code secret only into Hornhoof's form; both are
+   kept encrypted with the server's key and leave only sealed to the node that types them. Every agent of the company may
+   use an entry, unless a person narrowed it to one department or one agent. */
+export const VAULT_SCOPES = ['company', 'department', 'agent'] as const;
+export type VaultScope = (typeof VAULT_SCOPES)[number];
+export const vaultEntries = pgTable('vault_entries', {
+  id: id(),
+  companyId: companyId(),
+  name: text('name').notNull(),
+  site: text('site').notNull(),
+  login: text('login').notNull(),
+  passwordEnc: text('password_enc').notNull(),
+  /* The one-time code's secret, digits, period and algorithm, as JSON; none when the site asks for no code. */
+  totpEnc: text('totp_enc'),
+  scopeKind: text('scope_kind', { enum: VAULT_SCOPES }).notNull().default('company'),
+  scopeDepartmentId: uuid('scope_department_id').references(() => departments.id, { onDelete: 'cascade' }),
+  scopeAgentId: uuid('scope_agent_id').references(() => agents.id, { onDelete: 'cascade' }),
+  createdBy: uuid('created_by').notNull().references(() => people.id),
+  createdAt: createdAt(),
+  updatedBy: uuid('updated_by').notNull().references(() => people.id),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  uniqueIndex('vault_entries_company_name').on(t.companyId, sql`lower(${t.name})`),
+  check('vault_entries_scope', sql`(${t.scopeKind} = 'company' AND ${t.scopeDepartmentId} IS NULL AND ${t.scopeAgentId} IS NULL) OR (${t.scopeKind} = 'department' AND ${t.scopeDepartmentId} IS NOT NULL AND ${t.scopeAgentId} IS NULL) OR (${t.scopeKind} = 'agent' AND ${t.scopeAgentId} IS NOT NULL AND ${t.scopeDepartmentId} IS NULL)`),
+]);
+
+/* Who used, added, changed or removed which entry, when, for which task and with what end; never a value. The name and
+   site stay as they were, so the log still reads after the entry is gone. */
+export const VAULT_LOG_KINDS = ['used', 'created', 'changed', 'removed'] as const;
+export const vaultLog = pgTable('vault_log', {
+  id: id(),
+  companyId: companyId(),
+  entryId: uuid('entry_id').references(() => vaultEntries.id, { onDelete: 'set null' }),
+  entryName: text('entry_name').notNull(),
+  site: text('site').notNull(),
+  kind: text('kind', { enum: VAULT_LOG_KINDS }).notNull(),
+  personId: uuid('person_id').references(() => people.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  target: text('target', { enum: ['browser', 'phone'] }),
+  fields: jsonb('fields').$type<FillField[]>(),
+  /* sent while the node fills; then the node's status, or node_offline, no_answer. */
+  status: text('status'),
+  at: createdAt(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+}, t => [index('vault_log_entry_at').on(t.entryId, t.at), index('vault_log_company_at').on(t.companyId, t.at)]);
