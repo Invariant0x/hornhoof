@@ -1,7 +1,7 @@
 # Task 1148: controlled keeper tests
 
 Base: `6d17d217e568fcdf7a6e6267b636ef332c205a62`.
-Executable candidate: `f5171f05bf33c671ba5949749a57b8c508c93ede`.
+The app-call mechanism was first checked at `f5171f05bf33c671ba5949749a57b8c508c93ede`; later task receipts name the expanded candidate.
 
 ## Causes and changes
 
@@ -10,6 +10,12 @@ Executable candidate: `f5171f05bf33c671ba5949749a57b8c508c93ede`.
 - The older-leader test could receive a real ten-second socket timeout in its log while a report was still being handled. Its reports and holder round now run explicitly on a frozen clock. Setup makes and verifies a real signed bundle directly, without a timed stream fetch. The test checks that its bytes remain unchanged, reports retry only their existing compatibility forms, and neither keeper logs a report failure.
 
 `askApp` retains the ten-second inactivity limit. A normal timer starts when its socket connects, restarts on the response and body data, and clears on completion or close. Stopping the keeper still aborts the request. `appDeadline` owns this scheduling separately from response parsing. No public keeper option, report retry or longer timeout was added.
+
+The eighth repetition exposed another real-time timeout in the adjacent compatibility test that drops refused measures. Its full log and a load sample were attached to task 1148. The head then included that fourth test and the other real timers and report waits in the file, without splitting it or weakening assertions.
+
+All worker keeper cases now use `worker-keeper-time.ts`. Its state wait awaits direct rounds of the server, peer hello, worker, computer carrier, backup keeper and updater. Wall time advances by one virtual millisecond between completed rounds; request deadlines stay frozen during I/O. The runner's cancellation stops an unfinished state wait. Recurring jobs never run against the real clock. The backup recovery test registers the replacement app for injected HTTP, and updater heartbeat files use the virtual timestamp. Fixture listeners use the repository's test port corridor.
+
+The fixture requests an immediate offline refusal instead of a timed front-door hold; those cases assert the refusal and do not test the holding delay. The production holding limits remain unchanged. The peer stream's thirty-second idle limit also uses a normal timer, renewed by incoming or outgoing data and cleared on close. Its regression checks the exact virtual deadline and that observing activity loses no body bytes.
 
 ## Regression and verification
 
@@ -21,9 +27,9 @@ From `apps/server`, run each named file twenty consecutive times, stopping at th
 npx --no-install vitest run test/keeper-app-call.test.ts test/worker-keeper.test.ts --maxWorkers=1
 ```
 
-The final completed repetition receipt belongs to task 1148. This command runs four boundary tests and all twenty-nine worker keeper tests each time; it does not run the whole suite.
+Include `test/peer-stream-clock.test.ts` in the expanded candidate's repetition command. The final completed repetition receipt belongs to task 1148. The three named files run 35 tests each time; this does not run the whole suite. The stream regression was red before the change: after thirty virtual seconds it received no timeout error. All 35 tests passed after the change.
 
-Additional local checks on the executable candidate:
+Earlier local checks on the initial app-call candidate, repeated for the expanded candidate as recorded in the task receipt:
 
 - `npx --no-install vitest run test/keeper-identity.test.ts test/keeper-backups.test.ts --maxWorkers=1`: 27 passed.
 - `NODE_OPTIONS=--max-old-space-size=6144 npm run build -w @hornhoof/server`: exit 0.
