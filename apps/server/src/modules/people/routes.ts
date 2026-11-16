@@ -365,11 +365,11 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { person: await personView(db, person) };
   });
 
-  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off: only from the CEO's own
-     screen, never the orchestrator's tool. The mark needs an active person with the whole company. */
+  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off, by himself or through the
+     orchestrator. The mark needs an active person with the whole company. */
   app.put('/api/people/:id/ceo-delegate', async req => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
+    if (!me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
     const { id } = IdParams.parse(req.params);
     const { isCeoDelegate } = DelegateBody.parse(req.body);
     const target = await delegateTarget(db, me, id, isCeoDelegate);

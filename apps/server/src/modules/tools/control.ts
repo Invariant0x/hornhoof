@@ -40,6 +40,8 @@ const MAX_ANSWER = 30_000;
 
 /* Pages the orchestrator does not read with view: live streams, files and sign-in. */
 const UNREAD = /^\/api\/(stream|attachments|auth|invites|setup|nodes)(\/|$)|\/terminal$/;
+/* Routes that stream for as long as someone listens, with no answer to wait for: the live stream and the sockets. */
+const STREAMS = /^\/api\/(stream|nodes\/socket)$|\/terminal$/;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or view.`);
@@ -135,6 +137,22 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       const url = new URL(path, 'http://hornhoof');
       if (!url.pathname.startsWith('/api/') || UNREAD.test(url.pathname)) return `${url.pathname} is not a page view reads. Use an /api/ page from the list.`;
       return { method: 'GET', url: url.pathname + url.search };
+    },
+  );
+  tool(
+    'api',
+    "Calls any route of Hornhoof's API as the company's owner and gives its answer: whatever a person can do in Hornhoof's screens, and what they read there. " +
+      'method is GET by default; path starts with /api/, with its query; body is the JSON the route takes. view lists the pages worth reading.',
+    {
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+      path: z.string().trim().min(1).max(2000).describe('The route, starting with /api/.'),
+      body: z.unknown().optional().describe('The JSON body, for a route that takes one.'),
+    },
+    ({ method = 'GET', path, body }) => {
+      const url = new URL(path, 'http://hornhoof');
+      if (!url.pathname.startsWith('/api/')) return `${url.pathname} is no route of the API: it starts with /api/.`;
+      if (STREAMS.test(url.pathname)) return `${url.pathname} streams without end, so it has no answer to give. Read the pages it streams from instead.`;
+      return { method, url: url.pathname + url.search, ...(body === undefined ? {} : { payload: body }) };
     },
   );
 
