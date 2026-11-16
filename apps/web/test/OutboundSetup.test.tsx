@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { DepartmentMessaging } from '../src/ui/OutboundSetup';
 import { mockApi } from './api-mock';
+import { decl } from './css';
 
 /* A department's own outbound setup as the people who run it meet it: channels with their accounts and limits, the
    catalog with what to publish or take back, and the log of who did what on whose word. */
@@ -202,6 +203,14 @@ describe('a department\'s own outbound setup', () => {
     await user.click(within(form).getByRole('checkbox'));
     await user.click(within(form).getByRole('button', { name: 'Add' }));
     expect(await within(form).findByRole('alert')).toHaveTextContent('This person asked not to get messages. Their address cannot be added again.');
+  });
+
+  it('frames a field to correct in pink, with the focus ring outside it, as Design set it for fields', () => {
+    const wrong = ".outbound-setup .field :is(input, select, textarea)[aria-invalid='true']";
+    expect(decl(wrong, 'border-color')).toBe('var(--pink)');
+    expect(decl(`${wrong}:is(:focus, :focus-visible)`, 'outline')).toBe('2px solid var(--cyan-ink)');
+    expect(decl(`${wrong}:is(:focus, :focus-visible)`, 'box-shadow')).toBe('none');
+    expect(decl(".outbound-setup .check-card:has([aria-invalid='true'])", 'border-color')).toBe('var(--pink)');
   });
 
   it('takes an address without spaces for a webhook channel to contacts, and shows any other refusal above the buttons', async () => {
