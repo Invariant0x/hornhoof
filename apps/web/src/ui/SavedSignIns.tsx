@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, useLanguage, useT, type Messages } from '../i18n';
 
 /* The sign-ins saved for an employee: the sites whose pages its hh-browse opens as signed in, who saved each and when.
    One press revokes a sign-in. Nothing of a sign-in itself comes to this screen: the server answers with where, how and
@@ -16,17 +16,17 @@ const hostOf = (site: string): string => {
   }
 };
 
-export function SavedSignIns({ agentId }: { agentId: string }) {
-  const t = useT();
-  const s = t.agent;
-  const { language } = useLanguage();
-  const id = useId();
-  const [signIns, setSignIns] = useState<SavedSignIn[] | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<unknown>(null);
-  const path = `/api/agents/${agentId}/sign-ins`;
-  const when = (iso: string) => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+/* "Sign-in to www.artstation.com saved by Clara, 16/11/2026, 15:00": from the vault, by a person, or by one who left. */
+function lineOf(s: Messages['agent'], x: SavedSignIn, at: string): string {
+  const host = hostOf(x.site);
+  if (x.source === 'vault') return s.signInFromVault(host, at);
+  return x.savedBy?.name ? s.signInBy(host, x.savedBy.name, at) : s.signInSaved(host, at);
+}
 
+/* The list of the employee's saved sign-ins, read once the card opens. */
+function useSignIns(path: string) {
+  const [signIns, setSignIns] = useState<SavedSignIn[] | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   useEffect(() => {
     let live = true;
     api.get<{ signIns: SavedSignIn[] }>(path).then(
@@ -37,9 +37,35 @@ export function SavedSignIns({ agentId }: { agentId: string }) {
       live = false;
     };
   }, [path]);
+  return { signIns, setSignIns, failure, setFailure };
+}
+
+function SignInRow({ signIn, line, busy, onRevoke }: { signIn: SavedSignIn; line: string; busy: boolean; onRevoke(): void }) {
+  const s = useT().agent;
+  return (
+    <li>
+      <span className="entry-main">{line}</span>
+      <div className="entry-actions">
+        <button className="act danger" type="button" disabled={busy} aria-label={s.signInRevokeOf(hostOf(signIn.site))} onClick={onRevoke}>
+          {s.signInRevoke}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+export function SavedSignIns({ agentId }: { agentId: string }) {
+  const t = useT();
+  const s = t.agent;
+  const { language } = useLanguage();
+  const id = useId();
+  const path = `/api/agents/${agentId}/sign-ins`;
+  const { signIns, setSignIns, failure, setFailure } = useSignIns(path);
+  const [busy, setBusy] = useState(false);
+  const when = (iso: string) => new Date(iso).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
 
   async function revoke(signIn: SavedSignIn) {
-    setBusy(signIn.id);
+    setBusy(true);
     setFailure(null);
     try {
       await api.del(`${path}/${signIn.id}`);
@@ -47,29 +73,20 @@ export function SavedSignIns({ agentId }: { agentId: string }) {
     } catch (err) {
       setFailure(err);
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
-  const said = (x: SavedSignIn) =>
-    x.source === 'vault' ? s.signInFromVault(hostOf(x.site), when(x.savedAt)) : x.savedBy?.name ? s.signInBy(hostOf(x.site), x.savedBy.name, when(x.savedAt)) : s.signInSaved(hostOf(x.site), when(x.savedAt));
-
+  const list = signIns ?? [];
   return (
     <section className="ac-sign-ins" aria-labelledby={`${id}-sign-ins`}>
       <h4 id={`${id}-sign-ins`}>{s.signIns}</h4>
       <p className="muted">{s.signInsAbout}</p>
-      {signIns && signIns.length === 0 && failure === null && <p className="muted">{s.signInsNone}</p>}
-      {signIns && signIns.length > 0 && (
+      {signIns?.length === 0 && failure === null && <p className="muted">{s.signInsNone}</p>}
+      {list.length > 0 && (
         <ul>
-          {signIns.map(x => (
-            <li key={x.id}>
-              <span className="entry-main">{said(x)}</span>
-              <div className="entry-actions">
-                <button className="act danger" type="button" disabled={busy !== null} aria-label={s.signInRevokeOf(hostOf(x.site))} onClick={() => void revoke(x)}>
-                  {s.signInRevoke}
-                </button>
-              </div>
-            </li>
+          {list.map(x => (
+            <SignInRow key={x.id} signIn={x} line={lineOf(s, x, when(x.savedAt))} busy={busy} onRevoke={() => void revoke(x)} />
           ))}
         </ul>
       )}

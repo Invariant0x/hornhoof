@@ -42,6 +42,12 @@ describe('SavedSignIns', () => {
     expect(within(items[0]!).getByRole('button', { name: 'Revoke the sign-in to www.artstation.com' })).toHaveTextContent('Revoke');
   });
 
+  it('says a sign-in was saved without a name when the person who saved it has left', async () => {
+    show({ [`GET ${PATH}`]: [200, { signIns: [{ ...SIGN_INS[0], savedBy: null }] }] });
+    const item = await screen.findByRole('listitem');
+    expect(item.querySelector('.entry-main')!.textContent).toMatch(/^Sign-in to www\.artstation\.com saved, \S/);
+  });
+
   it('revokes a sign-in with one press, and it leaves the list', async () => {
     const user = userEvent.setup();
     const { calls } = show({ [`GET ${PATH}`]: [200, { signIns: SIGN_INS }], [`DELETE ${PATH}/s1`]: [204] });
