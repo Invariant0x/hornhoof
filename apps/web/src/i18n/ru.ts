@@ -56,6 +56,7 @@ export const ru: Messages = {
     goal_risk: 'цель под угрозой',
     turn_summary: 'итог хода',
     release_tag: 'тег версии без записи выпуска',
+    inbox_marked: 'письма отметил другой',
     service: 'сохраненное служебное сообщение',
   },
   common: {
