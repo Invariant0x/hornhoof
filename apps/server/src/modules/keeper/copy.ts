@@ -145,6 +145,8 @@ export class CopyMaker {
   private enabledAt = 0;
   private failing = false;
   private lastOrder: CopyOrder | null = null;
+  /* How many tables of which subscription had got through their first copy at the last look. */
+  private through: { oid: number; ready: number } | null = null;
 
   constructor(private readonly opts: CopyMakerOptions) {
     this.kept = this.read();
@@ -473,7 +475,8 @@ export class CopyMaker {
 
   /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row: one that was
      enabled again holds only once it still runs a minute later, so one that stops on its first error each time it
-     starts, however often a look finds it running in between, counts as stopped all along, and is given up. */
+     starts, however often a look finds it running in between, counts as stopped all along, and is given up. A first
+     copy that got a table through since, as one between two cuts of a slow link, has not stood still: see moves. */
   private async stoppedFor(sql: Sql, enabled: boolean): Promise<number> {
     const now = this.now();
     if (enabled) {
@@ -506,9 +509,10 @@ export class CopyMaker {
        enabled again would stop on the first row of that table, so it is not, and the next attempt loads the schema the
        leader has now. */
     if (!elsewhere && (await this.otherSchema(sql, order))) return this.schemaChanged();
+    const tables = await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [sub.oid]);
+    this.moves(sub.oid, tables?.ready ?? 0);
     const stopped = await this.stoppedFor(sql, sub.enabled);
     if (elsewhere ? elsewhere.moved : order?.slot === 'lost' || stopped >= ENABLE_FOR_MS) return this.giveUp();
-    const tables = await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [sub.oid]);
     if (tables && tables.total > 0 && tables.ready === tables.total) {
       this.keep({ phase: 'ready', given: 0 });
       return this.ready(sql, order);
@@ -517,6 +521,15 @@ export class CopyMaker {
     const progress = order?.leaderSize ? Math.min(99, Math.floor((size * 100) / order.leaderSize)) : 0;
     /* While it is made again, the copy that is read says how far it reaches. */
     this.said = this.making(progress, this.kept.old ? await this.oldPulse() : null);
+  }
+
+  /* A cut of the link stops a subscription whose tables' first copies are under way, as any error of theirs does, and
+     the table whose rows were going over starts again from its first row. A table that got through since the last
+     look means the copy moves all the same, however often it was stopped: what it was stopped for so far counts no
+     more. One that breaks each time it starts gets nothing through, and is given up after ten minutes as before. */
+  private moves(oid: number, ready: number): void {
+    if (this.through?.oid === oid && ready > this.through.ready) this.disabledSince = null;
+    this.through = { oid, ready };
   }
 
   /* Asked each second for as long as the next copy fills, so on one connection that stays; one that failed is opened

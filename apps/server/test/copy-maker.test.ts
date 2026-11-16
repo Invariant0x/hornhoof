@@ -942,6 +942,33 @@ describe('the maker of a copy', () => {
     expect(seen.most).toBe(3);
   });
 
+  it('goes on with a first copy that its link cuts again and again while its tables get through, and gives up one that gets nothing more through', async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync');
+    const sub = s.databases.get('hornhoof')!.subs.get(NAME)!;
+    sub.rels = Array.from({ length: 40 }, () => 'i');
+    /* A slow link that drops within a minute of each start: Postgres stops the subscription on each cut, as on any error
+       of a table's first copy, so no enabling holds a minute. One more table gets through between two cuts. */
+    for (let minute = 0; minute < 25; minute++) {
+      sub.rels[minute] = 'r';
+      sub.enabled = false;
+      await maker.tick({ ...ORDER });
+      s.later(60_000);
+    }
+    expect(s.kept()).toMatchObject({ attempt: 1, phase: 'sync', given: 0 });
+    expect(maker.report()).toMatchObject({ state: 'making', name: NAME });
+    /* Nothing more gets through: ten minutes stopped, and the attempt is given up, as one that breaks each time it starts. */
+    for (let minute = 0; minute <= 10; minute++) {
+      sub.enabled = false;
+      await maker.tick({ ...ORDER });
+      s.later(60_000);
+    }
+    expect(s.kept()).toMatchObject({ attempt: 2, given: 1 });
+  });
+
   it('gives up an attempt whose subscription stops each time it starts, takes its slots with it and waits longer each time', async () => {
     const s = stand();
     s.leader.live = true;
