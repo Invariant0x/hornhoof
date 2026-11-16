@@ -7,6 +7,7 @@ import { insertTurn, pump, TURN_TIMEOUT_MS } from '../src/modules/conversation/q
 import { keyOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
+import { moveStalledQueues } from '../src/modules/tasks/orphan-turns.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { BUILTIN } from './builtin.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -228,11 +229,11 @@ describe('a live program its queue waits behind', () => {
     const lastSign = Date.now();
     c.later(2 * MIN);
     await c.pulse(c.node, turn, 'thinking', lastSign, lastSign);
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     expect((await c.job(turn)).status).toBe('running');
     c.later(2 * MIN);
     await c.pulse(c.node, turn, 'thinking', lastSign, lastSign);
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     expect((await c.job(turn)).status).toBe('done');
     expect((await c.job(next)).status).toBe('running');
     expect(screen.asked).toEqual([keyOf(c.node), keyOf(c.node)]);
@@ -243,20 +244,20 @@ describe('a live program its queue waits behind', () => {
     const turn = await c.message(c.hana.id, 'Plan the release.');
     const screen = screens(c, turn);
     c.later(2 * MIN);
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     screen.show({ instance: 'program-2' });
     c.later(2 * MIN);
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     expect((await c.job(turn)).status).toBe('running');
     screen.show({ instance: 'program-2', state: 'working' });
     c.later();
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     screen.show({ instance: 'program-2' });
     c.later();
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     expect((await c.job(turn)).status).toBe('running');
     c.later(2 * MIN);
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     expect((await c.job(turn)).status).toBe('done');
   });
 
@@ -270,13 +271,13 @@ describe('a live program its queue waits behind', () => {
     const turn = await c.message(c.hana.id, 'Plan the release.');
     const screen = screens(c, turn);
     c.later(2 * MIN);
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     screen.show(unsafe);
     c.later(2 * MIN);
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     screen.show({});
     c.later();
-    await reconcile(c.ctx, new Date());
+    await moveStalledQueues(c.ctx, new Date());
     expect((await c.job(turn)).status).toBe('running');
   });
 
