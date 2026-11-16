@@ -40,11 +40,12 @@ export function TokenCount({ count }: { count: number }) {
   return <Piece text={tokenCount(language, count)} />;
 }
 
-/* A period's tile: the short count on screen, the whole one in its name and tooltip, then input, output and cache. */
+/* A period's tile: its name in one piece as «7 дней», the short count on screen, the whole one in its name and tooltip,
+   then input, output and cache. */
 function PeriodGauge({ label, sum, t, language }: { label: string; sum: TokenSum; t: Messages; language: Language }) {
   const full = t.subs.tokens.full(new Intl.NumberFormat(language).format(sum.total), sum.total);
   const split = [[t.subs.tokens.input, sum.input], [t.subs.tokens.output, sum.output], [t.subs.tokens.cache, sum.cacheRead + sum.cacheWrite]] as const;
-  return <Gauge label={label} name={`${label}: ${full}`} title={full} figure={<TokenCount count={sum.total} />} sub={split.map(([term, count]) => <span key={term}>{`${term} `}<TokenCount count={count} /></span>)} empty={!sum.turns} />;
+  return <Gauge label={<Piece text={label} />} name={`${label}: ${full}`} title={full} figure={<TokenCount count={sum.total} />} sub={split.map(([term, count]) => <span key={term}>{`${term} `}<TokenCount count={count} /></span>)} empty={!sum.turns} />;
 }
 
 /* Each model's share of the connection's 30 days, the largest first, under the name the connection lists it by. */

@@ -261,8 +261,9 @@ describe('the Tokens part of an open card', () => {
     expect(card.querySelector('.models')).toBeNull();
   });
 
-  /* Design #1053: a page laid out right to left read a count unit first, «млн 25» for «25 млн». Each count is one piece
-     that reads left to right, and the words by it stay outside that piece, so they stand mirrored. */
+  /* Design #1053: a page laid out right to left read a count unit first, «млн 25» for «25 млн», and a tile's name «дней 7».
+     Each count and each tile's name is one piece that reads left to right, and the words by a count stay outside that
+     piece, so they stand mirrored. */
   it.each([['en', 'Tokens, 30 days'], ['ru', 'Токены, 30 дней']])('in %s holds each token count and each model share in one piece read left to right', async (language, column) => {
     lists();
     show(language);
@@ -277,6 +278,8 @@ describe('the Tokens part of an open card', () => {
     const pieces = (el: Element) => [...el.querySelectorAll('bdi')].map(b => `${b.getAttribute('dir')} ${b.textContent}`);
     const counts = periods(1_250_000);
     expect(pieces(cell)).toEqual([`ltr ${tokenCount(language, ROUTER.tokens!.month.total)}`]);
+    const words = language === 'en' ? en.subs.tokens : ru.subs.tokens;
+    expect([...part.querySelectorAll('.g-l')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${words[p]}`]));
     expect([...part.querySelectorAll('.g-f b')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${tokenCount(language, counts[p].total)}`]));
     const today = [...part.querySelectorAll('.gauge')][0]!;
     const lines = [...today.querySelectorAll('.g-s > span')];

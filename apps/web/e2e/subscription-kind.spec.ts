@@ -174,8 +174,8 @@ for (const { lang, skin, width, dir } of LOOKS) {
   });
 }
 
-/* Every token count on the screen, read where it stands: its number and its unit (or percent sign) left to right as one
-   piece, and the words around it mirrored where the page reads right to left: a tile's line starts with its word from the
+/* Every token count on the screen, read where it stands, and a tile's name of so many days: its number and its unit (or
+   percent sign) left to right as one piece, and the words around it mirrored where the page reads right to left: a tile's line starts with its word from the
    right, and a model's share stands left of its count. Each miss is named, so one run shows them all. */
 async function tokenCountsInRtl(page: Page, t: typeof en): Promise<string[]> {
   return page.evaluate(({ column, title }) => {
@@ -224,6 +224,8 @@ async function tokenCountsInRtl(page: Page, t: typeof en): Promise<string[]> {
     const figures = all('article .g-f b');
     if (!figures.length) out.push('no tile figures');
     figures.forEach((figure, i) => count(`tile ${i + 1}`, figure));
+    /* A tile's name that holds a number, «7 дней», is a count as well. */
+    all('article .g-l').filter(name => /\d/.test(name.textContent!)).forEach((name, i) => count(`tile name ${i + 1}`, name));
     const lines = all('article .g-s > span');
     if (!lines.length) out.push('no tile lines');
     lines.forEach((line, i) => count(`tile line ${i + 1}`, line));

@@ -28,7 +28,7 @@ export function Part({ title, children }: { title: string; children: ReactNode }
 }
 
 /* name and title: what the tile says in full, where its figure is short. */
-export function Gauge({ label, figure, unit, used, sub, empty = false, name, title }: { label: string; figure: ReactNode; unit?: string; used?: number | null; sub?: ReactNode; empty?: boolean; name?: string; title?: string }) {
+export function Gauge({ label, figure, unit, used, sub, empty = false, name, title }: { label: ReactNode; figure: ReactNode; unit?: string; used?: number | null; sub?: ReactNode; empty?: boolean; name?: string; title?: string }) {
   return <Edge className={`gauge${empty ? ' na' : ''}`} cut={8} name={name} title={title}><span className="g-l">{label}</span><p className="g-f"><b>{figure}</b>{unit && <span>{unit}</span>}</p>{used !== undefined && used !== null && <Bar used={used} />}{sub && <span className="g-s">{sub}</span>}</Edge>;
 }
 
