@@ -79,7 +79,7 @@ function TableRow<T>({ row, columns, name, expanded, toggle }: { row: T; columns
 
 function ResultLine({ filtered, count, shown, all, clear }: { filtered: boolean; count: string; shown: number; all: number; clear: () => void }) {
   const t = useT();
-  return <p className="result" role="status">{filtered ? <>{t.tables.shown(shown, all)} <button className="linkbtn" type="button" onClick={clear}>{t.tables.clear}</button></> : count}</p>;
+  return <p className="result" role="status">{filtered ? <><bdi>{t.tables.shown(shown, all)}</bdi> <button className="linkbtn" type="button" onClick={clear}>{t.tables.clear}</button></> : <bdi>{count}</bdi>}</p>;
 }
 
 function useAutoOpen<T extends { id: string }>(openIds: readonly string[] | undefined, rows: readonly T[], setOpen: Dispatch<SetStateAction<Set<string>>>) {

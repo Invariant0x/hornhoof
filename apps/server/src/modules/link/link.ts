@@ -7,6 +7,7 @@ import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { machines, publicLinks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { linkMode, readLinkMode } from '../tls/store.js';
 import { Relay, type Bound, type NameCheck } from './relay.js';
@@ -145,7 +146,7 @@ export class PublicLinks {
       if (!old) return;
       const { db, config } = this.ctx;
       const others = sql`${machines.networkId} IS DISTINCT FROM ${config.machineId}`;
-      const [copy] = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.role, 'data'), isNull(machines.revokedAt), others)).limit(1);
+      const [copy] = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.role, 'data'), isNull(machines.revokedAt), others)).limit(1);
       if (copy) {
         if (!old.hidden) await this.change(companyId, undefined, true, true);
         return;

@@ -1,6 +1,7 @@
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
-import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, like, max, notExists, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -11,7 +12,7 @@ import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
-import { liveNode, shownMachine } from '../nodes/nodes.js';
+import { builtinMachine, liveNode, shownMachine } from '../nodes/nodes.js';
 import { bindCandidateRun, candidateForRun, type CandidateRun, type EchelonRun } from '../tasks/echelons-run.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
@@ -224,6 +225,28 @@ const builtinsFirstOwn = (ctx: Ctx): string[] => {
   return ctx.hub.builtins().sort((a, b) => Number(b === own) - Number(a === own) || (a < b ? -1 : 1));
 };
 
+/* The company's computer a built-in node runs on: the server's own runs on the computer whose key install.sh named as its
+   host, another machine's on the row that holds its id in the network. None when it runs on no computer of the company. */
+async function builtinComputer(ctx: Ctx, companyId: string, machine: string): Promise<string | null> {
+  if (machine === ownMachine(ctx.config)) return (await builtinMachine(ctx.db, ctx.config.hostId, companyId, ctx.config.machineId))?.id ?? null;
+  const [row] = await ctx.db.select(idOnly(machines)).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+  return row?.id ?? null;
+}
+
+/* Whether a built-in node is lent, as a condition its write checks: taken back, the computer it runs on lends none of
+   its nodes. One on no computer of the company is lent, as it always was. */
+export async function builtinLent(ctx: Ctx, companyId: string, machine: string): Promise<SQL> {
+  const computer = await builtinComputer(ctx, companyId, machine);
+  return computer ? notExists(ctx.db.select(idOnly(machines)).from(machines).where(and(eq(machines.id, computer), eq(machines.lendsTests, false)))) : sql`true`;
+}
+
+/* The computer a built-in node runs on, none for the server's own, and whether it lends itself to runs. */
+async function builtinHost(ctx: Ctx, companyId: string, machine: string): Promise<{ machineId: string | null; lent: boolean }> {
+  const computer = await builtinComputer(ctx, companyId, machine);
+  const [row] = computer ? await ctx.db.select({ lent: machines.lendsTests }).from(machines).where(eq(machines.id, computer)) : [];
+  return { machineId: machine === ownMachine(ctx.config) ? null : computer, lent: row?.lent ?? true };
+}
+
 const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
   !nodeHeld(ctx, node) && ctx.hub.isReady(node) && ctx.hub.loadOf(node) !== null && ctx.hub.noRunsOf(node) === null;
 
@@ -258,11 +281,10 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   for (const machine of builtins) {
     const node = builtinOf(machine);
     if (!takesParts(ctx, node)) continue;
-    const own = machine === ownMachine(ctx.config);
-    const [row] = own ? [] : await db.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+    const { machineId, lent } = await builtinHost(ctx, companyId, machine);
     places.push({
-      key: builtinPlaceKey(ctx, machine), node, name: await builtinName(ctx, db, machine), machineId: row?.id ?? null, nodeId: null, builtin: true, builtinMachine: machine,
-      lent: true, busy: false, running: 0, load: together([hub.loadOf(node)]), access: null, works: hub.runsWork(node),
+      key: builtinPlaceKey(ctx, machine), node, name: await builtinName(ctx, db, machine), machineId, nodeId: null, builtin: true, builtinMachine: machine,
+      lent, busy: false, running: 0, load: together([hub.loadOf(node)]), access: null, works: hub.runsWork(node),
     });
   }
   const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), ...builtins.map(machine => hub.loadOf(builtinOf(machine)))];
@@ -282,7 +304,7 @@ export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<Br
   for (const machine of builtinsFirstOwn(ctx)) {
     const node = builtinOf(machine);
     const builtinError = hub.browserHoldOf(node);
-    if (builtinError) held.push({ name: await builtinName(ctx, db, machine), lent: true, access: null, works: hub.runsWork(node), browserError: builtinError });
+    if (builtinError) held.push({ name: await builtinName(ctx, db, machine), lent: (await builtinHost(ctx, companyId, machine)).lent, access: null, works: hub.runsWork(node), browserError: builtinError });
   }
   return held;
 }
@@ -356,7 +378,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
   const { db } = ctx;
   await pumpDescriptions(ctx, companyId => placesOf(ctx, companyId), run => targetOf(ctx, run), id => settleRun(ctx, id));
   /* A run whose every file was reused has no part whose end would end it. */
-  for (const { id } of await db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.status, 'running'), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)))) await settleRun(ctx, id);
+  for (const { id } of await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.status, 'running'), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)))) await settleRun(ctx, id);
   const waiting = await db
     .select({ part: testParts, run: testRuns, task: { number: tasks.number } })
     .from(testParts)
@@ -434,7 +456,7 @@ async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'pas
 
 /* A described run planned with no part at all: nothing was left to run. Before its description a run has no parts either. */
 async function everythingReused(ctx: Ctx, runId: string): Promise<boolean> {
-  const [run] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)));
+  const [run] = await ctx.db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)));
   return run !== undefined;
 }
 
@@ -507,7 +529,7 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
 /* A part's log goes on its task as a file of the turn that started the run, once. */
 async function keepLog(ctx: Ctx, run: Run, part: Part, log: string): Promise<void> {
   const name = logName(run, part.part);
-  const [had] = await ctx.db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.taskId, run.taskId), eq(attachments.name, name))).limit(1);
+  const [had] = await ctx.db.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.taskId, run.taskId), eq(attachments.name, name))).limit(1);
   if (had) return;
   const bytes = Buffer.from(log, 'utf8');
   await ctx.db.insert(attachments).values({ companyId: run.companyId, jobId: run.jobId, agentId: run.agentId, taskId: run.taskId, name, mediaType: 'text/plain; charset=utf-8', bytes, size: bytes.length });
@@ -567,7 +589,7 @@ export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = [])
   const known = has.filter(isId);
   await loseParts(ctx, and(ofNode(ctx, id), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
   if (known.length) {
-    const open = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(ctx, id)));
+    const open = await ctx.db.select(idOnly(testParts)).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(ctx, id)));
     const keep = new Set(open.map(p => p.id));
     for (const partId of known) if (!keep.has(partId)) ctx.hub.send(id, { type: 'tests.cancel', partId });
   }
@@ -655,7 +677,7 @@ async function workFiles(ctx: Ctx, task: Task, input: RunInput, kind: RunKind): 
 }
 
 async function checkRunCapacity(ctx: Ctx, job: RunJob): Promise<void> {
-  const [open] = await ctx.db.select({ n: count() }).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
+  const [open] = await ctx.db.select(countOnly()).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
   if (Number(open?.n ?? 0) >= OPEN_RUNS) throw refuse(409, 'task_invalid', `You have ${OPEN_RUNS} runs going on already. Wait for one to end, or stop one with stop_tests or stop_work.`);
 }
 
@@ -687,7 +709,7 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
   const { department, pin } = setup;
   return ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
-    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
+    await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, job.companyId)).for('update');
     const number = await nextRunNumber(tx, job.companyId);
     const [row] = await tx
       .insert(testRuns)
@@ -801,7 +823,7 @@ async function stopperName(ctx: Ctx, job: ToolJob, other: boolean): Promise<stri
 async function recordRunStop(ctx: Ctx, job: ToolJob, run: Run, task: Task, other: boolean, stopper: string) {
   const now = new Date();
   return ctx.db.transaction(async tx => {
-    await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, run.taskId)).for('update');
+    await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.id, run.taskId)).for('update');
     const [row] = await tx
       .update(testRuns)
       .set({ status: 'stopped', finishedAt: now, stoppedByAgentId: other ? job.agentId : null })

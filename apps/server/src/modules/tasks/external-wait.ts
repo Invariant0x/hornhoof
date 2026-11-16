@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { and, desc, eq, gt, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { refusePaused } from './pause.js';
@@ -49,7 +50,7 @@ function waitOf(input: WaitAsked, now: Date): ExternalWait {
 
 /* The one run this wait is for: of the one who waits, on this task, still going. A result already on its way cannot be waited for. */
 async function namedRun(ctx: Ctx, task: Task, agentId: string, number: number): Promise<string> {
-  const [run] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(
+  const [run] = await ctx.db.select(idOnly(testRuns)).from(testRuns).where(and(
     eq(testRuns.companyId, task.companyId), eq(testRuns.number, number), eq(testRuns.taskId, task.id), eq(testRuns.agentId, agentId), eq(testRuns.status, 'running'),
   ));
   if (!run) throw refuse(409, 'task_invalid', `You have no run ${number} going on #${task.number}. If it ended, read its result instead of waiting for it.`);
@@ -97,11 +98,11 @@ async function newMessage(ctx: Ctx, agentId: string, taskId: string, heard: numb
 
 /* Whether words on the task wait for its holder, the end of a run among them: in a turn, or still in the outbox. */
 async function unreadMessage(ctx: Ctx, agentId: string, taskId: string): Promise<boolean> {
-  const [message] = await ctx.db.select({ id: jobs.id }).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
+  const [message] = await ctx.db.select(idOnly(jobs)).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
     eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), eq(agentEvents.kind, 'message'),
     sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment', 'unblocked', 'tests', 'work')`,
   )).limit(1);
-  const [comment] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(and(
+  const [comment] = await ctx.db.select(idOnly(pendingWakes)).from(pendingWakes).where(and(
     eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), inArray(pendingWakes.why, ['comment', 'unblocked', 'tests', 'work']),
   )).limit(1);
   return Boolean(message || comment);
@@ -213,7 +214,7 @@ const planHold = (state: AgentNow, onTask: boolean): string | null => (state.lim
    getting back on the line. */
 async function waitsInLine(ctx: Ctx, agentId: string, turn: { id: string; createdAt: Date }, state: AgentNow): Promise<boolean> {
   if (state.busy) return true;
-  const [ahead] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, turn.id), lte(jobs.createdAt, turn.createdAt))).limit(1);
+  const [ahead] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, turn.id), lte(jobs.createdAt, turn.createdAt))).limit(1);
   if (ahead) return true;
   return state.reason === 'machine_offline' && (await reconnecting(ctx, agentId));
 }

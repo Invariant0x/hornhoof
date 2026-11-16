@@ -7,6 +7,7 @@ import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, machineAccess, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { canViewComputer, type AccessView, type Asked } from '../computer/access.js';
 import { ORCHESTRATORS_TABLES } from '../merge/rules.js';
 import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
@@ -106,7 +107,7 @@ const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAns
    not, and to the people who see the whole company and see him. Only a screen of a person takes it. */
 async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ cards: ProposalRow[]; computers: Decisions['computers'] }> {
   const { db } = ctx;
-  const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
+  const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
   if (!orchestrator || me.via) return { cards: [], computers: [] };
   const seesHim = seesAgentId(viewer, orchestrator.id);
   const cards = seesHim && me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
@@ -129,7 +130,7 @@ async function mergesFor(ctx: Pick<Ctx, 'db'>, me: Person, everyone: readonly Ca
     WHERE c.picked IS NULL AND c.tbl <> ALL (${sql.raw(`ARRAY[${his.map(table => `'${table}'`).join(', ')}]::text[]`)})
     GROUP BY m.id ORDER BY m.created_at, m.source`)) as unknown as { rows: { id: string; label: string; open: number; after: string | Date | null }[] };
   if (found.rows.length === 0) return [];
-  const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   const owner = decisionOwner({ source: 'merge' }, everyone);
   return found.rows.map(row => ({ id: row.id, label: row.label, after: row.after ? new Date(row.after).toISOString() : null, open: row.open, agentId: orchestrator?.id ?? '', ownerPersonId: owner }));
 }

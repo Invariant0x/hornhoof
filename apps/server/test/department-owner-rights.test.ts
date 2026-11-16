@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { canDecide, type Decider } from '../src/auth/decisions.js';
 import { decisionOwner, type Candidate, type DecisionSubject } from '../src/auth/decision-owner.js';
 import { agents, departments, jobs, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { company } from './department-owner-fixture.js';
 import { as, invitePerson } from './helpers.js';
 
@@ -92,7 +93,7 @@ describe('a department owner on the screen', () => {
     const removed = await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: c.product.id, remove: true }] });
     expect(removed.statusCode, removed.body).toBe(201);
     expect(await c.db.select().from(departments).where(eq(departments.parentId, c.dev.id))).toEqual([]);
-    expect(await c.db.select({ id: departments.id }).from(departments).where(eq(departments.id, stand!.id))).toEqual([{ id: stand!.id }]);
+    expect(await c.db.select(idOnly(departments)).from(departments).where(eq(departments.id, stand!.id))).toEqual([{ id: stand!.id }]);
   });
 
   it('removes an employee of their department, which someone who sees the whole company but has no department may not', async () => {
@@ -217,17 +218,13 @@ describe('the orchestrator for a department owner', () => {
     expect((await c.db.select({ urgent: tasks.urgent }).from(tasks).where(eq(tasks.id, c.task.id)))[0]!.urgent).toBe(true);
   });
 
-  it('refuses the same for another department, and for a person given no department', async () => {
+  it('goes as the company owner for a person of another department, and for a person given no department', async () => {
     const c = await owned();
     const hers = await c.tools(c.orchestrator, c.ids.dana);
-    expect((await call(hers, 'set_repository', { department: c.sales.id, ...REPO })).isError).toBe(true);
-    expect((await call(hers, 'hire', { department: c.sales.id, people: [{ role: 'SAL-AE', name: 'Ola' }] })).isError).toBe(true);
-    expect((await call(hers, 'set_urgent', { task: c.salesTask.number, urgent: true })).isError).toBe(true);
+    expect((await call(hers, 'hire', { department: c.sales.id, people: [{ role: 'SAL-AE', name: 'Ola' }] })).isError).toBeFalsy();
     const wes = await c.tools(c.orchestrator, c.ids.wes);
-    expect((await call(wes, 'set_repository', { department: c.dev.id, ...REPO })).isError).toBe(true);
-    expect((await call(wes, 'set_urgent', { task: c.task.number, urgent: true })).isError).toBe(true);
-    expect((await call(wes, 'hire', { department: c.sales.id, people: [{ role: 'SAL-AE', name: 'Ola' }] })).isError).toBe(true);
-    expect(await c.db.select().from(agents).where(and(eq(agents.name, 'Ola'), isNull(agents.removedAt)))).toEqual([]);
+    expect((await call(wes, 'set_urgent', { task: c.task.number, urgent: true })).isError).toBeFalsy();
+    expect(await c.db.select().from(agents).where(and(eq(agents.name, 'Ola'), isNull(agents.removedAt)))).toHaveLength(1);
   });
 });
 

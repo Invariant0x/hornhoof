@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
@@ -34,6 +34,9 @@ const SAID = {
   networkChanged: true,
 };
 const REPORT: Extract<NodeMessage, { type: 'node.reconnect' }> = { type: 'node.reconnect', ...SAID, cause: 'dns_error' };
+/* The network id of a machine whose own built-in node connects, with the key the node key makes for it. */
+const MACHINE = 'b'.repeat(64);
+const builtinKey = (machine: string) => `builtin.${machine}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${machine}`).digest('hex')}`;
 
 /* A company with one machine of the CEO that carries two subscriptions, each its own node. */
 async function joinedMachine(app: FastifyInstance, ceo: string) {
@@ -247,6 +250,41 @@ describe('the history of a node connection', () => {
     await node.closed;
     /* The end of a connection goes to the log where a node's would be written: the history has had its chance. */
     await until(() => lines.some(l => l.includes('A node lost its connection.')));
+    expect(await stored(db)).toEqual([]);
+  });
+
+  /* #1060: parts of runs went on the built-in node of home-api, and its drops were nowhere to be read. */
+  it('writes the built-in node of a machine on that machine, with no node of its own, and how it ended', async () => {
+    const lines: string[] = [];
+    const { db, url, machineId } = await liveCompany({}, { level: 'info', stream: { write: (line: string) => void lines.push(line) } });
+    const [acme] = await db.select().from(companies);
+    await db.update(machines).set({ networkId: MACHINE }).where(eq(machines.id, machineId));
+    const node = await connectNode(url, builtinKey(MACHINE));
+    await storedAre(db, 1);
+    expect((await stored(db))[0]).toMatchObject({ companyId: acme!.id, machineId, nodeId: null, disconnectedAt: null, cause: null });
+    node.ws.close(1000);
+    await endedAre(db, 1);
+    expect((await stored(db))[0]).toMatchObject({ machineId, nodeId: null, cause: 'node_closed', closeCode: 1000 });
+    const parsed = lines.map(l => JSON.parse(l) as Record<string, unknown>);
+    expect(parsed.find(l => l.msg === 'A node connected.')).toMatchObject({ machine: 'dev-mac', node: 'builtin', offlineMs: null });
+    expect(parsed.find(l => l.msg === 'A node lost its connection.')).toMatchObject({ machine: 'dev-mac', node: 'builtin', cause: 'node_closed', code: 1000 });
+    /* Back, it says how long it was away, and what it said of the drop goes with that drop. */
+    const back = await connectNode(url, builtinKey(MACHINE));
+    await storedAre(db, 2);
+    back.send(REPORT);
+    await until(async () => (await stored(db))[0]!.report !== null);
+    expect((await stored(db)).map(r => r.report)).toEqual([SAID, null]);
+    await until(() => lines.filter(l => l.includes('A node connected.')).length === 2);
+    expect(JSON.parse(lines.filter(l => l.includes('A node connected.'))[1]!)).toMatchObject({ machine: 'dev-mac', node: 'builtin', offlineMs: expect.any(Number) });
+  });
+
+  it('keeps the built-in node of a machine that is not one of a company in the log only', async () => {
+    const { db, url } = await liveCompany();
+    const node = await connectNode(url, builtinKey(MACHINE));
+    node.ws.close(1000);
+    await node.closed;
+    const other = await connectNode(url, NODE_KEY);
+    await marked(other);
     expect(await stored(db)).toEqual([]);
   });
 

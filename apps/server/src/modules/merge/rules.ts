@@ -113,7 +113,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   phone_sessions: rows('protected'),
   phone_frames: add('protected'),
 
-  ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
+  ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
   machines: rows('machines'),
   computer_runs: rows('machines'),

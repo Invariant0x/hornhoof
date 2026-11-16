@@ -25,6 +25,7 @@ import { saveLink } from '../src/modules/link/link.js';
 import { linkClientId } from '../src/modules/link/client.js';
 import { Relay } from '../src/modules/link/relay.js';
 import type { SyncCatalog, SyncControllerOptions } from '../src/modules/keeper/sync.js';
+import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { fakeRelay } from './fake-relay.js';
 import { peerConfigFor, type PeerServices } from '../src/modules/link/peer-client.js';
 import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
@@ -657,6 +658,33 @@ describe('the peer link in the keeper', () => {
     expect(relay.calls.some(call => call.includes('/sync'))).toBe(false);
   });
 
+  it('drops at its next sweep the slot of a broken-off table that a copy named to its app, and keeps the one nobody named', async () => {
+    const c = await company(false);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    const { catalog } = syncCatalog(null);
+    const [broken, other] = ['pg_16500_sync_16384_7300000000000000000', 'pg_16500_sync_16390_7300000000000000000'];
+    /* The leader's Postgres as far as the sweep asks it: two slots of tables' first copies that nobody reads. */
+    const slots = [broken, other];
+    const dropped: string[] = [];
+    const sql: Sql = {
+      query: async <R>(text: string, params: unknown[] = []) => {
+        if (text.includes('FROM pg_replication_slots')) return { rows: slots.map(name => ({ name, active: false, pid: null, copying: false })) as R[] };
+        if (text.includes('pg_drop_replication_slot')) {
+          dropped.push(String(params[0]));
+          slots.splice(slots.indexOf(String(params[0])), 1);
+        }
+        return { rows: [] as R[] };
+      },
+    };
+    const { keeper } = await keeperBeside(c, target, folder(), { lease: fakeLease(), sync: { catalog, relay: new Relay(relay.url), everyMs: 20, slots: { sql, diskFree: () => null, everyMs: 20 } } });
+    await until(() => keeper.mode() === 'lead');
+    c.app.ctx.leftSlots.say('cccccccc-0000-4000-8000-00000000000c', [broken]);
+    await until(() => dropped.length > 0);
+    expect(dropped).toEqual([broken]);
+    expect(slots).toEqual([other]);
+  });
+
   it('stops its link when its lease ends with a copy listed, and starts it again to tell the relay', async () => {
     const c = await company(true);
     const target = await listening(c.app);
@@ -693,6 +721,45 @@ describe('the peer link in the keeper', () => {
     renews.hold = true;
     await until(() => started === 2);
     await until(() => keeper.mode() === 'lead');
+  });
+
+  it('keeps its link when its lease ends while no other machine holds a copy that finished', async () => {
+    const c = await company(true);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    relay.bindings.set('acme', { key: 'k'.repeat(32) });
+    relay.register('acme', `acme-${MACHINE_ID.slice(0, 8)}-link`);
+    const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
+    /* The copy is listed and still being made: nobody but this machine could lead. */
+    const { catalog } = syncCatalog(copy);
+    const clock = { wall: Date.now(), mono: 1_000_000 };
+    const renews = { hold: true };
+    const lease = fakeLease({ othersHoldData: true, renew: async () => renews.hold });
+    let started = 0;
+    const { keeper, lines } = await keeperBeside(c, target, folder(), {
+      lease, now: () => ({ ...clock }),
+      clientFor: () => (started++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
+      sync: { catalog, relay: new Relay(relay.url), everyMs: 20, routeEveryMs: 0, linkPauseMs: 30_000 },
+      proofs: {
+        needed: async () => false,
+        probe: async () => null,
+        ownTerm: async () => null,
+        poll: async () => { throw new Error('no machine needs the relay to come back in here'); },
+        follow: async () => undefined,
+      },
+    });
+    await until(() => keeper.mode() === 'lead');
+    await until(() => started === 1);
+
+    /* Its disk holds every renewal back for ten seconds: the lease ends, and the link the company is reached by stays. */
+    renews.hold = false;
+    clock.wall += 11_000;
+    clock.mono += 11_000;
+    await until(() => lines.some(line => line.startsWith('The lease ended')));
+    expect(keeper.linkWanted()).toBe(true);
+    renews.hold = true;
+    await until(() => keeper.mode() === 'lead');
+    expect([keeper.linkWanted(), started, lines.includes('No public link: the tunnel waits.')]).toEqual([true, 1, false]);
   });
 
   it('never leads alone while its controller says a copy is listed and the relay cannot be told', async () => {

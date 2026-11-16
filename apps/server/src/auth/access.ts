@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../db/client.js';
 import { departments, people, personAccess, teams } from '../db/schema.js';
+import { idOnly } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import type { Person } from './session.js';
 
@@ -57,7 +58,7 @@ export async function accessesOf(db: Pick<Db, 'select'>, persons: readonly Pick<
   const listedPeople = persons.filter(p => p.scopeKind !== 'company').map(p => p.id);
   const rows = listedPeople.length ? await db.select().from(personAccess).where(inArray(personAccess.personId, listedPeople)) : [];
   const listed = [...new Set(rows.flatMap(r => (r.departmentId ? [r.departmentId] : [])))];
-  const tops = new Set(listed.length ? (await db.select({ id: departments.id }).from(departments).where(and(inArray(departments.id, listed), isNull(departments.parentId)))).map(d => d.id) : []);
+  const tops = new Set(listed.length ? (await db.select(idOnly(departments)).from(departments).where(and(inArray(departments.id, listed), isNull(departments.parentId)))).map(d => d.id) : []);
   return new Map(
     persons.map(person => {
       if (person.scopeKind === 'company') return [person.id, withOwned(WHOLE, namedOf(person.id))];
@@ -83,11 +84,11 @@ export async function checkAccess(db: Db, companyId: string, input: AccessInput)
   const depts = [...new Set(input.departments)];
   const tms = [...new Set(input.teams)];
   if (depts.length) {
-    const found = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), inArray(departments.id, depts)));
+    const found = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), inArray(departments.id, depts)));
     if (found.length !== depts.length) throw unknown();
   }
   if (tms.length) {
-    const found = await db.select({ id: teams.id }).from(teams).where(and(eq(teams.companyId, companyId), inArray(teams.id, tms)));
+    const found = await db.select(idOnly(teams)).from(teams).where(and(eq(teams.companyId, companyId), inArray(teams.id, tms)));
     if (found.length !== tms.length) throw unknown();
   }
 }

@@ -4,7 +4,7 @@ import { serveApi } from './api';
 const COMMIT = '84c8383' + 'a'.repeat(33);
 const CURRENT = { version: '0.5.0', commit: COMMIT, migrations: 51 };
 const BUILD = { ...CURRENT, tag: '0.5.0', created: '2026-11-03T10:00:00Z', title: 'Clearer work history' };
-const UPDATES = { current: CURRENT, latest: BUILD, versions: [BUILD], available: false, checkedAt: '2026-11-03T10:00:00Z', error: null, updater: { present: true, status: null, waiting: null } };
+const UPDATES = { current: CURRENT, latest: BUILD, versions: [BUILD], available: false, checkedAt: '2026-11-03T10:00:00Z', error: null, updater: { present: true, status: null, waiting: null, calledOff: null } };
 
 for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for (const width of [1280, 375]) {
   test(`Versions ${language} ${theme} ${width}`, async ({ page }, info) => {
@@ -52,7 +52,9 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     const old = { ...BUILD, version: '0.4.0', tag: '0.4.0', commit: 'c'.repeat(40), migrations: 50 };
     /* A running update stands at the step with the longest words. */
     const status = { id: 'update', version: target.version, commit: target.commit, state, step: state === 'running' ? 'promise' : 'backup', log: '', at: '2026-11-03T10:00:00Z' };
-    const updater = { present: true, status: ['running', 'rolled_back'].includes(state) ? status : null, waiting: state === 'waiting' ? target : null };
+    /* An update that waits for the agents says for which turns and until when. */
+    const waiting = { version: target.version, commit: target.commit, since: '2026-11-03T10:00:00Z', until: '2026-11-03T10:30:00Z', turns: [{ agent: 'Zed', task: 1051 }], lost: [] };
+    const updater = { present: true, status: ['running', 'rolled_back'].includes(state) ? status : null, waiting: state === 'waiting' ? waiting : null, calledOff: null };
     await page.route('**/api/version', route => route.fulfill({ json: CURRENT }));
     await page.route('**/api/updates', route => route.fulfill({ json: { ...UPDATES, latest: target, versions: [target, BUILD, old], updater } }));
     await page.addInitScript(({ language, theme }) => {

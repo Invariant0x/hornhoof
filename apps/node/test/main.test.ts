@@ -1235,6 +1235,38 @@ describe('runNode', () => {
     expect(server.received.findIndex(m => m.type === 'check.release')).toBeGreaterThan(server.received.findIndex(m => m.type === 'tests.started'));
   });
 
+  /* #1060: a socket that drops for a moment, as home-api's did while it took 125 MB of dependencies, stops no part. Its
+     slot is claimed again once the node is back, the part goes on, and its end goes out on the new connection. */
+  it('keeps a part running under its slot through a short drop and sends its end once back', async () => {
+    fakeClock();
+    const server = await fakeServer(), logs: string[] = [];
+    let finish!: () => void, signal: AbortSignal | undefined;
+    const ending = new Promise<void>(done => (finish = done));
+    const runPart: typeof runTests = async (m, options) => {
+      signal = options.signal;
+      await ending;
+      return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'checked' };
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: line => logs.push(line), runPart, testUser: { uid: 20001, gid: 20001 } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'tests.run', partId: 'p4', repo: null, branch: null, task: 3, command: 'check', part: 4, parts: 4, timeoutMs: 600000 });
+    await server.wait(() => server.received.some(m => m.type === 'tests.started' && m.partId === 'p4'));
+    const id = server.received.find(m => m.type === 'check.acquire')!.id;
+    await dropAndReturn(server, logs);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
+    await server.barrier('back');
+    expect(signal?.aborted, 'the part stopped with the drop').toBe(false);
+    await server.wait(() => server.received.some(m => m.type === 'check.acquire' && m.resume === true));
+    const again = server.received.findIndex(m => m.type === 'check.acquire' && m.resume === true);
+    expect(server.received[again]).toMatchObject({ id });
+    expect(again).toBeGreaterThan(server.received.findLastIndex(m => m.type === 'hello'));
+    expect(server.received.findLast(m => m.type === 'hello')).toMatchObject({ tests: ['p4'] });
+    finish();
+    await server.wait(() => server.received.some(m => m.type === 'tests.done' && m.partId === 'p4'));
+    expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p4')).toMatchObject({ ok: true });
+  });
+
   it('cancels a queued part without starting preparation or claiming execution began', async () => {
     const server = await fakeServer({ grantChecks: false }), ran: string[] = [];
     const runPart: typeof runTests = async m => { ran.push(m.partId); return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' }; };
