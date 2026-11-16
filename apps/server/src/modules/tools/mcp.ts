@@ -76,7 +76,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
   registerInboxTools(server, ctx, job);
   registerTelegramTools(server, ctx, job);
   registerGoogleSheetsTools(server, ctx, job);
-  registerVaultTools(server, ctx, async () => ({ id: job.agentId, companyId: job.companyId, departmentId: job.departmentId, jobId: job.id }));
+  registerVaultTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   registerApprovalTools(server, ctx, job);
   registerOutboundTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {

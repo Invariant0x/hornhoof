@@ -1,5 +1,5 @@
 {
-  "id": "741c97f6-200e-4da2-bac2-88c34621ce64",
+  "id": "5f1a3030-53b8-46ff-9bc7-5248551137a6",
   "prevId": "3c28bc6c-017a-4bb7-a39a-d71f7e6d3da9",
   "version": "7",
   "dialect": "postgresql",
@@ -16978,46 +16978,20 @@
           "primaryKey": false,
           "notNull": false
         },
-        "scope_kind": {
-          "name": "scope_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'company'"
-        },
-        "scope_department_id": {
-          "name": "scope_department_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "scope_agent_id": {
-          "name": "scope_agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "created_by_agent": {
+          "name": "created_by_agent",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
@@ -17061,32 +17035,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "vault_entries_scope_department_id_departments_id_fk": {
-          "name": "vault_entries_scope_department_id_departments_id_fk",
-          "tableFrom": "vault_entries",
-          "tableTo": "departments",
-          "columnsFrom": [
-            "scope_department_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "vault_entries_scope_agent_id_agents_id_fk": {
-          "name": "vault_entries_scope_agent_id_agents_id_fk",
-          "tableFrom": "vault_entries",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "scope_agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "vault_entries_created_by_people_id_fk": {
           "name": "vault_entries_created_by_people_id_fk",
           "tableFrom": "vault_entries",
@@ -17100,12 +17048,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "vault_entries_updated_by_people_id_fk": {
-          "name": "vault_entries_updated_by_people_id_fk",
+        "vault_entries_created_by_agent_agents_id_fk": {
+          "name": "vault_entries_created_by_agent_agents_id_fk",
           "tableFrom": "vault_entries",
-          "tableTo": "people",
+          "tableTo": "agents",
           "columnsFrom": [
-            "updated_by"
+            "created_by_agent"
           ],
           "columnsTo": [
             "id"
@@ -17117,12 +17065,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "vault_entries_scope": {
-          "name": "vault_entries_scope",
-          "value": "(\"vault_entries\".\"scope_kind\" = 'company' AND \"vault_entries\".\"scope_department_id\" IS NULL AND \"vault_entries\".\"scope_agent_id\" IS NULL) OR (\"vault_entries\".\"scope_kind\" = 'department' AND \"vault_entries\".\"scope_department_id\" IS NOT NULL AND \"vault_entries\".\"scope_agent_id\" IS NULL) OR (\"vault_entries\".\"scope_kind\" = 'agent' AND \"vault_entries\".\"scope_agent_id\" IS NOT NULL AND \"vault_entries\".\"scope_department_id\" IS NULL)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.vault_log": {
@@ -17178,33 +17121,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "job_id": {
-          "name": "job_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "task_id": {
           "name": "task_id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fields": {
-          "name": "fields",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -17214,12 +17133,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -17317,19 +17230,6 @@
             "id"
           ],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "vault_log_job_id_jobs_id_fk": {
-          "name": "vault_log_job_id_jobs_id_fk",
-          "tableFrom": "vault_log",
-          "tableTo": "jobs",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "vault_log_task_id_tasks_id_fk": {

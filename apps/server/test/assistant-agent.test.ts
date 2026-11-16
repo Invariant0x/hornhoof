@@ -148,12 +148,12 @@ describe("an assistant's own agent", () => {
     expect((await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.olgaSession) })).statusCode).toBe(403);
   });
 
-  it("works with its owner's assistant tools, not with the company's", async () => {
+  it("works with its owner's assistant tools and the company's vault, not with the rest of the company's", async () => {
     const c = await company();
     const { run } = await talking(c);
     const client = await mcp(c.app, run.toolToken!);
     const names = (await client.listTools()).tools.map(t => t.name).sort();
-    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'read_events', 'send_message', 'tell_owner', 'who_am_i']);
+    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'read_events', 'send_message', 'tell_owner', 'vault_entries', 'vault_entry', 'vault_save', 'who_am_i']);
   });
 });
 

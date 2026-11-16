@@ -1,7 +1,5 @@
-import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { totpCode, totpCodesAround } from '../src/secret-fill/totp.js';
-import { SecretValue } from '../src/secret-fill/values.js';
+import { totpCode } from '../src/modules/vault/totp.js';
 
 /* RFC 6238, appendix B: the seeds are the ASCII digits, 20, 32 and 64 bytes long, in base32 here. */
 const SHA1 = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
@@ -25,27 +23,5 @@ describe('one-time codes by RFC 6238 on a controlled clock', () => {
 
   it('keeps the last six digits for a six-digit code, with leading zeros', () => {
     expect(totpCode({ secret: SHA1, digits: 6, period: 30, algorithm: 'SHA1' }, 1111111109_000)).toBe('081804');
-  });
-
-  it('gives the codes of the period before, the current one and the one after', () => {
-    const totp = { secret: SHA1, digits: 8, period: 30, algorithm: 'SHA1' } as const;
-    expect(totpCodesAround(totp, 1111111111_000)).toEqual([totpCode(totp, 1111111081_000), '14050471', totpCode(totp, 1111111141_000)]);
-  });
-
-  it('refuses a secret that is not base32', () => {
-    expect(() => totpCode({ secret: 'GEZ1', digits: 6, period: 30, algorithm: 'SHA1' }, 0)).toThrow();
-  });
-});
-
-describe('a secret value', () => {
-  it('shows as hidden in every way it can be printed and gives the value only to a callback', () => {
-    const value = new SecretValue('marker-pw-71c9');
-    expect(String(value)).toBe('[hidden]');
-    expect(`${value}`).toBe('[hidden]');
-    expect(JSON.stringify({ value })).toBe('{"value":"[hidden]"}');
-    expect(inspect(value)).toBe('[hidden]');
-    expect(inspect({ nested: value }, { depth: 5 })).not.toContain('marker');
-    expect(Object.keys(value)).toEqual([]);
-    expect(value.reveal(plain => plain.length)).toBe(14);
   });
 });
