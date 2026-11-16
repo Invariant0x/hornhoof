@@ -56,21 +56,21 @@ const unchanged = (tokens: readonly Token[]): Piece[] => tokens.map(token => ({ 
 function Changes({ entry, revision }: { entry: ShownEntry; revision: ShownRevision }) {
   const v = useT().outboundSetup.view;
   const inUse = entry.revisions.find(r => r.revision === entry.current);
-  if (!inUse) return <p className="outbound-note">{v.isNew}</p>;
-  if (inUse.revision === revision.revision) return <p className="outbound-note">{v.inUseNow}</p>;
+  if (!inUse) return <p className="outbound-note" dir="auto">{v.isNew}</p>;
+  if (inUse.revision === revision.revision) return <p className="outbound-note" dir="auto">{v.inUseNow}</p>;
   const subject = changes(subjectOf(inUse), subjectOf(revision));
   const text = changes(textOf(inUse), textOf(revision));
   const same = [...subject, ...text].every(piece => piece.change === 'same');
   return (
     <div className="outbound-changes" role="group" aria-label={v.changesFrom(inUse.revision)}>
-      <b>{v.changesFrom(inUse.revision)}</b>
+      <b dir="auto">{v.changesFrom(inUse.revision)}</b>
       {same ? (
-        <p className="outbound-note">{v.same}</p>
+        <p className="outbound-note" dir="auto">{v.same}</p>
       ) : (
         <>
-          <small>{v.key}</small>
-          {templateOf(revision.value) && <p className="outbound-words"><Words pieces={subject} /></p>}
-          <p className="outbound-words"><Words pieces={text} /></p>
+          <small dir="auto">{v.key}</small>
+          {templateOf(revision.value) && <p className="outbound-words" dir="auto"><Words pieces={subject} /></p>}
+          <p className="outbound-words" dir="auto"><Words pieces={text} /></p>
         </>
       )}
     </div>
@@ -85,23 +85,23 @@ export function RevisionView({ id, entry, revision, children }: { id: string; en
   return (
     <section className="outbound-view" id={id} aria-label={s.revision(revision.revision)}>
       <p className="outbound-meta">
-        {entry.locale && <span>{`${v.language}: ${languageName(entry.locale, language)}`}</span>}
-        <span>{v.proposed(revision.createdBy.name ?? '', whenOf(language, revision.createdAt))}</span>
+        {entry.locale && <span dir="auto">{`${v.language}: ${languageName(entry.locale, language)}`}</span>}
+        <span dir="auto">{v.proposed(revision.createdBy.name ?? '', whenOf(language, revision.createdAt))}</span>
       </p>
       {template ? (
         <dl className="outbound-facts">
           <dt>{v.subject}</dt>
-          <dd>{template.subject ?? v.noSubject}</dd>
+          <dd dir="auto">{template.subject ?? v.noSubject}</dd>
           <dt>{v.text}</dt>
           <dd>
-            <p className="outbound-words"><Words pieces={unchanged(partsAsTokens(template.parts))} /></p>
-            <small>{v.places}</small>
+            <p className="outbound-words" dir="auto"><Words pieces={unchanged(partsAsTokens(template.parts))} /></p>
+            <small dir="auto">{v.places}</small>
           </dd>
         </dl>
       ) : (
         <dl className="outbound-facts">
           <dt>{v.value}</dt>
-          <dd>{revision.summary}</dd>
+          <dd dir="auto">{revision.summary}</dd>
         </dl>
       )}
       <Changes entry={entry} revision={revision} />
