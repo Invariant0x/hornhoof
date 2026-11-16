@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { chmodSync, lstatSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 
@@ -18,9 +20,9 @@ export function textScript(value: string): string {
 }
 
 /* No stdout, stderr, script or adb error object is logged or returned on failure. */
-export const systemAdb: AdbRun = call => new Promise((resolve, reject) => {
+export const adbRunner = (executable: string, environment?: NodeJS.ProcessEnv): AdbRun => call => new Promise((resolve, reject) => {
   if (call.signal.aborted) return reject(new Error('phone_cancelled'));
-  const child = spawn('adb', call.args, { stdio: ['pipe', 'pipe', 'pipe'], shell: false, signal: call.signal });
+  const child = spawn(executable, call.args, { stdio: ['pipe', 'pipe', 'pipe'], shell: false, signal: call.signal, killSignal: 'SIGKILL', ...(environment ? { env: environment } : {}) });
   const chunks: Buffer[] = [];
   let bytes = 0;
   let failed = false;
@@ -33,7 +35,8 @@ export const systemAdb: AdbRun = call => new Promise((resolve, reject) => {
   });
   child.stderr.on('data', () => {});
   child.stdin.on('error', () => {});
-  child.on('error', () => { failed = true; clearTimeout(timer); reject(new Error('phone_adb_failed')); });
+  // Abort also emits error before close. The receipt must wait until the process has actually closed.
+  child.on('error', () => { failed = true; });
   child.on('close', code => {
     clearTimeout(timer);
     if (failed || code !== 0 || call.signal.aborted) reject(new Error('phone_adb_failed'));
@@ -41,6 +44,23 @@ export const systemAdb: AdbRun = call => new Promise((resolve, reject) => {
   });
   child.stdin.end(call.input ?? '');
 });
+
+export function privateAdbEnvironment(keyDir: string): NodeJS.ProcessEnv {
+  const socketDir = join('/tmp', `hornhoof-adb-${createHash('sha256').update(`${process.getuid?.()}:${keyDir}`).digest('hex').slice(0, 24)}`);
+  return { ...process.env, ANDROID_USER_HOME: keyDir, ADB_SERVER_SOCKET: `localfilesystem:${socketDir}/server`, ADB_TRACE: '', ADB_VENDOR_KEYS: '' };
+}
+
+/* The adb server itself must not expose an unrestricted TCP port to the node's agent users. */
+export function privateAdb(executable: string, keyDir: string): AdbRun {
+  const env = privateAdbEnvironment(keyDir);
+  for (const directory of [keyDir, dirname(env.ADB_SERVER_SOCKET!.slice('localfilesystem:'.length))]) {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.uid !== process.getuid?.()) throw new Error('phone_adb_directory_invalid');
+    chmodSync(directory, 0o700);
+  }
+  return adbRunner(executable, env);
+}
 
 export class PhoneAdb {
   constructor(private readonly run: AdbRun) {}

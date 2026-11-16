@@ -1,5 +1,101 @@
 # Company Android phones, task 1079
 
+## Development checkpoint: USB host transport (not a final submission)
+
+The bridge now has a strict high-level request schema, an outgoing authenticated
+WebSocket to its own node, and per-operation server authorization of the current
+node key, machine, company, serial, hardware identity and session generation.
+It accepts device discovery, identity, tree, pixels, fixed actions and text, plus
+an internal cancellation/drain receipt. It has no argv or arbitrary shell API.
+Typed values stay in memory and adb stdin; neither the server authorization call
+nor bridge messages to logs contain them. The host waits for the actual adb child
+close before acknowledging cancellation. Reconnection waits for previous commands
+to drain. An unavailable helper cannot acknowledge Stop successfully.
+
+adb uses a filesystem socket in a mode 0700 directory, not TCP 5037, so unprivileged
+agent users cannot speak unrestricted adb to the node's server. adb trace is
+disabled and additional vendor keys are cleared. Node pairing and capture share
+this adapter. The Android source documents the socket interface:
+[adb client command line](https://android.googlesource.com/platform/packages/modules/adb/+/1bacec0a271e494d149d5e46f745b04a3c5c7a19/client/commandline.cpp).
+
+Linux gets a separate helper container from the same node image, on a per-node
+network, with only USB device access, a private Android key volume and this node's
+state read-only. It gets no Docker socket and is not privileged. macOS gets a
+bundled helper started as a user LaunchAgent, with mode 0700 directories and mode
+0600 key/config files. The normal installer sets it up without sudo. The updater
+preserves the original host path and architecture, replaces the bundle atomically,
+and the helper restarts through launchd. The uninstaller stops the helper with its
+node and preserves keys unless the person also approves deleting volumes.
+
+The node image pins Debian adb 1:34.0.5-12~bpo12+1, including native arm64:
+[Debian package](https://packages.debian.org/bookworm-backports/arm64/adb).
+Native Mac assets are Node 22.23.4 for each architecture and Android platform-tools
+37.0.0 for Darwin, with SHA-256 values in `usb-install.ts`, verified against the
+[Node sums](https://nodejs.org/dist/v22.23.4/SHASUMS256.txt) and the exact
+[platform-tools archive](https://dl.google.com/android/repository/platform-tools_r37.0.0-darwin.zip).
+The Node archive keeps its license and platform-tools keeps its notices; esbuild
+links bundle license comments. No upstream mobile-mcp source is copied.
+
+The approved dependency 21cf42d02cc0dcd7d3978e94ef0a19da1516f5e7 remains in
+history. Task 1076's fresh head ff00fe24721c439ff065e5eef2e85b21fb1621e3 was merged
+as 7b6c1d81655313b571492a59979e2e00d551ae81, including its corrected test types
+and Passwords UI. The shared phone contract did not change. None of this is in
+turn or main; the dependency still needs its own independent gates first.
+
+Proof obtained during this checkpoint:
+
+- Node bridge, stdin, allowlist, server refusal, cancellation/drain, private adb,
+  host asset hashes, parser, session and redaction checks passed locally: 7 named
+  files / 28 tests, exit 0, after the last relevant node class changes. The native
+  entry/uninstall lifecycle still needs its own completed build and delta checks.
+- Server bridge access passed for the current key/serial/generation and refusal
+  after Stop or key revocation. Four installer cases passed: Linux separation,
+  native Mac installation, container-based update of an existing Mac helper and
+  helper removal. These use recorded command results; they do not prove macOS,
+  Docker or a physical phone on this Linux workspace.
+- Installer join and node updater callers passed, 3 files / 43 tests, before the
+  latest uninstall adjustment. A wider earlier named run exposed fixture counts
+  treating helpers as subscription nodes; the fixture now respects their label,
+  while the original node counts remain unchanged.
+- `npm run build -w @hornhoof/node` passed (tsc plus both host bundles) before the
+  final uninstall entry change. Node test types passed. Server test types reached
+  errors in the new bridge test payload type; that local fixture type is fixed
+  but requires a new passed result. The earlier dependency type errors are fixed.
+- The named browser scenario executed 9 tests across Chromium, Firefox and WebKit,
+  both 375/1440 widths, every shipped theme, en/ru and synthetic RTL. Its owner
+  form, live hidden frame, Stop and recording playback passed. The scenario's
+  subsequent blank-page cleanup adjustment is pending a new run. Screenshots in
+  `docs/evidence/android-phones` are the running UI with recorded fixtures, not
+  a real phone or a finished human handoff. The RTL image is explicitly synthetic.
+
+Open conditions, which prevent Development submission:
+
+- The head must settle first bootstrap on already installed Macs: the existing
+  updater runs in Linux and cannot first start a new host LaunchAgent. It can
+  update a helper installed by the normal host installer. No extra human command
+  or host privilege exception has been assumed. There is no native Windows USB
+  helper in this checkpoint.
+- The head must settle the social-action declaration contract. Raw tap coordinates
+  cannot reliably distinguish navigation from posting, liking or messaging. The
+  newly requested account limits, duplicate-text protection, journal, owner limit
+  UI and suitable-phone pool allocation are not implemented yet.
+- Several later checks were terminated with SIGTERM / exit 143, including a
+  server run which printed 6 green tests before termination. That is NOT PASS.
+  ESLint and shellcheck also ended with 143. They need complete results; no test
+  threshold was raised. Docker is absent here, so an image build is unverified.
+- The new migration-upgrade fixture needed an email for its ordinary person
+  constraint. The corrected migration test passed, 1 file / 1 test, exit 0: it
+  checks legacy identity/session revocation, preserved company/task data, a fresh
+  database and repeat application. No database constraint was weakened.
+- Combined server/node secret-marker evidence, further queue concurrency/pool
+  checks, final quality checks, the complete Russian guide and an actual phone
+  check remain. Independent Review, Security and Tests have not run on this work.
+
+The bridge's independent Security report must explicitly cover socket/key
+isolation, machine and company binding, stale generations, Stop/drain, stdin and
+absence of values in logs, installer supply chain and the unresolved first Mac
+bootstrap. No integration is authorized by these development checks.
+
 ## Development checkpoint: pairing, physical identity and owner controls
 
 The network probe accepts the Android wireless pairing address and six-digit code.

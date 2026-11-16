@@ -47,7 +47,7 @@ export function registerPhoneTools(server: McpServer, ctx: Ctx, actor: () => Pro
     return { value: await sessionView(ctx, await sessionFor(ctx, me, input.session)) };
   }));
   server.registerTool('phone_action', {
-    description: 'Observe or operate the real Android phone you hold. capture gives a sanitized PNG and element tree; tap and swipe use screen coordinates; url opens ordinary Chrome. Text accepts printable ASCII; ask the owner for other scripts. Never pass a password or code here: use vault_fill for the focused phone field. A lost reply has an unknown outcome: inspect before another action.',
+    description: 'Observe or operate the real Android phone you hold, on the company account its owner signed in. Use one screen and one app or site at a time, never bulk messages. A robot check needs the phone owner; never bypass it. capture gives a sanitized PNG and element tree; tap and swipe use screen coordinates; url opens ordinary Chrome. Text accepts printable ASCII; ask the owner for other scripts. Never pass a password or code here: use vault_fill for the focused phone field. A lost reply has an unknown outcome: inspect before another action.',
     inputSchema: { session: z.uuid(), operation: PhoneOperation },
   }, input => answer(async () => {
     const reply = await phoneAction(ctx, await actor(), input.session, input.operation);

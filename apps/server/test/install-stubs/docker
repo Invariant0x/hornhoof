@@ -439,7 +439,22 @@ case "$1" in
         case "$* " in *"com.docker.compose.project=$v "*) echo "${v}_pgdata" ;; esac
       done
     fi ;;
+  port)
+    if [ "${3:-}" = 38997/tcp ]; then echo '127.0.0.1:43791'; fi ;;
   run)
+    WORD=/app/apps/node/dist/phone-host-install.cjs; if has "$@"; then
+      previous=''; root=''
+      for word in "$@"; do
+        if [ "$previous" = "$WORD" ]; then root=$word; break; fi
+        previous=$word
+      done
+      [ -n "$root" ] || exit 1
+      mkdir -p "$root"
+      printf '<plist version="1.0"><dict/></plist>\n' > "$root/agent.plist"
+      exit 0
+    fi
+    # USB helpers have their own label. They never appear in a query for hornhoof.subscription.
+    case " $* " in *' --label hornhoof.phone-helper=1 '*) echo usb-helper-cid; exit 0 ;; esac
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
     WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi
     case "$*" in

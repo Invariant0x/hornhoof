@@ -9,6 +9,7 @@ import { phoneOwner } from './store.js';
 import { phoneFillTarget, reconcilePhone, stopPhone } from './queue.js';
 import { usePhoneTargets } from '../vault/fill.js';
 import { imageBytes, livePhone, recordingImage, taskRecordings } from './recording.js';
+import { phoneBridgeRoutes } from './bridge.js';
 
 const Id = z.strictObject({ id: z.uuid() });
 
@@ -19,6 +20,7 @@ function body<T>(schema: z.ZodType<T>, input: unknown): T {
 }
 
 export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
+  phoneBridgeRoutes(app, ctx);
   usePhoneTargets(ctx, phoneFillTarget);
   app.get('/api/phones', async req => {
     const me = await requirePerson(req, ctx.db);
