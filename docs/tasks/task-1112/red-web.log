@@ -1,0 +1,202 @@
+
+ RUN  v5.0.5 /data/work/agents/70032ca2-201d-401e-9dc9-06f01c1ff0e8/hornhoof-worktrees/task-1112/apps/web
+
+ ❯ test/ApprovalPolicy.test.tsx (23 tests | 1 failed | 22 skipped) 2774ms
+   ❯ ApprovalPolicy (17)
+     × explains the default while keeping the department rules supplied by the server 2739ms
+     ↓ says the CEO decides while there is no owner, and offers the CEO those who may own it
+     ↓ names the state of autonomous release in a word in both languages
+     ↓ says in both languages that everyone given the department runs it too, the owner only coming first with its approvals
+     ↓ names the owner the CEO picks through the route, and shows them
+     ↓ takes the owner away with the empty choice
+     ↓ tells the CEO what to do when nobody may be named yet
+     ↓ shows the server's refusal of an owner in place, and the choice goes back
+     ↓ gives the owner the rules to change and not the owner to change
+     ↓ shows someone with access the rules in words, with nothing to change
+     ↓ says "to me" to the one the approvals go to, and "to the owner" to a CEO looking at someone else's department
+     ↓ saves a mode without a limit at once
+     ↓ asks for a limit before it saves the mode of limits, and sends a number
+     ↓ offers a stored limit to change, and leaves a mode of limits with no unit without one
+     ↓ shows a refused rule on its own line
+     ↓ says it is loading, and says so when it cannot load
+     ↓ loads again when the owner changes elsewhere
+   ↓ an approval under a department's policy (3)
+     ↓ asks in words, with no commit to show, and sends the answer
+     ↓ names the owner to someone who may not take it
+     ↓ keeps the commit of an approval that names one
+   ↓ who takes an approval (1)
+     ↓ names the owner of the department
+   ↓ the words (2)
+     ↓ has every channel and mode in both languages, in plain Russian with no letter yo and no long dash
+     ↓ lets the people who run the department toggle its autonomous release, the CEO too, and shows its journal
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/ApprovalPolicy.test.tsx > ApprovalPolicy > explains the default while keeping the department rules supplied by the server
+TestingLibraryElementError: Unable to find an element with the text: /By default, only new kinds need approval/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"appr"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"appr-owner"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"field"[39m
+        [36m>[39m
+          [36m<label[39m
+            [33mfor[39m=[32m"_r_0_"[39m
+          [36m>[39m
+            [0mDepartment owner[0m
+          [36m</label>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"field-control"[39m
+          [36m>[39m
+            [36m<select[39m
+              [33maria-describedby[39m=[32m"_r_0_-note"[39m
+              [33mid[39m=[32m"_r_0_"[39m
+            [36m>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m""[39m
+              [36m>[39m
+                [0mNo owner: the CEO decides[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"p2"[39m
+              [36m>[39m
+                [0mDana, COO[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"p3"[39m
+              [36m>[39m
+                [0mWes[0m
+              [36m</option>[39m
+            [36m</select>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"hint"[39m
+              [33mid[39m=[32m"_r_0_-note"[39m
+            [36m>[39m
+              [0mThe owner gets this department's approvals and decisions first. Everyone given the department runs it in full as well: hires and removes its employees, changes its sub-units and repository and answers its approvals.[0m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"muted"[39m
+      [36m>[39m
+        [0mThe rules stay as they are when the owner changes. The CEO and the CEO delegate can always answer any approval themselves.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"appr-rules"[39m
+      [36m>[39m
+        [36m<fieldset[39m
+          [33mclass[39m=[32m"appr-rule"[39m
+        [36m>[39m
+          [36m<legend>[39m
+            [0mMessages[0m
+          [36m</legend>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"appr-form"[39m
+          [36m>[39m
+            [36m<select[39m
+              [33maria-label[39m=[32m"How it is approved"[39m
+            [36m>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"every"[39m
+              [36m>[39m
+                [0mEvery one to me[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"new_kinds"[39m
+              [36m>[39m
+                [0mOnly new kinds[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"within_limits"[39m
+              [36m>[39m
+                [0mNo approval within limits[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</div>[39m
+        [36m</fieldset>[39m
+        [36m<fieldset[39m
+          [33mclass[39m=[32m"appr-rule"[39m
+        [36m>[39m
+          [36m<legend>[39m
+            [0mPrices[0m
+          [36m</legend>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"appr-form"[39m
+          [36m>[39m
+            [36m<select[39m
+              [33maria-label[39m=[32m"How it is approved"[39m
+            [36m>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"every"[39m
+              [36m>[39m
+                [0mEvery one to me[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"new_kinds"[39m
+              [36m>[39m
+                [0mOnly new kinds[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"within_limits"[39m
+              [36m>[39m
+                [0mNo approval within limits[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</div>[39m
+        [36m</fieldset>[39m
+        [36m<fieldset[39m
+          [33mclass[39m=[32m"appr-rule"[39m
+        [36m>[39m
+          [36m<legend>[39m
+            [0mCommits[0m
+          [36m</legend>[39m
+          [36m<span>[39m
+            [0mEvery one needs approval[0m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"appr-auto"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"muted"[39m
+            [36m>[39m
+              [0mAutonomous release: off. The people who run this department switch it.[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"muted"[39m
+            [36m>[39m
+              [0mWhen on, an exact commit for main passes without an approval card if it has a green full test run, an independent PASS verdict from another employee and a fast-forward path from main. It is this department's own: the people who run it turn it on and off, never an agent.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+        [36m</fieldset>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ test/ApprovalPolicy.test.tsx:32:19
+     30|     render(<ApprovalPolicy departmentId="d1" />);
+     31|     await screen.findByRole('combobox', { name: t.owner });
+     32|     expect(screen.getByText(/By default, only new kinds need approval/…
+       |                   ^
+     33|     expect(rowOf('message').getByRole('combobox', { name: t.mode })).t…
+     34|     expect(rowOf('price').getByRole('combobox', { name: t.mode })).toH…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 22 skipped (23)
+   Start at  16:55:28
+   Duration  125.39s (transform 45%, environment 34%, setup 17%, tests 2%, worker 1%)
+

@@ -1,0 +1,22 @@
+
+> @hornhoof/web@0.29.2 test
+> vitest run test/ApprovalPolicy.test.tsx --pool=threads --no-file-parallelism
+
+
+ RUN  v5.0.5 /data/work/agents/70032ca2-201d-401e-9dc9-06f01c1ff0e8/hornhoof-worktrees/task-1112/apps/web
+
+ ✓ test/ApprovalPolicy.test.tsx (23 tests) 10593ms
+   ✓ ApprovalPolicy (17)
+     ✓ explains the default while keeping the department rules supplied by the server 2256ms
+     ✓ says "to me" to the one the approvals go to, and "to the owner" to a CEO looking at someone else's department 911ms
+     ✓ asks for a limit before it saves the mode of limits, and sends a number 344ms
+     ✓ offers a stored limit to change, and leaves a mode of limits with no unit without one 552ms
+     ✓ shows a refused rule on its own line 370ms
+   ✓ the words (2)
+     ✓ lets the people who run the department toggle its autonomous release, the CEO too, and shows its journal 4409ms
+
+ Test Files  1 passed (1)
+      Tests  23 passed (23)
+   Start at  16:58:57
+   Duration  76.16s (transform 51%, environment 20%, tests 15%, setup 14%)
+
