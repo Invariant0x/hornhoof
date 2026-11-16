@@ -1,0 +1,75 @@
+import { and, eq } from 'drizzle-orm';
+import type { Ctx } from '../../app.js';
+import { pipelineStages, tasks } from '../../db/schema.js';
+import { note, published, refuse, taskSpot, type Actor, type Task } from '../tasks/engine.js';
+import { placeOnPipeline } from './pipelines.js';
+import { requireAnswersFor } from './responsible.js';
+import { goalFor } from './task-fields.js';
+
+/* What may change of a task beside its work: its texts for people and what the tracker keeps. Who does it, its status, its
+   place and its route change elsewhere. null takes a goal, a date or a pipeline off. */
+export type TaskEdit = {
+  title?: string;
+  brief?: string;
+  why?: string;
+  goalId?: string | null;
+  responsiblePersonId?: string;
+  dueAt?: Date | null;
+  pipelineId?: string | null;
+  pipelineStageId?: string | null;
+};
+
+/* The names the history and the screens use for what changed, in the order the card shows them. */
+const FIELDS = [['title', 'title'], ['brief', 'brief'], ['why', 'why'], ['goalId', 'goal'], ['responsiblePersonId', 'responsible'], ['dueAt', 'due'], ['pipelineId', 'pipeline'], ['pipelineStageId', 'stage']] as const;
+
+const same = (a: unknown, b: unknown) => (a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b);
+
+/* The checked change of a task, and the names of what it changes: a goal only for a task with nothing above it, a person who
+   reaches its place, a pipeline of its department, a stage of its pipeline. A new pipeline without a stage starts where
+   whoever holds the task stands on it. */
+export async function trackerSet(ctx: Pick<Ctx, 'db'>, task: Task, edit: TaskEdit): Promise<{ set: Partial<Task>; fields: string[] }> {
+  const spot = taskSpot(task);
+  const set: Partial<Task> = {};
+  if (edit.title !== undefined) set.title = edit.title.trim();
+  if (edit.brief !== undefined) set.brief = edit.brief.trim();
+  if (edit.why !== undefined) set.why = edit.why.trim();
+  if (edit.dueAt !== undefined) set.dueAt = edit.dueAt;
+  if (edit.goalId !== undefined && edit.goalId !== task.goalId) {
+    if (edit.goalId && task.parentId) throw refuse(400, 'goal_invalid', 'Work under a task serves the goal of the task above it, so it names none of its own.');
+    set.goalId = edit.goalId ? (await goalFor(ctx, task.companyId, spot, edit.goalId)).id : null;
+  }
+  if (edit.responsiblePersonId !== undefined && edit.responsiblePersonId !== task.responsiblePersonId) {
+    await requireAnswersFor(ctx, task.companyId, edit.responsiblePersonId, spot);
+    set.responsiblePersonId = edit.responsiblePersonId;
+  }
+  if (edit.pipelineId === null) Object.assign(set, { pipelineId: null, pipelineStageId: null });
+  else if (edit.pipelineId !== undefined && edit.pipelineId !== task.pipelineId) Object.assign(set, await placeOnPipeline(ctx.db, task.companyId, spot, task.assigneeAgentId, edit.pipelineId, edit.pipelineStageId));
+  else if (edit.pipelineStageId !== undefined) set.pipelineStageId = await stageOf(ctx, task, edit.pipelineStageId);
+  const fields = FIELDS.filter(([key]) => key in set && !same(set[key], task[key])).map(([, name]) => name);
+  return { set, fields };
+}
+
+/* A stage of the pipeline the task is on, or none: back to not started. */
+async function stageOf(ctx: Pick<Ctx, 'db'>, task: Task, stageId: string | null): Promise<string | null> {
+  if (stageId === null) return null;
+  if (!task.pipelineId) throw refuse(400, 'pipeline_invalid', 'Put the task on a pipeline first.');
+  const [stage] = await ctx.db.select({ id: pipelineStages.id }).from(pipelineStages).where(and(eq(pipelineStages.id, stageId), eq(pipelineStages.pipelineId, task.pipelineId)));
+  if (!stage) throw refuse(400, 'pipeline_invalid', 'This stage is not of the task\'s pipeline.');
+  return stage.id;
+}
+
+/* An edit of what the tracker keeps, made only on the task as its writer saw it. It gives no work, so it wakes nobody and
+   leaves what the task waits for as it is; its line in the history says what changed. */
+export async function editTask(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task: Task, edit: TaskEdit, version: number): Promise<Task> {
+  if (task.version !== version) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
+  const { set, fields } = await trackerSet(ctx, task, edit);
+  if (!fields.length) return task;
+  const row = await ctx.db.transaction(async tx => {
+    const [row] = await tx.update(tasks).set({ ...set, version: task.version + 1, updatedAt: new Date() }).where(and(eq(tasks.id, task.id), eq(tasks.version, version))).returning();
+    if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
+    await note(tx, row, { kind: 'edited', actor, data: { fields } });
+    return row;
+  });
+  published(ctx, row);
+  return row;
+}

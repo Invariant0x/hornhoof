@@ -15,7 +15,8 @@ import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
-import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, setAfter, taskSpot, type Task } from './engine.js';
+import { editTask } from '../tracker/edit.js';
 import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
@@ -48,7 +49,29 @@ const NewTaskBody = z.object({
   afterPlans: z.array(z.strictObject({ task: z.number().int().positive(), plan: WaitPlan })).max(10).optional(),
   independentPart: z.strictObject({ title: z.string().trim().min(1).max(120), brief: z.string().max(600), body: z.string().trim().min(1).max(20000), executor: z.uuid() }).optional(),
   independentNone: z.string().trim().min(1).max(2000).optional(),
+  /* What the tracker keeps; a task under parent goes to the head of the parent's department and serves its goal. */
+  parent: z.uuid().optional(),
+  goal: z.uuid().optional(),
+  responsible: z.uuid().optional(),
+  why: z.string().trim().max(300).optional(),
+  due: z.iso.datetime({ offset: true }).optional(),
+  pipeline: z.uuid().optional(),
+  stage: z.uuid().optional(),
 });
+/* What a person changes of a task beside its work, on the task as they saw it. */
+const TaskPatch = z.strictObject({
+  version: z.number().int().min(0),
+  title: z.string().trim().min(1).max(120).optional(),
+  brief: z.string().max(600).optional(),
+  why: z.string().trim().max(300).optional(),
+  goal: z.uuid().nullable().optional(),
+  responsible: z.uuid().optional(),
+  due: z.iso.datetime({ offset: true }).nullable().optional(),
+  pipeline: z.uuid().nullable().optional(),
+  stage: z.uuid().nullable().optional(),
+});
+const AfterBody = z.strictObject({ after: z.array(z.number().int().positive()).max(10), independentNone: z.string().trim().min(1).max(2000).optional(), version: z.number().int().min(0) });
+const dateOf = (iso: string | null | undefined) => (iso === undefined ? undefined : iso === null ? null : new Date(iso));
 /* A promise of dates named by the task's number: one for a task it does not come after is refused with the rest of the change. */
 const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: Task[]) =>
   given ? Object.fromEntries(given.map(({ task, plan }) => [after.find(t => t.number === task)?.id ?? String(task), plan])) : undefined;
@@ -57,7 +80,7 @@ const ReplanBody = z.strictObject({ expectedGeneration: z.number().int().positiv
 const WaitsQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().max(100).optional() });
 /* department: any of the company's, or none for the work given to the orchestrator itself, which only people with the
    whole company read; left out, every task the person reads. */
-const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]).optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
+const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]).optional(), status: z.enum(['open', 'closed', 'all']).default('open'), responsible: z.uuid().optional() });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
@@ -275,7 +298,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       db
         .select()
         .from(tasks)
-        .where(and(eq(tasks.companyId, me.companyId), state, place))
+        .where(and(eq(tasks.companyId, me.companyId), state, place, q.responsible ? eq(tasks.responsiblePersonId, q.responsible) : undefined))
         .orderBy(desc(tasks.number))
         .limit(500);
     /* All of them: every open one stays even under many closed ones, the newest closed ones come with them. */
@@ -295,6 +318,9 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/tasks', async (req, reply) => {
     const me = await requirePerson(req, db);
     const body = NewTaskBody.parse(req.body);
+    const parent = body.parent ? await shown(me, body.parent) : null;
+    if (parent && body.department && body.department !== parent.departmentId) throw refuse(400, 'task_invalid', 'Work under a task stays in the department of the task above it.');
+    if (parent) Object.assign(body, { department: parent.departmentId ?? undefined, product: parent.productId ?? undefined });
     let assignee: { id: string } | null;
     if (!body.department) {
       requireCompanyScope(me);
@@ -316,9 +342,40 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
-    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: body.urgent, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone });
+    const moved = await createTask(ctx, actorOf(me), {
+      title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: parent ? undefined : body.urgent,
+      parentId: parent?.id ?? null, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone,
+      goalId: body.goal, responsiblePersonId: body.responsible, why: body.why, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+    });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
+  });
+
+  /* Texts for people and what the tracker keeps, by whoever acts on the task's work. */
+  app.patch('/api/tasks/:id', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const body = TaskPatch.parse(req.body);
+    const task = await changed(me, id);
+    const row = await editTask(ctx, actorOf(me), task, {
+      title: body.title, brief: body.brief, why: body.why, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
+    }, body.version);
+    return { task: await detail(me, row) };
+  });
+
+  /* What a task comes after, by number, of the tasks this person sees. */
+  app.put('/api/tasks/:id/after', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const body = AfterBody.parse(req.body);
+    const task = await changed(me, id);
+    const viewer = await viewerOf(db, me);
+    const after = body.after.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
+    const missing = body.after.find(n => !after.some(t => t.number === n));
+    if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
+    const moved = await setAfter(ctx, actorOf(me), task.id, { after: body.after.map(n => after.find(t => t.number === n)!.id), independentNone: body.independentNone }, body.version);
+    await wakeAll(ctx, moved.wakes);
+    return { task: await detail(me, moved.task) };
   });
 
   /* A page of a list of waits: how much of it, and from where. */
