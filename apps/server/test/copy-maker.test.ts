@@ -15,8 +15,8 @@ const FIRST: CopyOrder = { ...ORDER, slot: null };
 
 /* oid: as Postgres numbers it, one per subscription made. dies: enabled again, it stops on its next error, which one
    look still finds it running before. */
-/* leads: its connection leads to the leader, as one made by the maker does. */
-type Sub = { enabled: boolean; slot: string | null; rels: string[]; oid?: number; dies?: { looked: boolean }; leads?: boolean };
+/* leads: its connection leads to the leader, as one made by the maker does. working: the tables a worker of it copies now. */
+type Sub = { enabled: boolean; slot: string | null; rels: string[]; oid?: number; dies?: { looked: boolean }; leads?: boolean; working?: number[] };
 /* handed: its time as the leader ended in a handover. passfile: the file the replica role's password is read from is there. */
 /* leftovers: the origins of tables whose first copy was broken off, which Postgres keeps until that table's copy is
    through, and which no worker uses now. */
@@ -95,6 +95,11 @@ function cluster() {
       if (leader.live) leader.slots.add(sub.slot!);
       start(db!, sub);
       return [];
+    }
+    /* The leader's slots of the tables whose first copy broke off, which no worker takes up now. */
+    if (text.includes('pg_control_system')) {
+      const sub = [...db!.subs.values()].find(found => (found.oid ?? 16500) === params[0]);
+      return (sub?.rels ?? []).flatMap((state, table) => (state === 'd' && !sub!.working?.includes(table) ? [{ name: syncSlot(sub!, table) }] : []));
     }
     if (text.includes('FROM pg_subscription_rel')) {
       const sub = [...db!.subs.values()][0];
@@ -299,6 +304,23 @@ describe('the maker of a copy', () => {
     await maker.tick(null);
     expect(maker.report()).toMatchObject({ state: 'making', progress: 0 });
     expect(maker.mode()).toBe('off');
+  });
+
+  it("names in its report the leader's slots of the tables whose first copy broke off, and no more once they start again", async () => {
+    const s = stand();
+    const maker = s.maker();
+    await maker.tick(null);
+    s.loaded();
+    await until(s, maker, 'sync');
+    const sub = s.databases.get('hornhoof')!.subs.get(NAME)!;
+    /* A cut broke off two tables mid-copy, and a worker took one of them up again; a third waits for its first start. */
+    sub.rels = ['d', 'd', 'i', 'r'];
+    sub.working = [1];
+    await maker.tick(ORDER);
+    expect(maker.report()).toMatchObject({ state: 'making', left: [`pg_${sub.oid}_sync_0_7300000000000000000`] });
+    sub.working = [0, 1];
+    await maker.tick(ORDER);
+    expect(maker.report()).not.toHaveProperty('left');
   });
 
   it('finishes when every table is ready', async () => {

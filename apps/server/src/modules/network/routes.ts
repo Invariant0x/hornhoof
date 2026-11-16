@@ -11,6 +11,7 @@ import { holdsData } from '../copies/holds.js';
 import { copyOrder } from '../copies/slots.js';
 import { appendEvent } from '../events/store.js';
 import { isPrivate } from '../keeper/addresses.js';
+import { TABLE_SYNC_SLOT } from '../keeper/slots.js';
 import { UPLOAD_SPARE, type UploadAllowed } from '../keeper/uploads.js';
 import { queryOf } from '../merge/leader.js';
 import { makeCrl } from './authority.js';
@@ -64,6 +65,8 @@ const ReportBody = z.object({
       name: z.string().regex(/^copy_[0-9a-f]{16}_[1-9][0-9]{0,8}$/).nullable(),
       /* led: the number of the term its old database led under, when it led. */
       old: z.object({ attempt: z.number().int().min(1), led: z.number().int().min(0).optional() }).nullable(),
+      /* The leader's slots of its tables whose first copy broke off. */
+      left: z.array(z.string().regex(TABLE_SYNC_SLOT)).max(200).optional(),
     })
     .optional(),
   /* A machine that stopped holding the data holds nothing of it any more. */
@@ -104,6 +107,11 @@ const keyChanged = () => new ApiError(409, 'conflict', "This machine's key chang
 /* The term a machine says its old database led under, as the merge's source can name it: any other number leaves the
    database to be read as a copy's, which is compared the whole way all the same once it wrote. */
 const ledOf = (led: number | undefined): number | null => (led !== undefined && led >= 1 && led <= 999_999_999 ? led : null);
+
+/* How a machine's row keeps what its keeper said of its copy; a copy that names no subscription keeps the one the row has. */
+function copyColumns(copy: NonNullable<z.infer<typeof ReportBody>['copy']>, copyName: string | null) {
+  return { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name ?? copyName ?? null, copyOld: copy.old?.attempt ?? null, copyOldLed: ledOf(copy.old?.led) };
+}
 
 /* networkId: the id the machine's keeper runs under, which the slot a new leader made for its copy is named by. */
 type Holder = { id: string; networkId: string | null; role: MachineRole; personId: string | null; copyName: string | null; copyOld: number | null; copyOldLed: number | null; uploadState: UploadState | null };
@@ -210,7 +218,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The machine's own keeper also hears which copies' databases a merge is to read, and opens a door to each. */
     const doors = who.own ? { doors: await ctx.doorsWanted() } : {};
     /* And which machines owe it what they held, and how large that may be. */
-    const uploads = who.own ? { uploads: await uploadsOwed() } : {};
+    const uploads = who.own ? { uploads: await uploadsOwed(), leftSlots: ctx.leftSlots.now() } : {};
     /* A machine that keeps a copy hears of its slot here, and how far the leader's database has grown; one that stopped
        keeping one, what it still owes. */
     const told = peer ? { role: peer.role, copy: peer.role === 'data' || peer.uploadState ? await copyOrder(ctx, peer) : null } : {};
@@ -240,10 +248,8 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       /* A report that says nothing of the pin keeps the one the machine said before. */
       const pinned = pin === undefined ? {} : { ownerPin: pin };
       /* Only a machine the server gave the data says anything of a copy; and never the one that leads. */
-      const copied =
-        copy === undefined || who.own || row?.role !== 'data'
-          ? {}
-          : { copyState: copy.state, copyProgress: copy.progress, copyError: copy.error, copyAt: copy.at ? new Date(copy.at) : null, copyName: copy.name ?? row?.copyName ?? null, copyOld: copy.old?.attempt ?? null, copyOldLed: ledOf(copy.old?.led) };
+      const copied = copy === undefined || who.own || row?.role !== 'data' ? {} : copyColumns(copy, row.copyName);
+      if ('copyState' in copied) ctx.leftSlots.say(machine.id, copy?.left);
       /* A machine that owed what it held and holds nothing now owes nothing, and its row says nothing of a copy but
          its name: the next copy on that machine starts at the attempt above it, so no name is used twice. */
       const left = wiped && !who.own && row?.role !== 'data' && row?.uploadState ? { uploadState: null, copyState: null, copyProgress: null, copyError: null, copyAt: null, copyOld: null, copyOldLed: null } : {};
