@@ -59,8 +59,9 @@ export async function authorizeAccess(ctx: Ctx, caller: OperatorCaller): Promise
   return found.me;
 }
 
-/* What reached a node: a turn that started there, or one that went out and has not ended. */
-const reachedNode = or(isNotNull(jobs.startedAt), inArray(jobs.status, ['queued', 'running']));
+/* What reached a node: a turn that started there, one that runs, or one that went out to a node named and waits there. A
+   message that waits in the employee's queue on no node yet is none, however new: the turn it waits behind has the screen. */
+const reachedNode = or(isNotNull(jobs.startedAt), eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), or(isNotNull(jobs.nodeId), isNotNull(jobs.builtinMachine))));
 
 /* The employee's program where its last turn on its plan went, of any department and on any plan. Never the caller's own,
    and never a person's own assistant's, which is its owner's alone. */
