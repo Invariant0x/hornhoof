@@ -40,6 +40,19 @@ function controlledTime(): void {
   onTestFinished(() => { timeout.mockRestore(); vi.useRealTimers(); });
 }
 
+/* The join still runs the real app route. An injected fetch keeps the HTTP client's own native deadlines out of a
+   test of our keeper; serving the joined machine's front door still goes over its actual peer link. */
+function joinAt(c: Company): typeof fetch {
+  return async (input, init) => {
+    expect(init?.method).toBe('POST');
+    if (typeof init?.body !== 'string') throw new Error('The keeper did not send JSON.');
+    const url = new URL(String(input));
+    expect(url.origin).toBe(`http://127.0.0.1:${c.appPort}`);
+    const res = await c.app.inject({ method: 'POST', url: url.pathname, headers: Object.fromEntries(new Headers(init.headers)), payload: init.body });
+    return new Response(res.body, { status: res.statusCode });
+  };
+}
+
 /* A certificate of the company's authority for the worker's key, issued so long ago that it has ended. */
 async function expire(c: Company, w: { machine: string; config: WorkerConfig }): Promise<HeldCertificate> {
   const key = machineKey(w.config.dir);
@@ -56,7 +69,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
   it('joins with its ticket and serves the company on its front door', async () => {
     controlledTime();
     const c = await company({}, {}, {}, undefined, true);
-    const w = await worker(c);
+    const w = await worker(c, { fetch: joinAt(c) });
     await until(() => hasLeader(w.status()));
     const server = await c.serverRow();
     expect(w.status()).toEqual({ role: 'worker', commit: 'w0rker', machine: w.machine, certificate: true, leader: { machine: server!.id, hostname: null, path: 'direct' }, disconnected: false });
@@ -280,7 +293,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
       seen.push({ via, words });
       return words ? 400 : null;
     }, true);
-    const w = await worker(c, { holderEveryMs: 30 });
+    const w = await worker(c, { holderEveryMs: 30, fetch: joinAt(c) });
     await until(() => hasLeader(w.status()) && c.keeper['backups'] !== null && w.keeper['ageRecipient'] !== null);
     await w.keeper['report']();
     const saved = await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(c.ceo) });
@@ -640,7 +653,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const { machine, ticket } = await c.joined();
     const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: 'darwin', survivorMs: 600_000 };
     updaterAlive(config.controlDir);
-    const w = await workerOn(c, config);
+    const w = await workerOn(c, config, { fetch: joinAt(c) });
     await until(() => hasLeader(w.status()));
     await w.keeper['report']();
     expect((await c.rowOf(machine)).ownerPin).toBe(keyPrint(ownerKey));

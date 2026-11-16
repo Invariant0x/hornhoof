@@ -13,7 +13,9 @@ function appDoor() {
     destroy: (error: Error) => { request.emit('error', error); request.emit('close'); return request; },
   });
   let deliver: ((res: http.IncomingMessage) => void) | undefined;
-  const transport = vi.spyOn(http, 'request').mockImplementation((_options, listener) => {
+  const transport = vi.spyOn(http, 'request').mockImplementation((...args) => {
+    const listener = args.find(arg => typeof arg === 'function');
+    if (typeof listener !== 'function') throw new Error('The keeper asked without a response listener.');
     deliver = listener;
     return request as unknown as http.ClientRequest;
   });
