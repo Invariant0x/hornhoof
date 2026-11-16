@@ -187,14 +187,20 @@ async function forWhom(db: Ctx['db'], data: Record<string, unknown>[]): Promise<
   return new Map((await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, ids))).map(p => [p.id, p]));
 }
 
-/* Who wrote a line of the log: a person, or an agent with the person it acted for. */
-function byOf(n: Names, actedFor: Map<string, { id: string; name: string }>) {
-  return (personId: string | null, personName: string | null, agentId: string | null, data: Record<string, unknown>): LogLine['by'] => {
+/* A line of a history as it is kept, for a task and a goal alike. */
+export type LogRow = { kind: string; text: string; data: Record<string, unknown>; personId: string | null; personName: string | null; agentId: string | null; at: Date };
+
+/* A history as people read it, oldest first, from its rows newest first: who wrote each line, a person, or an agent with
+   the person it acted for. */
+export async function logOf(db: Ctx['db'], rows: LogRow[], agentName: (id: string) => string | undefined): Promise<LogLine[]> {
+  const actedFor = await forWhom(db, rows.map(e => e.data));
+  const by = ({ personId, personName, agentId, data }: LogRow): LogLine['by'] => {
     if (personId) return { kind: 'person', id: personId, name: personName ?? '' };
     if (!agentId) return null;
     const whom = typeof data.onBehalfOfPersonId === 'string' ? actedFor.get(data.onBehalfOfPersonId) : undefined;
-    return { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '', ...(whom ? { for: whom } : {}) };
+    return { kind: 'agent', id: agentId, name: agentName(agentId) ?? '', ...(whom ? { for: whom } : {}) };
   };
+  return [...rows].reverse().map(e => ({ kind: e.kind, text: e.text, data: e.data, by: by(e), at: e.at.toISOString() }));
 }
 
 /* What test runs say of the commit each request names, for those that name one. */
@@ -235,7 +241,6 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
   const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
-  const by = byOf(n, await forWhom(db, events.map(e => e.data)));
   return {
     ...line(task, n, sees),
     echelonFindings: await findingReport(db, [task.id]),
@@ -245,7 +250,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     executor: n.agent(task.executorAgentId),
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n, sees)),
-    log: events.reverse().map(e => ({ kind: e.kind, text: e.text, data: e.data, by: by(e.personId, e.personName, e.agentId, e.data), at: e.at.toISOString() })),
+    log: await logOf(db, events, id => n.agent(id)?.name),
     requests: asks.map((r, i) => ({
       id: r.id,
       kind: r.kind,
