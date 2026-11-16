@@ -113,7 +113,7 @@ describe('install.sh as the updater of the nodes runs it', () => {
     const r = fromUpdater({ STUB_REMOVED: CODEX });
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('docker run --rm') && c.includes(`-v ${CLAUDE}:/data:ro`) && c.endsWith(`${NODE} wait-update`))).toBe(true);
-    expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
+    expect(r.calls.some(c => c.startsWith(`docker rm -f ${CLAUDE}-old-`))).toBe(true);
     expect(r.calls.find(c => c.startsWith('docker run -d'))!.endsWith(NODE)).toBe(true);
     expect(r.calls.filter(c => c.includes(CODEX) && !c.startsWith('docker ps'))).toEqual([]);
   });

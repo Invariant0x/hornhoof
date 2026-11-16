@@ -126,6 +126,8 @@ export async function serveApi(page: Page) {
     if (/^\/api\/subscriptions\/[^/]+\/tokens(\?|$)/.test(path)) return route.fulfill(json({ tokens: NO_TOKENS }));
     /* A department has no task branch outside main unless a test says otherwise. */
     if (/^\/api\/departments\/[^/]+\/branches$/.test(path)) return route.fulfill(json({ branches: [], problem: null }));
+    /* A department's screen asks what it sends outside and who runs it: nothing, and nobody here. */
+    if (/^\/api\/outbound\?department=[^&]+$/.test(path)) return route.fulfill(json({ channels: [], messages: [], escalations: [], approvals: [], departments: [] }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (task) return route.fulfill(json({ task: detail(task) }));
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));

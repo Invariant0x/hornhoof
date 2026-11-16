@@ -10,7 +10,7 @@ import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
-import { answeredWords, byPerson, clickWords, incomingWords, wordsForTurn } from './turn-words.js';
+import { activeClickGrants, answeredWords, byPerson, incomingWords, wordsForTurn } from './turn-words.js';
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
@@ -37,7 +37,7 @@ const ANSWERS_PEOPLE: readonly (typeof agents.$inferSelect)['kind'][] = ['orches
    words are on their way into it. */
 async function turnWords(db: Reader, jobId: string) {
   const [job] = await db
-    .select({ agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, agentKind: agents.kind })
+    .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, inboxWake: jobs.inboxWake, agentKind: agents.kind })
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(eq(jobs.id, jobId));
@@ -79,8 +79,6 @@ async function earlierPrincipal(db: Reader, agentId: string): Promise<Principal 
 }
 
 const answered = ({ job, said }: Words): Principal | null => answeredWords(job.createdBy, said);
-
-const clickOf = ({ job, said }: Words): string | null => clickWords(job, said);
 
 export const contextMissing = () =>
   new ApiError(
@@ -135,13 +133,26 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
    turn tells of, until a person writes or types into it, when that person directs commands there: the CEO or the CEO
    delegate, who direct the orchestrator, or the machine's own owner while active. A click answers no question, so it
    takes no decision and asks for nothing else. */
-export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string): Promise<string | null> {
-  const turn = await turnWords(db, jobId);
-  const personId = turn && (answered(turn)?.personId ?? clickOf(turn));
-  if (!personId) return null;
+async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: string): Promise<string | null> {
   if (personId !== ownerPersonId) return actingCeo(db, personId);
   const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, personId));
   return owner?.status === 'active' ? personId : null;
+}
+
+const grantMatchesMachine = (grant: { machineId: string | null }, machineId?: string): boolean =>
+  machineId === undefined || grant.machineId === null || grant.machineId === machineId;
+
+export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string, machineId?: string): Promise<string | null> {
+  const turn = await turnWords(db, jobId);
+  if (!turn) return null;
+  const direct = answered(turn);
+  if (direct) return activeMachinePerson(db, direct.personId, ownerPersonId);
+  for (const g of await activeClickGrants(db, turn.job, turn.said)) {
+    if (!grantMatchesMachine(g, machineId)) continue;
+    const ok = await activeMachinePerson(db, g.personId, ownerPersonId);
+    if (ok) return ok;
+  }
+  return null;
 }
 
 /* The CEO or the CEO delegate who gave their own answer in a task's card to a question about machines, while that task is
@@ -195,7 +206,7 @@ export function deliverLive(
   ctx: Ctx,
   agentId: string,
   text: string,
-  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
   return withInputLock(ctx, agentId, () => deliverLockedInput(ctx, agentId, text, on, keep));
@@ -206,10 +217,10 @@ export async function deliverLockedInput(
   ctx: Ctx,
   agentId: string,
   text: string,
-  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
-  const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId), on.required);
+  const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId));
   const delivery = liveInputOf(on.source?.data, agentId)?.delivery;
   return into ? keepLiveInput(into, (jobId, kept) => keep(jobId, keepOperatorDelivery(kept, delivery))) : null;
 }
@@ -279,9 +290,16 @@ async function turnWithWords(db: Reader, where: SQL) {
 
 type Turn = NonNullable<Awaited<ReturnType<typeof turnWithWords>>>;
 
+async function hasClickGrant(db: Reader, jobId: string): Promise<boolean> {
+  const turn = await turnWords(db, jobId);
+  return Boolean(turn && (await activeClickGrants(db, turn.job, turn.said)).length);
+}
+
 /* The turn of the orchestrator or a head answers this person from now on, or nobody: marked once as long as it does. */
 async function answersFromNow(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, turn: Turn, personId: string | null): Promise<void> {
-  if (!ANSWERS_PEOPLE.includes(turn.agentKind) || ((await decisionPrincipal(ctx.db, turn.id))?.personId ?? null) === personId) return;
+  if (!ANSWERS_PEOPLE.includes(turn.agentKind)) return;
+  const current = (await decisionPrincipal(ctx.db, turn.id))?.personId ?? null;
+  if (current === personId && (personId !== null || !(await hasClickGrant(ctx.db, turn.id)))) return;
   await appendEvent(ctx, { companyId: turn.companyId, agentId: turn.agentId, jobId: turn.id, kind: 'typed', data: {}, personId });
 }
 

@@ -221,8 +221,8 @@ select:disabled { opacity: .55; }
 .link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
-.command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
-.command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.command { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; min-inline-size: 0; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
+.command code { min-inline-size: 0; font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* Shell: the header floats over the canvas in three glass blocks; there is no bar under it. */
 .shell { position: relative; height: 100%; }
@@ -252,14 +252,28 @@ select:disabled { opacity: .55; }
 .account { position: relative; }
 .avatar { width: 44px; height: 44px; cursor: pointer; color: var(--ink); font-family: var(--f-display); font-size: 15px; font-weight: 600; }
 .avatar:hover { border-color: var(--line2); }
+/* The account menu as Design's reference draws it: its heading, then rows in groups with a line between them. A row is a
+   line of the panel 44 px high, its words at the start and a count at the end; the panel's 6 px hold a row's focus ring. */
 .account-menu {
-  position: absolute; inset-inline-end: 0; top: 52px; z-index: 20; width: 240px;
-  display: grid; gap: 12px; padding: 14px;
+  position: absolute; inset-inline-end: 0; top: 52px; z-index: 20; inline-size: min(280px, calc(100vw - 32px));
+  display: grid; padding: 6px;
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 10px 30px var(--shadow);
 }
-.account-menu p { display: grid; gap: 2px; }
-.account-menu p span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
-.menu-version { color: var(--muted); font-size: 12px; }
+.am-head { display: grid; gap: 2px; padding: 8px 12px 10px; min-inline-size: 0; }
+.am-head b { font-weight: 600; overflow-wrap: break-word; }
+.am-head > span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.am-head > .menu-version { font-size: 12px; overflow-wrap: break-word; }
+.am-sep { block-size: 0; margin-block: 6px; margin-inline: 0; border: 0; border-block-start: 1px solid var(--line); }
+.mi {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; inline-size: 100%; min-block-size: 44px; padding: 8px 12px;
+  border: 0; background: transparent; color: var(--ink); font: 500 14px/1.4 var(--f-body); text-align: start; overflow-wrap: break-word; cursor: pointer;
+}
+.mi > span:first-child { min-inline-size: 0; }
+.mi:hover { background: var(--surface2); }
+.mi:active { background: var(--glow); }
+.mi:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+.mi > .nav-count { flex: none; margin: 0; }
+.account-menu > .alert { margin-block: 4px; }
 
 /* Updates: a banner under the top bar and the Versions dialog. */
 .update-banner {
@@ -388,6 +402,9 @@ select:disabled { opacity: .55; }
 .ident { display: inline-block; max-inline-size: 100%; overflow-wrap: anywhere; }
 /* The language: one native list, each language named in itself; closed it keeps one line, its own arrow at the end in
    either direction. */
+.settings-window .lang-part { gap: 4px; }
+.lang-part > p { margin: 0; }
+.lang-part > .select-wrap { margin-block-start: 4px; }
 .select-wrap { position: relative; inline-size: 100%; max-inline-size: 360px; }
 .lang-select {
   display: block; inline-size: 100%; block-size: 44px; padding-block: 0; padding-inline: 12px 36px;
@@ -798,7 +815,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .people-head > .head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 /* A column of lines, each as wide as the list: as wide as its longest word in a table, as wide as its place as an entry. */
 .where-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.add-plan { display: grid; gap: 10px; }
+.add-plan { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .add-plan .actions { display: flex; justify-content: flex-end; }
 .share { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .share select { background-color: var(--surface); }
@@ -848,7 +865,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .test.ok { color: var(--ok); }
 .test details summary { cursor: pointer; color: var(--cyan-ink); }
 .test pre { margin: 6px 0 0; padding: 10px; max-height: 240px; overflow: auto; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); }
-.command-box { display: grid; gap: 8px; }
+.command-box { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .trust { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
 /* The plans to connect: a card each, with its tick, its mark, its name and what it takes. */
 .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; min-width: 0; border: 0; padding: 0; margin: 0; }
@@ -905,14 +922,24 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
   .facts { grid-template-columns: 1fr; gap: 0; }
   .facts dd { margin-bottom: 8px; }
 }
-/* About is a small window: small type and tight lines, in two columns on a phone too. */
-.dialog.about { gap: 6px; width: min(420px, 100%); padding: 8px 16px 10px; font-size: 13px; }
-.dialog.about .facts { grid-template-columns: 6.5em minmax(0, 1fr); gap: 1px 10px; font-size: 12.5px; }
-.dialog.about .facts dd { margin-bottom: 0; }
-.dialog.about .about-author { font-size: 12px; }
+/* About, as Design's reference draws it: 480 px, 14 px text, its facts and author small, a line, then Feedback. Its end
+   keeps the same 18 px of room for a scrollbar in every browser: --sb is what this browser's scrollbar takes of it. */
+.dialog.about { inline-size: min(480px, 100%); gap: 12px; padding: 18px; scrollbar-gutter: stable; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
+.dialog.about > header h2 { min-inline-size: 0; overflow-wrap: break-word; }
+.dialog.about .facts { grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; font-size: 13.5px; }
+.dialog.about .facts dd { margin: 0; min-inline-size: 0; overflow-wrap: break-word; }
+.dialog.about .about-author { color: var(--muted); font-size: 12px; }
+.about-sep { block-size: 0; margin: 0; border: 0; border-block-start: 1px solid var(--line); }
+/* A cross of 44 px by 44 px. */
+.icon-btn { inline-size: 44px; block-size: 44px; padding: 0; font-size: 18px; line-height: 1; }
 /* Writing to Hornhoof's developers, inside About under its facts, a line above it. */
-.about-feedback { display: grid; gap: 10px; min-width: 0; margin-block-start: 6px; padding-block-start: 12px; border-block-start: 1px solid var(--line); }
+.about-feedback { display: grid; gap: 12px; min-width: 0; }
 .about-feedback h3 { margin: 0; font-size: 15px; overflow-wrap: break-word; }
+.about-feedback > p { margin: 0; overflow-wrap: break-word; }
+@media (max-width: 420px) {
+  .dialog.about .facts { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .dialog.about .facts dd { margin-block-end: 8px; }
+}
 
 /* On a phone the header stays one row: the mark gives its place to the tabs, which get tighter and put a name of
    several words on two lines, each word whole, so every tab stands whole in the strip, the account button stays in view
@@ -1680,6 +1707,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .fb-input { width: 100%; min-height: 120px; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; line-height: 1.45; resize: vertical; }
 .fb-input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
 .fb-note { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
+.fb-form .field input { height: 44px; }
 .fb-check { display: grid; gap: 12px; min-width: 0; }
 .fb-check h3 { margin: 0; font-size: 15px; overflow-wrap: break-word; }
 .fb-check .facts dd { overflow-wrap: anywhere; }
@@ -2100,6 +2128,9 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .card-t > .mc { color: var(--ink); }
 .stline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; color: var(--muted); }
 .wcard { container: card / inline-size; }
+/* A button of an open card is a touch's height and wraps its words inside the card's column, from the start of the line;
+   a narrow row of a table keeps its own, and a screen that sets its cards' buttons, as Subscriptions does, keeps its. */
+:where(.wcard) .act { box-sizing: border-box; height: auto; min-height: 44px; max-inline-size: 100%; padding: 8px 12px; line-height: 1.4; white-space: normal; overflow-wrap: break-word; text-align: start; justify-content: flex-start; }
 .blocks { display: grid; gap: 18px 32px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "facts" "run" "side"; }
 .blk { display: grid; gap: 10px; align-content: start; min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
 .blk-facts { grid-area: facts; }
@@ -2390,6 +2421,8 @@ th.k-prio .sorth { white-space: nowrap; }
    table, a sorting table keeps each status whole on one line as well; one that does not fit so stands as entries
    (useEntriesFit), where a status wraps its words inside its frame. */
 .dt td, .dt th, .cell-lim, .where-list { overflow-wrap: break-word; }
+/* The card open below a row is no cell of the table's columns: its words break as they do in a card anywhere else. */
+.dt > tbody > tr.det > td { overflow-wrap: anywhere; }
 .dt .status { white-space: normal; }
 @container tbl (width > 780px) {
   .dt:not([data-fit="entries"]) > tbody > tr.rm .status { white-space: nowrap; }

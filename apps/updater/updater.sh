@@ -2169,6 +2169,31 @@ restore_request() {
   WORK=''
 }
 
+is_old_node() {
+  case "$1" in
+    *[!A-Za-z0-9_.-]*) return 1 ;;
+    hornhoof-*-*-old-?*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+node_healthy() {
+  [ "$(docker inspect --format '{{.State.Running}} {{.State.Restarting}}' "$1" 2> /dev/null || true)" = 'true false' ]
+}
+
+# Renamed -old-* node containers never run again: auto-restart comes off at once, and each goes once the node container
+# it was renamed from runs and is not restarting.
+sweep_old_node() {
+  local name=$1 base
+  if [ "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$name" 2> /dev/null || true)" != no ]; then
+    docker update --restart=no "$name" > /dev/null 2>&1 || true
+  fi
+  base=${name%-old-*}
+  if node_healthy "$base"; then
+    docker rm -f "$name" > /dev/null 2>&1 || true
+  fi
+}
+
 # The nodes on this computer that run another image than the one .env names, or have stopped, by the images of this
 # server's own repositories, as words: builtin for the built-in node, the plan on its label for each other. One of
 # another server on this computer counts too: the server names only its own.
@@ -2183,6 +2208,10 @@ nodes_behind() {
   if [ -n "$cid" ]; then running=$(docker inspect --format '{{.Image}}' "$cid" 2> /dev/null || true); fi
   if [ -n "$running" ] && { [ "$running" != "$target" ] || [ "$(docker inspect --format '{{.State.Running}}' "$cid" 2> /dev/null || true)" = false ]; }; then printf 'builtin '; fi
   { docker ps -a --filter label=hornhoof.subscription --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
+    if is_old_node "$name"; then
+      sweep_old_node "$name" >&2
+      continue
+    fi
     case "$plan" in '' | *[!A-Za-z0-9-]*) continue ;; esac
     running=$(docker inspect --format '{{.Image}}' "$name" 2> /dev/null || true)
     if [ -n "$running" ] && { [ "$running" != "$target" ] || [ "$(docker inspect --format '{{.State.Running}}' "$name" 2> /dev/null || true)" = false ]; }; then printf '%s ' "$plan"; fi
@@ -2616,6 +2645,10 @@ updater_name() {
 behind_of() {
   local name plan id
   { docker ps -a --filter label=hornhoof.subscription --filter "label=hornhoof.server=$1" --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
+    if is_old_node "$name"; then
+      sweep_old_node "$name" >&2
+      continue
+    fi
     case "$plan" in '' | *[!A-Za-z0-9_-]*) continue ;; esac
     id=$(docker inspect --format '{{.Image}}' "$name" 2> /dev/null || true)
     [ -n "$id" ] || continue

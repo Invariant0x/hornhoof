@@ -17,6 +17,7 @@ import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
 import { pickBuiltin } from '../nodes/builtin.js';
 import { cameBack } from '../nodes/connections.js';
+import { shownAway } from '../nodes/machine-away.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -42,7 +43,7 @@ import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from 
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
-import { inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
+import { claimMail, inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. Their window is named outright too:
@@ -205,7 +206,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; computerAccess?: { machineId: string; inboxId?: string }; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
 
 export type TurnMessage = NonNullable<Turn['message']>;
 
@@ -334,10 +335,11 @@ export class NoSubscription extends Error {
 const actsForCeo = async (ctx: Ctx, personId: string | null | undefined): Promise<boolean> => Boolean(personId && (await actingCeo(ctx.db, personId)));
 
 /* Keeps what no person wrote in the employee's inbox, with the turn it went into or waits for, and tells its screens. */
-export async function keepLetter(ctx: Ctx, t: Turn, jobId: string, status: InboxStatus): Promise<void> {
-  if (!isMail(t)) return;
-  await keepMail(ctx.db, t, jobId, status);
+export async function keepLetter(ctx: Ctx, t: Turn, jobId: string, status: InboxStatus): Promise<string | null> {
+  if (!isMail(t)) return null;
+  const id = await keepMail(ctx.db, t, jobId, status);
   await inboxChanged(ctx, t.agentId);
+  return id;
 }
 
 /* The turns a switched-off employee still takes: no task's and not the one for its inbox. */
@@ -369,8 +371,9 @@ async function inboxTurn(ctx: Ctx, t: Pick<Turn, 'companyId' | 'agentId'>): Prom
    into no running turn. */
 async function intoInbox(ctx: Ctx, t: Turn & { message: TurnMessage }): Promise<string> {
   const wake = await inboxTurn(ctx, t);
-  await keepLetter(ctx, t, wake, 'unread');
-  await showMessage(ctx, t, wake, async () => undefined);
+  const inboxId = await keepLetter(ctx, t, wake, 'unread');
+  const shown = t.message.computerAccess && inboxId ? { ...t, message: { ...t.message, computerAccess: { ...t.message.computerAccess, inboxId } } } : t;
+  await showMessage(ctx, shown, wake, async () => undefined);
   return wake;
 }
 
@@ -449,17 +452,18 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   return jobId;
 }
 
-/* Direct messages need the node's receipt, including when their topic is a task. The caller owns the input lock. */
-export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): Promise<string> {
+/* Words go into the turn that runs when its node says they went in, and otherwise wait in the agent's line for its next
+   turn, including when their topic is a task. The caller owns the input lock. */
+export async function insertOrDeliverTurn(ctx: Ctx, t: Turn): Promise<string> {
   if (isMail(t) && takesInsteadOfTurn(t) && (await inboxModeOf(ctx.db, t.agentId)).effective === 'inbox') return intoInbox(ctx, t);
-  const combined = await combineReport(ctx, t, { send: deliverLockedInput, required });
+  const combined = await combineReport(ctx, t, { send: deliverLockedInput });
   if (combined) {
     if (isMail(t)) await keepLetter(ctx, t, combined, (await runsNow(ctx, combined)) ? 'read' : 'unread');
     return combined;
   }
   const message = t.repeated ? undefined : t.message;
   const into = message
-    ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
+    ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message } }, async (jobId, kept) => {
         if (await actsForCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
         await showMessage(ctx, t, jobId, kept, true);
       })
@@ -1128,6 +1132,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, builtinMachine: place.builtinMachine, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
   if (taken === HELD) return;
   if (!taken) return sendNext(ctx, agentId);
+  await claimMail(db, agentId, mail, job);
   wentOutWithWords(ctx, agentId, job);
   /* The agent stays on this machine from now on. */
   if (place.moves) await db.update(agents).set({ nodeId: place.nodeId, builtinMachine: place.builtinMachine }).where(eq(agents.id, agentId));
@@ -1212,6 +1217,26 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
 
 /* A node that waits or restarts for an update is not away: it comes back by itself, and its turns wait in line for it. */
 const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isReady(node) || nodeHeld(ctx, node);
+
+/* A node is getting back on the line until it says hello: while its socket is open, or closed while its machine is not
+   off for as long as a card of it takes. The machine of a built-in node has no card, so one whose socket is closed is away. */
+async function comingBack(ctx: Ctx, node: NodeIdentity, machineId?: string): Promise<boolean> {
+  if (ctx.hub.isReady(node)) return false;
+  return ctx.hub.isOnline(node) || (machineId !== undefined && !(await shownAway(ctx, machineId)));
+}
+
+/* Whether the machine an agent's turns wait for is only getting back on the line: they wait in line for it, and go out
+   once it says hello. One with work in progress waits for its own machine alone, as its turns do. */
+export async function reconnecting(ctx: Ctx, agentId: string): Promise<boolean> {
+  const sub = await liveSubscription(ctx, agentId);
+  if (!sub) return false;
+  if (sub.kind === 'api_key') return comingBack(ctx, ownBuiltin(ctx.config));
+  const [agent] = await ctx.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+  const all = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready');
+  const own = all.find(n => n.id === agent?.nodeId);
+  const waited = own && (await holdsWork(ctx, agentId)) ? [own] : all;
+  return (await Promise.all(waited.map(n => comingBack(ctx, nodeIdentity(n.id), n.machineId)))).some(Boolean);
+}
 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work

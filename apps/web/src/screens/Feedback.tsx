@@ -173,7 +173,7 @@ function WriteStep({ flow, onCancel }: { flow: Flow; onCancel?: () => void }) {
     if (!untitled) void flow.look();
   }
   return (
-    <form className="form-grid" noValidate onSubmit={next}>
+    <form className="form-grid fb-form" noValidate onSubmit={next}>
       <KindPicker kind={draft.kind} onPick={kind => flow.edit({ kind })} />
       <Field label={t.feedback.titleLabel} problem={problem || undefined}>
         {p => <input {...p} value={draft.title} maxLength={TITLE_MAX} onChange={event => flow.edit({ title: event.target.value })} />}

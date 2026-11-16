@@ -62,7 +62,8 @@ function GoogleSheetsForm({ google, busy, change, onCancel }: { google: GoogleSh
   );
 }
 
-/* The buttons under the saved settings: connect, change or disconnect, and the question before disconnecting. */
+/* The buttons under the saved settings: Connect, the main button while nothing is connected; Change and the pink
+   Disconnect once it is; and the question before disconnecting. */
 function GoogleSheetsActions({ google, mode, busy, change, setMode }: { google: GoogleSheetsConfig | null; mode: Mode; busy: boolean; change: Change; setMode(mode: Mode): void }) {
   const t = useT();
   if (mode === 'remove') {
@@ -81,7 +82,7 @@ function GoogleSheetsActions({ google, mode, busy, change, setMode }: { google: 
   if (!google) {
     return (
       <div className="repo-actions">
-        <button className="btn small ghost" type="button" onClick={() => setMode('edit')}>
+        <button className="btn small" type="button" onClick={() => setMode('edit')}>
           {t.googleSheets.connect}
         </button>
       </div>
@@ -92,7 +93,7 @@ function GoogleSheetsActions({ google, mode, busy, change, setMode }: { google: 
       <button className="btn small ghost" type="button" onClick={() => setMode('edit')}>
         {t.googleSheets.change}
       </button>
-      <button className="btn small ghost" type="button" onClick={() => setMode('remove')}>
+      <button className="btn small ghost danger" type="button" onClick={() => setMode('remove')}>
         {t.googleSheets.remove}
       </button>
     </div>
