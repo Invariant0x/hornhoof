@@ -44,15 +44,28 @@ async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, de
   const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no whole run of ${commit} on ${branch}: ${why}. A release needs a whole run of its own on its exact commit: the first run of its release, or a later one that took only what its release proved.`);
   const [run] = await db.select().from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.companyId, turn.companyId)));
   if (!run) throw notFull('there is no such run');
-  if (run.departmentId !== departmentId || run.branch !== branch || run.commitSha !== commit) throw notFull(`it ran ${run.branch ?? 'no branch'} at ${run.commitSha ?? 'no commit'}`);
-  if (run.status !== 'passed') throw notFull(`it ${run.status === 'running' ? 'is still running' : run.status}`);
-  if (run.environmentRequest?.suite) throw notFull(`it ran only the suite ${run.environmentRequest.suite}`);
-  if (!ofItsRelease(run.fileCache)) throw notFull(`it took ${run.fileCache!.reused} green results from before releases were kept`);
+  const problem = placeProblem(run, branch, departmentId, commit) ?? endProblem(run);
+  if (problem) throw notFull(problem);
   const parts = await db.select({ status: testParts.status }).from(testParts).where(eq(testParts.runId, run.id));
-  if (parts.length !== run.parts || parts.some(part => part.status !== 'passed') || (!parts.length && !keptEverything(run))) throw notFull('not every part of it passed');
+  if (!allPartsPassed(run, parts)) throw notFull('not every part of it passed');
   const [newer] = await db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
 }
+
+type ReleaseRun = typeof testRuns.$inferSelect;
+/* Why a run checked another place than R's release on the turn branch, or null. */
+const placeProblem = (run: ReleaseRun, branch: string, departmentId: string, commit: string): string | null =>
+  run.departmentId !== departmentId || run.branch !== branch || run.commitSha !== commit ? `it ran ${run.branch ?? 'no branch'} at ${run.commitSha ?? 'no commit'}` : null;
+/* Why the way a run ended does not check its release whole, or null. */
+function endProblem(run: ReleaseRun): string | null {
+  if (run.status !== 'passed') return `it ${run.status === 'running' ? 'is still running' : run.status}`;
+  if (run.environmentRequest?.suite) return `it ran only the suite ${run.environmentRequest.suite}`;
+  if (!ofItsRelease(run.fileCache)) return `it took ${run.fileCache!.reused} green results from before releases were kept`;
+  return null;
+}
+/* Every part of the run passed, or it ran none as every test file kept its green result. */
+const allPartsPassed = (run: ReleaseRun, parts: { status: string }[]): boolean =>
+  parts.length === run.parts && parts.every(part => part.status === 'passed') && (parts.length > 0 || keptEverything(run));
 
 /* A person's approval of exactly R, on the release task, or none. */
 async function personApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
