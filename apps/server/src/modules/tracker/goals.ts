@@ -8,15 +8,15 @@ import { logOf, type LogLine } from '../tasks/views.js';
 import { nudgeTrackerKeepers } from './nudge.js';
 import { placeOwner, requireAnswersFor, spotOf } from './responsible.js';
 
-export type Goal = typeof goals.$inferSelect;
+type Goal = typeof goals.$inferSelect;
 /* What may change on a goal: everything but its place, which a goal keeps from its start. */
 export type GoalChange = Partial<Pick<Goal, 'title' | 'why' | 'parentGoalId' | 'responsiblePersonId' | 'targetValue' | 'currentValue' | 'unit' | 'dueAt'>>;
-export type NewGoal = GoalChange & Pick<Goal, 'title' | 'departmentId'>;
+type NewGoal = GoalChange & Pick<Goal, 'title' | 'departmentId'>;
 /* Whoever writes may change goals in this place, or it throws: people by their access, agents by their department. */
 export type GoalGuard = (spot: Spot) => Promise<void>;
 type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates'>>;
 
-export type GoalView = {
+type GoalView = {
   id: string;
   number: number;
   title: string;
@@ -89,9 +89,11 @@ export async function createGoal(ctx: Live, companyId: string, actor: Actor, gua
   return goal;
 }
 
-/* A change made only when the goal is still as its writer saw it, by its version. */
-async function changeGoal(ctx: Live, companyId: string, id: string, version: number, write: (tx: Tx, goal: Goal) => Promise<Partial<Goal> | null>): Promise<Goal> {
+/* A change made only when the goal is still as its writer saw it, by its version. One that moves the goal under another
+   holds the company first, as a new goal does, so two moves at once cannot each miss the other's half of a circle. */
+async function changeGoal(ctx: Live, companyId: string, id: string, version: number, write: (tx: Tx, goal: Goal) => Promise<Partial<Goal> | null>, moves = false): Promise<Goal> {
   const goal = await ctx.db.transaction(async tx => {
+    if (moves) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('update');
     const [current] = await tx.select().from(goals).where(and(eq(goals.id, id), eq(goals.companyId, companyId))).for('update');
     if (!current) throw refuse(404, 'goal_unknown', 'There is no such goal.');
     if (current.version !== version) throw refuse(409, 'goal_changed', 'Someone changed this goal meanwhile. Look at it again.');
@@ -118,7 +120,7 @@ export async function editGoal(ctx: Live, companyId: string, actor: Actor, guard
     if (fields.includes('parentGoalId') && change.parentGoalId) await checkParent(tx, goal, spot, change.parentGoalId);
     await goalNote(tx, goal, 'edited', actor, { fields: fields.map(f => FIELD_NAMES[f]) });
     return Object.fromEntries(fields.map(f => [f, change[f]]));
-  });
+  }, change.parentGoalId !== undefined);
 }
 
 /* The names the history and the screens use for what changed. */

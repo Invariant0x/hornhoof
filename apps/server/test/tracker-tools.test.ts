@@ -104,12 +104,13 @@ describe('tracker tools', () => {
     const hourAgo = new Date(Date.now() - 3_600_000);
     await db.update(agents).set({ timerMinutes: 240, timerOrder: 'Go over the tracker.', timerAt: hourAgo }).where(eq(agents.id, pia.id));
     await work();
-    const [first] = await db.select({ at: agents.timerAt }).from(agents).where(eq(agents.id, pia.id));
-    const dueIn = (at: Date) => at.getTime() + 240 * 60_000 - Date.now();
+    const [first] = await db.select({ at: agents.timerNudgedAt, last: agents.timerAt }).from(agents).where(eq(agents.id, pia.id));
+    const dueIn = (at: Date) => at.getTime() - Date.now();
     expect(dueIn(first!.at!)).toBeGreaterThan(4 * 60_000);
     expect(dueIn(first!.at!)).toBeLessThanOrEqual(5 * 60_000);
+    expect(first!.last).toEqual(hourAgo);
     await work();
-    const [second] = await db.select({ at: agents.timerAt }).from(agents).where(eq(agents.id, pia.id));
+    const [second] = await db.select({ at: agents.timerNudgedAt }).from(agents).where(eq(agents.id, pia.id));
     expect(second!.at!.getTime()).toBe(first!.at!.getTime());
   });
 });

@@ -21,7 +21,7 @@ export async function spotOf(db: Pick<Ctx['db'], 'select'> | Tx, companyId: stri
 
 /* Whether a person may answer for work in a place: an active person of the company, no assistant, who reaches it. What is
    in no department is for someone who sees the whole company. */
-export async function answersFor(ctx: Pick<Ctx, 'db'>, companyId: string, personId: string, spot: Spot): Promise<boolean> {
+async function answersFor(ctx: Pick<Ctx, 'db'>, companyId: string, personId: string, spot: Spot): Promise<boolean> {
   const [person] = await ctx.db.select({ isAgent: people.isAgent }).from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId)));
   if (!person || person.isAgent) return false;
   const found = (await candidates(ctx, companyId)).find(p => p.id === personId);

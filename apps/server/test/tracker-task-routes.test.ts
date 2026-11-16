@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, goals, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
-import { createTask } from '../src/modules/tasks/engine.js';
+import { createTask, updateTask } from '../src/modules/tasks/engine.js';
 import { as, echelonsTurn, invitePerson, ownPlan, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -64,16 +64,18 @@ describe('a person makes a task with what the tracker keeps', () => {
 
 describe('a person edits what the tracker keeps of a task', () => {
   it('changes its texts and fields when they act on its work, waking nobody and keeping the version', async () => {
-    const { db, oleg, maria, ivanId, send, get, work } = await company();
+    const { db, ctx, head, oleg, maria, ivanId, send, get, work } = await company();
     const { task } = await work();
     const queued = (await db.select().from(jobs)).length;
     const edited = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'Customers pay by card', why: 'Shops sell online.', responsible: ivanId, due: '2026-12-24T00:00:00.000Z', version: task.version });
     expect(edited.statusCode, edited.body).toBe(200);
-    expect(edited.json().task).toMatchObject({ title: 'Customers pay by card', brief: 'Pay by card.', why: 'Shops sell online.', responsible: { id: ivanId }, dueAt: '2026-12-24T00:00:00.000Z' });
+    expect(edited.json().task).toMatchObject({ title: 'Customers pay by card', brief: 'Pay by card.', why: 'Shops sell online.', responsible: { id: ivanId }, dueAt: '2026-12-24T00:00:00.000Z', version: task.version });
     const log = (await get(oleg, `/api/tasks/${task.id}`)).json().task.log as { kind: string; data: { fields?: string[] }; by: { name: string } }[];
     expect(log.at(-1)).toMatchObject({ kind: 'edited', data: { fields: ['title', 'why', 'responsible', 'due'] }, by: { name: 'Oleg' } });
     expect((await db.select().from(jobs)).length).toBe(queued);
 
+    /* A move of its work makes what was read before it stale. */
+    await updateTask(ctx, head.id, task.id, { brief: 'Pay by card or cash.' });
     const stale = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'Again', version: task.version });
     expect([stale.statusCode, stale.json().error.reason]).toEqual([409, 'task_changed']);
     expect((await get(oleg, `/api/tasks/${task.id}`)).json().task.mayEdit).toBe(true);

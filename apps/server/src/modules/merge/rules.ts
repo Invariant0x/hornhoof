@@ -149,7 +149,7 @@ export const BOOKKEEPING: Readonly<Record<string, readonly string[]>> = {
   feedback_inbox: ['updated_at'],
   feedback_signals: ['signals', 'updated_at'],
   telegram_bots: ['update_offset'],
-  agents: ['context_used', 'timer_at'],
+  agents: ['context_used', 'timer_at', 'timer_nudged_at'],
   nodes: ['last_seen_at', 'status', 'version', 'boot'],
   subscriptions: ['status', 'limits', 'models', 'limits_updated_at', 'lease_node_id'],
   machines: [

@@ -42,7 +42,8 @@ async function passTasks(ctx: Pick<Ctx, 'db' | 'bus'>, o: Owners, companyId: str
     const to = o.owner(spot);
     if (to === personId) continue;
     const row = await ctx.db.transaction(async tx => {
-      const [moved] = await tx.update(tasks).set({ responsiblePersonId: to, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+      /* No move of its work: its version and time of the last change stay, as for any edit of what the tracker keeps. */
+      const [moved] = await tx.update(tasks).set({ responsiblePersonId: to })
         .where(and(eq(tasks.id, task.id), eq(tasks.responsiblePersonId, personId))).returning();
       if (moved) await ownNote(tx, moved, { kind: 'edited', ...passedOn(o, personId, to) });
       return moved;

@@ -273,10 +273,11 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return task;
   }
 
-  /* The task as this person reads it, and whether they may pause it and edit what the tracker keeps of it. */
+  /* The task as this person reads it, whether they may pause it and edit what the tracker keeps of it, and the version an
+     edit names. */
   const detail = async (me: Person, task: Task) => {
     const viewer = await viewerOf(db, me);
-    return { ...(await detailFor(ctx, viewer, task)), mayPause: await runsDepartment(db, me, task.departmentId), mayEdit: actsOnTask(viewer, task) };
+    return { ...(await detailFor(ctx, viewer, task)), mayPause: await runsDepartment(db, me, task.departmentId), mayEdit: actsOnTask(viewer, task), version: task.version };
   };
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. mine: one

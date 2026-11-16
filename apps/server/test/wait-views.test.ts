@@ -60,12 +60,13 @@ describe('what people read of the waits on a task', () => {
     const follow = await comesAfter(c, 'Follow', c.crew.mine, [hidden, far, seen]);
     const res = await c.get(`/api/tasks/${follow.id}`, c.tokens.ann);
     expect(res.json().task.waits).toHaveLength(2);
+    expect(res.json().task.time.waitsOn).toHaveLength(2);
     expect(res.json().task.waitsFor).toEqual([far.number, seen.number]);
     expect(leaks(res, [agent])).toEqual([]);
     for (const word of ['Own secret', hidden.id, afterSourceKey(hidden.id)]) expect(res.body).not.toContain(word);
     expect(await waitsOn(c, follow, c.tokens.ceo)).toHaveLength(2);
     const line = (await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ann)).json().tasks.find((t: { id: string }) => t.id === follow.id);
-    expect(line.waits).toHaveLength(2);
+    expect([line.waits.length, line.time.waitsOn.length]).toEqual([2, 2]);
   });
 
   it('names an employee who owns a wait to everyone, and leaves out a person other than themselves', async () => {

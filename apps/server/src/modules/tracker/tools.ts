@@ -11,13 +11,13 @@ import type { ToolJob } from '../tools/job.js';
 import { editTask, type TaskEdit } from './edit.js';
 import { createGoal, editGoal, goalViews, setGoalStatus, type GoalGuard } from './goals.js';
 import { createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';
-import { placeOwner } from './responsible.js';
+import { placeOwner, spotOf } from './responsible.js';
 import { goalServed } from './task-view.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
 /* What the tracker keeps of a task, as the task tools take it. */
-export const GoalRef = z.number().int().positive().describe('The number of the goal this work serves, as goals lists them. Work under a task serves the goal of the task above it and names none.');
+const GoalRef = z.number().int().positive().describe('The number of the goal this work serves, as goals lists them. Work under a task serves the goal of the task above it and names none.');
 export const TrackerFields = {
   goal: GoalRef.optional(),
   responsible: z.uuid().optional().describe("The person who answers for the result, as company lists people. Without one: the parent's, else the goal's, else the person who decides for the department."),
@@ -90,6 +90,13 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
   );
   if (job.agentKind !== 'head' && job.agentKind !== 'orchestrator' && !keeper) return;
   const guard = agentGuard(job);
+  /* A head and the orchestrator name anyone who reaches the goal's place; a keeper of the tracker only the person who
+     decides for it or the one already on the goal, as on a task. */
+  const namesOnGoal = async (departmentId: string | null, personId: string, current: string | null) => {
+    if (job.agentKind === 'head' || job.agentKind === 'orchestrator' || personId === current) return;
+    if (personId === (await placeOwner(ctx, job.companyId, await spotOf(ctx.db, job.companyId, departmentId)))) return;
+    throw refuse(403, 'responsible_invalid', 'You may make responsible for a goal only the person who decides for its department or the one already on it. Ask the head to propose anyone else.');
+  };
 
   server.registerTool(
     'set_goal',
@@ -103,7 +110,7 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
         title: z.string().trim().min(1).max(120).optional(),
         why: z.string().trim().max(300).optional(),
         parent: GoalRef.nullable().optional().describe('The bigger goal this one is part of, by number, or null for none.'),
-        responsible: z.uuid().optional().describe('The person who answers for it; without one, the person who decides for its place.'),
+        responsible: z.uuid().optional().describe('The person who answers for it; without one, the person who decides for its place. A product manager names only that person or the one already on the goal.'),
         target: z.number().positive().nullable().optional().describe('A number to reach, like 500.'),
         current: z.number().min(0).nullable().optional().describe('Where it stands now, from the reports.'),
         unit: z.string().trim().max(40).optional().describe('What the number counts, like subscribers.'),
@@ -120,11 +127,13 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
           if (!input.title) throw refuse(400, 'goal_invalid', 'A new goal needs a title.');
           const departmentId = input.company ? null : job.agentKind === 'orchestrator' ? (input.department ?? null) : job.departmentId;
           if (job.agentKind === 'orchestrator' && !input.company && !input.department) throw refuse(400, 'goal_invalid', 'Name the department of the goal, or say it is a goal of the company.');
+          if (input.responsible) await namesOnGoal(departmentId, input.responsible, null);
           id = (await createGoal(ctx, job.companyId, actor, guard, { ...change, title: input.title, departmentId })).id;
           if (input.status && input.status !== 'active') await setGoalStatus(ctx, job.companyId, actor, guard, id, input.status, 0);
         } else {
           id = await goalIdOf(ctx, job.companyId, input.goal);
-          const [now] = await ctx.db.select({ version: goals.version }).from(goals).where(eq(goals.id, id));
+          const [now] = await ctx.db.select({ version: goals.version, departmentId: goals.departmentId, responsible: goals.responsiblePersonId }).from(goals).where(eq(goals.id, id));
+          if (input.responsible) await namesOnGoal(now!.departmentId, input.responsible, now!.responsible);
           const edited = await editGoal(ctx, job.companyId, actor, guard, id, change, now!.version);
           if (input.status) await setGoalStatus(ctx, job.companyId, actor, guard, id, input.status, edited.version);
         }

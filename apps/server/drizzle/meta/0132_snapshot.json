@@ -846,6 +846,12 @@
           "notNull": true,
           "default": false
         },
+        "timer_nudged_at": {
+          "name": "timer_nudged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "removed_at": {
           "name": "removed_at",
           "type": "timestamp with time zone",

@@ -64,6 +64,7 @@ CREATE TABLE "pipelines" (
 	"version" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "agents" ADD COLUMN "timer_nudged_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "companies" ADD COLUMN "tracker_due" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "goal_id" uuid;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "responsible_person_id" uuid;--> statement-breakpoint

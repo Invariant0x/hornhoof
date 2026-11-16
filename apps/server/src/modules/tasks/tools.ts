@@ -41,7 +41,7 @@ import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
 import { requireTaskHead } from './echelons-update.js';
-import { editTask } from '../tracker/edit.js';
+import { editTask, trackerSet } from '../tracker/edit.js';
 import { hasTrackerFields, TrackerFields, trackerInputOf } from '../tracker/tools.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind; departmentId: string | null };
@@ -621,12 +621,15 @@ class TaskTools {
     }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, ...changes }) => this.run(async () => {
       const { agent, task } = await this.find(ref);
       const tracker = { goal, responsible, why, due, pipeline, stage };
-      /* What the tracker keeps changes on its own, waking nobody; the work changes as before. */
+      /* What the tracker keeps changes on its own, waking nobody; the work changes as before. Both are checked before
+         either is written, so a refused part leaves the other as it was. */
       const works = after !== undefined || Object.values(changes).some(v => v !== undefined);
+      const edit = hasTrackerFields(tracker) ? await trackerInputOf(this.ctx, this.job.companyId, tracker) : null;
       if (!works) await requireTaskHead(this.ctx, task, agent.id);
+      if (edit) await trackerSet(this.ctx, task, edit);
       const moved = works ? await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) }) : undefined;
       let row = moved?.task ?? task;
-      if (hasTrackerFields(tracker)) row = await editTask(this.ctx, { agentId: agent.id }, row, await trackerInputOf(this.ctx, this.job.companyId, tracker), row.version);
+      if (edit) row = await editTask(this.ctx, { agentId: agent.id }, row, edit, row.version);
       return { text: `Updated. ${await this.where(row)}`, moved };
     }));
   }

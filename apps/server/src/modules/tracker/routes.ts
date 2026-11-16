@@ -54,7 +54,7 @@ function goalChange(body: Partial<z.infer<typeof GoalPatch>>): GoalChange {
 
 /* A person sets the company's goals as the CEO or the CEO's delegate, and a department's goals and pipelines when they
    reach it. */
-export const personGuard = (ctx: Pick<Ctx, 'db'>, me: Person): GoalGuard & PipelineGuard => async spot => {
+const personGuard = (ctx: Pick<Ctx, 'db'>, me: Person): GoalGuard & PipelineGuard => async spot => {
   if (actsAsCeo(me)) return;
   if (!spot.departmentId) throw new ApiError(403, 'forbidden', "Only the CEO or the CEO delegate sets the company's goals.", 'company_scope_only');
   if (!canReach(await accessOf(ctx.db, me), spot)) throw refuse(403, 'not_your_department', 'This department is not one you have.');

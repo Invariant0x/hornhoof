@@ -691,6 +691,8 @@ export const agents = pgTable(
     timerOrder: text('timer_order'),
     timerAt: timestamp('timer_at', { withTimezone: true }),
     timerForWork: boolean('timer_for_work').notNull().default(false),
+    /* A round sooner than the timer's own, asked for by a change the employee keeps track of; timerAt stays its last round. */
+    timerNudgedAt: timestamp('timer_nudged_at', { withTimezone: true }),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },

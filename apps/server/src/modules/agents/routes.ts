@@ -335,7 +335,7 @@ function patchTimerValues(next: AgentRow, body: PatchBody): void {
 function patchTimer(agent: AgentRow, next: AgentRow, body: PatchBody): void {
   if (body.timer !== undefined) {
     patchTimerValues(next, body);
-    if (next.timerMinutes !== agent.timerMinutes) next.timerAt = body.timer ? new Date() : null;
+    if (next.timerMinutes !== agent.timerMinutes) Object.assign(next, { timerAt: body.timer ? new Date() : null, timerNudgedAt: null });
   }
 }
 
@@ -443,6 +443,7 @@ async function savePatch(db: Ctx['db'], me: Person, agent: AgentRow, next: Agent
           timerMinutes: next.timerMinutes,
           timerOrder: next.timerOrder,
           timerAt: next.timerAt,
+          timerNudgedAt: next.timerNudgedAt,
           timerForWork: next.timerForWork,
         })
         .where(eq(agents.id, agent.id));

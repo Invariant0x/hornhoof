@@ -58,17 +58,21 @@ async function stageOf(ctx: Pick<Ctx, 'db'>, task: Task, stageId: string | null)
   return stage.id;
 }
 
-/* An edit of what the tracker keeps, made only on the task as its writer saw it. It gives no work, so it wakes nobody and
-   leaves what the task waits for as it is; its line in the history says what changed. */
+/* An edit of what the tracker keeps, made only on the task as its writer saw it. It gives no work and is no move of it: it
+   wakes nobody, leaves what the task waits for as it is, and keeps the task's version and its time of the last change, by
+   which turns kept for it and the quiet department's alarm tell the work going on. Its line in the history says what
+   changed. */
 export async function editTask(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task: Task, edit: TaskEdit, version: number): Promise<Task> {
-  if (task.version !== version) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
+  const changed = () => refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
+  if (task.version !== version) throw changed();
   const { set, fields } = await trackerSet(ctx, task, edit);
   if (!fields.length) return task;
   const row = await ctx.db.transaction(async tx => {
-    const [row] = await tx.update(tasks).set({ ...set, version: task.version + 1, updatedAt: new Date() }).where(and(eq(tasks.id, task.id), eq(tasks.version, version))).returning();
-    if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
-    await note(tx, row, { kind: 'edited', actor, data: { fields } });
-    return row;
+    const [fresh] = await tx.select({ version: tasks.version }).from(tasks).where(eq(tasks.id, task.id)).for('update');
+    if (fresh?.version !== version) throw changed();
+    const [row] = await tx.update(tasks).set(set).where(eq(tasks.id, task.id)).returning();
+    await note(tx, row!, { kind: 'edited', actor, data: { fields } });
+    return row!;
   });
   published(ctx, row);
   return row;

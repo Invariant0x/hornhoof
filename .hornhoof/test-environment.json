@@ -689,6 +689,7 @@
           "apps/server/test/test-environment-templates.test.ts",
           "apps/server/test/test-evidence.test.ts",
           "apps/server/test/timers.test.ts",
+          "apps/server/test/tracker-guards.test.ts",
           "apps/server/test/tracker-tools.test.ts",
           "apps/server/test/turn-effort-dispatch.test.ts",
           "apps/server/test/turn-effort.test.ts",

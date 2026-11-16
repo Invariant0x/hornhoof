@@ -13,7 +13,7 @@ import type { Lang } from '../templates/load.js';
 import { type Task } from './engine.js';
 import { independentViews, type IndependentPartInput, type IndependentRecord } from './independent.js';
 import type { TaskWait } from './wait-state.js';
-import { openWaitsOf, shownWaits } from './wait-views.js';
+import { openWaitsOf, prerequisiteOf, shownWaits } from './wait-views.js';
 import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
 import { trackerLookups, type GoalRef, type TrackerLookups } from '../tracker/task-view.js';
 import type { TimeFacts } from './time-facts.js';
@@ -189,12 +189,17 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   responsible: n.person(t.responsiblePersonId),
   why: t.why,
   dueAt: t.dueAt?.toISOString() ?? null,
-  time: n.time(t),
+  time: shownWaitsOn(n.time(t), n.waits(t), id => n.after(t).some(a => a.id === id && sees(a))),
   pipelineId: t.pipelineId,
   pipelineStageId: t.pipelineStageId,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
+
+/* Whom a task waits for, as its waits show it: nothing of a wait for a task the reader does not see. The facts list the
+   waits in their order. */
+const shownWaitsOn = (time: TimeFacts, waits: TaskWait[], seen: (id: string) => boolean): TimeFacts =>
+  ({ ...time, waitsOn: time.waitsOn.filter((_, i) => { const prerequisite = prerequisiteOf(waits[i]!); return prerequisite === null || seen(prerequisite); }) });
 
 export async function taskLines(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[], sees: (t: Task) => boolean): Promise<TaskLine[]> {
   const n = await names(ctx, rows);
