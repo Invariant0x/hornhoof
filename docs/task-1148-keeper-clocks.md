@@ -17,6 +17,8 @@ All worker keeper cases now use `worker-keeper-time.ts`. Its state wait awaits d
 
 The fixture requests an immediate offline refusal instead of a timed front-door hold; those cases assert the refusal and do not test the holding delay. The production holding limits remain unchanged. The peer stream's thirty-second idle limit also uses a normal timer, renewed by incoming or outgoing data and cleared on close. Its regression checks the exact virtual deadline and that observing activity loses no body bytes.
 
+The expanded candidate's author check exposed the lease compatibility case in `keeper-peer.test.ts`: its real clock ran twenty times faster, so a delayed tick could end the lease before the test changed the link answer, yielding a different termination reason. The head included that case in this task. Its wall and monotonic clocks now move only in explicit steps, and the proof answer is deferred to the event loop without a deadline. Lease proof, renewal and reentry rounds are awaited directly. The former 60 and 100 ms pauses at twenty-times speed are 1,200 and 2,000 virtual milliseconds. All original assertions and the production lease limits are preserved. Its app and keeper ports come from the test corridor. No shared clock mechanism or keeper implementation changed for this repair.
+
 ## Regression and verification
 
 The original socket timer did not expire after ten virtual seconds: the regression expected `the app did not answer in ten seconds` and received `waiting`. The controlled timer passes that regression. The four boundary tests use a recorded HTTP response and also check an answer before the deadline, continued body delivery, and stopping without advancing time.
@@ -27,7 +29,7 @@ From `apps/server`, run each named file twenty consecutive times, stopping at th
 npx --no-install vitest run test/keeper-app-call.test.ts test/worker-keeper.test.ts --maxWorkers=1
 ```
 
-Include `test/peer-stream-clock.test.ts` in the expanded candidate's repetition command. The final completed repetition receipt belongs to task 1148. The three named files run 35 tests each time; this does not run the whole suite. The stream regression was red before the change: after thirty virtual seconds it received no timeout error. All 35 tests passed after the change.
+Include `test/peer-stream-clock.test.ts` and `test/keeper-peer.test.ts` in the final candidate's repetition command. The final completed repetition receipt belongs to task 1148. The four named files run 62 tests each time; this does not run the whole suite. The stream regression was red before the change: after thirty virtual seconds it received no timeout error. The lease case was red in the recorded author check under load, and green with the controlled clock and deferred probe response.
 
 Earlier local checks on the initial app-call candidate, repeated for the expanded candidate as recorded in the task receipt:
 
