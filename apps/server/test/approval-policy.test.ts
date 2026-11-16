@@ -306,12 +306,12 @@ describe('the orchestrator\'s tools for owners and rules', () => {
     expect(read.rules).toContainEqual({ channel: 'spend', mode: 'within_limits', limit: 100 });
   });
 
-  it('sets the owner only in a turn that answers the CEO or the delegate, and is refused the same as they are', async () => {
+  it('sets the owner in any turn, as the owner when nobody wrote, and is refused the same as the CEO is', async () => {
     const c = await company();
     const nobody = await c.tools(c.orchestrator);
-    const refused = await call(nobody, 'set_department_owner', { department: c.dev.id, person: c.ids.dana });
-    expect(refused.isError).toBe(true);
-    expect((await c.db.select({ o: departments.ownerPersonId }).from(departments).where(eq(departments.id, c.dev.id)))[0]!.o).toBeNull();
+    expect((await call(nobody, 'set_department_owner', { department: c.dev.id, person: c.ids.dana })).isError).toBeFalsy();
+    expect((await c.db.select({ o: departments.ownerPersonId }).from(departments).where(eq(departments.id, c.dev.id)))[0]!.o).toBe(c.ids.dana);
+    await c.db.update(departments).set({ ownerPersonId: null }).where(eq(departments.id, c.dev.id));
     const ceos = await c.tools(c.orchestrator, c.ids.ceo);
     expect((await call(ceos, 'set_department_owner', { department: c.dev.id, person: c.ids.sam })).isError).toBe(true);
     const set = await call(ceos, 'set_department_owner', { department: c.dev.id, person: c.ids.dana });
@@ -321,29 +321,28 @@ describe('the orchestrator\'s tools for owners and rules', () => {
     expect((await c.db.select({ o: departments.ownerPersonId }).from(departments).where(eq(departments.id, c.dev.id)))[0]!.o).toBeNull();
   });
 
-  it('changes a rule only as the person its turn answers, when they may', async () => {
+  it('changes a rule in any turn, as the owner for a person who may not or for nobody, and only a rule that holds', async () => {
     const c = await company();
     const nobody = await c.tools(c.orchestrator);
     const rule = { department: c.dev.id, channel: 'spend', mode: 'within_limits', limit: 100, unit: 'USD' };
-    expect((await call(nobody, 'set_approval_policy', rule)).isError).toBe(true);
-    expect(await c.db.select().from(approvalPolicies)).toEqual([]);
+    expect((await call(nobody, 'set_approval_policy', rule)).isError).toBeFalsy();
     const strangers = await c.tools(c.orchestrator, c.ids.sam);
-    expect((await call(strangers, 'set_approval_policy', rule)).isError).toBe(true);
-    expect(await c.db.select().from(approvalPolicies)).toEqual([]);
+    expect((await call(strangers, 'set_approval_policy', { ...rule, limit: 50 })).isError).toBeFalsy();
+    expect(await ruleFor(c, c.dev.id, 'spend')).toMatchObject([{ limitAmount: 50, updatedBy: c.ids.ceo }]);
+    await c.db.delete(approvalPolicies);
     const ceos = await c.tools(c.orchestrator, c.ids.ceo);
     expect((await call(ceos, 'set_approval_policy', rule)).isError).toBeFalsy();
     expect(await ruleFor(c, c.dev.id, 'spend')).toMatchObject([{ mode: 'within_limits', limitAmount: 100, limitUnit: 'USD', updatedBy: c.ids.ceo }]);
     expect((await call(ceos, 'set_approval_policy', { ...rule, limit: undefined })).isError).toBe(true);
   });
 
-  it('lets the owner change a rule through the orchestrator, in a turn that answers them', async () => {
+  it("lets a department's owner change a rule through the orchestrator, which names owners for them as the company's owner", async () => {
     const c = await company();
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     const hers = await c.tools(c.orchestrator, c.ids.dana);
     expect((await call(hers, 'set_approval_policy', { department: c.dev.id, channel: 'price', mode: 'new_kinds' })).isError).toBeFalsy();
-    const refused = await call(hers, 'set_department_owner', { department: c.dev.id, person: null });
-    expect(refused.isError).toBe(true);
-    expect(said(refused)).toContain('Only the CEO');
+    expect((await call(hers, 'set_department_owner', { department: c.dev.id, person: null })).isError).toBeFalsy();
+    expect((await c.db.select({ o: departments.ownerPersonId }).from(departments).where(eq(departments.id, c.dev.id)))[0]!.o).toBeNull();
   });
 
   it("names owners through the orchestrator alone, and sets a department's rules through its head too, never a worker", async () => {

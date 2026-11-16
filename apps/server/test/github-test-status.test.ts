@@ -477,7 +477,7 @@ describe("the repository's full test command", () => {
     expect((await set(c, { fullTestCommand: 'x'.repeat(4001) })).statusCode).toBe(400);
   });
 
-  it('is set by the same tool as the rest of the repository, and only the CEO may ask for that', async () => {
+  it("is set by the same tool as the rest of the repository, by the orchestrator in any turn as the company's owner", async () => {
     const c = await company({ full: null });
     const [orchestrator] = await c.db.select().from(agents).where(inArray(agents.kind, ['orchestrator']));
     const token = 'tool-token-orchestrator-0123456789abcdef01';
@@ -488,8 +488,8 @@ describe("the repository's full test command", () => {
     expect(Object.keys(tool.inputSchema.properties ?? {})).toContain('fullTestCommand');
     expect(tool.description).toContain('hornhoof/tests');
     const asked = (await client.callTool({ name: 'set_repository', arguments: { department: c.dev.id, url: 'https://github.com/acme/shop.git', fullTestCommand: 'true' } })) as Res;
-    expect(asked.content[0]!.text).toMatch(/CEO/);
-    expect((await c.db.select().from(departments).where(eq(departments.id, c.dev.id)))[0]!.repoFullTestCommand).toBeNull();
+    expect(asked.isError, asked.content[0]!.text).toBeFalsy();
+    expect((await c.db.select().from(departments).where(eq(departments.id, c.dev.id)))[0]!.repoFullTestCommand).toBe('true');
   });
 
   /* Whoever may change it decides what lets a commit past GitHub's tests, so an agent's SQL may read it and no more. */

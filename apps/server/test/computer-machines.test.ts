@@ -16,7 +16,7 @@ import { pump } from '../src/modules/conversation/queue.js';
 import { VIA } from '../src/modules/network/via.js';
 import { BUILTIN } from './builtin.js';
 import { identityOf, ownBuiltin } from '../src/modules/nodes/hub.js';
-import { approvalAsked, as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, viaLink } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, viaLink } from './helpers.js';
 import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -779,7 +779,7 @@ describe('computer access button through inbox mode', () => {
   const endOrchestrator = (c: Company) =>
     c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.status, 'running')));
 
-  it('works in the woken inbox turn and its retry on every machine that is open and on none that is closed, and decides nothing else', async () => {
+  it('works in the woken inbox turn and its retry on every machine that is open and on none that is closed', async () => {
     const c = await inboxCompany();
     const askClient = await mcp(c.app, TOKEN);
     expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
@@ -822,11 +822,7 @@ describe('computer access button through inbox mode', () => {
     expect(text(onServerWake)).toBe('Exit code 0.\nPlenty.\n');
     expect(text(await call(serverClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(CLOSED('marat-mac'));
 
-    const reqRow = await approvalAsked(c.app);
-    expect((await call(serverClient, 'answer_request', { request: reqRow.id, approve: true })).isError).toBe(true);
-    expect((await call(serverClient, 'invite_person', { name: 'Eve', email: 'eve@acme.com', title: '', access: { whole: true } })).isError).toBe(true);
-
-    /* A retry of that inbox turn still works on the open server, still not on the closed Mac, and still grants no CEO decisions. */
+    /* A retry of that inbox turn still works on the open server, and still not on the closed Mac. */
     c.builtin.send({ type: 'job.done', jobId: serverWake.jobId, ok: false, sessionId: 's-srv', error: 'agent_failed', tail: 'Overloaded.', result: '', failure: { kind: 'overloaded', retryable: true, text: 'Provider overloaded.' } });
     await until(async () => (await c.db.select().from(jobs).where(eq(jobs.continueOf, serverWake.jobId))).length === 1);
     await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.continueOf, serverWake.jobId));
@@ -836,7 +832,6 @@ describe('computer access button through inbox mode', () => {
     const onRetry = await callOn(c, retryClient, { command: 'uptime' }, c.server, 'up 5d\n');
     expect(text(onRetry)).toBe('Exit code 0.\nup 5d\n');
     expect(text(await call(retryClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(CLOSED('marat-mac'));
-    expect((await call(retryClient, 'invite_person', { name: 'Eve', email: 'eve@acme.com', title: '', access: { whole: true } })).isError).toBe(true);
   });
 
   it('never lets an employee message via message_employee open a machine in inbox mode', async () => {
