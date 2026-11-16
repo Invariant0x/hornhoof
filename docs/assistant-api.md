@@ -149,7 +149,7 @@ The assistant's events after a number, oldest first, at most 100 at a time. This
 ```json
 {
   "events": [
-    { "seq": 41, "kind": "reply", "at": "2026-11-11T10:00:03.000Z", "data": { "messageId": "…", "agent": { "id": "…", "name": "Hana", "kind": "head" }, "text": "On it." } }
+    { "seq": 41, "kind": "reply", "at": "2026-11-11T10:00:03.000Z", "data": { "messageId": "…", "agent": { "id": "…", "name": "Hana", "kind": "head" }, "byOwnAgent": false, "text": "On it." } }
   ],
   "next": 41
 }
@@ -497,7 +497,7 @@ curl -s -H "$H" -H 'Content-Type: application/json' \
 # 202 {"message":{"id":"d41e…","agentId":"8a3c…"}}
 
 curl -s -H "$H" "$BASE/api/assistant/events?after=0&wait=50"
-# {"events":[{"seq":57,"kind":"reply","at":"…","data":{"messageId":"d41e…","agent":{"id":"8a3c…","name":"Hana","kind":"head"},"text":"Bruno has the payment form done and asks which provider to use."}}],"next":57}
+# {"events":[{"seq":57,"kind":"reply","at":"…","data":{"messageId":"d41e…","agent":{"id":"8a3c…","name":"Hana","kind":"head"},"byOwnAgent":false,"text":"Bruno has the payment form done and asks which provider to use."}}],"next":57}
 
 curl -s -H "$H" "$BASE/api/assistant/events?after=57&wait=50"
 # {"events":[{"seq":58,"kind":"request","at":"…","data":{"request":{"id":"f19b…","kind":"choice","topic":"task","text":"Which payment provider do we take?","options":["Stripe","PayPal"],"answerable":true,…}}},
