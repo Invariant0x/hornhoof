@@ -123,14 +123,14 @@ describe('node machine check leases across a reconnect', () => {
     const client = new CheckClient(frame => { requests.push(frame); return true; });
     client.online(true);
     const { lease: held } = await lease(client, requests);
-    const waiting = client.acquire({ label: 'part 2' });
+    const waiting = expect(client.acquire({ label: 'part 2' })).rejects.toThrow('Machine check queue lease was lost.');
     client.online(false);
     await vi.advanceTimersByTimeAsync(89_999);
     expect(held.signal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(held.signal.aborted).toBe(true);
     expect((held.signal.reason as Error).message).toBe('Machine check queue lease was lost.');
-    await expect(waiting).rejects.toThrow('Machine check queue lease was lost.');
+    await waiting;
   });
 
   it('loses the lease the server ends when the node claims it again', async () => {
