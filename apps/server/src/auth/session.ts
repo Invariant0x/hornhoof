@@ -6,6 +6,7 @@ import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
 import { agents, people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
+import { idOnly } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import { internalCall } from './internal.js';
 import { checkRead, READ_MS, readCookieOf, readPerson, signRead } from './read-cookie.js';
@@ -86,7 +87,7 @@ export async function startSession(reply: FastifyReply, db: Db, config: Config, 
   const expiresAt = newSessionExpiry();
   const started = await db.transaction(async tx => {
     const [still] = await tx
-      .select({ id: people.id })
+      .select(idOnly(people))
       .from(people)
       .where(and(eq(people.id, personId), eq(people.passwordHash, passwordHash), eq(people.status, 'active')))
       .for('share');
@@ -116,7 +117,7 @@ async function moveOlderSession(db: Db, config: Config, oldToken: string): Promi
     if (!owner) return null;
     /* The person's row first and then the session's, the order a reset or a disable takes, so a reset running at the same
        time either comes first and is seen here, or waits and then deletes the new session too. */
-    const [person] = await tx.select({ id: people.id }).from(people).where(and(eq(people.id, owner.personId), eq(people.status, 'active'))).for('share');
+    const [person] = await tx.select(idOnly(people)).from(people).where(and(eq(people.id, owner.personId), eq(people.status, 'active'))).for('share');
     if (!person) return null;
     const [older] = await tx
       .select({ tokenHash: sessions.tokenHash })
@@ -203,7 +204,7 @@ async function tradeRead(db: Db, config: Config, cookie: string, personId: strin
   const tokenHash = hashToken(token);
   return db.transaction(async tx => {
     const [still] = await tx
-      .select({ id: people.id })
+      .select(idOnly(people))
       .from(people)
       .where(and(eq(people.id, personId), eq(people.passwordHash, passwordHash), eq(people.status, 'active')))
       .for('share');

@@ -496,6 +496,13 @@ select:disabled { opacity: .55; }
 .outbound-setup .form-foot { margin-block-start: 8px; }
 /* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
 .outbound-setup .field :is(input, select) { height: 44px; }
+/* A field the person has to correct says so in its frame too: a pink frame, with the focus ring outside it when focused,
+   as Design set it for fields; so does the tick of consent, whose words stand under it. */
+.outbound-setup .field :is(input, select, textarea)[aria-invalid='true'] { border-color: var(--pink); }
+.outbound-setup .field :is(input, select, textarea)[aria-invalid='true']:is(:focus, :focus-visible) { border-color: var(--pink); outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: none; }
+.outbound-setup .check-card:has([aria-invalid='true']) { border-color: var(--pink); }
+.outbound-setup .repo-form > .bad { margin: 0; font-size: 12px; color: var(--pink-ink); overflow-wrap: break-word; }
+.outbound-added { margin: 0; overflow-wrap: anywhere; }
 /* The groups of the limits form share .field-group, standing 8px below what precedes them and 10px between their fields. */
 .outbound-numbers { margin-block-start: 8px; }
 .outbound-numbers > .field-group-body { gap: 10px; }
@@ -924,11 +931,16 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .badge.old { color: var(--amber-ink); }
 /* A machine taken off checks: a plain state, not a fault. */
 .badge.off { color: var(--muted); border-color: var(--line2); }
-/* How a connection is paid, in a word and its sign; color tells nothing here. The orchestrator's mark is a role, quiet too. */
-.badge.ctype { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); border-color: var(--line2); white-space: nowrap; }
-.badge.ctype svg.sign, .chipf svg.sign { inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.badge.orch-role { color: var(--muted); border-color: var(--line2); }
-.nmg + .badge { margin-inline-end: 6px; }
+/* How a connection is paid, as a sign: by its word in a filter's button, and right after a connection's name in the quiet
+   ink, a little smaller than the name, where its words are its name and tooltip. */
+.chipf svg.sign, .pay-sign > svg.sign { inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.pay-sign { display: inline-block; margin-inline-start: 6px; vertical-align: -2px; color: var(--muted); }
+.pay-sign > svg.sign { display: block; inline-size: 14px; block-size: 14px; }
+/* The last letter of a name and the sign after it, which no line break parts. */
+.name-end { white-space: nowrap; }
+.nm-l { min-inline-size: 0; overflow-wrap: anywhere; }
+/* A small line under a card's name, such as the orchestrator's role: past the mark and the gap after it, as the name. */
+.card-t > .card-under { flex: 1 1 100%; min-inline-size: 0; margin-inline-start: calc(18px + 10px); font-size: 12px; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
 /* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
 .ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; overflow-wrap: break-word; }
 .ast.work { color: var(--cyan-ink); }
@@ -1526,6 +1538,14 @@ body:has(.form-foot) .version-mark { display: none; }
 .offline-plan { display: grid; gap: 8px; min-width: 0; }
 .offline-moves { display: flex; flex-wrap: wrap; gap: 8px; }
 .offline-moves .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+/* A plan's fallback plans in their order: each name on its own line, its model and its moves after it, the moves wrapping
+   below the model as one group when tight. */
+.plan-fallbacks { display: grid; gap: 8px; min-inline-size: 0; font-size: 13.5px; }
+.plan-fallbacks > small { font-size: 12.5px; color: var(--muted); }
+.fallback-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.fallback-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-inline-size: 0; }
+.fallback-name { flex: 1 0 100%; min-inline-size: 0; overflow-wrap: anywhere; }
+.fallback-moves { display: flex; flex-wrap: wrap; gap: 8px; }
 .ac-obsolete { max-width: 100%; font-size: 12.5px; color: var(--muted); }
 .ac-failure summary { cursor: pointer; overflow-wrap: anywhere; }
 .ac-failure pre { margin: 6px 0 0; padding: 8px 10px; max-height: 160px; overflow: auto; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-mono); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }

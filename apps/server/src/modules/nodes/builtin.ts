@@ -2,15 +2,16 @@ import { and, eq, exists, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, subscriptions, testParts } from '../../db/schema.js';
-import { installingBuiltins } from '../network/follow.js';
+import { idOnly } from '../../db/selections.js';
+import { heldBuiltins } from '../network/follow.js';
 import { builtinOf, ownMachine, UNNAMED_BUILTIN } from './hub.js';
 
 type Reader = Pick<Db, 'select'>;
 
 /* The built-in node an API key's agent runs on: the one its program is on while that node is ready, so its folder and
    session go on there; else the one of the machine this server runs on; else the ready one whose machine stands first
-   in the server order. A machine that installs its build now takes nothing new. The machine's network id, or null when
-   no built-in node is ready. */
+   in the server order. A machine that installs its build now, or is next to, takes nothing new. The machine's network
+   id, or null when no built-in node is ready. */
 export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null): Promise<string | null> {
   const own = ownMachine(ctx.config);
   const there = (machine: string): boolean => ctx.hub.isReady(builtinOf(machine));
@@ -18,7 +19,7 @@ export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null):
   if (current === own || current === null) {
     if (there(own)) return own;
   }
-  const installing = await installingBuiltins(db, ctx.config);
+  const installing = await heldBuiltins(ctx, db);
   if (current && current !== own && there(current) && !installing.has(current)) return current;
   if (there(own)) return own;
   const ready = ctx.hub.builtins().filter(machine => machine !== own && !installing.has(machine));
@@ -45,9 +46,9 @@ export async function nameBuiltinWork(ctx: Ctx): Promise<void> {
   const own = ownMachine(ctx.config);
   if (own === UNNAMED_BUILTIN) return;
   const { db } = ctx;
-  const keys = db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key'));
+  const keys = db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.kind, 'api_key'));
   await db.update(jobs).set({ builtinMachine: own }).where(and(isNull(jobs.builtinMachine), isNull(jobs.nodeId), inArray(jobs.status, ['queued', 'running']), inArray(jobs.subscriptionId, keys)));
-  const ran = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agents.id), eq(jobs.subscriptionId, agents.subscriptionId), isNotNull(jobs.startedAt)));
+  const ran = db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agents.id), eq(jobs.subscriptionId, agents.subscriptionId), isNotNull(jobs.startedAt)));
   await db.update(agents).set({ builtinMachine: own }).where(and(isNull(agents.builtinMachine), isNull(agents.nodeId), inArray(agents.subscriptionId, keys), exists(ran)));
   await db.update(testParts).set({ builtinMachine: own }).where(and(isNull(testParts.builtinMachine), eq(testParts.builtin, true), inArray(testParts.status, ['queued', 'running'])));
 }

@@ -1,3 +1,4 @@
+import { idOnly } from '../../db/selections.js';
 import { turnCounts } from './turn-progress.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -305,10 +306,10 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!dept || dept.parentId) throw refuse(404, 'department_unknown', 'This department does not exist.');
       if (!canReach(await accessOf(db, me), { departmentId: dept.id })) throw refuse(403, 'not_your_department', "Only the CEO, the CEO delegate and the people of this department give it work. Ask one of them, or the orchestrator.");
       if (body.product) {
-        const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, body.product), eq(departments.parentId, dept.id)));
+        const [product] = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, body.product), eq(departments.parentId, dept.id)));
         if (!product) throw refuse(404, 'department_unknown', 'This product does not exist.');
       }
-      [assignee] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
+      [assignee] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
       if (!assignee) throw refuse(409, 'no_head', 'This department has no head yet. Hire one first.');
     }
     /* A task the person does not see is no task to come after, as for anything else they name. */

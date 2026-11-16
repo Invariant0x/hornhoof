@@ -2,12 +2,12 @@ import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { tasks, testRuns } from '../../db/schema.js';
 import { openTurnOf } from '../tasks/turn-department.js';
-import { ranEverything, runScope, scopeWords, type RunScope, type ScopeSource } from './purpose.js';
+import { runScope, scopeWords, type RunScope, type ScopeSource } from './purpose.js';
 
 type TaskPlace = Pick<typeof tasks.$inferSelect, 'id' | 'companyId' | 'turnId' | 'departmentId'>;
 
-/* What test runs say of one exact commit. run: the passed run on it that ran every suite and every test file anew, else the newest
-   that passed on it, on any task of the company, as the final check of a turn is rarely the task that asks; scope: what that run
+/* What test runs say of one exact commit. run: the newest passed run on it that left no suite out, a whole run of its release, else
+   the newest that passed on it, on any task of the company, as the final check of a turn is rarely the task that asks; scope: what that run
    left out, for a run of the product's environment; failedRun: the newest that failed on it, which whoever decides hears of all
    the same; other: when none passed on it, the newest that passed on another commit of this work, and proves nothing here. */
 export type CommitProof = { commit: string; run: number | null; command: string | null; scope: RunScope | null; failedRun: number | null; other: { run: number; commitSha: string } | null };
@@ -25,7 +25,7 @@ const testsOf = (companyId: string) => and(eq(testRuns.companyId, companyId), eq
 const snapshot = testRuns.environmentSnapshot;
 const PASSED = {
   number: testRuns.number, command: testRuns.command,
-  source: sql<ScopeSource | null>`case when ${snapshot} is null then null else jsonb_build_object('profile', ${snapshot}->'profile', 'manifest', ${snapshot}->'description'->'manifest', 'baseCommit', ${snapshot}->'candidate'->'baseCommit') end`,
+  source: sql<ScopeSource | null>`case when ${snapshot} is null then null else jsonb_build_object('profile', ${snapshot}->'profile', 'manifest', ${snapshot}->'description'->'manifest') end`,
   suite: sql<string | null>`${testRuns.environmentRequest}->>'suite'`,
   kept: sql<number | null>`(${testRuns.fileCache}->>'reused')::int`,
 };
@@ -38,7 +38,7 @@ async function newestFailed(db: Db, companyId: string, commit: string) {
   return run ?? null;
 }
 
-/* A run that ran everything proves the commit for a release, whatever narrower run passed after it. */
+/* A whole run of the release proves the commit, whatever narrower run passed after it. */
 async function bestPassed(db: Db, companyId: string, commit: string): Promise<(Passed & { scope: RunScope | null }) | null> {
   const runs = await db
     .select(PASSED)
@@ -47,7 +47,7 @@ async function bestPassed(db: Db, companyId: string, commit: string): Promise<(P
     .orderBy(desc(testRuns.number))
     .limit(PASSED_READ);
   const scoped = runs.map(run => ({ ...run, scope: scopeOf(run) }));
-  return scoped.find(run => run.scope && ranEverything(run.scope)) ?? scoped[0] ?? null;
+  return scoped.find(run => run.scope && !run.scope.leftOut.length) ?? scoped[0] ?? null;
 }
 
 /* The turn a task's work is in: the one it went into, else its department's open turn, the release it goes into. */

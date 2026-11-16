@@ -105,8 +105,11 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   /* The key of a git host is a way out to an account of the company's, and so is the Google key that makes its sheets. */
   repo_hosts: rows('access'),
   google_sheets: rows('access'),
+  /* A vault entry is a way into a site's account of the company, and its log is written only by Hornhoof. */
+  vault_entries: rows('access'),
+  vault_log: rows('protected'),
 
-  ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
+  ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
   machines: rows('machines'),
   computer_runs: rows('machines'),

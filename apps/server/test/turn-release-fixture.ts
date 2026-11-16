@@ -61,8 +61,7 @@ export async function readyInTurn() {
   const branch = `turn-${turn!.number}`;
   const repo: Repository = { heads: { main: BASE, [branch]: f.finalCommit, 'task-1': f.finalCommit, [`task-${f.task.number}`]: f.finalCommit }, tags: {}, holds: { [f.finalCommit]: [BASE] }, between: {}, cut: new Set() };
   serve(f.ctx, repo);
-  const run = await f.run();
-  await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id]));
+  await report(f.ctx, f.tester.id, f.task.id, f.verified());
   const route = (await f.detail()).echelons;
   const acceptance = { candidateId: route.candidateId!, revision: route.revision, integrationCommit: f.finalCommit };
   const accept = (changes: Partial<typeof acceptance> = {}) => report(f.ctx, f.head.id, f.task.id, { done: true, summary: 'Fast-forwarded the turn to the checked candidate.', acceptance: { ...acceptance, ...changes } });
@@ -84,14 +83,16 @@ export async function releasing() {
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.head.id, subscriptionId: f.head.subscriptionId!, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken('release-head-tool-token-0123456789abcdef0123') }).returning();
   let runs = 0;
   /* A run of the turn's branch, as the machines would have finished it. */
-  const fullRun = async (options: { commit?: string; reused?: number; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string } = {}) => {
+  /* reused: green results it took, of its release unless it is from before releases were kept (ofRelease false). */
+  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number } = {}) => {
     const commit = options.commit ?? R;
     const [run] = await f.db.insert(testRuns).values({
       companyId: f.task.companyId, number: 9000 + ++runs, taskId: release!.id, agentId: f.head.id, jobId: job!.id, departmentId: f.task.departmentId!,
-      branch: options.branch ?? f.branch, commitSha: commit, command: 'npm test', parts: 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
-      fileCache: options.reused ? { mode: 'cached', turn: f.turn.number, mainLine: true, fingerprints: [], reused: options.reused, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] } : { mode: 'full', turn: f.turn.number, mainLine: true, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
+      branch: options.branch ?? f.branch, commitSha: commit, command: 'npm test', parts: options.parts ?? 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
+      ...(options.suite ? { environmentRequest: { version: 1 as const, repositoryScope: { companyId: f.task.companyId, repositoryOwnerId: f.task.departmentId!, repoUrlHash: 'a'.repeat(64) }, suite: options.suite, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null } } : {}),
+      fileCache: { mode: options.reused ? 'cached' : 'full', ...(options.ofRelease === false ? {} : { release: options.branch ?? f.branch }), fingerprints: [], reused: options.reused ?? 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
     }).returning();
-    await f.db.insert(testParts).values([1, 2].map(part => ({ companyId: f.task.companyId, runId: run!.id, part, status: options.failedPart && part === 2 ? 'failed' as const : 'passed' as const, commit, exitCode: options.failedPart && part === 2 ? 1 : 0 })));
+    if (options.parts !== 0) await f.db.insert(testParts).values([1, 2].map(part => ({ companyId: f.task.companyId, runId: run!.id, part, status: options.failedPart && part === 2 ? 'failed' as const : 'passed' as const, commit, exitCode: options.failedPart && part === 2 ? 1 : 0 })));
     return run!;
   };
   const approve = async (commit = R) => {

@@ -1,5 +1,6 @@
 import { runsInClass, type RepositoryScope, type RuntimeCapability, type NodeLoad } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
+import { idOnly } from '../../db/selections.js';
 import { nodeHeld } from '../updates/drain.js';
 import { availableMemory } from './capacity.js';
 import { and, asc, eq, isNull } from 'drizzle-orm';
@@ -54,7 +55,7 @@ function productCapable(ctx: Ctx, place: RunPlace, run: Pick<ProductRun, 'enviro
 }
 async function siblingPlaces(ctx: Ctx, place: RunPlace): Promise<RunPlace[]> {
   if (place.builtin) return [place];
-  const siblings = await ctx.db.select({ id: nodes.id }).from(nodes).leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(and(eq(nodes.machineId, place.machineId!), liveNode, isNull(subscriptions.removedAt))).orderBy(asc(nodes.createdAt), asc(nodes.id));
+  const siblings = await ctx.db.select(idOnly(nodes)).from(nodes).leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(and(eq(nodes.machineId, place.machineId!), liveNode, isNull(subscriptions.removedAt))).orderBy(asc(nodes.createdAt), asc(nodes.id));
   const loads = siblings.map(node => ctx.hub.loadOf(nodeIdentity(node.id)));
   return siblings.map(node => ({ ...place, node: nodeIdentity(node.id), nodeId: node.id, load: forRun(ctx.hub.loadOf(nodeIdentity(node.id)), loads) }));
 }

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,8 +19,9 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { departments, harnessBuilds, harnessProducts, jobs, machines, personAccess, subscriptions } from '../src/db/schema.js';
 import { harnessGreeted, harnessRound, harnessSynced } from '../src/modules/testruns/harness.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { hostIdOf } from '../src/modules/network/join.js';
 import { nextOf, until, type FakeNode } from './helpers.js';
-import { company, gets } from './test-runs-company.js';
+import { company, gets, NODE_KEY } from './test-runs-company.js';
 
 const folders: string[] = [];
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
@@ -347,6 +348,44 @@ describe('who may share a build', () => {
     const c = await shared(), one = await c.machine(c.ceo, 'one'), stranger = await c.machine(c.bob, 'stranger');
     await c.claim(one.key); await c.uploaded(one.key, Buffer.from('private'));
     expect((await c.bundle(stranger.key, 'bytes=0-1')).statusCode).toBe(403);
+  });
+
+  /* A built-in node runs on a computer of the company too. That computer taken off checks, the node neither takes a build
+     nor hands in one it began: its claim ends with its lease, the build passes to a machine that may take it, and once the
+     computer lends itself again the node builds and hands in again (#1118). The key a built-in node of the server's own
+     computer or of another one says; the computer it runs on. */
+  const builtinOn: Record<string, (c: Shared) => Promise<{ key: string; computer: string }>> = {
+    'the server’s own': async c => {
+      await c.builtin();
+      return { key: NODE_KEY, computer: (await c.machine(c.ceo, 'home-box')).machineId };
+    },
+    'another machine’s': async c => {
+      const MACHINE = 'd0'.repeat(16);
+      const [row] = await c.db.select({ companyId: machines.companyId, personId: machines.personId }).from(machines).limit(1);
+      const [box] = await c.db.insert(machines).values({ ...row!, machineKey: 'mac-box-0001', hostname: 'mac-box', role: 'worker', networkId: MACHINE }).returning();
+      return { key: `builtin.${MACHINE}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${MACHINE}`).digest('hex')}`, computer: box!.id };
+    },
+  };
+  it.each(Object.keys(builtinOn))('takes no build back from %s built-in node once its computer is taken off checks', async whose => {
+    const c = await shared({ HORNHOOF_HOST_ID: hostIdOf('home-box-0001-abcd') }), lender = await c.machine(c.ann, 'lender');
+    const { key, computer } = await builtinOn[whose]!(c), lends = (lendsTests: boolean) => c.db.update(machines).set({ lendsTests }).where(eq(machines.id, computer));
+    const begun = Buffer.from('begun on the built-in node'), done = Buffer.from('built by the lender');
+    expect((await c.claim(key)).json()).toMatchObject({ state: 'build' });
+    expect((await c.part(key, 0, begun)).statusCode).toBe(204);
+    await lends(false);
+    expect((await c.finish(key, begun)).statusCode).toBe(403);
+    expect((await c.part(key, 1, begun)).statusCode).toBe(403);
+    expect((await c.failed(key, 'untrusted failure')).statusCode).toBe(403);
+    expect((await c.claim(key)).statusCode).toBe(403);
+    expect((await c.db.select().from(harnessBuilds))[0]).toMatchObject({ status: 'building', error: null, digest: null });
+    expect((await c.claim(lender.key)).json().state).toBe('wait');
+    await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
+    expect((await c.claim(lender.key)).json().state).toBe('build');
+    expect((await c.uploaded(lender.key, done)).statusCode).toBe(204);
+    await lends(true);
+    expect((await c.claim(key)).json()).toMatchObject({ state: 'ready', digest: sha(done) });
+    expect((await c.claim(key, { key: OTHER })).json()).toMatchObject({ state: 'build' });
+    expect((await c.uploaded(key, begun, OTHER)).statusCode).toBe(204);
   });
 });
 

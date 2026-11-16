@@ -1,13 +1,14 @@
 import { WAIT_SOURCE_KINDS, WaitPlan } from '@hornhoof/protocol/waits';
 import { APPROVAL_MODES, ApprovalAmount, ApprovalChannel, approvalNeeded, kindKey, ruleOf } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, count, eq, gte, inArray } from 'drizzle-orm';
+import { and, eq, gte, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorHeaders } from '../../auth/internal.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
+import { countOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
@@ -82,7 +83,7 @@ async function heldTask(ctx: Pick<Ctx, 'db'>, job: ToolJob, ref: number | string
 async function askedInTurn(db: Ctx['db'], job: ToolJob): Promise<number> {
   const [started] = await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id));
   const [asked] = await db
-    .select({ n: count() })
+    .select(countOnly())
     .from(requests)
     .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, started?.at ?? new Date(0))));
   return Number(asked?.n ?? 0);
@@ -209,7 +210,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         'When the policy lets the work go, no person is asked: the answer says so and a line goes in the task\'s log, so go on with the work. Otherwise the task waits, the department\'s owner (with none, the CEO) is asked, and you are woken with the answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
         'amount: how much this one is, in what the channel\'s limit counts. Without it, a limit never lets the work go. text: what you want to do, in plain words. link: an https page where it can be seen.' +
-        ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. Before pushing an exact 40-character commit to main from a release task or turn leading to main, ask here on channel commit (or ask_person with commit): Hornhoof approves automatically without a card only when its department enabled autonomousRelease and that current candidate commit on a main-line route (review.baseCommit on main) has a completed green full run_tests run that proves it, an independent non-author PASS verdict on that exact SHA and a complete fast-forward comparison from main (within GitHub's diff limits); otherwise it opens a release approval card.`,
+        ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. Before pushing an exact 40-character commit to main from a release task or turn leading to main, ask here on channel commit (or ask_person with commit): Hornhoof approves automatically without a card only when its department enabled autonomousRelease and that current candidate commit on a main-line route (review.baseCommit on main) has a completed green whole run of its release on main or a release-X.Y.Z branch that proves it, an independent non-author PASS verdict on that exact SHA and a complete fast-forward comparison from main (within GitHub's diff limits); otherwise it opens a release approval card.`,
       inputSchema: {
         task: Ref,
         channel: ApprovalChannel,

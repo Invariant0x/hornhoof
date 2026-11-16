@@ -7,6 +7,7 @@ import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
 import { actorOf, changedBy, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, telegramBots, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { unreadCount } from '../conversation/inbox.js';
 import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
@@ -14,6 +15,7 @@ import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
 import { keyEndFor, onlineIn, subViews, type SubView } from '../subscriptions/views.js';
+import { endFallback, fallbackOf } from '../subscriptions/fallback.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
@@ -44,6 +46,9 @@ export type AgentCard = FailureState & {
   /* The level a person picked, or null to follow its role. */
   effort: string | null;
   subscription: SubView | null;
+  /* Hornhoof put it on its subscription for a while, as its own plan is at its limit: that plan, and until when that limit
+     holds as far as it is known, after which it goes back between turns. */
+  fallback: { home: SubView; until: string | null } | null;
   /* The machine its program is on; none on the built-in node and before it first ran. */
   machine: { id: string; hostname: string } | null;
   /* The machine its plan was heard from last while none of the plan's machines is online; none while it can run. */
@@ -123,7 +128,7 @@ async function applyTeamPatch(db: Ctx['db'], agent: AgentRow, next: AgentRow, te
   if (team === undefined) return;
   if (team !== null) {
     if (agent.kind !== 'worker' || !agent.departmentId) throw invalid('A department head cannot be in a sub-unit.', 'unknown_place');
-    const [found] = await db.select({ id: teams.id }).from(teams).where(and(eq(teams.id, team), eq(teams.departmentId, agent.departmentId)));
+    const [found] = await db.select(idOnly(teams)).from(teams).where(and(eq(teams.id, team), eq(teams.departmentId, agent.departmentId)));
     if (!found) throw invalid('This sub-unit does not exist in this department.', 'unknown_place');
   }
   next.teamId = team;
@@ -228,6 +233,12 @@ function cardSubscription(agent: AgentRow, views: Map<string, SubView>): SubView
   return agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null;
 }
 
+async function cardFallback(ctx: Ctx, agent: AgentRow, views: Map<string, SubView>): Promise<AgentCard['fallback']> {
+  const on = await fallbackOf(ctx, agent);
+  const home = on && views.get(on.home);
+  return home ? { home, until: on.until } : null;
+}
+
 async function cardMachine(ctx: Ctx, agent: AgentRow): Promise<AgentCard['machine']> {
   return machineOf(ctx.db, (await programNode(ctx, agent.id))?.node ?? null);
 }
@@ -243,7 +254,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   const named = await cardPlaces(db, agent);
   const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
-  const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
+  const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
   /* An employee's card shows what people edit. A head's department notebook has its own window and its own access; it
      counts all the same in what every turn sends. */
   const told = await instructionsOf(ctx, agent);
@@ -274,6 +285,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
     model: agent.model,
     effort: agent.effort,
     subscription: cardSubscription(agent, views),
+    fallback: await cardFallback(ctx, agent, views),
     machine: await cardMachine(ctx, agent),
     offline: await offlineMachine(ctx, agent.subscriptionId),
     state: cardState(agent, Boolean(running)),
@@ -299,6 +311,8 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
 
 /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
 export async function afterPlanMove(ctx: Ctx, agent: AgentRow, next: AgentRow): Promise<void> {
+  /* A person put it where it works now: it no longer goes back to the plan Hornhoof moved it from. */
+  await endFallback(ctx, agent.id);
   if (agent.subscriptionId) await releaseLeftProgram(ctx, agent.id, agent.subscriptionId);
   if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
   await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
@@ -529,7 +543,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
   await requireDepartmentChanger(db, me, found.departmentId);
   if (found.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
   await changing(ctx, found, async agent => {
-    const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
+    const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
     if (running) throw new ApiError(409, 'conflict', 'This employee is working. Stop it first.', 'agent_working');
     /* A task it holds or does would wait for it for good. */
     const held = await db

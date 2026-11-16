@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines, publicLinks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { builtinMachine } from '../nodes/nodes.js';
 import { findThisMachine } from '../network/store.js';
@@ -49,7 +50,7 @@ export async function setPriority(ctx: Ctx, machineId: string, pin: Pin): Promis
 
   const stored = pin === null ? null : String(pin);
   await db.transaction(async tx => {
-    await tx.select({ id: machines.id }).from(machines).where(isNull(machines.revokedAt)).orderBy(asc(machines.id)).for('update');
+    await tx.select(idOnly(machines)).from(machines).where(isNull(machines.revokedAt)).orderBy(asc(machines.id)).for('update');
     if (typeof pin === 'number') await tx.update(machines).set({ serverPin: null }).where(and(eq(machines.serverPin, String(pin)), ne(machines.id, row.id)));
     await tx.update(machines).set({ serverPin: stored }).where(eq(machines.id, row.id));
   });

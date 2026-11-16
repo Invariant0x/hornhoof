@@ -2,6 +2,7 @@ import type { WaitOwnerBinding, WaitPlan, WaitSourceKind, WaitSourceState } from
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, requests, taskWaits } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { candidates, decisionOwner } from './decisions.js';
 import { routeOf, type Route } from './echelons-store.js';
@@ -45,7 +46,7 @@ export async function bindSource(tx: Tx, task: Task, source: Source): Promise<Ta
 /* The first of these still here, else the head of the task's department. */
 async function answeringFor(tx: Tx, task: Task, named: (string | null)[]): Promise<string | null> {
   const ids = named.filter((id): id is string => id !== null);
-  const live = ids.length ? await tx.select({ id: agents.id }).from(agents).where(and(inArray(agents.id, ids), isNull(agents.removedAt))) : [];
+  const live = ids.length ? await tx.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, ids), isNull(agents.removedAt))) : [];
   return ids.find(id => live.some(a => a.id === id)) ?? (task.departmentId ? departmentHead(tx, task.departmentId) : null);
 }
 

@@ -2,6 +2,7 @@ import { hkdfSync, timingSafeEqual } from 'node:crypto';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
 import { companies } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { publicUrl } from '../link/link.js';
 
 /* The code in the setup link: only whoever has it creates the company and its owner. It is derived from
@@ -18,7 +19,7 @@ export function isSetupCode(secret: Buffer, given: string): boolean {
 }
 
 export async function setupNeeded(db: Db): Promise<boolean> {
-  const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
+  const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
   return !company;
 }
 

@@ -6,6 +6,7 @@ import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agentInbox, agents, jobs, people, requests, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
@@ -57,7 +58,7 @@ async function asOwner(db: Reader, turn: Words, found: Principal | null): Promis
   if (turn.job.agentKind !== 'orchestrator') return found;
   if (found && (await actingCeo(db, found.personId))) return found;
   const [owner] = await db
-    .select({ id: people.id })
+    .select(idOnly(people))
     .from(people)
     .where(and(eq(people.companyId, turn.job.companyId), eq(people.isOwner, true), eq(people.status, 'active')))
     .limit(1);
@@ -273,7 +274,7 @@ class TurnStopped extends Error {}
 
 /* The message and its turn check share a transaction, so Stop cannot move between the check and the write. */
 async function liveInputKept(tx: Tx, jobId: string): Promise<void> {
-  const [job] = await tx.select({ id: jobs.id }).from(jobs)
+  const [job] = await tx.select(idOnly(jobs)).from(jobs)
     .where(and(eq(jobs.id, jobId), or(isNull(jobs.error), ne(jobs.error, 'cancelled')))).for('no key update');
   if (!job) throw new TurnStopped();
   await inputKept(tx, jobId);
