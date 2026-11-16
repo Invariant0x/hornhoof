@@ -425,9 +425,10 @@ describe('a merge applied', () => {
     await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
     await s.db.insert(personAccess).values([{ ...s.on, personId: maria!.id, departmentId: s.dev.id }, { ...s.on, personId: maria!.id, departmentId: sales!.id }]);
     await s.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), now(), 'hornhoof_before_t1')`);
-    /* A moment later, on a clock that may count in milliseconds, the CEO narrows her access to one department, as the
-       screen does: all of her places go, and one comes back. And a task is removed. */
-    await new Promise(resolve => setTimeout(resolve, 5));
+    /* A moment later the CEO narrows her access to one department, as the screen does: all of her places go, and one
+       comes back. And a task is removed. What came before is set a second back, so on any clock it is a moment later. */
+    await s.db.execute(sql`UPDATE net.journal SET at = at - interval '1 second'`);
+    await s.db.execute(sql`UPDATE net.restores SET at = at - interval '1 second', dumped_at = dumped_at - interval '1 second'`);
     await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
     const [left] = await s.db.insert(personAccess).values({ ...s.on, personId: maria!.id, departmentId: s.dev.id }).returning();
     await s.db.delete(tasks).where(eq(tasks.id, gone.id));

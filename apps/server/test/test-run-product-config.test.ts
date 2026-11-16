@@ -1,9 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { parseTestEnvironment } from '@hornhoof/protocol';
+import { parseTestEnvironment, type Command } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 
 const manifest = () => parseTestEnvironment(readFileSync(new URL('../../../.hornhoof/test-environment.json', import.meta.url), 'utf8'));
 const original = () => parseTestEnvironment(readFileSync(new URL('../../../packages/protocol/test/fixtures/hornhoof-test-environment-v1.json', import.meta.url), 'utf8'));
+/* A type check as the preparation runs it: tsc in a node with room for 4 GB, since the types of the server's tests take
+   2.2 GB and a node of a machine with less memory gives 2 GB by default. */
+const TSC = ['--max-old-space-size=4096', 'node_modules/typescript/bin/tsc'];
+const tsc = (args: string[]) => ({ program: 'node', args: [...TSC, ...args], cwd: '.' });
+const asPrepared = (command: Command) => (command.program === 'npx' && command.args[0] === '--no-install' && command.args[1] === 'tsc' ? tsc(command.args.slice(2)) : command);
 
 describe('canonical versioned product configuration', () => {
   it('declares the protocol suite and all prior static checks once before final batches', () => {
@@ -11,13 +16,19 @@ describe('canonical versioned product configuration', () => {
     expect(current.execution?.version).toBe(2); expect(preparation?.profiles).toEqual(['final', 'full']); expect(preparation?.suiteIds).toEqual(['protocol']);
     const commands = preparation?.commands.map(command => JSON.stringify(command)) ?? [];
     const checks = original().suites.flatMap(suite => suite.finalChecks ?? []).flatMap(command => command.program === 'npm' && command.args.join(' ') === 'run typecheck:tests'
-      ? ['apps/server', 'apps/node', 'packages/protocol'].map(workspace => ({ program: 'npx', args: ['--no-install', 'tsc', '-p', `${workspace}/tsconfig.eslint.json`, '--noEmit'], cwd: '.' })) : [command]);
+      ? ['apps/server', 'apps/node', 'packages/protocol'].map(workspace => tsc(['-p', `${workspace}/tsconfig.eslint.json`, '--noEmit'])) : [asPrepared(command)]);
     for (const command of checks) expect(commands).toContain(JSON.stringify(command));
     expect(new Set(commands).size).toBe(commands.length);
     expect(preparation?.commands).toContainEqual({ program: 'node', args: ['scripts/check-release.mjs', '--local'], cwd: '.' });
     expect(preparation?.commands).toContainEqual({ program: 'npm', args: ['run', 'lint:part', '--workspaces', '--include-workspace-root', '--'], cwd: '.' });
     expect(preparation?.commands.some(command => command.program === 'npm' && ['lint', 'typecheck:tests', 'build'].includes(command.args[1] ?? ''))).toBe(false);
     expect(current.suites.flatMap(suite => suite.finalChecks ?? [])).toEqual([]);
+  });
+  it('gives every type check of the preparation room for 4 GB', () => {
+    const commands = manifest().execution?.oncePreparation?.commands ?? [];
+    const checks = commands.filter(command => [command.program, ...command.args].some(arg => /(?:^|\/)tsc$/.test(arg)));
+    expect(checks.length).toBe(7);
+    for (const command of checks) expect([command.program, ...command.args.slice(0, 2)]).toEqual(['node', ...TSC]);
   });
   it('checks the installer as the GitHub build does, since a passing run of the whole product spares GitHub its own', () => {
     const commands = manifest().execution?.oncePreparation?.commands;
