@@ -232,9 +232,10 @@ async function openFixture(page: Page, width: number, theme: string, state: Fixt
   await mountFixture(page, state, errors);
 }
 
-/* The ranking of the shipped locales and the flow of each locale are tests of their own, so a test loads the card once per
-   locale it ranks or twice for its flow, and none outruns its time as locales are added. Every shipped locale has its flow,
-   which covers the shortest, the longest and the first right-to-left one the ranking names. */
+/* The ranking of the shipped locales, the flow of each locale and its read-only view are tests of their own: the ranking
+   loads the card once per locale and the others once, so none outruns its time on a busy machine or as locales are added.
+   Every shipped locale has its flow and its read-only view, which covers the shortest, the longest and the first
+   right-to-left one the ranking names. */
 for (const width of [375, 1280]) {
   for (const theme of ['light', 'cyberpunk'] as const) {
     test(`shipped locales ranked by the assignment card at ${width}px in ${theme}`, async ({ page }, info) => {
@@ -253,7 +254,7 @@ for (const width of [375, 1280]) {
         const errors: string[] = [];
         const geometry: Geometry[] = [];
         await openFixture(page, width, theme, state, errors);
-        await test.step(`${locale}: save, raw round-trip, reset and read-only`, async () => {
+        await test.step(`${locale}: save, raw round-trip and reset`, async () => {
           const words = await messagesFor(locale);
           state.assignment = LEGACY_ASSIGNMENT;
           state.skill = DEFAULT_SKILL;
@@ -315,8 +316,20 @@ for (const width of [375, 1280]) {
           geometry.push({ surface: 'assignment-reset', locale, measurements: await geometryOf(page, card) });
           await assignment.scrollIntoViewIfNeeded();
           await shot(page, info, `assignment-reset-${locale}-${theme}-${width}`);
+        });
 
-          state.canEdit = false;
+        await info.attach('assignment-fixture-observations', { body: JSON.stringify({ provenance: 'playwright-route-fixture', engine: info.project.use.browserName, browserVersion: browser.version(), width, theme, locale, patches: state.patches, resets: state.resets, apiRequests: state.apiRequests, geometry, errors }, null, 2), contentType: 'application/json' });
+        expect(errors).toEqual([]);
+      });
+
+      test(`read-only assignment card at ${width}px in ${theme}, ${locale}`, async ({ page, browser }, info) => {
+        /* What the flow above leaves: its last saved assignment and the skill reset to the role's own. */
+        const state: FixtureState = { ...freshState(), assignment: FINAL_ASSIGNMENT, canEdit: false };
+        const errors: string[] = [];
+        const geometry: Geometry[] = [];
+        await openFixture(page, width, theme, state, errors);
+        await test.step(`${locale}: read-only`, async () => {
+          const words = await messagesFor(locale);
           const readonlyCard = await openCard(page, locale, words);
           const readonlyAssignment = readonlyCard.getByRole('textbox', { name: words.agent.assignment, exact: true });
           await expect(readonlyAssignment).toHaveValue(FINAL_ASSIGNMENT);
