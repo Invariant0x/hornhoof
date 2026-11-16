@@ -43,11 +43,11 @@ const UNREAD = /^\/api\/(stream|attachments|auth|invites|setup|nodes)(\/|$)|\/te
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or view.`);
 
-/* The tools that change people, their access, money or the company's reach. The orchestrator is the CEO's hands, so he
-   uses them only in a turn that answers the CEO or the CEO delegate now, as that person, never because an employee, a
-   timer, a task or another person asked. Those that change one department's own resources go in any turn of his, for the
-   last person who asked him if they run that department, as the CEO, the delegate or its owner. create_repository also
-   creates a department's first repository in a turn of his own. */
+/* The tools that change people, their access, money or the company's reach. What is not forbidden is allowed, and the
+   orchestrator can do everything in the company (Ivan's rule of 16 November 2026): he uses them in any turn, as the CEO
+   or the CEO delegate who wrote to him, or else as the company's owner, whoever asked, an employee, a timer, a task or
+   another person. What the company wants him not to do is written in its notebook. Only a company with no active owner
+   leaves them to the CEO's word. */
 export const CEO_ONLY = new Set([
   'invite_person',
   'change_person',
@@ -330,8 +330,10 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool('check_updates', 'Looks for a newer Hornhoof now.', {}, () => ({ method: 'POST', url: '/api/updates/check' }));
   tool(
     'update_hornhoof',
-    'Installs a Hornhoof version: version "latest" or a tag from check_updates. whenIdle waits until no agent works. Hornhoof restarts, and so does your turn. ' +
-      'It goes for the CEO or the CEO delegate who asked you last, in this turn or an earlier one.',
+    'Installs a Hornhoof version: version "latest" or a tag from check_updates. whenIdle (the default) starts no new turn of the company and waits until no agent works, ' +
+      'for idleWaitMinutes at most: when the agents have not finished by then, the update is called off, nothing running stops, the turns start again and you are told. ' +
+      'A turn whose node said nothing of its program for ten minutes is not waited for. The answer, and check_updates later, say which turns it waits for and until when. ' +
+      'Hornhoof restarts, and so does your turn. It goes for the CEO or the CEO delegate who asked you last, in this turn or an earlier one.',
     UpdateBody.shape,
     body => ({ method: 'POST', url: '/api/updates', payload: body }),
   );

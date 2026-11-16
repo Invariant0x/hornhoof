@@ -1,7 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { departments } from '../src/db/schema.js';
-import { ONLY_DEPARTMENT_OWNER } from '../src/modules/tools/control.js';
 import { company } from './department-owner-fixture.js';
 import { as } from './helpers.js';
 
@@ -102,7 +101,7 @@ describe('another repository of a department', () => {
 describe('add_repository', () => {
   const call = async (c: Awaited<ReturnType<C['tools']>>, args: Record<string, unknown>) => (await c.callTool({ name: 'add_repository', arguments: args })) as Res;
 
-  it("adds a repository for the CEO or the department's owner, in a turn that answers them, and for nobody else", async () => {
+  it("adds a repository for the CEO or the department's owner, and as the company's owner for anyone else or nobody", async () => {
     const c = await company();
     expect((await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana)).statusCode).toBe(200);
     const forCeo = await call(await c.tools(c.orchestrator, c.ids.ceo), { department: c.dev.id, name: 'Docs', url: 'https://github.com/acme/docs.git', token: 'ghp_docs4444' });
@@ -111,9 +110,9 @@ describe('add_repository', () => {
     const forDana = await call(await c.tools(c.orchestrator, c.ids.dana), { department: c.dev.id, url: 'https://github.com/acme/app.git' });
     expect(forDana.isError, forDana.content[0]!.text).toBeFalsy();
     const forSam = await call(await c.tools(c.orchestrator, c.ids.sam), { department: c.dev.id, url: 'https://github.com/acme/other.git' });
-    expect(forSam.content[0]!.text).toBe(ONLY_DEPARTMENT_OWNER);
-    const unasked = await call(await c.tools(c.orchestrator), { department: c.dev.id, url: 'https://github.com/acme/other.git' });
-    expect(unasked.isError).toBe(true);
-    expect(await productsOf(c, c.dev.id)).toEqual(['Docs', 'Shop', 'app']);
+    expect(forSam.isError, forSam.content[0]!.text).toBeFalsy();
+    const unasked = await call(await c.tools(c.orchestrator), { department: c.dev.id, url: 'https://github.com/acme/more.git' });
+    expect(unasked.isError, unasked.content[0]!.text).toBeFalsy();
+    expect(await productsOf(c, c.dev.id)).toEqual(['Docs', 'Shop', 'app', 'more', 'other']);
   });
 });

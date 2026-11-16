@@ -1,4 +1,3 @@
-import { PGlite } from '@electric-sql/pglite';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -6,7 +5,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { companies, departments } from '../src/db/schema.js';
 import { as, createTestDb, setUpCompany, testApp } from './helpers.js';
-import { ownDatabases } from './helpers-db.js';
+import { freshPglite, ownDatabases } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 /* One test adds a constraint to make the database refuse a write. */
@@ -109,7 +108,7 @@ describe('private repository credential revision', () => {
   });
 
   it('initializes old rows without changing their encrypted token or other stored data', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsBefore('repo_token_revision') });

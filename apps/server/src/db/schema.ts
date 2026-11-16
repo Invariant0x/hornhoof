@@ -607,14 +607,15 @@ export const nodes = pgTable(
 
 /* Each connection of a node, from when it came to how it ended; a node that stays connected has an open one. How long the
    node was away is the time to its next one. A connection's end and cause come together. report: what the node itself said
-   of this drop once it was back; a node from before says nothing. */
+   of this drop once it was back; a node from before says nothing. nodeId: none for the machine's built-in node, which has
+   no node of its own (#1060). */
 export const nodeConnections = pgTable(
   'node_connections',
   {
     id: id(),
     companyId: companyId(),
     machineId: uuid('machine_id').notNull().references(() => machines.id),
-    nodeId: uuid('node_id').notNull().references(() => nodes.id, { onDelete: 'cascade' }),
+    nodeId: uuid('node_id').references(() => nodes.id, { onDelete: 'cascade' }),
     connectedAt: timestamp('connected_at', { withTimezone: true }).notNull(),
     disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
     cause: text('cause', { enum: CONNECTION_ENDS }),
@@ -1426,6 +1427,8 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
   version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
+  /* The time limit of a part the run asked for, when it asked for one. */
+  minutes?: number;
   requestId: string | null; nodeId: string | null; builtin: boolean;
   /* The machine whose built-in node was asked, when one was; a request from before machines had theirs names none,
      and was this server's own. */
@@ -1611,7 +1614,7 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
-    /* Proved on the repository's main branch or the turn's, the only results a release takes. */
+    /* Proved on the repository's main branch or the turn's. A release takes these, and those proved on a commit the main branch holds now. */
     mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },

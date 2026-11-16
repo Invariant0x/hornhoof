@@ -262,7 +262,7 @@ function changeAsPerson(ctx: Ctx, app: FastifyInstance, job: ToolJob): Change {
     });
 }
 
-const ORCHESTRATOR_WHO = "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.";
+const ORCHESTRATOR_WHO = 'In any turn: as the CEO or the CEO delegate who wrote to you, or else as the company\'s owner.';
 const HEAD_WHO = 'Only for your own department, and only in a turn that answers a person who runs it or the CEO, as their decision.';
 
 /* The tools that set a department's approvals and wait dates; mine says which department the agent may name. */

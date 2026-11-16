@@ -858,11 +858,13 @@ async function runPreparedMerge(
   db: Db,
   merge: { id: string; label: string; kept: boolean; companyId: string },
   prepared: MergeReader,
-  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number },
+  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; clock?: () => number },
 ): Promise<MergeResult> {
   let heldMs = 0;
+  /* The time the writes are held is counted on the clock given, which tests move; the real one by default. */
+  const now = opts.clock ?? Date.now;
   const done = await writeGate.exclusive(async () => {
-    const began = Date.now();
+    const began = now();
     try {
       /* Read committed so the deferred fence trigger at commit sees live lease renewals (and any fence) committed while this merge ran. */
       return await db.transaction(tx => new Merge(queryOf(tx as unknown as Db), prepared, merge, opts.onUnit).run());
@@ -872,7 +874,7 @@ async function runPreparedMerge(
       if (codeOf(err) === LOCK_NOT_TAKEN) throw new Error('Another session held a table the merge must lock, for longer than 10 s.');
       throw err;
     } finally {
-      heldMs = Date.now() - began;
+      heldMs = now() - began;
     }
   }, opts.gateWaitMs ?? GATE_WAIT_MS);
   return { ...done, heldMs };
@@ -882,7 +884,7 @@ async function runPeerMerge(
   db: Db,
   merge: { id: string; label: string; kept: boolean; companyId: string },
   source: MergeSource,
-  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number },
+  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; clock?: () => number },
 ): Promise<MergeResult> {
   const request: SourceRequest = { compare: false, files: new Map() };
   for (let attempt = 0; ; attempt += 1) {
@@ -902,7 +904,7 @@ export async function runMerge(
   db: Db,
   merge: { id: string; label: string; kept: boolean; companyId: string },
   source: MergeSource,
-  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; log?: (line: string) => void } = {},
+  opts: { onUnit?: (n: number) => void | Promise<void>; gateWaitMs?: number; log?: (line: string) => void; clock?: () => number } = {},
 ): Promise<MergeResult> {
   const [target] = await queryOf(db)<{ status: string; source: string }>('SELECT status, source FROM net.merges WHERE id = $1::uuid', [merge.id]);
   if (target?.status !== 'pending') throw new MergeRefused('The merge was applied already.');

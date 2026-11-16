@@ -1,9 +1,230 @@
 # Changelog
 
-Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD`,
-one plain summary, and short entries under `### Added`, `### Changed` and
-`### Fixed`. Include `### Before you update` only when people need to take action.
-The middle number is the turn; the last counts releases between turns.
+Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD` and is one short list in English: one
+line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, with no summary and no translation. A
+step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
+number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
+
+## [0.31.0]
+
+### Fixed
+
+- The first result of a new turn is no longer refused because its `turn-N` branch was missing; the server makes it.
+- A program with no screen no longer raises false `node_silent` alarms while its turn is working.
+- An update no longer cuts short a turn that streams its work without a screen.
+- A held turn whose program is gone ends as interrupted, and the next turn goes out.
+- No more false "assignment words not recorded" cases when Claude Code starts a turn for its own notice.
+- Releasing a hold calls a program busy exactly when `program_screen` does.
+- A machine taken off the company's checks no longer lends its built-in node to test and work runs.
+- Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
+- The glow and focus ring of a card follow its cut corner, with no dark triangle there.
+- The map's zoom label, such as 115%, is no longer cut off.
+
+### Added
+
+- The orchestrator reads and marks any employee's inbox, with a reason that goes into the employee's log.
+- The CEO and the CEO's delegate mark any employee's letters with `POST /api/agents/:id/inbox/mark`.
+- `failures` shows `next` for each blocked task, taken from its holder's last report.
+- Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
+- A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+
+### Changed
+
+- A machine its owner opened stays open to the orchestrator in all its turns while access lasts, not just one.
+- Commands on a machine are refused when the turn's last words come from someone without rights or unknown.
+- A message to a busy or reconnecting employee waits for its next turn instead of being lost.
+- A message that cannot be delivered names a reason code, the recipient and the task.
+- Personal assistants are hidden from Operations' SQL reads and from the program operator.
+- The full release check runs in two to four parts of up to an hour each.
+- Release test profiles also reuse green results proved at commits main already holds.
+- A full machine of the company keeps its place whatever its memory, free disk or disk speed.
+- Machines always says why a machine has no place.
+- A machine's card stands in three blocks, and its connection history reads as plain lines.
+- Install commands read left to right in any language, and their flags never break.
+- Machines filters start with All and a count, with chips of at least 44 px.
+- Table headers and row buttons are 44 px in every table.
+- A field you must correct has a pink frame, and the Feedback title error clears as you type.
+
+## [0.29.2] - 2026-11-16
+
+The orchestrator does everything in the company in any turn, as its owner, and limits a company wants are written in
+its notebook: what is not forbidden is allowed. It also connects one more mail account to a channel with the settings of
+an account the company has, so no password passes through it.
+
+### Changed
+
+- The orchestrator took a decision only for the person its turn answered: after an employee's message, a notice of
+  Hornhoof or a person who runs one department, it could not write to the database, change people, resources, cards,
+  approvals, wait dates or channels, and asked for a confirmation instead. Now it goes as the CEO or the CEO delegate who
+  wrote into its turn, or else as the company's owner, whoever asked. Machines keep their own rule: a command runs only
+  where the machine's owner opened it. A department's head is unchanged. Known limits: a decision the orchestrator takes
+  as the owner names the owner in the task's log, not the person or employee who asked; only a company with no active
+  owner still waits for the CEO's word.
+- The skills of the orchestrator and the notebook say so: limits are written in the company's notebook, and the rest is
+  done without asking anyone to confirm it.
+
+### Added
+
+- outbound_account_add connects one more mail account to a channel with the settings of an account the company already
+  has, sending from its own address, like kate@ next to hello@; the settings go from one account to the other inside
+  Hornhoof and never through a model. outbound_account_bind makes an employee the one who writes from an account. Both
+  are the orchestrator's; a new password or another server a person still gives on the channel's screen.
+
+### Russian
+
+Оркестратор делает в компании все в любом ходе, как ее владелец, а ограничения компания пишет в своем блокноте: что не
+запрещено, то разрешено. Еще он подключает к каналу рассылки новый почтовый ящик с настройками ящика, который у
+компании уже есть, и пароль через него не проходит.
+
+- Оркестратор принимал решение только за того человека, кому отвечал его ход: после сообщения сотрудника, уведомления
+  Hornhoof или человека, который ведет один отдел, он не мог писать в базу, менять людей, ресурсы, карточки, правила
+  согласований, сроки ожидания и каналы и вместо этого просил подтверждения. Теперь он действует как CEO или
+  заместитель CEO, если тот писал в ход, а иначе как владелец компании, кто бы ни попросил. У машин свое правило:
+  команда идет только там, где владелец машины ее открыл. Руководители отделов работают как раньше. Известные пределы:
+  в журнале задачи решение, принятое как владелец, записано за владельцем, а не за тем, кто попросил; только компания
+  без действующего владельца по-прежнему ждет слова CEO.
+- Навыки оркестратора и блокнота говорят то же: ограничения записаны в блокноте компании, остальное делается без
+  просьб о подтверждении.
+- outbound_account_add подключает к каналу еще один почтовый ящик с настройками ящика, который у компании уже есть, со
+  своим адресом отправителя, например kate@ рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
+  проходят через модель. outbound_account_bind назначает сотрудника, который пишет с ящика. Оба инструмента у
+  оркестратора; новый пароль или другой сервер по-прежнему вводит человек на экране канала.
+
+## [0.29.1] - 2026-11-16
+
+A program no longer closes under a turn it has just begun, an update that waits for the agents no longer stops the
+company's work without end, a machine that alone can lead keeps its lease when its disk writes slowly, a copy no longer
+fills the server's replication slots after an update, a node's updater keeps its wait while the server is away for a
+moment, and parts of test runs no longer stop when a machine's connection drops for a moment.
+
+### Before you update
+
+- Migration 0129 comes with this release. It lets `node_id` of `node_connections` be empty, so the connections of a
+  machine's built-in node can go into its connection history. It is one change of the table, it changes no rows, and
+  nothing needs doing before or after the update.
+
+### Changed
+
+- The server log now names a machine's built-in node by the machine it runs on, as in machine "home-api", node
+  "builtin", instead of machine "built-in". A built-in node of a server with no machine of a company is still named
+  machine "built-in", node "builtin".
+
+### Fixed
+
+- A node could close or put to sleep an agent's program at the moment the program began a new turn: Codex takes the
+  words it held once its turn is over, and Kimi Code takes the words it queued and tells of them through its hook late.
+  The turn then stood running with no program, the agent's next turns waited behind it and live words found no
+  program, until a person stopped it, as the programs of Operations on a Mac showed on 15 and 16 November. The node now
+  looks for a new turn right before it closes a program or puts it to sleep and keeps a program that began one, and a
+  turn that opens on a program already asleep ends as one whose program is gone, so the next turn starts the program
+  again in its session.
+- An update asked for when the agents finish held every new turn of the company until no agent worked, and a turn whose
+  machine had stopped reporting never let it go. A turn whose node said nothing of its program for ten minutes is no
+  longer waited for, and the wait has a deadline: 30 minutes, or `idleWaitMinutes` from 1 to 240. If the agents have
+  not finished by then, the update is called off: nothing running stops, the turns start again, and the orchestrator
+  and the update banner say why. The banner, the answer to the request and `check_updates` name the turns the update
+  waits for and until when. Known limits: right after a server restart a long turn counts from its start until its node
+  reports again; only agents' turns can be lost, so other running work still holds the wait; and the wait lives in the
+  server's memory, so a restart drops it and the update has to be asked for again.
+- A part of a test run stopped with "Machine check queue lease was lost." when its machine's connection dropped for a
+  moment, or when the server handled the machine's reports late. A machine now keeps its check slots for 90 seconds
+  after a drop and takes them back once it returns, and its parts go on; the server counts a machine as present while
+  anything it sends arrives. A machine silent for 90 seconds still loses its slots, and a part run again on another
+  machine takes no result from the first one. The connections of each machine's built-in node now go into the
+  connection history with no node of their own. Known limits: a machine back between 90 seconds and 3 minutes reports
+  its part as failed, and the part does not run again; after a server restart the slots still end and their parts stop;
+  a node and a server of different versions get no slot back after a drop, and an older node's slot stays taken for up
+  to 3 minutes; the machine's connection screen does not show the built-in node yet.
+- A machine that is the only one able to lead (no other copy has finished) no longer ends its own lease, the app's
+  sessions and the public link for 20 to 30 s when its disk writes slowly: a late tick ends nothing there, and its link
+  keeps running when a lease ends. The keeper's statements now wait twice the measured fsync p99 (2 to 5 s), and where
+  another finished copy could lead, a tick may come three times that late (6 to 9 s) before the lease ends. Known
+  limits: a renewal that cannot be written for a whole lease (10 s) still ends the lease and the sessions; the disk's
+  p99 is known about 3.5 minutes after the keeper starts, and until then the old 2 s and 6 s apply.
+- A machine that keeps a copy and was still taking its first copy when the company server updated with a new column (as
+  autonomous_release in 0.29.0) no longer goes round in a circle and fills the server's replication slots. It takes the
+  server's new schema before it follows, an attempt it gives up drops its slots on the server, and attempts given up in
+  a row wait longer each time, from 10 minutes up to 2 hours. Known limits: with the server out of reach at that moment,
+  the slot is left to the server's own cleanup, as before. A copy that was already whole is still made again after an
+  update with migrations.
+- The node updater keeps a node's place in its wait when the server is away for a moment: only a Hornhoof server's own
+  404 means a server from before node waits; any other answer is retried after 1, 2, 4, 8, 16 and then every 30 seconds,
+  for 5 minutes. A node is marked restarting only once an updater is told it is free, so a restart that never came no
+  longer keeps the orchestrator and the heads off their node for 10 minutes: they come back past their 3-minute limit,
+  and the hold ends with the 2-minute lease of a wait. Known limits: a restart the updater was told of but never began
+  still holds the node up to 10 minutes; a restarting wait saved by an earlier build keeps its 10 minutes once.
+- A machine took every turn sent into a program that already ran there, however loaded it was: on 16 November seven
+  employees tested and ran browsers at once on a machine of 8 processors and 12 GB, it ran out of memory and swap, and
+  each of their turns took hours. An employee's turn now waits while its machine works past what it carries, with less
+  free memory than one more program needs or a load over the last minute above one and a half times its processors, and
+  goes on by itself once the machine has room. The turns that waited go one with each report of the machine, every 20
+  seconds, so they do not fall on it at once. Nothing that runs is stopped, a machine where no turn runs takes one all
+  the same, and the orchestrator's and the heads' turns go on. The agent's window says the machine is busy.
+
+### Russian
+
+Программа больше не закрывается под ходом, который она только что начала, обновление, ждущее агентов, больше не
+останавливает работу компании без конца, машина, которая одна может быть лидером, держит аренду при медленном диске,
+копия после обновления сервера больше не забивает его слоты репликации, обновлятор узла держит ожидание, пока сервер на
+миг недоступен, а части тестовых прогонов больше не обрываются, когда связь машины на миг пропадает.
+
+- Перед обновлением: в выпуске миграция 0129. Она разрешает пустой `node_id` в `node_connections`, чтобы подключения
+  встроенного узла машины попадали в ее историю подключений. Это одно изменение таблицы, строки она не меняет, и ни до,
+  ни после обновления ничего делать не нужно.
+- Журнал сервера теперь называет встроенный узел машины по машине, на которой он работает, например machine
+  "home-api", node "builtin", а не machine "built-in". Встроенный узел сервера без машины компании по-прежнему
+  называется machine "built-in", node "builtin".
+- Узел мог закрыть программу агента или усыпить ее в тот самый миг, когда она начинала новый ход: Codex берет слова,
+  которые придержал, когда его ход закончен, а Kimi Code берет слова из своей очереди и сообщает о них через хук с
+  опозданием. Тогда ход висел running без программы, следующие ходы агента ждали за ним, а живые слова не находили
+  программу, пока человек его не останавливал; так было у программ Операций на Mac 15 и 16 ноября. Теперь узел прямо
+  перед тем, как закрыть или усыпить программу, проверяет, не начался ли новый ход, и оставляет программу, которая его
+  начала, а ход, открывшийся у уже спящей программы, завершается как ход без программы, и следующий ход снова запускает
+  программу в ее сеансе.
+- Обновление, которое попросили провести, когда агенты закончат, держало каждый новый ход компании, пока не замрет
+  последний агент, а ход, машина которого перестала отчитываться, не отпускал его никогда. Ход, узел которого десять
+  минут ничего не сообщал о своей программе, больше не ждут, а у ожидания есть срок: 30 минут или `idleWaitMinutes` от
+  1 до 240. Если агенты к этому сроку не закончили, обновление отменяется: ничего из идущего не останавливается, ходы
+  снова запускаются, а оркестратор и баннер обновления говорят почему. Баннер, ответ на запрос и `check_updates`
+  называют ходы, которых ждет обновление, и до какого времени. Известные пределы: сразу после перезапуска сервера
+  долгий ход считается с его начала, пока его узел снова не отчитается; потерянными могут быть только ходы агентов,
+  поэтому другая идущая работа по-прежнему держит ожидание; ожидание живет в памяти сервера, поэтому перезапуск его
+  сбрасывает, и обновление нужно попросить снова.
+- Часть тестового прогона обрывалась с «Machine check queue lease was lost.», когда связь ее машины на миг пропадала
+  или сервер поздно обрабатывал отчеты машины. Теперь машина держит свои места для проверок 90 секунд после обрыва и
+  забирает их обратно, как только вернется, а ее части идут дальше; сервер считает машину на месте, пока от нее
+  приходит что угодно. Машина, молчащая 90 секунд, по-прежнему теряет свои места, а часть, запущенная заново на другой
+  машине, не берет результата у первой. Подключения встроенного узла каждой машины теперь попадают в историю
+  подключений без своего узла. Известные пределы: машина, вернувшаяся позже 90 секунд, но раньше 3 минут, сообщает о
+  своей части как о проваленной, и часть заново не запускается; после перезапуска сервера места все равно кончаются, и
+  их части останавливаются; узел и сервер разных версий после обрыва места обратно не получают, а место старого узла
+  остается занятым до 3 минут; экран подключений машины встроенный узел пока не показывает.
+- Машина, которая одна может быть лидером (других готовых копий нет), больше не заканчивает свою аренду, не обрывает
+  сеансы приложения и не снимает публичную ссылку на 20-30 с, когда ее диск медленно пишет: поздний тик там ничего не
+  заканчивает, а ссылка работает и после конца аренды. Запросы хранителя теперь ждут вдвое дольше измеренного fsync p99
+  (от 2 до 5 с), а если вести может другая готовая копия, тик может опоздать втрое против этого срока (от 6 до 9 с),
+  прежде чем аренда закончится. Известные пределы: если продление не удается записать за всю аренду (10 с), аренда и
+  сеансы все равно заканчиваются; p99 диска известен примерно через 3,5 минуты после старта хранителя, до этого
+  действуют прежние 2 с и 6 с.
+- Машина с копией, которая еще снимала первую копию, когда сервер компании обновился с новым столбцом (как
+  autonomous_release в 0.29.0), больше не ходит по кругу и не забивает слоты репликации на сервере. Она берет новую
+  схему сервера до того, как следовать за ним, брошенная попытка убирает свои слоты на сервере, а попытки подряд ждут
+  все дольше, от 10 минут до 2 часов. Известные пределы: если сервер в этот момент недоступен, слот убирает сам сервер,
+  как и раньше. Целая копия после обновления с миграциями по-прежнему делается заново.
+- Обновлятор узла держит место узла в ожидании, когда сервер на миг недоступен: старым сервер считается только по
+  собственному ответу 404 Hornhoof, а любой другой ответ обновлятор повторяет через 1, 2, 4, 8, 16 и затем каждые 30
+  секунд, всего 5 минут. Узел помечается restarting только когда обновлятору сказано, что он свободен, поэтому
+  несостоявшийся перезапуск больше не держит оркестратора и глав вне их узла 10 минут: они возвращаются после своего
+  предела в 3 минуты, а ожидание снимается по 2-минутной аренде. Известные пределы: перезапуск, о котором обновлятору
+  сказали, но который не начался, по-прежнему держит узел до 10 минут; ожидание restarting, сохраненное прежней сборкой,
+  один раз держит свои 10 минут.
+- Машина брала каждый ход в уже запущенную на ней программу, как бы она ни была загружена: 16 ноября семь сотрудников
+  одновременно гоняли тесты и браузеры на машине с 8 процессорами и 12 ГБ, у нее кончились память и своп, и каждый их
+  ход шел часами. Теперь ход сотрудника ждет, пока машина работает сверх своих сил, то есть свободной памяти у нее
+  меньше, чем нужно еще одной программе, или нагрузка за последнюю минуту выше полутора на каждый процессор, и
+  продолжается сам, когда место освобождается. Дождавшиеся ходы идут по одному с каждым отчетом машины, раз в 20 секунд,
+  чтобы не навалиться разом. Ничего из идущего не останавливается, машина, на которой не идет ни одного хода, все равно
+  берет один, а ходы оркестратора и глав идут как раньше. Окно агента говорит, что машина загружена.
 
 ## [0.29.0] - 2026-11-15
 

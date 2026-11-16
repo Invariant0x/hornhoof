@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentInbox, agents, companies, departments, jobs, people, requests, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agentEvents, agentInbox, agents, companies, departments, jobs, people, requests, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { said } from '../src/modules/conversation/live.js';
 import { letterKind, type MailMessage } from '../src/modules/conversation/inbox.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
@@ -327,6 +327,99 @@ describe('the inbox tools', () => {
   });
 });
 
+/* Letters of Sam, the head of Sales, as a long quiet night of the Mac node left them: three stale alarms an hour apart, a
+   call to the program operator, and Sara's letter on her task. */
+async function nightOf(c: Company, agentId = c.sam.id) {
+  const task = await c.task(c.bruno.id);
+  const at = (h: number) => new Date(START.getTime() + h * 60 * MIN);
+  const notice = (source: string, text: string, h: number) => ({ companyId: c.companyId, agentId, senderKind: 'hornhoof' as const, senderName: 'Hornhoof', kind: 'notification' as const, source, text, createdAt: at(h) });
+  const rows = await c.db.insert(agentInbox).values([
+    notice('program_alarm', 'Bruno has given no sign of life for 20 minutes.', 1),
+    notice('program_alarm', 'Rita has given no sign of life for 20 minutes.', 2),
+    notice('program_operator', 'Program operator case for Bruno.', 2),
+    notice('program_alarm', 'Sara has given no sign of life for 20 minutes.', 3),
+    { companyId: c.companyId, agentId, senderKind: 'agent' as const, senderAgentId: c.sara.id, senderName: 'Sara', kind: 'message' as const, taskId: task.id, taskNumber: task.number, text: 'The price list is ready.', createdAt: at(4) },
+  ]).returning();
+  return { task, at, rows };
+}
+
+/* What the employee's log tells of marks someone else made in its inbox. */
+const marksIn = async (c: Company, agentId: string) =>
+  (await c.db.select().from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(asc(agentEvents.seq)))
+    .map(e => e.data as { text: string; notification?: { source: string }; inboxMarked?: unknown; _message?: { from: { kind: string; name: string } } })
+    .filter(d => d.notification?.source === 'inbox_marked');
+
+const json = (res: Said) => JSON.parse(res.content[0]!.text) as { unread: number; letters: { id: string; from: string; task: number | null; text: string; status: string }[] };
+
+describe("another employee's inbox", () => {
+  it("opens to the orchestrator whole, and it marks letters by kind, source, task and time, which the employee's log tells with who, why and how many", async () => {
+    const c = await company();
+    const { task, at } = await nightOf(c);
+    const tools = await c.toolsOf(c.orchestrator.id);
+    const all = json((await tools.callTool({ name: 'inbox', arguments: { employee: c.sam.id, status: 'all' } })) as Said);
+    expect(all.unread).toBe(5);
+    expect(all.letters.map(l => l.text)).toEqual(['Bruno has given no sign of life for 20 minutes.', 'Rita has given no sign of life for 20 minutes.', 'Program operator case for Bruno.', 'Sara has given no sign of life for 20 minutes.', 'The price list is ready.']);
+
+    const stale = (await tools.callTool({ name: 'inbox_mark', arguments: { employee: c.sam.id, status: 'done', source: 'program_alarm', receivedBefore: at(3).toISOString(), reason: 'Stale alarms of the night the Mac node was away.' } })) as Said;
+    expect(stale.isError).toBeFalsy();
+    expect(stale.content[0]!.text).toBe("Marked 2 letters done in Sam's inbox.");
+    const onTask = (await tools.callTool({ name: 'inbox_mark', arguments: { employee: c.sam.id, status: 'read', kind: 'message', task: task.number, reason: 'Sara told me the same.' } })) as Said;
+    expect(onTask.content[0]!.text).toBe("Marked 1 letter read in Sam's inbox.");
+    expect((await c.inboxOf(c.sam.id)).map(l => l.status)).toEqual(['done', 'done', 'unread', 'unread', 'read']);
+    /* Read never takes back a letter that was dealt with, and a mark that finds nothing tells nobody anything. */
+    const none = (await tools.callTool({ name: 'inbox_mark', arguments: { employee: c.sam.id, status: 'read', source: 'program_alarm', receivedBefore: at(3).toISOString(), reason: 'Again.' } })) as Said;
+    expect(none.content[0]!.text).toBe("Marked 0 letters read in Sam's inbox.");
+    expect((await c.inboxOf(c.sam.id)).map(l => l.status)).toEqual(['done', 'done', 'unread', 'unread', 'read']);
+
+    expect(await marksIn(c, c.sam.id)).toEqual([
+      expect.objectContaining({ text: 'Orchestrator marked 2 letters done in this inbox. Why: Stale alarms of the night the Mac node was away.', inboxMarked: { by: { kind: 'agent', id: c.orchestrator.id, name: 'Orchestrator' }, status: 'done', count: 2, reason: 'Stale alarms of the night the Mac node was away.' } }),
+      expect.objectContaining({ text: 'Orchestrator marked 1 letter read in this inbox. Why: Sara told me the same.', inboxMarked: { by: { kind: 'agent', id: c.orchestrator.id, name: 'Orchestrator' }, status: 'read', count: 1, reason: 'Sara told me the same.' } }),
+    ]);
+    expect((await marksIn(c, c.sam.id))[0]!._message!.from).toMatchObject({ kind: 'agent', name: 'Orchestrator' });
+    expect(await marksIn(c, c.orchestrator.id)).toEqual([]);
+  });
+
+  it('asks the orchestrator for a reason and a choice of letters, and refuses ids of letters that are not that inbox\'s whole', async () => {
+    const c = await company();
+    const { rows } = await nightOf(c);
+    await c.db.insert(agentInbox).values({ companyId: c.companyId, agentId: c.sara.id, senderKind: 'hornhoof', senderName: 'Hornhoof', kind: 'notification', text: 'For Sara.', createdAt: new Date() });
+    const [saras] = await c.inboxOf(c.sara.id);
+    const tools = await c.toolsOf(c.orchestrator.id);
+    const refused = async (args: Record<string, unknown>) => ((await tools.callTool({ name: 'inbox_mark', arguments: args })) as Said);
+    expect((await refused({ employee: c.sam.id, status: 'done', source: 'program_alarm' })).isError).toBe(true);
+    expect((await refused({ employee: c.sam.id, status: 'done', reason: 'All of it.' })).isError).toBe(true);
+    const mixed = await refused({ employee: c.sam.id, status: 'done', ids: [rows[0]!.id, saras!.id], reason: 'Old.' });
+    expect(mixed.isError).toBe(true);
+    expect((await c.inboxOf(c.sam.id)).every(l => l.status === 'unread')).toBe(true);
+    expect((await refused({ employee: c.sam.id, status: 'done', ids: [rows[0]!.id], reason: 'Old.' })).content[0]!.text).toBe("Marked 1 letter done in Sam's inbox.");
+  });
+
+  it("is closed to every other employee, a head too, and a person's own assistant's or a removed employee's to the orchestrator", async () => {
+    const c = await company();
+    const { rows } = await nightOf(c);
+    const hana = await c.toolsOf(c.hana.id);
+    const read = (await hana.callTool({ name: 'inbox', arguments: { employee: c.sam.id } })) as Said;
+    expect(read.isError).toBe(true);
+    expect(read.content[0]!.text).toBe("Forbidden: only the orchestrator reads and marks another employee's inbox. Leave out employee for your own.");
+    const marked = (await hana.callTool({ name: 'inbox_mark', arguments: { employee: c.sam.id, status: 'done', ids: [rows[0]!.id], reason: 'Mine now.' } })) as Said;
+    expect(marked.isError).toBe(true);
+    expect((await c.inboxOf(c.sam.id)).every(l => l.status === 'unread')).toBe(true);
+    /* Her own inbox, named or not, is hers as before. */
+    expect(json((await hana.callTool({ name: 'inbox', arguments: { employee: c.hana.id } })) as Said).letters).toEqual([]);
+
+    const [ava] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Ava', model: 'claude-opus-5-5', subscriptionId: c.key.id, skills: [] }).returning();
+    /* Rita left the company. */
+    await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.rita.id));
+    const orchestrator = await c.toolsOf(c.orchestrator.id);
+    for (const employee of [ava!.id, c.rita.id, '0f0f0f0f-0000-4000-8000-00000000000a']) {
+      const unknown = (await orchestrator.callTool({ name: 'inbox', arguments: { employee } })) as Said;
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content[0]!.text).toBe(`There is no employee with id ${employee} in the company. Call company for their ids.`);
+    }
+    expect(await marksIn(c, c.sam.id)).toEqual([]);
+  });
+});
+
 describe('the delivery mode', () => {
   it('is the inbox for a company from its first setup', async () => {
     const { app, db } = await testApp();
@@ -520,6 +613,55 @@ describe('the inbox a person opens', () => {
     expect((await markRead(c, c.bruno.id, { ids: [seen.letters[0]!.id] }, lena)).statusCode).toBe(403);
     expect((await markRead(c, c.bruno.id, { all: true }, lena)).statusCode).toBe(403);
     expect((await c.inboxOf(c.bruno.id))[0]!.status).toBe('unread');
+  });
+
+  const mark = (c: Company, agentId: string, payload: object, token = c.ceoToken) =>
+    c.app.inject({ method: 'POST', url: `/api/agents/${agentId}/inbox/mark`, payload, ...as(token) });
+
+  it("lets the CEO and the CEO delegate mark any employee's letters read or done by kind, source, task and time, with the reason in its log", async () => {
+    const c = await company();
+    const { task, at, rows } = await nightOf(c);
+    const dave = await invitePerson(c.app, c.ceoToken, { name: 'Dave', email: 'dave@acme.com', access: { whole: true } });
+    await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Dave'));
+
+    const stale = await mark(c, c.sam.id, { status: 'done', source: 'program_alarm', receivedBefore: at(3).toISOString(), reason: 'Stale alarms.' });
+    expect(stale.statusCode).toBe(200);
+    expect(stale.json()).toEqual({ marked: 2, unreadCount: 3 });
+    const byDave = await mark(c, c.sam.id, { status: 'read', ids: [rows[2]!.id], kind: 'notification', reason: 'Bruno is back.' }, dave);
+    expect(byDave.json()).toEqual({ marked: 1, unreadCount: 2 });
+    expect((await mark(c, c.sam.id, { status: 'done', kind: 'message', task: task.number, reason: 'Answered.' }, dave)).json()).toEqual({ marked: 1, unreadCount: 1 });
+    expect((await c.inboxOf(c.sam.id)).map(l => l.status)).toEqual(['done', 'done', 'read', 'unread', 'done']);
+
+    expect((await marksIn(c, c.sam.id)).map(d => [d.text, d.inboxMarked, d._message?.from.name])).toEqual([
+      ['Ivan marked 2 letters done in this inbox. Why: Stale alarms.', { by: { kind: 'person', id: c.ceo.id, name: 'Ivan' }, status: 'done', count: 2, reason: 'Stale alarms.' }, 'Ivan'],
+      ['Dave marked 1 letter read in this inbox. Why: Bruno is back.', { by: { kind: 'person', id: expect.any(String), name: 'Dave' }, status: 'read', count: 1, reason: 'Bruno is back.' }, 'Dave'],
+      ['Dave marked 1 letter done in this inbox. Why: Answered.', { by: { kind: 'person', id: expect.any(String), name: 'Dave' }, status: 'done', count: 1, reason: 'Answered.' }, 'Dave'],
+    ]);
+  });
+
+  it('asks for a reason and a choice of letters, refuses letters of another inbox, and opens to nobody else, a department owner and a person with the whole company too', async () => {
+    const c = await company();
+    /* Sara's letters this time: Pia, who owns Sales, sees her once she works on its plan. */
+    await c.ivanWrites(c.sara.id, 'Let us sell.');
+    const { rows } = await nightOf(c, c.sara.id);
+    await c.db.insert(agentInbox).values({ companyId: c.companyId, agentId: c.sam.id, senderKind: 'hornhoof', senderName: 'Hornhoof', kind: 'notification', text: 'For Sam.', createdAt: new Date() });
+    const [sams] = await c.inboxOf(c.sam.id);
+    expect((await mark(c, c.sara.id, { status: 'done', source: 'program_alarm' })).statusCode).toBe(400);
+    expect((await mark(c, c.sara.id, { status: 'done', reason: 'Everything.' })).statusCode).toBe(400);
+    expect((await mark(c, c.sara.id, { status: 'done', ids: [sams!.id], reason: 'Old.' })).statusCode).toBe(404);
+
+    const pia = await invitePerson(c.app, c.ceoToken, { name: 'Pia', email: 'pia@acme.com', access: { departments: [c.sales.id] } });
+    await c.db.update(departments).set({ ownerPersonId: (await c.db.select().from(people).where(eq(people.name, 'Pia')))[0]!.id }).where(eq(departments.id, c.sales.id));
+    const wes = await invitePerson(c.app, c.ceoToken, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
+    const byPia = await mark(c, c.sara.id, { status: 'done', ids: [rows[0]!.id], reason: 'Old.' }, pia);
+    expect(byPia.statusCode).toBe(403);
+    expect(byPia.json().error.message).toBe("Only the CEO and the CEO delegate mark another employee's letters this way.");
+    /* Wes sees the whole company, yet is neither the CEO nor the delegate. */
+    expect((await mark(c, c.sara.id, { status: 'done', ids: [rows[0]!.id], reason: 'Old.' }, wes)).statusCode).toBe(403);
+    /* The owner of Sales still marks its letters read by the buttons of the tab. */
+    expect((await markRead(c, c.sara.id, { ids: [rows[0]!.id] }, pia)).statusCode).toBe(200);
+    expect((await c.inboxOf(c.sara.id)).map(l => l.status)).toEqual(['read', 'unread', 'unread', 'unread', 'unread']);
+    expect(await marksIn(c, c.sara.id)).toEqual([]);
   });
 
   it('names a sender that is no longer in the company "Employee", not by the name its letter kept', async () => {

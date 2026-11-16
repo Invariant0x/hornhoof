@@ -81,9 +81,32 @@ describe('hornhoof-node wait-update', () => {
   });
 
   it('answers 3 for a server from before this wait, and leaves saying why to the installer', async () => {
-    const s = await server([{ status: 404, body: { error: { code: 'not_found' } } }]);
+    const s = await server([{ status: 404, body: { error: { code: 'not_found', message: 'Not found.' } } }]);
     expect(await waitUpdate(nodeFolder(s.url), terminal().io, async () => {})).toBe(3);
     expect(s.requests).toHaveLength(1);
+  });
+
+  /* As the public link answers for a moment while the machine that leads fences itself or hands over. */
+  it("keeps its wait through a 404 that is not a Hornhoof server's own refusal, and asks again", async () => {
+    const s = await server([{ status: 200, body: waiting }, { status: 404, body: { ok: false } }, { status: 404, body: 'Not Found' }, { status: 200, body: ready }]);
+    const t = terminal();
+    expect(await waitUpdate(nodeFolder(s.url), t.io, async () => {})).toBe(0);
+    expect(s.requests).toHaveLength(4);
+    expect(t.said()).not.toContain('Could not ask');
+  });
+
+  it("asks again soon and then less often while the server is away, always within the server's hold of the node", async () => {
+    const s = await server([{ status: 200, body: waiting }, ...Array.from({ length: 8 }, () => ({ status: 503 })), { status: 200, body: ready }]);
+    const naps: number[] = [];
+    expect(await waitUpdate(nodeFolder(s.url), terminal().io, async ms => void naps.push(ms))).toBe(0);
+    expect(naps).toEqual([7, 1000, 2000, 4000, 8000, 16_000, 30_000, 30_000, 30_000]);
+  });
+
+  it('starts its pace over once the server answers again', async () => {
+    const s = await server([{ status: 503 }, { status: 503 }, { status: 200, body: waiting }, { status: 503 }, { status: 200, body: ready }]);
+    const naps: number[] = [];
+    expect(await waitUpdate(nodeFolder(s.url), terminal().io, async ms => void naps.push(ms))).toBe(0);
+    expect(naps).toEqual([1000, 2000, 7, 1000]);
   });
 
   it('answers 1 at once when the server refuses the key', async () => {
@@ -114,11 +137,13 @@ describe('hornhoof-node wait-update', () => {
     expect(s.requests).toHaveLength(4);
   });
 
-  it('gives up with 1 on a server that stays away, leaving the node as it is', async () => {
+  it('gives up with 1 on a server that stays away for 5 minutes, leaving the node as it is', async () => {
     const s = await server([{ status: 503 }]);
     const t = terminal();
-    expect(await waitUpdate(nodeFolder(s.url), t.io, async () => {})).toBe(1);
+    const naps: number[] = [];
+    expect(await waitUpdate(nodeFolder(s.url), t.io, async ms => void naps.push(ms))).toBe(1);
     expect(s.requests.length).toBeGreaterThan(5);
+    expect(naps.reduce((a, b) => a + b, 0)).toBe(300_000);
     expect(t.said()).toContain('503');
   });
 

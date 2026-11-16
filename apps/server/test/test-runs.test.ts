@@ -8,6 +8,7 @@ import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { builtinOf, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { hostIdOf } from '../src/modules/network/join.js';
 import { checkTestTimes, placesOf, pumpTests } from '../src/modules/testruns/runs.js';
 import { as, connectNode, TEST_COMMIT, until, type FakeNode } from './helpers.js';
 import { company, done, gets, GIB, idle, nextOf, NODE_KEY } from './test-runs-company.js';
@@ -265,6 +266,34 @@ describe('a test run', () => {
     expect(await gets(c.app.ctx, back, 'tests.run')).toBe(false);
   });
 
+  /* #1060: a machine away past its lease keeps nothing of its part once the part runs on another machine. What it sends
+     back for it, should it come back with the part still running, counts for nothing, and it hears to stop it. */
+  it('takes no end from the machine that was away once its part runs on another machine, and tells it to stop', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
+    const ann = await c.machine(c.ann, 'ann-pc');
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test' });
+    const lost = await nextOf(ann.node, 'tests.run');
+    ann.node.close();
+    await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: ann.nodeId }));
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + 4 * 60_000));
+    const again = await nextOf(ivan.node, 'tests.run');
+    expect(again).toMatchObject({ part: 1, command: 'make test' });
+    expect(again.partId).not.toBe(lost.partId);
+    const back = await connectNode(c.url, ann.key);
+    back.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], load: idle(), tests: [lost.partId], work: true });
+    expect(await nextOf(back, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: lost.partId });
+    back.send(done(lost));
+    await nextOf(back, 'tests.ack');
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ status: 'running', parts: [{ status: 'running' }] });
+    expect(await c.wokeWith(c.bruno.id)).toBeNull();
+    ivan.node.send(done(again, { ok: false, exitCode: 1, error: 'failed' }));
+    await nextOf(ivan.node, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*Part 1 of 1 failed on dev-mac[^\n]*It ran again after ann-pc went offline\./);
+  });
+
   it("does not count a turn that ended while its test run goes on as standing still", async () => {
     const c = await company();
     await c.machine(c.ceo, 'dev-mac');
@@ -322,6 +351,40 @@ describe('a test run', () => {
     await nextOf(other, 'tests.ack');
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 passed[\s\S]*Part 1 of 1 passed on the built-in node on copy-box/);
+  });
+
+  /* A machine taken back from the company's runs lends none of its nodes, its built-in node with them; lent again, it
+     takes parts as before. */
+  it('gives no part to the built-in node of a machine its owner took back, and one again once it is lent', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'dev-mac');
+    const MACHINE = 'd0'.repeat(16);
+    const [row] = await c.db.select({ companyId: machines.companyId, personId: machines.personId }).from(machines).limit(1);
+    const [box] = await c.db.insert(machines).values({ ...row!, machineKey: 'mac-box-0001', hostname: 'mac-box', role: 'worker', networkId: MACHINE, lendsTests: false }).returning();
+    const key = `builtin.${MACHINE}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${MACHINE}`).digest('hex')}`;
+    const builtin = await connectNode(c.url, key);
+    builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
+    await until(() => c.app.ctx.hub.loadOf(builtinOf(MACHINE)) !== null);
+    expect((await placesOf(c.app.ctx, c.task.companyId)).find(place => place.builtinMachine === MACHINE)).toMatchObject({ machineId: box!.id, lent: false });
+    await (await c.turn(c.bruno)).call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    expect((await nextOf(ivan.node, 'tests.run')).part).toBe(1);
+    expect(await gets(c.app.ctx, builtin, 'tests.run')).toBe(false);
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${box!.id}`, payload: { lendsTests: true }, ...as(c.ceo) })).statusCode).toBe(200);
+    expect((await nextOf(builtin, 'tests.run')).part).toBe(2);
+  });
+
+  /* The server's own built-in node runs on a computer of the company too; that computer taken back lends it no more. */
+  it('gives no part to the server’s own built-in node when the computer it runs on is taken back', async () => {
+    const c = await company({ HORNHOOF_HOST_ID: hostIdOf('home-box-0001-abcd') });
+    const home = await c.machine(c.ceo, 'home-box');
+    const ann = await c.machine(c.ann, 'ann-pc');
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${home.machineId}`, payload: { lendsTests: false }, ...as(c.ceo) })).statusCode).toBe(200);
+    const own = await c.builtin();
+    expect((await placesOf(c.app.ctx, c.task.companyId)).find(place => place.builtin)).toMatchObject({ key: 'builtin', lent: false });
+    await (await c.turn(c.bruno)).call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    expect((await nextOf(ann.node, 'tests.run')).part).toBe(1);
+    expect(await gets(c.app.ctx, own, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, home.node, 'tests.run')).toBe(false);
   });
 
   it('ends a part that found no free machine within 2 hours', async () => {
