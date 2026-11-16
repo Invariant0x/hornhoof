@@ -133,5 +133,15 @@
     "name": "malformed pair after done",
     "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=done:app=kimi-code:\u001b\\",
     "done": false
+  },
+  {
+    "name": "valid root after an empty report",
+    "output": "\u001b]7501;\u001b\\\u001b]7501;state=done:app=kimi-code\u001b\\",
+    "done": true
+  },
+  {
+    "name": "valid maximum child id preserves root done",
+    "output": "\u001b]7501;state=done:app=kimi-code\u001b\\\u001b]7501;state=done:id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccc/ddddddddddddddddddddddddddddd\u001b\\",
+    "done": true
   }
 ]

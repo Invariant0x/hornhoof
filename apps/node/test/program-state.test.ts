@@ -3,6 +3,7 @@ import { PROGRAM_SCREEN_MAX, type NodeMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { READY, idleScreen, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
 import { real } from './real-screens.js';
+import { atEmptyPrompt } from '../src/terminal/input.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}.txt`, import.meta.url), 'utf8');
 const agy = (name: string) => readFileSync(new URL(`./fixtures/agy-tui/screen-${name}`, import.meta.url), 'utf8');
@@ -174,4 +175,25 @@ describe('independent completion after a lost end', () => {
     expect(idleScreen('kimi', fixture('kimi-empty-screen'))).toBe(false);
     expect(idleScreen('kimi', real('kimi-2.5.1-after'))).toBe(false);
   });
+});
+
+it('recognizes a Claude completion starting in the first captured column', () => {
+  expect(idleScreen('claude', '✻ Worked for 4s · done 10:47 AM\n────────────────────\n❯ \n────────────────────')).toBe(true);
+});
+
+it('uses the latest Antigravity response after older empty input and interruption history', () => {
+  expect(idleScreen('antigravity', agy('idle.ansi') + agy('done.ansi'))).toBe(true);
+  expect(idleScreen('antigravity', agy('interrupted.txt') + '\n' + agy('done.ansi'))).toBe(true);
+  const done = agy('done.ansi');
+  expect(idleScreen('antigravity', done.slice(done.indexOf('> Also say BANANA.')))).toBe(true);
+});
+
+it('keeps an unanswered Antigravity prompt and an unfamiliar placeholder open', () => {
+  const done = agy('done.ansi');
+  const prompt = done.lastIndexOf('\x1b[94m>');
+  const footer = done.slice(done.lastIndexOf('\x1b[90m', prompt));
+  const unanswered = '> A new unanswered prompt.\n\n' + footer;
+  expect(atEmptyPrompt('antigravity', unanswered)).toBe(true);
+  expect(idleScreen('antigravity', unanswered)).toBe(false);
+  expect(idleScreen('antigravity', done.replace(/>\x1b\[39m\n/, '>\x1b[2mType here\x1b[22m\n'))).toBe(false);
 });

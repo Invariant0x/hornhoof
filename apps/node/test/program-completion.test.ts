@@ -25,3 +25,11 @@ it('keeps completed response continuity across toolbar changes but not response 
   expect(completionText('kimi', done.replace('The review is complete', 'The next response is complete'), output)).not.toBe(proof);
   expect(completionText('kimi', done, '')).toBeNull();
 });
+
+it('keeps all response characters and uses the latest Kimi input box in a captured history', () => {
+  const output = samples[0]!.output;
+  const text = done.trimStart();
+  expect(completionText('kimi', text, output)).not.toBe(completionText('kimi', 'C' + text.slice(1), output));
+  const history = done + '\nA newer response.\n' + done;
+  expect(completionText('kimi', history, output)).not.toBe(completionText('kimi', history.replace('A newer response.', 'A different response.'), output));
+});
