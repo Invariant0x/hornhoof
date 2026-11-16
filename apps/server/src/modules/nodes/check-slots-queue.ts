@@ -5,7 +5,8 @@ type Acquire = Extract<CheckQueueRequest, { type: 'check.acquire' }>;
 type Sample = { cpus: number; load: number; at?: number };
 type Member = { host: string; sample: Sample; online: boolean; at: number };
 type Entry = { node: string; request: Acquire; state: CheckQueueReply['state']; position: number; stop: AbortController; finish(): void };
-type Options = { send(node: string, reply: CheckQueueReply): void; now?(): number; warmupMs?: number };
+/* heard: when the server last took in a frame from the node, whether or not it has handled it yet (#1060). */
+type Options = { send(node: string, reply: CheckQueueReply): void; now?(): number; warmupMs?: number; heard?(node: string): number | null };
 
 /* A disconnected worker must stop its process group before another worker gets its CPU budget.
    The startup hold covers old workers discovering a server restart and performing that cleanup. */
@@ -26,7 +27,7 @@ export class CheckCoordinator {
 
   node(node: string, host: string, sample: Sample): void {
     const at = sample.at ?? this.now();
-    if (this.now() - at >= CHECK_LEASE_MS) { this.lost(node); return; }
+    if (this.now() - this.heardSince(node, at) >= CHECK_LEASE_MS) { this.lost(node); return; }
     this.nodes.set(node, { host, sample, online: true, at });
     if (!this.pools.has(host)) this.pools.set(host, new CheckSlotQueue(() => this.capacity(host)));
     this.refresh();
@@ -92,9 +93,15 @@ export class CheckCoordinator {
     this.queueEnds.clear();
   }
 
+  /* A machine is live while it was heard within a lease: its last load handled, or any frame that came after it, as a frame
+     can wait behind others of the node and behind the shared pump of test runs long after it came. */
   private live(node: string, now = this.now()): boolean {
     const member = this.nodes.get(node);
-    return Boolean(member?.online && now - member.at < CHECK_LEASE_MS);
+    return Boolean(member?.online && now - this.heardSince(node, member.at) < CHECK_LEASE_MS);
+  }
+
+  private heardSince(node: string, at: number): number {
+    return Math.max(at, this.options.heard?.(node) ?? Number.NEGATIVE_INFINITY);
   }
 
   private capacity(host: string): number {

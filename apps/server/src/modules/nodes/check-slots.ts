@@ -12,7 +12,8 @@ const queues = new WeakMap<Ctx, CheckCoordinator>();
 function queueFor(ctx: Ctx): CheckCoordinator {
   let queue = queues.get(ctx);
   if (!queue) {
-    queue = new CheckCoordinator({ send: (key, reply) => { ctx.hub.send(identityOfKey(key, ownBuiltin(ctx.config)), reply); } });
+    const node = (key: string) => identityOfKey(key, ownBuiltin(ctx.config));
+    queue = new CheckCoordinator({ send: (key, reply) => { ctx.hub.send(node(key), reply); }, heard: key => ctx.hub.lastSeenAt(node(key)) });
     queues.set(ctx, queue);
   }
   return queue;
