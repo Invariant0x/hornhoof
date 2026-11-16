@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LeaseKind } from '../src/db/net.js';
-import { leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from '../src/modules/keeper/lease.js';
+import { lateTickMs, leaseValid, nextLeaseStep, queryTimeoutMs, type Clocks, type Held, type LeaseStep } from '../src/modules/keeper/lease.js';
 
 const t0: Clocks = { wall: 1e12, mono: 5e3 };
 
@@ -148,5 +148,37 @@ describe('nextLeaseStep with proofs', () => {
 
   it.each(rows)('renews only on a proof sent after the last renewal: %s', (_name, inputs, step) => {
     expect(nextLeaseStep(inputs)).toEqual(step);
+  });
+});
+
+/* The keeper's limits go by the fsync p99 this machine measured: a disk that writes slowly gets a statement and a tick
+   more time, never less than before and never a whole lease. Literals on purpose, as above. */
+describe('the limits a slow disk gets', () => {
+  const rows: [name: string, fsyncP99Ms: number | null, queryMs: number, lateMs: number][] = [
+    ['nothing measured yet', null, 2000, 6000],
+    ['a fast disk', 20, 2000, 6000],
+    ['the disks of most machines', 50, 2000, 6000],
+    ['a disk just at the old limit', 1000, 2000, 6000],
+    ['a disk a little slower', 1259, 2518, 7554],
+    ['a disk as slow as a-host', 2949, 5000, 9000],
+    ['a disk that hangs', 60_000, 5000, 9000],
+    ['a measure that makes no sense', -5, 2000, 6000],
+  ];
+
+  it.each(rows)('%s', (_name, fsyncP99Ms, queryMs, lateMs) => {
+    expect([queryTimeoutMs(fsyncP99Ms), lateTickMs(fsyncP99Ms)]).toEqual([queryMs, lateMs]);
+  });
+
+  it('lets a tick come later on a slow disk, but never as late as a lease', () => {
+    const lateMs = lateTickMs(2949);
+    expect(nextLeaseStep({ now: at(9000), last: at(1000), held: normalLease, maintenance: false, lateMs })).toEqual({ do: 'renew', kind: 'normal', endSessions: false, sent: at(9000) });
+    expect(nextLeaseStep({ now: at(9500), last: at(400), held: normalLease, maintenance: false, lateMs })).toEqual(fence('a tick came 9.1 s after the one before'));
+  });
+
+  it('fences no late tick where no other machine could lead, but still a lease that lapsed and a clock set back', () => {
+    const lateMs = Number.POSITIVE_INFINITY;
+    expect(nextLeaseStep({ now: at(9500), last: at(400), held: normalLease, maintenance: false, lateMs })).toEqual({ do: 'renew', kind: 'normal', endSessions: false, sent: at(9500) });
+    expect(nextLeaseStep({ now: at(10000), last: at(1000), held: normalLease, maintenance: false, lateMs })).toEqual(fence('no renewal for 10 s'));
+    expect(nextLeaseStep({ now: at(-1500, 2000), last: at(1000), held: normalLease, maintenance: false, lateMs })).toEqual(fence('the clock went back 2.5 s'));
   });
 });

@@ -73,6 +73,11 @@ export class Measures {
     this.samples = keepLatest(this.samples, await timedSyncedWrite(join(this.opts.dir, PROBE_FILE)));
   }
 
+  /* The fsync p99 of the disk as measured so far, none before there are enough samples. */
+  fsyncP99(): number | null {
+    return fsyncP99(this.samples);
+  }
+
   /* Throws when the folder is gone: there is no honest number for free space then. */
   snapshot(): MachineMeasures {
     const { bavail, bsize } = statfsSync(this.opts.dir);
