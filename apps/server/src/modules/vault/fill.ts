@@ -13,13 +13,13 @@ import { entryById, entryByName, notAllowed, plainOf, unknownEntry, type Entry }
    the values to that node's key alone, logs the use, and waits for the node's status. What comes back holds no value. */
 
 /* How long the tool waits for the node, within the minute a program gives a tool call. */
-export const FILL_WAIT_MS = 45_000;
+const FILL_WAIT_MS = 45_000;
 /* How long a fill may wait on the way to its node before the node refuses to start it. */
 const FILL_START_MS = 60_000;
 
-export type FillAnswerStatus = FillStatus | 'node_offline' | 'no_answer';
-export type FillAnswer = { entry: string; target: FillKind; status: FillAnswerStatus; filled: FillField[]; savedSignIn?: boolean; shot?: string };
-export type FillRequest = { entry: string; target: FillKind; address?: string; phoneSession?: string; element?: string | null; fields?: FillField[] };
+type FillAnswerStatus = FillStatus | 'node_offline' | 'no_answer';
+type FillAnswer = { entry: string; target: FillKind; status: FillAnswerStatus; filled: FillField[]; savedSignIn?: boolean; shot?: string };
+type FillRequest = { entry: string; target: FillKind; address?: string; phoneSession?: string; element?: string | null; fields?: FillField[] };
 
 /* What a node said it fills, with the key Hornhoof seals to, while it is connected. */
 type Filler = { publicKey: string; fills: FillKind[] };

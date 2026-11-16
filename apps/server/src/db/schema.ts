@@ -2772,8 +2772,7 @@ export const autonomousReleases = pgTable('autonomous_releases', {
 /* The company's vault of site sign-ins. A person types the password and the code secret only into Hornhoof's form; both are
    kept encrypted with the server's key and leave only sealed to the node that types them. Every agent of the company may
    use an entry, unless a person narrowed it to one department or one agent. */
-export const VAULT_SCOPES = ['company', 'department', 'agent'] as const;
-export type VaultScope = (typeof VAULT_SCOPES)[number];
+const VAULT_SCOPES = ['company', 'department', 'agent'] as const;
 export const vaultEntries = pgTable('vault_entries', {
   id: id(),
   companyId: companyId(),
@@ -2797,7 +2796,7 @@ export const vaultEntries = pgTable('vault_entries', {
 
 /* Who used, added, changed or removed which entry, when, for which task and with what end; never a value. The name and
    site stay as they were, so the log still reads after the entry is gone. */
-export const VAULT_LOG_KINDS = ['used', 'created', 'changed', 'removed'] as const;
+const VAULT_LOG_KINDS = ['used', 'created', 'changed', 'removed'] as const;
 export const vaultLog = pgTable('vault_log', {
   id: id(),
   companyId: companyId(),

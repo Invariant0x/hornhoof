@@ -8,7 +8,7 @@ export const FILL_FIELDS = ['login', 'password', 'code'] as const;
 export const FillField = z.enum(FILL_FIELDS);
 export type FillField = z.infer<typeof FillField>;
 
-export const FILL_KINDS = ['browser', 'phone'] as const;
+const FILL_KINDS = ['browser', 'phone'] as const;
 export const FillKind = z.enum(FILL_KINDS);
 export type FillKind = z.infer<typeof FillKind>;
 
@@ -16,11 +16,11 @@ export type FillKind = z.infer<typeof FillKind>;
    has no such field, or the one meant is not a password field; rejected: the site said the sign-in is wrong; needs_person,
    robot_check and browser_refused: only a person goes on; target_gone: the page or phone session is over; expired: it came
    too late; unsupported: the node fills no such target; failed: anything else, told with no words of its own. */
-export const FILL_STATUSES = ['filled', 'signed_in', 'field_not_found', 'wrong_field', 'rejected', 'needs_person', 'robot_check', 'browser_refused', 'target_gone', 'expired', 'unsupported', 'failed'] as const;
+const FILL_STATUSES = ['filled', 'signed_in', 'field_not_found', 'wrong_field', 'rejected', 'needs_person', 'robot_check', 'browser_refused', 'target_gone', 'expired', 'unsupported', 'failed'] as const;
 export const FillStatus = z.enum(FILL_STATUSES);
 export type FillStatus = z.infer<typeof FillStatus>;
 
-export const FILL_ADDRESS_MAX = 2048;
+const FILL_ADDRESS_MAX = 2048;
 const webAddress = (value: string): boolean => {
   try {
     const url = new URL(value);
@@ -61,7 +61,7 @@ export type FillTarget = z.infer<typeof FillTarget>;
 const distinct = (values: readonly string[]) => new Set(values).size === values.length;
 const Fields = z.array(FillField).min(1).max(FILL_FIELDS.length).refine(distinct, 'Each field is named once.');
 
-export const TOTP_ALGORITHMS = ['SHA1', 'SHA256', 'SHA512'] as const;
+const TOTP_ALGORITHMS = ['SHA1', 'SHA256', 'SHA512'] as const;
 export const FillTotp = z.strictObject({
   secret: z.string().regex(/^[A-Z2-7]{16,128}$/),
   digits: z.union([z.literal(6), z.literal(7), z.literal(8)]),
