@@ -1,17 +1,18 @@
-Task 1148 verification receipt
-Checked executable candidate: d20a7c468f0ecaf9c0809dc858cf4eef7c5a1c67
+Task 1148: final four-file repeat receipt
+Checked executable/test candidate: b403f914d57239e0dae6b72fdd13f51e890aa09f
 Base: 6d17d217e568fcdf7a6e6267b636ef332c205a62
-Command in apps/server: npx --no-install vitest run test/keeper-app-call.test.ts test/peer-stream-clock.test.ts test/worker-keeper.test.ts --maxWorkers=1
-PASS: 20 consecutive runs, each process exit 0; three files and 35 tests passed in each run; 700 test executions.
-worker-keeper file ms: min 7818, median 9924.5, max 137119.
-Recorded load 1m: 5.01 to 24.07; samples 2026-11-16T21:37:41.785499+00:00 to 2026-11-16T21:50:21.378472+00:00.
-Each repetition full output and load.csv are in the attached archive.
-Server build: NODE_OPTIONS=--max-old-space-size=6144 npm run build -w @hornhoof/server, exit 0.
-Author command: NODE_OPTIONS=--max-old-space-size=6144 npm run -s check:author -- --sha d20a7c468f0ecaf9c0809dc858cf4eef7c5a1c67 --base 6d17d217e568fcdf7a6e6267b636ef332c205a62
-Author result: exit 1. Lint, source/test types, crapper and dryer passed. Worst new/grown CRAP 9.648; dryer found no duplicate candidates. Formatter is unavailable in this repository.
-Author tests: 106 passed, 1 failed among 107 tests in seven named files. The unchanged keeper-peer.test.ts:556 case renews by itself until a copy finished ... failed to find the expected other-machine lease-end log.
-That test uses real performance.now accelerated 20 times and real pauses of 60 and 100 ms. Its scope needs a head decision; no pass is claimed for this stage.
-The earlier repetition failure in the fourth worker keeper case was repaired by moving the whole worker keeper file to controlled time, as the head authorized. The final 20-run series above has no failures.
-The app-call mechanism is byte-identical to f5171f05bf33c671ba5949749a57b8c508c93ede; Oracle received that commit. No branch integration or main push was performed.
-Built-in codex review could not inspect code because its sandbox could not create a namespace. Manual self-review and security inspection were performed; no independent review is claimed.
-Earlier development checks also exposed and repaired test callback typing and request overload typing; an initial 2 GB type-check heap exhaustion was resolved by running the check with 6 GB; an initial askApp CRAP increase was resolved by extracting deadline scheduling.
+Command in apps/server: npx --no-install vitest run test/keeper-peer.test.ts test/keeper-app-call.test.ts test/peer-stream-clock.test.ts test/worker-keeper.test.ts --maxWorkers=1
+PASS: 20 consecutive processes, each exit 0; four files and 62 tests passed each time; 1240 test executions, no skipped tests.
+keeper-peer file ms: min 8653, median 8887.5, max 9849.
+worker-keeper file ms: min 7990, median 8204.0, max 10226.
+Recorded load 1m: 3.71 to 5.38; samples 2026-11-16T22:04:19.059503+00:00 to 2026-11-16T22:09:24.359095+00:00.
+All 29 worker keeper cases use controlled time and awaited rounds. App requests retain a 10 s idle limit; peer streams retain a 30 s idle limit.
+The remaining keeper-peer lease case was red in the completed author check on d20a7c468f0ecaf9c0809dc858cf4eef7c5a1c67: its expected other-machine termination log was absent under load. Its real clock ran 20 times faster, so a delayed tick could end the lease for another reason before the link answer changed.
+The head included that case on 2026-11-16 at 21:55 UTC. The repair uses explicit wall/monotonic clocks and awaited proof, lease and reentry steps with a deferred response. Former 60/100 ms pauses at 20-times speed became 1200/2000 virtual milliseconds. All seven original assertions and production lease limits remain unchanged.
+The initial app deadline and stream deadline regressions were red on their native timers and green after using the controlled scheduler. No report retry was added.
+Author verification follows these repeats on the final receipt commit: NODE_OPTIONS=--max-old-space-size=6144 npm run -s check:author -- --sha <final task-1148 SHA> --base 6d17d217e568fcdf7a6e6267b636ef332c205a62. The task stores its actual completed result and exact SHA.
+Server build evidence is reused from d20a7c46: production sources and build inputs did not change afterward. The author check compiles the current source and test types and lints every changed TypeScript file.
+Earlier development checks exposed and repaired test callback and request overload typing, a default 2 GB type-check heap exhaustion (completed checks use 6 GB), and an askApp CRAP increase (resolved by separating deadline scheduling). An intermediate worker keeper repetition exposed the adjacent real-clock compatibility case; the head expanded scope to the whole worker keeper file and it now passes.
+Earlier worker keeper timing reached 137119 ms at recorded load 1m up to 24.07 while all tests still passed. A prior 43120 ms observation had no contemporaneous load sample. These earlier records remain in task attachments; they are not the final repetition timings above.
+Built-in codex review could not inspect code because its sandbox could not create a namespace; manual self-review and security inspection were completed. No independent review is claimed. The repository has no formatter.
+No run_tests, whole suite, turn integration or main push was performed. Oracle received f5171f05 and app-call.ts has not changed since that mechanism commit.
