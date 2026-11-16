@@ -22,6 +22,7 @@ import { DrainLine, DrainMark } from '../ui/MachineDrain';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 import { everyVisible } from '../guard';
+import { Phones } from '../ui/Phones';
 
 const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
@@ -783,6 +784,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           }} />}
         />
       )}
+      {machines && <Phones me={me} machines={machines} />}
     </section>
   );
 }

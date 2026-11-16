@@ -1351,9 +1351,10 @@ export const companyPhones = pgTable('company_phones', {
   id: id(), companyId: companyId(), personId: uuid('person_id').notNull().references(() => people.id),
   machineId: uuid('machine_id').notNull().references(() => machines.id), nodeId: uuid('node_id').notNull().references(() => nodes.id),
   serial: text('serial').notNull(), transport: text('transport', { enum: ['network', 'usb'] }).notNull(), endpoint: text('endpoint'),
+  hardwareKey: text('hardware_key'),
   name: text('name').notNull(), lending: boolean('lending').notNull().default(true), generation: integer('generation').notNull().default(0),
   createdAt: createdAt(), removedAt: timestamp('removed_at', { withTimezone: true }),
-}, t => [uniqueIndex('company_phones_machine_serial').on(t.machineId, t.serial).where(sql`${t.removedAt} is null`), index('company_phones_company').on(t.companyId), check('company_phones_generation', sql`${t.generation} >= 0`)]);
+}, t => [uniqueIndex('company_phones_machine_serial').on(t.machineId, t.serial).where(sql`${t.removedAt} is null`), uniqueIndex('company_phones_hardware').on(t.hardwareKey).where(sql`${t.removedAt} is null`), index('company_phones_company').on(t.companyId), check('company_phones_generation', sql`${t.generation} >= 0`)]);
 
 export const phoneSessions = pgTable('phone_sessions', {
   id: id(), companyId: companyId(), phoneId: uuid('phone_id').notNull().references(() => companyPhones.id),

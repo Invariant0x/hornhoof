@@ -15,6 +15,7 @@ export class PhoneSessions {
     const until = Date.parse(grant.expiresAt);
     if (until <= Date.now() || until > Date.now() + PHONE_LEASE_MS * 2) throw gone();
     const old = this.#serials.get(grant.binding.serial);
+    if (this.#held.has(grant.sessionId) && this.#held.get(grant.sessionId) !== old) throw gone();
     if (old) {
       if (old.count || old.grant.sessionId !== grant.sessionId || old.grant.generation !== grant.generation) throw new Error('phone_busy');
       if (old.stop.signal.aborted) throw gone();

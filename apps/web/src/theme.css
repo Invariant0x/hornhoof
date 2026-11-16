@@ -2579,3 +2579,23 @@ th.k-prio .sorth { white-space: nowrap; }
   filter: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   box-shadow: none !important; text-shadow: none !important;
 }
+.phones { margin-block-start: 24px; min-inline-size: 0; }
+.phones > .people-head { margin-block-end: 16px; }
+.phones .people-head > .entry-actions { inline-size: auto; }
+.phone-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; }
+.phone-cards .wcard { min-inline-size: 0; max-inline-size: 100%; }
+.phone-cards :is(h3, p, dd, .stline), .phone-recording :is(h4, p) { overflow-wrap: anywhere; }
+.phone-form { max-inline-size: 640px; padding: 16px; margin-block-end: 16px; border: 1px solid var(--line); background: var(--surface); }
+.phone-form fieldset { min-inline-size: 0; padding: 0; margin: 0; border: 0; display: grid; gap: 16px; }
+.phone-form legend { font-weight: 600; margin-block-end: 16px; }
+.phone-form :is(input:not([type="radio"]), select) { box-sizing: border-box; inline-size: 100%; min-inline-size: 0; min-block-size: 44px; }
+.phone-form .form-foot { margin-block-start: 16px; }
+.phone-device { display: flex; align-items: center; gap: 12px; min-block-size: 44px; overflow-wrap: anywhere; }
+.phone-device input { flex: 0 0 auto; inline-size: 24px; block-size: 24px; }
+.phone-device span { min-inline-size: 0; }
+.phone-device small { display: block; color: var(--muted); }
+.phone-screen { margin: 16px 0; min-inline-size: 0; }
+.phone-screen img { display: block; max-inline-size: 100%; max-block-size: 60vh; object-fit: contain; margin-inline: auto; }
+.phone-screen figcaption { margin-block-start: 8px; color: var(--muted); overflow-wrap: anywhere; }
+.phone-recordings { margin-block: 24px; min-inline-size: 0; }
+.phone-recording { border-block-start: 1px solid var(--line); padding-block: 16px; }

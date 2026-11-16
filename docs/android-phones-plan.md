@@ -1,5 +1,30 @@
 # Company Android phones, task 1079
 
+## Development checkpoint: pairing, physical identity and owner controls
+
+The network probe accepts the Android wireless pairing address and six-digit code.
+The code goes to adb stdin once, never to database fields or adb argv. Registration
+and each operation verify the real device's manufacturer and hardware serial hash;
+alternate USB/network addresses cannot create two simultaneous loans of one phone.
+Unverified or emulator identities receive no grant. Migration 0131 preserves old
+history and disables lending until an old phone is verified again.
+
+The Machines page now has the connection form, owner-only live picture, Stop and
+explicit resume. Task panels show sanitized frame recordings with playback.
+An epoch prevents stale list reads from undoing Stop in the UI. This checkpoint
+does not deliver the USB host bridge yet. Browser inspection and final checks are
+still pending. Named local checks: node 4 files / 20 tests; protocol 2 files / 10
+tests; web Phones, PhoneRecordings, Machines and TaskPanel 4 files / 149 tests,
+all passed. Web production types and the new UI ESLint checks passed. The existing
+TaskPanel tests print jsdom's canvas availability notice while passing.
+
+The orchestrator's 2026-11-16 addition also requires allocation to any suitable
+free phone, social-action limits and an action journal. Development asked the
+head to settle the contract for distinguishing social actions from navigation;
+raw tap coordinates alone cannot reliably classify their effect. This additional
+work and its virtual-time tests remain pending. Target release is 0.31.0; no date
+for a person's phone check has been promised before the candidate clears its gates.
+
 Architecture at base `d44ecb8c7d3d0b6d7ce690e01c25046f0404b212` on `task-1079`.
 Task kind: unknown path. Risk: access, physical device control and credentials.
 This file is a plan, not a claim that the feature or its checks have shipped.
