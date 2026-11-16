@@ -563,6 +563,9 @@ export const subscriptions = pgTable(
     budget: integer('budget'),
     /* The models its node says it can run; null until a node reports them. An API connection's are the ones it was given. */
     models: jsonb('models').$type<ModelOption[]>(),
+    /* The plans its employees go on to, in this order, when it reaches its limit or the share set for tasks, each with the
+       model to run there or none for the one their role asks for. Empty: any plan of the company that may serve them. */
+    fallbacks: jsonb('fallbacks').$type<PlanFallback[]>().notNull().default([]),
     /* Where a compatible API answers, which a person named; null for every other subscription, whose address is known. */
     baseUrl: text('base_url'),
     /* The protocol an API connection's program talks to it in: OpenRouter's choice, a compatible API's own. */
@@ -576,6 +579,9 @@ export const subscriptions = pgTable(
   },
   t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
 );
+
+/* One plan a plan's employees go on to at its limit: model null runs the one their role asks for there. */
+export type PlanFallback = { subscription: string; model: string | null };
 
 export const NODE_STATUSES = ['needs_login', 'needs_setup', 'ready'] as const;
 export type NodeStatus = (typeof NODE_STATUSES)[number];
@@ -700,6 +706,18 @@ export const agents = pgTable(
 );
 
 export type AgentKind = (typeof agents.$inferSelect)['kind'];
+
+/* An employee Hornhoof put on a fallback plan while its own was at its limit: the plan, model and effort it goes back to
+   between turns once that limit starts over, and the fallback it went to. A person who moves it by hand ends it. */
+export const agentFallbacks = pgTable('agent_fallbacks', {
+  agentId: uuid('agent_id').primaryKey().references(() => agents.id),
+  companyId: companyId(),
+  homeSubscriptionId: uuid('home_subscription_id').notNull().references(() => subscriptions.id),
+  homeModel: text('home_model').notNull(),
+  homeEffort: text('home_effort'),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  createdAt: createdAt(),
+});
 
 /* base keeps its stored key for compatibility; it is the assignment, separate from role identity. */
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };

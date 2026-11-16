@@ -1,5 +1,5 @@
-import { API_PROTOCOLS, API_PROVIDERS, ApiBaseUrl, apiEndpoint, isApiProvider, Sealed, type ApiProtocol, type ApiProvider, type ProviderId } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { API_PROTOCOLS, API_PROVIDERS, ApiBaseUrl, apiEndpoint, isApiProvider, modelsFor, Sealed, type ApiProtocol, type ApiProvider, type ProviderId } from '@hornhoof/protocol';
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -8,7 +8,7 @@ import { runsDepartment } from '../../auth/departments.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agentFallbacks, agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { runningAgents } from '../agents/running.js';
@@ -27,6 +27,7 @@ import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
 import { onlineIn, subView, subViews } from './views.js';
 import { tryPlaceWaiting } from './waiting.js';
+import { fallBackFrom } from './fallback.js';
 
 const Target = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('orchestrator') }),
@@ -67,11 +68,31 @@ export const SubscriptionBody = ApiKeyFields.superRefine(connectionRules);
 /* An API's models, asked before its connection is saved. */
 export const ModelsBody = z.object({ ...Connection, apiKey }).superRefine(connectionRules);
 
-/* What a subscription's owner or company scope changes: the share of its limits, and of an API connection its name,
-   models and the place it serves. */
+/* The plans its employees go on to at its limit, in order, each once, with the model to run there or none for their role's. */
+const Fallbacks = z
+  .array(z.object({ subscription: z.uuid(), model: z.string().trim().min(1).max(80).nullable() }))
+  .max(20)
+  .refine(list => new Set(list.map(f => f.subscription)).size === list.length, 'fallbacks: Each plan once.');
+
+/* What a subscription's owner or company scope changes: the share of its limits and its fallbacks, and of an API connection
+   its name, models and the place it serves. */
 export const SubscriptionPatch = z
-  .object({ budget: Budget.optional(), label: label.optional(), models: ConnectionModels.optional(), target: Target.optional() })
+  .object({ budget: Budget.optional(), fallbacks: Fallbacks.optional(), label: label.optional(), models: ConnectionModels.optional(), target: Target.optional() })
   .refine(patch => Object.values(patch).some(value => value !== undefined), 'Say what to change.');
+
+const badFallback = (message: string) => new ApiError(400, 'validation', `fallbacks: ${message}`, 'fallback_invalid');
+
+/* Each fallback is another plan of the company, and a model named for it is one that plan runs. */
+async function checkFallbacks(db: Db, sub: { id: string; companyId: string }, fallbacks: z.infer<typeof Fallbacks>): Promise<void> {
+  const ids = fallbacks.map(f => f.subscription);
+  if (ids.includes(sub.id)) throw badFallback('A plan cannot be its own fallback.');
+  const plans = ids.length ? await db.select().from(subscriptions).where(and(inArray(subscriptions.id, ids), eq(subscriptions.companyId, sub.companyId), isNull(subscriptions.removedAt))) : [];
+  for (const f of fallbacks) {
+    const plan = plans.find(p => p.id === f.subscription);
+    if (!plan) throw badFallback('The company has no such plan.');
+    if (f.model && !modelsFor(plan.provider, plan.models).some(m => m.id === f.model)) throw badFallback(`${plan.label} cannot run ${f.model}.`);
+  }
+}
 
 const PLANS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' } as const;
 type Plan = keyof typeof PLANS;
@@ -419,16 +440,19 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     const keeps = await mayKeep(me, sub);
     if (!ownsOrCompany(me, sub.ownerPersonId) && !keeps) throw notOwner();
-    const { budget, label, models, target } = SubscriptionPatch.parse(req.body);
+    const { budget, fallbacks, label, models, target } = SubscriptionPatch.parse(req.body);
     if (label !== undefined || models !== undefined || target !== undefined) {
       if (!keeps) throw notTheirPlace();
       if (sub.kind !== 'api_key') throw notApiKey();
       if (target && !(await mayPlace(me, target))) throw notTheirPlace();
     }
     if (target) await placeExists(target);
+    if (fallbacks) await checkFallbacks(db, sub, fallbacks);
     const place = target ? { targetKind: target.kind, targetId: 'id' in target ? target.id : null } : {};
-    await db.update(subscriptions).set({ ...(budget !== undefined ? { budget } : {}), ...(label !== undefined ? { label } : {}), ...(models !== undefined ? { models } : {}), ...place }).where(eq(subscriptions.id, sub.id));
+    await db.update(subscriptions).set({ ...(budget !== undefined ? { budget } : {}), ...(fallbacks !== undefined ? { fallbacks } : {}), ...(label !== undefined ? { label } : {}), ...(models !== undefined ? { models } : {}), ...place }).where(eq(subscriptions.id, sub.id));
     await pumpWaiting(ctx);
+    /* A share set below what the plan used sends its workers on to a fallback at once. */
+    if (budget !== undefined) await fallBackFrom(ctx, sub.id);
     ctx.bus.publish(sub.companyId, { type: 'org' });
     return { subscription: await subView(db, online, sub.id, me) };
   });
@@ -443,6 +467,11 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
         .where(eq(subscriptions.id, sub.id));
       await endRemovedPlanCommands(tx, [sub.id]);
+      /* Those on it for a while, as a fallback, go back to their own plan; those it was a home to stay where they are now. */
+      for (const away of await tx.select().from(agentFallbacks).where(eq(agentFallbacks.subscriptionId, sub.id))) {
+        await tx.update(agents).set({ subscriptionId: away.homeSubscriptionId, model: away.homeModel, effort: away.homeEffort, nodeId: null }).where(and(eq(agents.id, away.agentId), eq(agents.subscriptionId, sub.id)));
+      }
+      await tx.delete(agentFallbacks).where(or(eq(agentFallbacks.subscriptionId, sub.id), eq(agentFallbacks.homeSubscriptionId, sub.id)));
       await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
       await tx.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.subscriptionId, sub.id));
       /* Its sign-in, sealed to its nodes, goes with it. */

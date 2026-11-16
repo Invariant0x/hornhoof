@@ -42,6 +42,7 @@ const RULES: Record<string, string> = {
   test_parts: TESTS,
   turn_snapshots: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
   turn_tokens: 'Hornhoof counts what each turn used itself, from what its program told: the tool only reads it.',
+  agent_fallbacks: 'Hornhoof moves an employee to a fallback plan and back itself: the tool only reads it. A plan of an employee changes by change_employee.',
   test_part_timings: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
   test_file_results: 'Hornhoof keeps which test files passed itself, as a forged row would let a test go unrun: the tool only reads it.',
   test_suite_memory: 'Hornhoof keeps what test runs leave for their next run itself: the tool only reads it.',
