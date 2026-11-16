@@ -678,36 +678,44 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
 
   it('says a machine that holds no database is wiped, and one that was wiped once its updater said so', async () => {
     const c = await company();
-    const w = await worker(c);
+    /* The test makes each report itself, and none goes on the keeper's own pace: none made before a step lands after
+       it and undoes it. */
+    const w = await worker(c, { reportEveryMs: 3_600_000 });
     const row = () => c.rowOf(w.machine);
-    /* Two more reports reached the leader. */
-    const reported = async () => {
-      for (let n = 0; n < 2; n++) {
-        const before = (await row()).reportAt?.getTime();
-        await until(async () => (await row()).reportAt?.getTime() !== before);
-      }
+    const control = (name: string) => join(w.config.controlDir, name);
+    /* What the leader says of this machine's upload reached it: the next report is made on that word. */
+    const told = (upload: 'waiting' | 'wipe') => until(() => w.keeper.known()?.copy?.upload === upload);
+    /* One report of the machine, heard by the leader. */
+    const report = async () => {
+      const before = (await row()).reportAt!.getTime();
+      await (w.keeper as unknown as { report(): Promise<void> }).report();
+      expect((await row()).reportAt!.getTime()).toBeGreaterThan(before);
     };
+    /* The one report the keeper makes by itself, once the way to the leader it found is open, has landed. */
+    await until(async () => (await row()).reportAt !== null);
     /* While its updater still wipes it, it says nothing of the kind. */
-    writeFileSync(join(w.config.controlDir, WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
+    writeFileSync(control(WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
     await c.db.update(machines).set({ uploadState: 'kept', dataLeftAt: new Date() }).where(eq(machines.id, w.machine));
-    await reported();
+    await told('wipe');
+    await report();
     expect((await row()).uploadState).toBe('kept');
     /* The updater is done: the leader hears it, and the updater's word goes once it did. */
-    rmSync(join(w.config.controlDir, WIPE_FILE));
-    writeFileSync(join(w.config.controlDir, WIPED_FILE), JSON.stringify({ id: 'w1', at: new Date().toISOString() }));
-    await until(async () => (await row()).uploadState === null);
-    await until(() => !existsSync(join(w.config.controlDir, WIPED_FILE)));
+    rmSync(control(WIPE_FILE));
+    writeFileSync(control(WIPED_FILE), JSON.stringify({ id: 'w1', at: new Date().toISOString() }));
+    await report();
+    expect((await row()).uploadState).toBeNull();
+    expect(existsSync(control(WIPED_FILE))).toBe(false);
     /* The leader counts on a machine for what it held, though a worker's keeper holds no database: it says so, and owes
        nothing. */
     await c.db.update(machines).set({ uploadState: 'waiting' }).where(eq(machines.id, w.machine));
-    await until(async () => (await row()).uploadState === null);
-    /* A machine marked as one that keeps a copy holds a database, whatever keeper runs on it: it says nothing either.
-       A report it made before the mark may still be on its way and say it was wiped. Reports go one at a time: by the
-       time two more landed, that one has too, and only then does the leader count on the machine again. */
-    writeFileSync(join(w.config.controlDir, 'replica.json'), '{}');
-    await reported();
+    await told('waiting');
+    await report();
+    expect((await row()).uploadState).toBeNull();
+    /* A machine marked as one that keeps a copy holds a database, whatever keeper runs on it: it says nothing either. */
+    writeFileSync(control('replica.json'), '{}');
     await c.db.update(machines).set({ uploadState: 'kept' }).where(eq(machines.id, w.machine));
-    await reported();
+    await told('wipe');
+    await report();
     expect((await row()).uploadState).toBe('kept');
   });
 });
