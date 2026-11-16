@@ -2,15 +2,15 @@ import { and, eq, exists, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, subscriptions, testParts } from '../../db/schema.js';
-import { installingBuiltins, nextToInstall } from '../network/follow.js';
+import { heldBuiltins } from '../network/follow.js';
 import { builtinOf, ownMachine, UNNAMED_BUILTIN } from './hub.js';
 
 type Reader = Pick<Db, 'select'>;
 
 /* The built-in node an API key's agent runs on: the one its program is on while that node is ready, so its folder and
    session go on there; else the one of the machine this server runs on; else the ready one whose machine stands first
-   in the server order. A machine that installs its build now takes nothing new. The machine's network id, or null when
-   no built-in node is ready. */
+   in the server order. A machine that installs its build now, or is next to, takes nothing new. The machine's network
+   id, or null when no built-in node is ready. */
 export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null): Promise<string | null> {
   const own = ownMachine(ctx.config);
   const there = (machine: string): boolean => ctx.hub.isReady(builtinOf(machine));
@@ -18,10 +18,7 @@ export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null):
   if (current === own || current === null) {
     if (there(own)) return own;
   }
-  const installing = await installingBuiltins(db, ctx.config);
-  /* Nor does the one next to install: what the company's keys run goes to another machine meanwhile. */
-  const next = await nextToInstall(ctx);
-  if (next?.networkId) installing.add(next.networkId);
+  const installing = await heldBuiltins(ctx, db);
   if (current && current !== own && there(current) && !installing.has(current)) return current;
   if (there(own)) return own;
   const ready = ctx.hub.builtins().filter(machine => machine !== own && !installing.has(machine));

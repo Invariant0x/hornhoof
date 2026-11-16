@@ -258,3 +258,19 @@ export async function installingMachines(db: Pick<Db, 'select'>, own: Own, now =
   const rows = await installRows(db, own);
   return new Set(rows.filter(row => installs(row, now)).map(row => row.id));
 }
+
+/* The built-in nodes that take no new work, for whoever picks one: those of the machines that install now, and of the
+   one next to install, so that what the company's keys run goes to another machine meanwhile. */
+export async function heldBuiltins(ctx: Ctx, db: Pick<Db, 'select'> = ctx.db): Promise<Set<string>> {
+  const held = await installingBuiltins(db, ctx.config);
+  const next = await nextToInstall(ctx);
+  return next?.networkId ? held.add(next.networkId) : held;
+}
+
+/* The machines that take no new work, for whoever places it: those that install now, and the one next to install, whose
+   work ends so that it has its turn. */
+export async function heldMachines(ctx: Ctx): Promise<Set<string>> {
+  const held = await installingMachines(ctx.db, ctx.config);
+  const next = await nextToInstall(ctx);
+  return next ? held.add(next.id) : held;
+}
