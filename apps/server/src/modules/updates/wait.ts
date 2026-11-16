@@ -5,6 +5,7 @@ import { loggable } from '../../errors.js';
 import { enqueueTurn, pumpWaiting } from '../conversation/queue.js';
 import { workingCount } from '../events/store.js';
 import { lostTurn } from '../tasks/silent.js';
+import { lastTurnSigns } from '../tasks/turn-signs.js';
 import { notStep } from '../tools/steps.js';
 import type { NamedTurn, UpdateCalledOff, UpdateRequest, UpdateWaiting } from './control.js';
 import { holdTurns } from './drain.js';
@@ -28,8 +29,8 @@ export function sendToUpdater(ctx: Ctx, request: UpdateRequest): void {
   ctx.updater.free(id);
 }
 
-/* The company's running turns, a turn its node said nothing of for ten minutes marked lost: nothing tells when that one
-   ends, so no update waits for it. */
+/* The company's running turns, a turn Hornhoof heard nothing of for ten minutes marked lost, neither a report of its
+   program nor an event of its work: nothing tells when that one ends, so no update waits for it. */
 async function runningTurns(ctx: Ctx, companyId: string, nowMs: number): Promise<RunningTurn[]> {
   const rows = await ctx.db
     .select({ id: jobs.id, kind: jobs.kind, startedAt: jobs.startedAt, createdAt: jobs.createdAt, agent: agents.name, task: tasks.number })
@@ -38,7 +39,8 @@ async function runningTurns(ctx: Ctx, companyId: string, nowMs: number): Promise
     .leftJoin(tasks, eq(tasks.id, jobs.taskId))
     .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), notStep))
     .orderBy(asc(jobs.createdAt));
-  return rows.map(row => ({ id: row.id, agent: row.agent, task: row.task, lost: row.kind === 'conversation' && lostTurn(ctx, row, nowMs) }));
+  const signs = await lastTurnSigns(ctx, rows.filter(row => row.kind === 'conversation').map(row => row.id));
+  return rows.map(row => ({ id: row.id, agent: row.agent, task: row.task, lost: row.kind === 'conversation' && lostTurn(ctx, row, nowMs, signs.get(row.id)) }));
 }
 
 const named = (turns: RunningTurn[], lost: boolean): NamedTurn[] => turns.filter(turn => turn.lost === lost).map(({ agent, task }) => ({ agent, task }));

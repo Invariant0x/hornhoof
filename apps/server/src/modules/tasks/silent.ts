@@ -141,7 +141,7 @@ const heardAt = (job: Pick<Job, 'startedAt' | 'createdAt'>, program: TurnProgram
 
 /* A running turn Hornhoof heard nothing of for SILENT_TURN_MS, the node_silent alarm: nothing tells when it ends, so
    nothing waits for it to end. worked: the turn's last sign besides its program's reports, as lastTurnSigns gives it. */
-export function lostTurn(ctx: Ctx, job: Pick<Job, 'id' | 'startedAt' | 'createdAt'>, nowMs: number, worked?: number): boolean {
+export function lostTurn(ctx: Ctx, job: Pick<Job, 'id' | 'startedAt' | 'createdAt'>, nowMs: number, worked: number | undefined): boolean {
   return nowMs - heardAt(job, mapOf(turnPrograms, ctx).get(job.id)?.program ?? null, worked) >= SILENT_TURN_MS;
 }
 
