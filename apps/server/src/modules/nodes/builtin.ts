@@ -2,7 +2,7 @@ import { and, eq, exists, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, subscriptions, testParts } from '../../db/schema.js';
-import { installingBuiltins } from '../network/follow.js';
+import { installingBuiltins, nextToInstall } from '../network/follow.js';
 import { builtinOf, ownMachine, UNNAMED_BUILTIN } from './hub.js';
 
 type Reader = Pick<Db, 'select'>;
@@ -19,6 +19,9 @@ export async function pickBuiltin(ctx: Ctx, db: Reader, current: string | null):
     if (there(own)) return own;
   }
   const installing = await installingBuiltins(db, ctx.config);
+  /* Nor does the one next to install: what the company's keys run goes to another machine meanwhile. */
+  const next = await nextToInstall(ctx);
+  if (next?.networkId) installing.add(next.networkId);
   if (current && current !== own && there(current) && !installing.has(current)) return current;
   if (there(own)) return own;
   const ready = ctx.hub.builtins().filter(machine => machine !== own && !installing.has(machine));

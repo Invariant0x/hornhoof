@@ -30,7 +30,7 @@ import { pickMachine } from './pick.js';
 import { runPurpose, runScope, scopeSource, scopeWords } from './purpose.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 import { keepPartTimings } from './timings.js';
-import { holdsBuiltin, holdsMachine, installingMachines } from '../network/follow.js';
+import { holdsBuiltin, holdsMachine, installingMachines, nextToInstall } from '../network/follow.js';
 import { builtinName } from '../nodes/builtin.js';
 
 type Run = typeof testRuns.$inferSelect;
@@ -320,6 +320,9 @@ async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, 
   /* A machine that installs its build is no place for a part: offered, it would be picked for being idle, and every
      part would wait for it while others stand free. The server's own node is never such a machine. */
   const busy = await installingMachines(ctx.db, ctx.config);
+  /* Nor is the machine next to install: the parts that run there end, and it has its turn. */
+  const next = await nextToInstall(ctx);
+  if (next) busy.add(next.id);
   for (const id of new Set(companyIds)) places.set(id, (await placesOf(ctx, id)).filter(place => !place.machineId || !busy.has(place.machineId)));
   return places;
 }
