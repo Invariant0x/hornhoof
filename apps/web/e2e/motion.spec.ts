@@ -210,7 +210,10 @@ test('starts a late message on arrival instead of at the document start', async 
   const read = () => shot.evaluate(box => {
     const anim = box.getAnimations()[0];
     if (!anim) return null;
+    /* pause() alone fixes the held time only on the next frame, so a real frame would slip in between two reads;
+       setting the current time completes the pause at once, and only the test moves the message from here. */
     anim.pause();
+    anim.currentTime = anim.currentTime;
     const dot = box.querySelector<SVGCircleElement>('circle.pt')!;
     const world = box.closest('.world')!.getBoundingClientRect();
     const rect = dot.getBoundingClientRect();

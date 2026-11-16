@@ -1,6 +1,6 @@
 # Hornhoof style book
 
-**Version 1.3, approved by the head of Design on 2026-11-13.** The head of Design owns this book (section 8).
+**Version 1.4, approved by the head of Design on 2026-11-16.** The head of Design owns this book (section 8).
 
 **Base.** `apps/web/src/theme.css` at commit `a354cc276d6f92792e4e602627d7300dfc04f251`, SHA256 `6efe8ccd9c9d420114e212c0cbf6c99d4a1ac97771b8ceebb00c1f8549a412ec`. Colours, type, sizes, components, fonts and languages were read at that commit. Counts of sizes and weights in sections 2 and 3 were taken at `2fed0c54` and not recounted.
 
@@ -199,6 +199,8 @@ There are no spacing tokens. Uses per value in `margin`, `padding` and `gap` in 
 Width breakpoints, with the number of rules: `max-width: 760px` 6, `max-width: 420px` 3, `max-width: 560px` 2, `min-width: 761px` 2, `max-width: 860px` 1, `max-width: 720px` 1, `min-width: 1200px` 1. Width of the place, by container: `card (min-width: 700px)`, `card (min-width: 1180px)`, `card (max-width: 300px)`, `tbl (max-width: 780px)`.
 
 Corners: mostly square. The cut corner is a `clip-path` with `--cut`: 7 px on `.btn`, 10 px on `.edge`, others set per place. `border-radius` is used for round dots and a few small items: `0`, `10px`, `50%`, `6px`, `4px`.
+
+**RULE, all skins.** The frame, selection border and glow of an element follow its shape, cut corner included. A rectangular `box-shadow` or `outline` around a `clip-path` shape is not allowed: it leaves a square halo and a dark triangle at the cut. Draw them with the same shape (an outer layer or pseudo-element with the same `clip-path` and `--cut`, or `filter: drop-shadow` on a wrapper). In a skin with no cut corners the same code draws a plain rectangle. Check it on a picture of the selected card in every built-in skin (#1070). Focus of a `.btn` keeps its own rule in section 6.
 
 **RULE.** A touch target is at least 44 by 44 px, from `templates/skills/dsn-ui-rules.md`.
 
@@ -443,6 +445,7 @@ Real sources in the repository:
 | 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |
 | 1.2 | 2026-11-07 | Base moved to `a354cc27`. Themes and modes told apart. GAPs and counts updated. Rules 14 and 15 of section 6, from the panel review. One exception added. Reading before work extended to giving out tasks | Head of Design |
 | 1.3 | 2026-11-13 | Tokens of skin file version 2: `--on-pink`, `--scrim`, `--scrollbar-thumb`, `--scrollbar-track` and `--cut-k`, with their contrast. Raw colours of `.dialog-back` and `.nav-count` removed from the GAP | Head of Design |
+| 1.4 | 2026-11-16 | Frame, selection and glow follow the cut corner in all skins, section 3 (#1070) | Head of Design |
 
 ## 9. Browsers
 

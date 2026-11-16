@@ -1,10 +1,10 @@
-import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 import { migrationsBefore } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 
 const SHA = 'a'.repeat(40);
 
@@ -13,7 +13,7 @@ const columnOf = async (db: ReturnType<typeof drizzle>) =>
 
 describe('the pinned commit of a test run', () => {
   it('is an optional column of test runs on a fresh database', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -21,7 +21,7 @@ describe('the pinned commit of a test run', () => {
   });
 
   it('comes to the previous schema with no pin on the runs already there, and every other value intact', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsBefore('test_run_commit') });

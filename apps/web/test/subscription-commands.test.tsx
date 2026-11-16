@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import { ME, mockApi, SUBS, withKey } from './api-mock';
+import { commandCode } from './command-code';
 
 const COMMAND = 'curl -fsSL https://hq.acme.test/install.sh | bash -s -- --join DEMO_ONLY';
 const NOW = Date.parse('2026-11-03T10:00:00Z');
@@ -47,19 +48,19 @@ describe('subscription install commands', () => {
     const row = await screen.findByRole('row', { name: 'Claude' });
     expect(within(row).getByText('Waiting for the machine')).toBeInTheDocument();
     const block = screen.getByRole('region', { name: 'Install Claude' });
-    expect(await within(block).findByText(withKey(COMMAND))).toBeVisible();
+    expect(await within(block).findByText(commandCode(withKey(COMMAND)))).toBeVisible();
     expect(within(block).getByText('Valid for 21 more hours.')).toBeInTheDocument();
     await user.click(within(block).getByRole('button', { name: 'Done' }));
     expect(screen.queryByRole('region', { name: 'Install Claude' })).not.toBeInTheDocument();
     expect(within(row).getByText('Waiting for the machine')).toBeInTheDocument();
     const card = await open();
-    expect(await within(card).findByText(withKey(COMMAND))).toBeVisible();
+    expect(await within(card).findByText(commandCode(withKey(COMMAND)))).toBeVisible();
     for (const copy of within(card).getAllByRole('button', { name: 'Copy' })) expect(copy).toBeVisible();
     expect(within(card).queryByRole('button', { name: /New command|Cancel/ })).not.toBeInTheDocument();
     first.unmount();
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: rows }], 'GET /api/nodes/commands': [200, { commands }] });
     view();
-    expect(await within(await open()).findByText(withKey(COMMAND))).toBeVisible();
+    expect(await within(await open()).findByText(commandCode(withKey(COMMAND)))).toBeVisible();
     expect(screen.queryByRole('region', { name: 'Install Claude' })).not.toBeInTheDocument();
   });
 
@@ -76,7 +77,7 @@ describe('subscription install commands', () => {
     await screen.findByRole('region', { name: 'Install Kimi' });
     for (const name of ['Claude', 'Codex']) await user.click(within(screen.getByRole('region', { name: `Install ${name}` })).getByRole('button', { name: 'Done' }));
     expect(screen.getAllByRole('region', { name: /^Install / })).toHaveLength(1);
-    for (const [i, row] of rows.entries()) expect(await within(await open(row.label)).findByText(withKey(`${COMMAND}${i}`))).toBeVisible();
+    for (const [i, row] of rows.entries()) expect(await within(await open(row.label)).findByText(commandCode(withKey(`${COMMAND}${i}`)))).toBeVisible();
   });
 
   it.each([['en', 'Valid for 35 more minutes.'], ['ru', 'Действует еще 35 мин.']])('updates remaining lifetime and allows a new command after expiry in %s', async (language, duration) => {
@@ -88,7 +89,7 @@ describe('subscription install commands', () => {
     const card = screen.getByRole('article');
     expect(within(card).getByText(duration)).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(36 * 60_000));
-    expect(within(card).queryByText(withKey(COMMAND))).not.toBeInTheDocument();
+    expect(within(card).queryByText(commandCode(withKey(COMMAND)))).not.toBeInTheDocument();
     expect(within(card).getByRole('button', { name: language === 'en' ? 'New command for Claude' : 'Новая команда для Claude' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /^Install |^Подключить / })).not.toBeInTheDocument();
   });

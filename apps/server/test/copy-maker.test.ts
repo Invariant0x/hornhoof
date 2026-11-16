@@ -13,7 +13,9 @@ const ORDER: CopyOrder = { slot: 'ok', leaderSize: 4 * MIB, migrations: 108, old
 /* What the leader says of a machine that never kept a copy. */
 const FIRST: CopyOrder = { ...ORDER, slot: null };
 
-type Sub = { enabled: boolean; slot: string | null; rels: string[] };
+/* oid: as Postgres numbers it, one per subscription made. dies: enabled again, it stops on its next error, which one
+   look still finds it running before. */
+type Sub = { enabled: boolean; slot: string | null; rels: string[]; oid?: number; dies?: { looked: boolean } };
 /* handed: its time as the leader ended in a handover. passfile: the file the replica role's password is read from is there. */
 type Database = { tables: boolean; led: boolean; handed: boolean; passfile: boolean; migrations: number; size: number; pulse: string | null; subs: Map<string, Sub> };
 
@@ -22,6 +24,20 @@ type Database = { tables: boolean; led: boolean; handed: boolean; passfile: bool
 function cluster() {
   const databases = new Map<string, Database>();
   const run: string[] = [];
+  /* The leader's side, where a test turns it on: the slots its Postgres keeps, the count of migrations its schema has,
+     whether the copy reaches it, and whether every apply breaks whatever the schema. A subscription that starts makes a
+     slot for each table whose first copy it takes; one whose schema is not the leader's, or any while applies break,
+     stops at its first error, and its tables' slots stay. Dropped with its slot, a subscription drops all of them there. */
+  const leader = { live: false, migrations: 108, slots: new Set<string>(), reachable: true, breaks: false };
+  let oids = 16500;
+  const syncSlot = (sub: Sub, table: number): string => `pg_${sub.oid}_sync_${table}_7300000000000000000`;
+  const fails = (db: Database): boolean => leader.breaks || db.migrations !== leader.migrations;
+  const start = (db: Database, sub: Sub): void => {
+    sub.enabled = true;
+    if (!leader.live) return;
+    sub.rels.forEach((state, table) => void (state !== 'r' && leader.slots.add(syncSlot(sub, table))));
+    if (fails(db)) sub.dies = { looked: false };
+  };
   const add = (name: string, over: Partial<Database> = {}) => {
     const database: Database = { tables: false, led: false, handed: false, passfile: false, migrations: 108, size: 0, pulse: null, subs: new Map(), ...over };
     databases.set(name, database);
@@ -38,7 +54,14 @@ function cluster() {
     if (text.includes('FROM pg_tables')) return [{ there: db!.tables }];
     if (text.includes('drizzle.__drizzle_migrations')) return [{ n: db!.migrations }];
     if (text.startsWith('DO $replica$')) return [];
-    if (text.includes('FROM pg_subscription s')) return [...db!.subs].map(([name, sub]) => ({ name, oid: 16500, enabled: sub.enabled, slot: sub.slot }));
+    if (text.includes('FROM pg_subscription s')) {
+      for (const sub of db!.subs.values()) {
+        if (!sub.dies) continue;
+        if (!sub.dies.looked) sub.dies.looked = true;
+        else [sub.enabled, sub.dies] = [false, undefined];
+      }
+      return [...db!.subs].map(([name, sub]) => ({ name, oid: sub.oid ?? 16500, enabled: sub.enabled, slot: sub.slot }));
+    }
     if (text.includes('pg_terminate_backend')) return [];
     if (text.startsWith('ALTER DATABASE')) {
       const [from, to] = [...text.matchAll(/"([^"]+)"/g)].map(found => found[1]!);
@@ -51,23 +74,38 @@ function cluster() {
     if (text === 'SHOW data_directory') return [{ data_directory: '/var/lib/postgresql/data' }];
     if (text.startsWith('CREATE SUBSCRIPTION')) {
       /* One that copies no data has every table ready at once. */
-      db!.subs.set(nameIn(text), { enabled: true, slot: nameIn(text), rels: text.includes('copy_data = false') ? ['r', 'r'] : ['i', 'i'] });
+      const sub: Sub = { enabled: true, slot: nameIn(text), rels: text.includes('copy_data = false') ? ['r', 'r'] : ['i', 'i'], oid: oids++ };
+      db!.subs.set(nameIn(text), sub);
+      if (leader.live) leader.slots.add(sub.slot!);
+      start(db!, sub);
       return [];
     }
     if (text.includes('FROM pg_subscription_rel')) {
-      const rels = [...db!.subs.values()][0]?.rels ?? [];
+      const sub = [...db!.subs.values()][0];
+      /* With the leader on, the first copy of every table is through once the subscription runs and nothing breaks it. */
+      if (leader.live && sub?.enabled && !sub.dies && !fails(db!)) {
+        sub.rels.forEach((state, table) => void (state !== 'r' && leader.slots.delete(syncSlot(sub, table))));
+        sub.rels = sub.rels.map(() => 'r');
+      }
+      const rels = sub?.rels ?? [];
       return [{ total: rels.length, ready: rels.filter(state => state === 'r').length }];
     }
     if (text.includes('pg_database_size')) return [{ size: db!.size }];
     if (text === 'SELECT at FROM net.pulse') return db!.pulse ? [{ at: db!.pulse }] : [];
     if (text.startsWith('ALTER SUBSCRIPTION')) {
       const sub = db!.subs.get(nameIn(text))!;
-      if (text.endsWith('ENABLE')) sub.enabled = true;
+      if (text.endsWith('ENABLE')) start(db!, sub);
       else if (text.endsWith('DISABLE')) sub.enabled = false;
       else if (text.endsWith('SET (slot_name = NONE)')) sub.slot = null;
       return [];
     }
     if (text.startsWith('DROP SUBSCRIPTION')) {
+      const sub = db!.subs.get(nameIn(text));
+      if (leader.live && sub?.slot) {
+        if (!leader.reachable) throw new Error('could not connect to the publisher: connection refused');
+        leader.slots.delete(sub.slot);
+        sub.rels.forEach((_, table) => leader.slots.delete(syncSlot(sub, table)));
+      }
       db!.subs.delete(nameIn(text));
       return [];
     }
@@ -91,7 +129,7 @@ function cluster() {
     },
     close: async () => undefined,
   });
-  return { databases, run, add, sqlOn, opened };
+  return { databases, run, add, sqlOn, opened, leader };
 }
 
 function stand(over: { diskFree?: number } = {}) {
@@ -114,7 +152,9 @@ function stand(over: { diskFree?: number } = {}) {
   const kept = () => JSON.parse(readFileSync(join(dir, COPY_STATE), 'utf8')) as Record<string, unknown>;
   /* The updater's part: the leader's schema loaded into the database the request names. */
   const loaded = (attempt = 1, database = 'hornhoof') => {
-    c.databases.get(database)!.tables = true;
+    const db = c.databases.get(database)!;
+    db.tables = true;
+    if (c.leader.live) db.migrations = c.leader.migrations;
     mkdirSync(join(controlDir, 'schema'), { recursive: true });
     writeFileSync(join(controlDir, 'schema', `${attempt}.done`), '');
     rmSync(join(controlDir, SCHEMA_FILE), { force: true });
@@ -376,9 +416,9 @@ describe('the maker of a copy', () => {
     const first = s.run.length;
     await maker.tick(ORDER);
     const given = s.run.slice(first).filter(line => /ALTER SUBSCRIPTION|DROP |CREATE DATABASE/.test(line));
+    /* Dropped with its slot, which Postgres drops on the leader with those of the tables' first copies. */
     expect(given).toEqual([
       `hornhoof: ALTER SUBSCRIPTION "${NAME}" DISABLE`,
-      `hornhoof: ALTER SUBSCRIPTION "${NAME}" SET (slot_name = NONE)`,
       `hornhoof: DROP SUBSCRIPTION "${NAME}"`,
       'postgres: DROP DATABASE "hornhoof" WITH (FORCE)',
       'postgres: CREATE DATABASE "hornhoof"',
@@ -407,7 +447,6 @@ describe('the maker of a copy', () => {
     const first = s.run.length;
     await s.maker().tick(ORDER);
     expect(s.run.slice(first).filter(line => /ALTER SUBSCRIPTION|DROP |CREATE DATABASE/.test(line))).toEqual([
-      `hornhoof: ALTER SUBSCRIPTION "${NAME}" SET (slot_name = NONE)`,
       `hornhoof: DROP SUBSCRIPTION "${NAME}"`,
       'postgres: DROP DATABASE "hornhoof" WITH (FORCE)',
       'postgres: CREATE DATABASE "hornhoof"',
@@ -599,7 +638,6 @@ describe('the maker of a copy', () => {
       `hornhoof: ALTER SUBSCRIPTION "${NAME}" DISABLE`,
       `hornhoof: ALTER SUBSCRIPTION "${NAME}" SET (slot_name = NONE)`,
       'hornhoof_next: ALTER SUBSCRIPTION "copy_99bb2233aabbccdd_7" DISABLE',
-      'hornhoof_next: ALTER SUBSCRIPTION "copy_99bb2233aabbccdd_7" SET (slot_name = NONE)',
       'hornhoof_next: DROP SUBSCRIPTION "copy_99bb2233aabbccdd_7"',
       'postgres: DROP DATABASE "hornhoof_next" WITH (FORCE)',
       'postgres: CREATE DATABASE "hornhoof_next"',
@@ -855,5 +893,88 @@ describe('the maker of a copy', () => {
     expect(s.kept()).toMatchObject({ swap: 'drop_db' });
     /* The new copy is in place and is read. */
     expect(maker.mode()).toBe('read');
+  });
+
+  /* The leader's side on, and the updater's part played whenever the maker asks: a run of seconds of virtual time, each
+     with one look of the leader's. What every second leaves on the leader is counted. */
+  async function run(s: ReturnType<typeof stand>, maker: CopyMaker, seconds: number, done: () => boolean = () => false) {
+    const seen = { most: 0, asked: [] as { attempt: number; at: number }[] };
+    const begun = s.state.now.getTime();
+    for (let second = 0; second < seconds && !done(); second++) {
+      const asked = s.request() as { attempt: number; database: string } | null;
+      if (asked) {
+        seen.asked.push({ attempt: asked.attempt, at: (s.state.now.getTime() - begun) / 60_000 });
+        s.loaded(asked.attempt, asked.database);
+      }
+      await maker.tick({ ...ORDER, migrations: s.leader.migrations });
+      seen.most = Math.max(seen.most, s.leader.slots.size);
+      s.later(1000);
+    }
+    return seen;
+  }
+
+  it("takes the leader's new schema before it follows, and leaves no slot of the attempt behind", async () => {
+    const s = stand();
+    s.leader.live = true;
+    s.leader.breaks = true;
+    const maker = s.maker();
+    await maker.tick(FIRST);
+    s.loaded();
+    await until(s, maker, 'sync');
+    /* The first copy runs: the leader keeps the subscription's slot and one for each table it copies. */
+    expect(s.leader.slots.size).toBe(3);
+    /* The leader is updated meanwhile, and its new migration adds a column this copy's tables lack: the update stopped
+       the subscription, and enabled it would stop again on the first row of that table. */
+    s.leader.breaks = false;
+    s.leader.migrations = 109;
+    s.databases.get('hornhoof')!.subs.get(NAME)!.enabled = false;
+    const from = s.run.length;
+    const seen = await run(s, maker, 3 * 3600, () => maker.report()?.state === 'ready');
+    /* Never started on the schema of before: given up at once, and made again with the leader's schema now. */
+    expect(s.run.slice(from).filter(line => line.startsWith('hornhoof: ALTER SUBSCRIPTION') && line.endsWith('ENABLE'))).toEqual([]);
+    expect(maker.report()).toMatchObject({ state: 'ready', name: NEXT });
+    expect(s.kept()).toMatchObject({ attempt: 2, phase: 'ready', migrations: 109 });
+    expect(seen.asked.map(({ attempt }) => attempt)).toEqual([2]);
+    expect(seen.asked[0]!.at).toBeLessThan(1);
+    expect(s.state.lines).toEqual(["This copy was being made with the company server's schema of before the server's update: it is made again with the schema the server has now."]);
+    /* The attempt given up left nothing on the leader: only the slot of the copy that follows is there. */
+    expect([...s.leader.slots]).toEqual([NEXT]);
+    expect(seen.most).toBe(3);
+  });
+
+  it('gives up an attempt whose subscription stops each time it starts, takes its slots with it and waits longer each time', async () => {
+    const s = stand();
+    s.leader.live = true;
+    s.leader.breaks = true;
+    const maker = s.maker();
+    await maker.tick(FIRST);
+    s.loaded();
+    await until(s, maker, 'sync');
+    /* Every start stops on its first error, which one look still finds it running before. */
+    const seen = await run(s, maker, 4 * 3600);
+    expect(seen.asked.map(({ attempt }) => attempt)).toEqual([2, 3, 4, 5]);
+    /* Ten minutes stopped, then the wait before the next request: ten minutes, twice as long each time after, two hours
+       at most. */
+    expect(seen.asked.map(({ at }) => Math.round(at))).toEqual([20, 50, 100, 190]);
+    /* An attempt given up takes its slot and those of its tables' first copies with it, so they never pile up. */
+    expect(seen.most).toBe(3);
+    expect(s.kept()).toMatchObject({ attempt: 6, phase: 'schema', given: 5 });
+    expect([...s.leader.slots]).toEqual([]);
+    /* A leader out of reach while one is given up: the subscription goes all the same, and its slots are the leader's
+       own sweep's to drop. */
+    s.leader.reachable = false;
+    await run(s, maker, 3 * 3600, () => s.kept().attempt === 7 && s.kept().phase === 'schema');
+    expect(s.kept()).toMatchObject({ attempt: 7, phase: 'schema' });
+    expect([...s.databases.get('hornhoof')!.subs.keys()]).toEqual([]);
+    expect(s.leader.slots.size).toBe(3);
+    expect(s.state.lines.filter(line => line.includes('Could not drop'))).toHaveLength(1);
+    s.leader.slots.clear();
+    /* Once applies hold again, the copy is made whole, and the count of attempts given up starts over. */
+    s.leader.reachable = true;
+    s.leader.breaks = false;
+    await run(s, maker, 3 * 3600, () => maker.report()?.state === 'ready');
+    expect(maker.report()).toMatchObject({ state: 'ready', name: 'copy_99bb2233aabbccdd_7' });
+    expect([...s.leader.slots]).toEqual(['copy_99bb2233aabbccdd_7']);
+    expect(s.kept()).toMatchObject({ given: 0 });
   });
 });
