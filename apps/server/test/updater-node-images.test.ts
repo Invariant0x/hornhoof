@@ -81,6 +81,13 @@ describe('updater', () => {
       expect(r.out).toContain('This server is from before nodes wait for their work');
     });
 
+    it("takes a 404 that is not a Hornhoof server's own for a server away, not for one from before", async () => {
+      const r = await runOnce(behind(), null, { ...running041, STUB_NODES: 'lost' });
+      expect(r.code).toBe(0);
+      expect(installs(r.calls)).toEqual([]);
+      expect(r.out).not.toContain('from before nodes wait');
+    });
+
     it.each(['down', 'refused'])('leaves them and their turns when the server is %s, and stays up', async state => {
       const r = await runOnce(behind(), null, { ...running041, STUB_NODES: state });
       expect(r.code).toBe(0);
