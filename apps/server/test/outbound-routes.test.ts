@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { companies, departments, jobs, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPolicies, subscriptions } from '../src/db/schema.js';
+import { companies, departments, jobs, outboundCatalogRevisions, outboundContacts, outboundMessages, outboundPolicies, subscriptions } from '../src/db/schema.js';
 import { unsubscribeToken } from '../src/modules/outbound/contacts.js';
 import { as, mcp } from './helpers.js';
 import { QUIET, world, type World } from './outbound-world.js';
@@ -469,12 +469,10 @@ describe('the page for stopping messages', () => {
 describe('what the orchestrator may do for a person', () => {
   const control = async (w: World, createdBy: string | null) => w.c.tools(w.c.orchestrator, createdBy);
 
-  it('nothing in a turn that answers nobody', async () => {
+  it('what the owner may, as the owner, in a turn that answers nobody', async () => {
     const w = await world();
     const tools = await control(w, null);
-    const told = (await tools.callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } })) as Tool;
-    expect(told.isError).toBe(true);
-    expect((await w.c.db.select().from(outboundChannels).where(eq(outboundChannels.id, w.channel.id)))[0]!.status).toBe('active');
+    expect(said(await tools.callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } }))).toMatchObject({ status: 'stopped' });
   });
 
   it('what that person may, as that person', async () => {
@@ -492,17 +490,15 @@ describe('what the orchestrator may do for a person', () => {
     expect((await w.c.db.select().from(outboundContacts).where(eq(outboundContacts.id, w.contact.id)))[0]!.doNotContact).toBe(true);
   });
 
-  it('nothing that person may not', async () => {
+  it('what the owner may, as the owner, for a person who may not', async () => {
     const w = await world();
-    const told = (await (await control(w, w.c.ids.sam)).callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } })) as Tool;
-    expect(told.isError).toBe(true);
-    expect((await w.c.db.select().from(outboundChannels).where(eq(outboundChannels.id, w.channel.id)))[0]!.status).toBe('active');
+    expect(said(await (await control(w, w.c.ids.sam)).callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } }))).toMatchObject({ status: 'stopped' });
   });
 
-  it('has no tool that publishes, adds an address or reads one', async () => {
+  it('has no tool that publishes, adds a contact\'s address or reads one, and connects an account only with settings the company has', async () => {
     const w = await world();
     const names = (await (await control(w, null)).listTools()).tools.map(t => t.name).filter(n => n.startsWith('outbound_')).sort();
-    expect(names).toEqual(['outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit']);
+    expect(names).toEqual(['outbound_account_add', 'outbound_account_bind', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit']);
   });
 });
 

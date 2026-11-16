@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, companies, jobs, machines, nodeCodes, nodeConnections, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
+import { idOnly } from '../src/db/selections.js';
 import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { BUILTIN } from './builtin.js';
@@ -38,7 +39,7 @@ describe('POST /api/nodes/join', () => {
     const identity = { kind: 'node' as const, nodeId: made.nodeId, keyHash: hashToken(made.key) };
     await connectNode(url, made.key);
     let oldLink: string | undefined;
-    await until(async () => { oldLink = (await db.select({ id: nodeConnections.id }).from(nodeConnections).where(eq(nodeConnections.nodeId, made.nodeId)))[0]?.id; return oldLink !== undefined; });
+    await until(async () => { oldLink = (await db.select(idOnly(nodeConnections)).from(nodeConnections).where(eq(nodeConnections.nodeId, made.nodeId)))[0]?.id; return oldLink !== undefined; });
     const current = await connectNode(url, made.key);
     current.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
     await until(async () => (await db.select().from(nodes).where(eq(nodes.id, made.nodeId)))[0]?.status === 'ready');

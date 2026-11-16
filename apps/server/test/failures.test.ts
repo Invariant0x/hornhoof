@@ -119,7 +119,7 @@ describe('named turn failures', () => {
     await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.id, retry.id));
     await pump(c.ctx, orchestrator!.id);
     expect(await c.jobOf(retry.id)).toMatchObject({ status: 'running' });
-    expect(await decisionPrincipal(c.db, retry.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, retry.id)).toEqual({ personId: c.sub.ownerPersonId, sourceSeq: null });
   });
 
   it.each(['overloaded', 'crash'] as const)('keeps the CEO as the principal of a %s orchestrator retry', async kind => {

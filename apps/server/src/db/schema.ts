@@ -563,6 +563,9 @@ export const subscriptions = pgTable(
     budget: integer('budget'),
     /* The models its node says it can run; null until a node reports them. An API connection's are the ones it was given. */
     models: jsonb('models').$type<ModelOption[]>(),
+    /* The plans its employees go on to, in this order, when it reaches its limit or the share set for tasks, each with the
+       model to run there or none for the one their role asks for. Empty: any plan of the company that may serve them. */
+    fallbacks: jsonb('fallbacks').$type<PlanFallback[]>().notNull().default([]),
     /* Where a compatible API answers, which a person named; null for every other subscription, whose address is known. */
     baseUrl: text('base_url'),
     /* The protocol an API connection's program talks to it in: OpenRouter's choice, a compatible API's own. */
@@ -576,6 +579,9 @@ export const subscriptions = pgTable(
   },
   t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
 );
+
+/* One plan a plan's employees go on to at its limit: model null runs the one their role asks for there. */
+export type PlanFallback = { subscription: string; model: string | null };
 
 export const NODE_STATUSES = ['needs_login', 'needs_setup', 'ready'] as const;
 export type NodeStatus = (typeof NODE_STATUSES)[number];
@@ -607,14 +613,15 @@ export const nodes = pgTable(
 
 /* Each connection of a node, from when it came to how it ended; a node that stays connected has an open one. How long the
    node was away is the time to its next one. A connection's end and cause come together. report: what the node itself said
-   of this drop once it was back; a node from before says nothing. */
+   of this drop once it was back; a node from before says nothing. nodeId: none for the machine's built-in node, which has
+   no node of its own (#1060). */
 export const nodeConnections = pgTable(
   'node_connections',
   {
     id: id(),
     companyId: companyId(),
     machineId: uuid('machine_id').notNull().references(() => machines.id),
-    nodeId: uuid('node_id').notNull().references(() => nodes.id, { onDelete: 'cascade' }),
+    nodeId: uuid('node_id').references(() => nodes.id, { onDelete: 'cascade' }),
     connectedAt: timestamp('connected_at', { withTimezone: true }).notNull(),
     disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
     cause: text('cause', { enum: CONNECTION_ENDS }),
@@ -699,6 +706,18 @@ export const agents = pgTable(
 );
 
 export type AgentKind = (typeof agents.$inferSelect)['kind'];
+
+/* An employee Hornhoof put on a fallback plan while its own was at its limit: the plan, model and effort it goes back to
+   between turns once that limit starts over, and the fallback it went to. A person who moves it by hand ends it. */
+export const agentFallbacks = pgTable('agent_fallbacks', {
+  agentId: uuid('agent_id').primaryKey().references(() => agents.id),
+  companyId: companyId(),
+  homeSubscriptionId: uuid('home_subscription_id').notNull().references(() => subscriptions.id),
+  homeModel: text('home_model').notNull(),
+  homeEffort: text('home_effort'),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  createdAt: createdAt(),
+});
 
 /* base keeps its stored key for compatibility; it is the assignment, separate from role identity. */
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
@@ -1426,6 +1445,8 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
   version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
+  /* The time limit of a part the run asked for, when it asked for one. */
+  minutes?: number;
   requestId: string | null; nodeId: string | null; builtin: boolean;
   /* The machine whose built-in node was asked, when one was; a request from before machines had theirs names none,
      and was this server's own. */
@@ -1611,7 +1632,7 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
-    /* Proved on the repository's main branch or the turn's, the only results a release takes. */
+    /* Proved on the repository's main branch or the turn's. A release takes these, and those proved on a commit the main branch holds now. */
     mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },

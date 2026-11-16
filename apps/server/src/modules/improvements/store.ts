@@ -3,6 +3,7 @@ import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, FEEDBACK_KINDS, improvements, IMPROVEMENT_SCOPES, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { fingerprintOfReport } from '../feedback/inbox.js';
@@ -49,7 +50,7 @@ export async function listImprovements(ctx: Pick<Ctx, 'db'> & Fate, companyId: s
   const active = statuses.filter(s => ACTIVE.includes(s));
   const closed = statuses.filter(s => !ACTIVE.includes(s));
   const ofCompany = eq(improvements.companyId, companyId);
-  const latestClosed = ctx.db.select({ id: improvements.id }).from(improvements).where(and(ofCompany, inArray(improvements.status, closed))).orderBy(desc(improvements.updatedAt)).limit(CLOSED_LISTED);
+  const latestClosed = ctx.db.select(idOnly(improvements)).from(improvements).where(and(ofCompany, inArray(improvements.status, closed))).orderBy(desc(improvements.updatedAt)).limit(CLOSED_LISTED);
   /* One read, so one that changes meanwhile is listed once. */
   const rows = await ctx.db
     .select({ i: improvements, agent: { id: agents.id, name: agents.name }, department: departments, decidedBy: people.name })

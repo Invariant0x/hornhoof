@@ -1,8 +1,12 @@
-import { and, asc, count, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
+import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
+import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agentInbox, agents, companies, departments, jobs, type InboxMode, type LetterKind } from '../../db/schema.js';
+import { countOnly, idOnly } from '../../db/selections.js';
+import type { MessageParty } from '../events/parties.js';
+import { appendEvent } from '../events/store.js';
 
 type Reader = Pick<Db, 'select'>;
 type Writer = Pick<Db, 'update' | 'insert' | 'select' | 'delete'>;
@@ -37,6 +41,7 @@ export type MailMessage = {
   notification?: { source: string };
   /* Who did what a notice of Hornhoof tells, as the notice names them. */
   actor?: { kind: 'person' | 'agent' | 'hornhoof'; id: string | null; name: string };
+  computerAccess?: { machineId: string; inboxId?: string };
 };
 export type MailTurn = { companyId: string; agentId: string; taskId?: string; repeated?: unknown; message?: MailMessage };
 
@@ -71,7 +76,7 @@ const HORNHOOF: Sender = { senderKind: 'hornhoof', senderAgentId: null, senderPe
 async function senderOf(db: Reader, companyId: string, m: MailMessage): Promise<Sender> {
   if (m.from === 'agent' && m.by) return { senderKind: 'agent', senderAgentId: m.by, senderPersonId: null, senderName: m.name ?? 'Employee' };
   if (m.from === 'orchestrator') {
-    const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
+    const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
     return { senderKind: 'agent', senderAgentId: orchestrator?.id ?? null, senderPersonId: null, senderName: 'Orchestrator' };
   }
   const actor = m.actor;
@@ -81,10 +86,10 @@ async function senderOf(db: Reader, companyId: string, m: MailMessage): Promise<
 }
 
 /* Keeps the letter in the employee's inbox, with the turn it went into or waits for. */
-export async function keepMail(db: Writer, t: MailTurn & { message: MailMessage }, jobId: string, status: InboxStatus): Promise<void> {
+export async function keepMail(db: Writer, t: MailTurn & { message: MailMessage }, jobId: string, status: InboxStatus): Promise<string> {
   const m = t.message;
   const task = m.task ?? null;
-  await db.insert(agentInbox).values({
+  const [row] = await db.insert(agentInbox).values({
     companyId: t.companyId,
     agentId: t.agentId,
     ...(await senderOf(db, t.companyId, m)),
@@ -97,7 +102,8 @@ export async function keepMail(db: Writer, t: MailTurn & { message: MailMessage 
     status,
     readAt: status === 'unread' ? null : new Date(),
     createdAt: new Date(),
-  });
+  }).returning({ id: agentInbox.id });
+  return row!.id;
 }
 
 /* The screens of the employee's place fetch its inbox again; the message says nothing of what is in it. */
@@ -117,6 +123,14 @@ export async function mailWentOut(db: Writer, agentId: string, jobIds: string[])
 export async function dropMail(db: Writer, agentId: string, jobId: string): Promise<number> {
   const dropped = await db.delete(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.jobId, jobId), eq(agentInbox.status, 'unread'))).returning({ id: agentInbox.id });
   return dropped.length;
+}
+
+/* Attaches the unread letters that go out with this inbox turn before dispatch, detaching any unshown ones. */
+export async function claimMail(db: Writer, agentId: string, mail: readonly Pick<InboxRow, 'id'>[], job: { id: string; inboxWake: boolean }): Promise<void> {
+  if (!job.inboxWake || !mail.length) return;
+  const ids = mail.map(m => m.id);
+  await db.update(agentInbox).set({ jobId: null }).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.jobId, job.id), notInArray(agentInbox.id, ids)));
+  await db.update(agentInbox).set({ jobId: job.id }).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids), eq(agentInbox.status, 'unread')));
 }
 
 /* The turn that took the inbox went out with these letters in its summary: read, as letters of that turn. */
@@ -197,14 +211,20 @@ export async function lettersPage(db: Reader, agentId: string, { before, limit }
 }
 
 export async function letterTotal(db: Reader, agentId: string): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(agentInbox).where(eq(agentInbox.agentId, agentId));
+  const [row] = await db.select(countOnly()).from(agentInbox).where(eq(agentInbox.agentId, agentId));
   return row?.n ?? 0;
 }
 
 /* How many of the employee's letters nobody marked yet. */
 export async function unreadCount(db: Reader, agentId: string): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.status, 'unread')));
+  const [row] = await db.select(countOnly()).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.status, 'unread')));
   return row?.n ?? 0;
+}
+
+async function detachQueuedWake(db: Pick<Db, 'select' | 'update'>, agentId: string, picked: SQL | undefined): Promise<void> {
+  const queued = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true)));
+  if (!queued.length) return;
+  await db.update(agentInbox).set({ jobId: null }).where(and(picked, eq(agentInbox.status, 'unread'), inArray(agentInbox.jobId, queued.map(j => j.id))));
 }
 
 /* A person marks the employee's own letters read, these or all of them; a letter it dealt with stays so, and any other id
@@ -212,18 +232,68 @@ export async function unreadCount(db: Reader, agentId: string): Promise<number> 
 export async function readByPerson(db: Pick<Db, 'select' | 'update'>, agentId: string, which: string[] | 'all'): Promise<number | null> {
   const mine = eq(agentInbox.agentId, agentId);
   if (which !== 'all') {
-    const found = await db.select({ id: agentInbox.id }).from(agentInbox).where(and(mine, inArray(agentInbox.id, which)));
+    const found = await db.select(idOnly(agentInbox)).from(agentInbox).where(and(mine, inArray(agentInbox.id, which)));
     if (found.length !== new Set(which).size) return null;
   }
   const picked = which === 'all' ? mine : and(mine, inArray(agentInbox.id, which));
+  await detachQueuedWake(db, agentId, picked);
   await db.update(agentInbox).set({ status: 'read', readAt: new Date() }).where(and(picked, eq(agentInbox.status, 'unread')));
   return unreadCount(db, agentId);
 }
 
-/* Marks the employee's own letters; any other id is refused whole. */
-export async function markMail(db: Pick<Db, 'select' | 'update'>, agentId: string, ids: string[], status: 'read' | 'done'): Promise<number | null> {
-  const mine = await db.select({ id: agentInbox.id }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids)));
-  if (mine.length !== new Set(ids).size) return null;
-  await db.update(agentInbox).set({ status, readAt: new Date() }).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids)));
-  return mine.length;
+/* Which of the employee's letters a mark takes: these ids, and of them, or of all, those of this kind, from this source,
+   on this task, or that came before this moment. */
+export type LetterPick = { ids?: string[]; kind?: LetterKind; source?: string; task?: number; receivedBefore?: Date };
+
+/* Whether the pick names letters at all: an id, a kind, a source, a task or a moment. */
+export const picksLetters = (pick: LetterPick): boolean =>
+  Boolean(pick.ids?.length) || pick.kind !== undefined || pick.source !== undefined || pick.task !== undefined || pick.receivedBefore !== undefined;
+
+function pickedBy(agentId: string, pick: LetterPick): SQL {
+  return and(
+    eq(agentInbox.agentId, agentId),
+    pick.ids ? inArray(agentInbox.id, pick.ids) : undefined,
+    pick.kind ? eq(agentInbox.kind, pick.kind) : undefined,
+    pick.source !== undefined ? eq(agentInbox.source, pick.source) : undefined,
+    pick.task !== undefined ? eq(agentInbox.taskNumber, pick.task) : undefined,
+    pick.receivedBefore ? lt(agentInbox.createdAt, pick.receivedBefore) : undefined,
+  )!;
+}
+
+/* Marks the employee's letters the pick takes; read never takes back a letter that was dealt with. Any id not of its
+   inbox refuses the mark whole. How many letters it changed, or null. */
+export async function markMail(db: Pick<Db, 'select' | 'update'>, agentId: string, pick: LetterPick, status: 'read' | 'done'): Promise<number | null> {
+  if (pick.ids) {
+    const mine = await db.select(idOnly(agentInbox)).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, pick.ids)));
+    if (mine.length !== new Set(pick.ids).size) return null;
+  }
+  const picked = and(pickedBy(agentId, pick), inArray(agentInbox.status, status === 'read' ? ['unread'] : ['unread', 'read']));
+  await detachQueuedWake(db, agentId, picked);
+  const changed = await db.update(agentInbox).set({ status, readAt: new Date() }).where(picked).returning({ id: agentInbox.id });
+  return changed.length;
+}
+
+/* Who marked another's letters and why, as the employee's log names them. */
+export type MarkedBy = { party: MessageParty & { kind: 'agent' | 'person'; id: string }; reason: string };
+
+const letters = (n: number) => `${n} ${n === 1 ? 'letter' : 'letters'}`;
+const MARKED_RU = { read: 'прочитано', done: 'разобрано' } as const;
+
+/* Letters someone else marked go in the employee's log, so it sees who took what away and why: never a word to its
+   program, a turn or a letter of its own. The reason is cleaned of secrets. */
+export async function logMarked(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, agent: { id: string; companyId: string }, by: MarkedBy, status: 'read' | 'done', count: number): Promise<void> {
+  if (count === 0) return;
+  const reason = cleanDiagnostic(by.reason);
+  const { kind, id, name } = by.party;
+  await appendEvent(ctx, {
+    companyId: agent.companyId,
+    agentId: agent.id,
+    kind: 'message',
+    data: {
+      text: `${name} marked ${letters(count)} ${status} in this inbox. Why: ${reason}`,
+      notification: { source: 'inbox_marked', tasks: [], detail: { en: `${status}: ${count}`, ru: `${MARKED_RU[status]}: ${count}` } },
+      actor: by.party,
+      inboxMarked: { by: { kind, id, name }, status, count, reason },
+    },
+  });
 }

@@ -100,6 +100,19 @@ describe("the company's key in Settings, under Integrations", () => {
     expect(calls.map(c => `${c.method} ${c.path}`)).toContain('DELETE /api/repo-host');
   });
 
+  it('makes Save a key the main button of a record with no key, and Remove key the pink one, last of its row', async () => {
+    const { part } = await settings({ 'GET /api/repo-host': [200, { host: null }] });
+    const first = await within(part).findByRole('button', { name: 'Save a key' });
+    expect(first).toHaveClass('btn');
+    expect(first).not.toHaveClass('ghost');
+    cleanup();
+    const again = await settings({ 'GET /api/repo-host': [200, { host: KEY }] });
+    const remove = await within(again.part).findByRole('button', { name: 'Remove key' });
+    expect(remove).toHaveClass('btn', 'ghost', 'danger');
+    expect(remove.parentElement!.lastElementChild).toBe(remove);
+    expect(within(again.part).getByRole('button', { name: 'Change key' })).not.toHaveClass('danger');
+  });
+
   it("says the server's refusal in plain words", async () => {
     const user = userEvent.setup();
     const { part } = await settings({

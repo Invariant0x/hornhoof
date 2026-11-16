@@ -6,6 +6,7 @@ import { About } from '../src/screens/About';
 import { Feedback } from '../src/screens/Feedback';
 import { Shell } from '../src/screens/Shell';
 import { ME, mockApi, ORG } from './api-mock';
+import { decl } from './css';
 
 /* A person writes a bug, an improvement or an idea to Hornhoof's developers inside About: they see exactly what goes,
    with the technical data beside it, and nothing leaves until they press Send. */
@@ -38,10 +39,13 @@ function page(routes: Record<string, unknown> = {}, language = 'en') {
   return { user: userEvent.setup(), calls };
 }
 
-async function openFeedback(user: ReturnType<typeof userEvent.setup>, account = 'Account', item = 'About', title = 'About Hornhoof') {
+/* About, with its feedback opened from its button. */
+async function openFeedback(user: ReturnType<typeof userEvent.setup>, account = 'Account', item = 'About', title = 'About Hornhoof', write = 'Write to developers') {
   await user.click(screen.getByRole('button', { name: account }));
   await user.click(screen.getByRole('button', { name: item }));
-  return screen.findByRole('dialog', { name: title });
+  const box = await screen.findByRole('dialog', { name: title });
+  await user.click(within(box).getByRole('button', { name: write }));
+  return box;
 }
 
 const sent = (calls: ReturnType<typeof mockApi>) => calls.filter(c => c.method === 'POST' && c.path === '/api/feedback');
@@ -82,8 +86,11 @@ describe('writing to Hornhoof developers inside About', () => {
     await user.click(within(box).getByRole('button', { name: 'Send' }));
     expect(await within(box).findByText('Sent. Thank you, Hornhoof developers will read it.')).toBeInTheDocument();
     expect(sent(calls).map(c => c.body)).toEqual([{ kind: 'bug', title: 'Terminal froze for ivan@acme.example', text: 'In /home/alex/shop the key ghp_abc123 showed', digest: 'd'.repeat(64) }]);
+    /* Done closes the feedback back to its button; About stays open. */
     await user.click(within(box).getByRole('button', { name: 'Done' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'About Hornhoof' })).toBe(box);
+    expect(within(box).getByRole('button', { name: 'Write to developers' })).toHaveFocus();
+    expect(within(box).queryByText('Sent. Thank you, Hornhoof developers will read it.')).not.toBeInTheDocument();
   });
 
   it('goes back with what was written kept, and needs a title before it shows anything', async () => {
@@ -123,19 +130,54 @@ describe('writing to Hornhoof developers inside About', () => {
     expect(await within(box).findByText('Added to the inbox.')).toBeInTheDocument();
   });
 
-  it('stands in About under its facts, with no Feedback item in the account menu and no window of its own', async () => {
+  it('stands in About after its author and a line, with no Feedback item in the account menu and no window of its own', async () => {
     const { user } = page();
     await user.click(screen.getByRole('button', { name: 'Account' }));
     expect(screen.queryByRole('button', { name: 'Feedback' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'About' }));
     const about = await screen.findByRole('dialog', { name: 'About Hornhoof' });
-    const part = within(about).getByRole('region', { name: 'Write to Hornhoof developers' });
-    expect(part.previousElementSibling).toHaveClass('facts');
+    const part = within(about).getByRole('region', { name: 'Feedback' });
+    expect(part.previousElementSibling).toHaveClass('about-sep');
+    await user.click(within(part).getByRole('button', { name: 'Write to developers' }));
     expect(within(part).getByRole('button', { name: 'Next' })).toBeInTheDocument();
-    /* About has its own close button, so the form needs no Cancel. */
-    expect(within(part).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(within(part).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     expect(location.pathname).toBe('/about');
+  });
+
+  it('marks an empty title invalid with its note tied to the field, keeps the draft, and clears the problem as soon as a title is typed', async () => {
+    const { user, calls } = page();
+    const box = await openFeedback(user);
+    const title = within(box).getByLabelText('Title');
+    const description = within(box).getByLabelText('What happened, or what you would like');
+    expect(title).not.toHaveAttribute('aria-invalid');
+    expect(title).not.toHaveAttribute('aria-describedby');
+
+    await user.type(description, 'The map flickers when scrolling');
+    await user.click(within(box).getByRole('button', { name: 'Next' }));
+    const note = within(box).getByText('Write a title.');
+    expect(note).toHaveClass('bad');
+    expect(note.id).not.toBe('');
+    expect(title).toHaveAttribute('aria-invalid', 'true');
+    expect(title).toHaveAttribute('aria-describedby', note.id);
+    expect(description).toHaveValue('The map flickers when scrolling');
+    expect(description).not.toHaveAttribute('aria-invalid');
+    expect(calls.filter(c => c.path === '/api/feedback/preview')).toEqual([]);
+
+    await user.type(title, '   ');
+    expect(within(box).getByText('Write a title.')).toBeInTheDocument();
+    expect(title).toHaveAttribute('aria-invalid', 'true');
+
+    await user.clear(title);
+    await user.type(title, 'A');
+    expect(within(box).queryByText('Write a title.')).not.toBeInTheDocument();
+    expect(title).not.toHaveAttribute('aria-invalid');
+    expect(title).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('gives the title field of the form 44 px, as every field of the reference', () => {
+    expect(decl('.fb-form .field input', 'height')).toBe('44px');
+    expect(decl('.field :is(input, select, textarea)[aria-invalid="true"]', 'border-color')).toBe('var(--pink)');
   });
 
   it('keeps the focus where the person types in About when the screen behind it is drawn again', async () => {
@@ -143,6 +185,7 @@ describe('writing to Hornhoof developers inside About', () => {
     mockApi({ 'GET /api/updates/current': [200, { version: '0.18.11', commit: 'abc1234' }] });
     const { rerender } = render(<LanguageProvider><About inbox={false} onClose={() => {}} /></LanguageProvider>);
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Write to developers' }));
     await user.type(screen.getByLabelText('Title'), 'Terminal');
     rerender(<LanguageProvider><About inbox={false} onClose={() => {}} /></LanguageProvider>);
     await user.keyboard(' froze');
@@ -163,8 +206,8 @@ describe('writing to Hornhoof developers inside About', () => {
 
   it('speaks Russian', async () => {
     const { user } = page({}, 'ru');
-    const box = await openFeedback(user, 'Аккаунт', 'О программе', 'О программе Hornhoof');
-    expect(within(box).getByRole('region', { name: 'Написать разработчикам Hornhoof' })).toBeInTheDocument();
+    const box = await openFeedback(user, 'Аккаунт', 'О программе', 'О программе Hornhoof', 'Написать разработчикам');
+    expect(within(box).getByRole('region', { name: 'Обратная связь' })).toBeInTheDocument();
     expect(within(within(box).getByRole('group', { name: 'Что это' })).getAllByRole('button').map(b => b.textContent)).toEqual(['Ошибка', 'Улучшение', 'Идея']);
     await user.type(within(box).getByLabelText('Заголовок'), 'Терминал завис');
     await user.click(within(box).getByRole('button', { name: 'Далее' }));

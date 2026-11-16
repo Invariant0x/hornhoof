@@ -4,8 +4,7 @@ import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { checkerFor, populateSecurityOwner } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
-import { changeRoute, routeOf, type Route } from './echelons-store.js';
-import { RepoPath } from './review-schema.js';
+import { changeRoute, checkedScopePaths, routeOf, type Route } from './echelons-store.js';
 import { CLOSED, note, published, refuse, type Task, type TaskChange, type Tx, type Wake } from './engine.js';
 import { turnkeyTeamOf, turnkeyWork } from './turnkey.js';
 import { openTurnOf, workOfOpenTurn } from './turn-department.js';
@@ -28,11 +27,7 @@ export function withCleanup(route: Route, enabled: boolean): Route['state'] {
 
 type RouteChange = { state: Route['state']; set: Partial<Task>; paths: string[] };
 
-function changedPaths(route: Route, change: TaskChange): string[] {
-  const paths = change.paths ?? route.paths;
-  if (paths.some(path => !RepoPath.safeParse(path).success)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');
-  return paths;
-}
+const changedPaths = (route: Route, change: TaskChange): string[] => checkedScopePaths(change.paths ?? route.paths);
 
 /* Work with no echelons is done by its holder alone and takes no stage, Cleanup or checker. It stays with a member of a
    turnkey team, as the team of who does a task is what takes it past the echelons. */

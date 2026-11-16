@@ -60,7 +60,8 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(logName(machine)) }, me.id);
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
     if (orchestrator && asked) {
-      const message = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine.name), { actor: { personId: me.id } });
+      const note = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine.name), { actor: { personId: me.id } });
+      const message = { ...note, computerAccess: { machineId: machine.id } };
       await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt: message.text, createdBy: me.id, answersCeo: true, message }).catch(err => {
         if (!(err instanceof NoSubscription)) throw err;
       });

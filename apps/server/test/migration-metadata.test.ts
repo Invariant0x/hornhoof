@@ -1,10 +1,10 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
+import { freshPglite } from './helpers-db.js';
 
 const folder = fileURLToPath(new URL('../drizzle', import.meta.url));
 type JournalEntry = { idx: number; when: number; tag: string };
@@ -64,7 +64,7 @@ describe('merged migration metadata', () => {
   });
 
   it('describes the columns and regular indexes of a freshly migrated database', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     await migrate(drizzle(client), { migrationsFolder: folder });
     const latest = await latestSnapshot();

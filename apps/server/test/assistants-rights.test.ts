@@ -49,6 +49,15 @@ describe("an assistant's key", () => {
     expect((await c.app.inject({ method: 'POST', url: '/api/people/invite', ...bearer(key), payload: { name: 'X', email: 'x@acme.com', access: { whole: true } } })).statusCode).toBe(401);
   });
 
+  it("does not open the CEO's marks of an employee's letters", async () => {
+    const c = await aclCompany();
+    const { key } = await assistantOf(c, 'ceo');
+    const res = await c.app.inject({ method: 'POST', url: `/api/agents/${c.crew.owned.id}/inbox/mark`, ...bearer(key), payload: { status: 'done', receivedBefore: '2100-01-01T00:00:00.000Z', reason: 'Stale.' } });
+    expect(res.statusCode).toBe(401);
+    /* The same marks open to the CEO's own session. */
+    expect((await c.app.inject({ method: 'POST', url: `/api/agents/${c.crew.owned.id}/inbox/mark`, ...as(c.tokens.ceo), payload: { status: 'done', receivedBefore: '2100-01-01T00:00:00.000Z', reason: 'Stale.' } })).statusCode).toBe(200);
+  });
+
   it("names the owner's Telegram as it is now, so a program can tell its owner from another person", async () => {
     const c = await aclCompany();
     const { key } = await assistantOf(c, 'olga');

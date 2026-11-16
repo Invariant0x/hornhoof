@@ -326,13 +326,14 @@ describe('improvements', () => {
     const settings = screen.getByRole('button', { name: 'Settings' });
     const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
-    /* Improvements comes first: the themes, the languages and Outbound are no longer in the menu. */
+    /* Top to bottom as Design's reference orders them: Settings, the pages of the whole company, then About and Log out.
+       The themes, the languages and Outbound are no longer in the menu. */
+    await user.tab();
+    expect(settings).toHaveFocus();
     await user.tab();
     expect(improvements).toHaveFocus();
     await user.tab();
     expect(versions).toHaveFocus();
-    await user.tab();
-    expect(settings).toHaveFocus();
     await user.tab();
     expect(about).toHaveFocus();
     await user.tab();
@@ -343,6 +344,8 @@ describe('improvements', () => {
     await user.keyboard('{Enter}');
     await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
     await user.tab();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Improvements, 1 to decide' })).toHaveFocus();
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('heading', { level: 1, name: 'Improvements' })).toBeInTheDocument();
   });

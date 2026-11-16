@@ -85,12 +85,13 @@ async function follower(c: Company, over: Partial<FollowKeeperOptions> = {}, bef
     allowed: async () => [LOOPBACK],
     ports: { door: 0, peer: 0, peerApp: 0 },
     everyMs: 20,
+    peerClientFor: () => SLEEPER,
+    ...over,
     worker: {
       ports: { front: 0 }, visitClientFor: () => SLEEPER, lookEveryMs: 10, viewEveryMs: 30, reportEveryMs: 30, renewAfterMs: 50, renewEveryMs: 100, holdMs: 400, holdEveryMs: 10, noLeaderPageMs: 50,
       certificate: { retryMs: 20 }, sessions: { everyMs: 10, helloMs: 10, connectMs: 1000, directEveryMs: 50, pingMs: 60_000 }, computer: { openEveryMs: 10, closedEveryMs: 20 },
+      ...over.worker,
     },
-    peerClientFor: () => SLEEPER,
-    ...over,
   });
   const ports = await keeper.start();
   let stopped = false;
@@ -220,6 +221,19 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect(JSON.parse(readFileSync(join(f.config.controlDir, 'schema.json'), 'utf8'))).toMatchObject({ attempt: 1, database: 'hornhoof', port: 7432 });
     for (const line of f.lines) expect(line).not.toContain(TEST_SECRET);
   });
+  it('measures nothing of its disk while it makes its copy', async () => {
+    /* Pouring the copy in is what keeps the disk busy then: a probe would only measure that. */
+    const c = await company();
+    const f = await follower(c, { worker: { sampleMs: 1 } });
+    await until(async () => (await c.rowOf(f.machine)).copyState === 'making');
+    for (let reports = 0; reports < 3; reports++) {
+      const { reportAt } = await c.rowOf(f.machine);
+      await until(async () => (await c.rowOf(f.machine)).reportAt!.getTime() > reportAt!.getTime());
+    }
+    expect(existsSync(join(f.config.dir, 'fsync-probe'))).toBe(false);
+    expect(await c.rowOf(f.machine)).toMatchObject({ copyState: 'making', fsyncP99Ms: null });
+  });
+
   it('answers the machine that leads about a planned switch, and ends once it took the go', async () => {
     const dir = folder();
     const c = await company({ dir });

@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
 import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorCases, subscriptions, tasks } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
@@ -644,7 +645,7 @@ it('keeps queue, start and deadline apart for one operator of two nodes: no acti
   expect(await c.jobOf(children[0]!.id)).toMatchObject({ nodeId: a.identity.nodeId, sessionId: 'session-a' });
   expect(await c.jobOf(others[0]!.id)).toMatchObject({ nodeId: b.node.id, sessionId: 'session-b' });
   for (const side of [a, b]) {
-    const running = await c.db.select({ id: jobs.id }).from(jobs).where(sql`${jobs.agentId} = ${side.agent.id} and ${jobs.status} = 'running'`);
+    const running = await c.db.select(idOnly(jobs)).from(jobs).where(sql`${jobs.agentId} = ${side.agent.id} and ${jobs.status} = 'running'`);
     expect(running.length).toBeLessThanOrEqual(1);
   }
 });

@@ -86,6 +86,21 @@ describe('Measures', () => {
     expect(Math.abs(uptimeS - Math.floor(uptime()))).toBeLessThanOrEqual(2);
   });
 
+  it('takes no sample while the machine makes its copy of the company\'s data', async () => {
+    /* Pouring the copy in slows the disk down by itself: what the disk does then says nothing of the disk. */
+    const dir = tempFolder();
+    let copying = true;
+    const measures = new Measures({ dir, copying: () => copying });
+    running.push(measures);
+    for (let taken = 0; taken < 10; taken++) await measures.sample();
+    expect(measures.snapshot().fsyncP99Ms).toBeNull();
+    expect(existsSync(join(dir, PROBE_FILE))).toBe(false);
+    /* Once the copy is made, the samples count again. */
+    copying = false;
+    for (let taken = 0; taken < 10; taken++) await measures.sample();
+    expect(measures.snapshot().fsyncP99Ms).toBeGreaterThanOrEqual(0);
+  });
+
   it('writes 4096 new random bytes for each sample', async () => {
     const dir = tempFolder();
     const measures = measuresOn(dir);

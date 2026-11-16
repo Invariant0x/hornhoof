@@ -8,13 +8,17 @@ import { BASE } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
 
 /* What a repository says in these tests: where each branch and tag is, and which commit holds which. A commit holds itself
-   and whatever holds names for it; the commits between two are what between names. */
+   and whatever holds names for it; the commits between two are what between names. made lists the branches the server made,
+   refusing says why the repository takes no new branch, and each push to make one waits at hold first. */
 export type Repository = {
   heads: Record<string, string>;
   tags: Record<string, string>;
   holds: Record<string, string[]>;
   between: Record<string, { sha: string; parents: string[] }[]>;
   cut: Set<string>;
+  made?: { branch: string; commit: string }[];
+  refusing?: string;
+  hold?: () => Promise<void>;
 };
 
 const contains = (repo: Repository, head: string, base: string): boolean => head === base || (repo.holds[head] ?? []).includes(base);
@@ -36,6 +40,16 @@ export function serve(ctx: Ctx, repo: Repository): void {
   };
   ctx.readMerged = async (_at, want) => contains(repo, want.base, want.head);
   ctx.readTags = async () => ({ tags: { ...repo.tags } });
+  ctx.readBranches = async () => ({ heads: { ...repo.heads } });
+  /* As a host takes a push with no old value: only where there is no such branch yet, one push at a time. */
+  ctx.createBranch = async (at, branch, commit) => {
+    await repo.hold?.();
+    if (repo.refusing) return { problem: repo.refusing };
+    if (repo.heads[branch]) return { problem: `Hornhoof could not create the branch ${branch} in ${at.url}: it has that branch already.` };
+    repo.heads[branch] = commit;
+    (repo.made ??= []).push({ branch, commit });
+    return { made: true };
+  };
 }
 
 /* A department in turn 1..N, its open turn, and a checked candidate of one of its tasks ready for its head, the task in no

@@ -7,6 +7,7 @@ import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import type { StageRoute } from '../templates/load.js';
 import { refuse, type Task, type Tx } from './engine.js';
+import { validScopePaths } from './review-schema.js';
 import { throughEchelons } from './turnkey.js';
 import { NO_DEPARTMENT_CHECKER, populateSecurityOwner, uncheckable } from './echelons-assign.js';
 import { AUTHOR_CHECK_PASSED } from './echelons-handoff.js';
@@ -14,6 +15,11 @@ import { AUTHOR_CHECK_PASSED } from './echelons-handoff.js';
 export type Route = typeof taskRoutes.$inferSelect;
 export type RouteInput = { resultKind?: 'code' | 'document' | 'coordination'; architectAgentId?: string; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 export type SkippedCheck = EchelonStep['stage'] | { stage: EchelonStep['stage']; reason: typeof NO_DEPARTMENT_CHECKER | typeof AUTHOR_CHECK_PASSED };
+
+export function checkedScopePaths(paths: string[] = []): string[] {
+  if (!validScopePaths(paths)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');
+  return paths;
+}
 
 function routeStep(name: EchelonStep['stage'], current: EchelonStep['stage'], ownerAgentId: string | null = null): EchelonStep {
   return { stage: name, status: name === current ? 'active' : 'pending', ownerAgentId, reason: null, inputCandidateId: null, candidateId: null };
@@ -95,8 +101,8 @@ function stagedState(task: Task, input: RouteInput, cleanup: boolean, plan: Stag
 }
 
 /* Work done end to end by its holder alone: no stage, no candidate and nobody else called onto it, even when checkers are named. */
-async function turnkeyRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
-  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
+async function turnkeyRoute(tx: Tx, task: Task, paths: string[]): Promise<void> {
+  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths, state: {
     kind: 'development_echelons', version: 1, resultKind: 'turnkey', stage: null, phase: 'active', candidateId: null, assignment: null, stages: [], abilities: {}, security: NO_SECURITY,
   } });
 }
@@ -132,13 +138,14 @@ async function withoutUncheckable(tx: Tx, task: Task, state: Route['state']): Pr
 export async function createRoute(tx: Tx, task: Task, input: RouteInput, plan: StageRoute): Promise<EchelonStep['stage'][]> {
   const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
   if (resultKind === 'coordination') return createCoordinationRoute(tx, task).then(() => []);
-  if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, input).then(() => []);
+  const paths = resultKind === 'document' ? [] : checkedScopePaths(input.paths);
+  if (!(await throughEchelons(tx, task))) return turnkeyRoute(tx, task, paths).then(() => []);
   /* The head's Cleanup for a whole turn reaches only the departments whose route has it. */
   const cleanup = resultKind === 'document' ? input.cleanup ?? false : input.cleanup ?? (plan.stages.some(step => step.stage === 'cleanup') && await turnCleanupDefault(tx, task));
   const staged = resultKind === 'document' ? stagedState(task, input, cleanup, documentStages(plan), 'document') : stagedState(task, input, cleanup, plan, 'code');
   const withSecurity = await populateSecurityOwner(tx, task, staged);
   const { state, skipped } = await withoutUncheckable(tx, task, withSecurity);
-  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: resultKind === 'document' ? [] : input.paths ?? [], state });
+  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths, state });
   return skipped;
 }
 

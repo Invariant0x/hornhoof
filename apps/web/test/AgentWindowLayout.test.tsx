@@ -90,7 +90,7 @@ describe('agent window task and controls', () => {
     const window = await openEmployee(user);
     if (['Account', 'About', 'Settings', 'Versions'].includes(name)) {
       await user.click(screen.getByRole('button', { name: 'Account' }));
-      if (name !== 'Account') await user.click(screen.getByRole('button', { name: name === 'Settings' ? 'Company settings' : name }));
+      if (name !== 'Account') await user.click(screen.getByRole('button', { name }));
     } else await user.click(screen.getByRole('button', { name }));
     const surface = name === 'Account' ? screen.getByRole('button', { name: 'Log out' })
       : ['About', 'Settings', 'Versions'].includes(name) ? await screen.findByRole('dialog')

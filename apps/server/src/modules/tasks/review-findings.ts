@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { matchesGlob } from 'node:path';
 import { EchelonCandidate, EchelonModel, type EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { published, refuse, type Task, type Tx } from './engine.js';
 import { routeOf, type Route } from './echelons-store.js';
 import { currentCandidate } from './echelons-candidates.js';
-import { RepoPath, ReviewSha } from './review-schema.js';
+import { pathInScope, RepoPath, ReviewSha } from './review-schema.js';
 
 export const IssueInput = z.object({ taskId: z.uuid().optional(), category: z.enum(['security', 'data', 'spec', 'other', 'mechanical']), blocking: z.boolean(), path: RepoPath, line: z.number().int().positive(), harm: z.string().trim().min(1).max(2000) }).strict();
 export const FindingRecord = IssueInput.extend({ taskId: z.uuid(), findingId: z.uuid(), revision: z.uuid(), candidateId: z.uuid(), stage: z.enum(['review', 'security', 'cleanup']), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), reviewedCommit: ReviewSha, authorId: z.uuid(), reviewerId: z.uuid(), reviewerVendor: z.string().min(1) });
@@ -69,7 +69,7 @@ export async function issuesForEchelon(db: Reader, task: Task, route: Route, can
   const known = findingsOf(await reviewEvents(db, [task.id]));
   return input.map(value => {
     const issue = IssueInput.parse(value);
-    if ((issue.taskId && issue.taskId !== task.id) || !route.paths.some(pattern => matchesGlob(issue.path, pattern))) throw refuse(400, 'task_invalid', 'A finding must belong to this task and its approved paths.');
+    if ((issue.taskId && issue.taskId !== task.id) || !pathInScope(issue.path, route.paths)) throw refuse(400, 'task_invalid', 'A finding must belong to this task and its approved paths.');
     if (pass && issue.blocking) throw refuse(400, 'task_invalid', 'A blocking finding cannot certify PASS.');
     const fingerprint = createHash('sha256').update(JSON.stringify([task.id, issue.category, issue.path, issue.line, issue.harm.trim().toLowerCase().replace(/\s+/g, ' ')])).digest('hex');
     return { ...issue, taskId: task.id, findingId: known.find(finding => finding.fingerprint === fingerprint)?.findingId ?? randomUUID(), fingerprint, revision: candidate.id, candidateId: candidate.id, stage, reviewedCommit: candidate.commit, authorId: candidate.producedBy.agentId, reviewerId: checker.agentId, reviewerVendor: checker.provider };
@@ -122,7 +122,7 @@ function submittedForVerdict(source: Event, verdict: Event): boolean {
 }
 
 export async function findingTurnReport(db: Reader, companyId: string, number: number): Promise<TurnFindingReport> {
-  const rows = await db.select({ id: tasks.id }).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(and(eq(tasks.companyId, companyId), eq(turns.number, number)));
+  const rows = await db.select(idOnly(tasks)).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(and(eq(tasks.companyId, companyId), eq(turns.number, number)));
   const events = await reviewEvents(db, rows.map(row => row.id));
   if (hasUnattestedVerdict(events)) return { status: 'unavailable', reason: 'finding-provenance-unavailable', uniqueReported: null, uniqueConfirmed: null, review: null, security: null, cleanup: null, byVendor: [], issues: [] };
   return { ...countedFindings(events), status: 'recorded', reason: null };

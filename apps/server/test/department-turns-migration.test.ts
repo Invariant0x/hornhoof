@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 
 const ACME = '00000000-0000-4000-8000-000000000a01';
 const BARE = '00000000-0000-4000-8000-000000000a02';
@@ -23,7 +24,7 @@ const K = (n: number) => `00000000-0000-4000-8000-000000000d${String(n).padStart
 /* A database migrated up to just before this migration, with what the given statements put in it, then through it. Each
    install holds one company. */
 async function migrated(rows: string): Promise<PGlite> {
-  const client = new PGlite();
+  const client = await freshPglite();
   onTestFinished(() => client.close());
   await migrate(drizzle(client), { migrationsFolder: await migrationsBefore('department_turns') });
   await client.exec(rows);

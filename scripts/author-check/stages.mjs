@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { join, posix } from 'node:path';
 import { changedLines, countDuplicates, judgeFunctions, parseCrapEdn, parseLcov, parseTap, parseVitestJson, worstCrap } from './judge.mjs';
 import { cwdOf, isCode, isLintable, isSource, ownerOf } from './plan.mjs';
@@ -9,10 +10,25 @@ const TEST_TYPES = { program: 'npm', args: ['run', 'typecheck:tests'], cwd: '.' 
 const REPORT_READER = { vitest: { extension: 'json', read: parseVitestJson }, 'node-test': { extension: 'tap', read: parseTap } };
 /* crapper's own code for a score over its threshold; this gate decides for itself what counts. */
 const OVER_LIMIT = 2;
+const MAX_BATCH_ITEMS = 200;
+const MAX_BATCH_BYTES = 16_384;
 
 const ended = (name, status, exitCode, reason) => ({ name, status, exitCode, reason });
 const unavailable = (name, reason, exitCode = null) => ended(name, 'unavailable', exitCode, reason);
 const broken = (name, code) => unavailable(name, code === null ? `${name}_missing` : `${name}_failed`, code);
+const fitsInBatch = (batch, bytes, size) => batch.length < MAX_BATCH_ITEMS && bytes + size <= MAX_BATCH_BYTES;
+
+function batches(items) {
+  const result = [];
+  let current = [], bytes = 0;
+  for (const item of items) {
+    const size = Buffer.byteLength(item) + 1;
+    if (current.length && !fitsInBatch(current, bytes, size)) { result.push(current); current = []; bytes = 0; }
+    current.push(item);
+    bytes += size;
+  }
+  return current.length ? [...result, current] : result;
+}
 
 function fromCodes(name, codes) {
   const failed = codes.find(code => code !== 0 && code !== null);
@@ -31,10 +47,17 @@ async function formatStage(context) {
   return fromCodes('format', await runAll(context, [{ program: 'npm', args: ['run', '-s', 'format:check'], cwd: '.' }]));
 }
 
+function lintBatches(files, suites) {
+  if (batches(files).length <= 1) return batches(files);
+  const groups = Map.groupBy(files, file => ownerOf(suites, file)?.root ?? '.');
+  return [...groups.values()].flatMap(batches);
+}
+
 async function lintStage(context) {
   const files = context.paths.filter(isLintable);
   if (!files.length) return unavailable('lint', 'nothing_to_lint');
-  return fromCodes('lint', await runAll(context, [{ program: 'npx', args: ['--no-install', 'eslint', ...files], cwd: '.' }]));
+  const commands = lintBatches(files, context.suites).map(batch => ({ program: 'npx', args: ['--no-install', 'eslint', ...batch], cwd: '.' }));
+  return fromCodes('lint', await runAll(context, commands));
 }
 
 const TSC = /^tsc -p (\S+)((?: \S+)*)$/;
@@ -97,6 +120,40 @@ function nodeTestFlags(sources, report) {
 }
 
 const FLAGS = { vitest: vitestFlags, 'node-test': nodeTestFlags };
+const reportName = (suiteId, index, extension) => `tests-${suiteId}${index ? `-${index + 1}` : ''}.${extension}`;
+const suiteBatches = (suite, paths) => (suite.split.kind === 'argv-files' && paths.length ? batches(paths) : [paths]);
+const lcovHits = text => (text === '-' ? 0 : Number(text));
+
+function coverageIncludes(sources) {
+  if (batches(sources).length <= 1) return sources;
+  const compact = [...new Set(sources.map(source => (source.includes('/') ? `${source.split('/')[0]}/**` : source)))];
+  return batches(compact).length <= 1 ? compact : ['**'];
+}
+
+function fileCoverage(files, name) {
+  if (!files.has(name)) files.set(name, { da: new Map(), brda: new Map() });
+  return files.get(name);
+}
+
+function addLcovLine(record, line) {
+  const da = /^DA:(\d+),(\d+)/.exec(line);
+  if (da) record.da.set(da[1], (record.da.get(da[1]) ?? 0) + Number(da[2]));
+  const brda = /^BRDA:(\d+,[^,]+,[^,]+),(-|\d+)/.exec(line);
+  if (brda) record.brda.set(brda[1], (record.brda.get(brda[1]) ?? 0) + lcovHits(brda[2]));
+}
+
+function mergeLcov(parts) {
+  if (parts.length === 1) return parts[0];
+  const files = new Map();
+  let current = null;
+  for (const line of parts.join('\n').split('\n')) {
+    if (line.startsWith('SF:')) current = fileCoverage(files, line.slice(3));
+    else if (current) addLcovLine(current, line);
+  }
+  return [...files].map(([file, { da, brda }]) => [
+    `SF:${file}`, ...[...da].map(([k, v]) => `DA:${k},${v}`), ...[...brda].map(([k, v]) => `BRDA:${k},${v}`), 'end_of_record', '',
+  ].join('\n')).join('');
+}
 
 /* How a suite is told its files: by arguments, or, as on a node, by the file its Vitest sequencer reads, which also asks for a shard. */
 function chosenFiles(context, suite, paths) {
@@ -107,15 +164,15 @@ function chosenFiles(context, suite, paths) {
   return { shard: ['--shard=1/1'], env: { HH_TEST_FILES: filesPath } };
 }
 
-function testCommand(context, suite, units) {
+function testCommand(context, suite, paths, index) {
   const adapter = adapterOf(suite.run);
   if (!adapter) return { command: suite.run, report: null };
   const { cwd } = suite.run;
   const sourceRoot = adapter === 'vitest' ? suite.root : cwd;
   const sources = context.paths.filter(path => isSource(path) && ownerOf(context.suites, path) === suite).map(path => posix.relative(sourceRoot, path));
-  const { shard = [], files = [], env } = chosenFiles(context, suite, units.map(unit => `./${posix.relative(cwd, unit.file)}`));
-  const report = join(context.tmp, `tests-${suite.id}.${REPORT_READER[adapter].extension}`);
-  return { command: { ...suite.run, args: [...suite.run.args, ...shard, ...FLAGS[adapter](sources, report), ...files], env }, report, reader: REPORT_READER[adapter].read, coverageFile: sources.length ? join(cwd, 'coverage/lcov.info') : null };
+  const { shard = [], files = [], env } = chosenFiles(context, suite, paths);
+  const report = join(context.tmp, reportName(suite.id, index, REPORT_READER[adapter].extension));
+  return { command: { ...suite.run, args: [...suite.run.args, ...shard, ...FLAGS[adapter](coverageIncludes(sources), report), ...files], env }, report, reader: REPORT_READER[adapter].read, coverageFile: sources.length ? join(cwd, 'coverage/lcov.info') : null };
 }
 
 function sumCounts(counts) {
@@ -137,7 +194,7 @@ async function testsStage(context) {
   if (selection.packages.some(item => !item.units.length && adapterOf(context.suites.find(suite => suite.id === item.packageId).run))) return ended('tests', 'failed', 1, 'empty_test_selection');
   const results = [], coverage = new Map();
   for (const item of selection.packages) results.push(await runTestSuite(context, item, coverage));
-  for (const [path, parts] of coverage) ports.write(path, parts.join('\n'));
+  for (const [path, parts] of coverage) ports.write(path, mergeLcov(parts));
   context.numbers.tests = sumCounts(results.map(result => result.counts));
   const execution = fromCodes('tests', results.flatMap(result => result.codes));
   const reported = results.filter(result => result.reported).map(result => result.counts);
@@ -152,11 +209,17 @@ function keepCoverage(ports, path, coverage) {
 
 async function runTestSuite(context, item, coverage) {
   const suite = context.suites.find(candidate => candidate.id === item.packageId);
-  const { command, report, reader, coverageFile } = testCommand(context, suite, item.units);
-  context.ports.mkdir(join(command.cwd, 'coverage'));
-  const codes = await runAll(context, [command]);
-  keepCoverage(context.ports, coverageFile, coverage);
-  return { codes, reported: Boolean(report), counts: report ? reader(context.ports.read(report)) : null };
+  const paths = item.units.map(unit => `./${posix.relative(suite.run.cwd, unit.file)}`);
+  const codes = [], counts = [];
+  let reported = false;
+  for (const [index, batch] of suiteBatches(suite, paths).entries()) {
+    const { command, report, reader, coverageFile } = testCommand(context, suite, batch, index);
+    context.ports.mkdir(join(command.cwd, 'coverage'));
+    codes.push(...await runAll(context, [command]));
+    keepCoverage(context.ports, coverageFile, coverage);
+    if (report) { reported = true; counts.push(reader(context.ports.read(report))); }
+  }
+  return { codes, reported, counts: reported ? sumCounts(counts) : null };
 }
 
 function sourceGroups({ paths, suites }) {
@@ -183,15 +246,24 @@ function crapperOutcome(judged, groups) {
   return unavailable('crapper', groups.every(group => group.measured) ? 'crap_unknown' : 'no_coverage_adapter');
 }
 
+async function crapperEntries(context, group) {
+  const flag = group.measured ? '--use-existing-coverage' : '--no-coverage', entries = [];
+  for (const batch of batches(group.files)) {
+    const { code } = await context.ports.exec('crapper', [flag, ...batch], { cwd: group.cwd });
+    if (code !== 0) return { failed: broken('crapper', code) };
+    entries.push(...parseCrapEdn(context.ports.read(join(group.cwd, '.metrics/crap.edn')) ?? ''));
+  }
+  return { entries };
+}
+
 async function crapperStage(context) {
   const groups = sourceGroups(context);
   if (!groups.length) return unavailable('crapper', 'no_source_changed');
   if (context.selection.unavailable) return unavailable('crapper', 'no_coverage_measured');
   const judged = [];
   for (const group of groups) {
-    const { code } = await context.ports.exec('crapper', [group.measured ? '--use-existing-coverage' : '--no-coverage', ...group.files], { cwd: group.cwd });
-    if (code !== 0) return broken('crapper', code);
-    const entries = parseCrapEdn(context.ports.read(join(group.cwd, '.metrics/crap.edn')) ?? '');
+    const { entries, failed } = await crapperEntries(context, group);
+    if (failed) return failed;
     judged.push(...judgeFunctions(entries, context.plan.grown[group.cwd] ?? []));
   }
   showJudged(judged, context.ports.log);
@@ -202,9 +274,13 @@ async function crapperStage(context) {
 async function dryerStage(context) {
   const files = context.paths.filter(isCode);
   if (!files.length) return unavailable('dryer', 'no_source_changed');
-  const { code, output } = await context.ports.exec('dryer', files, { cwd: '.' });
-  if (code !== 0) return broken('dryer', code);
-  context.numbers.dryerFlags = countDuplicates(output);
+  let flags = 0;
+  for (const batch of batches(files)) {
+    const { code, output } = await context.ports.exec('dryer', batch, { cwd: '.' });
+    if (code !== 0) return broken('dryer', code);
+    flags += countDuplicates(output);
+  }
+  context.numbers.dryerFlags = flags;
   return ended('dryer', 'passed', 0);
 }
 

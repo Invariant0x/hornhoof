@@ -158,10 +158,12 @@ describe('install.sh', () => {
   it('replaces existing containers and keeps their volumes', () => {
     const r = install({ env: { STUB_CONTAINERS: 'hornhoof-claude-1c07dac4 hornhoof-codex-9f1e2d3c' } });
     expect(r.code).toBe(0);
-    const rm = indexOf(r.calls, 'docker rm -f hornhoof-claude-1c07dac4');
+    const rename = indexOf(r.calls, 'docker rename hornhoof-claude-1c07dac4 hornhoof-claude-1c07dac4-old-');
     const run = indexOf(r.calls, 'docker run -d --name hornhoof-claude-1c07dac4');
-    expect(rm).toBeGreaterThanOrEqual(0);
-    expect(run).toBeGreaterThan(rm);
+    const rmOld = indexOf(r.calls, 'docker rm -f hornhoof-claude-1c07dac4-old-');
+    expect(rename).toBeGreaterThanOrEqual(0);
+    expect(run).toBeGreaterThan(rename);
+    expect(rmOld).toBeGreaterThan(run);
     expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
   });
 
@@ -217,10 +219,12 @@ describe('install.sh', () => {
     });
     expect(r.code).toBe(0);
     expect(r.calls).toContain(`docker cp ${name}:/data/removed -`);
-    const rm = indexOf(r.calls, `docker rm -f ${name}`);
+    const rename = indexOf(r.calls, `docker rename ${name} ${name}-old-`);
     const run = indexOf(r.calls, `docker run -d --name ${name} `);
-    expect(rm).toBeGreaterThanOrEqual(0);
-    expect(run).toBeGreaterThan(rm);
+    const rmOld = indexOf(r.calls, `docker rm -f ${name}-old-`);
+    expect(rename).toBeGreaterThanOrEqual(0);
+    expect(run).toBeGreaterThan(rename);
+    expect(rmOld).toBeGreaterThan(run);
     expect(r.calls[run]).toContain(`-v ${name}:/data`);
     expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
   });
@@ -286,7 +290,7 @@ describe('install.sh', () => {
     const r = install({ args: [], env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER}`, STUB_STATUS: 'needs_login' } });
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
-    expect(r.calls).toContain('docker rm -f hornhoof-claude-1c07dac4');
+    expect(r.calls.some(c => c.startsWith('docker rm -f hornhoof-claude-1c07dac4-old-'))).toBe(true);
     expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toBe(true);
     expect(r.calls.some(c => c.startsWith('docker exec -it hornhoof-claude-1c07dac4'))).toBe(true);
   });

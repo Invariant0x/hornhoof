@@ -49,7 +49,8 @@ export class Measures {
   private timer: NodeJS.Timeout | undefined;
   private busy = false;
 
-  constructor(private readonly opts: { dir: string; sampleMs?: number; internet?: Internet }) {}
+  /* copying: whether the machine makes its copy of the company's data now, or makes it again. */
+  constructor(private readonly opts: { dir: string; sampleMs?: number; internet?: Internet; copying?: () => boolean }) {}
 
   start(): void {
     this.timer = setInterval(() => void this.sampleUnlessBusy(), this.opts.sampleMs ?? SAMPLE_MS);
@@ -69,8 +70,16 @@ export class Measures {
     return { ...(said?.internetRttMs != null ? { internetRttMs: said.internetRttMs } : {}), ...(said?.internetMbps != null ? { internetMbps: said.internetMbps } : {}) };
   }
 
+  /* While the copy is poured in, the disk is busy with that, and a write timed then measures the copy, not the disk:
+     none is taken until it is made. */
   async sample(): Promise<void> {
+    if (this.opts.copying?.()) return;
     this.samples = keepLatest(this.samples, await timedSyncedWrite(join(this.opts.dir, PROBE_FILE)));
+  }
+
+  /* The fsync p99 of the disk as measured so far, none before there are enough samples. */
+  fsyncP99(): number | null {
+    return fsyncP99(this.samples);
   }
 
   /* Throws when the folder is gone: there is no honest number for free space then. */
