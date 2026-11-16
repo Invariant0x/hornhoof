@@ -634,12 +634,15 @@ describe('Subscriptions', () => {
   });
 
   it('shows the fallback plans without changing them to someone who may not change the plan', async () => {
-    const subs = [{ ...SUBS[0]!, owner: { id: 'p9', name: 'Olga' }, fallbacks: [{ subscription: 's-codex', model: null }] }, ...SUBS.slice(1)];
+    const fallbacks = [{ subscription: 's-codex', model: null }, { subscription: 's-key', model: 'claude-sonnet-5-5' }];
+    const subs = [{ ...SUBS[0]!, owner: { id: 'p9', name: 'Olga' }, fallbacks }, ...SUBS.slice(1, 3), { ...SUBS[3]!, models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }] }];
     lists({ 'GET /api/subscriptions': [200, { subscriptions: subs }] });
     render(<Subscriptions me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} />);
     await openAll();
     const card = rowOf('Claude');
     expect(await within(card).findByText('Codex, Ivan')).toBeInTheDocument();
+    /* The model named for a fallback shows by its name; the role's own shows nothing. */
+    expect([...card.querySelectorAll('.fallback-list li')].map(item => item.textContent)).toEqual(['Codex, Ivan', 'Orchestrator (Anthropic)Claude Sonnet 5.5']);
     expect(within(card).queryByRole('combobox', { name: /fallback|Model on/ })).not.toBeInTheDocument();
     expect(within(card).queryByRole('button', { name: /^(Move|Remove) Codex/ })).not.toBeInTheDocument();
   });

@@ -222,8 +222,8 @@ async function planHeldNow(ctx: Ctx, planId: string): Promise<boolean> {
 }
 
 /* A plan that has just come to its limit or its share for tasks sends everyone on it to a fallback at once. */
-async function fallBackIfHeld(ctx: Ctx, planId: string): Promise<void> {
-  if (await planHeldNow(ctx, planId)) await fallBackFrom(ctx, planId);
+async function fallBackIfHeld(ctx: Ctx, planId: string | null): Promise<void> {
+  if (planId && (await planHeldNow(ctx, planId))) await fallBackFrom(ctx, planId);
 }
 
 const planState = async (ctx: Ctx, id: string) =>
@@ -438,7 +438,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       }
       if (finished.length) await afterJob(ctx, msg.jobId);
       /* Everyone on the plan goes on to a fallback, not only the one whose turn it refused. */
-      if (refused) await fallBackIfHeld(ctx, refused);
+      await fallBackIfHeld(ctx, refused);
       /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
       ctx.hub.send(id, { type: 'job.ack', jobId: msg.jobId });
       return;

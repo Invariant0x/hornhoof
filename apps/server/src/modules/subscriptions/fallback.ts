@@ -61,8 +61,8 @@ async function hasRoom(ctx: Ctx, agent: Agent, plan: Plan): Promise<boolean> {
   return plan.status === 'ready' && !heldUntil(plan, agent.kind) && (await planWaitsFor(ctx, agent, plan)) === null;
 }
 
-async function firstWithRoom(ctx: Ctx, agent: Agent, home: Plan, now: string | null): Promise<Target | null> {
-  for (const target of await fallbacksOf(ctx, agent, home)) if (target.plan.id !== now && (await hasRoom(ctx, agent, target.plan))) return target;
+async function firstWithRoom(ctx: Ctx, agent: Agent, home: Plan, now: Plan | null): Promise<Target | null> {
+  for (const target of await fallbacksOf(ctx, agent, home)) if (target.plan.id !== now?.id && (await hasRoom(ctx, agent, target.plan))) return target;
   return null;
 }
 
@@ -158,26 +158,42 @@ function noRoomText(home: Plan & { ownerName: string }, until: string, stuck: Ag
 
 /* The orchestrator can read it now: its own plan takes its turns. One held on a plan with no fallback hears nothing it could
    read only once the limit is over; the notice to Operations of a turn held that long stands for it. */
-async function readsNow(ctx: Ctx, orchestrator: Agent): Promise<boolean> {
-  const plan = orchestrator.subscriptionId ? await planOf(ctx, orchestrator.subscriptionId) : null;
+async function readsNow(ctx: Ctx, orchestrator: Agent | undefined): Promise<boolean> {
+  if (!orchestrator?.subscriptionId || orchestrator.removedAt) return false;
+  const plan = await planOf(ctx, orchestrator.subscriptionId);
   return Boolean(plan && !heldUntil(plan, orchestrator.kind));
 }
 
-/* The orchestrator hears once of a plan whose hold stops work that no fallback can take: once for each hold, by its reset. */
 const told = new WeakMap<Ctx, Set<string>>();
-async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Promise<void> {
-  const caseId = `plan-fallback:${home.id}:${holdMinute(until)}`;
+function toldIn(ctx: Ctx): Set<string> {
   const seen = told.get(ctx) ?? new Set<string>();
   told.set(ctx, seen);
-  if (seen.has(caseId)) return;
+  return seen;
+}
+
+/* The orchestrator to tell of this hold, while it can read it and has not heard of it, in this run of the server or before. */
+async function toTell(ctx: Ctx, home: Plan, caseId: string): Promise<Agent | null> {
+  const seen = toldIn(ctx);
+  if (seen.has(caseId)) return null;
   const orchestrator = await orchestratorOf(ctx, home.companyId);
-  if (!orchestrator || orchestrator.removedAt || !(await readsNow(ctx, orchestrator))) return;
+  if (!(await readsNow(ctx, orchestrator))) return null;
   seen.add(caseId);
   const [before] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'failureCase' = ${caseId}`).limit(1);
-  const stuck = before ? [] : await stuckOn(ctx, home);
-  if (!stuck.length) return;
+  return before ? null : orchestrator!;
+}
+
+async function ownerName(ctx: Ctx, home: Plan): Promise<string> {
   const [owner] = await ctx.db.select({ name: people.name }).from(people).where(eq(people.id, home.ownerPersonId));
-  const text = noRoomText({ ...home, ownerName: owner?.name ?? '' }, until, stuck);
+  return owner?.name ?? '';
+}
+
+/* The orchestrator hears once of a plan whose hold stops work that no fallback can take: once for each hold, by its reset. */
+async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Promise<void> {
+  const caseId = `plan-fallback:${home.id}:${holdMinute(until)}`;
+  const orchestrator = await toTell(ctx, home, caseId);
+  const stuck = orchestrator ? await stuckOn(ctx, home) : [];
+  if (!orchestrator || !stuck.length) return;
+  const text = noRoomText({ ...home, ownerName: await ownerName(ctx, home) }, until, stuck);
   const turn = { companyId: home.companyId, agentId: orchestrator.id, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId, notification: { source: 'limit' as const, tasks: [], detail: { en: home.label, ru: home.label } } } };
   /* The orchestrator's own line goes on as it is: it takes the message once the turn it is in goes out. */
   await (orchestrator.id === from.id ? insertTurn(ctx, turn) : enqueueTurn(ctx, turn));
@@ -187,30 +203,53 @@ async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Pro
    its waiting turns with it, and comes back to its own plan, model and effort once that plan takes its turns again. A
    person who moved it by hand in between decided where it works, so it stays there. True when it moved. */
 export async function fallbackMove(ctx: Ctx, agentId: string): Promise<boolean> {
+  const at = await whereItIs(ctx, agentId);
+  if (!at) return false;
+  const until = heldUntil(at.home, at.agent.kind);
+  if (until) return goOnOrStay(ctx, at, until);
+  return at.kept ? comeHome(ctx, at.agent, at.home, at.kept) : false;
+}
+
+type Where = { agent: Agent; kept: Fallback | null; home: Plan };
+
+/* An employee Hornhoof may move, with the fallback it is on and its own plan. A fallback ends where a person moved it since,
+   or where its own plan is gone. */
+async function whereItIs(ctx: Ctx, agentId: string): Promise<Where | null> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
-  if (!agent?.subscriptionId || agent.kind === 'assistant' || agent.switchedOffAt) return false;
+  if (!agent?.subscriptionId || agent.kind === 'assistant' || agent.switchedOffAt) return null;
   const [kept] = await ctx.db.select().from(agentFallbacks).where(eq(agentFallbacks.agentId, agentId));
   const home = await planOf(ctx, kept?.homeSubscriptionId ?? agent.subscriptionId);
-  if (kept && (kept.subscriptionId !== agent.subscriptionId || !home)) {
-    await ctx.db.delete(agentFallbacks).where(eq(agentFallbacks.agentId, agentId));
-    return false;
-  }
-  if (!home) return false;
-  const until = heldUntil(home, agent.kind);
-  if (kept && !until) return (await hasRoom(ctx, agent, home)) && goHome(ctx, agent, kept);
-  if (!until) return false;
-  if (kept) comeBackAt(ctx, agentId, until);
-  const now = kept ? await planOf(ctx, kept.subscriptionId) : null;
+  if (kept && (kept.subscriptionId !== agent.subscriptionId || !home)) return endFallback(ctx, agentId).then(() => null);
+  return home && { agent, kept: kept ?? null, home };
+}
+
+async function comeHome(ctx: Ctx, agent: Agent, home: Plan, kept: Fallback): Promise<boolean> {
+  return (await hasRoom(ctx, agent, home)) && goHome(ctx, agent, kept);
+}
+
+/* The fallback it is on, with its wake set for when its own plan's hold ends. */
+async function stayingOn(ctx: Ctx, { agent, kept }: Where, until: string): Promise<Plan | null> {
+  if (!kept) return null;
+  comeBackAt(ctx, agent.id, until);
+  return planOf(ctx, kept.subscriptionId);
+}
+
+/* While its own plan holds it: it stays on a fallback with room, or goes on to the first other one that has room. */
+async function goOnOrStay(ctx: Ctx, at: Where, until: string): Promise<boolean> {
+  const { agent, home } = at;
+  const now = await stayingOn(ctx, at, until);
   if (now && (await hasRoom(ctx, agent, now))) return false;
-  const target = await firstWithRoom(ctx, agent, home, now?.id ?? null);
-  /* Only work the plan really holds back waits: a person's own message still goes past the share set for tasks. */
-  if (!target) {
-    if (await planHeld(ctx, agent, home)) await tellNoRoom(ctx, home, until, agent);
-    return false;
-  }
-  const moved = await goOn(ctx, agent, home, kept ?? null, target);
-  if (moved) comeBackAt(ctx, agentId, until);
+  const target = await firstWithRoom(ctx, agent, home, now);
+  if (!target) return noRoom(ctx, agent, home, until);
+  const moved = await goOn(ctx, agent, home, at.kept, target);
+  if (moved) comeBackAt(ctx, agent.id, until);
   return moved;
+}
+
+/* Only work the plan really holds back waits: a person's own message still goes past the share set for tasks. */
+async function noRoom(ctx: Ctx, agent: Agent, home: Plan, until: string): Promise<false> {
+  if (await planHeld(ctx, agent, home)) await tellNoRoom(ctx, home, until, agent);
+  return false;
 }
 
 /* A plan that came to its limit or its share for tasks: everyone on it goes on to a fallback at once, except whoever is in a

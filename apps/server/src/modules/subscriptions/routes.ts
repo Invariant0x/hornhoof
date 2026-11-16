@@ -83,7 +83,8 @@ export const SubscriptionPatch = z
 const badFallback = (message: string) => new ApiError(400, 'validation', `fallbacks: ${message}`, 'fallback_invalid');
 
 /* Each fallback is another plan of the company, and a model named for it is one that plan runs. */
-async function checkFallbacks(db: Db, sub: { id: string; companyId: string }, fallbacks: z.infer<typeof Fallbacks>): Promise<void> {
+async function checkFallbacks(db: Db, sub: { id: string; companyId: string }, fallbacks: z.infer<typeof Fallbacks> | undefined): Promise<void> {
+  if (!fallbacks) return;
   const ids = fallbacks.map(f => f.subscription);
   if (ids.includes(sub.id)) throw badFallback('A plan cannot be its own fallback.');
   const plans = ids.length ? await db.select().from(subscriptions).where(and(inArray(subscriptions.id, ids), eq(subscriptions.companyId, sub.companyId), isNull(subscriptions.removedAt))) : [];
@@ -92,6 +93,20 @@ async function checkFallbacks(db: Db, sub: { id: string; companyId: string }, fa
     if (!plan) throw badFallback('The company has no such plan.');
     if (f.model && !modelsFor(plan.provider, plan.models).some(m => m.id === f.model)) throw badFallback(`${plan.label} cannot run ${f.model}.`);
   }
+}
+
+/* The columns a change of a subscription sets: only those it names. */
+function patchColumns({ budget, fallbacks, label, models }: Pick<z.infer<typeof SubscriptionPatch>, 'budget' | 'fallbacks' | 'label' | 'models'>) {
+  return { ...(budget !== undefined ? { budget } : {}), ...(fallbacks !== undefined ? { fallbacks } : {}), ...(label !== undefined ? { label } : {}), ...(models !== undefined ? { models } : {}) };
+}
+
+/* A plan removed: those on it for a while, as a fallback, go back to their own plan; those it was a home to stay where
+   they are now. */
+async function endFallbacksOn(tx: Parameters<Parameters<Db['transaction']>[0]>[0], planId: string): Promise<void> {
+  for (const away of await tx.select().from(agentFallbacks).where(eq(agentFallbacks.subscriptionId, planId))) {
+    await tx.update(agents).set({ subscriptionId: away.homeSubscriptionId, model: away.homeModel, effort: away.homeEffort, nodeId: null }).where(and(eq(agents.id, away.agentId), eq(agents.subscriptionId, planId)));
+  }
+  await tx.delete(agentFallbacks).where(or(eq(agentFallbacks.subscriptionId, planId), eq(agentFallbacks.homeSubscriptionId, planId)));
 }
 
 const PLANS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' } as const;
@@ -447,9 +462,9 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (target && !(await mayPlace(me, target))) throw notTheirPlace();
     }
     if (target) await placeExists(target);
-    if (fallbacks) await checkFallbacks(db, sub, fallbacks);
+    await checkFallbacks(db, sub, fallbacks);
     const place = target ? { targetKind: target.kind, targetId: 'id' in target ? target.id : null } : {};
-    await db.update(subscriptions).set({ ...(budget !== undefined ? { budget } : {}), ...(fallbacks !== undefined ? { fallbacks } : {}), ...(label !== undefined ? { label } : {}), ...(models !== undefined ? { models } : {}), ...place }).where(eq(subscriptions.id, sub.id));
+    await db.update(subscriptions).set({ ...patchColumns({ budget, fallbacks, label, models }), ...place }).where(eq(subscriptions.id, sub.id));
     await pumpWaiting(ctx);
     /* A share set below what the plan used sends its workers on to a fallback at once. */
     if (budget !== undefined) await fallBackFrom(ctx, sub.id);
@@ -467,11 +482,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
         .where(eq(subscriptions.id, sub.id));
       await endRemovedPlanCommands(tx, [sub.id]);
-      /* Those on it for a while, as a fallback, go back to their own plan; those it was a home to stay where they are now. */
-      for (const away of await tx.select().from(agentFallbacks).where(eq(agentFallbacks.subscriptionId, sub.id))) {
-        await tx.update(agents).set({ subscriptionId: away.homeSubscriptionId, model: away.homeModel, effort: away.homeEffort, nodeId: null }).where(and(eq(agents.id, away.agentId), eq(agents.subscriptionId, sub.id)));
-      }
-      await tx.delete(agentFallbacks).where(or(eq(agentFallbacks.subscriptionId, sub.id), eq(agentFallbacks.homeSubscriptionId, sub.id)));
+      await endFallbacksOn(tx, sub.id);
       await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
       await tx.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.subscriptionId, sub.id));
       /* Its sign-in, sealed to its nodes, goes with it. */

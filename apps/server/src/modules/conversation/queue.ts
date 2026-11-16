@@ -1077,8 +1077,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (await operatorRecoveryHolds(ctx, agentId)) return;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running || await waitsForWords(ctx, agentId)) return;
-  /* Between turns: onto a fallback plan while its own holds its turns back, and home again once it does not. */
-  if (await fallbackMove(ctx, agentId)) return sendNext(ctx, agentId);
+  /* Between turns: onto a fallback plan while its own holds its turns back, and home again once it does not. What follows
+     reads the plan it is on after that. */
+  await fallbackMove(ctx, agentId);
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
