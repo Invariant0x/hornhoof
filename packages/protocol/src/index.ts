@@ -390,12 +390,16 @@ export const LOAD_MS = 20_000;
    Hornhoof starts no new program on a machine short of free memory. A list that is not one counts as none said. */
 const Live = z.array(z.string().regex(/^[A-Za-z0-9-]{1,64}$/)).max(200).optional().catch(undefined);
 
-/* Installed agent programs and an update in progress on the connected node. */
+/* Installed agent programs and an update in progress on the connected node. repair: the program was installed but does
+   not start, so the node installs it again, or it still does not start, with the last line it said (through the node's
+   masks). */
 export const ProgramInfo = z.object({
   id: z.enum(['claude', 'codex', 'kimi']),
   version: z.string().min(1).max(64).nullable(),
   updating: z.boolean(),
   failed: z.boolean(),
+  repair: z.enum(['reinstalling', 'broken']).optional(),
+  reason: z.string().min(1).max(400).optional(),
 });
 export type ProgramInfo = z.infer<typeof ProgramInfo>;
 const Programs = z.array(ProgramInfo).max(3);
@@ -569,7 +573,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     n: MessageNumber,
   }),
   /* How the sign-in Hornhoof started on this node ended. */
-  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), n: MessageNumber }),
+  /* code and line: a sign-in whose program ended early, with its exit code and the last line it said, through the node's
+     masks, for its owner to read. */
+  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), code: z.number().int().nullable().optional(), line: z.string().min(1).max(400).nullable().optional(), n: MessageNumber }),
   z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
   /* Which of the turns Hornhoof asked about the node still runs, as its hello would list them. */
   z.object({ type: z.literal('jobs.held'), asked: z.array(z.string()).max(100), held: z.array(z.string()).max(100) }),
