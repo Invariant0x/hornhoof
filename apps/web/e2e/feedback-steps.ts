@@ -78,14 +78,14 @@ export async function prepare(page: Page, inbox: { value: boolean }) {
 }
 
 /* Errors of the page, and any file of the app it could not load. */
-function watchProblems(page: Page): string[] {
+export function watchProblems(page: Page): string[] {
   const problems: string[] = [];
   page.on('pageerror', error => problems.push(error.message));
   page.on('response', response => { if (!new URL(response.url()).pathname.startsWith('/api/') && response.status() >= 400) problems.push(`${response.status()} ${response.url()}`); });
   return problems;
 }
 
-async function setLook(page: Page, choice: Choice, language: Language) {
+export async function setLook(page: Page, choice: Choice, language: Language) {
   await page.evaluate(({ choice, collection, language }) => {
     localStorage.setItem('hh-skins', collection);
     localStorage.setItem('hh-theme', choice);
@@ -97,7 +97,7 @@ export type Scene = { name: string; inbox: boolean; open: (page: Page, words: Me
 
 /* Writing to the developers inside About, opened from its button once About holds the focus it takes when it opens, so
    what a test types next stays where it is typed. */
-async function dialog(page: Page, words: Messages): Promise<Locator> {
+export async function dialog(page: Page, words: Messages): Promise<Locator> {
   await page.goto('/about');
   const about = page.getByRole('dialog', { name: words.about.title, exact: true });
   await expect(about).toBeFocused();
@@ -176,7 +176,7 @@ async function geometry(place: Locator): Promise<Record<string, unknown>[]> {
 }
 
 /* The lowest WCAG contrast of the text that can be read, each element's colour on the backgrounds behind it. */
-async function lowestContrast(place: Locator): Promise<{ ratio: number; what: string }> {
+export async function lowestContrast(place: Locator): Promise<{ ratio: number; what: string }> {
   return place.evaluate(root => {
     const parse = (value: string): number[] => {
       const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(value);
@@ -204,7 +204,7 @@ async function lowestContrast(place: Locator): Promise<{ ratio: number; what: st
 }
 
 /* A field keeps 44 px, a kind choice and a button of a form's foot or of a record from 44 px, the description from 120 px. */
-async function heights(place: Locator): Promise<string[]> {
+export async function heights(place: Locator): Promise<string[]> {
   return place.evaluate(root => {
     const wrong: string[] = [];
     const h = (e: Element) => Math.round(e.getBoundingClientRect().height * 100) / 100;
