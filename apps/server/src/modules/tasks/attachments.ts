@@ -16,6 +16,7 @@ import { mayOpenRequest } from './decisions.js';
 import { refuse, type Task } from './engine.js';
 import { seesTask } from './sight.js';
 import { taskByRef } from './views.js';
+import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
 
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */
 export const PICTURE_BYTES = 3 * 1024 * 1024;
@@ -358,11 +359,12 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   void app.register(async scope => {
     scope.addContentTypeParser(['application/octet-stream', 'image/png', 'image/jpeg', 'image/webp'], { parseAs: 'buffer', bodyLimit: FILE_BYTES }, (_req, body, done) => done(null, body));
     scope.post('/api/attachments', { bodyLimit: FILE_BYTES }, async (req, reply) => {
-      const job = await jobOf(ctx, req);
+      const job = await attachmentJobOf(ctx, req);
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
+      checkAttachmentTask(job, task, toChat);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
       const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, ref !== undefined, raw);
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
