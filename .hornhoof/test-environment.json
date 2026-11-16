@@ -540,6 +540,7 @@
           "apps/server/drizzle/**",
           "apps/server/src/db/schema.ts",
           "apps/server/test/global-setup.ts",
+          "apps/server/test/global-initdb.ts",
           "apps/server/test/prepare-environment.ts",
           "apps/server/vitest*.config.ts"
         ],
