@@ -20,7 +20,7 @@ async function assistant(c: AclCompany, owner: keyof AclCompany['tokens'] = 'ann
   const keyed = await c.app.inject({ method: 'POST', url: `/api/people/${id}/key`, ...as(c.tokens[owner]) });
   expect(keyed.statusCode).toBe(201);
   const key = keyed.json().key as string;
-  return { id, download: (file: string) => c.app.inject({ url: `/api/assistant/attachments/${file}`, headers: { authorization: `Bearer ${key}` } }) };
+  return { id, download: (file: string, lang?: string) => c.app.inject({ url: `/api/assistant/attachments/${file}`, headers: { authorization: `Bearer ${key}`, ...(lang ? { 'accept-language': lang } : {}) } }) };
 }
 
 const BYTES = Buffer.from([0x50, 0x4b, 0, 0xff, 0x80, 0x0a, 0x0d]);
@@ -97,6 +97,24 @@ describe('files an assistant downloads for its owner', () => {
       expect(got.statusCode).toBe(404);
       expect(got.body).toBe(absent.body);
       expect(got.headers).toEqual(absent.headers);
+    }
+  });
+
+  it("tells its owner in their language, as one person to another, that a file is not there for them, the same for any file it may not have", async () => {
+    const c = await aclCompany();
+    const ava = await assistant(c);
+    const hidden = await file(c, { taskId: (await c.work('Other report', c.crew.other)).id, agentId: c.crew.other.id });
+    const said = {
+      'ru-RU,ru;q=0.9,en;q=0.8': 'Такого файла в Hornhoof нет, или вам его там не открыть.',
+      'en-GB': 'There is no such file in Hornhoof, or you cannot open it there.',
+      '': 'There is no such file in Hornhoof, or you cannot open it there.',
+    };
+    for (const [lang, message] of Object.entries(said)) {
+      for (const id of [hidden.id, randomUUID(), 'not-a-uuid']) {
+        const got = await ava.download(id, lang);
+        expect(got.statusCode).toBe(404);
+        expect(got.json()).toEqual({ error: { code: 'not_found', message, reason: 'attachment_unknown' } });
+      }
     }
   });
 });

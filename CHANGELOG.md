@@ -27,6 +27,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `failures` shows `next` for each blocked task, taken from its holder's last report.
 - Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
+- A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
 
 ### Changed
 
@@ -44,16 +46,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Machines filters start with All and a count, with chips of at least 44 px.
 - Table headers and row buttons are 44 px in every table.
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
-
-## Unreleased
-
-### Changed
-
-- The assistant API reports contract 3, including attachment downloads and `byOwnAgent` in `reply` and `reply_end`: true when the assistant's own agent sent the original message, false for a message from its program.
-
-### Russian
-
-- API ассистента сообщает контракт 3: скачивание вложений и `byOwnAgent` в `reply` и `reply_end`, true для исходного сообщения собственного агента и false для сообщения программы ассистента.
+- The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent the message.
+- A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
+- Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
 
 ## [0.29.2] - 2026-11-16
 
