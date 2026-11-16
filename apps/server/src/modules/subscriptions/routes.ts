@@ -9,7 +9,7 @@ import { requireCompanyScope, requirePerson, type Person } from '../../auth/sess
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agentFallbacks, agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { runningAgents } from '../agents/running.js';
@@ -246,7 +246,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (me.via || !id) return false;
     if (kind === 'department') return runsDepartment(db, me, id);
     if (kind !== 'team') return false;
-    const [team] = await db.select({ departmentId: teams.departmentId }).from(teams).where(and(eq(teams.id, id), eq(teams.companyId, me.companyId)));
+    const [team] = await db.select(only(teams, 'departmentId')).from(teams).where(and(eq(teams.id, id), eq(teams.companyId, me.companyId)));
     return team ? runsDepartment(db, me, team.departmentId) : false;
   }
   const mayPlace = async (me: Person, target: z.infer<typeof Target>) => me.scopeKind === 'company' || runsPlace(me, target.kind, 'id' in target ? target.id : null);
@@ -416,7 +416,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     requireCompanyScope(me);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     const notCompanyLevel = () => new ApiError(400, 'validation', 'The orchestrator can only run on a subscription that serves the whole company.', 'not_company_level');
-    const [owner] = await db.select({ scopeKind: people.scopeKind }).from(people).where(eq(people.id, sub.ownerPersonId));
+    const [owner] = await db.select(only(people, 'scopeKind')).from(people).where(eq(people.id, sub.ownerPersonId));
     if (!servesWholeCompany(sub, owner?.scopeKind)) throw notCompanyLevel();
     const before = await orchestratorOf(ctx, me.companyId);
     await db.update(agents).set(orchestratorOn(sub)).where(eq(agents.kind, 'orchestrator'));

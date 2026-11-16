@@ -8,6 +8,7 @@ import { requireAssistant, wholeCompany } from '../../auth/assistant.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import { agents, assistants, companies, departments, people } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { AgentRow } from '../agents/find.js';
 import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
@@ -67,7 +68,7 @@ async function addressee(ctx: Ctx, me: Person, agentId: string | undefined, mine
 
 /* The assistant's own agent, if its owner picked a plan for it once. */
 export async function ownAgentOf(ctx: Pick<Ctx, 'db'>, assistantId: string): Promise<string | null> {
-  const [row] = await ctx.db.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistantId));
+  const [row] = await ctx.db.select(only(assistants, 'agentId')).from(assistants).where(eq(assistants.personId, assistantId));
   return row?.agentId ?? null;
 }
 
@@ -76,7 +77,7 @@ export async function ownAgentOf(ctx: Pick<Ctx, 'db'>, assistantId: string): Pro
 export async function whoAmI(ctx: Ctx, me: Person) {
   const { db } = ctx;
   const [helper] = await db.select({ name: people.name, title: people.title, program: assistants.program, agentId: assistants.agentId }).from(people).innerJoin(assistants, eq(assistants.personId, people.id)).where(eq(people.id, me.assistant!.id));
-  const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
+  const [company] = await db.select(only(companies, 'name')).from(companies).where(eq(companies.id, me.companyId));
   const view = await personView(db, me);
   const owns = [...((await accessOf(db, me)).owns ?? [])];
   const named = owns.length ? (await db.select().from(departments).where(eq(departments.companyId, me.companyId))).filter(d => owns.includes(d.id)) : [];
