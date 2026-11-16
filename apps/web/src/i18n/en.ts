@@ -2047,6 +2047,7 @@ export const en = {
     outbound_not_allowed: 'This is not yours to send: the task or the channel belongs to someone else.',
     outbound_unknown: 'Hornhoof does not know this, or it is not yours to see.',
     outbound_conflict: 'This changed meanwhile, or it was already used for something else. Look at it again.',
+    outbound_changed: 'This entry got another version while you were looking at it. Look at it again before you publish or take it back.',
     outbound_unavailable: 'This account cannot send now. Its owner needs to look at its settings.',
     delegate_requires_company_access: 'Only an active person with access to the whole company can be the CEO delegate.',
     wrong_password: 'Wrong email or password.',
@@ -2330,7 +2331,6 @@ export const en = {
     inUse: (n: number) => `Messages use revision ${n}`,
     show: (n: number) => `Show revision ${n}`,
     hide: (n: number) => `Hide revision ${n}`,
-    changed: 'This entry got another version while you were looking at it. Look at it again before you publish or take it back.',
     view: {
       language: 'Language',
       proposed: (name: string, at: string) => `Proposed by ${name} on ${at}`,

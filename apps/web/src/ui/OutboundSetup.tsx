@@ -52,8 +52,7 @@ type LogEntry = { id: string; kind: keyof Messages['outboundSetup']['log']; chan
 export type RunDepartment = { id: string; name: string | null; templateKey: keyof Messages['templates'] | null };
 
 const reasonOf = (err: unknown): string | undefined => (err instanceof ApiFailure ? err.reason : undefined);
-const SAID: Record<string, (t: Messages) => string> = { outbound_invalid: t => t.outboundSetup.invalid, outbound_changed: t => t.outboundSetup.changed };
-const errorOf = (t: Messages, err: unknown): string => SAID[reasonOf(err) ?? '']?.(t) ?? errorText(t, err);
+const errorOf = (t: Messages, err: unknown): string => (reasonOf(err) === 'outbound_invalid' ? t.outboundSetup.invalid : errorText(t, err));
 
 /* A move that reloads what it changed, with its failure shown where it was made. */
 function useMove(onDone: () => void) {
