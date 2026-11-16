@@ -924,6 +924,14 @@ export type JobView = {
 export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
 export type UpdateStep = 'backup' | 'pull' | 'promise' | 'install' | 'health' | 'rollback' | 'finished';
 export type UpdaterStatus = { id: string; version: string; commit?: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
+/* A running turn by its agent's name and its task's number. */
+export type NamedTurn = { agent: string; task: number | null };
+/* An update that waits for the agents: until is when it is called off unless they finished. lost: the turns it does not
+   wait for, as their node said nothing of their program for ten minutes. */
+export type UpdateWaiting = { version: string; commit?: string; since: string; until: string; turns: NamedTurn[]; lost: NamedTurn[] };
+/* An update called off as the agents had not finished by its deadline, with the turns that still ran. */
+export type UpdateCalledOff = { version: string; commit?: string; at: string; reason: 'deadline'; turns: NamedTurn[] };
+
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };
   available: boolean;
@@ -931,7 +939,7 @@ export type UpdatesView = {
   latest: Build | null;
   versions: Build[];
   error: string | null;
-  updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string; commit?: string } | null };
+  updater: { present: boolean; status: UpdaterStatus | null; waiting: UpdateWaiting | null; calledOff: UpdateCalledOff | null };
   /* What each node waits for before it is replaced. A server from before this says nothing. */
   nodeWaits?: NodeWait[];
 };

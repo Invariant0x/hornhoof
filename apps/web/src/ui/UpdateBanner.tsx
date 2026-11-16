@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { errorText, useT } from '../i18n';
+import { errorText, useLanguage, useT } from '../i18n';
 import type { Updates } from '../updates';
 import { UpdateProgress } from './UpdateProgress';
 import { buildText, versionText } from './VersionMark';
@@ -7,6 +7,7 @@ import { updateTargetText, versionedStatus } from './UpdateVersion';
 
 const LATER = 'hh-later';
 const SEEN = 'hh-update-seen';
+const CALLED_OFF = 'hh-update-called-off';
 
 function stored(key: string): string | null {
   try {
@@ -27,11 +28,13 @@ function store(key: string, value: string): void {
 /* Under the top bar: a newer build to take, an update waiting for the agents or running, or how the last one ended. */
 export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetails: () => void }) {
   const t = useT();
+  const { language } = useLanguage();
   const [, rerender] = useState(0);
   const [failure, setFailure] = useState<unknown>(null);
   const { view } = updates;
   if (!view) return null;
-  const { status, waiting } = view.updater;
+  const { status, waiting, calledOff } = view.updater;
+  const time = (iso: string) => new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
   async function act(run: () => Promise<void>) {
     setFailure(null);
@@ -58,8 +61,15 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
   } else if (waiting) {
     body = (
       <>
-        <span>{t.updates.waiting(versionText(waiting))}</span>
+        <span>{t.updates.waiting(versionText(waiting), time(waiting.until))}</span>
         <button className="btn small ghost" type="button" onClick={() => void act(updates.callOff)}>{t.updates.callOff}</button>
+      </>
+    );
+  } else if (calledOff && stored(CALLED_OFF) !== calledOff.at) {
+    body = (
+      <>
+        <span>{t.updates.calledOff(versionText(calledOff), time(calledOff.at))}</span>
+        <button className="btn small ghost" type="button" onClick={() => hide(CALLED_OFF, calledOff.at)}>{t.updates.ok}</button>
       </>
     );
   } else if (status && stored(SEEN) !== status.id) {
