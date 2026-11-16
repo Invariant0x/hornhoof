@@ -205,7 +205,7 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
 type AgentNow = Awaited<ReturnType<typeof agentState>>;
 
 /* The update its machine gets ready for, which a turn waits out. */
-const updating = (state: AgentNow): boolean => Boolean(state.machineDrain && state.machineDrain.state !== 'postponed');
+const updating = (state: AgentNow): boolean => Boolean(state.machineDrain);
 
 /* What its plan holds a turn back for, which the sender should not wait out: its limit, or the share set for tasks. */
 const planHold = (state: AgentNow, onTask: boolean): string | null => (state.limitUntil ? 'plan_at_limit' : state.budgetUntil && onTask ? 'plan_budget' : null);

@@ -606,6 +606,8 @@ export const nodes = pgTable(
     account: jsonb('account').$type<Account>(),
     /* How it came up, as it said last: what tells why the turns it ran are gone when it says it again. */
     boot: jsonb('boot').$type<Boot & { stopped?: NodeExit }>(),
+    /* Since when it waits for an update: it takes no new turn until it is back from it. Empty when it does not wait. */
+    updateWaitSince: timestamp('update_wait_since', { withTimezone: true }),
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],

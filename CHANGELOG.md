@@ -19,6 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
 - The glow and focus ring of a card follow its cut corner, with no dark triangle there.
 - The map's zoom label, such as 115%, is no longer cut off.
+- A node that waits for an update takes no new turns, so it updates as soon as the turns it runs end.
 
 ### Added
 
@@ -27,6 +28,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `failures` shows `next` for each blocked task, taken from its holder's last report.
 - Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 
 ### Changed
 
@@ -44,6 +46,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Machines filters start with All and a count, with chips of at least 44 px.
 - Table headers and row buttons are 44 px in every table.
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
+- A node's wait for an update never gives up, and leaders no longer enter a waiting node after three minutes.
+- `NODE_DRAIN_MS`, `NODE_UPDATE_RETRY_MS` and `NODE_LEADER_HOLD_MS` are gone.
 
 ## [0.29.2] - 2026-11-16
 
