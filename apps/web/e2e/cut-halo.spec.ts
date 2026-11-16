@@ -187,7 +187,7 @@ for (const skin of SKINS) {
             if (!pixel) continue;
             expect.soft(distance(pixel, ground), `${place}: the glow lights the cut of card ${i} at ${x.toFixed(1)}, ${y.toFixed(1)} as it lights its side (${lit})`).toBeGreaterThanOrEqual(lit * 0.5);
           }
-          await dots.evaluate(style => style.remove());
+          await dots.evaluate(style => (style as Element).remove());
         }
         await writeFile(info.outputPath(`sizes-${skin}-${lang}-${dir}-${width}-${browserName}.json`), JSON.stringify(sizes));
 
@@ -213,8 +213,23 @@ for (const skin of SKINS) {
         } else {
           expect.soft(distance(outer, ring), `${place}: a skin with no cut keeps a square ring`).toBeLessThan(60);
         }
-        await dots.evaluate(style => style.remove());
+        await dots.evaluate(style => (style as Element).remove());
       });
     }
   }
 }
+
+/* In forced colours the system paints every background its own way: the ring of a focused card keeps showing, in the
+   system's colour of a highlight, as the outline it stands for did. */
+test('the focus ring of a framed card shows in forced colours', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'forced colours are emulated in Chromium only');
+  await openMap(page, 'cyberpunk', 'ltr', 1440);
+  await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+  const button = page.locator('button.dept').first();
+  const box = await closeUp(page, button);
+  await button.focus();
+  expect(await button.evaluate(element => element.matches(':focus-visible'))).toBe(true);
+  const shot = await around(page, box);
+  const [ring, beyond] = [shot.at(box.x - 3, box.y + box.h / 2)!, shot.at(box.x - 12, box.y + box.h / 2)!];
+  expect(distance(ring, beyond), 'the ring stands out of the map around it').toBeGreaterThan(60);
+});
