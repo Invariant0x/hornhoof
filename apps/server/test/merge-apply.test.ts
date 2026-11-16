@@ -95,15 +95,6 @@ describe('a merge applied', () => {
     expect(events.map(event => event.id)).toEqual([1, 2]);
     const [heard] = await s.db.select().from(agentEvents).where(eq(agentEvents.id, said!.id));
     expect([heard!.data, Number(heard!.seq) > Number(said!.seq)]).toEqual([{ text: 'there' }, true]);
-    /* In the order the source numbered them, by either way. */
-    for (const kept of [false, true]) {
-      const again = await stand();
-      const other = await again.sides.fork();
-      const told = await other.db.insert(agentEvents).values(['a', 'b', 'c', 'd', 'e'].map(text => ({ ...again.on, agentId: again.ana.id, kind: 'text' as const, data: { text } }))).returning();
-      await again.merge(other, { kept });
-      const order = await again.db.select().from(agentEvents).orderBy(agentEvents.seq);
-      expect(order.map(event => event.id)).toEqual([...told].sort((a, b) => Number(a.seq) - Number(b.seq)).map(event => event.id));
-    }
     expect(await s.db.select().from(agentChanges).where(eq(agentChanges.id, change!.id))).toHaveLength(1);
     expect(await s.conflicts(id)).toEqual([]);
     const row = await s.mergeRow(id);
@@ -111,6 +102,17 @@ describe('a merge applied', () => {
     expect([row.xact, row.applied_at, row.from_at, row.to_at].every(Boolean)).toBe(true);
     expect((await s.consumed(id)).every(entry => entry.how === 'applied')).toBe(true);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  /* A log's added rows come in the order the source numbered them, by either way. Each way stands its own company, so
+     no test of this file builds three. */
+  it.each([false, true])('adds a log in the order the source numbered it, kept %s', async kept => {
+    const again = await stand();
+    const other = await again.sides.fork();
+    const told = await other.db.insert(agentEvents).values(['a', 'b', 'c', 'd', 'e'].map(text => ({ ...again.on, agentId: again.ana.id, kind: 'text' as const, data: { text } }))).returning();
+    await again.merge(other, { kept });
+    const order = await again.db.select().from(agentEvents).orderBy(agentEvents.seq);
+    expect(order.map(event => event.id)).toEqual([...told].sort((a, b) => Number(a.seq) - Number(b.seq)).map(event => event.id));
   });
 
   it('applies a proven overwrite', async () => {
@@ -423,9 +425,10 @@ describe('a merge applied', () => {
     await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
     await s.db.insert(personAccess).values([{ ...s.on, personId: maria!.id, departmentId: s.dev.id }, { ...s.on, personId: maria!.id, departmentId: sales!.id }]);
     await s.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), now(), 'hornhoof_before_t1')`);
-    /* A moment later, on a clock that may count in milliseconds, the CEO narrows her access to one department, as the
-       screen does: all of her places go, and one comes back. And a task is removed. */
-    await new Promise(resolve => setTimeout(resolve, 5));
+    /* A moment later the CEO narrows her access to one department, as the screen does: all of her places go, and one
+       comes back. And a task is removed. What came before is set a second back, so on any clock it is a moment later. */
+    await s.db.execute(sql`UPDATE net.journal SET at = at - interval '1 second'`);
+    await s.db.execute(sql`UPDATE net.restores SET at = at - interval '1 second', dumped_at = dumped_at - interval '1 second'`);
     await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
     const [left] = await s.db.insert(personAccess).values({ ...s.on, personId: maria!.id, departmentId: s.dev.id }).returning();
     await s.db.delete(tasks).where(eq(tasks.id, gone.id));
@@ -513,6 +516,9 @@ describe('a merge applied', () => {
     expect(written.find(row => row.tbl === 'computer_runs')).toMatchObject({ cols: ['state', 'done_at'], was: { state: 'waiting', done_at: null } });
     expect(result.counts.rewritten).toBe(6);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('stops what a kept database left running, once, whichever copy of it comes later', async () => {
     /* After a restore nobody knows where it ran. */
     const again = await stand();
     const kept = await again.sides.fork();

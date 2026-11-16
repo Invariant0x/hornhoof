@@ -13,14 +13,15 @@ type Props = {
   saved: RepoKey | null;
   /* What the person reads of the key in use. */
   says: ReactNode;
-  /* The button that saves a first key there. */
+  /* The button that saves a first key there, and its classes: the record's main button where nothing is connected yet. */
   first: string;
+  firstClass: string;
   /* The key there now, for whoever keeps it; a department's comes back with the company's view instead. */
   onSaved?: (key: RepoKey | null) => void;
 };
 
 /* One GitHub key, saved, changed or removed in place. An empty key field keeps the saved key. */
-function KeyPart({ path, saved, says, first, onSaved }: Props) {
+function KeyPart({ path, saved, says, first, firstClass, onSaved }: Props) {
   const t = useT();
   const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
   const [owner, setOwner] = useState('');
@@ -86,11 +87,11 @@ function KeyPart({ path, saved, says, first, onSaved }: Props) {
       ) : saved ? (
         <div className="repo-actions">
           <button className="btn small ghost" type="button" onClick={edit}>{t.repoHost.change}</button>
-          <button className="btn small ghost" type="button" onClick={() => setMode('remove')}>{t.repoHost.remove}</button>
+          <button className="btn small ghost danger" type="button" onClick={() => setMode('remove')}>{t.repoHost.remove}</button>
         </div>
       ) : (
         <div className="repo-actions">
-          <button className="btn small ghost" type="button" onClick={edit}>{first}</button>
+          <button className={firstClass} type="button" onClick={edit}>{first}</button>
         </div>
       )}
       {alert}
@@ -115,7 +116,7 @@ export function RepoHostCard() {
   const says = host ? <Idents text={t.repoHost.saved(host.owner, host.tokenLast4)} idents={[host.owner]} /> : t.repoHost.none;
   return (
     <IntegrationCard name={t.repoHost.title} about={t.repoHost.about} connected={Boolean(host)}>
-      {host !== undefined && <KeyPart path="/api/repo-host" saved={host} says={says} first={t.repoHost.save} onSaved={setHost} />}
+      {host !== undefined && <KeyPart path="/api/repo-host" saved={host} says={says} first={t.repoHost.save} firstClass="btn small" onSaved={setHost} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </IntegrationCard>
   );
@@ -129,7 +130,7 @@ export function DepartmentRepoHost({ departmentId, host }: { departmentId: strin
   return (
     <section aria-labelledby={`${id}-title`}>
       <h3 id={`${id}-title`}>{t.repoHost.title}</h3>
-      <KeyPart path={`/api/departments/${departmentId}/repo-host`} saved={host?.own ? host : null} says={says} first={host ? t.repoHost.own : t.repoHost.save} />
+      <KeyPart path={`/api/departments/${departmentId}/repo-host`} saved={host?.own ? host : null} says={says} first={host ? t.repoHost.own : t.repoHost.save} firstClass="btn small ghost" />
     </section>
   );
 }

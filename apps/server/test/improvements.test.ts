@@ -405,20 +405,21 @@ describe('a finding about Hornhoof itself, once sent to its developers', () => {
     expect(JSON.parse((await call(wendy, 'improvements')).content[0]!.text).map((i: { id: string }) => i.id)).not.toContain(id);
   });
 
-  it('takes the issue from the answer only at its exact address on GitHub', async () => {
-    const answers: [unknown, unknown][] = [
-      [{ number: 12, url: 'https://evil.example/invariant0x/hornhoof/issues/12' }, null],
-      [{ number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/13' }, null],
-      [{ number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12?x=1' }, null],
-      [{ number: 12, url: 'javascript:alert(1)' }, null],
-      [{ number: 12, url: 'https://github.com/Invariant0x/Hornhoof/issues/12' }, { number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12' }],
-    ];
-    for (const [issue, kept] of answers) {
-      const { relay, card, send } = await installation();
-      relay.feedbackAnswer = { status: 202, body: { received: true, number: 7, issue } };
-      expect((await send()).statusCode).toBe(200);
-      expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: kept } });
-    }
+  /* Each answer stands its own installation, so no test of this file builds six. */
+  it.each<[string, unknown, unknown]>([
+    ['another host', { number: 12, url: 'https://evil.example/invariant0x/hornhoof/issues/12' }, null],
+    ['another number', { number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/13' }, null],
+    ['a query', { number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12?x=1' }, null],
+    ['a script', { number: 12, url: 'javascript:alert(1)' }, null],
+    ['its exact address in other letters', { number: 12, url: 'https://github.com/Invariant0x/Hornhoof/issues/12' }, { number: 12, url: 'https://github.com/invariant0x/hornhoof/issues/12' }],
+  ])('takes the issue from the answer only at its exact address on GitHub: %s', async (_, issue, kept) => {
+    const { relay, card, send } = await installation();
+    relay.feedbackAnswer = { status: 202, body: { received: true, number: 7, issue } };
+    expect((await send()).statusCode).toBe(200);
+    expect(await card()).toMatchObject({ status: 'sent', sent: { number: 7, issue: kept } });
+  });
+
+  it('takes no number and no issue from an answer that names neither', async () => {
     const { relay, card, send } = await installation();
     relay.feedbackAnswer = { status: 202, body: { received: true } };
     expect((await send()).statusCode).toBe(200);
