@@ -89,6 +89,20 @@ it('draws every focus ring in the accent ink, which keeps 3:1 on every surface o
   for (const ring of rings) expect(ring.decls.outline, ring.selectors.join(', ')).toMatch(/^2px solid var\(--cyan-ink\)$/);
 });
 
+it('frames every invalid field control in pink by one shared .field rule while keeping a visible focus ring', () => {
+  const invalid = '.field :is(input, select, textarea)[aria-invalid="true"]';
+  const focused = `${invalid}:is(:focus, :focus-visible)`;
+  expect(decl(invalid, 'border-color')).toBe('var(--pink)');
+  expect(decl(focused, 'border-color')).toBe('var(--pink)');
+  expect(decl(focused, 'outline')).toBe('2px solid var(--cyan-ink)');
+  expect(decl(focused, 'outline-offset')).toBe('2px');
+  expect(decl(focused, 'box-shadow')).toBe('none');
+  expect(RULES.filter(r => r.selectors.some(s => s.includes('aria-invalid'))).map(r => r.selectors)).toEqual([
+    [invalid],
+    [focused],
+  ]);
+});
+
 it('lets a finger take a line of the company map and a bend on it as easily as a block\'s grip', () => {
   /* In the map's own units, against its zoom: a browser finds what a pointer is on without vector-effect, by the drawn width. */
   expect(decl('.wires .hit', 'stroke-width')).toBe('calc(12px / var(--k, 1))');
@@ -99,4 +113,24 @@ it('lets a finger take a line of the company map and a bend on it as easily as a
   expect(decl('.bend', '-webkit-tap-highlight-color')).toBe('transparent');
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p))).toEqual(['28px', '28px', '-14px 0 0 -14px']);
   expect(['width', 'height', 'margin'].map(p => decl('.bend', p, '(pointer: coarse)'))).toEqual(['44px', '44px', '-22px 0 0 -22px']);
+});
+
+it('sizes the map scale label by its content from tokens without clipping and keeps 44 px zoom buttons', () => {
+  expect(decl('.zoom', 'max-inline-size')).toBe('calc(100% - 32px)');
+  expect(decl('.zbtn', 'flex')).toBe('none');
+  expect(decl('.zbtn', 'width')).toBe('44px');
+  expect(decl('.zbtn', 'height')).toBe('44px');
+  expect(decl('.zv', 'flex')).toBe('none');
+  expect(decl('.zv', 'box-sizing')).toBe('border-box');
+  expect(decl('.zv', 'min-inline-size')).toBe('52px');
+  expect(decl('.zv', 'min-width')).toBeUndefined();
+  expect(decl('.zv', 'padding-inline')).toBe('8px');
+  expect(decl('.zv', 'white-space')).toBe('nowrap');
+  expect(decl('.zv', 'font-family')).toBe('var(--f-body)');
+  expect(decl('.zv', 'font-size')).toBe('13px');
+  expect(decl('.zv', 'font-weight')).toBe('500');
+  expect(decl('.zv', 'line-height')).toBe('1.45');
+  expect(decl('.zv', 'font-variant-numeric')).toBe('tabular-nums');
+  expect(decl('.zv', 'overflow')).toBeUndefined();
+  expect(decl('.zv', 'text-overflow')).toBeUndefined();
 });
