@@ -1,18 +1,44 @@
 import { randomUUID } from 'node:crypto';
-import { CheckQueueRequest, type CheckOptions, type CheckQueueReply } from '@hornhoof/protocol';
+import { CHECK_LEASE_MS, CheckQueueRequest, type CheckOptions, type CheckQueueReply } from '@hornhoof/protocol';
 
 export type SlotOptions = CheckOptions & { label?: string; agentId?: string; jobId?: string };
 export type CheckLease = { id: string; signal: AbortSignal; release(): void };
-type Pending = { options: SlotOptions; stop: AbortController; state: 'queued' | 'running'; resolve(lease: CheckLease): void; reject(reason: unknown): void; detach(): void };
+type Pending = { options: SlotOptions; frame: CheckQueueRequest; stop: AbortController; state: 'queued' | 'running'; resolve(lease: CheckLease): void; reject(reason: unknown): void; detach(): void };
 
+/* A connection that drops for a moment takes no lease with it (#1060): the leases wait as long as the server keeps them,
+   and are claimed again once the node is back. One away longer loses them, and what runs under them stops. */
 export class CheckClient {
   private connected = false;
   private readonly entries = new Map<string, Pending>();
-  constructor(private readonly send: (frame: CheckQueueRequest) => boolean) {}
+  /* Leases let go while the node was away, which the server hears of once it is back. */
+  private readonly letGo = new Set<string>();
+  private away: NodeJS.Timeout | undefined;
+  constructor(private readonly send: (frame: CheckQueueRequest) => boolean, private readonly graceMs = CHECK_LEASE_MS) {}
 
   online(value: boolean): void {
+    if (this.connected === value) return;
     this.connected = value;
-    if (value) return;
+    if (value) { this.back(); return; }
+    this.away = setTimeout(() => this.gone(), this.graceMs);
+    this.away.unref();
+  }
+
+  /* The node stops: every lease ends now, with nothing to come back to. */
+  stop(): void {
+    this.connected = false;
+    clearTimeout(this.away);
+    this.gone();
+  }
+
+  private back(): void {
+    clearTimeout(this.away); this.away = undefined;
+    for (const id of this.letGo) this.send({ type: 'check.release', id });
+    this.letGo.clear();
+    for (const [id, entry] of this.entries) if (!entry.stop.signal.aborted) this.publish(id, entry, { ...entry.frame, resume: true } as CheckQueueRequest);
+  }
+
+  private gone(): void {
+    this.away = undefined; this.letGo.clear();
     for (const [id, entry] of this.entries) this.lost(id, entry);
   }
 
@@ -22,7 +48,7 @@ export class CheckClient {
     const id = randomUUID(), frame = this.request(id, options);
     return new Promise((resolve, reject) => {
       const abort = () => { this.release(id); reject(options.signal?.reason); };
-      const entry: Pending = { options, stop: new AbortController(), state: 'queued', resolve, reject, detach: () => options.signal?.removeEventListener('abort', abort) };
+      const entry: Pending = { options, frame, stop: new AbortController(), state: 'queued', resolve, reject, detach: () => options.signal?.removeEventListener('abort', abort) };
       this.entries.set(id, entry);
       options.signal?.addEventListener('abort', abort, { once: true });
       this.publish(id, entry, frame);
@@ -63,6 +89,7 @@ export class CheckClient {
     if (!entry) return;
     entry.detach(); this.entries.delete(id);
     if (this.connected) this.send({ type: 'check.release', id });
+    else if (this.away) this.letGo.add(id);
   }
 
   private lost(id: string, entry: Pending): void {

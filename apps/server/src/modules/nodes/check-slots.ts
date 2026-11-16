@@ -51,7 +51,8 @@ export async function receiveCheckRequest(ctx: Ctx, id: NodeIdentity, request: C
   queue.acquire(key, actor);
 }
 
-export function nodeCheckQueueLost(ctx: Ctx, id: NodeIdentity): void { queues.get(ctx)?.lost(keyOf(id)); }
+/* A machine whose connection dropped keeps its leases while it may come back (#1060). */
+export function nodeCheckQueueAway(ctx: Ctx, id: NodeIdentity): void { queues.get(ctx)?.away(keyOf(id)); }
 export function jobCheckQueued(ctx: Ctx, jobId: string, now?: number): boolean { return queues.get(ctx)?.waiting(jobId, now) ?? false; }
 export function jobCheckLastEnd(ctx: Ctx, jobId: string, now: number): number | null { return queues.get(ctx)?.lastEnd(jobId, now) ?? null; }
 export function closeCheckQueue(ctx: Ctx): void { queues.get(ctx)?.close(); queues.delete(ctx); }
