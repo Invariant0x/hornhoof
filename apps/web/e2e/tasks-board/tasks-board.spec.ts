@@ -50,7 +50,8 @@ async function inside(page: Page, what: string) {
 
 /* What a finger presses is at least 44 px high. */
 async function touchable(page: Page, what: string) {
-  for (const height of await page.locator('.tr-item, .tr-views label, .tr-chip, .tr-menu:visible, .tr-canvas .zbtn').evaluateAll(els =>
+  const links = '.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish';
+  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-chip, .tr-chip select, .tr-menu:visible, .tr-canvas .zbtn, ${links}`).evaluateAll(els =>
     els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height))) {
     expect(height, what).toBeGreaterThanOrEqual(43.5);
   }
@@ -172,6 +173,57 @@ for (const dir of ['ltr', 'rtl'] as const) {
     }
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     await capture(page, info, `card-${dir}-1440`);
+  });
+}
+
+/* The colour a role of the skin gives words, as the engine computes it. */
+const roleColor = (page: Page, role: string) => page.evaluate(r => {
+  const probe = document.body.appendChild(document.createElement('i'));
+  probe.style.color = `var(${r})`;
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}, role);
+
+/* Design's rules for the tracker (#1150), in the light skin: a chip in focus has the app's ring, its choice is as wide and as
+   high in every engine with the arrow at the end side, the left panel keeps no room for a bar, a chosen chip and the chosen
+   view read clearly, and a card's facts keep their words in order right to left. */
+for (const dir of ['ltr', 'rtl'] as const) {
+  test(`keeps the chips, the left panel and the card's facts alike in every engine: ${dir}`, async ({ page }, info) => {
+    const t = MESSAGES.en;
+    const shot = (name: string) => capture(page, info, `design-${name}-${dir}-${info.project.name.replace('tasks-', '')}`);
+    await serveTasksBoard(page);
+    await open(page, 'en', 1440, `/tasks?department=${DEV.id}`, SKINS[0]);
+    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    const chips = page.getByRole('group', { name: t.tracker.filters.label });
+    const status = chips.getByLabel(t.tracker.filters.status);
+    await status.focus();
+    const ring = await status.evaluate(el => { const s = getComputedStyle(el); return [s.outlineStyle, s.outlineWidth, s.outlineOffset, s.outlineColor]; });
+    expect(ring).toEqual(['solid', '2px', '2px', await roleColor(page, '--cyan-ink')]);
+    await shot('chip-focus');
+    const box = (await status.boundingBox())!;
+    expect(Math.abs(box.width - 160)).toBeLessThanOrEqual(1);
+    expect(Math.abs(box.height - 40)).toBeLessThanOrEqual(1);
+    const arrow = await status.evaluate(el => { const s = getComputedStyle(el); return [s.paddingInlineEnd, s.backgroundPositionX]; });
+    expect(arrow[0]).toBe('28px');
+    if (dir === 'rtl') expect(arrow[1]).toBe('10px, 15px');
+    else expect(arrow[1]).not.toBe('10px, 15px');
+    const side = await page.locator('.tr-side').evaluate(el => { const s = getComputedStyle(el); return [el.clientWidth, el.offsetWidth - parseFloat(s.borderInlineStartWidth) - parseFloat(s.borderInlineEndWidth)]; });
+    expect(side[0]).toBe(side[1]);
+    await status.selectOption({ label: t.tracker.statuses.working });
+    await status.evaluate(el => (el as HTMLSelectElement).blur());
+    await expect(page.locator('.tr-chip.on')).toHaveCount(1);
+    expect(await page.locator('.tr-chip.on').evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await roleColor(page, '--cyan-ink'));
+    expect(await page.locator('.tr-views label.on').evaluate(el => getComputedStyle(el).color)).toBe(await roleColor(page, '--ink'));
+    await shot('light-chips');
+    await view(page, t, t.tracker.views.board);
+    const card = page.getByRole('region', { name: t.tracker.views.board, exact: true }).getByRole('article', { name: named('Take card payments'), exact: true });
+    for (const fact of await card.locator('.tr-card-facts li').all()) await expect(fact).toHaveAttribute('dir', 'auto');
+    expect(await card.locator('.tr-card-facts li').first().evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
+    await card.locator('.tr-card-title .linkish').click();
+    const panel = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
+    await expect(panel.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
+    await shot('card');
   });
 }
 

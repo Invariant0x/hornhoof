@@ -1689,10 +1689,11 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tracker { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; max-width: 1440px; margin: 0 auto; padding: 84px 16px 48px; box-sizing: border-box; }
 @media (min-width: 1100px) { .body.with-task .tracker { padding-inline-end: 432px; } }
 @media (min-width: 761px) {
-  .body.tracker-page ~ .acard.at-end { left: auto; right: 16px; }
-  [dir="rtl"] .body.tracker-page ~ .acard.at-end { right: auto; left: 16px; }
+  .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
 }
-.tr-side { position: sticky; top: 84px; display: grid; gap: 8px; align-content: start; min-width: 0; max-height: calc(100vh - 100px); overflow: auto; scrollbar-gutter: stable; padding: 12px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); }
+.tr-side { position: sticky; top: 84px; display: grid; gap: 8px; align-content: start; min-width: 0; max-height: calc(100vh - 100px); overflow: auto; scrollbar-width: none; padding: 12px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); }
+/* The panel scrolls with no bar of its own, so every engine leaves its content the same width (style book section 9). */
+.tr-side::-webkit-scrollbar { display: none; }
 .tr-side > h2 { margin: 10px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
 .tr-side-close { display: none; justify-content: flex-end; }
 .tr-items, .tr-dept-body ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; }
@@ -1716,7 +1717,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-people li { display: grid; gap: 2px; min-width: 0; padding: 6px 10px; font-size: 13px; }
 .tr-person { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
 .tr-person b { font-weight: 600; overflow-wrap: anywhere; }
-.tr-people .linkish { justify-self: start; min-height: 32px; font-size: 12.5px; overflow-wrap: anywhere; }
+.tr-people .linkish { justify-self: start; font-size: 12.5px; overflow-wrap: anywhere; }
 .tr-turns { padding-block-start: 8px; border-block-start: 1px solid var(--line); }
 .tr-main { display: grid; gap: 16px; align-content: start; min-width: 0; }
 .tr-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px 16px; min-width: 0; }
@@ -1734,12 +1735,21 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 44px; padding-inline-start: 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface); font-size: 13px; font-weight: 600; color: var(--muted); }
 .tr-chip > span { overflow-wrap: anywhere; }
 .tr-chip.on { border-color: var(--cyan); color: var(--cyan-ink); }
-.tr-chip select { min-width: 0; height: 42px; padding-inline-start: 8px; border: 0; background-color: var(--surface); font: inherit; font-weight: 500; color: var(--ink); }
+/* The chip's choice is as wide in every engine, its arrow at the end side of the line in both directions. */
+.tr-chip select {
+  inline-size: 160px; max-inline-size: 100%; min-inline-size: 0; block-size: 40px; padding-block: 0; padding-inline: 8px 28px;
+  border: 0; background-color: var(--surface); font: inherit; font-weight: 500; line-height: 40px; color: var(--ink);
+}
+[dir="rtl"] .tr-chip select { background-position: 10px 50%, 15px 50%; }
+.tr-chip select:is(:focus, :focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: none; }
+/* In the light skin a cyan line on white is too faint for a border, and cyan words over the glow too faint for words. */
+:root[data-scheme="light"] :is(.tr-chip.on, .tr-node.goal) { border-color: var(--cyan-ink); }
+:root[data-scheme="light"] .tr-views label.on { color: var(--ink); }
 .tr-goals { display: grid; gap: 8px; min-width: 0; }
 .tr-goals > h2, .tr-found > h2 { margin: 0; font-size: 15px; }
 .tr-goals ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
 .tr-goals li { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); }
-.tr-goals .linkish { justify-self: start; min-height: 32px; font-weight: 600; overflow-wrap: anywhere; }
+.tr-goals .linkish { justify-self: start; font-weight: 600; overflow-wrap: anywhere; }
 .tr-found { display: grid; gap: 10px; min-width: 0; }
 .tr-waits { display: grid; gap: 6px; }
 .tr-waits h3 { margin: 0; font-size: 14px; }
@@ -1763,7 +1773,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-head > span { overflow-wrap: anywhere; }
 .tr-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 14px; }
 .tr-no { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tr-title { min-height: 32px; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.tr-title { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
 .tr-title:hover { color: var(--cyan-ink); }
 .tr-name .tstate, .tr-name .badge { white-space: normal; }
 .tr-name small { flex-basis: 100%; font-size: 12px; }
@@ -1793,7 +1803,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-card.done::before { background: var(--ok); }
 .tr-card.on { border-color: var(--cyan); }
 .tr-card-title { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
-.tr-card-title .linkish { min-height: 32px; color: var(--ink); overflow-wrap: anywhere; }
+.tr-card-title .linkish { color: var(--ink); overflow-wrap: anywhere; }
 .tr-card-title .linkish:hover { color: var(--cyan-ink); }
 .tr-card .tstate { white-space: normal; }
 .tr-card-facts { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
@@ -1804,7 +1814,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-crumbs ol, .tp-path ol { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .tr-crumbs li, .tp-path li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
 .tr-crumbs li + li::before, .tp-path li + li::before { content: '/'; color: var(--muted); }
-.tr-crumbs .linkish, .tp-path .linkish { min-height: 32px; overflow-wrap: anywhere; }
+.tr-crumbs .linkish, .tp-path .linkish { overflow-wrap: anywhere; }
+/* A link that stands alone takes a finger: at least 44 px high, its words in the middle as before. Links inside a line of
+   words keep the line's height. */
+:is(.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-block-size: 44px; }
 .tr-crumbs [aria-current] { font-weight: 600; }
 .tr-modes { max-width: 420px; }
 .tr-modes label { min-height: 44px; padding: 6px 8px; text-align: center; overflow-wrap: anywhere; }

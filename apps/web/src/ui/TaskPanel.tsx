@@ -252,9 +252,9 @@ export function CardPath({ goals, parent, onOpenGoal, onOpen }: { goals: { id: s
     <nav className="tp-path" aria-label={t.tracker.card.path}>
       <ol>
         {goals.map(g => (
-          <li key={g.id}>{onOpenGoal ? <button className="linkish" type="button" onClick={() => onOpenGoal(g.id)}>{g.title}</button> : <span>{g.title}</span>}</li>
+          <li key={g.id}>{onOpenGoal ? <button className="linkish" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button> : <span dir="auto">{g.title}</span>}</li>
         ))}
-        {parent && <li><button className="linkish" type="button" onClick={() => onOpen(parent.id)}>#{parent.number} {parent.title}</button></li>}
+        {parent && <li><button className="linkish" type="button" dir="auto" onClick={() => onOpen(parent.id)}>#{parent.number} {parent.title}</button></li>}
       </ol>
     </nav>
   );
@@ -355,7 +355,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
       {task.why && (
         <section className="tp-why" aria-label={t.tracker.card.why}>
           <h4>{t.tracker.card.why}</h4>
-          <p>{task.why}</p>
+          <p dir="auto">{task.why}</p>
         </section>
       )}
       <TaskFacts task={task} />
@@ -371,7 +371,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
       <TaskRelatedSection heading={t.tracker.card.waitsFor} items={task.after} onOpen={onOpen} />
       <TaskRelatedSection heading={t.tracker.card.neededFor} items={task.neededFor ?? []} onOpen={onOpen} />
       <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
-      {task.brief && <p className="tp-brief">{task.brief}</p>}
+      {task.brief && <p className="tp-brief" dir="auto">{task.brief}</p>}
       {task.body && (
         <section className="tp-body">
           <h4>{t.tasks.details}</h4>

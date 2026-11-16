@@ -297,7 +297,7 @@ function MakeHere({ places, org, department, pipeline, making, setMaking, onOpen
   const head = known?.employees.some(e => e.kind === 'head');
   return (
     <>
-      {known && !head && <p className="muted">{t.dept.needsHead}</p>}
+      {known && !head && <p className="muted" dir="auto">{t.dept.needsHead}</p>}
       {!making && (
         <div className="entry-actions tr-make">
           {known && head && <button className="btn small ghost" type="button" onClick={() => setMaking('task')}>{words.newTask}</button>}

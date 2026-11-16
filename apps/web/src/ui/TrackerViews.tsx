@@ -122,11 +122,12 @@ function BoardCard({ tree, rows, stage }: { tree: TaskTree; rows: Rows; stage: b
       <h3 className="tr-card-title"><button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button></h3>
       {(stage || status === 'waitingYou' || status === 'paused' || status === 'stopped') && <StateWord status={status} />}
       <ul className="tr-card-facts">
-        <li>{words.executor(doerOf(task)?.name ?? t.tracker.nobody)}</li>
-        <li>{words.responsible(task.responsible?.name ?? t.tracker.nobody)}</li>
-        {due && <li className={due.late ? 'tp-late' : undefined}>{words.due(due.text)}</li>}
-        {tree.total > 0 && <li>{words.subtasks(tree.done, tree.total)}</li>}
-        {waits && <li className="tr-wait">{waits}</li>}
+        {/* Each fact is a whole phrase in its own direction, so its dot and the parts of its date stay in place in RTL. */}
+        <li dir="auto">{words.executor(doerOf(task)?.name ?? t.tracker.nobody)}</li>
+        <li dir="auto">{words.responsible(task.responsible?.name ?? t.tracker.nobody)}</li>
+        {due && <li className={due.late ? 'tp-late' : undefined} dir="auto">{words.due(due.text)}</li>}
+        {tree.total > 0 && <li dir="auto">{words.subtasks(tree.done, tree.total)}</li>}
+        {waits && <li className="tr-wait" dir="auto">{waits}</li>}
         {task.urgent && <li><span className="badge urgent">{t.tracker.card.urgent}</span></li>}
       </ul>
     </article>

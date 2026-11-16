@@ -122,7 +122,7 @@ function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Pr
       {goal.why && (
         <section className="tp-why" aria-label={words.why}>
           <h4>{words.why}</h4>
-          <p>{goal.why}</p>
+          <p dir="auto">{goal.why}</p>
         </section>
       )}
       <GoalProgress goal={goal} />
