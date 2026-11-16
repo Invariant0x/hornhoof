@@ -191,10 +191,12 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
 
 /* One connection at a time under the keeper's name, with no statement timeout of the database's own: each connect and each
    query has timeoutMs, and one that fails or runs out drops its connection without waiting for it to end, so the next
-   query opens a new one. A commit counts here once this machine wrote it (synchronous_commit local): the lease is a
-   fact of this machine alone. Queries run one after another, each waiting for the one before to settle. */
-export function keeperSql(url: string, opts: { timeoutMs?: number } = {}): Sql & { close(): Promise<void> } {
-  const timeoutMs = opts.timeoutMs ?? 2000;
+   query opens a new one. A timeout given as a function is read at each connect and each query, so it can follow what
+   the disk measures. A commit counts here once this machine wrote it (synchronous_commit local): the lease is a fact
+   of this machine alone. Queries run one after another, each waiting for the one before to settle. */
+export function keeperSql(url: string, opts: { timeoutMs?: number | (() => number) } = {}): Sql & { close(): Promise<void> } {
+  const given = opts.timeoutMs ?? 2000;
+  const timeoutMs = (): number => (typeof given === 'function' ? given() : given);
   let client: pg.Client | null = null;
   let last: Promise<unknown> = Promise.resolve();
   const drop = (): void => {
@@ -204,7 +206,7 @@ export function keeperSql(url: string, opts: { timeoutMs?: number } = {}): Sql &
   };
   const connected = async (): Promise<pg.Client> => {
     if (client) return client;
-    const next = new pg.Client({ connectionString: stripSettings(url), application_name: KEEPER_NAME, options: '-c synchronous_commit=local', connectionTimeoutMillis: timeoutMs, query_timeout: timeoutMs });
+    const next = new pg.Client({ connectionString: stripSettings(url), application_name: KEEPER_NAME, options: '-c synchronous_commit=local', connectionTimeoutMillis: timeoutMs() });
     keepErrors(next);
     next.on('error', () => { if (client === next) client = null; });
     await next.connect();
@@ -213,7 +215,9 @@ export function keeperSql(url: string, opts: { timeoutMs?: number } = {}): Sql &
   };
   const run = async <R>(text: string, params?: unknown[]): Promise<{ rows: R[] }> => {
     try {
-      const { rows } = await (await connected()).query(text, params);
+      const client = await connected();
+      const statement: pg.QueryConfig & { query_timeout: number } = { text, values: params, query_timeout: timeoutMs() };
+      const { rows } = await client.query(statement);
       return { rows: rows as R[] };
     } catch (err) {
       drop();

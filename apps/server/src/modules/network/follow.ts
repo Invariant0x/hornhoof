@@ -2,6 +2,7 @@ import { and, eq, isNotNull, isNull, notLike, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { jobs, machines, nodes, testParts } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { ON_NODE } from '../jobs/dispatch.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
@@ -115,13 +116,13 @@ export async function tryGrant(tx: Db, own: Own, machineId: string, build: Leade
   if (row.failedCommit === build.commit && within(row.failedAt, FOLLOW_RETRY_MS, now)) return false;
   const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
   if (others.some(other => installs(other, now))) return false;
-  const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), ON_NODE)).limit(1);
-  const [part] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
+  const [turn] = await tx.select(idOnly(jobs)).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), ON_NODE)).limit(1);
+  const [part] = await tx.select(idOnly(testParts)).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
   if (turn || part) return false;
   /* The same for what its own built-in node runs: the work of the company's keys. */
   if (row.networkId) {
-    const [keyTurn] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.builtinMachine, row.networkId), ON_NODE)).limit(1);
-    const [keyPart] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.builtinMachine, row.networkId), eq(testParts.status, 'running'))).limit(1);
+    const [keyTurn] = await tx.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.builtinMachine, row.networkId), ON_NODE)).limit(1);
+    const [keyPart] = await tx.select(idOnly(testParts)).from(testParts).where(and(eq(testParts.builtinMachine, row.networkId), eq(testParts.status, 'running'))).limit(1);
     if (keyTurn || keyPart) return false;
   }
   await tx.update(machines).set({ goCommit: build.commit, goAt: now }).where(eq(machines.id, machineId));

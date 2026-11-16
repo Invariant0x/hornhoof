@@ -92,6 +92,9 @@ export type SubView = {
   limitsUpdatedAt?: string | null;
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
+  /* The plans its employees go on to at its limit, in order, each with the model to run there or null for their role's;
+     empty for any plan of the company with room. None from an older server. */
+  fallbacks?: PlanFallback[];
   isOrchestrator: boolean;
   /* The account each signed-in machine of the plan is on; the address only for its owner and people who see the whole
      company. tier: the one all of them say; accountsDiffer: they are on different accounts or tiers. */
@@ -318,6 +321,8 @@ export type CardSkill = { id: string; title: Lang; description: Lang; on: boolea
 /* Why a node restarted, as far as Hornhoof could tell. */
 export type RestartCause = 'server' | 'update' | 'machine' | 'container' | 'program' | 'connection' | 'unknown';
 
+export type PlanFallback = { subscription: string; model: string | null };
+
 export type AgentCardView = {
   id: string;
   currentTask: { id: string; number: number; title: string } | null;
@@ -332,6 +337,9 @@ export type AgentCardView = {
   /* The level a person picked, or null for the Default. */
   effort: string | null;
   subscription: SubView | null;
+  /* Hornhoof put it on its subscription for a while, as its own plan is at its limit: that plan, and until when as far as it
+     is known; it goes back between turns after that. None from an older server. */
+  fallback?: { home: SubView; until: string | null } | null;
   /* The machine its plan was heard from last while none of the plan's machines is online, and when; none while it can run. */
   offline?: OfflineMachine | null;
   /* The machine its program runs on; none before its first turn, or on a key. */
@@ -921,6 +929,14 @@ export type JobView = {
 export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
 export type UpdateStep = 'backup' | 'pull' | 'promise' | 'install' | 'health' | 'rollback' | 'finished';
 export type UpdaterStatus = { id: string; version: string; commit?: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
+/* A running turn by its agent's name and its task's number. */
+export type NamedTurn = { agent: string; task: number | null };
+/* An update that waits for the agents: until is when it is called off unless they finished. lost: the turns it does not
+   wait for, as their node said nothing of their program for ten minutes. */
+export type UpdateWaiting = { version: string; commit?: string; since: string; until: string; turns: NamedTurn[]; lost: NamedTurn[] };
+/* An update called off as the agents had not finished by its deadline, with the turns that still ran. */
+export type UpdateCalledOff = { version: string; commit?: string; at: string; reason: 'deadline'; turns: NamedTurn[] };
+
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };
   available: boolean;
@@ -928,7 +944,7 @@ export type UpdatesView = {
   latest: Build | null;
   versions: Build[];
   error: string | null;
-  updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string; commit?: string } | null };
+  updater: { present: boolean; status: UpdaterStatus | null; waiting: UpdateWaiting | null; calledOff: UpdateCalledOff | null };
   /* What each node waits for before it is replaced. A server from before this says nothing. */
   nodeWaits?: NodeWait[];
 };

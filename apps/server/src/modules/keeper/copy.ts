@@ -29,11 +29,29 @@ const ENABLE_EVERY_MS = 60_000;
 /* How often the saver of a database that led is asked to go on. */
 const SAVE_EVERY_MS = 10_000;
 const RETRY_MS = 600_000;
+/* The longest an attempt waits after attempts were given up in a row, each twice as long as the one before. */
+const RETRY_MAX_MS = 7_200_000;
+const OTHER_VERSION = 'the company server runs another version of the database';
 /* How long the app gets to read that it is off before the databases change places. */
 const OFF_FOR_MS = 2_000;
 const FIRST_DB = 'hornhoof';
 const LEADER_DB = 'hornhoof';
 const PASSFILE = 'replica.pgpass';
+/* How long a statement of the copy's Postgres that asks the leader something may wait for its answer: under the
+   20 seconds a keeper waits for any statement of its own. */
+const LEADER_WAIT_MS = 10_000;
+/* Where a subscription that is given up and could not reach the leader in time is pointed, so its drop asks the leader
+   nothing more: a folder that is not there, which no connection gets through. */
+const NOWHERE = 'host=/nonexistent';
+/* The origins of tables whose first copy was broken off and that no worker uses now: Postgres names a table's origin
+   pg_<subscription>_<table>, and a table whose rows were going over when a cut came stays at data copy. */
+const LEFT_ORIGINS = `SELECT o.roname::text AS name FROM pg_replication_origin o JOIN pg_subscription_rel r ON o.roname = format('pg_%s_%s', r.srsubid, r.srrelid)
+  WHERE r.srsubid = $1::oid AND r.srsubstate = 'd' AND NOT EXISTS (SELECT FROM pg_stat_subscription w WHERE w.subid = r.srsubid AND w.relid = r.srrelid)`;
+/* The leader's slots of the same tables, by the name Postgres gives them: pg_<subscription>_sync_<table>_<this database
+   server's system id>. Postgres makes a table's slot anew when its first copy starts again, so the old one only takes a
+   place on the leader: the copy names them in its report, and the leader drops them. */
+const LEFT_SLOTS = `SELECT format('pg_%s_sync_%s_%s', r.srsubid, r.srrelid, (SELECT system_identifier FROM pg_control_system())) AS name FROM pg_subscription_rel r
+  WHERE r.srsubid = $1::oid AND r.srsubstate = 'd' AND NOT EXISTS (SELECT FROM pg_stat_subscription w WHERE w.subid = r.srsubid AND w.relid = r.srrelid) ORDER BY r.srrelid`;
 /* Whether a file is there, by its path. Its size is asked, and not the whole answer: a row is null to Postgres
    unless every field of it is set, and a file's time of creation never is on Linux. */
 export const PASSFILE_THERE = 'SELECT (pg_stat_file($1, true)).size IS NOT NULL AS there';
@@ -43,8 +61,10 @@ export type SwapStep = 'off' | 'disable' | 'rename' | 'enable' | 'drop_sub' | 'd
 
 /* What a copy says of itself in its keeper's report. at: the leader's pulse it holds. name: the name of its
    subscription, its slot on the leader and its connection there. old: the attempt whose database waits to be merged. */
-/* old.led: the number of the term the old database led the company under, when it did. */
-export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null };
+/* old.led: the number of the term the old database led the company under, when it did. left: while the first copy is
+   made, the leader's slots of its tables whose first copy broke off, for the leader to drop; none said while there are
+   none. */
+export type CopyReport = { state: CopyState; progress: number | null; error: CopyError | null; at: string | null; name: string | null; old: { attempt: number; led?: number } | null; left?: string[] };
 /* What the leader says of the copy in its view. slot: its slot there. leaderSize: the size of the leader's database.
    migrations: how many the leader's schema has. old: how far the leader is with reading the copy's old database.
    upload: what a machine that stopped holding the data still owes: what it holds, nothing while the leader reads that, or
@@ -84,6 +104,8 @@ const Kept = z.object({
   swap: z.enum(['off', 'disable', 'rename', 'enable', 'drop_sub', 'drop_db', 'read']).nullable().default(null),
   stamp: z.string().regex(/^[0-9]{8}t[0-9]{6}$/).nullable().default(null),
   swapAt: z.string().nullable().default(null),
+  /* How many attempts in a row were given up since the copy was last whole: the next waits the longer. */
+  given: z.number().int().min(0).default(0),
 });
 type Kept = z.infer<typeof Kept>;
 type Subscription = { name: string; oid: number; enabled: boolean; slot: string | null };
@@ -140,6 +162,8 @@ export class CopyMaker {
   private enabledAt = 0;
   private failing = false;
   private lastOrder: CopyOrder | null = null;
+  /* How many tables of which subscription had got through their first copy at the last look. */
+  private through: { oid: number; ready: number } | null = null;
 
   constructor(private readonly opts: CopyMakerOptions) {
     this.kept = this.read();
@@ -277,6 +301,14 @@ export class CopyMaker {
     return { moved: this.kept.moved?.leader === order.leader && this.kept.moved.views >= MOVED_VIEWS };
   }
 
+  /* The same, and once that leader has said often enough that it holds no place for this copy, the copy is of that
+     leader from now on. */
+  private moving(order: CopyOrder | null): { moved: boolean } | null {
+    const elsewhere = this.elsewhere(order);
+    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    return elsewhere;
+  }
+
   /* One connection to a database of the copy, opened anew after it was closed. */
   private on(database: string): Closable {
     if (this.open?.database === database) return this.open.sql;
@@ -325,7 +357,7 @@ export class CopyMaker {
     if (this.kept.phase === 'join') return this.join(sql, order);
     if (this.kept.phase === 'schema') return this.schema(sql);
     if (this.kept.phase === 'grant') return this.grant();
-    if (this.kept.phase === 'subscribe') return this.subscribe(sql);
+    if (this.kept.phase === 'subscribe') return this.subscribe(sql, order);
     if (this.kept.phase === 'sync') return this.sync(sql, order);
     return this.ready(sql, order);
   }
@@ -441,7 +473,8 @@ export class CopyMaker {
   /* The copy answers the leader each second, so the leader knows within seconds when it falls silent. The password is
      read from a file in the database's own folder, so no statement holds it. A subscription of that name already
      there counts as made. */
-  private async subscribe(sql: Sql): Promise<void> {
+  private async subscribe(sql: Sql, order: CopyOrder | null): Promise<void> {
+    if (await this.otherSchema(sql, order)) return this.schemaChanged();
     if (!(await this.subscription(sql))) {
       await sql.query(`ALTER SYSTEM SET wal_receiver_status_interval = '1s'`);
       await sql.query('SELECT pg_reload_conf()');
@@ -457,19 +490,32 @@ export class CopyMaker {
     this.keep({ phase: 'sync', seen: false, missing: 0 });
   }
 
-  /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row. */
-  private async stoppedFor(sql: Sql, enabled: boolean): Promise<number> {
-    if (enabled) {
-      this.disabledSince = null;
+  /* A subscription that stopped is enabled again once a minute. How long it has been stopped for, in a row: one that was
+     enabled again holds only once it still runs a minute later, so one that stops on its first error each time it
+     starts, however often a look finds it running in between, counts as stopped all along, and is given up. A first
+     copy that got a table through since, as one between two cuts of a slow link, has not stood still: see moves. */
+  private async stoppedFor(sql: Sql, sub: Subscription): Promise<number> {
+    const now = this.now();
+    if (sub.enabled) {
+      if (now - this.enabledAt >= ENABLE_EVERY_MS) this.disabledSince = null;
       return 0;
     }
-    const now = this.now();
     this.disabledSince ??= now;
     if (now - this.enabledAt >= ENABLE_EVERY_MS) {
       this.enabledAt = now;
+      await this.freeOrigins(sql, sub.oid);
       await sql.query(`ALTER SUBSCRIPTION ${ident(this.name())} ENABLE`);
     }
     return now - this.disabledSince;
+  }
+
+  /* A cut stops a subscription with each table whose rows were going over, and Postgres keeps such a table's origin
+     until the table is through. The next start begins other tables first, each with an origin of its own, so cut after
+     cut the copy's Postgres runs out of them and no table starts any more. One that no worker uses goes before the
+     subscription starts again: the table's next copy begins from its first row all the same, and makes it anew. */
+  private async freeOrigins(sql: Sql, oid: number): Promise<void> {
+    const { rows } = await sql.query<{ name: string }>(LEFT_ORIGINS, [oid]);
+    for (const { name } of rows) await sql.query('SELECT pg_replication_origin_drop($1)', [name]);
   }
 
   /* The pulse of the leader a database holds, in the leader's own clock; none before its first. */
@@ -483,21 +529,47 @@ export class CopyMaker {
   private async sync(sql: Sql, order: CopyOrder | null): Promise<void> {
     const sub = await this.subscription(sql);
     if (!sub) return this.keep({ phase: 'subscribe' });
-    const stopped = await this.stoppedFor(sql, sub.enabled);
     /* While the server moved and the new leader has not said its word yet, nothing is given up; once it has, the first
        copy this machine was still making is begun anew, from that leader. */
-    const elsewhere = this.elsewhere(order);
-    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    const elsewhere = this.moving(order);
+    /* The leader's schema changed while its rows were copied, as with an update that added a column: a subscription
+       enabled again would stop on the first row of that table, so it is not, and the next attempt loads the schema the
+       leader has now. */
+    if (!elsewhere && (await this.otherSchema(sql, order))) return this.schemaChanged();
+    const tables = await this.tables(sql, sub.oid);
+    const stopped = await this.stoppedFor(sql, sub);
     if (elsewhere ? elsewhere.moved : order?.slot === 'lost' || stopped >= ENABLE_FOR_MS) return this.giveUp();
-    const tables = await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [sub.oid]);
-    if (tables && tables.total > 0 && tables.ready === tables.total) {
-      this.keep({ phase: 'ready' });
+    if (tables.total > 0 && tables.ready === tables.total) {
+      this.keep({ phase: 'ready', given: 0 });
       return this.ready(sql, order);
     }
     const size = Number((await this.one<{ size: number }>(sql, 'SELECT pg_database_size(current_database())::float8 AS size'))?.size ?? 0);
     const progress = order?.leaderSize ? Math.min(99, Math.floor((size * 100) / order.leaderSize)) : 0;
     /* While it is made again, the copy that is read says how far it reaches. */
-    this.said = this.making(progress, this.kept.old ? await this.oldPulse() : null);
+    this.said = { ...this.making(progress, this.kept.old ? await this.oldPulse() : null), ...(await this.leftSlots(sql, sub.oid)) };
+  }
+
+  /* The leader's slots of tables whose first copy broke off, to name in the report; nothing when there are none. */
+  private async leftSlots(sql: Sql, oid: number): Promise<{ left?: string[] }> {
+    const { rows } = await sql.query<{ name: string }>(LEFT_SLOTS, [oid]);
+    return rows.length ? { left: rows.map(row => row.name) } : {};
+  }
+
+  /* How many tables the subscription takes, and how many of them got through their first copy; each look counts
+     toward whether the copy moves. */
+  private async tables(sql: Sql, oid: number): Promise<{ total: number; ready: number }> {
+    const tables = (await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [oid])) ?? { total: 0, ready: 0 };
+    this.moves(oid, tables.ready);
+    return tables;
+  }
+
+  /* A cut of the link stops a subscription whose tables' first copies are under way, as any error of theirs does, and
+     the table whose rows were going over starts again from its first row. A table that got through since the last
+     look means the copy moves all the same, however often it was stopped: what it was stopped for so far counts no
+     more. One that breaks each time it starts gets nothing through, and is given up after ten minutes as before. */
+  private moves(oid: number, ready: number): void {
+    if (this.through?.oid === oid && ready > this.through.ready) this.disabledSince = null;
+    this.through = { oid, ready };
   }
 
   /* Asked each second for as long as the next copy fills, so on one connection that stays; one that failed is opened
@@ -521,8 +593,31 @@ export class CopyMaker {
     if (order?.slot === 'lost') return 'the company server no longer keeps what this copy had still to read';
     if (this.kept.missing >= MISSING_VIEWS) return 'the company server no longer lists this copy';
     if (stopped >= ENABLE_FOR_MS) return 'its changes stopped coming in and would not start again';
-    if (order && order.migrations !== null && this.kept.migrations !== null && order.migrations !== this.kept.migrations) return 'the company server runs another version of the database';
+    if (order && order.migrations !== null && this.kept.migrations !== null && order.migrations !== this.kept.migrations) return OTHER_VERSION;
     return null;
+  }
+
+  /* How many migrations this copy's schema has: as written down, or, for a copy a build of before made without writing
+     it down, counted once in its database. Null when it cannot tell. */
+  private async ownMigrations(sql: Sql): Promise<number | null> {
+    if (this.kept.migrations !== null) return this.kept.migrations;
+    const counted = await this.one<{ n: number }>(sql, `SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations`).catch(() => undefined);
+    if (counted) this.keep({ migrations: counted.n });
+    return counted?.n ?? null;
+  }
+
+  /* Whether the leader's schema has another count of migrations than this copy's. */
+  private async otherSchema(sql: Sql, order: CopyOrder | null): Promise<boolean> {
+    if (order?.migrations == null) return false;
+    const own = await this.ownMigrations(sql);
+    return own !== null && own !== order.migrations;
+  }
+
+  /* An attempt made with the leader's schema of before is given up, and the next asks for the schema now: at once the
+     first time, as any other attempt given up after that. */
+  private schemaChanged(): void {
+    this.opts.log("This copy was being made with the company server's schema of before the server's update: it is made again with the schema the server has now.");
+    this.giveUp(true);
   }
 
   /* The copy follows. One whose subscription stopped says why, as far as it can tell: no room left, or a change that
@@ -537,16 +632,18 @@ export class CopyMaker {
     }
     const sub = await this.subscription(sql);
     const at = await this.pulse(sql);
+    /* A copy a build of before made says now how many migrations its schema has, so a leader of another version makes
+       it again and does not start it. */
+    await this.ownMigrations(sql);
     /* A view of another leader than the one this copy follows counts toward none of the reasons to make it again,
        until that leader named no slot for it twice in a row: then it did not hold everything, and is made again. */
-    const elsewhere = this.elsewhere(order);
-    if (elsewhere?.moved) this.keep({ leader: order!.leader, moved: null });
+    const elsewhere = this.moving(order);
     /* A copy that is to be made again whatever its subscription does is not started first: one that stood still for
        the leader's update takes nothing from a database of another version. */
     const known = elsewhere ? null : this.broken(order, 0);
-    const stopped = sub && !known ? await this.stoppedFor(sql, sub.enabled) : 0;
+    const stopped = sub && !known ? await this.stoppedFor(sql, sub) : 0;
     const why = elsewhere ? (elsewhere.moved ? 'the company server moved to a machine that does not hold a place for this copy' : null) : (known ?? this.broken(order, sub ? stopped : ENABLE_FOR_MS));
-    if (why) return this.kept.old ? this.giveUp() : this.remake(why);
+    if (why) return this.kept.old ? this.giveUp(why === OTHER_VERSION) : this.remake(why);
     if (!sub || stopped > 0) {
       const free = this.opts.diskFree();
       this.said = this.stopped(free !== null && free < DISK_FULL ? 'disk_full' : 'apply', at);
@@ -574,20 +671,49 @@ export class CopyMaker {
   }
 
   /* An attempt is given up whole before the next begins: the next number and the phase are written down first, so a
-     keeper that starts in the middle goes on with what is left. */
-  private giveUp(): void {
-    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: new Date(this.now() + RETRY_MS).toISOString(), seen: false, missing: 0 });
+     keeper that starts in the middle goes on with what is left. The next asks for its schema ten minutes later, twice
+     as long after each attempt given up in a row, two hours at most; soon: at once, when none was given up before. */
+  private giveUp(soon = false): void {
+    const { given } = this.kept;
+    const wait = soon && given === 0 ? 0 : Math.min(RETRY_MS * 2 ** given, RETRY_MAX_MS);
+    this.keep({ attempt: this.kept.attempt + 1, phase: 'drop', notBefore: wait === 0 ? null : new Date(this.now() + wait).toISOString(), seen: false, missing: 0, given: given + 1 });
     this.disabledSince = null;
     this.said = this.making(0);
   }
 
   /* Each subscription of a database is given up: disabled, parted from its slot, which the leader then drops, and
-     dropped. Each step is skipped when it is done. */
+     dropped. Each step is skipped when it is done. One that is dropped goes with its slot where the leader answers in
+     time: Postgres then drops on the leader that slot and those of its tables' first copies that are not through,
+     which would else stay there until the leader's sweep, and reserve its log meanwhile. Otherwise it is parted from
+     its slot and from the leader itself, so its drop asks the leader nothing more and leaves those to the sweep. */
   private async release(sql: Sql, drop: boolean): Promise<void> {
     for (const sub of await this.subscriptions(sql)) {
       if (sub.enabled) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} DISABLE`);
+      if (drop && sub.slot) {
+        try {
+          await this.askingLeader(sql, `DROP SUBSCRIPTION ${ident(sub.name)}`);
+          continue;
+        } catch (err) {
+          this.opts.log(`Could not drop the slots of a copy given up on the company server, which drops them itself later: ${reasonOf(err)}`);
+        }
+      }
       if (sub.slot) await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} SET (slot_name = NONE)`);
-      if (drop) await sql.query(`DROP SUBSCRIPTION ${ident(sub.name)}`);
+      if (!drop) continue;
+      await sql.query(`ALTER SUBSCRIPTION ${ident(sub.name)} CONNECTION ${literal(NOWHERE)}`);
+      await sql.query(`DROP SUBSCRIPTION ${ident(sub.name)}`);
+    }
+  }
+
+  /* A statement of the copy's Postgres that asks the leader something on the way. Postgres waits for the leader's
+     answer for as long as the link holds the connection open with none, whatever the connection's own timeout says,
+     and goes on after the keeper stopped waiting: the next tick would then pile the same statement onto it, each
+     holding its locks, until the link let go of them all at once. So the statement's own session ends the wait first. */
+  private async askingLeader(sql: Sql, text: string): Promise<void> {
+    await sql.query(`SET statement_timeout = ${LEADER_WAIT_MS}`);
+    try {
+      await sql.query(text);
+    } finally {
+      await sql.query('RESET statement_timeout').catch(() => undefined);
     }
   }
 

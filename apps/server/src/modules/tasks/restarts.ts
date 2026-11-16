@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, taskEvents, tasks, type Interruption, type RestartCause } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent, turnGoingOn } from '../conversation/queue.js';
 import { repeatedTurn as repeatedWords, wordsForTurn } from '../conversation/turn-words.js';
 import { turnAgain } from './again.js';
@@ -63,11 +64,11 @@ async function retry(ctx: Ctx, { job, task, agent, cut, taskWake }: Ended & { ta
 
 /* Operations' reliability engineer who is on and its head who is on, in the order they are called. */
 export async function operationsOnDuty(ctx: Ctx, companyId: string): Promise<Agent[]> {
-  const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
+  const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
   const staff = await ctx.db
     .select()
     .from(agents)
-    .where(and(or(inArray(agents.departmentId, ops), inArray(agents.departmentId, ctx.db.select({ id: departments.id }).from(departments).where(inArray(departments.parentId, ops)))), isNull(agents.removedAt), isNull(agents.switchedOffAt)))
+    .where(and(or(inArray(agents.departmentId, ops), inArray(agents.departmentId, ctx.db.select(idOnly(departments)).from(departments).where(inArray(departments.parentId, ops)))), isNull(agents.removedAt), isNull(agents.switchedOffAt)))
     .orderBy(asc(agents.createdAt));
   return [staff.find(a => a.kind === 'worker' && a.roleKey === 'OPS-FIX'), staff.find(a => a.kind === 'head' && a.roleKey === 'OPS-HEAD') ?? staff.find(a => a.kind === 'head')].filter(a => a !== undefined);
 }
