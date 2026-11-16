@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+import { freshPglite } from './helpers-db.js';
 
 type Entry = { idx: number; version: string; when: number; tag: string; breakpoints: boolean };
 type SnapshotRow = { row: Record<string, unknown> };
@@ -61,7 +62,7 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
 
 describe('migration histories merged in turn 5', () => {
   it.each(['main', 'turn-5'] as const)('upgrades an existing %s installation with all retained rows and one record per migration', async branch => {
-    const source = new PGlite();
+    const source = await freshPglite();
     onTestFinished(() => source.close());
     const oldDb = drizzle(source);
     await migrate(oldDb, { migrationsFolder: await oldMigrations(branch === 'main' ? mainHistory : turnHistory) });

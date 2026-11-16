@@ -18,7 +18,7 @@ const ambiguous = (name: string) => `More than one machine is called ${name}. Na
 const unreachable = (name: string) => `Hornhoof cannot reach ${name} now: its core has not answered for a minute. Tell its owner in a line; never ask anyone to type commands.`;
 const closed = (name: string) => `Access to ${name} is closed. Ask its owner for it with ask_computer_access and the reason in a line, then go on once it opens.`;
 const notTheirs = (owner: string, name: string) =>
-  `Only the CEO, the CEO delegate or ${owner}, who owns ${name}, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.`;
+  `The last words in this turn came from a person who may not direct commands on ${name}: only the CEO, the CEO delegate or ${owner}, who owns it, may. Nothing was run. Ask them first.`;
 
 const MACHINE = z.string().trim().min(1).max(200).optional().describe('The machine, by its name or its id from machines. Left out: the machine the company server runs on.');
 
@@ -50,13 +50,13 @@ async function answer(ctx: Ctx, job: ToolJob, id: string, waited: Waited): Promi
   return say(`Exit code ${waited.exit}.\n${waited.output}`);
 }
 
-/* A command starts only while the machine's access is open, and only in a turn that answers the CEO, the CEO delegate
-   or the machine's owner now, or that their click opening a machine opened, kept under the input lock from words that
+/* A command starts only while the machine's access is open, in any turn of the orchestrator but one whose last words came
+   from a person other than the CEO, the CEO delegate or the machine's owner, kept under the input lock from words that
    would change it meanwhile: its id, or why it did not start. */
 function started(ctx: Ctx, job: ToolJob, machine: AccessMachine, command: string, seconds: number): Promise<{ id: string } | Said> {
   return withInputLock(ctx, job.agentId, async () => {
     if (!(await ctx.computer.openUntil(machine.id))) return say(closed(machine.name), true);
-    if (!(await machinePrincipal(ctx.db, job.id, machine.personId, machine.id))) return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
+    if (!(await machinePrincipal(ctx.db, job.id, machine.personId))) return say(notTheirs(await ownerName(ctx, machine.personId), machine.name), true);
     if (!ctx.computer.reachable(machine.id)) return say(unreachable(machine.name), true);
     const run = await ctx.computer.start(job, machine.id, command, seconds);
     if (run === 'closed') return say(closed(machine.name), true);
@@ -81,7 +81,8 @@ function lineOf(state: AccessState, owner: string): string {
 }
 
 /* The orchestrator's way out of its container: it asks a machine's owner for that machine, and while the owner keeps
-   access open it runs commands there as root, in turns that answer the CEO, the CEO delegate or that owner. */
+   access open it runs commands there as root, in any turn of its own but one whose last words are of a person who may
+   not direct it there. */
 export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'machines',
@@ -131,6 +132,7 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
     {
       description:
         'Runs a bash command as root on a machine of the company, while its owner keeps access to it open, and gives back its exit code and the end of its output. ' +
+        'It works in any turn of yours for as long as access stays open, with no new word of anyone, but not in one whose last words came from a person other than the CEO, the CEO delegate or the machine\'s owner, their task, comment or answer included, or from someone Hornhoof cannot name. ' +
         "It runs in a helper container with every privilege, in the machine's processes and network: docker reaches the machine's Docker, the machine's files are at /host, " +
         "and chroot /host sh -c '...' runs a command on the machine itself (Linux; on a Mac the machine is Docker's own Linux system). Commands get no input, so pass -y and the like. " +
         'A command that takes longer than a tool call answers that it still runs, with an id for computer_result. Look before you change anything, and say in your answer what you ran, where and why.',
