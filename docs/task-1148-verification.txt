@@ -1,4 +1,4 @@
-Task 1148: final four-file repeat receipt
+Task 1148: four-file repeat receipt before turn integration
 Checked executable/test candidate: b403f914d57239e0dae6b72fdd13f51e890aa09f
 Base: 6d17d217e568fcdf7a6e6267b636ef332c205a62
 Command in apps/server: npx --no-install vitest run test/keeper-peer.test.ts test/keeper-app-call.test.ts test/peer-stream-clock.test.ts test/worker-keeper.test.ts --maxWorkers=1
@@ -15,4 +15,14 @@ Server build evidence is reused from d20a7c46: production sources and build inpu
 Earlier development checks exposed and repaired test callback and request overload typing, a default 2 GB type-check heap exhaustion (completed checks use 6 GB), and an askApp CRAP increase (resolved by separating deadline scheduling). An intermediate worker keeper repetition exposed the adjacent real-clock compatibility case; the head expanded scope to the whole worker keeper file and it now passes.
 Earlier worker keeper timing reached 137119 ms at recorded load 1m up to 24.07 while all tests still passed. A prior 43120 ms observation had no contemporaneous load sample. These earlier records remain in task attachments; they are not the final repetition timings above.
 Built-in codex review could not inspect code because its sandbox could not create a namespace; manual self-review and security inspection were completed. No independent review is claimed. The repository has no formatter.
-No run_tests, whole suite, turn integration or main push was performed. Oracle received f5171f05 and app-call.ts has not changed since that mechanism commit.
+No run_tests, whole suite or main push was performed. Oracle received f5171f05 and app-call.ts has not changed since that mechanism commit.
+
+Integration verification, 2026-11-16
+The head authorized integration into turn-31 before Zee starts the final release run. Merge 309daa843ce86cdef436b4ef41b9d8e6b4ae6425 took in turn-31 de3b430fc9113ea7a34f5587d94401e63dd35277 without conflicts. That incoming branch added one keeper-peer slot-sweep test, so all four files were repeated 20 times again, including this new test.
+Command in apps/server: npx --no-install vitest run test/keeper-peer.test.ts test/keeper-app-call.test.ts test/peer-stream-clock.test.ts test/worker-keeper.test.ts --maxWorkers=1
+PASS on 309daa843ce86cdef436b4ef41b9d8e6b4ae6425: 20 consecutive processes, each exit 0; four files and 63 tests passed each time; 1260 test executions, no skipped tests.
+keeper-peer file ms: min 9205, median 10475.5, max 16061.
+worker-keeper file ms: min 8381, median 10711.0, max 19893.
+Recorded load 1m: 4.34 to 10.39; samples 2026-11-16T22:21:30.676502+00:00 to 2026-11-16T22:28:16.109404+00:00.
+NODE_OPTIONS=--max-old-space-size=6144 npm run build -w @hornhoof/server: exit 0 on 309daa843ce86cdef436b4ef41b9d8e6b4ae6425.
+Next merge 3f4d56f41c318d14f038e21e4db1ba43de8f864c took in origin/turn-31 e4cd00e6b6057f49a8a17c6a6a6c510730db2894 without conflicts. None of the four named files, deadline mechanisms, manifests or lockfiles changed in that incoming delta. Under the head's explicit instruction, one four-file repeat plus types and lint is sufficient on this merged candidate. The author check and task submission record the exact final receipt commit and actual results. No release-wide result is claimed.
