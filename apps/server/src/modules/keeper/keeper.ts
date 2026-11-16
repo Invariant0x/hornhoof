@@ -933,12 +933,17 @@ export class Keeper {
         await slots.sql.query('SELECT pg_reload_conf()');
         this.keptSizeAt = now;
       }
-      await sweepSlots(slots.sql, this.opts.log, this.syncSlotsIdle, now);
+      await sweepSlots(slots.sql, this.opts.log, this.syncSlotsIdle, now, this.leftSlots());
       this.slotsFail = false;
     } catch (err) {
       if (!this.slotsFail) this.opts.log(`Could not look after the copies' slots: ${reasonOf(err)}`);
       this.slotsFail = true;
     }
+  }
+
+  /* The slots of tables whose first copy broke off, as the copies named them to the app. */
+  private leftSlots(): string[] {
+    return this.peers?.current()?.leftSlots ?? [];
   }
 
   /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */

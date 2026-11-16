@@ -34,6 +34,7 @@ import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
+import { fallBackFrom, heldUntil } from '../subscriptions/fallback.js';
 import { closeCheck, openCheck } from '../tools/outside.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -213,10 +214,23 @@ async function afterReading(ctx: Ctx, planId: string, reading: Limits, now: Date
 
 async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
   if (!msg.limits && !msg.models) return;
+  const held = msg.limits ? await planHeldNow(ctx, planId) : true;
   await ctx.db
     .update(subscriptions)
     .set({ ...(msg.limits ? await afterReading(ctx, planId, msg.limits, now) : {}), ...(msg.models ? { models: msg.models } : {}) })
     .where(and(eq(subscriptions.id, planId), isNull(subscriptions.removedAt)));
+  if (!held) await fallBackIfHeld(ctx, planId);
+}
+
+/* Whether the plan holds a worker's turns back now: at its limit, or past the share set for tasks. */
+async function planHeldNow(ctx: Ctx, planId: string): Promise<boolean> {
+  const [plan] = await ctx.db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.id, planId));
+  return Boolean(plan && heldUntil(plan, 'worker'));
+}
+
+/* A plan that has just come to its limit or its share for tasks sends everyone on it to a fallback at once. */
+async function fallBackIfHeld(ctx: Ctx, planId: string | null): Promise<void> {
+  if (planId && (await planHeldNow(ctx, planId))) await fallBackFrom(ctx, planId);
 }
 
 const planState = async (ctx: Ctx, id: string) =>
@@ -419,15 +433,19 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       }
       /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does, and the
          map says until when. */
+      let refused: string | null = null;
       if (finished.length && (msg.failure?.kind === 'usage_limit' || (!msg.failure && msg.error === 'agent_failed' && id.kind === 'node'))) {
         const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, msg.jobId));
         const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime(), msg.failure?.kind === 'usage_limit');
         if (held) {
           await db.update(subscriptions).set({ limits: held, limitsUpdatedAt: now }).where(eq(subscriptions.id, sub.id));
           for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });
+          refused = sub.id;
         }
       }
       if (finished.length) await afterJob(ctx, msg.jobId);
+      /* Everyone on the plan goes on to a fallback, not only the one whose turn it refused. */
+      await fallBackIfHeld(ctx, refused);
       /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
       ctx.hub.send(id, { type: 'job.ack', jobId: msg.jobId });
       return;
