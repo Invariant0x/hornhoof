@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agentInbox, agents, companies, departments, jobs, type InboxMode, type LetterKind } from '../../db/schema.js';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import type { MessageParty } from '../events/parties.js';
 import { appendEvent } from '../events/store.js';
 
@@ -191,7 +191,7 @@ export async function inboxView(db: Reader, agentId: string, filter: InboxFilter
   if (filter.task !== undefined) where.push(eq(agentInbox.taskNumber, filter.task));
   if (filter.sender) where.push(eq(agentInbox.senderAgentId, filter.sender));
   if (filter.before) {
-    const [cursor] = await db.select({ seq: agentInbox.seq }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, filter.before)));
+    const [cursor] = await db.select(only(agentInbox, 'seq')).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, filter.before)));
     if (cursor) where.push(lt(agentInbox.seq, cursor.seq));
   }
   const rows = await db.select().from(agentInbox).where(and(...where)).orderBy(desc(agentInbox.seq)).limit(Math.min(filter.limit ?? 50, 200));
@@ -203,7 +203,7 @@ export async function inboxView(db: Reader, agentId: string, filter: InboxFilter
 export async function lettersPage(db: Reader, agentId: string, { before, limit }: { before?: string; limit: number }): Promise<{ letters: InboxRow[]; more: boolean }> {
   const where: (SQL | undefined)[] = [eq(agentInbox.agentId, agentId)];
   if (before) {
-    const [cursor] = await db.select({ seq: agentInbox.seq }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, before)));
+    const [cursor] = await db.select(only(agentInbox, 'seq')).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), eq(agentInbox.id, before)));
     if (cursor) where.push(lt(agentInbox.seq, cursor.seq));
   }
   const rows = await db.select().from(agentInbox).where(and(...where)).orderBy(desc(agentInbox.seq)).limit(limit + 1);

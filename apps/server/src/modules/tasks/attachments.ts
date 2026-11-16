@@ -7,7 +7,7 @@ import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
@@ -271,7 +271,7 @@ export async function attachmentBytesForPerson(
   }
   if (!allowed) return null;
   const [row] = await db
-    .select({ bytes: attachments.bytes })
+    .select(only(attachments, 'bytes'))
     .from(attachments)
     .where(and(eq(attachments.id, id), eq(attachments.companyId, person.companyId), isNull(attachments.operatorCaseId)));
   if (!row) return null;
@@ -411,7 +411,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const file = await personFile(db, me, id);
     if (file) return sendFile(db, reply, file, true);
-    const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
+    const [picture] = await db.select(only(attachments, 'operatorCaseId')).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     const [found] = await db
       .select({ name: attachments.name, mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks, request: requests })

@@ -9,7 +9,7 @@ import { actsAsCeo } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { computerRuns, machineAccess, machines, people, personKeys, type MachineRole } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { askerOf, KEEPER_MARK } from '../network/via.js';
 import { readGrant, type Grant } from './grant.js';
@@ -191,7 +191,7 @@ export class Computers {
 
   /* Until when the machine's access is open, or null when it is closed or its day is over. */
   async openUntil(machineId: string): Promise<string | null> {
-    const [row] = await this.ctx.db.select({ until: machineAccess.until }).from(machineAccess).where(eq(machineAccess.machineId, machineId));
+    const [row] = await this.ctx.db.select(only(machineAccess, 'until')).from(machineAccess).where(eq(machineAccess.machineId, machineId));
     return row?.until && row.until > this.now() ? row.until.toISOString() : null;
   }
 
@@ -247,7 +247,7 @@ export class Computers {
     if (!row.ownerPin && this.own(row)) return { until: new Date(now.getTime() + ACCESS_MS), grant: null };
     const name = this.nameOf(row);
     if (!grant) throw new ApiError(400, 'validation', `Opening ${name} takes its owner's signature, and this request brought none.`, 'grant_needed');
-    const [mine] = await tx.select({ publicKey: personKeys.publicKey }).from(personKeys).where(eq(personKeys.personId, me.id));
+    const [mine] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, me.id));
     if (!mine) throw new ApiError(409, 'conflict', 'You have no key yet. Get a command under Connect a machine: Hornhoof makes your key then.', 'no_key');
     const facts = readGrant(grant, mine.publicKey, row.networkId!, Math.floor(now.getTime() / 1000));
     if (!facts) throw new ApiError(400, 'validation', `This is no signature of yours that opens ${name} now.`, 'bad_grant');
@@ -263,7 +263,7 @@ export class Computers {
       const row = await this.held(tx, me.companyId, machineId);
       if (!row) throw noCore();
       const machine = this.machineOf(row);
-      const [ownerKey] = await tx.select({ publicKey: personKeys.publicKey }).from(personKeys).where(eq(personKeys.personId, row.personId));
+      const [ownerKey] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, row.personId));
       const opener = person ? { ...person, via: me.via } : null;
       if (!opener || !canOpen(opener, machine, this.keyOf(row, ownerKey?.publicKey))) throw notOwner(machine.name);
       if (!this.reachable(machineId)) throw unreachable(machine.name);
@@ -298,7 +298,7 @@ export class Computers {
       const row = await this.held(tx, me.companyId, machineId);
       if (!row) throw noCore();
       const machine = this.machineOf(row);
-      const [ownerKey] = await tx.select({ publicKey: personKeys.publicKey }).from(personKeys).where(eq(personKeys.personId, row.personId));
+      const [ownerKey] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, row.personId));
       if (!canOpen(me, machine, this.keyOf(row, ownerKey?.publicKey))) throw notOwner(machine.name);
       const cleared = await tx.update(machineAccess).set({ askedReason: null, askedAt: null }).where(and(eq(machineAccess.machineId, machineId), isNotNull(machineAccess.askedAt))).returning({ id: machineAccess.machineId });
       return cleared.length > 0 ? machine : null;
@@ -310,7 +310,7 @@ export class Computers {
     return this.ctx.db.transaction(async tx => {
       const row = await this.held(tx, job.companyId, machineId, 'share');
       if (!row) return 'none';
-      const [access] = await tx.select({ until: machineAccess.until }).from(machineAccess).where(eq(machineAccess.machineId, machineId));
+      const [access] = await tx.select(only(machineAccess, 'until')).from(machineAccess).where(eq(machineAccess.machineId, machineId));
       if (!access?.until || access.until <= this.now()) return 'closed';
       const [run] = await tx.insert(computerRuns).values({ companyId: job.companyId, machineId, jobId: job.id, agentId: job.agentId, command, timeoutS }).returning({ id: computerRuns.id });
       return { id: run!.id };
@@ -411,7 +411,7 @@ export class Computers {
       if (!row || row.revokedAt || !row.networkId) return null;
       const now = this.now();
       if (nonce !== null) {
-        const [open] = await tx.select({ grant: machineAccess.grant }).from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
+        const [open] = await tx.select(only(machineAccess, 'grant')).from(machineAccess).where(eq(machineAccess.machineId, machineId)).for('update');
         if (!open?.grant || grantNonce(open.grant.payload) !== nonce) return null;
       }
       const closed = await tx.update(machineAccess).set({ until: null, grant: null }).where(and(eq(machineAccess.machineId, machineId), isNotNull(machineAccess.grant), gt(machineAccess.until, now))).returning({ id: machineAccess.machineId });
@@ -438,7 +438,7 @@ export class Computers {
   /* A new build leads the company, by its data keeper's report: no owner could close a machine while the leader
      changed, so every other machine's access closes, and its commands nobody took end. */
   async newBuild(tx: Db, serverMachineId: string): Promise<void> {
-    const [mine] = await tx.select({ companyId: machines.companyId }).from(machines).where(eq(machines.id, serverMachineId));
+    const [mine] = await tx.select(only(machines, 'companyId')).from(machines).where(eq(machines.id, serverMachineId));
     if (!mine) return;
     const others = (await this.rows(mine.companyId, tx)).filter(row => row.id !== serverMachineId);
     if (others.length === 0) return;
@@ -497,7 +497,7 @@ export class Computers {
      of it: every other machine of the company has nothing to take over, and is served whatever becomes of that. */
   async served(machineId: string): Promise<boolean> {
     if (this.legacyDone) return true;
-    const [row] = await this.ctx.db.select({ networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
+    const [row] = await this.ctx.db.select(only(machines, 'networkId')).from(machines).where(eq(machines.id, machineId));
     return !row || !this.own(row);
   }
 

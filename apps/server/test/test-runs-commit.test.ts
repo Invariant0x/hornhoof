@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, testParts, testRuns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { evidenceOf, freshnessOf } from '../src/modules/testruns/evidence.js';
 import { pumpTests } from '../src/modules/testruns/runs.js';
 import { TEST_COMMIT, until } from './helpers.js';
@@ -40,7 +41,7 @@ describe('one commit for a whole run', () => {
     expect(prompt).toContain(TEST_COMMIT);
     expect(prompt).not.toContain(MOVED);
     expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ status: 'passed', branch: 'task-1-checkout', commitSha: TEST_COMMIT, parts: [{ commit: TEST_COMMIT }, { commit: TEST_COMMIT }] });
-    expect((await c.db.select({ commitSha: testRuns.commitSha }).from(testRuns))).toEqual([{ commitSha: TEST_COMMIT }]);
+    expect((await c.db.select(only(testRuns, 'commitSha')).from(testRuns))).toEqual([{ commitSha: TEST_COMMIT }]);
   });
 
   it('reads the branch an agent names', async () => {

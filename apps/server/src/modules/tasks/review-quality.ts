@@ -4,7 +4,7 @@ import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { jobs, taskEvents, taskRoutes, tasks, testParts, testRuns } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from './engine.js';
 import { RepoPath, ReviewSha } from './review-schema.js';
@@ -45,7 +45,7 @@ function assertJob(task: Binding['task'], run: Binding['run'], job: Binding['job
 
 /* The producing owner, or its immutable submission, owns a quality receipt. */
 async function assertProducer(db: Store, task: Binding['task'], run: Binding['run']): Promise<void> {
-  const [route] = await db.select({ state: taskRoutes.state }).from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
+  const [route] = await db.select(only(taskRoutes, 'state')).from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
   if (activeProducer(task, run, route?.state)) return;
   const events = await db.select().from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, run.agentId)));
   if (events.some(event => submittedProducer(event, run))) return;

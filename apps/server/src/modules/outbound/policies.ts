@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { modelChecks, outboundAttempts, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundMessages, outboundPolicies, supportTickets, type StopReason } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { isOn } from '../model-checks/lifecycle.js';
 import type { Tx } from '../tasks/engine.js';
@@ -136,7 +136,7 @@ export async function addPolicy(ctx: Pick<Ctx, 'db'>, at: { companyId: string; c
   const digest = digestOf(value);
   return ctx.db.transaction(async tx => {
     await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, at.channelId)).for('update');
-    const [newest] = await tx.select({ revision: outboundPolicies.revision }).from(outboundPolicies).where(eq(outboundPolicies.channelId, at.channelId)).orderBy(desc(outboundPolicies.revision)).limit(1);
+    const [newest] = await tx.select(only(outboundPolicies, 'revision')).from(outboundPolicies).where(eq(outboundPolicies.channelId, at.channelId)).orderBy(desc(outboundPolicies.revision)).limit(1);
     const [row] = await tx.insert(outboundPolicies).values({ ...at, revision: (newest?.revision ?? 0) + 1, digest, value }).returning();
     return { id: row!.id, revision: row!.revision, digest };
   });

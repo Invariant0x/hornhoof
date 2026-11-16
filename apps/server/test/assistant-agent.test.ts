@@ -6,6 +6,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
 import { agentEvents, agents, assistantEvents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { ASSISTANT_WITHOUT_SKILLS, instructionsOf } from '../src/modules/agents/instructions.js';
 import { putOnPlan } from '../src/modules/assistants/setup.js';
 import { appendEvent, publishWorking } from '../src/modules/events/store.js';
@@ -53,7 +54,7 @@ const pick = (c: Company, session: string, assistantId: string, plan: string | n
 const me = async (c: Company, key: string) => (await c.app.inject({ url: '/api/assistant/me', ...bearer(key) })).json();
 const write = (c: Company, key: string, payload: object) => c.app.inject({ method: 'POST', url: '/api/assistant/messages', ...bearer(key), payload });
 const ownAgent = async (c: Company, assistantId: string) => {
-  const [row] = await c.db.select().from(agents).where(and(eq(agents.kind, 'assistant'), eq(agents.name, (await c.db.select({ name: people.name }).from(people).where(eq(people.id, assistantId)))[0]!.name)));
+  const [row] = await c.db.select().from(agents).where(and(eq(agents.kind, 'assistant'), eq(agents.name, (await c.db.select(only(people, 'name')).from(people).where(eq(people.id, assistantId)))[0]!.name)));
   return row!;
 };
 
@@ -72,7 +73,7 @@ const finish = (c: Company, run: Run, sessionId: string | null) => {
   c.node.send({ type: 'job.started', jobId: run.jobId });
   c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: '', tail: '', error: null });
 };
-const idle = (c: Company, agentId: string) => until(async () => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, agentId))).every(j => j.status === 'done'));
+const idle = (c: Company, agentId: string) => until(async () => (await c.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.agentId, agentId))).every(j => j.status === 'done'));
 const skillsAt = (c: Company, assistantId: string, skillsUrl: string | null) =>
   c.app.inject({ method: 'PATCH', url: `/api/people/${assistantId}/assistant`, payload: { skillsUrl }, ...as(c.ceo) });
 
@@ -619,7 +620,7 @@ describe('freshText', () => {
     const shown = (await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.ceo) })).json().events as { kind: string; data: { text?: string } }[];
     expect(shown.filter(e => e.kind === 'message').map(e => e.data.text)).toContain('New words');
     expect(JSON.stringify(shown)).not.toContain('The frame and the whole conversation');
-    const kept = await c.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.jobId, run.jobId), eq(agentEvents.kind, 'message')));
+    const kept = await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.jobId, run.jobId), eq(agentEvents.kind, 'message')));
     expect(JSON.stringify(kept)).not.toContain('The frame and the whole conversation');
   });
 
@@ -656,6 +657,6 @@ describe('freshText', () => {
       expect(run.prompt).not.toContain('A frame for my own agent');
       expect(run.freshPrompt).toBeUndefined();
     }
-    expect(JSON.stringify(await c.db.select({ data: agentEvents.data }).from(agentEvents))).not.toContain('A frame for my own agent');
+    expect(JSON.stringify(await c.db.select(only(agentEvents, 'data')).from(agentEvents))).not.toContain('A frame for my own agent');
   });
 });

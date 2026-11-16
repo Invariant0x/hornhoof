@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { tasks, testRuns } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { openTurnOf } from '../tasks/turn-department.js';
 import { ranEverything, runScope, scopeWords, type RunScope, type ScopeSource } from './purpose.js';
 
@@ -34,7 +35,7 @@ type Passed = { number: number; command: string; source: ScopeSource | null; sui
 const scopeOf = (run: Passed): RunScope | null => (run.command === '' && run.source ? runScope(run.source, run.suite, run.kept ?? 0) : null);
 
 async function newestFailed(db: Db, companyId: string, commit: string) {
-  const [run] = await db.select({ number: testRuns.number }).from(testRuns).where(and(testsOf(companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'))).orderBy(desc(testRuns.number)).limit(1);
+  const [run] = await db.select(only(testRuns, 'number')).from(testRuns).where(and(testsOf(companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'))).orderBy(desc(testRuns.number)).limit(1);
   return run ?? null;
 }
 

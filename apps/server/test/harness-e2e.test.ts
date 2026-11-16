@@ -20,6 +20,7 @@ vi.mock('../../node/src/isolation.js', async original => {
   return { ...module, userFor: () => ({ uid: ids.builderUid, gid: ids.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
 });
 import { departments, harnessBuilds, harnessProducts, jobs, testParts, testRuns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { harnessRound } from '../src/modules/testruns/harness.js';
 import { until, type FakeNode } from './helpers.js';
@@ -137,7 +138,7 @@ async function world() {
 }
 
 const unitsOf = async (c: Awaited<ReturnType<typeof world>>) => c.db.select().from(harnessBuilds);
-const turnsOf = async (c: Awaited<ReturnType<typeof world>>, agentId: string) => (await c.db.select({ prompt: jobs.prompt }).from(jobs).where(eq(jobs.agentId, agentId))).map(job => job.prompt);
+const turnsOf = async (c: Awaited<ReturnType<typeof world>>, agentId: string) => (await c.db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, agentId))).map(job => job.prompt);
 
 describe('one harness for a product, across all its machines', () => {
   it('masks a manual preparation token before its HTTP failure reaches the registry, product and head', async () => {

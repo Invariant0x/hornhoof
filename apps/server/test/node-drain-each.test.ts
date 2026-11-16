@@ -6,7 +6,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { agentState, enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
 import { nodeDrain, nodeHeldLong } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, nextOf, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
@@ -327,7 +327,7 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(await nextOf(there, 'job.run')).toMatchObject({ jobId: job });
     expect(await f.statusOf(job)).toMatchObject({ nodeId: other.nodeId });
     expect(await f.gotTurnOf(head.id, here)).toBe(false);
-    expect((await f.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, head.id)))[0]!.nodeId).toBe(other.nodeId);
+    expect((await f.db.select(only(agents, 'nodeId')).from(agents).where(eq(agents.id, head.id)))[0]!.nodeId).toBe(other.nodeId);
   });
 
   it('stays on its own node past the limit when every machine of its plan waits, and starts on that one', async () => {

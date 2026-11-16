@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
 import { agents, assistantEvents, companies, departments, people, requests } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { storeEvent, sweepEvents } from '../src/modules/assistants/events.js';
 import { cardPrincipal } from '../src/modules/conversation/decision-context.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
@@ -181,7 +182,7 @@ describe("an assistant's events", () => {
     await c.db.update(assistantEvents).set({ createdAt: new Date('2026-10-12T11:59:00Z') }).where(eq(assistantEvents.seq, old));
     await c.db.update(assistantEvents).set({ createdAt: new Date('2026-10-12T12:01:00Z') }).where(eq(assistantEvents.seq, kept));
     await sweepEvents(c.db, now);
-    expect((await c.db.select({ seq: assistantEvents.seq }).from(assistantEvents)).map(e => e.seq)).toEqual([kept]);
+    expect((await c.db.select(only(assistantEvents, 'seq')).from(assistantEvents)).map(e => e.seq)).toEqual([kept]);
   });
 });
 
