@@ -4,7 +4,13 @@ import { PROVIDER_NAMES } from '../providers';
 import type { Limits, PlanStatus, SubView } from '../types';
 
 /* A compatible API goes by the name it was given, as the address it answers at names no product. */
-export const subName = (t: Messages, s: SubView) => s.kind === 'api_key' ? t.subs.keyEnding(s.provider === 'custom_api' ? s.label : PROVIDER_NAMES[s.provider], s.last4 ?? '') : PROVIDER_NAMES[s.provider];
+const keyName = (s: SubView) => s.provider === 'custom_api' ? s.label : PROVIDER_NAMES[s.provider];
+export const subName = (t: Messages, s: SubView) => s.kind === 'api_key' ? t.subs.keyEnding(keyName(s), s.last4 ?? '') : PROVIDER_NAMES[s.provider];
+/* The name the list and a card show, by the sign of how the connection is paid: a plan by its provider and tier, as Claude
+   Max, though the machine tells the tier in small letters; a key by its provider and how the key ends. */
+export const shortName = (t: Messages, s: SubView) => s.kind === 'api_key'
+  ? t.subs.keyShort(keyName(s), s.last4 ?? '')
+  : [PROVIDER_NAMES[s.provider], s.tier && s.tier.charAt(0).toUpperCase() + s.tier.slice(1)].filter(Boolean).join(' ');
 export const MAIN_WINDOWS = ['five_hour', 'seven_day'];
 /* Plans that sign in once in a terminal on one machine; Hornhoof then passes the sign-in to the owner's others. */
 export const TERMINAL_SIGNIN = new Set(['claude', 'codex']);

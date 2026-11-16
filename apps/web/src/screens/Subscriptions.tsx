@@ -12,17 +12,16 @@ import { ConnectPanel } from '../ui/ConnectPanel';
 import { isKeyPlan, KeyForm } from '../ui/KeyForm';
 import { resetDurationAt, useNow } from '../ui/reset';
 import { SignInPanel } from '../ui/SignInPanel';
-import { CardFrame, CardHead, Facts, MachineMark, Part } from '../ui/Cards';
-import { ProviderMark } from '../ui/icons';
+import { CardFrame, CardHead, Facts, MachineMark, NameWithSign, Part } from '../ui/Cards';
+import { PayIcon, ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { LimitCell, LimitMeters } from '../ui/PlanLimits';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { ApiForm } from '../ui/ApiForm';
-import { TokenGauges } from '../ui/Tokens';
-import { tokenCount } from '../ui/token-count';
+import { TokenCount, TokenGauges } from '../ui/Tokens';
 import { Edge } from '../ui/Edge';
-import { clock, limitState, planStateOnMachine, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
+import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
 import { PlanSteps } from '../ui/PlanSteps';
 import { replaceSubscription } from './subscription-list';
 export { clock } from '../ui/subscription';
@@ -84,30 +83,21 @@ function SubscriptionStatus({ sub, now, showUntil = false }: { sub: SubView; now
   return <><span className={`status ${state}`}>{state === 'limit' ? t.subs.limitReached(null) : t.subs.states[state]}</span>{at && <small className="until">{t.cards.until(at)}</small>}</>;
 }
 
-/* The sign of how a connection is paid: arrows going round for a subscription, a stack of coins for tokens. */
-function PaySign({ kind }: { kind: SubView['kind'] }) {
-  return <svg className="sign" viewBox="0 0 24 24" aria-hidden="true">{kind === 'api_key'
-    ? <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>
-    : <><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9" /><path d="M20 4v5h-5" /><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15" /><path d="M4 20v-5h5" /></>}</svg>;
+/* How the connection is paid, as a sign by its name; its words are its name and tooltip. */
+function KindSign({ kind }: { kind: SubView['kind'] }) {
+  const t = useT();
+  return <span className="pay-sign" role="img" aria-label={t.subs.kindHint[kind]} title={t.subs.kindHint[kind]}><PayIcon kind={kind} /></span>;
 }
 
-/* How the connection is paid: a plan by its subscription, an API by the tokens its agents use. The word and its sign
-   tell it; the mark keeps the ink of the page. */
-function PayBadge({ sub: s }: { sub: SubView }) {
+/* The connection's short name with the sign of how it is paid, the orchestrator's role a small line under it. */
+function SubscriptionName({ sub: s }: { sub: SubView }) {
   const t = useT();
-  return <span className={`badge ctype ${s.kind === 'api_key' ? 'pay-tokens' : 'pay-plan'}`}><PaySign kind={s.kind} />{t.subs.pay[s.kind]}</span>;
-}
-
-/* The mark of the orchestrator's connection, in the quiet ink: it is a role, not an alarm. */
-function OrchestratorBadge() {
-  const t = useT();
-  return <span className="badge orch-role">{t.subs.orchestrator}</span>;
+  return <span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><span className="nm-l"><b><NameWithSign name={shortName(t, s)} sign={<KindSign kind={s.kind} />} /></b></span>{s.isOrchestrator && <small>{t.subs.orchestrator}</small>}</span></span>;
 }
 
 /* What the connection's turns used in 30 days, or nothing from an older server. */
 function TokensCell({ sub: s }: { sub: SubView }) {
-  const { language } = useLanguage();
-  return s.tokens ? <span className="num">{tokenCount(language, s.tokens.month.total)}</span> : null;
+  return s.tokens ? <span className="num"><TokenCount count={s.tokens.month.total} /></span> : null;
 }
 
 /* A limit's column name holds its number with its unit in one piece read left to right, between the marks that isolate it
@@ -122,7 +112,7 @@ function limitColumn(t: Messages, now: number, key: string): TableColumn<SubView
 
 function subscriptionColumns(t: Messages, now: number): TableColumn<SubView>[] {
   return [
-    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [subName(t, s), s.owner.name], cell: s => <><span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><b>{subName(t, s)}</b>{s.tier && <small>{s.tier}</small>}</span></span><PayBadge sub={s} />{s.isOrchestrator && <OrchestratorBadge />}</> },
+    { key: 'name', label: t.subs.columns.subscription, direction: 1, value: s => [shortName(t, s), s.owner.name], cell: s => <SubscriptionName sub={s} /> },
     { key: 'owner', label: t.tables.owner, direction: 1, value: s => s.owner.name, cell: s => s.owner.name },
     { key: 'status', label: t.tables.status, direction: 1, value: s => STATUS_ORDER.indexOf(stateOf(s, now)), className: 'k-status', cell: s => <SubscriptionStatus sub={s} now={now} showUntil /> },
     { key: 'serves', label: t.tables.serves, direction: 1, value: s => [s.place.kind === 'company' ? 0 : 1, s.place.name], cell: s => s.place.kind === 'company' ? t.people.wholeCompany : s.place.name },
@@ -194,7 +184,7 @@ function PlanAccount({ sub: s }: { sub: SubView }) {
 function subscriptionFilters(t: Messages, now: number, subs: SubView[]): FilterGroup<SubView>[] {
   const labels: Record<string, string> = { ...t.subs.states, limit: t.subs.limitReached(null) };
   const groups: FilterGroup<SubView>[] = [
-    { key: 'pay', label: t.subs.payFilter, values: s => [s.kind], text: kind => t.subs.pay[kind as SubView['kind']] ?? kind, mark: kind => <PaySign kind={kind as SubView['kind']} /> },
+    { key: 'pay', label: t.subs.payFilter, values: s => [s.kind], text: kind => t.subs.pay[kind as SubView['kind']] ?? kind, mark: kind => <PayIcon kind={kind as SubView['kind']} /> },
     providerFilter(t.tables.provider, s => [s.provider]),
     { key: 'owner', label: t.tables.owner, values: s => [s.owner.id], text: id => subs.find(s => s.owner.id === id)?.owner.name ?? id },
     { key: 'status', label: t.tables.status, values: s => [stateOf(s, now)], text: value => labels[value] ?? value },
@@ -425,10 +415,9 @@ function PlanWorking({ sub: s, me, controls, now }: PlanProps & { now: number })
 function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: number }) {
   const t = useT();
   const { language } = useLanguage();
-  const name = subName(t, s);
   return (
-    <CardFrame label={`${name}, ${s.owner.name}`} accent={s.isOrchestrator}
-      head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={name} tier={s.tier} badges={<><PayBadge sub={s} />{s.isOrchestrator && <OrchestratorBadge />}</>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
+    <CardFrame label={`${subName(t, s)}, ${s.owner.name}`} accent={s.isOrchestrator}
+      head={<CardHead mark={<ProviderMark provider={s.provider} protocol={s.api?.protocol} />} name={shortName(t, s)} sign={<KindSign kind={s.kind} />} under={s.isOrchestrator && t.subs.orchestrator} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
       extra={<PlanExtra sub={s} controls={controls} />}>
       {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>
