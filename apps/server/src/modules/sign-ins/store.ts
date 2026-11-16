@@ -30,13 +30,11 @@ export async function keepSignIn(ctx: Ctx, input: KeptSignIn): Promise<boolean> 
   if (!site || !session.success) return false;
   const [agent] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, input.agentId), eq(agents.companyId, input.companyId), isNull(agents.removedAt)));
   if (!agent) return false;
-  const values = {
-    companyId: input.companyId, agentId: agent.id, site,
+  const change = {
     sessionEnc: encryptSecret(JSON.stringify(session.data), ctx.config.secret),
     userAgent: input.userAgent, source: input.source, savedBy: input.savedBy, savedAt: new Date(),
   };
-  const { companyId: _companyId, agentId: _agentId, site: _site, ...change } = values;
-  await ctx.db.insert(savedSignIns).values(values).onConflictDoUpdate({ target: [savedSignIns.agentId, savedSignIns.site], set: change });
+  await ctx.db.insert(savedSignIns).values({ companyId: input.companyId, agentId: agent.id, site, ...change }).onConflictDoUpdate({ target: [savedSignIns.agentId, savedSignIns.site], set: change });
   return true;
 }
 

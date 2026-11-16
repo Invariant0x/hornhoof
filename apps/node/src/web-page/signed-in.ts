@@ -41,17 +41,20 @@ async function opened(m: SignedInBrowse, deps: SignedInDeps): Promise<SignedInPl
 }
 
 /* What hh-browse prints of the page, with every value of the sign-in replaced wherever the page showed it. */
-function pageOf({ screenshot: _file, ...result }: BrowseResult, values: string[], notes: string[]): BrowsedPage {
+function pageOf(result: BrowseResult, values: string[], notes: string[]): BrowsedPage {
   const clean = (text: string) => redact(text, values);
   const maybe = (text: string | null) => (text === null ? null : clean(text));
   return {
-    ...result,
+    status: result.status,
     reason: maybe(result.reason),
     address: clean(result.address),
     finalAddress: maybe(result.finalAddress),
+    httpStatus: result.httpStatus,
     title: maybe(result.title),
     text: maybe(result.text),
+    textLength: result.textLength,
     links: result.links.map(link => ({ text: clean(link.text), url: clean(link.url) })),
+    linkCount: result.linkCount,
     notes: [...result.notes, ...notes].map(clean),
   };
 }
