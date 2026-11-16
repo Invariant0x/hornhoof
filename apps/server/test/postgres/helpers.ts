@@ -180,7 +180,7 @@ export async function backendPid(pool: pg.Pool): Promise<number> {
 
 function advertisement(): Buffer {
   const packet = (text: string) => `${(Buffer.byteLength(text) + 4).toString(16).padStart(4, '0')}${text}`;
-  return Buffer.from(packet('# service=git-upload-pack\n') + '0000' + packet(`${FIXTURE_COMMIT} refs/heads/task-1\0multi_ack\n`) + packet(`${FIXTURE_COMMIT} refs/heads/task-2\n`) + '0000');
+  return Buffer.from(packet('# service=git-upload-pack\n') + '0000' + packet(`${FIXTURE_COMMIT} refs/heads/release-1\0multi_ack\n`) + packet(`${FIXTURE_COMMIT} refs/heads/release-2\n`) + '0000');
 }
 
 /* A real authorized Git refs endpoint is the barrier immediately before startRun enters its numbering transaction. */
