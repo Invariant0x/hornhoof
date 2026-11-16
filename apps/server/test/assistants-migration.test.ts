@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
-import { freshPglite, ownDatabases } from './helpers-db.js';
+import { createTestDb, freshPglite, ownDatabases } from './helpers-db.js';
 import { freshInstall, migrate, migrationsUpTo } from './migrations-fixture.js';
 
 ownDatabases();
@@ -44,7 +44,9 @@ describe('personal assistants migration', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await db.execute(sql`select by_own_agent from assistant_replies`)).rows).toEqual([{ by_own_agent: true }]);
     await expect(db.execute(sql`update assistant_replies set by_own_agent = null`)).rejects.toThrow();
-    expect((await drizzle(await freshInstall()).execute(column)).rows).toEqual(expected);
+    /* global-setup.ts migrates a fresh database for this run; open its copy for the fresh-schema assertion. */
+    const fresh = await createTestDb();
+    expect((await fresh.execute(column)).rows).toEqual(expected);
   });
 
   it('makes every person a person and no assistant, adds its tables empty and touches no older row', async () => {
