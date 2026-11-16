@@ -11,6 +11,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
 import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
@@ -62,8 +63,8 @@ async function company(withLink = true) {
   return { app, db, config, companyId: acme!.id, ownerId: owner!.id };
 }
 
-async function listening(app: FastifyInstance): Promise<Target> {
-  await app.listen({ host: '127.0.0.1', port: 0 });
+async function listening(app: FastifyInstance, port = 0): Promise<Target> {
+  await app.listen({ host: '127.0.0.1', port });
   return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
 }
 
@@ -541,13 +542,37 @@ describe('the peer link in the keeper', () => {
     return { proofs, did, probes };
   }
 
-  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async () => {
+  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async ({ signal }) => {
+    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const c = await company();
-    const { now, step, stepUntil } = steppedClock();
+    const clock = { wall: Date.now(), mono: 0 };
+    const now = () => ({ ...clock });
     const said = { needed: false, link: 'self' as 'self' | 'other' | 'silent', name: { state: 'held', client: OWN_CLIENT, generation: 7 } as Name };
     const p = proving(now, said);
+    /* A deferred answer, on the event loop rather than a real-time deadline. Machine load cannot age the lease. */
+    const probe = p.proofs.probe;
+    p.proofs.probe = async (nonce, link) => {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      return probe(nonce, link);
+    };
     const lease = fakeLease();
-    const { keeper, lines } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs, ...STEPPED });
+    const ports = { front: await testPort(), linkHttp: await testPort(), linkTls: await testPort(), peer: await testPort(), peerApp: await testPort() };
+    const { keeper, lines } = await keeperBeside(c, await listening(c.app, await testPort()), folder(), { lease, now, proofs: p.proofs, ports });
+    await until(() => Boolean(keeper['ownLink']()));
+    const step = async (ms = 20) => {
+      clock.wall += ms;
+      clock.mono += ms;
+      vi.setSystemTime(clock.wall);
+      await keeper['readNeeded']();
+      if (said.needed) {
+        if (keeper['holder'].standing()) await keeper['leaseProofs']!.tick();
+        else await keeper['reentry']!.tick();
+      }
+      await keeper['holder'].tick();
+      keeper['giveWord']();
+    };
+    const stepUntil = (check: () => boolean) => until(async () => { signal.throwIfAborted(); await step(); return check(); });
     const renewals = () => lease.calls.filter(call => call.method === 'renew').length;
     await stepUntil(() => keeper.mode() === 'lead' && renewals() > 3);
     /* Alone with the data it asks nobody: its lease is its own word. */
