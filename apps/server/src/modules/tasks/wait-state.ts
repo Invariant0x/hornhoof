@@ -2,6 +2,7 @@ import { EndSourceWait, ReplanWait, signalsOnce, SyncSourceWaits, validSourceKey
 import { and, asc, desc, eq, inArray, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { runsDepartment } from '../../auth/departments.js';
+import type { Checker } from '../../checker.js';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
 import { CLOSED, note, ownNote, refuse, type Actor, type Task, type Tx } from './engine.js';
 import { nextReview, planFromPolicy, setsWaitDates, waitRoute } from './wait-policy.js';
@@ -25,7 +26,7 @@ const OPEN_STATES = ['active', 'legacy_needs_plan'] as const;
 const isOpen = (wait: TaskWait): boolean => wait.endedAt === null;
 const staleSource = () => refuse(409, 'task_changed', 'This source has moved on since what you read.');
 
-function parsed<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
+function parsed<T>(schema: Checker<T>, input: unknown): T {
   const result = schema.safeParse(input);
   if (!result.success) throw refuse(400, 'task_invalid', `A wait needs a real source, a real owner and a whole plan: ${result.error.issues[0]!.message}`);
   return result.data;

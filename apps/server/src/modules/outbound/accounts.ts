@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
+import type { Checker } from '../../checker.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, type OutboundSetupKind } from '../../db/schema.js';
@@ -62,7 +63,7 @@ const conflict = (message: string, reasonCodes: GateCode[] = []) => new ApiError
 const notYours = (message: string) => new ApiError(403, 'forbidden', message, 'outbound_not_allowed');
 
 /* Which fields were wrong, and none of what they said. */
-function checked<T>(schema: z.ZodType<T>, raw: unknown): T {
+function checked<T>(schema: Checker<T>, raw: unknown): T {
   const parsed = schema.safeParse(raw);
   if (parsed.success) return parsed.data;
   throw new ApiError(400, 'validation', 'These settings cannot be used.', 'outbound_invalid', { fields: parsed.error.issues.map(issue => issue.path.join('.')) });
