@@ -15,7 +15,7 @@ import type { WithEvent } from '../events/store.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { programRestartStatus, restartProgram } from '../tasks/program-restarts.js';
-import { sendTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
+import { sendTaskMessage, MESSAGE_TASK_HINT, TaskReference, type SentMessage } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
@@ -215,6 +215,24 @@ async function sentLine(ctx: Ctx, name: string, jobId: string, waits: Waits): Pr
   const [turn] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
   if (turn?.status !== 'queued') return `Sent to ${name}.`;
   return `Sent to ${name}. ${WAITS[waits]}`;
+}
+
+/* What the sender of a message hears once it went: its line, after the map runs it between the two departments, or the card
+   between the two agents of one. A repeat of words that went before from the same turn goes nowhere and says so. went: the
+   message is the sender's and what its turn waits for. */
+async function messageSent(ctx: Ctx, companyId: string, { me, target }: { me: Agent; target: Agent }, sent: SentMessage, went: () => Waits) {
+  if (sent.repeated) return say(`Sent to ${target.name} already in this turn, so this repeat was not sent again.`);
+  const waits = went();
+  if (me.departmentId && target.kind === 'orchestrator') ctx.bus.publish(companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
+  else if (me.departmentId && target.departmentId) {
+    const same = me.departmentId === target.departmentId;
+    ctx.bus.publish(companyId, {
+      type: 'pulse',
+      from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
+      to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
+    });
+  }
+  return say(await sentLine(ctx, target.name, sent.id, waits));
 }
 
 /* Why a message does not go, as a code a failure collector groups by and as words its sender reads. */
@@ -566,21 +584,10 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           createdBy: null,
           message: { personId: null, text, from: 'agent', name: me.name, by: me.id, byTurn: job.id },
           withMessage: back.withMessage,
-        }).then(async ({ id, repeated }) => {
-        if (repeated) return say(`Sent to ${target.name} already in this turn, so this repeat was not sent again.`);
+        }).then(sent => messageSent(ctx, job.companyId, { me, target }, sent, () => {
         back.told();
-        /* The map runs it between the two departments, or the card between the two agents of one. */
-        if (me.departmentId && target.kind === 'orchestrator') ctx.bus.publish(job.companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
-        else if (me.departmentId && target.departmentId) {
-          const same = me.departmentId === target.departmentId;
-          ctx.bus.publish(job.companyId, {
-            type: 'pulse',
-            from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
-            to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
-          });
-        }
-        return say(await sentLine(ctx, target.name, id, waitsOf(state)));
-      }, taskMessageFailure);
+        return waitsOf(state);
+      }), taskMessageFailure);
     },
   );
 }
