@@ -70,13 +70,14 @@ async function messagesFor(locale: Language): Promise<Messages> {
 
 async function mountFixture(page: Page, state: FixtureState, errors: string[]): Promise<void> {
   const origin = new URL(test.info().project.use.baseURL!).origin;
-  await page.route('**/*', route => {
+  /* Only a request that leaves the app's origin comes to the test, and is refused. The app's own modules go straight to
+     its server: each of the hundreds of them a page loads took a trip through the test, which made one load take seconds
+     on a busy machine and the test's six loads outrun its time. */
+  const outside = new RegExp(`^(?!${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/)`);
+  await page.route(outside, route => {
     const url = new URL(route.request().url());
-    if (url.origin !== origin) {
-      errors.push(`Unexpected external request: ${url.origin}${url.pathname}`);
-      return route.abort('blockedbyclient');
-    }
-    return route.fallback();
+    errors.push(`Unexpected external request: ${url.origin}${url.pathname}`);
+    return route.abort('blockedbyclient');
   });
   await serveApi(page);
   await page.route('**/api/**', async route => {
@@ -219,23 +220,39 @@ async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
   await info.attach(name, { path, contentType: 'image/png' });
 }
 
+const freshState = (): FixtureState => ({ assignment: LEGACY_ASSIGNMENT, skill: DEFAULT_SKILL, canEdit: true, patches: [], resets: 0, apiRequests: [] });
+
+async function openFixture(page: Page, width: number, theme: string, state: FixtureState, errors: string[]): Promise<void> {
+  await page.setViewportSize({ width, height: 1000 });
+  await page.addInitScript(({ theme }) => {
+    const locale = new URL(location.href).searchParams.get('assignment-locale');
+    if (locale) localStorage.setItem('hh-lang', locale);
+    localStorage.setItem('hh-theme', theme);
+  }, { theme });
+  await mountFixture(page, state, errors);
+}
+
+/* The ranking of the shipped locales and the flow of each locale are tests of their own, so a test loads the card once per
+   locale it ranks or twice for its flow, and none outruns its time as locales are added. Every shipped locale has its flow,
+   which covers the shortest, the longest and the first right-to-left one the ranking names. */
 for (const width of [375, 1280]) {
   for (const theme of ['light', 'cyberpunk'] as const) {
-    test(`assignment card flow and geometry at ${width}px in ${theme}`, async ({ page, browser }, info) => {
-      const state: FixtureState = { assignment: LEGACY_ASSIGNMENT, skill: DEFAULT_SKILL, canEdit: true, patches: [], resets: 0, apiRequests: [] };
+    test(`shipped locales ranked by the assignment card at ${width}px in ${theme}`, async ({ page }, info) => {
+      const state = freshState();
       const errors: string[] = [];
-      const geometry: Geometry[] = [];
-      await page.setViewportSize({ width, height: 1000 });
-      await page.addInitScript(({ theme }) => {
-        const locale = new URL(location.href).searchParams.get('assignment-locale');
-        if (locale) localStorage.setItem('hh-lang', locale);
-        localStorage.setItem('hh-theme', theme);
-      }, { theme });
-      await mountFixture(page, state, errors);
+      await openFixture(page, width, theme, state, errors);
       const locales = await chooseLocales(page, state);
       await info.attach('shipped-locale-ranking', { body: JSON.stringify({ ...locales, rtlStatus: locales.rtl.length ? 'CHECKED' : 'NOT_AVAILABLE' }, null, 2), contentType: 'application/json' });
+      expect(locales.ranked.map(sample => sample.id).sort()).toEqual(LANGUAGES.map(language => language.id).sort());
+      expect(errors).toEqual([]);
+    });
 
-      for (const locale of locales.selected) {
+    for (const { id: locale } of LANGUAGES) {
+      test(`assignment card flow and geometry at ${width}px in ${theme}, ${locale}`, async ({ page, browser }, info) => {
+        const state = freshState();
+        const errors: string[] = [];
+        const geometry: Geometry[] = [];
+        await openFixture(page, width, theme, state, errors);
         await test.step(`${locale}: save, raw round-trip, reset and read-only`, async () => {
           const words = await messagesFor(locale);
           state.assignment = LEGACY_ASSIGNMENT;
@@ -317,10 +334,10 @@ for (const width of [375, 1280]) {
           await readonlyCard.getByRole('textbox', { name: words.agent.assignment, exact: true }).scrollIntoViewIfNeeded();
           await shot(page, info, `assignment-readonly-${locale}-${theme}-${width}`);
         });
-      }
 
-      await info.attach('assignment-fixture-observations', { body: JSON.stringify({ provenance: 'playwright-route-fixture', engine: info.project.use.browserName, browserVersion: browser.version(), width, theme, selectedLocales: locales.selected, patches: state.patches, resets: state.resets, apiRequests: state.apiRequests, geometry, errors }, null, 2), contentType: 'application/json' });
-      expect(errors).toEqual([]);
-    });
+        await info.attach('assignment-fixture-observations', { body: JSON.stringify({ provenance: 'playwright-route-fixture', engine: info.project.use.browserName, browserVersion: browser.version(), width, theme, locale, patches: state.patches, resets: state.resets, apiRequests: state.apiRequests, geometry, errors }, null, 2), contentType: 'application/json' });
+        expect(errors).toEqual([]);
+      });
+    }
   }
 }
