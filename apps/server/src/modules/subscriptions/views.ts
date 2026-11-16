@@ -1,7 +1,7 @@
 import { apiEndpoint, currentLimits, modelsFor, type Account, type ApiEndpoint, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
+import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type PlanFallback, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { nodeIdentity, ownBuiltin, type NodeIdentity, type NodeHub } from '../nodes/hub.js';
@@ -25,6 +25,8 @@ export type SubView = {
   limits: Limits | null;
   limitsUpdatedAt: string | null;
   budget: number | null;
+  /* The plans its employees go on to at its limit, in order; empty for any plan of the company that may serve them. */
+  fallbacks: PlanFallback[];
   isOrchestrator: boolean;
   /* The account each machine's program is signed in to: the address only for the plan's owner and the CEO.
      tier when all machines say the same one; accountsDiffer when they are on different ones. */
@@ -74,6 +76,7 @@ const columns = {
   limits: subscriptions.limits,
   limitsUpdatedAt: subscriptions.limitsUpdatedAt,
   budget: subscriptions.budget,
+  fallbacks: subscriptions.fallbacks,
   credVersion: subscriptions.credVersion,
   leaseNodeId: subscriptions.leaseNodeId,
   targetKind: subscriptions.targetKind,
@@ -176,6 +179,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
       limits: currentLimits(r.limits ?? null, r.limitsUpdatedAt),
       limitsUpdatedAt: r.limitsUpdatedAt?.toISOString() ?? null,
       budget: r.budget,
+      fallbacks: r.fallbacks,
       isOrchestrator: orchestrator?.subscriptionId === r.id,
       ...accountViews(mine, accountOf, viewer, r.ownerId),
       signedInOnce: r.kind === 'personal' && r.credVersion > 0,

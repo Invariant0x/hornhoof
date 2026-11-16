@@ -193,6 +193,8 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rexs = (id: NodeIdentity) => id.kind === 'node' && id.nodeId === codex!.id;
     vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
     vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
+    const takesSkillFiles = c.ctx.hub.takesSkillFiles.bind(c.ctx.hub);
+    vi.spyOn(c.ctx.hub, 'takesSkillFiles').mockImplementation(id => rexs(id) || takesSkillFiles(id));
     const [team] = rex.urgentOnly ? await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning() : [];
     const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id, teamId: team?.id ?? null }).returning();
     const task = await c.memberTask();
@@ -227,11 +229,12 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     }
   });
 
-  it('waits for the reset when the one who could take it is in a team that takes only urgent work', async () => {
+  it('keeps the work with Bruno, who goes on on the free plan as a fallback, when the one who could take it is in a team that takes only urgent work', async () => {
     const { db, bruno, rex, task, turnsOf } = await withPeer({ urgentOnly: true });
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ executorAgentId: bruno.id });
     expect(await turnsOf(rex.id)).toEqual([]);
-    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]).toMatchObject({ subscriptionId: rex.subscriptionId });
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued' || j.status === 'running').map(j => [j.taskId, j.subscriptionId])).toEqual([[task.id, rex.subscriptionId]]);
   });
 
   it('waits for the reset when their plans are at their limits too', async () => {
@@ -794,7 +797,10 @@ describe("a plan's share for tasks", () => {
     const { ctx, db, builtin, bruno, task, resetsAt } = await plan(0.85);
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
     await marked(builtin);
-    expect(builtin.queued()).toBe(0);
+    /* Nothing of Bruno's goes to the machine: the one turn there is the orchestrator's, told once that no fallback has room. */
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect(builtin.queued()).toBe(1);
+    expect((await db.select({ prompt: jobs.prompt }).from(jobs).where(eq(jobs.agentId, orchestrator!.id))).map(j => j.prompt)).toEqual([expect.stringContaining('no fallback plan has room for its employees, so their work waits: Bruno.')]);
     expect((await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, bruno.id)))).toEqual([{ status: 'queued' }]);
     expect(await agentState(ctx, bruno.id)).toMatchObject({ budgetUntil: resetsAt, limitUntil: null });
   });

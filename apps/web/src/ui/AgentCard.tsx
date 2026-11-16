@@ -11,6 +11,7 @@ import { TelegramBot } from './TelegramBot';
 import { Ask } from './Ask';
 import { PanelFrame } from './SidePanels';
 import { LimitMeters } from './PlanLimits';
+import { FallbackLine } from './PlanFallbacks';
 import { useNow } from './reset';
 import { AgentState, clockAt, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
@@ -317,6 +318,7 @@ export function AgentCard({ agentId, live, serverNow, onClose, onRemoved = onClo
           <LastObsolete obsolete={card.obsolete} />
         </header>
         <OfflinePlan card={card} editable={editable} onMove={subscription => change({ subscription })} />
+        <FallbackLine card={card} />
         {!editable && <p className="muted">{t.agent.viewOnly}</p>}
 
         <div className="ac-pick">

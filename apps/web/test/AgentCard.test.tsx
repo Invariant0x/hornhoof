@@ -757,3 +757,35 @@ describe('an employee whose machine is offline', () => {
     expect(screen.queryByRole('button', { name: /^Move to / })).not.toBeInTheDocument();
   });
 });
+
+describe('an employee on a fallback plan', () => {
+  const HOME: SubView = { ...SUBS[0]!, id: 's-home', provider: 'antigravity', label: 'Antigravity', owner: { id: 'p5', name: 'Clara' } };
+  const SPARE: SubView = { ...SUBS[0]!, id: 's-spare', provider: 'codex', label: 'Codex', owner: { id: 'p6', name: 'Max' } };
+  const RESET = '2026-11-20T22:51:00.000Z';
+  const at = (locale: string) => new Date(RESET).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const onFallback = (until: string | null): AgentCardView => ({ ...CARD, subscription: SPARE, fallback: { home: HOME, until } });
+
+  it('says which fallback plan it is on, until when its own plan is at its limit, and where it goes back, in English and Russian', async () => {
+    for (const [lang, line] of [
+      ['en', `On the fallback plan Codex, Max until ${at('en-GB')}, while Antigravity, Clara is at its limit. Then back to Antigravity, Clara.`],
+      ['ru', `На запасном тарифе Codex, Max до ${at('ru-RU')}: Antigravity, Clara на лимите. Потом вернется на Antigravity, Clara.`],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, onFallback(RESET)] });
+      expect(await screen.findByText(line)).toBeInTheDocument();
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('says it goes back after its turn once its own plan takes turns again', async () => {
+    open({ 'GET /api/agents/b1': [200, onFallback(null)] });
+    expect(await screen.findByText('On the fallback plan Codex, Max for now. Back to Antigravity, Clara after its turn.')).toBeInTheDocument();
+  });
+
+  it('says nothing of a fallback on its own plan', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...CARD, fallback: null }] });
+    await screen.findByRole('heading', { name: 'Bruno' });
+    expect(screen.queryByText(/fallback plan/)).not.toBeInTheDocument();
+  });
+});
