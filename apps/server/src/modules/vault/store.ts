@@ -2,6 +2,7 @@ import { FILL_PASSWORD_MIN, FillTotp, type FillPlain } from '@hornhoof/protocol'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { knowsAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, people, tasks, vaultEntries, vaultLog } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -232,8 +233,10 @@ export async function entryViews(ctx: Ctx, rows: Entry[]) {
   }));
 }
 
-export async function entryLog(ctx: Ctx, entryId: string, limit = 200) {
-  const rows = await ctx.db.select().from(vaultLog).where(eq(vaultLog.entryId, entryId)).orderBy(desc(vaultLog.at)).limit(limit);
+/* The log is the company's work, which every person of it reads, but for the uses of another person's own assistant,
+   which nobody else knows of. A task shows by its number only. */
+export async function entryLog(ctx: Ctx, entryId: string, viewer: Pick<AgentViewer, 'apart'>, limit = 200) {
+  const rows = (await ctx.db.select().from(vaultLog).where(eq(vaultLog.entryId, entryId)).orderBy(desc(vaultLog.at)).limit(limit)).filter(r => r.agentId === null || knowsAgentId(viewer, r.agentId));
   const names = await namesFor(ctx, {
     people: rows.flatMap(r => (r.personId ? [r.personId] : [])),
     agents: rows.flatMap(r => (r.agentId ? [r.agentId] : [])),
