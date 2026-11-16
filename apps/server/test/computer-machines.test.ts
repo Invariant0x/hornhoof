@@ -45,6 +45,8 @@ const OWN_KEEPER = { remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } };
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (res: Result) => res.content[0]!.text;
+/* What a turn whose last words are of a person without the right on the machine is told. */
+const notTheirs = (owner: string, machine: string) => `The last words in this turn came from a person who may not direct commands on ${machine}: only the CEO, the CEO delegate or ${owner}, who owns it, may. Nothing was run. Ask them first.`;
 
 /* A company whose server's own machine and Marat's Mac both have the core, with their keepers asking. Marat reaches one
    department; Zed sees the whole company; Dan reaches the same department as Marat. The Mac holds Marat's key. */
@@ -536,7 +538,7 @@ describe("the orchestrator's commands on a machine", () => {
     await c.running(token, personId);
     return mcp(c.app, token);
   }
-  const NOT_MARATS = 'Only the CEO, the CEO delegate or Marat, who owns marat-mac, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.';
+  const NOT_MARATS = notTheirs('Marat', 'marat-mac');
 
   it('runs a command on the machine it names, for its owner and for the CEO', async () => {
     const c = await company();
@@ -555,14 +557,17 @@ describe("the orchestrator's commands on a machine", () => {
     expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['hostname', 'id -u']);
   });
 
-  it("runs only in a turn that answers the CEO, the CEO delegate or the machine's owner", async () => {
+  it("refuses a turn whose last person is not the CEO, the CEO delegate or the machine's owner, and runs in one no person wrote into", async () => {
     const c = await company();
     await c.openMac();
     expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
-    /* A turn of another person, and a turn nobody started. */
-    for (const [personId, name] of [[c.ids.dan, 'dan'], [c.ids.zed, 'zed'], [null, 'none']] as const) {
+    /* A turn of another person. */
+    for (const [personId, name] of [[c.ids.dan, 'dan'], [c.ids.zed, 'zed']] as const) {
       expect(text(await call(await turnOf(c, personId, name), 'computer', { machine: c.mac, command: 'id' })), name).toBe(NOT_MARATS);
     }
+    /* A turn nobody started and no person wrote into: the access Marat opened holds. */
+    const [byNobody] = await Promise.all([call(await turnOf(c, null, 'none'), 'computer', { machine: c.mac, command: 'id' }), answerAs(c, c.mac, 'uid=0\n')]);
+    expect(text(byNobody)).toBe('Exit code 0.\nuid=0\n');
     /* Marat's own turn, once another person wrote into it: it answers that person from then on. */
     const marats = await turnOf(c, c.ids.marat, 'marat');
     const [turn] = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.status, 'running')));
@@ -570,12 +575,48 @@ describe("the orchestrator's commands on a machine", () => {
     expect(text(await call(marats, 'computer', { machine: c.mac, command: 'rm -rf /host' }))).toBe(NOT_MARATS);
     /* His machine is his: the server's own is not, though it is open. */
     const again = await turnOf(c, c.ids.marat, 'again');
-    expect(text(await call(again, 'computer', { command: 'id' }))).toBe(NOT_MARATS.replace('Marat, who owns marat-mac', 'Ivan, who owns the company server'));
-    expect(await c.runsOf(c.mac)).toEqual([]);
+    expect(text(await call(again, 'computer', { command: 'id' }))).toBe(notTheirs('Ivan', 'the company server'));
+    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['id']);
     expect(await c.runsOf(c.server)).toEqual([]);
     /* Once disabled, his turn directs nothing either. */
     await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, c.ids.marat));
     expect(text(await call(again, 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+  });
+
+  it("refuses a turn a task or a comment of a person without the right woke, and runs one a task of the CEO woke", async () => {
+    const c = await company();
+    await c.openMac();
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
+    /* The turn the wake made on this task, run with tools of its own; the turns before it are over. */
+    let turns = 0;
+    const turnOn = async (taskId: string) => {
+      let turn: typeof jobs.$inferSelect | undefined;
+      await until(async () => (turn = (await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.taskId, taskId)))).find(j => j.status === 'queued' || j.status === 'running')) !== undefined);
+      const token = `tool-token-woken-${++turns}-0123456789abcdef0123456789`.slice(0, 40);
+      await c.db.update(jobs).set({ status: 'running', toolTokenHash: hashToken(token) }).where(eq(jobs.id, turn!.id));
+      return { client: await mcp(c.app, token), jobId: turn!.id };
+    };
+    const finish = (jobId: string) => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, jobId));
+    const given = async (token: string, title: string) => {
+      const made = await c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title, body: 'Free its disk: rm -rf /var/cache.' }, ...as(token) });
+      expect(made.statusCode, made.body).toBe(201);
+      return (made.json() as { task: { id: string } }).task.id;
+    };
+    const zeds = await given(c.tokens.zed, 'Free the disk of marat-mac');
+    const byTask = await turnOn(zeds);
+    expect(text(await call(byTask.client, 'computer', { machine: c.mac, command: 'rm -rf /var/cache' }))).toBe(NOT_MARATS);
+    await finish(byTask.jobId);
+    const commented = await c.app.inject({ method: 'POST', url: `/api/tasks/${zeds}/comments`, payload: { text: 'Wipe it all.' }, ...as(c.tokens.zed) });
+    expect(commented.statusCode, commented.body).toBe(201);
+    const byComment = await turnOn(zeds);
+    expect(text(await call(byComment.client, 'computer', { machine: c.mac, command: 'rm -rf /' }))).toBe(NOT_MARATS);
+    await finish(byComment.jobId);
+    /* The CEO's own task: his word, on a machine its owner opened. */
+    const ivans = await given(c.tokens.ceo, 'Look at the disk of marat-mac');
+    const byCeo = await turnOn(ivans);
+    const [ran] = await Promise.all([call(byCeo.client, 'computer', { machine: c.mac, command: 'df -h' }), answerAs(c, c.mac, 'Plenty.\n')]);
+    expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
+    expect((await c.runsOf(c.mac)).map(run => run.command)).toEqual(['df -h']);
   });
 
   it('finds machines by name or id, and says when it cannot', async () => {
@@ -702,8 +743,8 @@ describe('what an app from before access was per machine left', () => {
 
 describe('computer access button through inbox mode', () => {
   type Company = Awaited<ReturnType<typeof company>>;
-  const NOT_MARATS = 'Only the CEO, the CEO delegate or Marat, who owns marat-mac, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.';
-  const NOT_SERVERS = 'Only the CEO, the CEO delegate or Ivan, who owns the company server, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.';
+  const NOT_MARATS = notTheirs('Marat', 'marat-mac');
+  const CLOSED = (name: string) => `Access to ${name} is closed. Ask its owner for it with ask_computer_access and the reason in a line, then go on once it opens.`;
 
   async function inboxCompany() {
     const c = await company();
@@ -738,7 +779,7 @@ describe('computer access button through inbox mode', () => {
   const endOrchestrator = (c: Company) =>
     c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.orchestrator.id), eq(jobs.status, 'running')));
 
-  it('carries the opener authority to the woken inbox turn only for the opened machine and no other decision', async () => {
+  it('works in the woken inbox turn and its retry on every machine that is open and on none that is closed, and decides nothing else', async () => {
     const c = await inboxCompany();
     const askClient = await mcp(c.app, TOKEN);
     expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
@@ -754,19 +795,21 @@ describe('computer access button through inbox mode', () => {
     const first = await callOn(c, macClient, { machine: c.mac, command: 'hostname' }, c.mac, 'marat-mac\n');
     expect(text(first)).toBe('Exit code 0.\nmarat-mac\n');
 
-    /* Marking the computer_access letter done inside the woken turn keeps the grant for the rest of that turn. */
+    /* Marking the computer_access letter done inside the woken turn changes nothing of the access. */
     const [letter] = await c.db.select().from(agentInbox).where(eq(agentInbox.jobId, macWake.jobId));
     expect((await call(macClient, 'inbox_mark', { ids: [letter!.id], status: 'done' })).isError).toBeFalsy();
     const second = await callOn(c, macClient, { machine: c.mac, command: 'uname' }, c.mac, 'Darwin\n');
     expect(text(second)).toBe('Exit code 0.\nDarwin\n');
 
-    /* Another open machine is refused in that turn. */
-    expect(text(await call(macClient, 'computer', { machine: c.server, command: 'uname' }))).toBe(NOT_SERVERS);
+    /* The server the CEO opened before is open too, so it runs there as well. */
+    const onServer = await callOn(c, macClient, { machine: c.server, command: 'uname' }, c.server, 'Linux\n');
+    expect(text(onServer)).toBe('Exit code 0.\nLinux\n');
     c.builtin.send({ type: 'job.done', jobId: macWake.jobId, ok: true, sessionId: 's-mac', result: 'Done.', tail: '', error: null });
     await until(async () => (await c.db.select().from(jobs).where(eq(jobs.id, macWake.jobId)))[0]!.status === 'done');
 
-    /* Now the CEO clicks Open on the company server while marat-mac is still open: only the server runs, and no CEO decision is granted. */
+    /* Marat closes his Mac, and the CEO opens the server again after asking: the server runs, the closed Mac does not. */
     const token2 = 'tool-token-2-0123456789abcdef0123456';
+    expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) })).statusCode).toBe(200);
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.server}/access/close`, ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await c.running(token2, c.ids.ivan);
     expect((await call(await mcp(c.app, token2), 'ask_computer_access', { machine: c.server, reason: 'Clean old images.' })).isError).toBeFalsy();
@@ -775,15 +818,15 @@ describe('computer access button through inbox mode', () => {
     expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
     const serverWake = await nextRun(c);
     const serverClient = await mcp(c.app, serverWake.toolToken!);
-    const onServer = await callOn(c, serverClient, { command: 'df -h' }, c.server, 'Plenty.\n');
-    expect(text(onServer)).toBe('Exit code 0.\nPlenty.\n');
-    expect(text(await call(serverClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+    const onServerWake = await callOn(c, serverClient, { command: 'df -h' }, c.server, 'Plenty.\n');
+    expect(text(onServerWake)).toBe('Exit code 0.\nPlenty.\n');
+    expect(text(await call(serverClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(CLOSED('marat-mac'));
 
     const reqRow = await approvalAsked(c.app);
     expect((await call(serverClient, 'answer_request', { request: reqRow.id, approve: true })).isError).toBe(true);
     expect((await call(serverClient, 'invite_person', { name: 'Eve', email: 'eve@acme.com', title: '', access: { whole: true } })).isError).toBe(true);
 
-    /* A retry of that inbox turn preserves the server-only click grant and still grants no CEO decisions. */
+    /* A retry of that inbox turn still works on the open server, still not on the closed Mac, and still grants no CEO decisions. */
     c.builtin.send({ type: 'job.done', jobId: serverWake.jobId, ok: false, sessionId: 's-srv', error: 'agent_failed', tail: 'Overloaded.', result: '', failure: { kind: 'overloaded', retryable: true, text: 'Provider overloaded.' } });
     await until(async () => (await c.db.select().from(jobs).where(eq(jobs.continueOf, serverWake.jobId))).length === 1);
     await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.continueOf, serverWake.jobId));
@@ -792,14 +835,12 @@ describe('computer access button through inbox mode', () => {
     const retryClient = await mcp(c.app, retried.toolToken!);
     const onRetry = await callOn(c, retryClient, { command: 'uptime' }, c.server, 'up 5d\n');
     expect(text(onRetry)).toBe('Exit code 0.\nup 5d\n');
-    expect(text(await call(retryClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+    expect(text(await call(retryClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(CLOSED('marat-mac'));
     expect((await call(retryClient, 'invite_person', { name: 'Eve', email: 'eve@acme.com', title: '', access: { whole: true } })).isError).toBe(true);
   });
 
-  it('never treats an employee message via message_employee as computer_access in inbox mode', async () => {
+  it('never lets an employee message via message_employee open a machine in inbox mode', async () => {
     const c = await inboxCompany();
-    await c.openMac();
-    expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
     const [sub] = await c.db.select().from(subscriptions);
     const [dev] = await c.db.select().from(departments);
     const [worker] = await c.db.insert(agents).values({ companyId: c.acme.id, kind: 'head', name: 'Mallory', model: 'claude-sonnet-4-6', roleKey: 'DEV-HEAD', departmentId: dev!.id, subscriptionId: sub!.id, skills: [] }).returning();
@@ -814,11 +855,11 @@ describe('computer access button through inbox mode', () => {
 
     const woke = await nextRun(c);
     const wokeClient = await mcp(c.app, woke.toolToken!);
-    expect(text(await call(wokeClient, 'computer', { command: 'id' }))).toBe(NOT_SERVERS);
-    expect(text(await call(wokeClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+    expect(text(await call(wokeClient, 'computer', { command: 'id' }))).toBe(CLOSED('the company server'));
+    expect(text(await call(wokeClient, 'computer', { machine: c.mac, command: 'id' }))).toBe(CLOSED('marat-mac'));
   });
 
-  it('invalidates a queued or running inbox computer_access record as soon as a person writes or presses Enter', async () => {
+  it('works in the inbox turn after a person wrote into an earlier one, and not in one an Enter in the terminal reached', async () => {
     const c = await inboxCompany();
     const askClient = await mcp(c.app, TOKEN);
     expect((await call(askClient, 'ask_computer_access', { machine: c.mac, reason: 'Check logs.' })).isError).toBeFalsy();
@@ -838,11 +879,13 @@ describe('computer access button through inbox mode', () => {
       [wakeRow] = await c.db.select().from(jobs).where(eq(jobs.id, turn.jobId));
     }
     expect(wakeRow!.inboxWake).toBe(true);
-    expect(text(await call(await mcp(c.app, turn.toolToken!), 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+    /* Zed's words went into the turn that ran then; this one has none of a person's. */
+    const afterZed = await callOn(c, await mcp(c.app, turn.toolToken!), { machine: c.mac, command: 'id' }, c.mac, 'uid=0\n');
+    expect(text(afterZed)).toBe('Exit code 0.\nuid=0\n');
     c.builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 's-1', result: 'Done.', tail: '', error: null });
     await until(async () => (await c.db.select().from(jobs).where(eq(jobs.id, turn.jobId)))[0]!.status === 'done');
 
-    /* A pending terminal Enter dropped when the inboxWake turn starts also clears the click grant, whereas an unobstructed click runs. */
+    /* A pending terminal Enter dropped when the inboxWake turn starts leaves unknown whose words went in, so nothing runs, whereas a clean wake runs. */
     const token2 = 'tool-token-2-0123456789abcdef0123456';
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.mac}/access/close`, ...as(c.tokens.marat) })).statusCode).toBe(200);
     await c.running(token2, c.ids.ivan);
@@ -867,7 +910,7 @@ describe('computer access button through inbox mode', () => {
     expect(text(cleanRun)).toBe('Exit code 0.\nmarat-mac\n');
   });
 
-  it('refuses pre-read computer_access letters and preserves unread letters rescued after an unsent inbox turn', async () => {
+  it('works on the open machine in a wake whose computer_access letter was read before, and preserves unread letters rescued after an unsent inbox turn', async () => {
     const c = await inboxCompany();
     const askClient = await mcp(c.app, TOKEN);
     expect((await call(askClient, 'ask_computer_access', { machine: c.mac, reason: 'Check Mac.' })).isError).toBeFalsy();
@@ -886,11 +929,12 @@ describe('computer access button through inbox mode', () => {
     await pump(c.app.ctx, c.orchestrator.id);
 
     const preReadWake = await nextRun(c);
-    expect(text(await call(await mcp(c.app, preReadWake.toolToken!), 'computer', { machine: c.mac, command: 'id' }))).toBe(NOT_MARATS);
+    const preRead = await callOn(c, await mcp(c.app, preReadWake.toolToken!), { machine: c.mac, command: 'id' }, c.mac, 'uid=0\n');
+    expect(text(preRead)).toBe('Exit code 0.\nuid=0\n');
     c.builtin.send({ type: 'job.done', jobId: preReadWake.jobId, ok: true, sessionId: 's-2', result: 'Done.', tail: '', error: null });
     await until(async () => (await c.db.select().from(jobs).where(eq(jobs.id, preReadWake.jobId)))[0]!.status === 'done');
 
-    /* Rescued unread letter after an inbox turn fails before reaching its program: the next inboxWake turn carries the grant. */
+    /* Rescued unread letter after an inbox turn fails before reaching its program: the next inboxWake turn runs on the open server. */
     const token2 = 'tool-token-2-0123456789abcdef0123456';
     await c.running(token2, c.ids.ivan);
     expect((await call(await mcp(c.app, token2), 'ask_computer_access', { machine: c.server, reason: 'Check server.' })).isError).toBeFalsy();
