@@ -248,6 +248,37 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(await nextOf(node, 'job.run')).toMatchObject({ jobId: job });
   });
 
+  /* As on 16.11: the updater asked, took a moment's 404 for a server from before and went, and then the long turn ended. */
+  it('lets the orchestrator in past the limit when the work on its node ended but no updater came back to hear it is free', async () => {
+    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+    const google = await f.plan('antigravity');
+    const node = await f.online(google.key);
+    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }));
+    const orchestrator = (await orchestratorOf(f.app.ctx, f.company.id))!;
+    await f.db.update(agents).set({ subscriptionId: google.plan, nodeId: google.nodeId }).where(eq(agents.id, orchestrator.id));
+    const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
+    await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
+    await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, long.id));
+    await vi.advanceTimersByTimeAsync(ROUND);
+    expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting', turnsLeft: 0, partsLeft: 0 });
+
+    const job = await f.turnFor(orchestrator.id);
+    await vi.advanceTimersByTimeAsync(ROUND);
+
+    expect(await nextOf(node, 'job.run')).toMatchObject({ jobId: job });
+  });
+
+  it('tells the updater that comes back that the node is free, once its work ended while nobody asked', async () => {
+    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+    const google = await f.plan('antigravity');
+    const long = await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
+    const ask = () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
+    expect((await ask()).json()).toMatchObject({ ready: false, drain: { state: 'waiting' } });
+    await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, long.id));
+    await vi.advanceTimersByTimeAsync(ROUND);
+    expect((await ask()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+  });
+
   it("keeps an assistant's own agent off the node past the limit, as a worker: the company does not wait for it", async () => {
     const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
     const google = await f.plan('antigravity');
