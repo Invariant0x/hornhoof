@@ -2816,3 +2816,20 @@ export const vaultLog = pgTable('vault_log', {
   at: createdAt(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
 }, t => [index('vault_log_entry_at').on(t.entryId, t.at), index('vault_log_company_at').on(t.companyId, t.at)]);
+
+/* A site sign-in kept for one employee or assistant, which its hh-browse opens pages with: the cookies and stored values
+   of the site, encrypted, never shown. One per agent and site; a newer sign-in replaces the older. source: a person
+   signed in for the agent (savedBy names who), or the vault's browser signed in with an entry. userAgent: the browser
+   the person signed in with, which a page then sees again. */
+export const SIGN_IN_SOURCES = ['person', 'vault'] as const;
+export const savedSignIns = pgTable('saved_sign_ins', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  site: text('site').notNull(),
+  sessionEnc: text('session_enc').notNull(),
+  userAgent: text('user_agent'),
+  source: text('source', { enum: SIGN_IN_SOURCES }).notNull(),
+  savedBy: uuid('saved_by').references(() => people.id, { onDelete: 'set null' }),
+  savedAt: timestamp('saved_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [uniqueIndex('saved_sign_ins_agent_site').on(t.agentId, t.site)]);

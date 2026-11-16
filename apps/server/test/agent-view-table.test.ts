@@ -85,6 +85,9 @@ const POINTED: Pointed[] = [
   /* A token that is no token: nothing reaches Telegram, and an open case is refused only for what it sent. */
   { route: 'PUT /api/agents/:id/telegram', of: anAgent('PUT', '/telegram', { token: 'no token' }), companyOnly: true, ownerToo: true },
   { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true, ownerToo: true },
+  /* Where an employee is signed in, and revoking a sign-in, go with the employee; a sign-in it does not have is not found. */
+  { route: 'GET /api/agents/:id/sign-ins', of: anAgent('GET', '/sign-ins') },
+  { route: 'DELETE /api/agents/:id/sign-ins/:signInId', of: anAgent('DELETE', '/sign-ins/00000000-0000-4000-8000-000000000000') },
   { route: 'GET /api/tasks/:id', of: aTask('GET', ''), company: true },
   { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits'), company: true },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
