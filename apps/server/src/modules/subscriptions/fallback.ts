@@ -67,13 +67,14 @@ async function firstWithRoom(ctx: Ctx, agent: Agent, home: Plan, now: string | n
 }
 
 /* The model it runs there: the one named for that fallback, its own on a plan of its own plan's program, else the one its
-   role asks for there. How hard it thinks goes back to the default on another program, which names its levels its own way. */
+   role asks for there, or that program's Default for the orchestrator, which has no role, as a move by hand gives it. How
+   hard it thinks goes back to the default on another program, which names its levels its own way. */
 async function runsOn(ctx: Ctx, agent: Agent, home: Plan, back: { model: string; effort: string | null }, target: Target) {
   const models = modelsFor(target.plan.provider, target.plan.models);
   if (target.model && models.some(m => m.id === target.model)) return { model: target.model, effort: target.plan.provider === home.provider ? back.effort : null };
   if (target.plan.provider === home.provider) return back;
   const tier = await tierOf(ctx, agent);
-  return { model: tier ? modelOnPlan(tier, target.plan) : back.model, effort: null };
+  return { model: tier ? modelOnPlan(tier, target.plan) : '', effort: null };
 }
 
 /* One row per changed field of its card, as a person's change of it leaves, with Hornhoof as the one who changed it. */

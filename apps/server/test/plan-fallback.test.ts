@@ -56,9 +56,12 @@ async function atWork() {
 describe('a plan at its limit', () => {
   it('moves everyone on it to a fallback with room at once, with their tasks, and their waiting turn goes out there', async () => {
     const c = await atWork();
+    await c.db.update(agents).set({ model: 'claude-opus-5-5' }).where(eq(agents.id, c.orchestrator.id));
     await c.fail(c.first.id, usageLimit);
 
     for (const id of [c.agent.id, c.head.id, c.watcher.id, c.orchestrator.id]) expect(await c.agentOf(id)).toMatchObject({ subscriptionId: c.spare.id });
+    /* The orchestrator has no role to pick a model by: another program runs it on its Default, as a move by hand does. */
+    expect(await c.agentOf(c.orchestrator.id)).toMatchObject({ model: '', effort: null });
     const bruno = await c.agentOf(c.agent.id);
     expect(bruno.effort).toBeNull();
     expect(bruno.model).not.toBe('claude-opus-5-5');
