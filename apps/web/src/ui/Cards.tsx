@@ -6,8 +6,10 @@ export function Facts({ items, className = 'facts' }: { items: [string, ReactNod
   return <dl className={className}>{items.map(([label, value]) => <Fragment key={label}><dt>{label}</dt><dd>{value}</dd></Fragment>)}</dl>;
 }
 
-export function CardHead({ mark, name, tier, badges, state, line }: { mark: ReactNode; name: string; tier?: string | null; badges?: ReactNode; state: ReactNode; line?: ReactNode }) {
-  return <header className="card-h"><div className="card-t">{mark}<h3>{name}{tier && <> <small>{tier}</small></> }</h3>{badges}</div><div className="stline">{state}{line && <span>{line}</span>}</div></header>;
+/* sign: a mark by the name's first line that stays there however the name wraps; under: a small line under the name. */
+export function CardHead({ mark, name, tier, sign, badges, under, state, line }: { mark: ReactNode; name: string; tier?: string | null; sign?: ReactNode; badges?: ReactNode; under?: ReactNode; state: ReactNode; line?: ReactNode }) {
+  const title = <h3>{name}{tier && <> <small>{tier}</small></> }</h3>;
+  return <header className="card-h"><div className="card-t">{mark}{sign ? <span className="card-n">{title}{sign}</span> : title}{badges}{under && <small className="card-under">{under}</small>}</div><div className="stline">{state}{line && <span>{line}</span>}</div></header>;
 }
 
 export function CardFrame({ label, accent, head, children, extra }: { label: string; accent?: boolean; head: ReactNode; children: ReactNode; extra?: ReactNode }) {

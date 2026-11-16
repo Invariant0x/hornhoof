@@ -563,7 +563,7 @@ export const en = {
     waitsThere: { needs_login: 'waiting for the login', needs_setup: 'waiting for the first setup', offline: 'offline' },
     keyEnding: (provider: string, last4: string) => `${provider} key ending ${last4}`,
     /* A key's name in the list and its card, where its sign says it is a key. */
-    keyShort: (provider: string, last4: string) => `${provider} …${last4}`,
+    keyShort: (provider: string, last4: string) => `${provider} ••••${last4}`,
     noMachine: 'No machine yet',
     builtin: 'Built-in node',
     states: { waiting_machine: 'Waiting for the machine', needs_login: 'Waiting for the login', needs_setup: 'Waiting for the first setup', ready: 'Ready', offline: 'Machine offline', builtin_offline: 'Built-in node offline' },

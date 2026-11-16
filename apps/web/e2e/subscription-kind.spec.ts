@@ -43,7 +43,7 @@ const LONG: SubView = {
 };
 const LIST = [CLAUDE, CODEX, ROUTER, LONG];
 /* What a person reads as each name, in every language. */
-const NAMES: Record<string, string> = { 's-claude': 'Claude Max', 's-codex': 'Codex Pro', 's-router': 'OpenRouter …WXYZ', 's-long': `${LONG.label} …M3N4` };
+const NAMES: Record<string, string> = { 's-claude': 'Claude Max', 's-codex': 'Codex Pro', 's-router': 'OpenRouter ••••WXYZ', 's-long': `${LONG.label} ••••M3N4` };
 const KEYS: Record<string, string> = { 's-claude': 'node-a', 's-codex': 'Maria', 's-router': 'WXYZ', 's-long': 'M3N4' };
 
 const pathOf = (url: URL | string) => new URL(url.toString()).pathname;
@@ -81,17 +81,18 @@ const rowOf = (page: Page, s: SubView) => page.locator('tr.rm').filter({ hasText
 
 const lineHeight = (el: Locator) => el.evaluate(e => parseFloat(getComputedStyle(e).lineHeight));
 
-/* The sign stands at the end of the name's first line, inside its cell, whichever way the page reads. */
-async function signByName(sign: Locator, name: Locator, cell: Locator, dir: 'ltr' | 'rtl') {
-  const [s, n, c] = [await box(sign), await box(name), await box(cell)];
-  const line = await lineHeight(name);
-  expect(s.y).toBeGreaterThanOrEqual(n.y - 2);
-  expect(s.y + s.height).toBeLessThanOrEqual(n.y + line + 2);
+/* The sign stands by the end of the name's first line, inside its frame, whichever way the page reads: on a line of its
+   own it would leave the name. */
+async function signByName(sign: Locator, name: Locator, frame: Locator, dir: 'ltr' | 'rtl') {
+  const [s, n, f] = [await box(sign), await box(name), await box(frame)];
+  const middle = s.y + s.height / 2;
+  expect(middle).toBeGreaterThanOrEqual(n.y);
+  expect(middle).toBeLessThanOrEqual(n.y + await lineHeight(name));
   const gap = dir === 'ltr' ? s.x - (n.x + n.width) : n.x - (s.x + s.width);
   expect(gap).toBeGreaterThanOrEqual(-0.5);
-  expect(gap).toBeLessThanOrEqual(12);
-  expect(s.x).toBeGreaterThanOrEqual(c.x - 0.5);
-  expect(s.x + s.width).toBeLessThanOrEqual(c.x + c.width + 0.5);
+  expect(gap).toBeLessThanOrEqual(8);
+  expect(s.x).toBeGreaterThanOrEqual(f.x - 0.5);
+  expect(s.x + s.width).toBeLessThanOrEqual(f.x + f.width + 0.5);
 }
 
 /* A small line right under the name, starting where the name starts. */
@@ -134,7 +135,7 @@ for (const { lang, skin, width, dir } of LOOKS) {
       const sign = cell.getByRole('img', { name: words, exact: true });
       expect.soft(await sign.isVisible(), `the sign by ${NAMES[s.id]}`).toBe(true);
       if (await sign.isVisible()) {
-        expect(await sign.evaluate(el => el.querySelector('title')?.textContent)).toBe(words);
+        expect(await sign.getAttribute('title')).toBe(words);
         await signByName(sign, name, cell, dir);
       }
       if (s.kind === 'personal') expect((await box(name)).height).toBeLessThan(await lineHeight(name) * 1.5);

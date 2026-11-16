@@ -885,11 +885,17 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
 /* A machine whose nodes are not the server's build waits for its owner to update them. */
 .badge.old { color: var(--amber-ink); }
-/* How a connection is paid, in a word and its sign; color tells nothing here. The orchestrator's mark is a role, quiet too. */
-.badge.ctype { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); border-color: var(--line2); white-space: nowrap; }
-.badge.ctype svg.sign, .chipf svg.sign { inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.badge.orch-role { color: var(--muted); border-color: var(--line2); }
-.nmg + .badge { margin-inline-end: 6px; }
+/* How a connection is paid, as a sign: by its word in a filter's button, and by a connection's name in the quiet ink, a
+   little smaller than the name, where its words are its name and tooltip. */
+.chipf svg.sign, .pay-sign > svg.sign { inline-size: 12px; block-size: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.pay-sign { display: inline-flex; flex: none; color: var(--muted); }
+.pay-sign > svg.sign { inline-size: 14px; block-size: 14px; }
+/* A name and its sign in a row that never wraps, so the sign stays by the name's first line however the name wraps; a line
+   may break before any picture, so plain text would leave the sign alone on a line of its own. */
+.nm-l, .card-n { display: flex; align-items: baseline; gap: 6px; min-inline-size: 0; }
+.nm-l > b, .card-n > h3 { min-inline-size: 0; }
+/* A small line under a card's name, such as the orchestrator's role: past the mark and the gap after it, as the name. */
+.card-t > .card-under { flex: 1 1 100%; min-inline-size: 0; margin-inline-start: calc(18px + 10px); font-size: 12px; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
 /* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
 .ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; overflow-wrap: break-word; }
 .ast.work { color: var(--cyan-ink); }
