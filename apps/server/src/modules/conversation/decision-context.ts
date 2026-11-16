@@ -206,7 +206,7 @@ export function deliverLive(
   ctx: Ctx,
   agentId: string,
   text: string,
-  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
   return withInputLock(ctx, agentId, () => deliverLockedInput(ctx, agentId, text, on, keep));
@@ -217,10 +217,10 @@ export async function deliverLockedInput(
   ctx: Ctx,
   agentId: string,
   text: string,
-  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
-  const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId), on.required);
+  const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId));
   const delivery = liveInputOf(on.source?.data, agentId)?.delivery;
   return into ? keepLiveInput(into, (jobId, kept) => keep(jobId, keepOperatorDelivery(kept, delivery))) : null;
 }
