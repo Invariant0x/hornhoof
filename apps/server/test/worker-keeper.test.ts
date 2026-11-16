@@ -701,8 +701,11 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
        nothing. */
     await c.db.update(machines).set({ uploadState: 'waiting' }).where(eq(machines.id, w.machine));
     await until(async () => (await row()).uploadState === null);
-    /* A machine marked as one that keeps a copy holds a database, whatever keeper runs on it: it says nothing either. */
+    /* A machine marked as one that keeps a copy holds a database, whatever keeper runs on it: it says nothing either.
+       A report it made before the mark may still be on its way and say it was wiped. Reports go one at a time: by the
+       time two more landed, that one has too, and only then does the leader count on the machine again. */
     writeFileSync(join(w.config.controlDir, 'replica.json'), '{}');
+    await reported();
     await c.db.update(machines).set({ uploadState: 'kept' }).where(eq(machines.id, w.machine));
     await reported();
     expect((await row()).uploadState).toBe('kept');
