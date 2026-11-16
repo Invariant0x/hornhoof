@@ -11,7 +11,7 @@ import { totpCode, totpSecondsLeft } from './totp.js';
    does, and saves when a person gives it one. Every agent of the company uses every entry. */
 
 /* The agent at its tools: itself, its company and the turn it runs. */
-export type VaultAgent = { id: string; companyId: string; jobId: string };
+type VaultAgent = { id: string; companyId: string; jobId: string };
 
 const said = (value: unknown, isError = false) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], ...(isError ? { isError } : {}) });
 
