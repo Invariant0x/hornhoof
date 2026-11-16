@@ -7,9 +7,9 @@ import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { ownFs, type AgentFs } from './agent-fs.js';
 import { applyCredential, takeLease } from './credentials.js';
 import { asAgent, type JobUser } from './isolation.js';
-import { plainOutput } from './program-exit.js';
+import { lastWords, plainOutput } from './program-exit.js';
 import { exitsCleanly } from './providers/process.js';
-import { HIDDEN } from './redact.js';
+import { HIDDEN, hideKeyLike, redact } from './redact.js';
 import { parentOf } from './terminal/host.js';
 import { StreamMask } from './terminal/mask.js';
 import { envFile, type Tmux } from './terminal/tmux.js';
@@ -71,10 +71,11 @@ export class CutAtToken {
   }
 }
 
-/* How a sign-in's program ended, with its last lines, for the machine's output. Once a token's start is among them, none go. */
-function endedEarly(code: number | null, text: string): string {
+/* How a sign-in's program ended, with its last lines through the node's masks, for the machine's output. Once a token's
+   start is among them, none go. */
+function endedEarly(code: number | null, text: string, secrets: string[]): string {
   const plain = plainOutput(text);
-  const last = plain.includes(TOKEN_START) ? [] : plain.split('\n').map(l => l.trim()).filter(Boolean).slice(-6);
+  const last = plain.includes(TOKEN_START) ? [] : plain.split('\n').map(l => hideKeyLike(redact(l.trim(), secrets))).filter(Boolean).slice(-6);
   return `The sign-in program ended with code ${code ?? 'unknown'}${last.length ? `: ${last.join(' | ')}` : '.'}`;
 }
 
@@ -222,12 +223,18 @@ export class LoginTerminal {
   /* The program ended: what it gave is kept if it is a sign-in its program takes. */
   private async ended(run: number): Promise<void> {
     let error: string | null = null;
+    /* A program that ended early: its code and the last line it said, which the owner reads instead of the plain words. */
+    let early: { code: number | null; line: string | null } | null = null;
     try {
       const snapshot = await this.tmux.exitSnapshot(SESSION);
       const screen = await this.tmux.screen(SESSION, 2000);
       if (run !== this.run) return;
       const code = snapshot?.programOutput?.code ?? null;
-      if (code !== 0) this.opts.log?.(endedEarly(code, snapshot?.programOutput?.text || screen));
+      if (code !== 0) {
+        const text = snapshot?.programOutput?.text || screen;
+        this.opts.log?.(endedEarly(code, text, this.opts.secrets()));
+        early = { code, line: plainOutput(text).includes(TOKEN_START) ? null : lastWords(text, this.opts.secrets()) };
+      }
       error = code !== 0 ? UNFINISHED : await this.keep(run, snapshot?.programOutput?.text ?? '', screen);
     } catch {
       error = BROKE;
@@ -235,7 +242,7 @@ export class LoginTerminal {
     if (run !== this.run) return;
     /* A sign-in kept is done: a stop that comes now has nothing left to stop. */
     if (error === null) this.active = false;
-    await this.finish(run, error);
+    await this.finish(run, error, early);
   }
 
   /* Takes the new sign-in into the plan's home; the words of what went wrong, or null. One stopped while its program
@@ -263,13 +270,13 @@ export class LoginTerminal {
     return null;
   }
 
-  private async finish(run: number, error: string | null): Promise<void> {
+  private async finish(run: number, error: string | null, early: { code: number | null; line: string | null } | null = null): Promise<void> {
     this.stopWatch();
     await this.end();
     if (run !== this.run) return;
     this.active = false;
     if (error === null) await this.opts.signedIn().catch(() => {});
-    this.opts.send({ type: 'login.done', ok: error === null, error });
+    this.opts.send({ type: 'login.done', ok: error === null, error, ...(early ?? {}) });
   }
 
   /* The session, its views and its folder go. */

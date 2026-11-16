@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import type { NodeMessage } from '@hornhoof/protocol';
+import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoginTerminal } from '../src/login.js';
 import { withProgramExit } from '../src/program-exit.js';
@@ -127,6 +128,32 @@ describe("a plan's sign-in in a terminal on the node", () => {
     s.ends(printed(30), 1);
     await until(() => Boolean(s.done()));
     expect(s.logged).toEqual(['The sign-in program ended with code 1.']);
+    expect(s.done()).toMatchObject({ ok: false, code: 1, line: null });
+  });
+
+  /* The owner sees why: its code and the last line it said, with nothing in it that looks like a key. */
+  it('whose program ends at once tells Hornhoof its code and last line, through the masks', async () => {
+    const s = signIn();
+    await s.login.start(false);
+    const key = 'sk-ant-api03-MARKER7c41qZ9xT2vB8nL0pW';
+    const bearer = 'AbCdMARKER7c41EfGh1234IjKlMnOp5678';
+    s.ends(`Checking the account\n\x1b[31mError: the key ${key} was refused (Bearer ${bearer})\x1b[0m\n\n`, 1);
+    await until(() => Boolean(s.done()));
+    expect(s.done()).toEqual({ type: 'login.done', ok: false, error: SIGNIN_ERRORS.unfinished, code: 1, line: 'Error: the key [hidden] was refused (Bearer [hidden])' });
+    expect(JSON.stringify(s.sent)).not.toContain('MARKER7c41');
+    expect(s.logged.join('\n')).not.toContain('MARKER7c41');
+  });
+
+  it('cuts a long last line and keeps no terminal codes in it', async () => {
+    const s = signIn();
+    await s.login.start(false);
+    s.ends(`\x1b]0;title\x07\x1b[1m${'word '.repeat(100)}\x1b[0m\x07\n`, 2);
+    await until(() => Boolean(s.done()));
+    const line = s.done()!.line!;
+    expect([...line]).toHaveLength(200);
+    expect(line.endsWith('…')).toBe(true);
+    expect(line).not.toMatch(/[\u0000-\u001f]/);
+    expect(s.done()).toMatchObject({ code: 2 });
   });
 
   it('keeps nothing of a token its program does not take', async () => {

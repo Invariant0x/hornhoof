@@ -23,6 +23,7 @@ import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
 import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
+import { CheckedInstalls } from './program-check.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -418,6 +419,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       removal.refused();
     },
   });
+  programs.watch(tellStatus);
   void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
@@ -753,38 +755,31 @@ function personal(dir: string, provider: ProviderId, user: JobUser | null = null
   return user ? { ...adapter, owner: { user, home, prepare: () => {}, mkdir: path => fs.mkdir(path), fs } } : adapter;
 }
 
-/* Each program is installed the first time something needs it. A failed install is tried again next time. */
-const installing = new Map<string, Promise<void>>();
-function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null): Promise<void> {
-  const path = join(tools, 'bin', programFor(provider, api).bin);
-  if (existsSync(path)) return Promise.resolve();
-  return updateInstalled(tools, provider, adapter, api);
-}
-
-function updateInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null): Promise<void> {
-  const path = join(tools, 'bin', programFor(provider, api).bin);
-  let pending = installing.get(path);
-  if (!pending) {
-    pending = adapter.install().finally(() => installing.delete(path));
-    installing.set(path, pending);
-  }
-  return pending;
+/* Each program is installed the first time something needs it, and checked that it starts, after an update too. A failed
+   install is tried again next time. agy comes as one file the node writes itself, and is not asked its version. */
+const installs = new CheckedInstalls();
+function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null, programs?: ProgramUpdates): Promise<void> {
+  const { bin } = programFor(provider, api);
+  const path = join(tools, 'bin', bin);
+  if (bin === 'agy') return existsSync(path) ? Promise.resolve() : adapter.install();
+  return installs.ensure(path, () => adapter.install(), repair => programs?.repaired(bin, repair));
 }
 
 function managedUpdates(tools: string, programs: { provider: ProviderId; adapter: ProviderAdapter }[]): ProgramUpdates {
-  return new ProgramUpdates(programs.flatMap(({ provider, adapter }) => {
+  const updates: ProgramUpdates = new ProgramUpdates(programs.flatMap(({ provider, adapter }) => {
     const id = programFor(provider).bin;
-    return id === 'agy' ? [] : [{ id, install: () => updateInstalled(tools, provider, adapter), readVersion: () => readInstalledVersion(tools, id) }];
+    return id === 'agy' ? [] : [{ id, install: () => installs.update(join(tools, 'bin', id), () => adapter.install(), repair => updates.repaired(id, repair)), readVersion: () => readInstalledVersion(tools, id) }];
   }));
+  return updates;
 }
 
 /* api: an API by the token at an address runs in the program of its protocol. */
-function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId, api?: ApiEndpoint | null): ProviderAdapter {
+function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId, api?: ApiEndpoint | null, programs?: ProgramUpdates): ProviderAdapter {
   return {
     ...adapter,
     async run(input): Promise<RunResult> {
       try {
-        await ensureInstalled(tools, provider, adapter, api);
+        await ensureInstalled(tools, provider, adapter, api, programs);
       } catch (err) {
         const output = `Could not install ${programFor(provider, api).name}: ${message(err)}`;
         return { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null };
@@ -978,8 +973,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     const fs = user ? agentFs(user) : ownFs;
     const adapter = personal(dir, provider, user, fs);
     const programs = managedUpdates(tools, [{ provider, adapter }]);
-    const install = () => ensureInstalled(tools, provider, adapter);
-    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install, programs, log, testUser, build, checkBrowser, ...terminalFor(dir, provider, user, fs) });
+    const install = () => ensureInstalled(tools, provider, adapter, null, programs);
+    return runNode({ dir, adapter: withInstall(adapter, tools, provider, null, programs), install, programs, log, testUser, build, checkBrowser, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;
@@ -990,13 +985,14 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   }
   /* Each API key gets its own home and, as root, its own user, so two keys never share settings or files. */
   const builtinPick = builtinAdapters(dir, tools);
-  const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider, job.api);
   const managed = (['anthropic_api', 'openai_api'] as const).map(provider => ({ provider, adapter: adapterFor(provider, { home: dir, tools }) }));
+  const programs = managedUpdates(tools, managed);
+  const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider, job.api, programs);
   const testUser = userFor(dir, 'tests');
   const verifyUser = testUser || agentUser();
   const checkBrowser = () => startupBrowserCheck(dir, verifyUser);
   const signIn = builtinKey(key, process.env.HORNHOOF_MACHINE_ID || null);
-  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key: signIn }, log, testUser, build, checkBrowser });
+  return runNode({ dir, adapter: pick, programs, builtin: { server, key: signIn }, log, testUser, build, checkBrowser });
 }
 
 /* What the node's updater and its machine's setup call, or the usage for anything else. */

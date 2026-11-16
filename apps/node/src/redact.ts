@@ -35,3 +35,14 @@ export function secretPrefixLength(text: string, values: string[]): number {
   }
   return best;
 }
+
+/* A word that looks like a key or a token though the node was never told it: one with a key's prefix, a long run of hex,
+   or a long run of letters in both cases and digits. */
+const KEY_PREFIX = /\b(?:sk|pk|rk|ghp|gho|ghs|ghu|github_pat|glpat|xox[abprs]|AKIA)[-_]?[A-Za-z0-9_-]{8,}/g;
+const LONG_RUN = /[A-Za-z0-9+/_=-]{24,}/g;
+const keyLike = (word: string): boolean => /^[0-9a-f]{32,}$/i.test(word) || (/[a-z]/.test(word) && /[A-Z]/.test(word) && /[0-9]/.test(word));
+
+/* Hides what looks like a key or a token in words a program printed, before a person reads them. */
+export function hideKeyLike(text: string): string {
+  return text.replace(KEY_PREFIX, HIDDEN).replace(LONG_RUN, word => (keyLike(word) ? HIDDEN : word));
+}
