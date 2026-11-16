@@ -9,7 +9,12 @@ import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelo
 import { ReviewSha } from './review-schema.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
-export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive() }).strict();
+/* An agent whose tool list an earlier build gave still names its test runs, as that build asked: they are taken and left out
+   until the next release, so its report does not fail on a field it was told to send. */
+export const Verification = z.object({
+  candidateId: z.uuid(), revision: z.number().int().positive(),
+  runIds: z.array(z.uuid()).max(100).optional().describe('Left out: Tests checks the candidate locally and names no test runs.'),
+}).strict();
 export type Verification = z.input<typeof Verification>;
 /* Reports made before checks went local also name test runs, which are left out. */
 const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive() });
