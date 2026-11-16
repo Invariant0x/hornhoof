@@ -9,6 +9,7 @@ import { ApiError } from '../../errors.js';
 import { refuse } from '../tasks/engine.js';
 import { createGoal, editGoal, goalLog, goalViews, loadGoal, setGoalStatus, type GoalChange, type GoalGuard } from './goals.js';
 import { createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';
+import { mayPlan } from './responsible.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const Version = z.number().int().min(0);
@@ -60,20 +61,26 @@ const personGuard = (ctx: Pick<Ctx, 'db'>, me: Person): GoalGuard & PipelineGuar
   if (!canReach(await accessOf(ctx.db, me), spot)) throw refuse(403, 'not_your_department', 'This department is not one you have.');
 };
 
-/* Goals and pipelines: everyone of the company reads them, as they read its tasks; who writes depends on their place. */
+/* Goals and pipelines: everyone of the company reads them, as they read its tasks; who writes depends on their place, and
+   each says whether its reader may change it. */
 export function trackerRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
+  const goalsFor = async (me: Person) => {
+    const may = await mayPlan(ctx, me);
+    return Promise.all((await goalViews(ctx, me.companyId)).map(async g => ({ ...g, mayEdit: await may(g.department?.id ?? null) })));
+  };
+
   app.get('/api/goals', async req => {
     const me = await requirePerson(req, db);
-    return { goals: await goalViews(ctx, me.companyId) };
+    return { goals: await goalsFor(me) };
   });
 
   app.get('/api/goals/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const goal = await loadGoal(db, me.companyId, id);
-    return { goal: (await goalViews(ctx, me.companyId)).find(g => g.id === goal.id), log: await goalLog(ctx, goal) };
+    return { goal: (await goalsFor(me)).find(g => g.id === goal.id), log: await goalLog(ctx, goal) };
   });
 
   app.post('/api/goals', async (req, reply) => {
@@ -103,7 +110,8 @@ export function trackerRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/pipelines', async req => {
     const me = await requirePerson(req, db);
     const { department } = PipelinesQuery.parse(req.query);
-    return { pipelines: await pipelineViews(ctx, me.companyId, department) };
+    const may = await mayPlan(ctx, me);
+    return { pipelines: await Promise.all((await pipelineViews(ctx, me.companyId, department)).map(async p => ({ ...p, mayEdit: await may(p.department.id) }))) };
   });
 
   const pipelineView = async (companyId: string, id: string) => (await pipelineViews(ctx, companyId)).find(p => p.id === id);

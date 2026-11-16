@@ -76,6 +76,31 @@ describe('goals', () => {
     expect((await send('POST', maria, '/api/goals', { title: 'Leads', department: sales.id })).statusCode).toBe(201);
   });
 
+  it('tells each person where they may set work, goals and pipelines, as the routes decide it', async () => {
+    const { db, companyId, ceo, oleg, dev, send, get, app } = await company();
+    const [shop] = await db.insert(departments).values({ companyId, parentId: dev.id, name: 'Shop', roleCode: 'DEV', position: 1 }).returning();
+    const pavel = await invitePerson(app, ceo, { name: 'Pavel', email: 'pavel@acme.com', access: { departments: [shop!.id] } });
+    expect((await send('POST', ceo, '/api/goals', { title: 'Grow' })).statusCode).toBe(201);
+    expect((await send('POST', ceo, '/api/goals', { title: 'Shop', department: dev.id })).statusCode).toBe(201);
+    expect((await send('POST', ceo, '/api/goals', { title: 'Cart', department: shop!.id })).statusCode).toBe(201);
+    expect((await send('POST', ceo, '/api/pipelines', { name: 'Releases', department: dev.id, stages: [{ key: 'a', parent: null, name: 'Build', ownerRole: 'DEV-BE' }] })).statusCode).toBe(201);
+    const places = async (token: string) => {
+      const read = (await get(token, '/api/task-departments')).json();
+      return [read.mayPlanCompany, ...read.departments.map((d: { name: string | null; mine: boolean; mayPlan: boolean }) => [d.mine, d.mayPlan])];
+    };
+    const goalRights = async (token: string) => (await get(token, '/api/goals')).json().goals.map((g: { title: string; mayEdit: boolean }) => [g.title, g.mayEdit]);
+    const pipelineRights = async (token: string) => (await get(token, '/api/pipelines')).json().pipelines.map((p: { mayEdit: boolean }) => p.mayEdit);
+    expect(await places(ceo)).toEqual([true, [true, true], [true, true]]);
+    expect(await places(oleg)).toEqual([false, [true, true], [false, false]]);
+    /* A person of one product has its department among theirs, but sets work only in the product. */
+    expect(await places(pavel)).toEqual([false, [true, false], [false, false]]);
+    expect(await goalRights(oleg)).toEqual([['Grow', false], ['Shop', true], ['Cart', true]]);
+    expect(await goalRights(pavel)).toEqual([['Grow', false], ['Shop', false], ['Cart', true]]);
+    expect([await pipelineRights(ceo), await pipelineRights(oleg), await pipelineRights(pavel)]).toEqual([[true], [true], [false]]);
+    const one = (await get(pavel, `/api/goals/${(await get(pavel, '/api/goals')).json().goals[2].id}`)).json().goal;
+    expect(one.mayEdit).toBe(true);
+  });
+
   it('keeps every change in the goal history and tells open screens', async () => {
     const { ceo, oleg, dev, send, get, heard } = await company();
     const shop = (await send('POST', oleg, '/api/goals', { title: 'Shop', department: dev.id })).json().goal;

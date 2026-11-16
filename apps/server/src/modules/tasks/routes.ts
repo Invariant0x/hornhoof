@@ -17,9 +17,9 @@ import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, setAfter, taskSpot, type Task } from './engine.js';
 import { editTask } from '../tracker/edit.js';
-import { placeOwner } from '../tracker/responsible.js';
+import { mayPlan, placeOwner } from '../tracker/responsible.js';
 import { setUrgent } from './urgency.js';
-import { requireDecision } from '../../auth/decisions.js';
+import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
@@ -286,10 +286,17 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const all = await db.select().from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
     const mine = new Set((await departmentsHad(db, me)).map(d => d.id));
-    /* Who answers for each, as the tracker names them: the person who decides for its work. */
+    /* Who answers for each, as the tracker names them: the person who decides for its work. mayPlan: whether this person
+       gives work and sets goals and pipelines there, as the routes decide it. */
     const owners = await Promise.all(all.map(d => placeOwner(ctx, me.companyId, { departmentId: d.id, parentId: null })));
     const named = owners.length ? await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, [...new Set(owners)])) : [];
-    return { whole: (await accessOf(db, me)).whole, departments: all.map((d, i) => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: mine.has(d.id), responsible: named.find(p => p.id === owners[i]) ?? null })) };
+    const may = await mayPlan(ctx, me);
+    const plans = await Promise.all(all.map(d => may(d.id)));
+    return {
+      whole: (await accessOf(db, me)).whole,
+      mayPlanCompany: actsAsCeo(me),
+      departments: all.map((d, i) => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: mine.has(d.id), mayPlan: plans[i]!, responsible: named.find(p => p.id === owners[i]) ?? null })),
+    };
   });
 
   /* One department's tasks, or every department's, as this person sees them: any department's. The work given to the
