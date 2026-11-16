@@ -208,12 +208,12 @@ describe('a department\'s own outbound setup', () => {
     expect(await within(form).findByRole('alert')).toHaveTextContent('This person asked not to get messages. Their address cannot be added again.');
   });
 
-  it('frames a field to correct in pink, with the focus ring outside it, as Design set it for fields', () => {
-    const wrong = ".outbound-setup .field :is(input, select, textarea)[aria-invalid='true']";
+  it('frames a field to correct in pink, with the focus ring outside it, by the rules every form shares, the tick of consent too', () => {
+    const wrong = '.field :is(input, select, textarea)[aria-invalid="true"]';
     expect(decl(wrong, 'border-color')).toBe('var(--pink)');
     expect(decl(`${wrong}:is(:focus, :focus-visible)`, 'outline')).toBe('2px solid var(--cyan-ink)');
     expect(decl(`${wrong}:is(:focus, :focus-visible)`, 'box-shadow')).toBe('none');
-    expect(decl(".outbound-setup .check-card:has([aria-invalid='true'])", 'border-color')).toBe('var(--pink)');
+    expect(decl('.check-card:has([aria-invalid="true"])', 'border-color')).toBe('var(--pink)');
   });
 
   it('takes an address without spaces for a webhook channel to contacts, and shows any other refusal above the buttons', async () => {
