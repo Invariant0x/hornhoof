@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Person } from '../../auth/session.js';
 import { agents, companies, machines, nodeConnections, nodes, people } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 
 /* A machine with agents on it that has been off the line this long is a person's to switch on. All of this is read from the
    machine's own history and asks no agent, as they may all be on that machine. So there is nothing to create or to close, and
@@ -97,7 +98,7 @@ const told = new WeakMap<object, Map<string, string>>();
 export async function tellOfMachinesAway(ctx: Pick<Ctx, 'db' | 'bus' | 'startedAt'>, now: Date): Promise<void> {
   const last = told.get(ctx) ?? new Map<string, string>();
   told.set(ctx, last);
-  for (const { id } of await ctx.db.select({ id: companies.id }).from(companies)) {
+  for (const { id } of await ctx.db.select(idOnly(companies)).from(companies)) {
     const state = (await machinesAway(ctx, id, now)).map(card => `${card.id} ${card.since.toISOString()} ${card.back?.toISOString() ?? ''}`).join();
     if ((last.get(id) ?? '') === state) continue;
     last.set(id, state);

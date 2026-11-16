@@ -63,14 +63,15 @@ export const SECRET: Record<string, string[]> = {
    through a person's guarded API. An employee's inbox, whose letters name who wrote them: a forged one would put words in
    a person's or an employee's mouth, so only Hornhoof keeps it and the employee marks it with inbox_mark. What each turn
    used of its subscription, which Hornhoof writes as the node told it, so that what a connection costs can be believed. A
-   head's Telegram bot, which only a person sets on its card, with its token kept from both roles. */
+   head's Telegram bot, which only a person sets on its card, with its token kept from both roles. Which employee works on a
+   fallback plan and the plan it goes back to, which only Hornhoof writes, as a forged row would move it to another plan. */
 export const ASSISTANT_TABLES = ['assistants', 'assistant_events', 'assistant_seqs', 'assistant_replies', 'assistant_requests'];
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
-  'autonomous_releases', 'agent_inbox', 'turn_tokens', 'telegram_bots',
+  'autonomous_releases', 'agent_inbox', 'turn_tokens', 'telegram_bots', 'agent_fallbacks',
   ...ASSISTANT_TABLES,
 ];
 const READER_SECRET = Object.keys(SECRET).filter(table => !ASSISTANT_TABLES.includes(table));

@@ -2,6 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { standingPrincipal } from '../src/modules/conversation/decision-context.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { disconnectMachines } from '../src/modules/nodes/disconnect.js';
@@ -61,7 +62,7 @@ async function company() {
     const res = await c.app.inject({ method: 'POST', url: '/mcp', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${token}`, 'mcp-protocol-version': VERSION }, payload: JSON.stringify(message) });
     return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
   };
-  const [owner] = await c.db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
+  const [owner] = await c.db.select(idOnly(people)).from(people).where(eq(people.isOwner, true));
   /* A machine of the CEO's with a node of the company's plan on it. */
   const machine = async (name: string) => {
     const [row] = await c.db.insert(machines).values({ companyId: c.companyId, personId: owner!.id, machineKey: name }).returning();
@@ -152,7 +153,7 @@ describe("an agent's tools with no turn of it running", () => {
     expect((await c.db.select({ urgent: tasks.urgent }).from(tasks).where(eq(tasks.id, task!.id)))[0]!.urgent).toBe(false);
     const removed = await c.outside(c.orchestrator.id, call(2, 'remove_subscription', { subscription: c.sub.id }));
     expect(textOf(removed)).toContain(ONLY_CEO);
-    expect(await c.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.id, c.sub.id))).toHaveLength(1);
+    expect(await c.db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.id, c.sub.id))).toHaveLength(1);
   });
 
   it('give a switched-off employee its tools as it connects, and refuse its calls until it is on again', async () => {

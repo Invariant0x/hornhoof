@@ -4,6 +4,7 @@ import { WHOLE, accessOf, type Access, type Spot } from '../src/auth/access.js';
 import { decisionOwner, type Candidate, type DecisionSubject } from '../src/auth/decision-owner.js';
 import { canDecide, decidedBy, type Decider } from '../src/auth/decisions.js';
 import { companies, departments, people } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { company } from './department-owner-fixture.js';
 import { as, invitePerson } from './helpers.js';
@@ -144,7 +145,7 @@ describe('setting a department owner', () => {
     const c = await company();
     const pia = await invitePerson(c.app, c.ceoToken, { name: 'Pia', email: 'pia@acme.com', access: { departments: [c.product.id] } });
     expect(pia).toBeTruthy();
-    const [piaRow] = await c.db.select({ id: people.id }).from(people).where(eq(people.email, 'pia@acme.com'));
+    const [piaRow] = await c.db.select(idOnly(people)).from(people).where(eq(people.email, 'pia@acme.com'));
     expect((await c.setOwner(c.ceoToken, c.dev.id, piaRow!.id)).json().error.reason).toBe('owner_no_access');
   });
 

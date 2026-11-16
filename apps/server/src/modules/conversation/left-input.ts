@@ -2,6 +2,7 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { appendEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { onAgent } from './queue.js';
@@ -10,7 +11,7 @@ import { wordsFrom } from './unheard.js';
 type Left = Extract<NodeMessage, { type: 'agent.input_left' }>;
 
 const keptBefore = async (ctx: Ctx, agentId: string, ref: string): Promise<boolean> =>
-  (await ctx.db.select({ id: agentEvents.id }).from(agentEvents)
+  (await ctx.db.select(idOnly(agentEvents)).from(agentEvents)
     .where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.kind, 'input_left'), sql`${agentEvents.data}->>'ref' = ${ref}`)).limit(1)).length > 0;
 
 /* Words left unsent in a program's input, which the node clears for the next assignment only once it hears they are kept.
