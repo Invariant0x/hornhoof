@@ -105,10 +105,10 @@ function program() {
   vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
   vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
+  /* The input row: what is typed, or else the dim suggestion while the program offers one. */
   vi.spyOn(tmux, 'screen').mockImplementation(async () => {
-    const shown = state.working ? BUSY.replace('❯ \n', `❯ ${state.input}\n`) : IDLE;
-    if (state.working) return shown;
-    return shown.replace(SUGGESTION, state.input || !state.suggests ? `❯ ${state.input}` : match => match);
+    if (state.working) return BUSY.replace('❯ \n', () => `❯ ${state.input}\n`);
+    return state.input || !state.suggests ? IDLE.replace(SUGGESTION, () => `❯ ${state.input}`) : IDLE;
   });
   vi.spyOn(tmux, 'paste').mockImplementation(async (_name, text) => { state.input += text; });
   vi.spyOn(tmux, 'keys').mockImplementation(async (_name, ...keys) => {
