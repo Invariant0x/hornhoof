@@ -23,7 +23,7 @@ export function project(version = '0.5.0', branch = 'turn-5') {
   }
   packages['node_modules/example-dependency'] = { version: '9.8.7' };
   writeJson(join(root, 'package-lock.json'), { name: 'project', version, lockfileVersion: 3, packages });
-  writeFileSync(join(root, 'CHANGELOG.md'), `# Changelog\n\n## [${version}] - 2026-11-04\nA release for people.\n\n### Fixed\n- A checkout issue.\n`);
+  writeFileSync(join(root, 'CHANGELOG.md'), `# Changelog\n\n## [${version}] - 2026-11-04\n\n### Fixed\n\n- A checkout issue.\n`);
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe' }).trim();
   git('init', '--quiet', `--initial-branch=${branch}`);
   git('config', 'user.name', 'Release Fixture');
