@@ -1,9 +1,11 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHmac, generateKeyPairSync } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodeCodes, nodes, people, subscriptions, testParts, testRuns } from '../src/db/schema.js';
 import { enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
+import { pickBuiltin } from '../src/modules/nodes/builtin.js';
+import { builtinOf } from '../src/modules/nodes/hub.js';
 import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, buildSoon, followOf, goodGrant, holdsBuiltin, holdsMachine, installingBuiltins, installingMachines, installs, leaderBuild, machineInstalls, nextToInstall, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
 import type { Build } from '../src/modules/updates/registry.js';
 import { as, connectNode, listen, nextOf, ownPlan, setUpCompany, testApp, until } from './helpers.js';
@@ -427,6 +429,25 @@ describe('a busy worker that waits for its turn to install', () => {
     /* A machine that stopped saying it has the build waits for nothing. */
     await c.db.update(machines).set({ reportAt: new Date(Date.now() - 3 * MINUTE) }).where(eq(machines.id, two));
     expect(await nextToInstall(c.ctx)).toBeNull();
+  });
+
+  it("sends the work of the company's keys to another built-in node while this machine is next to install", async () => {
+    const NODE_KEY = 'builtin-follow-key-0123456789abcdef';
+    const c = await company({ NODE_KEY });
+    const url = await listen(c.app);
+    onTestFinished(() => c.app.close());
+    const w = await c.worker('mac');
+    const machine = hashToken('mac');
+    const node = await connectNode(url, `builtin.${machine}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${machine}`).digest('hex')}`);
+    onTestFinished(() => node.close());
+    node.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
+    await until(() => c.ctx.hub.isReady(builtinOf(machine)));
+    expect(await pickBuiltin(c.ctx, c.db, machine)).toBe(machine);
+    await c.ready(w);
+    /* The server's own built-in node is not connected here, so no built-in node takes it now. */
+    expect(await pickBuiltin(c.ctx, c.db, machine)).toBeNull();
+    await c.report(w, { commit: COMMIT, update: null });
+    expect(await pickBuiltin(c.ctx, c.db, machine)).toBe(machine);
   });
 
   /* As on 16.11: the MacBook had the build from 10:01 and installed it at 14:02, as a turn always ran there. */
