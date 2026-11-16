@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { jobs } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 
@@ -38,7 +39,7 @@ export const messageNotDelivered = (reason: string): ApiError =>
   new ApiError(409, 'conflict', 'The message did not reach the employee. Check its window and try again.', 'agent_not_ready', { undelivered: reason });
 
 async function runningTurn(ctx: Pick<Ctx, 'db'>, agentId: string): Promise<string | null> {
-  const [turn] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
+  const [turn] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
   return turn?.id ?? null;
 }
 

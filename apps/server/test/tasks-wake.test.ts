@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { idOnly } from '../src/db/selections.js';
 import * as instructionBuilder from '../src/modules/agents/instructions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -467,7 +468,7 @@ describe("Hornhoof's note that a task stands still", () => {
 
   it('asks the member head to answer the internal stuck request', async () => {
     const c = await stuck();
-    const [note] = await c.db.select({ id: requests.id }).from(requests);
+    const [note] = await c.db.select(idOnly(requests)).from(requests);
     const asked = (await c.turnsOf(c.head.id)).filter(j => j.prompt.includes(note!.id));
     expect(asked).toHaveLength(1);
     expect(asked[0]!.prompt).toContain('comment');
@@ -801,7 +802,7 @@ describe("a plan's share for tasks", () => {
 
   it("still sends a person's own message on such a plan", async () => {
     const { ctx, builtin, bruno, companyId } = await plan(0.85);
-    const [person] = await ctx.db.select({ id: people.id }).from(people);
+    const [person] = await ctx.db.select(idOnly(people)).from(people);
     await enqueueTurn(ctx, { companyId, agentId: bruno.id, prompt: 'Ivan (CEO): How far are you?', createdBy: person!.id });
     expect((await nextRun(builtin)).prompt).toContain('How far are you?');
   });
@@ -820,7 +821,7 @@ describe("a plan's share for tasks", () => {
       : (await r.db.select().from(agents).where(eq(agents.kind, 'orchestrator')))[0]!;
     const mine = kind === 'head'
       ? await r.task(agent.id)
-      : (await createTask(r.ctx, { personId: (await r.db.select({ id: people.id }).from(people))[0]!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: null, assigneeAgentId: agent.id })).task;
+      : (await createTask(r.ctx, { personId: (await r.db.select(idOnly(people)).from(people))[0]!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: null, assigneeAgentId: agent.id })).task;
     await wakeAll(r.ctx, [{ agentId: agent.id, taskId: mine.id, why: 'assigned' }]);
     expect((await nextRun(r.builtin)).prompt).toContain('Checkout API');
     expect(await r.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, agent.id))).toEqual([{ status: 'running' }]);

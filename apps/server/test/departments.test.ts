@@ -1,6 +1,7 @@
 import { eq, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, personAccess, proposals, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { as, connectNode, invitePerson, listen, openStream, SETUP, setUpCompany, statements, TEST_API_KEY, testApp, until, type FakeNode } from './helpers.js';
 import { rowsRead, statementReads } from './rows-read.js';
 import { applyTeams } from '../src/modules/departments/routes.js';
@@ -82,7 +83,7 @@ describe('POST /api/departments/build', () => {
     const made = await withOrchestrator();
     const [dev] = await made.db.insert(departments).values({ companyId: made.acme.id, templateKey: 'development', roleCode: 'DEV', position: 1 }).returning();
     const dana = await invitePerson(made.app, made.ceo, { name: 'Dana', email: 'dana@acme.com', access: { departments: [dev!.id] } });
-    const [person] = await made.db.select({ id: people.id }).from(people).where(eq(people.name, 'Dana'));
+    const [person] = await made.db.select(idOnly(people)).from(people).where(eq(people.name, 'Dana'));
     expect((await made.app.inject({ method: 'PUT', url: `/api/departments/${dev!.id}/owner`, payload: { personId: person!.id }, ...as(made.ceo) })).statusCode).toBe(200);
     return { ...made, dev: dev!, dana };
   }

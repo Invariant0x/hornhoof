@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Checker } from '../../checker.js';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { CLOSED, note, ownNote, refuse, type Actor, type Task, type Tx } from './engine.js';
 import { nextReview, planFromPolicy, setsWaitDates, waitRoute } from './wait-policy.js';
 
@@ -59,12 +60,12 @@ async function lockedTask(tx: Tx, taskId: string): Promise<Task> {
 }
 
 async function isAgentOf(tx: Tx, companyId: string, agentId: string, working: boolean): Promise<boolean> {
-  const [agent] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), ...(working ? [isNull(agents.removedAt)] : [])));
+  const [agent] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), ...(working ? [isNull(agents.removedAt)] : [])));
   return Boolean(agent);
 }
 
 async function isPersonOf(tx: Tx, companyId: string, personId: string, working: boolean): Promise<boolean> {
-  const [person] = await tx.select({ id: people.id }).from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId), ...(working ? [eq(people.status, 'active')] : [])));
+  const [person] = await tx.select(idOnly(people)).from(people).where(and(eq(people.id, personId), eq(people.companyId, companyId), ...(working ? [eq(people.status, 'active')] : [])));
   return Boolean(person);
 }
 
@@ -83,7 +84,7 @@ async function requireOwner(tx: Tx, companyId: string, owner: WaitOwnerBinding):
 
 async function requirePlan(tx: Tx, companyId: string, plan: WaitPlan): Promise<void> {
   if (!(await isOfCompany(tx, companyId, plan.provenance.actor, false))) throw refuse(400, 'task_invalid', 'A plan\'s dates must come from someone of this company.');
-  const [head] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, plan.finalReview.headAgentId), eq(agents.companyId, companyId), eq(agents.kind, 'head'), isNull(agents.removedAt)));
+  const [head] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, plan.finalReview.headAgentId), eq(agents.companyId, companyId), eq(agents.kind, 'head'), isNull(agents.removedAt)));
   if (!head) throw refuse(400, 'task_invalid', 'The final review of a plan needs a real head of this company.');
 }
 

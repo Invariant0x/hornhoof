@@ -1,8 +1,9 @@
 import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
-import { and, count, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { ON_NODE } from '../jobs/dispatch.js';
@@ -61,14 +62,14 @@ const completionValue = (value: unknown, stopped: string | null): SQL => sql`cas
    from before machines' built-in nodes were told apart names none, and is the one of this server's own. */
 export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
-  const ofKeys = inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const ofKeys = inArray(jobs.subscriptionId, ctx.db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
   const here = id.machine === ownMachine(ctx.config) ? or(eq(jobs.builtinMachine, id.machine), isNull(jobs.builtinMachine)) : eq(jobs.builtinMachine, id.machine);
   return and(ofKeys, here)!;
 }
 
 /* The turns that run on the node now, as Hornhoof has them. */
 async function workingOn(ctx: Ctx, id: NodeIdentity): Promise<number> {
-  const [row] = await ctx.db.select({ n: count() }).from(jobs).where(and(jobsOf(id, ctx), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
+  const [row] = await ctx.db.select(countOnly()).from(jobs).where(and(jobsOf(id, ctx), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
   return Number(row?.n ?? 0);
 }
 
@@ -268,7 +269,7 @@ async function parkUnknown(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promis
   const kind = PARKED_AS[msg.type];
   const jobId = msg.type === 'job.started' || msg.type === 'job.event' || msg.type === 'job.done' || msg.type === 'agent.restarted' ? msg.jobId : null;
   if (!kind || !jobId || !z.uuid().safeParse(jobId).success || !(await mergePending(ctx.db))) return false;
-  const [known] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, jobId));
+  const [known] = await ctx.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.id, jobId));
   if (known) return false;
   await park(ctx.db, { jobId, node: id, kind, body: msg });
   if (msg.type === 'job.done') ctx.hub.send(id, { type: 'job.ack', jobId });
@@ -292,7 +293,7 @@ async function placeWaiting(ctx: Ctx, id: NodeIdentity, ids: string[]): Promise<
   }
   /* The server's own built-in node runs the turns that name no machine: those need no place. */
   if (id.machine === ownMachine(ctx.config)) return;
-  const ofKeys = inArray(jobs.subscriptionId, db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const ofKeys = inArray(jobs.subscriptionId, db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
   await db.update(jobs).set({ builtinMachine: id.machine }).where(and(waits, ofKeys));
 }
 
@@ -308,7 +309,7 @@ async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: 
   if (ids.length) await placeWaiting(ctx, id, ids);
   const open = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(and(inArray(jobs.id, running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
   const keep = new Set(open.map(j => j.id));
-  const known = new Set(ids.length ? (await db.select({ id: jobs.id }).from(jobs).where(inArray(jobs.id, ids))).map(j => j.id) : []);
+  const known = new Set(ids.length ? (await db.select(idOnly(jobs)).from(jobs).where(inArray(jobs.id, ids))).map(j => j.id) : []);
   for (const jobId of running) {
     if (keep.has(jobId)) continue;
     if (pending && ids.includes(jobId) && !known.has(jobId)) await park(db, { jobId, node: id, kind: 'listed', body: {} });

@@ -1,3 +1,4 @@
+import { countOnly, idOnly } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
@@ -193,7 +194,7 @@ async function waitsForWords(ctx: Ctx, agentId: string): Promise<boolean> {
 export async function wordsSettled(ctx: Ctx, node: NodeIdentity, agentId: string, jobId: string): Promise<void> {
   if (!z.uuid().safeParse(agentId).success || !z.uuid().safeParse(jobId).success) return;
   await onAgent(ctx, agentId, async () => {
-    const [job] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.agentId, agentId), inArray(jobs.status, ['done', 'failed']), isNotNull(jobs.finishedAt), jobsOf(node, ctx)));
+    const [job] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.agentId, agentId), inArray(jobs.status, ['done', 'failed']), isNotNull(jobs.finishedAt), jobsOf(node, ctx)));
     if (job) settleWords(ctx, agentId, jobId);
   });
   await pump(ctx, agentId);
@@ -284,7 +285,7 @@ export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode
 
 /* Where an agent on a personal plan that runs no turn opens now. Anyone else's stays where it is. */
 async function placedProgram(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const sub = running ? null : await liveSubscription(ctx, agentId);
   if (sub?.kind !== 'personal') return null;
   const at = (node: NodeIdentity) => ({ node, ownerPersonId: sub.ownerPersonId, planId: sub.id });
@@ -359,7 +360,7 @@ export const NOTHING_UNREAD = 'Nothing in the inbox was unread when this turn wa
 
 /* The one waiting turn of the agent that takes its inbox, made for the first letter that has none to wait for. */
 async function inboxTurn(ctx: Ctx, t: Pick<Turn, 'companyId' | 'agentId'>): Promise<string> {
-  const [open] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(t.agentId), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
+  const [open] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(t.agentId), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
   if (open) return open.id;
   const sub = await liveSubscription(ctx, t.agentId);
   if (!sub) throw new NoSubscription();
@@ -382,7 +383,7 @@ async function intoInbox(ctx: Ctx, t: Turn & { message: TurnMessage }): Promise<
 async function inboxTurnDue(ctx: Ctx, agent: { id: string; companyId: string; switchedOffAt: Date | null }): Promise<boolean> {
   if (agent.switchedOffAt) return false;
   if ((await inboxModeOf(ctx.db, agent.id)).effective !== 'inbox' || !(await unreadMail(ctx.db, agent.id)).length) return false;
-  const [open] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
+  const [open] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'queued'), eq(jobs.inboxWake, true))).limit(1);
   if (open) return false;
   await inboxTurn(ctx, { companyId: agent.companyId, agentId: agent.id });
   return true;
@@ -476,7 +477,7 @@ export async function insertOrDeliverTurn(ctx: Ctx, t: Turn): Promise<string> {
 }
 
 async function queuedOperatorWords(ctx: Ctx, agentId: string, jobId: string, text: string) {
-  const [own] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), ne(agents.kind, 'assistant')));
+  const [own] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, agentId), ne(agents.kind, 'assistant')));
   return own ? queuedOperatorAssignment(ctx, agentId, jobId, text) : null;
 }
 
@@ -583,7 +584,7 @@ async function storeTypedTurn(
     .update(jobs)
     .set({ status: 'done', result: '', finishedAt: new Date() })
     .where(and(conversationOf(agentId), eq(jobs.status, 'running'), eq(jobs.prompt, ''), isNull(jobs.taskId)));
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   /* A program's queued turn can start before the old job's end has reached Hornhoof. It holds the line meanwhile. */
   if (running && running.id !== queuedFrom) return null;
   const opened = await insertRunningTurn(ctx, node, target, text, personId, openedQueued ? openedQueued.repeated : null);
@@ -627,7 +628,7 @@ export async function turnRefused(ctx: Ctx, node: NodeIdentity, agentId: string,
   if (isProgramOwnPrompt(text) || !z.uuid().safeParse(agentId).success) return;
   const target = await agentOnNode(ctx, node, agentId);
   if (!target) return;
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const installing = node.kind === 'node' && (await machineInstalls(ctx.db, node.nodeId));
   const reason: TurnRefusal = installing ? 'machine_updating' : running && running.id !== queuedFrom ? 'busy' : 'unknown_words';
   ctx.terminals.refuse(agentId, reason);
@@ -649,7 +650,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     if (await resumesOperator(ctx, agent, node)) return true;
     /* Task turns and the inbox's turn of an agent that is switched off wait for it to be on and start nothing. */
     const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits, sub.limitsUpdatedAt) ? programStart : agent.switchedOffAt ? peopleTurns : undefined);
-    const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
+    const [open] = await db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
     if (open) return false;
     await insertTurn(ctx, { companyId: agent.companyId, agentId, prompt: '', createdBy: null });
     return true;
@@ -847,7 +848,7 @@ async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: n
 /* Whether the agent holds a task it works on, or stopped on to ask: its folder may hold work it has not pushed, so it
    waits for its own machine, and a laptop that sleeps a while does not scatter the team. */
 async function holdsWork(ctx: Ctx, agentId: string): Promise<boolean> {
-  const [held] = await ctx.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['working', 'blocked']))).limit(1);
+  const [held] = await ctx.db.select(idOnly(tasks)).from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['working', 'blocked']))).limit(1);
   return Boolean(held);
 }
 
@@ -1110,7 +1111,7 @@ async function turnOperatorDeliveries(
 
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
-  const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running || await waitsForWords(ctx, agentId)) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
@@ -1319,8 +1320,8 @@ const shownNode = async (ctx: Ctx, agentId: string, place: Placement | null): Pr
 
 /* Whether the agent can answer now and, if not, why; what it is doing and how many turns wait. */
 export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState> {
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-  const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const [waiting] = await ctx.db.select(countOnly()).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
   const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);

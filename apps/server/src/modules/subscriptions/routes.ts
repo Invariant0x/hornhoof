@@ -9,6 +9,7 @@ import { requireCompanyScope, requirePerson, type Person } from '../../auth/sess
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { runningAgents } from '../agents/running.js';
@@ -136,14 +137,14 @@ const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s
 
 async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<string[]> {
   if (!resetIds.length) return [];
-  const goneNodes = tx.select({ id: nodes.id }).from(nodes).where(inArray(nodes.subscriptionId, resetIds));
+  const goneNodes = tx.select(idOnly(nodes)).from(nodes).where(inArray(nodes.subscriptionId, resetIds));
   await tx.update(subscriptions).set({ removedAt: null, status: 'waiting_machine', leaseNodeId: null }).where(inArray(subscriptions.id, resetIds));
   await tx.update(agents).set({ nodeId: null }).where(inArray(agents.nodeId, goneNodes));
   await tx.update(jobs).set({ nodeId: null }).where(inArray(jobs.nodeId, goneNodes));
   await tx.update(testParts).set({ nodeId: null }).where(inArray(testParts.nodeId, goneNodes));
   await tx.delete(planCredentials).where(inArray(planCredentials.subscriptionId, resetIds));
-  const goneCases = tx.select({ id: programOperatorCases.id }).from(programOperatorCases).where(inArray(programOperatorCases.nodeId, goneNodes));
-  const goneDeliveries = tx.select({ id: programDeliveries.id }).from(programDeliveries).where(inArray(programDeliveries.nodeId, goneNodes));
+  const goneCases = tx.select(idOnly(programOperatorCases)).from(programOperatorCases).where(inArray(programOperatorCases.nodeId, goneNodes));
+  const goneDeliveries = tx.select(idOnly(programDeliveries)).from(programDeliveries).where(inArray(programDeliveries.nodeId, goneNodes));
   await tx.delete(programOperatorSignals).where(inArray(programOperatorSignals.caseId, goneCases));
   /* Keep conversation pictures after their physical program's investigation is gone. */
   await tx.update(attachments).set({ operatorCaseId: null }).where(inArray(attachments.operatorCaseId, goneCases));
@@ -221,7 +222,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function placesRun(me: Person): Promise<string[]> {
     const owns = me.via ? undefined : (await accessOf(db, me)).owns;
     if (!owns?.size) return [];
-    const tops = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
+    const tops = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
     return tops.map(d => d.id).filter(id => owns.has(id));
   }
 
@@ -237,7 +238,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function placeExists(target: z.infer<typeof Target>) {
     if (target.kind !== 'department' && target.kind !== 'team') return;
     const table = target.kind === 'department' ? departments : teams;
-    const [row] = await db.select({ id: table.id }).from(table).where(eq(table.id, target.id));
+    const [row] = await db.select(idOnly(table)).from(table).where(eq(table.id, target.id));
     if (!row) throw new ApiError(400, 'validation', `target.id: No ${target.kind} with this id.`, 'unknown_place');
   }
 
@@ -286,7 +287,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/tokens', async req => {
     const me = await requirePerson(req, db);
     const { zone } = TokensQuery.parse(req.query);
-    const own = me.scopeKind === 'company' ? undefined : (await db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.ownerPersonId, me.id))).map(s => s.id);
+    const own = me.scopeKind === 'company' ? undefined : (await db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.ownerPersonId, me.id))).map(s => s.id);
     return { tokens: together((await tokensBySubscription(db, me.companyId, ctx.clock(), zone, own)).values()) };
   });
 
