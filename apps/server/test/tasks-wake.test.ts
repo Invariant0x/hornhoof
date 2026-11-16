@@ -221,7 +221,7 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
   });
 
-  it("waits for the reset once Bruno's turns worked on it, as what he did may not be pushed yet", async () => {
+  it("keeps the work with Bruno once his turns worked on it, as what he did may not be pushed yet, and he goes on on a fallback plan", async () => {
     for (const before of ['a turn', 'a long refused turn'] as const) {
       const { db, bruno, rex, task, turnsOf } = await withPeer({}, before);
       expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0], before).toMatchObject({ executorAgentId: bruno.id, assigneeAgentId: bruno.id });
