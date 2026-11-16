@@ -1,26 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
-import { useOrg } from '../org';
-import type { Me } from '../types';
 import { Field } from './Field';
 import { TickBox } from './TickBox';
 
-/* The company's saved site sign-ins: any person adds one, every agent of the company may use it unless it is kept for a
-   department or an agent, and the password and code secret are typed here only, never shown again. */
+/* The company's saved site sign-ins: any person adds, changes and removes one, and every employee and assistant of the
+   company takes it to sign in. The password and the code secret are typed here and never shown again. */
 
 type Who = { id: string; name: string } | null;
-type Scope = { kind: 'company' } | { kind: 'department'; departmentId: string; departmentName: string } | { kind: 'agent'; agentId: string; agentName: string };
-export type VaultEntry = { id: string; name: string; site: string; login: string; hasCode: boolean; scope: Scope; createdBy: Who; createdAt: string; updatedBy: Who; updatedAt: string };
-type LogLine = { id: string; kind: 'used' | 'created' | 'changed' | 'removed'; person: Who; agent: Who; task: { id: string; number: number | null } | null; target: 'browser' | 'phone' | null; status: string | null; at: string };
+export type VaultEntry = { id: string; name: string; site: string; login: string; hasCode: boolean; createdBy: Who; createdAt: string };
+type LogLine = { id: string; kind: 'created' | 'changed' | 'removed' | 'taken'; person: Who; agent: Who; task: { id: string; number: number | null } | null; at: string };
 
 type Mode = { kind: 'list' } | { kind: 'add' } | { kind: 'edit'; entry: VaultEntry } | { kind: 'remove'; entry: VaultEntry } | { kind: 'log'; entry: VaultEntry; lines: LogLine[] | null };
-type FieldName = 'name' | 'site' | 'login' | 'password' | 'code' | 'scopeTarget';
-type Draft = { name: string; site: string; login: string; password: string; code: string; removeCode: boolean; scopeKind: Scope['kind']; scopeTarget: string };
+type FieldName = 'name' | 'site' | 'login' | 'password' | 'code';
+type Draft = { name: string; site: string; login: string; password: string; code: string; removeCode: boolean };
 
 /* What the window asks the server for: a server that keeps no vault shows no Passwords group. */
 export const VAULT_PATH = '/api/vault';
-const PASSWORD_MIN = 4;
 const CODE = /^(otpauth:\/\/totp\/\S+|[A-Z2-7]{16,128})$/;
 const codeOf = (text: string) => (/^otpauth:/i.test(text.trim()) ? text.trim() : text.replace(/[\s-]+/g, '').replace(/=+$/, '').toUpperCase());
 
@@ -31,11 +27,9 @@ const draftOf = (entry: VaultEntry | null): Draft => ({
   password: '',
   code: '',
   removeCode: false,
-  scopeKind: entry?.scope.kind ?? 'company',
-  scopeTarget: entry?.scope.kind === 'department' ? entry.scope.departmentId : entry?.scope.kind === 'agent' ? entry.scope.agentId : '',
 });
 
-const ORDER: FieldName[] = ['name', 'site', 'login', 'password', 'code', 'scopeTarget'];
+const ORDER: FieldName[] = ['name', 'site', 'login', 'password', 'code'];
 
 function useWhen() {
   const { language } = useLanguage();
@@ -46,24 +40,20 @@ function useWhen() {
 function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onSaved(): void; onCancel(): void }) {
   const t = useT();
   const v = t.vault;
-  const { org } = useOrg();
   const [draft, setDraft] = useState<Draft>(() => draftOf(entry));
   const [problems, setProblems] = useState<Partial<Record<FieldName, string>>>({});
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const inputs = useRef<Partial<Record<FieldName, HTMLInputElement | HTMLSelectElement | null>>>({});
+  const inputs = useRef<Partial<Record<FieldName, HTMLInputElement | null>>>({});
   const set = (change: Partial<Draft>) => setDraft(d => ({ ...d, ...change }));
-  const departments = org?.departments ?? [];
-  const agents = departments.flatMap(d => d.employees.map(e => ({ id: e.id, name: e.name })));
 
   function check(): Partial<Record<FieldName, string>> {
     const found: Partial<Record<FieldName, string>> = {};
     if (!draft.name.trim()) found.name = v.needName;
     if (!draft.site.trim()) found.site = v.needSite;
     if (!draft.login.trim()) found.login = v.needLogin;
-    if ((!entry && !draft.password) || (draft.password && draft.password.length < PASSWORD_MIN)) found.password = v.needPassword(PASSWORD_MIN);
+    if (!entry && !draft.password) found.password = v.needPassword;
     if (draft.code.trim() && !CODE.test(codeOf(draft.code))) found.code = v.badCode;
-    if (draft.scopeKind !== 'company' && !draft.scopeTarget) found.scopeTarget = draft.scopeKind === 'department' ? v.needDepartment : v.needAgent;
     return found;
   }
 
@@ -80,9 +70,8 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     setProblems({});
     setFailure(null);
     setBusy(true);
-    const scope = draft.scopeKind === 'company' ? { kind: 'company' } : draft.scopeKind === 'department' ? { kind: 'department', departmentId: draft.scopeTarget } : { kind: 'agent', agentId: draft.scopeTarget };
     const body = {
-      name: draft.name.trim(), site: draft.site.trim(), login: draft.login.trim(), scope,
+      name: draft.name.trim(), site: draft.site.trim(), login: draft.login.trim(),
       ...(draft.password ? { password: draft.password } : {}),
       ...(draft.code.trim() ? { code: draft.code.trim() } : {}),
       ...(entry && draft.removeCode ? { removeCode: true } : {}),
@@ -99,7 +88,7 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     }
   }
 
-  const ref = (name: FieldName) => (el: HTMLInputElement | HTMLSelectElement | null) => void (inputs.current[name] = el);
+  const ref = (name: FieldName) => (el: HTMLInputElement | null) => void (inputs.current[name] = el);
   return (
     <form className="settings-form" onSubmit={e => void submit(e)} noValidate aria-label={entry ? v.changeTitle(entry.name) : v.addTitle}>
       <Field label={v.name} hint={v.nameHint} problem={problems.name}>
@@ -123,27 +112,6 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
           <span><b>{v.removeCode}</b></span>
         </label>
       )}
-      <Field label={v.scope} hint={v.scopeHint}>
-        {p => (
-          <select {...p} value={draft.scopeKind} onChange={e => set({ scopeKind: e.target.value as Scope['kind'], scopeTarget: '' })}>
-            <option value="company">{v.scopeCompany}</option>
-            <option value="department">{v.scopeDepartment}</option>
-            <option value="agent">{v.scopeAgent}</option>
-          </select>
-        )}
-      </Field>
-      {draft.scopeKind !== 'company' && (
-        <Field label={draft.scopeKind === 'department' ? v.department : v.agent} problem={problems.scopeTarget}>
-          {p => (
-            <select {...p} ref={ref('scopeTarget')} value={draft.scopeTarget} onChange={e => set({ scopeTarget: e.target.value })}>
-              <option value="">{v.choose}</option>
-              {(draft.scopeKind === 'department' ? departments.map(d => ({ id: d.id, name: d.name ?? (d.templateKey ? t.templates[d.templateKey].name : d.roleCode) })) : agents).map(o => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-          )}
-        </Field>
-      )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       <div className="settings-actions">
         <button className="btn small" type="submit" disabled={busy}>{t.common.save}</button>
@@ -152,13 +120,6 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     </form>
   );
 }
-
-const scopeText = (v: ReturnType<typeof useT>['vault'], scope: Scope) =>
-  scope.kind === 'department' ? v.keptForDepartment(scope.departmentName) : scope.kind === 'agent' ? v.keptForAgent(scope.agentName) : v.forEveryone;
-
-/* A use's end in words: a status this window does not know yet reads as not working, never as its code. */
-const endedText = (v: ReturnType<typeof useT>['vault'], status: string | null): string =>
-  status === null ? v.ended.sent : Object.hasOwn(v.ended, status) ? v.ended[status as keyof typeof v.ended] : v.ended.failed;
 
 function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine[] | null; onClose(): void }) {
   const t = useT();
@@ -173,7 +134,7 @@ function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine
         <ul className="outbound-list outbound-entries">
           {lines.map(line => (
             <li key={line.id} className="outbound-entry">
-              <span>{v.logLine(line.kind, line.person?.name ?? line.agent?.name ?? '', line.task?.number ?? null, line.target, endedText(v, line.status))}</span>
+              <span>{v.logLine(line.kind, line.person?.name ?? line.agent?.name ?? '', line.task?.number ?? null)}</span>
               <small>{when(line.at)}</small>
             </li>
           ))}
@@ -186,7 +147,7 @@ function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine
   );
 }
 
-export function Vault({ me }: { me: Me }) {
+export function Vault() {
   const t = useT();
   const v = t.vault;
   const when = useWhen();
@@ -194,7 +155,6 @@ export function Vault({ me }: { me: Me }) {
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const mayChange = (entry: VaultEntry) => entry.createdBy?.id === me.person.id || me.person.isOwner || (Boolean(me.person.isCeoDelegate) && me.person.scopeKind === 'company');
 
   const load = () =>
     api.get<{ entries: VaultEntry[] }>(VAULT_PATH).then(
@@ -254,8 +214,7 @@ export function Vault({ me }: { me: Me }) {
                   <b>{entry.name}</b>
                   <span className="outbound-address">{entry.site}</span>
                   <span>{v.loginIs(entry.login)}{entry.hasCode ? ` ${v.withCode}` : ''}</span>
-                  <small>{scopeText(v, entry.scope)}</small>
-                  <small>{v.addedBy(entry.createdBy?.name ?? '', when(entry.createdAt))}</small>
+                  <small>{entry.createdBy ? v.addedBy(entry.createdBy.name, when(entry.createdAt)) : v.added(when(entry.createdAt))}</small>
                   {mode.kind === 'remove' && mode.entry.id === entry.id ? (
                     <div className="settings-actions">
                       <span className="entry-main">{v.removeAsk(entry.name)}</span>
@@ -265,8 +224,8 @@ export function Vault({ me }: { me: Me }) {
                   ) : (
                     <div className="settings-actions">
                       <button className="btn small ghost" type="button" onClick={() => openLog(entry)}>{v.log}</button>
-                      {mayChange(entry) && <button className="btn small ghost" type="button" onClick={() => setMode({ kind: 'edit', entry })}>{v.change}</button>}
-                      {mayChange(entry) && <button className="btn small ghost danger" type="button" onClick={() => setMode({ kind: 'remove', entry })}>{v.remove}</button>}
+                      <button className="btn small ghost" type="button" onClick={() => setMode({ kind: 'edit', entry })}>{v.change}</button>
+                      <button className="btn small ghost danger" type="button" onClick={() => setMode({ kind: 'remove', entry })}>{v.remove}</button>
                     </div>
                   )}
                 </li>

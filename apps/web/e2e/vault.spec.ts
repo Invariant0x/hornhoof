@@ -14,12 +14,10 @@ mkdirSync(SHOTS, { recursive: true });
 const ENTRIES = [
   {
     id: 'v1', name: 'Partner site of the northern region shops', site: 'https://accounts.partner-shops-of-the-northern-region.example/sign-in/with/a/very/long/address',
-    login: 'team.northern.region@acme.example', hasCode: true, scope: { kind: 'company' },
-    createdBy: { id: 'p2', name: 'Maria' }, createdAt: '2030-01-01T09:00:00.000Z', updatedBy: { id: 'p2', name: 'Maria' }, updatedAt: '2030-01-01T09:00:00.000Z',
+    login: 'team.northern.region@acme.example', hasCode: true, createdBy: { id: 'p2', name: 'Maria' }, createdAt: '2030-01-01T09:00:00.000Z',
   },
   {
-    id: 'v2', name: 'CRM', site: 'https://crm.example', login: 'sales@acme.example', hasCode: false, scope: { kind: 'department', departmentId: 'd2', departmentName: 'Development' },
-    createdBy: { id: 'p1', name: 'Ivan' }, createdAt: '2030-01-02T09:00:00.000Z', updatedBy: { id: 'p1', name: 'Ivan' }, updatedAt: '2030-01-02T09:00:00.000Z',
+    id: 'v2', name: 'CRM', site: 'https://crm.example', login: 'sales@acme.example', hasCode: false, createdBy: { id: 'a1', name: 'David AI' }, createdAt: '2030-01-02T09:00:00.000Z',
   },
 ];
 
