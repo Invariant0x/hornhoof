@@ -129,6 +129,26 @@ async function fitsTheScreen(page: Page, width: number) {
 for (const lang of CHECKED_LOCALES) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
+      test(`the default and saved approval rules fit, in ${lang}, ${theme}, at ${width}px`, async ({ page, browserName }, info) => {
+        const start = Date.parse('2026-01-02T12:00:00Z');
+        await page.clock.install({ time: start });
+        await page.clock.pauseAt(start + 60_000);
+        const t = MESSAGES[lang];
+        const { errors } = await open(page, lang, theme, width);
+        const part = section(page, t);
+        const a = t.dept.approvals;
+        await expect(part.getByText(a.defaultHint, { exact: true })).toBeVisible();
+        await expect(part.getByRole('group', { name: a.channels.message, exact: true }).getByRole('combobox')).toHaveValue('new_kinds');
+        await expect(part.getByRole('group', { name: a.channels.price, exact: true }).getByRole('combobox')).toHaveValue('every');
+        await expect(part.getByRole('group', { name: a.channels.commit, exact: true }).getByText(a.readModes.every)).toBeVisible();
+        await fitsTheScreen(page, width);
+        expect(await offences(part, { danger: [], groups: '.appr-limit' })).toEqual([]);
+        await info.attach('shipped-locale-lengths', { body: JSON.stringify(LOCALE_LENGTHS), contentType: 'application/json' });
+        await info.attach('geometry', { body: JSON.stringify(await sizes(part, PIECES)), contentType: 'application/json' });
+        await part.screenshot({ path: info.outputPath(`approvals-default-${lang}-${theme}-${width}-${browserName}.png`) });
+        expect(errors).toEqual([]);
+      });
+
       test(`the CEO reads and changes the owner and the rules, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
         const { errors, puts } = await open(page, lang, theme, width);
