@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -7,6 +7,7 @@ import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
@@ -117,7 +118,7 @@ export async function dropOldFiles(db: Db, now: Date): Promise<number> {
     .where(and(or(isNotNull(attachments.personId), and(isNull(attachments.requestId), isNotNull(attachments.name))), isNull(attachments.taskId), lt(attachments.createdAt, cutoff)))
     .returning({ id: attachments.id });
   const old = db
-    .select({ id: tasks.id })
+    .select(idOnly(tasks))
     .from(tasks)
     .innerJoin(turns, eq(turns.id, tasks.turnId))
     .where(and(eq(turns.status, 'closed'), lt(turns.closedAt, cutoff)));
@@ -189,7 +190,7 @@ function sentType(found: { name: string | null; mediaType?: string }, forPerson:
 
 /* Sends a task or chat file in pieces, so the server never holds a whole one. */
 export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }, forPerson = false) {
-  const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
+  const [ordinary] = await db.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
   if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   if (savedByPerson(found, forPerson)) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
   return reply
@@ -291,14 +292,14 @@ async function companyTaskForAgent(ctx: Ctx, job: ToolJob, ref: string): Promise
   const task = await taskByRef(ctx, job.companyId, ref);
   if (!task) return null;
   const ids = [task.assigneeAgentId, task.executorAgentId, task.createdByAgentId].filter((id): id is string => Boolean(id));
-  const [personal] = ids.length ? await ctx.db.select({ id: agents.id }).from(agents).where(and(inArray(agents.id, ids), eq(agents.kind, 'assistant'))).limit(1) : [];
+  const [personal] = ids.length ? await ctx.db.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, ids), eq(agents.kind, 'assistant'))).limit(1) : [];
   return personal ? null : task;
 }
 
 function taskAttachmentMatch(db: Db, companyId: string, taskId: string, file: string) {
   if (!z.uuid().safeParse(file).success) return and(eq(attachments.taskId, taskId), eq(attachments.name, file));
   const onTaskRow = and(eq(attachments.taskId, taskId), or(eq(attachments.id, file), eq(attachments.name, file)));
-  const taskRequests = db.select({ id: requests.id }).from(requests).where(and(eq(requests.companyId, companyId), eq(requests.taskId, taskId)));
+  const taskRequests = db.select(idOnly(requests)).from(requests).where(and(eq(requests.companyId, companyId), eq(requests.taskId, taskId)));
   const onRequest = and(eq(attachments.id, file), isNull(attachments.taskId), isNull(attachments.personId), inArray(attachments.requestId, taskRequests));
   return or(onTaskRow, onRequest);
 }
@@ -364,7 +365,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
       const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, ref !== undefined, raw);
-      const [sent] = await db.select({ n: count() }).from(attachments).where(eq(attachments.jobId, job.id));
+      const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
       await checkAttachmentSpace(ctx, job.companyId, task, toChat, bytes.length);
       const [row] = await db

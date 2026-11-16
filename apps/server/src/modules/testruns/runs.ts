@@ -1,6 +1,7 @@
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
-import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, like, max, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -369,7 +370,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
   const { db } = ctx;
   await pumpDescriptions(ctx, companyId => placesOf(ctx, companyId), run => targetOf(ctx, run), id => settleRun(ctx, id));
   /* A run whose every file was reused has no part whose end would end it. */
-  for (const { id } of await db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.status, 'running'), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)))) await settleRun(ctx, id);
+  for (const { id } of await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.status, 'running'), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)))) await settleRun(ctx, id);
   const waiting = await db
     .select({ part: testParts, run: testRuns, task: { number: tasks.number } })
     .from(testParts)
@@ -447,7 +448,7 @@ async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'pas
 
 /* A described run planned with no part at all: nothing was left to run. Before its description a run has no parts either. */
 async function everythingReused(ctx: Ctx, runId: string): Promise<boolean> {
-  const [run] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)));
+  const [run] = await ctx.db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)));
   return run !== undefined;
 }
 
@@ -520,7 +521,7 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
 /* A part's log goes on its task as a file of the turn that started the run, once. */
 async function keepLog(ctx: Ctx, run: Run, part: Part, log: string): Promise<void> {
   const name = logName(run, part.part);
-  const [had] = await ctx.db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.taskId, run.taskId), eq(attachments.name, name))).limit(1);
+  const [had] = await ctx.db.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.taskId, run.taskId), eq(attachments.name, name))).limit(1);
   if (had) return;
   const bytes = Buffer.from(log, 'utf8');
   await ctx.db.insert(attachments).values({ companyId: run.companyId, jobId: run.jobId, agentId: run.agentId, taskId: run.taskId, name, mediaType: 'text/plain; charset=utf-8', bytes, size: bytes.length });
@@ -580,7 +581,7 @@ export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = [])
   const known = has.filter(isId);
   await loseParts(ctx, and(ofNode(ctx, id), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
   if (known.length) {
-    const open = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(ctx, id)));
+    const open = await ctx.db.select(idOnly(testParts)).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(ctx, id)));
     const keep = new Set(open.map(p => p.id));
     for (const partId of known) if (!keep.has(partId)) ctx.hub.send(id, { type: 'tests.cancel', partId });
   }
@@ -668,7 +669,7 @@ async function workFiles(ctx: Ctx, task: Task, input: RunInput, kind: RunKind): 
 }
 
 async function checkRunCapacity(ctx: Ctx, job: RunJob): Promise<void> {
-  const [open] = await ctx.db.select({ n: count() }).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
+  const [open] = await ctx.db.select(countOnly()).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
   if (Number(open?.n ?? 0) >= OPEN_RUNS) throw refuse(409, 'task_invalid', `You have ${OPEN_RUNS} runs going on already. Wait for one to end, or stop one with stop_tests or stop_work.`);
 }
 
@@ -700,7 +701,7 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
   const { department, pin } = setup;
   return ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
-    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
+    await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, job.companyId)).for('update');
     const number = await nextRunNumber(tx, job.companyId);
     const [row] = await tx
       .insert(testRuns)
@@ -814,7 +815,7 @@ async function stopperName(ctx: Ctx, job: ToolJob, other: boolean): Promise<stri
 async function recordRunStop(ctx: Ctx, job: ToolJob, run: Run, task: Task, other: boolean, stopper: string) {
   const now = new Date();
   return ctx.db.transaction(async tx => {
-    await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, run.taskId)).for('update');
+    await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.id, run.taskId)).for('update');
     const [row] = await tx
       .update(testRuns)
       .set({ status: 'stopped', finishedAt: now, stoppedByAgentId: other ? job.agentId : null })

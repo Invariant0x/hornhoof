@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
 import { agents, companies, COPY_ERRORS, COPY_STATES, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole, type UploadState } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { logName, onMachine, type AccessMachine } from '../computer/access.js';
@@ -78,7 +79,7 @@ const ReportBody = z.object({
 /* The screens and the orchestrator's window hear that a machine did not take what its owner signed, and is closed. */
 async function machineRefused(ctx: Ctx, companyId: string, machine: AccessMachine): Promise<void> {
   ctx.bus.publish(companyId, { type: 'computer' });
-  const [orchestrator] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
+  const [orchestrator] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
   if (orchestrator) await appendEvent(ctx, { companyId, agentId: orchestrator.id, kind: 'computer', data: { state: 'refused', ...onMachine(logName(machine)) } });
 }
 
@@ -123,7 +124,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   const leading = () => ctx.mode.current() === 'lead';
   /* The database holds one company, the one this app serves. */
   const companyId = async (): Promise<string> => {
-    const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
+    const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
     if (!company) throw new ApiError(409, 'conflict', 'Hornhoof is not set up yet.');
     return company.id;
   };

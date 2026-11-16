@@ -8,6 +8,7 @@ import type { Checker } from '../../checker.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, type OutboundSetupKind } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf } from './checks.js';
@@ -132,14 +133,14 @@ export async function revokeAccount(ctx: Ctx, seen: Account, now = new Date()) {
 }
 
 async function refuseWhileOnItsWay(tx: Tx, accountId: string): Promise<void> {
-  const open = await tx.select({ id: outboundAttempts.id }).from(outboundAttempts).where(and(eq(outboundAttempts.accountId, accountId), inArray(outboundAttempts.status, ['reserved', 'sending', 'unknown']))).limit(1);
+  const open = await tx.select(idOnly(outboundAttempts)).from(outboundAttempts).where(and(eq(outboundAttempts.accountId, accountId), inArray(outboundAttempts.status, ['reserved', 'sending', 'unknown']))).limit(1);
   if (open.length) throw conflict('An attempt of this account has no known end yet. Settle it first.', ['delivery_unknown']);
 }
 
 async function requireFreeAuthor(tx: Tx, account: Account, agentId: string): Promise<void> {
-  const [author] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, account.companyId), eq(agents.departmentId, account.departmentId), isNull(agents.removedAt)));
+  const [author] = await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, account.companyId), eq(agents.departmentId, account.departmentId), isNull(agents.removedAt)));
   if (!author) throw new ApiError(404, 'not_found', 'There is no such author in this account\'s department.', 'outbound_unknown');
-  const [other] = await tx.select({ id: outboundBindings.id }).from(outboundBindings).where(and(eq(outboundBindings.agentId, agentId), eq(outboundBindings.status, 'active')));
+  const [other] = await tx.select(idOnly(outboundBindings)).from(outboundBindings).where(and(eq(outboundBindings.agentId, agentId), eq(outboundBindings.status, 'active')));
   if (other) throw conflict('This author already writes from another account.', ['account_bound_elsewhere']);
 }
 

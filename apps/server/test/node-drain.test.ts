@@ -6,6 +6,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { builtinOf } from '../src/modules/nodes/hub.js';
 import { drainPostponed, drainWork } from '../src/modules/updates/drain-work.js';
 import { nodeDrain } from '../src/modules/updates/node-drain.js';
@@ -38,7 +39,7 @@ const HOST_KEY = 'server-host-machine-key';
 /* A personal node on the machine the server runs on. */
 async function serverHostNode(f: Awaited<ReturnType<typeof fixture>>) {
   const key = 'personal-drain-key-0123456789abcdef';
-  const [person] = await f.db.select({ id: people.id }).from(people);
+  const [person] = await f.db.select(idOnly(people)).from(people);
   const [machine] = await f.db.insert(machines).values({ companyId: f.company.id, personId: person!.id, machineKey: HOST_KEY, hostname: 'server-host' }).returning();
   const [node] = await f.db.insert(nodes).values({ companyId: f.company.id, machineId: machine!.id, subscriptionId: f.job.subscriptionId, keyHash: hashToken(key), status: 'ready', version: '0.7.0' }).returning();
   return { key, nodeId: node!.id };
@@ -133,7 +134,7 @@ describe('planned node updates', () => {
     const other = 'b0'.repeat(16);
     const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
     const [head] = await f.db.insert(agents).values({ companyId: f.company.id, departmentId: ops!.id, subscriptionId: f.agent.subscriptionId, kind: 'head', model: '', roleKey: 'OPS-HEAD', name: 'Operations' }).returning();
-    const [person] = await f.db.select({ id: people.id }).from(people);
+    const [person] = await f.db.select(idOnly(people)).from(people);
     await f.db.insert(machines).values({ companyId: f.company.id, personId: person!.id, machineKey: 'studio-key', hostname: 'studio', role: 'data', networkId: other });
     const [turn] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, kind: 'conversation', prompt: 'On the copy', status: 'running', startedAt: new Date(), timeoutMs: 900_000, builtinMachine: other }).returning();
     await drainPostponed(f.app.ctx, builtinOf(other), '2026-11-11T13:00:00.000Z', await drainWork(f.app.ctx, builtinOf(other)));

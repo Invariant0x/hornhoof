@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, invites, jobs, machines, nodes, pendingWakes, people, tasks } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { bodyOf, taskFor, titleOf } from '../src/modules/merge/task.js';
 import { ownDatabases } from './helpers.js';
 import { mergeApp, rowsOf } from './merge-app-fixture.js';
@@ -55,7 +56,7 @@ describe('the task a merge leaves the orchestrator', () => {
     expect(body).not.toContain('h'.repeat(64));
     /* Asked again, it makes no second one. */
     await s.app.ctx.merger.tick();
-    expect(await s.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.assigneeAgentId, s.orchestrator.id))).toHaveLength(1);
+    expect(await s.db.select(idOnly(tasks)).from(tasks).where(eq(tasks.assigneeAgentId, s.orchestrator.id))).toHaveLength(1);
   });
 
   it("tells the orchestrator only how many are the CEO's", async () => {
@@ -104,7 +105,7 @@ describe('the task a merge leaves the orchestrator', () => {
     expect(joined.body).toContain('What office-mini did');
     expect(joined.body).toContain('title: here "Here", there "First there"');
     expect(joined.body).toContain('body: here "Body here", there "Second there"');
-    expect(await s.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.assigneeAgentId, s.orchestrator.id))).toHaveLength(1);
+    expect(await s.db.select(idOnly(tasks)).from(tasks).where(eq(tasks.assigneeAgentId, s.orchestrator.id))).toHaveLength(1);
     /* He is woken on it again. */
     const wakesAfter = (await s.db.select().from(pendingWakes).where(and(eq(pendingWakes.agentId, s.orchestrator.id), eq(pendingWakes.taskId, made!)))).length + (await s.db.select().from(jobs).where(and(eq(jobs.agentId, s.orchestrator.id), eq(jobs.taskId, made!)))).length;
     expect(wakesAfter).toBeGreaterThan(wakesBefore);
