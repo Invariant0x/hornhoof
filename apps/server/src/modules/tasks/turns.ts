@@ -3,7 +3,8 @@ import { lastTaskNumber } from './numbers.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, tasks, turns } from '../../db/schema.js';
-import { note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
+import { note, published, refuse, taskSpot, type Task, type Tx, type Wake } from './engine.js';
+import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
 import { keepWakes } from './outbox.js';
 import { refuseNotUrgent } from './urgency.js';
 import { handOff } from './pulses.js';
@@ -15,9 +16,9 @@ export type Turn = typeof turns.$inferSelect;
 /* One task as the orchestrator or a head gives it. department: a head's own, which it may leave out. from: the item of a
    department's list it was, and the person it comes from: whoever took the item to work, or for the orchestrator, whoever
    put it in the list. */
-export type PlanItem = { department?: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass']; urgent?: boolean; from?: { item: string; personId: string } };
+export type PlanItem = { department?: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass']; urgent?: boolean; from?: { item: string; personId: string } } & TrackerInput;
 type Head = { id: string; name: string };
-type Placed = PlanItem & { department: string; head: Head };
+type Placed = PlanItem & { department: string; head: Head; tracker: TrackerFields };
 /* Who gives the work, the orchestrator or a head, and the run they do it in. */
 export type By = { companyId: string; agentId: string; jobId: string };
 /* Who gives tasks: the orchestrator or a head, and the person who did it by hand. */
@@ -74,7 +75,8 @@ async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items
     if (!head) throw refuse(409, 'no_head', `"${item.title}": its department has no head yet. Propose staff for it first.`);
     if (await switchedOff(ctx.db, dept.id, head)) throw refuse(409, 'switched_off', `"${item.title}": its department is switched off right now. Give it no work until people switch it on.`);
     await headMayHold(ctx, by, companyId, item, head);
-    placed.push({ ...item, department: dept.id, head });
+    const tracker = await newTrackerFields(ctx, companyId, taskSpot({ departmentId: dept.id, productId: item.product ?? null }), null, item);
+    placed.push({ ...item, department: dept.id, head, tracker });
   }
   return placed;
 }
@@ -108,6 +110,7 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
     const [row] = await tx
       .insert(tasks)
       .values({
+        ...item.tracker,
         companyId,
         number: ++n,
         departmentId: item.department,
@@ -127,7 +130,7 @@ async function insertGiven(tx: Tx, companyId: string, planner: Planner, items: P
       .returning();
     await createCoordinationRoute(tx, row!);
     const actor = personId ? { personId } : { agentId };
-    await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { ...(item.from ? { backlog: item.from.item } : {}), ...(improvement ? { improvement } : {}) } });
+    await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { toStatus: row!.status, ...(item.from ? { backlog: item.from.item } : {}), ...(improvement ? { improvement } : {}) } });
     await note(tx, row!, { kind: 'assigned', actor: { agentId }, data: { assignee: item.head.id } });
     given.push({ task: row!, head: item.head });
   }

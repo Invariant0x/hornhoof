@@ -1,4 +1,5 @@
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
+import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
 import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
@@ -243,6 +244,9 @@ async function lockClosingParent(tx: Tx, task: Task, set: Partial<Task>): Promis
   await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, task.parentId)).for('no key update');
 }
 
+/* A change of status says in its line of the log where it went from and to, so the history tells how long each lasted. */
+const statusNoted = (n: Note, from: Task['status'], to: Task['status']): Note => (from === to ? n : { ...n, data: { ...n.data, fromStatus: from, toStatus: to } });
+
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
 export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
@@ -269,7 +273,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
     if (set.status === 'done') await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
-    const event = await note(tx, row, n, ctx.config);
+    const event = await note(tx, row, statusNoted(n, task.status, row.status), ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
     if (CLOSED.includes(row.status)) unstuck = await letStuckGo(tx, row.id);
@@ -354,7 +358,7 @@ export type NewTask = {
   /* Of a task with nothing above it; one under a task is what that task is. */
   urgent?: boolean;
   small?: boolean;
-};
+} & TrackerInput;
 
 /* A live employee or orchestrator of the company. An assistant's own agent is its owner's, not the company's. */
 export async function liveAgent(db: Db | Tx, companyId: string | null, id: string) {
@@ -397,6 +401,9 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     workKind: parent.workKind,
     riskClass: parent.riskClass,
     urgent: parent.urgent,
+    /* A part of the same work answers to the same person and serves its whole's goal. */
+    responsiblePersonId: parent.responsiblePersonId,
+    dueAt: parent.dueAt,
     createdByPersonId: actor.personId ?? null,
     createdByAgentId: actor.agentId ?? null,
     updatedAt: new Date(),
@@ -404,7 +411,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
   /* A part of the same work may touch what its whole may, as the head approved it there. */
   const whole = await routeOf(tx, parent);
   const skipped = await createRoute(tx, child!, { paths: whole.paths, ...(whole.state.resultKind === 'document' ? { resultKind: 'document' } : {}) }, plan);
-  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id, ...skippedData(skipped) } });
+  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { toStatus: child!.status, assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id, ...skippedData(skipped) } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
   return { child: child!, wake };
@@ -417,7 +424,7 @@ function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task
   return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null }, [input.assigneeAgentId, ...part]);
 }
 
-type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; parent: Task | null; declaration: IndependentDeclaration | null; plan: StageRoute };
+type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; parent: Task | null; declaration: IndependentDeclaration | null; plan: StageRoute; tracker: TrackerFields };
 
 function checkNewTaskFields(input: NewTask): void {
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
@@ -434,7 +441,8 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
-  return { assignee, parent, declaration, plan: await departmentStages(ctx, input.departmentId) };
+  const tracker = await newTrackerFields(ctx, assignee.companyId, taskSpot({ departmentId: input.departmentId, productId: input.productId ?? null }), parent, input);
+  return { assignee, parent, declaration, plan: await departmentStages(ctx, input.departmentId), tracker };
 }
 
 async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
@@ -470,8 +478,9 @@ function independentData(declaration: IndependentDeclaration | null): Record<str
   return {};
 }
 
-function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
+function newTaskValues(actor: Actor, input: NewTask, { assignee, parent, tracker }: NewTaskSetup, position: { urgent: boolean; number: number }): typeof tasks.$inferInsert {
   return {
+        ...tracker,
         companyId: assignee.companyId,
         number: position.number,
         parentId: parent?.id ?? null,
@@ -522,6 +531,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     .returning();
   const skipped = await createRoute(tx, row!, input, plan);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
+    toStatus: row!.status,
     assignee: assignee.id,
     after: row!.after,
     ...independentData(declaration),
@@ -760,13 +770,14 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
   const row = await move(ctx, task, { status: 'cancelled', closedAt: new Date(), assigneeAgentId: null }, { kind: 'cancelled', actor, text: why }, async (tx, row) => {
     let level = [taskId];
     while (level.length) {
+      const was = new Map((await tx.select({ id: tasks.id, status: tasks.status }).from(tasks).where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED]))).for('update')).map(t => [t.id, t.status]));
       const below = await tx
         .update(tasks)
         .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, externalWait: null, paused: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
         .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
         .returning();
       for (const t of below) {
-        const event = await note(tx, t, { kind: 'cancelled', actor, text: `#${task.number} was cancelled.` });
+        const event = await note(tx, t, statusNoted({ kind: 'cancelled', actor, text: `#${task.number} was cancelled.` }, was.get(t.id) ?? t.status, t.status));
         await keepWaitsWithMove(tx, t, t, { kind: 'cancelled', actor, eventId: event.id });
         /* Work cancelled with the task above it needs none of the turns kept for it. */
         await dropEarlierWakes(tx, t.id);
@@ -1210,7 +1221,7 @@ async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: num
 }
 
 /* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */
-export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away'] as const;
+export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status'] as const;
 
 /* Comments and notes about a turn ending do not begin a new piece of work. */
 export async function lastMove(db: Db | Tx, taskId: string) {
@@ -1405,8 +1416,9 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     await endRequest(tx, request, status, answerer(answeredBy, actor));
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
-    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}) }, inlineText }, ctx.config);
     const back = await statusAfterWait(tx, task, current?.status);
+    const answered: Note = { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom, ...(assistant ? { assistantId: assistant } : {}) }, inlineText };
+    const event = await note(tx, task, back ? statusNoted(answered, 'waiting', back) : answered, ctx.config);
     if (back) {
       await tx
         .update(tasks)
@@ -1473,10 +1485,14 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
   /* One that still waits for what it comes after is not at work, whatever turn went out on it. */
   const [task] = await ctx.db.select({ after: tasks.after }).from(tasks).where(eq(tasks.id, job.taskId));
   if (!task || (await openAfter(ctx.db, task)).length) return;
-  const [row] = await ctx.db
-    .update(tasks)
-    .set({ status: 'working', version: sql`${tasks.version} + 1`, updatedAt: new Date() })
-    .where(and(eq(tasks.id, job.taskId), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId)))
-    .returning();
+  const row = await ctx.db.transaction(async tx => {
+    const [started] = await tx
+      .update(tasks)
+      .set({ status: 'working', version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(tasks.id, job.taskId!), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId!)))
+      .returning();
+    if (started) await note(tx, started, { kind: 'status', actor: { agentId: job.agentId! }, data: { fromStatus: 'open', toStatus: 'working' } });
+    return started;
+  });
   if (row) published(ctx, row);
 }

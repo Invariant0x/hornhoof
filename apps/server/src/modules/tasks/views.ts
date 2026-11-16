@@ -2,7 +2,7 @@ import { findingReport } from './review-findings.js';
 import type { EchelonsSnapshot, EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import { routeSnapshots } from './echelons-store.js';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people, requests, taskEvents, tasks, turns, type AgentKind, type RequestOption } from '../../db/schema.js';
 import { commitUrl, filesOf, picturesOf } from './attachments.js';
@@ -15,6 +15,8 @@ import { independentViews, type IndependentPartInput, type IndependentRecord } f
 import type { TaskWait } from './wait-state.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
 import { offlineMachine, type OfflineMachine } from '../nodes/offline.js';
+import { trackerLookups, type GoalRef, type TrackerLookups } from '../tracker/task-view.js';
+import type { TimeFacts } from './time-facts.js';
 
 /* Task log text and its automatic files have the same agent readership. */
 export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Pick<Task, 'status' | 'departmentId' | 'assigneeAgentId' | 'executorAgentId'>): boolean {
@@ -46,6 +48,12 @@ export type TaskLine = {
   riskClass: Task['riskClass'];
   urgent: boolean;
   small: boolean;
+  /* The goal it serves, through the task at the top of its work; who answers for it; why it exists; by when. */
+  goal: GoalRef | null;
+  responsible: { id: string; name: string } | null;
+  why: string;
+  dueAt: string | null;
+  time: TimeFacts;
   createdAt: string;
   updatedAt: string;
 };
@@ -79,6 +87,8 @@ export type TaskDetail = TaskLine & {
   body: string;
   parent: { id: string; number: number; title: string } | null;
   after: AfterView[];
+  /* The tasks that come after this one, of those the reader sees. */
+  neededFor: AfterView[];
   executor: AgentRef | null;
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
   subtasks: TaskLine[];
@@ -91,7 +101,7 @@ export type TaskDetail = TaskLine & {
   assigneeOffline: OfflineMachine | null;
 };
 
-type Names = {
+type Names = TrackerLookups & {
   route(t: Task): EchelonsSnapshot;
   agent(id: string | null): AgentRef | null;
   place(id: string | null): Place;
@@ -102,10 +112,12 @@ type Names = {
 };
 
 /* Names for everything the tasks point at, read in one go. */
-async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'companyId' | 'id' | 'assigneeAgentId' | 'executorAgentId' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after'>[], more: string[] = []): Promise<Names> {
+async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'companyId' | 'id' | 'assigneeAgentId' | 'executorAgentId' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after' | 'createdAt' | 'responsiblePersonId'>[], more: string[] = []): Promise<Names> {
   const independent = await independentViews(ctx.db, rows.map(t => t.id));
   const partExecutors = [...independent.values()].flatMap(record => record.kind === 'part' ? [record.part.executor] : []);
-  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId]), ...partExecutors, ...more].filter((x): x is string => Boolean(x)))];
+  const waits = await openWaitsOf(ctx.db, rows.map(t => t.id));
+  const waitOwners = [...waits.values()].flat().map(w => w.ownerAgentId);
+  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId]), ...partExecutors, ...waitOwners, ...more].filter((x): x is string => Boolean(x)))];
   const placeIds = [...new Set(rows.flatMap(t => [t.departmentId, t.productId]).filter((x): x is string => Boolean(x)))];
   const turnIds = [...new Set(rows.map(t => t.turnId).filter((x): x is string => Boolean(x)))];
   const agentRows = agentIds.length ? await ctx.db.select({ id: agents.id, name: agents.name, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(inArray(agents.id, agentIds)) : [];
@@ -113,9 +125,10 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'compa
   const turnRows = turnIds.length ? await ctx.db.select({ id: turns.id, number: turns.number }).from(turns).where(inArray(turns.id, turnIds)) : [];
   const afterIds = [...new Set(rows.flatMap(t => t.after))];
   const afterRows = afterIds.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, afterIds)) : [];
-  const waits = await openWaitsOf(ctx.db, rows.map(t => t.id));
   const routes = await routeSnapshots(ctx.db, rows);
-  return { ...nameLookups(ctx, { agentRows, placeRows, turnRows, afterRows }, independent, waits), route: t => routes.get(t.id)! };
+  const lookups = nameLookups(ctx, { agentRows, placeRows, turnRows, afterRows }, independent, waits);
+  const tracker = await trackerLookups(ctx.db, rows, lookups.waits, id => lookups.agent(id)?.name);
+  return { ...lookups, ...tracker, route: t => routes.get(t.id)! };
 }
 
 type NamedRows = {
@@ -125,7 +138,7 @@ type NamedRows = {
   afterRows: Task[];
 };
 
-function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Omit<Names, 'route'> {
+function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Omit<Names, 'route' | keyof TrackerLookups> {
   return {
     agent: id => {
       const a = agentRows.find(r => r.id === id);
@@ -169,6 +182,11 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   riskClass: t.riskClass,
   urgent: t.urgent,
   small: t.small,
+  goal: n.goal(t),
+  responsible: n.person(t.responsiblePersonId),
+  why: t.why,
+  dueAt: t.dueAt?.toISOString() ?? null,
+  time: n.time(t),
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
@@ -247,6 +265,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     body: task.body,
     parent,
     after: after.map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),
+    neededFor: (await db.select().from(tasks).where(sql`${tasks.after} @> ${JSON.stringify([task.id])}::jsonb`).orderBy(asc(tasks.number))).filter(sees).map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),
     executor: n.agent(task.executorAgentId),
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n, sees)),
