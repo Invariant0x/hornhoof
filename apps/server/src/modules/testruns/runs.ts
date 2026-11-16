@@ -602,9 +602,9 @@ export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = [])
 async function settleLeftOpen(ctx: Ctx): Promise<void> {
   const ofRun = eq(testParts.runId, testRuns.id);
   const left = await ctx.db
-    .select({ id: testRuns.id })
+    .select(idOnly(testRuns))
     .from(testRuns)
-    .where(and(eq(testRuns.status, 'running'), exists(ctx.db.select({ id: testParts.id }).from(testParts).where(ofRun)), notExists(ctx.db.select({ id: testParts.id }).from(testParts).where(and(ofRun, inArray(testParts.status, ['queued', 'running']))))));
+    .where(and(eq(testRuns.status, 'running'), exists(ctx.db.select(idOnly(testParts)).from(testParts).where(ofRun)), notExists(ctx.db.select(idOnly(testParts)).from(testParts).where(and(ofRun, inArray(testParts.status, ['queued', 'running']))))));
   for (const { id } of left) await settleRun(ctx, id).catch((err: unknown) => ctx.log.error({ error: loggable(err), runId: id }, 'A test run whose parts all ended could not end.'));
 }
 
