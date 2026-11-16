@@ -8,7 +8,9 @@ The middle number is the turn; the last counts releases between turns.
 ## [0.29.1] - 2026-11-16
 
 A program no longer closes under a turn it has just begun, an update that waits for the agents no longer stops the
-company's work without end, and parts of test runs no longer stop when a machine's connection drops for a moment.
+company's work without end, a machine that alone can lead keeps its lease when its disk writes slowly, a copy no longer
+fills the server's replication slots after an update, a node's updater keeps its wait while the server is away for a
+moment, and parts of test runs no longer stop when a machine's connection drops for a moment.
 
 ### Before you update
 
@@ -48,12 +50,31 @@ company's work without end, and parts of test runs no longer stop when a machine
   its part as failed, and the part does not run again; after a server restart the slots still end and their parts stop;
   a node and a server of different versions get no slot back after a drop, and an older node's slot stays taken for up
   to 3 minutes; the machine's connection screen does not show the built-in node yet.
+- A machine that is the only one able to lead (no other copy has finished) no longer ends its own lease, the app's
+  sessions and the public link for 20 to 30 s when its disk writes slowly: a late tick ends nothing there, and its link
+  keeps running when a lease ends. The keeper's statements now wait twice the measured fsync p99 (2 to 5 s), and where
+  another finished copy could lead, a tick may come three times that late (6 to 9 s) before the lease ends. Known
+  limits: a renewal that cannot be written for a whole lease (10 s) still ends the lease and the sessions; the disk's
+  p99 is known about 3.5 minutes after the keeper starts, and until then the old 2 s and 6 s apply.
+- A machine that keeps a copy and was still taking its first copy when the company server updated with a new column (as
+  autonomous_release in 0.29.0) no longer goes round in a circle and fills the server's replication slots. It takes the
+  server's new schema before it follows, an attempt it gives up drops its slots on the server, and attempts given up in
+  a row wait longer each time, from 10 minutes up to 2 hours. Known limits: with the server out of reach at that moment,
+  the slot is left to the server's own cleanup, as before. A copy that was already whole is still made again after an
+  update with migrations.
+- The node updater keeps a node's place in its wait when the server is away for a moment: only a Hornhoof server's own
+  404 means a server from before node waits; any other answer is retried after 1, 2, 4, 8, 16 and then every 30 seconds,
+  for 5 minutes. A node is marked restarting only once an updater is told it is free, so a restart that never came no
+  longer keeps the orchestrator and the heads off their node for 10 minutes: they come back past their 3-minute limit,
+  and the hold ends with the 2-minute lease of a wait. Known limits: a restart the updater was told of but never began
+  still holds the node up to 10 minutes; a restarting wait saved by an earlier build keeps its 10 minutes once.
 
 ### Russian
 
 Программа больше не закрывается под ходом, который она только что начала, обновление, ждущее агентов, больше не
-останавливает работу компании без конца, а части тестовых прогонов больше не обрываются, когда связь машины на миг
-пропадает.
+останавливает работу компании без конца, машина, которая одна может быть лидером, держит аренду при медленном диске,
+копия после обновления сервера больше не забивает его слоты репликации, обновлятор узла держит ожидание, пока сервер на
+миг недоступен, а части тестовых прогонов больше не обрываются, когда связь машины на миг пропадает.
 
 - Перед обновлением: в выпуске миграция 0129. Она разрешает пустой `node_id` в `node_connections`, чтобы подключения
   встроенного узла машины попадали в ее историю подключений. Это одно изменение таблицы, строки она не меняет, и ни до,
@@ -86,6 +107,25 @@ company's work without end, and parts of test runs no longer stop when a machine
   своей части как о проваленной, и часть заново не запускается; после перезапуска сервера места все равно кончаются, и
   их части останавливаются; узел и сервер разных версий после обрыва места обратно не получают, а место старого узла
   остается занятым до 3 минут; экран подключений машины встроенный узел пока не показывает.
+- Машина, которая одна может быть лидером (других готовых копий нет), больше не заканчивает свою аренду, не обрывает
+  сеансы приложения и не снимает публичную ссылку на 20-30 с, когда ее диск медленно пишет: поздний тик там ничего не
+  заканчивает, а ссылка работает и после конца аренды. Запросы хранителя теперь ждут вдвое дольше измеренного fsync p99
+  (от 2 до 5 с), а если вести может другая готовая копия, тик может опоздать втрое против этого срока (от 6 до 9 с),
+  прежде чем аренда закончится. Известные пределы: если продление не удается записать за всю аренду (10 с), аренда и
+  сеансы все равно заканчиваются; p99 диска известен примерно через 3,5 минуты после старта хранителя, до этого
+  действуют прежние 2 с и 6 с.
+- Машина с копией, которая еще снимала первую копию, когда сервер компании обновился с новым столбцом (как
+  autonomous_release в 0.29.0), больше не ходит по кругу и не забивает слоты репликации на сервере. Она берет новую
+  схему сервера до того, как следовать за ним, брошенная попытка убирает свои слоты на сервере, а попытки подряд ждут
+  все дольше, от 10 минут до 2 часов. Известные пределы: если сервер в этот момент недоступен, слот убирает сам сервер,
+  как и раньше. Целая копия после обновления с миграциями по-прежнему делается заново.
+- Обновлятор узла держит место узла в ожидании, когда сервер на миг недоступен: старым сервер считается только по
+  собственному ответу 404 Hornhoof, а любой другой ответ обновлятор повторяет через 1, 2, 4, 8, 16 и затем каждые 30
+  секунд, всего 5 минут. Узел помечается restarting только когда обновлятору сказано, что он свободен, поэтому
+  несостоявшийся перезапуск больше не держит оркестратора и глав вне их узла 10 минут: они возвращаются после своего
+  предела в 3 минуты, а ожидание снимается по 2-минутной аренде. Известные пределы: перезапуск, о котором обновлятору
+  сказали, но который не начался, по-прежнему держит узел до 10 минут; ожидание restarting, сохраненное прежней сборкой,
+  один раз держит свои 10 минут.
 
 ## [0.29.0] - 2026-11-15
 
