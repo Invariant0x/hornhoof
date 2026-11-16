@@ -42,8 +42,9 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   /* Every head and member gets the speed skill its role lists, and everyone the machine of a built-in node, empty.
      Migration 0124 gives every card an empty inbox mode of its own, every company the inbox and every turn no inbox wake. */
   if (table === 'agents') return rows.map(({ row }) => ({ row: { ...row, builtin_machine: null, inbox_mode: null, ...(['head', 'worker'].includes(row.kind as string) ? { skills: [...(row.skills as string[]), 'hh-work-fast'] } : {}) } }));
-  /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. */
-  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0, inbox_mode: 'inbox' } }));
+  /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. The tracker's migration marks every
+     company there before it for its one-time upgrade. */
+  if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0, inbox_mode: 'inbox', tracker_due: true } }));
   if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, builtin_machine: null, inbox_wake: false } }));
   /* The same for a part of a test run: none ran on a machine's built-in node before there were any. */
   if (table === 'test_parts') return rows.map(row => ({ row: { ...row.row, builtin_machine: null } }));
@@ -52,10 +53,12 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   /* Migration 0100: nobody's assistant answered a request before. */
   if (table === 'requests') return rows.map(row => ({ row: { ...row.row, answered_by_assistant_id: null } }));
   if (table !== 'tasks') return rows;
-  /* Migration 0088 removes the gate columns; the required route replaces them. Migration 0089 adds the pause, empty. */
+  /* Migration 0088 removes the gate columns; the required route replaces them. Migration 0089 adds the pause, empty, and
+     the tracker's migration the goal, the responsible person, the why, the due date and the pipeline, all empty. */
   const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];
   return rows.map(({ row }) => ({ row: {
     ...Object.fromEntries(Object.entries(row).filter(([column]) => !GATE_COLUMNS.includes(column))), paused: null,
+    goal_id: null, responsible_person_id: null, why: '', due_at: null, pipeline_id: null, pipeline_stage_id: null,
     ...(row.external_wait ? { external_wait: { ...(row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } : {}),
   } }));
 }

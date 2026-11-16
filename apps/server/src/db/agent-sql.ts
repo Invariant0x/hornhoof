@@ -66,7 +66,7 @@ export const SECRET: Record<string, string[]> = {
    head's Telegram bot, which only a person sets on its card, with its token kept from both roles. */
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
-  'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
+  'requests', 'proposals', 'agent_events', 'task_events', 'goal_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
   'autonomous_releases', 'agent_inbox', 'turn_tokens', 'telegram_bots',
