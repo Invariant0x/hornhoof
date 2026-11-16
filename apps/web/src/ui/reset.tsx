@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useT, type Messages } from '../i18n';
+import { Phrase, useT, type Messages } from '../i18n';
 import { everyVisible } from '../guard';
 
 const MINUTE = 60_000;
@@ -33,15 +33,14 @@ export function useNow(): number {
   return now;
 }
 
-/* A character no words hold, to find where the words put the time in their sentence. */
-const SLOT = '\u0000';
-
-/* The words of a reset with its time in one piece that reads left to right, wherever the words of a language put it, so
-   the words around it stand mirrored on a page laid out right to left. */
-export function ResetTime({ at, now }: { at: string | null; now: number }) {
+/* The words of a reset as its language writes them, the time in them one piece that reads left to right. */
+export function ResetWords({ at, now }: { at: string | null; now: number }) {
   const t = useT();
   const duration = resetDurationAt(t, at, now);
-  if (!duration) return <span>{t.subs.resetUnknown}</span>;
-  const [before, after] = t.subs.resetsIn(SLOT).split(SLOT);
-  return <span>{before}<bdi dir="ltr">{duration}</bdi>{after}</span>;
+  return duration ? <Phrase words={t.subs.resetsIn} values={[<bdi dir="ltr">{duration}</bdi>]} /> : <>{t.subs.resetUnknown}</>;
+}
+
+/* A reset's line of its own: its words whole, in their own direction, so a page laid out right to left keeps their order. */
+export function ResetTime({ at, now }: { at: string | null; now: number }) {
+  return <bdi><ResetWords at={at} now={now} /></bdi>;
 }

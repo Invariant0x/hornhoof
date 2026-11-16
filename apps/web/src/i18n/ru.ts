@@ -594,6 +594,7 @@ export const ru: Messages = {
     month: 'Месяц',
     lessThanMinute: 'менее минуты',
     resetsIn: duration => `до сброса ${duration}`,
+    usedAndReset: (share, reset) => `${share}, ${reset}`,
     resetUnknown: 'Время сброса неизвестно',
     limitReached: duration => (duration ? `Лимит исчерпан, до сброса ${duration}` : 'Лимит исчерпан'),
     notOnPlan: 'Нет у этого тарифа',

@@ -11,7 +11,8 @@ import { ME, serveApi } from './api';
    every shipped language, left to right and right to left, at desktop and phone width, and so is the sign of the used
    share of a plan's limit on the Subscriptions screen. The small unit beside the figure of a meter, a machine's memory,
    disk and processor and a plan's limit, keeps its own size, colour and font. Each number of a plan's limits stands with
-   its unit in one piece that reads left to right, and the words by it stand mirrored right to left. */
+   its unit in one piece that reads left to right, and each phrase around such pieces reads whole, in the order and the
+   direction its dictionary writes it, on a page laid out either way. */
 test.describe.configure({ timeout: 180_000 });
 
 const GIB = 1024 ** 3;
@@ -37,12 +38,24 @@ const PLAN: SubView = {
   limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: '2026-11-15T15:00:00.000Z' }], complete: true },
   limitsUpdatedAt: '2026-11-15T11:58:00.000Z', budget: null, isOrchestrator: false, accounts: [], accountsDiffer: false, signedInOnce: true, leaseMachine: null, agents: [],
 };
-/* The same plan with both windows used and the time to each reset in whole hours and days, half a minute to spare. */
+/* The same plan with both windows used and the time to each reset in whole hours and days, half a minute to spare, and a
+   model's own week, whose name has words after its number. */
 const at = (ms: number) => new Date(NOW + ms + 30_000).toISOString();
 const PLAN_BOTH: SubView = {
   ...PLAN,
-  limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: at(3 * 3600_000) }, { name: 'seven_day', utilization: 0.7, resetsAt: at(3 * 24 * 3600_000) }], complete: true },
+  limits: {
+    status: 'allowed',
+    windows: [
+      { name: 'five_hour', utilization: 0.4, resetsAt: at(3 * 3600_000) },
+      { name: 'seven_day', utilization: 0.7, resetsAt: at(3 * 24 * 3600_000) },
+      { name: 'seven_day_opus', utilization: 0.2, resetsAt: at(3 * 24 * 3600_000) },
+    ],
+    complete: true,
+  },
 };
+/* Where what a phrase says first stands: both shipped languages write left to right. A language added to the registry fails
+   to compile here until its way is added. */
+const READS: Record<Language, 'left' | 'right'> = { en: 'left', ru: 'left' };
 
 async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN]) {
   await page.setViewportSize({ width, height });
@@ -284,13 +297,18 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
     }
   });
 
-  test(`keeps each number of a plan's limits with its unit in one piece and the words by it mirrored, ${skin} ${language} ${width}`, async ({ page }, info) => {
+  test(`keeps each number of a plan's limits with its unit in one piece and each phrase in its dictionary's order, ${skin} ${language} ${width}`, async ({ page }, info) => {
     const t = WORDS[language];
     await openScreen(page, language, skin, width, height, 'subscriptions', [PLAN_BOTH]);
     const [five, seven, soon, later, resets] = [t.subs.hours(5), t.subs.days(7), t.cards.hours(3), t.subs.days(3), t.subs.resetsIn('').trim()];
     const row = page.locator('tr.rm').filter({ hasText: 'Max' });
     const cells = row.locator('.cell-lim');
     await expect(cells).toHaveCount(2);
+    /* The page's time stands at NOW from here on, so each reset reads its whole hours and days however long a busy machine
+       takes; the cells say so once the page's next second has come. */
+    await page.clock.setFixedTime(NOW);
+    await expect(cells.nth(0)).toHaveText(t.subs.usedAndReset('40%', t.subs.resetsIn(soon)));
+    await expect(cells.nth(1)).toHaveText(t.subs.usedAndReset('70%', t.subs.resetsIn(later)));
     /* Pictures first, both ways, so a look that fails still leaves them. */
     for (const dir of ['ltr', 'rtl'] as const) {
       await page.evaluate(d => { document.documentElement.dir = d; }, dir);
@@ -299,29 +317,34 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
     await page.evaluate(() => { document.documentElement.dir = 'ltr'; });
     await row.locator('button.rowbtn').click();
     const meters = page.getByRole('article').locator('.gauge').filter({ has: page.locator('.g-f > span', { hasText: t.cards.used }) });
-    await expect(meters).toHaveCount(2);
+    await expect(meters).toHaveCount(3);
     for (const dir of ['ltr', 'rtl'] as const) {
       await page.evaluate(d => { document.documentElement.dir = d; }, dir);
       await page.getByRole('article').locator('.gauges').filter({ has: page.locator('.g-f > span', { hasText: t.cards.used }) }).screenshot({ path: info.outputPath(`limits-card-${skin}-${language}-${width}-${dir}.png`) });
     }
+    /* What a phrase says first stands on the side its language writes from, whichever way the page is laid out. Each order
+       is looked at softly, so one run names every phrase out of order. */
+    const reads = READS[language];
     for (const dir of ['ltr', 'rtl'] as const) {
       await page.evaluate(d => { document.documentElement.dir = d; }, dir);
-      /* The words by a piece stand before it in the line's direction: to its left left to right, to its right right to left. */
-      const before = dir === 'ltr' ? 'left' : 'right';
       /* A wide table names its columns in its head; one shown as entries names them on its sort buttons and by each entry. */
       const heads = page.locator('th .sorth:visible, .sortbar .sortb:visible');
       for (const name of [five, seven]) await expectWhole(heads.filter({ hasText: name }), name);
       for (const [cell, share, time] of [[cells.nth(0), '40%', soon], [cells.nth(1), '70%', later]] as const) {
         await expectWhole(cell, time);
         expect(await place(cell, share.slice(0, -1), '%')).toBe('left');
-        expect(await place(cell, share, resets)).toBe(before);
-        expect(await place(cell, resets, time)).toBe(before);
+        /* The separator follows the share as the phrase reads, and the words of the reset follow it, then their time. */
+        expect.soft(`${dir} ${share} ,: ${await place(cell, share, ',')}`).toBe(`${dir} ${share} ,: ${reads}`);
+        expect.soft(`${dir} , ${resets}: ${await place(cell, ',', resets)}`).toBe(`${dir} , ${resets}: ${reads}`);
+        expect.soft(`${dir} ${resets} ${time}: ${await place(cell, resets, time)}`).toBe(`${dir} ${resets} ${time}: ${reads}`);
       }
-      for (const [meter, name, time] of [[meters.nth(0), five, soon], [meters.nth(1), seven, later]] as const) {
+      for (const [meter, name, time] of [[meters.nth(0), five, soon], [meters.nth(1), seven, later], [meters.nth(2), seven, later]] as const) {
         await expectWhole(meter.locator('.g-l'), name);
         await expectWhole(meter.locator('.g-s'), time);
-        expect(await place(meter.locator('.g-s'), resets, time)).toBe(before);
+        expect.soft(`${dir} ${resets} ${time}: ${await place(meter.locator('.g-s'), resets, time)}`).toBe(`${dir} ${resets} ${time}: ${reads}`);
       }
+      /* A model's week: its words follow its number with their separator, as the name reads. */
+      expect.soft(`${dir} ${seven} , Opus: ${await place(meters.nth(2).locator('.g-l'), seven, ', Opus')}`).toBe(`${dir} ${seven} , Opus: ${reads}`);
       expect(await noSideScroll(page)).toBe(true);
     }
   });
