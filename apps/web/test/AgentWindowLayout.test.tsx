@@ -84,7 +84,7 @@ describe('agent window task and controls', () => {
     expect(within(window).getByText('Release verified.')).toBeVisible();
   });
 
-  it.each(['Department tasks', 'About the department', 'Speed', 'Account', 'About', 'Settings', 'Versions'])('keeps Escape with %s instead of stopping the busy agent', async name => {
+  it.each(['About the department', 'Speed', 'Account', 'About', 'Settings', 'Versions'])('keeps Escape with %s instead of stopping the busy agent', async name => {
     const { calls } = company(true, true);
     const user = userEvent.setup();
     const window = await openEmployee(user);

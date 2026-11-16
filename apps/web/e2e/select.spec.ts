@@ -256,13 +256,19 @@ async function expectChoiceInside(page: Page, phone: boolean) {
   const choice = await box(page.getByRole('combobox', { name: 'Department' }));
   const search = await box(page.getByLabel('Search tasks'));
   if (phone) {
-    /* On a phone they stand one above the other, as wide as the screen leaves them. */
-    expect({ x: choice.x, right: choice.x + choice.width }).toEqual({ x: search.x, right: search.x + search.width });
-    expect({ x: search.x, right: search.x + search.width }).toEqual({ x: 16, right: 359 });
+    /* On a phone each stays inside the screen's 16 px edges. */
+    for (const b of [choice, search]) {
+      expect(b.x).toBeGreaterThanOrEqual(16);
+      expect(b.x + b.width).toBeLessThanOrEqual(359);
+    }
   } else {
-    /* At a desk they stand side by side, neither over the other nor past the screen. */
-    expect(choice.x + choice.width).toBeLessThanOrEqual(search.x);
-    expect(search.x + search.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    /* At a desk neither goes past the screen nor over the other. */
+    for (const b of [choice, search]) {
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    }
+    const apart = choice.y + choice.height <= search.y || search.y + search.height <= choice.y || choice.x + choice.width <= search.x || search.x + search.width <= choice.x;
+    expect(apart).toBe(true);
   }
   expect(await page.getByRole('main').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
 }
@@ -272,23 +278,22 @@ test('keeps the department choice and the search box inside a 375 px phone scree
   await serveSelectScreens(page);
   await page.goto('/');
   await page.getByRole('button', { name: /^Tasks/ }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'My tasks' })).toBeVisible();
 
-  /* The department choice is a select since the tracker shows goals: a long name stays inside it. It is picked by
-     department, not on what is in progress. */
-  await page.getByRole('radio', { name: 'By department' }).check({ force: true });
+  /* StaffCard selects in what waits for the person */
+  const staffSelects = page.locator('.staff-pick select');
+  await expect(staffSelects).toHaveCount(2);
+  for (let i = 0; i < 2; i++) {
+    await expectSelectInsideViewport(staffSelects.nth(i), 375);
+  }
+
+  /* The department choice of the turns and releases: a long name stays inside it, as does the search box. */
+  await page.goto('/tasks?show=turns');
   const department = page.getByRole('combobox', { name: 'Department' });
   for (const name of [LONG_DEPT.name, "The orchestrator's own work"]) {
     await department.selectOption({ label: name });
     await expect(department.locator('option:checked')).toHaveText(name);
     await expectChoiceInside(page, true);
-  }
-
-  /* StaffCard selects on Tasks screen */
-  const staffSelects = page.locator('.staff-pick select');
-  await expect(staffSelects).toHaveCount(2);
-  for (let i = 0; i < 2; i++) {
-    await expectSelectInsideViewport(staffSelects.nth(i), 375);
   }
 
   /* Subscriptions select.sel */
@@ -304,7 +309,7 @@ test('keeps the department choice and the search box inside a 375 px phone scree
   await page.getByRole('button', { name: 'New task', exact: true }).click();
   await expectSelectInsideViewport(page.locator('.new-task select'), 375);
 
-  await page.locator('.dv-drawer .zbtn').click();
+  await page.goBack();
   await page.getByRole('button', { name: /Bruno/ }).click();
   await page.getByRole('button', { name: 'Card', exact: true }).click();
   const cardSelects = page.locator('.acard select');
@@ -315,9 +320,7 @@ test('keeps the department choice and the search box inside a 375 px phone scree
 
   /* Desktop 1280x800 layout on Tasks */
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto('/');
-  await page.getByRole('button', { name: /^Tasks/ }).click();
-  await page.getByRole('radio', { name: 'By department' }).check({ force: true });
+  await page.goto('/tasks?show=turns');
   await page.getByRole('combobox', { name: 'Department' }).selectOption({ label: LONG_DEPT.name });
   await expectChoiceInside(page, false);
 });

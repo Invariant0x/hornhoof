@@ -53,5 +53,5 @@ export function trackerLine(t: Messages, e: TaskLogLine, by: string, states: Rec
   }
   const fields = field(e.data, 'fields');
   if (!Array.isArray(fields)) return null;
-  return words.edited(by, words.and(fields.map(f => (words.fields as Record<string, string>)[f] ?? String(f))));
+  return words.edited(by, words.and(...fields.map(f => (words.fields as Record<string, string>)[f] ?? String(f))));
 }

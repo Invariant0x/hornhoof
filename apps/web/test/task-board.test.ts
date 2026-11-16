@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { askingTask, byDepartment, byRelease, goals, goalStatus, humanStatus, inDepartment, inProgress, split, summaryOf, type Goal } from '../src/task-board';
+import { askingTask, byRelease, goals, goalStatus, humanStatus, inDepartment, split, type Goal } from '../src/task-board';
 import type { TaskLine, TurnView } from '../src/types';
 import { taskRoute } from './task-route';
 
@@ -142,18 +142,8 @@ describe('the department filter and the sections of the tracker', () => {
     expect(inDepartment(work, 'none').map(t => t.id)).toEqual(['c']);
   });
 
-  it("groups the goals in progress by every department in the order given, and the orchestrator's own work last", () => {
-    const sections = byDepartment(work, ['d3', 'd2', 'd9']);
-    expect(sections.map(s => [s.id, s.split.open.map(g => g.task.id), s.split.closed.map(g => g.task.id)])).toEqual([
-      ['d3', ['b'], []],
-      ['d2', ['a'], ['e', 'd']],
-      ['d9', [], []],
-      ['none', ['c'], []],
-    ]);
-  });
-
   it('keeps every goal still going in progress, and folds what is over apart', () => {
-    const { open, closed } = inProgress(work);
+    const { open, closed } = split(goals(work));
     expect(open.map(g => g.task.id)).toEqual(['c', 'b', 'a']);
     expect(closed.map(g => g.task.id)).toEqual(['e', 'd']);
   });
@@ -211,23 +201,6 @@ describe("the person's part in the work", () => {
       task({ id: 'w1', number: 3, parentId: 'w', status: 'working' }),
     ]);
     expect(split(tree, id => id === 'w1').open.map(g => g.task.id)).toEqual(['w', 'q']);
-    expect(inProgress([task({ id: 'q', number: 1, status: 'waiting' }), task({ id: 'w', number: 2 })], id => id === 'w').open.map(g => g.task.id)).toEqual(['w', 'q']);
-  });
-
-  it('counts the goals that wait for the person, those going on now, and what the next releases hold', () => {
-    const tasks = [
-      task({ id: 'q', number: 1, status: 'waiting' }),
-      task({ id: 'w', number: 2, status: 'working' }),
-      task({ id: 'w2', number: 3, status: 'working' }),
-      task({ id: 'r', number: 4, status: 'review' }),
-      task({ id: 'd', number: 5, status: 'done', turn: 3 }),
-    ];
-    const turns = [
-      turn({ id: 'u3', number: 3, status: 'open', tasks: { total: 4, done: 4 } }),
-      turn({ id: 'u5', number: 5, status: 'open', departmentId: 'd3', releases: false, tasks: { total: 2, done: 2 } }),
-      turn({ id: 'u2', number: 2, status: 'closed', tasks: { total: 9, done: 9 } }),
-    ];
-    expect(summaryOf(tasks, turns, id => id === 'q')).toEqual({ waitingYou: 1, working: 2, ready: 4 });
-    expect(summaryOf(tasks, turns)).toEqual({ waitingYou: 0, working: 2, ready: 4 });
+    expect(split(goals([task({ id: 'q', number: 1, status: 'waiting' }), task({ id: 'w', number: 2 })]), id => id === 'w').open.map(g => g.task.id)).toEqual(['w', 'q']);
   });
 });

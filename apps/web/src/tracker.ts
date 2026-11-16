@@ -187,25 +187,34 @@ export function pipelineTree(pipeline: Pipeline, tasks: TaskLine[]): GraphNode[]
   return [{ kind: 'pipeline', id: pipeline.id, pipeline, count: on.length, children: pipeline.stages.filter(s => !s.parentId).sort((a, b) => a.position - b.position).map(stageNode) }];
 }
 
-/* The size of a node and the steps between levels and rows, in the units of the canvas. */
+/* The width and least height of a node and the steps between levels and rows, in the units of the canvas. */
 export const NODE = { w: 290, h: 56, dx: 330, dy: 66, pad: 20 };
-export type Placed = { node: GraphNode; x: number; y: number; depth: number };
+export type Placed = { node: GraphNode; x: number; y: number; h: number; depth: number };
 export type Layout = { nodes: Placed[]; parts: { from: string; to: string }[]; waits: { from: string; to: string }[]; width: number; height: number };
 
-/* Each level one step further along, each leaf on a row of its own, a node in the middle of what is under it. A dashed line
-   goes from a task to each task of the tree it waits for. */
-export function layoutTree(forest: GraphNode[]): Layout {
+/* Each level one step further along, each leaf on a row of its own, a node in the middle of what is under it and never over
+   the node above it in its level. heightOf: the height a node's words take on the page, once measured; a node is never
+   lower than NODE.h. A dashed line goes from a task to each task of the tree it waits for. */
+export function layoutTree(forest: GraphNode[], heightOf: (id: string) => number | undefined = () => undefined): Layout {
   const nodes: Placed[] = [];
   const parts: Layout['parts'] = [];
-  let row = 0;
-  const place = (node: GraphNode, depth: number): number => {
-    const ys = node.children.map(child => {
+  const gap = NODE.dy - NODE.h;
+  const bottoms: number[] = [];
+  let next = NODE.pad;
+  const middle = (p: Placed) => p.y + p.h / 2;
+  const place = (node: GraphNode, depth: number): Placed => {
+    const kids = node.children.map(child => {
       parts.push({ from: node.id, to: child.id });
       return place(child, depth + 1);
     });
-    const y = ys.length ? (ys[0]! + ys.at(-1)!) / 2 : NODE.pad + row++ * NODE.dy;
-    nodes.push({ node, x: NODE.pad + depth * NODE.dx, y, depth });
-    return y;
+    const h = Math.max(NODE.h, heightOf(node.id) ?? 0);
+    const wanted = kids.length ? (middle(kids[0]!) + middle(kids.at(-1)!)) / 2 - h / 2 : next;
+    const y = Math.max(wanted, bottoms[depth] === undefined ? NODE.pad : bottoms[depth]! + gap);
+    bottoms[depth] = y + h;
+    if (!kids.length) next = y + h + gap;
+    const placed = { node, x: NODE.pad + depth * NODE.dx, y, h, depth };
+    nodes.push(placed);
+    return placed;
   };
   forest.forEach(tree => place(tree, 0));
   const numbered = new Map(nodes.flatMap(p => (p.node.kind === 'task' ? [[p.node.task.number, p.node.id] as const] : [])));
@@ -214,7 +223,7 @@ export function layoutTree(forest: GraphNode[]): Layout {
   return {
     nodes, parts, waits,
     width: Math.max(0, ...nodes.map(p => p.x + NODE.w)) + NODE.pad,
-    height: Math.max(0, ...nodes.map(p => p.y + NODE.h)) + NODE.pad,
+    height: Math.max(0, ...nodes.map(p => p.y + p.h)) + NODE.pad,
   };
 }
 

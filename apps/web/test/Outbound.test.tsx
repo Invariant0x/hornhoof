@@ -148,7 +148,7 @@ describe('External messaging in Settings, bound Requests snapshot, and routing',
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
 
-    const navButtons = within(screen.getByRole('navigation')).getAllByRole('button').map(b => b.textContent);
+    const navButtons = within(screen.getByRole('navigation', { name: 'Sections' })).getAllByRole('button').map(b => b.textContent);
     expect(navButtons).toEqual(['Map', 'Tasks', 'People', 'Subscriptions & API', 'Machines']);
 
     await user.click(screen.getByRole('button', { name: 'Account' }));

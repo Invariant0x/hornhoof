@@ -160,11 +160,11 @@ const GOAL_CLASS = { active: 'working', reached: 'done', dropped: 'cancelled' } 
 function Node({ placed, rows, onOpenGoal }: { placed: Placed; rows: Rows; onOpenGoal: (id: string) => void }) {
   const t = useT();
   const { node, x, y } = placed;
-  const style = { left: x, top: y, width: NODE.w, height: NODE.h };
+  const style = { left: x, top: y, width: NODE.w, minHeight: NODE.h };
   if (node.kind === 'task') {
     const status = humanStatus(node.task, rows.asksYou?.(node.task.id) ?? false);
     return (
-      <button className={`tr-node ${STATE_CLASS[status]}${rows.selected === node.id ? ' on' : ''}`} type="button" style={style} onClick={() => rows.onOpenTask(node.id)}>
+      <button className={`tr-node ${STATE_CLASS[status]}${rows.selected === node.id ? ' on' : ''}`} type="button" style={style} data-node={node.id} onClick={() => rows.onOpenTask(node.id)}>
         <span className="tr-node-title"><b>#{node.task.number}</b> {node.task.title}</span>
         <small>{t.tracker.groups[status]}</small>
       </button>
@@ -172,7 +172,7 @@ function Node({ placed, rows, onOpenGoal }: { placed: Placed; rows: Rows; onOpen
   }
   if (node.kind === 'goal') {
     return (
-      <button className={`tr-node goal ${GOAL_CLASS[node.goal.status]}`} type="button" style={style} onClick={() => onOpenGoal(node.id)}>
+      <button className={`tr-node goal ${GOAL_CLASS[node.goal.status]}`} type="button" style={style} data-node={node.id} onClick={() => onOpenGoal(node.id)}>
         <span className="tr-node-title">{node.goal.title}</span>
         <small>{t.tracker.graph.goal}: {t.tracker.goal.statuses[node.goal.status]}</small>
       </button>
@@ -180,7 +180,7 @@ function Node({ placed, rows, onOpenGoal }: { placed: Placed; rows: Rows; onOpen
   }
   const name = node.kind === 'loose' ? t.tracker.graph.loose : node.kind === 'pipeline' ? node.pipeline.name : node.stage.name;
   return (
-    <div className={`tr-node plain${node.kind === 'loose' ? '' : ' stage'}`} style={style}>
+    <div className={`tr-node plain${node.kind === 'loose' ? '' : ' stage'}`} style={style} data-node={node.id}>
       <span className="tr-node-title">{name}</span>
       {node.kind !== 'loose' && <small>{t.tracker.graph.count(node.count)}</small>}
     </div>
@@ -189,29 +189,50 @@ function Node({ placed, rows, onOpenGoal }: { placed: Placed; rows: Rows; onOpen
 
 /* A line from the end of one node to the start of another, bent in the middle. */
 function wire(a: Placed, b: Placed): string {
-  const [x1, y1, x2, y2] = [a.x + NODE.w, a.y + NODE.h / 2, b.x, b.y + NODE.h / 2];
+  const [x1, y1, x2, y2] = [a.x + NODE.w, a.y + a.h / 2, b.x, b.y + b.h / 2];
   const mid = (x1 + x2) / 2;
-  return x2 > x1 ? `M${x1} ${y1}C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}` : `M${a.x + NODE.w / 2} ${a.y + NODE.h}C${a.x + NODE.w / 2} ${y2} ${b.x + NODE.w / 2} ${y1} ${b.x + NODE.w / 2} ${b.y}`;
+  return x2 > x1 ? `M${x1} ${y1}C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}` : `M${a.x + NODE.w / 2} ${a.y + a.h}C${a.x + NODE.w / 2} ${y2} ${b.x + NODE.w / 2} ${y1} ${b.x + NODE.w / 2} ${b.y}`;
 }
 
+/* The least scale a tree opens at, where the words of its nodes still read. */
+const READABLE = 0.6;
+
 /* The tree on a canvas like the map's: dots, drag to move, the wheel and the map's zoom bar to zoom, no scrollbars. It opens
-   at its natural size, or smaller until all of it fits. */
+   at its natural size, or smaller until all of it fits, but never smaller than its words read at. A node grows to hold its words; the tree is placed again by the
+   heights measured before the page is drawn. */
 function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows; onOpenGoal: (id: string) => void }) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
-  const layout = layoutTree(forest);
+  const world = useRef<HTMLDivElement>(null);
+  const [heights, setHeights] = useState<ReadonlyMap<string, number>>(new Map());
+  const layout = layoutTree(forest, id => heights.get(id));
+  useLayoutEffect(() => {
+    const measured = new Map(heights);
+    for (const el of world.current?.querySelectorAll<HTMLElement>('[data-node]') ?? []) {
+      const h = el.offsetHeight;
+      if (h > 0 && h !== Math.max(NODE.h, heights.get(el.dataset.node!) ?? 0)) measured.set(el.dataset.node!, h);
+    }
+    if (measured.size !== heights.size || [...measured].some(([id, h]) => heights.get(id) !== h)) setHeights(measured);
+  });
   const pan = usePanZoom(box, layout.nodes.length > 0, CANVAS_ZOOM_LIMITS);
   const { setView, touched } = pan;
-  const fit = useCallback(() => {
+  const root = layout.nodes.find(p => p.depth === 0);
+  const rootMiddle = root ? root.y + root.h / 2 : 0;
+  /* all: the whole tree as small as it takes. Otherwise a tree too big for the canvas opens at a size its words read at,
+     on the middle of its first root. */
+  const place = useCallback((all: boolean) => {
     const el = box.current;
     const [w, h] = [el?.clientWidth ?? 0, el?.clientHeight ?? 0];
-    const k = w && h && layout.width && layout.height ? Math.max(CANVAS_ZOOM_LIMITS.min, Math.min(1, (w - 24) / layout.width, (h - 24) / layout.height)) : 1;
-    setView({ k, x: Math.max(12, (w - layout.width * k) / 2), y: 12, smooth: false });
-  }, [layout.width, layout.height, setView]);
+    const whole = w && h && layout.width && layout.height ? Math.max(CANVAS_ZOOM_LIMITS.min, Math.min(1, (w - 24) / layout.width, (h - 24) / layout.height)) : 1;
+    const k = all ? whole : Math.max(whole, Math.min(1, READABLE));
+    const y = k === whole ? 12 : Math.min(12, h / 2 - rootMiddle * k);
+    setView({ k, x: Math.max(12, (w - layout.width * k) / 2), y, smooth: false });
+  }, [layout.width, layout.height, rootMiddle, setView]);
+  const fit = useCallback(() => place(true), [place]);
   /* New work on the tree places it again, until the person moved or zoomed it. */
   useLayoutEffect(() => {
-    if (!touched()) fit();
-  }, [fit, touched]);
+    if (!touched()) place(false);
+  }, [place, touched]);
   const at = new Map(layout.nodes.map(p => [p.node.id, p]));
   const ignoreDragged = (e: MouseEvent) => {
     if (!e.detail || !pan.dragged()) return;
@@ -222,16 +243,16 @@ function Canvas({ forest, rows, onOpenGoal }: { forest: GraphNode[]; rows: Rows;
   return (
     <div className="tr-canvas">
       <div className="map tr-map" ref={box} role="region" aria-label={t.tracker.graph.canvas} {...pan.handlers} onClickCapture={ignoreDragged}>
-        <div className="world" style={{ transform: `translate(${pan.view.x}px, ${pan.view.y}px) scale(${pan.view.k})` }}>
+        <div className="world" ref={world} style={{ transform: `translate(${pan.view.x}px, ${pan.view.y}px) scale(${pan.view.k})` }}>
           <svg className="wires tr-wires" width={layout.width} height={layout.height} aria-hidden="true">
             {layout.parts.map(p => <path key={`${p.from}-${p.to}`} className="part" d={wire(at.get(p.from)!, at.get(p.to)!)} />)}
             {layout.waits.map(w => {
               const [a, b] = [at.get(w.from)!, at.get(w.to)!];
               return (
                 <g key={`${w.from}~${w.to}`} className="wait">
-                  <path d={`M${a.x + NODE.w / 2} ${a.y}L${b.x + NODE.w / 2} ${b.y + NODE.h}`} />
+                  <path d={`M${a.x + NODE.w / 2} ${a.y}L${b.x + NODE.w / 2} ${b.y + b.h}`} />
                   <text x={a.x + NODE.w / 2 + 6} y={a.y - 6}>{t.tracker.graph.waitsFor}</text>
-                  <text x={b.x + NODE.w / 2 + 6} y={b.y + NODE.h + 14}>{t.tracker.graph.neededFor}</text>
+                  <text x={b.x + NODE.w / 2 + 6} y={b.y + b.h + 14}>{t.tracker.graph.neededFor}</text>
                 </g>
               );
             })}

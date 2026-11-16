@@ -123,7 +123,7 @@ function GoalBody({ goal, log, me, onOpen, onOpenGoal, onGraph, onChanged }: Omi
     <>
       <CardPath goals={goalChain(goal.parentId, goals)} onOpenGoal={onOpenGoal} onOpen={onOpen} />
       <header className="ac-head">
-        <p className="muted tp-kind">{goal.department ? words.kinds.goal(goal.department.name) : words.kinds.companyGoal}</p>
+        <p className="muted tp-type">{goal.department ? words.kinds.goal(goal.department.name) : words.kinds.companyGoal}</p>
         <h3>{goal.title}</h3>
         <p className="tp-state"><span className={`tstate ${goal.status === 'reached' ? 'done' : goal.status === 'active' ? 'working' : ''}`}>{t.tracker.goal.statuses[goal.status]}</span></p>
       </header>

@@ -169,6 +169,17 @@ describe('the graph', () => {
     expect(layout.height).toBeGreaterThanOrEqual(Math.max(...layout.nodes.map(n => n.y)) + NODE.h);
   });
 
+  it('gives a node the height its words take, moves the rows under it down and keeps its parent in the middle', () => {
+    const tall = new Map([['s1t', 100]]);
+    const layout = layoutTree(graphTree({ goal: 'g2' }, GOALS, TASKS), id => tall.get(id));
+    const at = (id: string) => layout.nodes.find(n => n.node.id === id)!;
+    expect(at('s1t').h).toBe(100);
+    expect(at('s2t').h).toBe(NODE.h);
+    expect(at('s2t').y - at('s1t').y).toBe(100 + NODE.dy - NODE.h);
+    expect(at('t412').y + at('t412').h / 2).toBe((at('s1t').y + at('s1t').h / 2 + at('s2t').y + at('s2t').h / 2) / 2);
+    expect(layout.height).toBeGreaterThanOrEqual(Math.max(...layout.nodes.map(n => n.y + n.h)));
+  });
+
   it('leads back from a task to its goals and the tasks above it', () => {
     expect(graphPath({ task: 's2t' }, GOALS, TASKS).map(c => c.id)).toEqual(['g1', 'g2', 't412', 's2t']);
     expect(graphPath({ goal: 'g2' }, GOALS, TASKS).map(c => c.id)).toEqual(['g1', 'g2']);

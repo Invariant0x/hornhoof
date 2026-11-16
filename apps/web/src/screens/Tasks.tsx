@@ -466,7 +466,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
             )}
             <TaskSearch query={query} onChange={setQuery} />
           </div>
-          {onOpenOrchestrator && <button className="btn ghost" type="button" onClick={onOpenOrchestrator}>{t.tasks.writeOrchestrator}</button>}
+          {onOpenOrchestrator && <button className="btn ghost tr-write" type="button" onClick={onOpenOrchestrator}>{t.tasks.writeOrchestrator}</button>}
         </header>
         {broken !== null && <p className="alert" role="alert">{errorText(t, broken)}</p>}
         {found ? (

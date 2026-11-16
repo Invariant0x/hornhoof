@@ -118,7 +118,7 @@ function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
   const meta = [placeName(t, org, task.department), task.product?.name, turnText].filter(Boolean).join(' / ');
   return (
     <header className="ac-head">
-      <p className="muted tp-kind">{task.parentId ? t.tracker.card.kinds.subtask : t.tracker.card.kinds.task}</p>
+      <p className="muted tp-type">{task.parentId ? t.tracker.card.kinds.subtask : t.tracker.card.kinds.task}</p>
       <h3>{task.title}</h3>
       <p className="muted">{meta}</p>
       <WorkLabels task={task} />
