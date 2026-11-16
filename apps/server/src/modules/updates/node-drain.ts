@@ -75,7 +75,7 @@ class NodeDrains {
       catch (err) { this.records.delete(key); throw err; }
     }
     record.touched = at;
-    await this.check(record);
+    await this.check(record, true);
     return record.view;
   }
 
@@ -109,15 +109,16 @@ class NodeDrains {
     this.wake();
   }
 
-  private check(record: Saved): Promise<void> {
+  /* asked: an updater asks now, and hears the answer. */
+  private check(record: Saved, asked = false): Promise<void> {
     const prior = this.pending.get(record.key) ?? Promise.resolve();
-    const next = prior.catch(() => {}).then(() => this.advance(record));
+    const next = prior.catch(() => {}).then(() => this.advance(record, asked));
     this.pending.set(record.key, next);
     void next.finally(() => { if (this.pending.get(record.key) === next) this.pending.delete(record.key); }).catch(() => {});
     return next;
   }
 
-  private async advance(record: Saved): Promise<void> {
+  private async advance(record: Saved, asked: boolean): Promise<void> {
     if (this.records.get(record.key) !== record || record.view.state === 'restarting') return;
     const now = Date.now();
     if (record.view.state === 'postponed') {
@@ -132,8 +133,11 @@ class NodeDrains {
     if (!found) return;
     const { work, live } = found;
     const counts = { turnsLeft: work.turnsLeft, partsLeft: work.partsLeft };
+    /* A node restarts only for an updater told it is free. Until one asks, the node waits with nothing left on it, so the
+       orchestrator and the heads come back past their limit and the hold ends with the lease of a wait: an updater that
+       went away never restarts it. */
     if (!live) {
-      record.view = { state: 'restarting', since: new Date(now).toISOString() };
+      record.view = asked ? { state: 'restarting', since: new Date(now).toISOString() } : { ...record.view, turnsLeft: 0, partsLeft: 0 };
       this.save();
       return;
     }
