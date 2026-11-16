@@ -175,7 +175,7 @@ describe('templates', () => {
     expect(resources).toMatch(/any earlier version/);
     expect(resources).toMatch(/keeps none and a key is saved for it, create its first repository yourself with create_repository[\s\S]*then tell the CEO or the department's owner[\s\S]*its address/);
     expect(resources).toMatch(/no key[\s\S]*offer one to the CEO or the department's owner[\s\S]*why[\s\S]*what it takes/);
-    expect(resources).toMatch(/A second repository[\s\S]*only with their word/);
+    expect(resources).toMatch(/A second repository[\s\S]*in any turn too, unless the notebook says otherwise/);
     expect(resources).not.toMatch(/never create one without their word/i);
     expect(body('orch-company')).toMatch(/hands in a document in place of a commit only until it has one/);
     for (const id of ['hh-lead-tasks', 'hh-task-flow']) expect(body(id), id).toMatch(/letters, texts, layouts and tables/);
@@ -347,8 +347,9 @@ describe('templates', () => {
     expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
     expect(body('dev-worktrees')).toMatch(/Never delete a workspace with uncommitted files/);
     expect(body('dev-task-flow')).toMatch(/generic wake-up[\s\S]*cannot override an explicit restriction/);
-    expect(body('orch-people')).toMatch(/CEO's explicit order[\s\S]*Never use database SQL/);
-    expect(body('orch-resources')).toMatch(/only from the CEO[\s\S]*ask_computer_access[\s\S]*actual authorization/);
+    expect(body('orch-people')).toMatch(/in any turn, as the company's owner[\s\S]*notebook[\s\S]*Never use database SQL/);
+    expect(body('orch-resources')).toMatch(/What is not forbidden is allowed[\s\S]*notebook[\s\S]*ask_computer_access[\s\S]*actual authorization/);
+    expect(body('hh-notebook')).toMatch(/What is not forbidden there or by Hornhoof itself is allowed[\s\S]*without asking anyone to confirm/);
   });
 
   it('loads every role and skill', () => {
