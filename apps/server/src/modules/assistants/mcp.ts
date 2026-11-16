@@ -9,6 +9,7 @@ import { ApiError, refusal } from '../../errors.js';
 import { lastSeqOf } from './events.js';
 import { tellOwner } from './replies.js';
 import { callSkill, hasSkills } from './skills.js';
+import { registerVaultTools } from '../vault/tools.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, writeFor } from './routes.js';
 
 /* What the program's model reads first: what Hornhoof is to it, and how the tools go together. */
@@ -105,11 +106,13 @@ function registerTools(server: McpServer, ctx: Ctx, actor: () => Promise<Person>
 
 /* What an assistant's own agent works with: its owner's assistant tools, the program's skills, and words for its owner's
    chat with the program. called: the tool this request calls, if it calls one. */
-export async function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string }, called: string | null): Promise<McpServer> {
+export async function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: string; companyId: string }, called: string | null): Promise<McpServer> {
   let actor: Promise<Person> | undefined;
   const owner = () => (actor ??= assistantOfAgent(ctx.db, job.agentId));
   const server = new McpServer({ name: 'hornhoof', version: ctx.config.version });
   registerTools(server, ctx, owner, new AbortController().signal, job.agentId);
+  /* The company's vault, as for every agent of the company: the assistant's own agent, in this turn. */
+  registerVaultTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   server.registerTool(
     'tell_owner',
     {

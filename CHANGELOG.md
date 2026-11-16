@@ -27,6 +27,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `failures` shows `next` for each blocked task, taken from its holder's last report.
 - Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
 
 ### Changed
 
