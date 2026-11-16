@@ -529,11 +529,10 @@ export class CopyMaker {
        enabled again would stop on the first row of that table, so it is not, and the next attempt loads the schema the
        leader has now. */
     if (!elsewhere && (await this.otherSchema(sql, order))) return this.schemaChanged();
-    const tables = await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [sub.oid]);
-    this.moves(sub.oid, tables?.ready ?? 0);
+    const tables = await this.tables(sql, sub.oid);
     const stopped = await this.stoppedFor(sql, sub);
     if (elsewhere ? elsewhere.moved : order?.slot === 'lost' || stopped >= ENABLE_FOR_MS) return this.giveUp();
-    if (tables && tables.total > 0 && tables.ready === tables.total) {
+    if (tables.total > 0 && tables.ready === tables.total) {
       this.keep({ phase: 'ready', given: 0 });
       return this.ready(sql, order);
     }
@@ -541,6 +540,14 @@ export class CopyMaker {
     const progress = order?.leaderSize ? Math.min(99, Math.floor((size * 100) / order.leaderSize)) : 0;
     /* While it is made again, the copy that is read says how far it reaches. */
     this.said = this.making(progress, this.kept.old ? await this.oldPulse() : null);
+  }
+
+  /* How many tables the subscription takes, and how many of them got through their first copy; each look counts
+     toward whether the copy moves. */
+  private async tables(sql: Sql, oid: number): Promise<{ total: number; ready: number }> {
+    const tables = (await this.one<{ total: number; ready: number }>(sql, `SELECT count(*)::int AS total, (count(*) FILTER (WHERE srsubstate = 'r'))::int AS ready FROM pg_subscription_rel WHERE srsubid = $1::oid`, [oid])) ?? { total: 0, ready: 0 };
+    this.moves(oid, tables.ready);
+    return tables;
   }
 
   /* A cut of the link stops a subscription whose tables' first copies are under way, as any error of theirs does, and

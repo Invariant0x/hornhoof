@@ -21,6 +21,9 @@ export function keepSize(diskFree: number): number {
 type Slot = { name: string; active: boolean; pid: number | null; copying: boolean };
 type Copy = { networkId: string; copyName: string | null };
 
+/* Whether somebody reads the slot now: the connection that holds it, or the one that sends a table's rows for it. */
+const read = (slot: Slot): boolean => slot.active || slot.copying;
+
 /* Whether a copy's slot is nobody's any more: no live machine that holds the data has that id, or the machine has
    named a later attempt since. A slot of a later attempt than the machine named waits for its next report. */
 function stale(name: string, copies: Copy[]): boolean {
@@ -40,7 +43,6 @@ export async function sweepSlots(sql: Sql, log: (line: string) => void, inactive
       'SELECT s.slot_name::text AS name, s.active, s.active_pid AS pid, EXISTS (SELECT FROM pg_stat_replication r WHERE r.application_name = s.slot_name::text) AS copying FROM pg_replication_slots s',
     )
   ).rows;
-  const read = (slot: Slot): boolean => slot.active || slot.copying;
   const copies = (await sql.query<Copy>(`SELECT network_id AS "networkId", copy_name AS "copyName" FROM public.machines WHERE role = 'data' AND revoked_at IS NULL AND network_id IS NOT NULL`)).rows;
   for (const name of inactiveSince.keys()) if (!slots.some(slot => slot.name === name && !read(slot))) inactiveSince.delete(name);
   const dropped: string[] = [];
