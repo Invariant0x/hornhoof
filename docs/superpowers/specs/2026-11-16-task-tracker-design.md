@@ -134,7 +134,7 @@ Extend, do not duplicate:
 - `GET /api/tasks` and the task detail carry the new fields, the time facts, and "needed for" (the reverse of `after`, computed).
 - `POST /api/tasks` takes `goalId`, `responsiblePersonId`, `why`, `dueAt`, `parentId` (a person adds a subtask; it goes to the head as tasks from people do today), and `pipelineId` with an optional `pipelineStageId` (section 5).
 - New `PATCH /api/tasks/:id`: `title`, `brief`, `why`, `goalId`, `responsiblePersonId`, `dueAt`, `pipelineId`, `pipelineStageId`, with `version`. Allowed by `actsOnTask`. Executor, status, parent and route are not editable here.
-- New `PUT /api/tasks/:id/after`: people set what a task waits for, through the engine's checks.
+- What a task waits for (`after`) stays with the agents, who set it through their tools; the card shows it and "needed for" read-only. People get no route of their own for it: nothing on the screen would call one.
 - New `goals` routes: list (with progress), create, edit, set status. Company goals: the CEO and delegates; department goals: whoever reaches the department.
 - New `pipelines` routes: list with stages, create, edit, archive.
 - Every write lands in the history and goes out on the existing live channel.

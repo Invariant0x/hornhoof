@@ -929,24 +929,6 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   return { task: row, wakes };
 }
 
-/* A person sets what a task comes after, through the checks a head's change goes through: no circle, nothing above or under
-   it, and a word on what of it can go on meanwhile. Its holder hears of it once it no longer waits. */
-export async function setAfter(ctx: Ctx, actor: Actor, taskId: string, change: Pick<TaskChange, 'after' | 'independentNone'> & { after: string[] }, version: number): Promise<Moved> {
-  const task = await loadTask(ctx.db, taskId);
-  stillOpen(task);
-  if (task.version !== version) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
-  const route = await routeOf(ctx.db, task);
-  const set: Partial<Task> = {};
-  await changePrerequisites(ctx, task, route, change, set);
-  const { declaration } = await prepareIndependentChange(ctx, task, change);
-  const wakes: Wake[] = [];
-  const row = await move(ctx, task, set, { kind: 'updated', actor, data: { fields: ['after'], ...independentData(declaration) } }, async (tx, row) => {
-    await rebindAfter(tx, row, await checkAfter(tx, task.companyId, change.after), undefined, actor);
-    await wakeUpdatedHolder(tx, task, row, set, row.assigneeAgentId, wakes);
-  }, wakes);
-  return { task: row, wakes };
-}
-
 function copyChangedFields(change: TaskChange, set: Partial<Task>): void {
   for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) if (change[key] !== undefined) Object.assign(set, { [key]: change[key] });
 }

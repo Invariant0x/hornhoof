@@ -15,7 +15,7 @@ import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
-import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, setAfter, taskSpot, type Task } from './engine.js';
+import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { editTask } from '../tracker/edit.js';
 import { mayPlan, placeOwner } from '../tracker/responsible.js';
 import { setUrgent } from './urgency.js';
@@ -71,7 +71,6 @@ const TaskPatch = z.strictObject({
   pipeline: z.uuid().nullable().optional(),
   stage: z.uuid().nullable().optional(),
 });
-const AfterBody = z.strictObject({ after: z.array(z.number().int().positive()).max(10), independentNone: z.string().trim().min(1).max(2000).optional(), version: z.number().int().min(0) });
 const dateOf = (iso: string | null | undefined) => (iso === undefined ? undefined : iso === null ? null : new Date(iso));
 /* A promise of dates named by the task's number: one for a task it does not come after is refused with the rest of the change. */
 const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: Task[]) =>
@@ -376,21 +375,6 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       title: body.title, brief: body.brief, why: body.why, goalId: body.goal, responsiblePersonId: body.responsible, dueAt: dateOf(body.due), pipelineId: body.pipeline, pipelineStageId: body.stage,
     }, body.version);
     return { task: await detail(me, row) };
-  });
-
-  /* What a task comes after, by number, of the tasks this person sees. */
-  app.put('/api/tasks/:id/after', async req => {
-    const me = await requirePerson(req, db);
-    const { id } = IdParams.parse(req.params);
-    const body = AfterBody.parse(req.body);
-    const task = await changed(me, id);
-    const viewer = await viewerOf(db, me);
-    const after = body.after.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
-    const missing = body.after.find(n => !after.some(t => t.number === n));
-    if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
-    const moved = await setAfter(ctx, actorOf(me), task.id, { after: body.after.map(n => after.find(t => t.number === n)!.id), independentNone: body.independentNone }, body.version);
-    await wakeAll(ctx, moved.wakes);
-    return { task: await detail(me, moved.task) };
   });
 
   /* A page of a list of waits: how much of it, and from where. */

@@ -51,9 +51,9 @@ and a map. Every department gets a product manager who keeps its work clear for 
   company goals; a product manager tidies a task of its own department with `tidy_task`. `create_task`, `add_tasks` and
   `update_task` take a goal, the person who answers, why, date, pipeline and stage; a change of only these wakes nobody.
 - People's routes: `GET/POST/PATCH /api/goals`, `PUT /api/goals/:id/status`, `GET/POST/PATCH /api/pipelines` and
-  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` on the task's version, `PUT /api/tasks/:id/after`, and
-  `GET /api/tasks?responsible=`. `POST /api/tasks` takes `parent`, and work under a task goes to the head of its
-  department.
+  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` on the task's version, and `GET /api/tasks?responsible=`.
+  `POST /api/tasks` takes `parent`, and work under a task goes to the head of its department. What a task waits for is
+  still set by the agents through their tools; the card shows it.
 
 ### Changed
 
@@ -99,8 +99,9 @@ and a map. Every department gets a product manager who keeps its work clear for 
   продакт-менеджер приводит в порядок задачу своего отдела через `tidy_task`. `create_task`, `add_tasks` и
   `update_task` принимают цель, ответственного, зачем, срок, конвейер и этап; смена только этого никого не будит.
 - Маршруты для людей: `GET/POST/PATCH /api/goals`, `PUT /api/goals/:id/status`, `GET/POST/PATCH /api/pipelines` и
-  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` по версии задачи, `PUT /api/tasks/:id/after` и
-  `GET /api/tasks?responsible=`. `POST /api/tasks` принимает `parent`, и работа под задачей идет руководителю ее отдела.
+  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` по версии задачи и `GET /api/tasks?responsible=`.
+  `POST /api/tasks` принимает `parent`, и работа под задачей идет руководителю ее отдела. Чего ждет задача, по-прежнему
+  задают агенты своими инструментами, карточка это показывает.
 - Старой доски вкладки "Задачи", трех ее видов и плиток сверху больше нет. Своего списка задач у отдела тоже больше нет:
   его кнопка "Задачи отдела" открывает трекер на этом отделе.
 

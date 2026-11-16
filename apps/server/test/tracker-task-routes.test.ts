@@ -86,16 +86,12 @@ describe('a person edits what the tracker keeps of a task', () => {
     expect(executor.statusCode).toBe(400);
   });
 
-  it('sets what a task waits for through the engine checks', async () => {
-    const { ceo, send, get, work } = await company();
+  it('leaves what a task comes after to the agents and their tools: a person has no route to set it', async () => {
+    const { ceo, send, work } = await company();
     const { task: first } = await work('Prices');
     const { task: second } = await work('Checkout');
     const set = await send('PUT', ceo, `/api/tasks/${second.id}/after`, { after: [first.number], independentNone: 'The checkout shows the prices.', version: second.version });
-    expect(set.statusCode, set.body).toBe(200);
-    expect((await get(ceo, `/api/tasks/${second.id}`)).json().task.after.map((a: { number: number }) => a.number)).toEqual([first.number]);
-    expect((await get(ceo, `/api/tasks/${first.id}`)).json().task.neededFor.map((a: { number: number }) => a.number)).toEqual([second.number]);
-    const circle = await send('PUT', ceo, `/api/tasks/${first.id}/after`, { after: [second.number], independentNone: 'Loop.', version: first.version });
-    expect([circle.statusCode, circle.json().error.message]).toEqual([400, '#1 would wait for itself through what it comes after.']);
+    expect(set.statusCode).toBe(404);
   });
 
   it('names in each line of the list both who holds the task now and who does its work', async () => {
