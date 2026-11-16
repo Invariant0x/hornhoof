@@ -62,7 +62,7 @@ function registerTools(server: McpServer, ctx: Ctx, actor: () => Promise<Person>
         if (self && (!args.agentId || args.agentId === self)) throw new ApiError(400, 'validation', 'This is your own conversation: name an agent from list_agents.');
         const me = await actor();
         const next = await lastSeqOf(ctx.db, me.assistant!.id);
-        return { ...(await writeFor(ctx, me, args)), next };
+        return { ...(await writeFor(ctx, me, args, self)), next };
       }),
   );
   server.registerTool(

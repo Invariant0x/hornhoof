@@ -14,8 +14,8 @@ async function lastSeq(ctx: Pick<Ctx, 'db'>, agentId: string): Promise<number> {
 
 /* The assistant's words to an agent, as its owner's, through the same way a person's words from the window go. What the
    agent says from that message on, in the turn it went into, is collected for the assistant. fresh: the program's whole
-   conversation, for its own agent. Returns the message's id. */
-export async function sendForOwner(ctx: Ctx, me: Person, agent: AgentRow, text: string, fresh?: string): Promise<string> {
+   conversation, for its own agent. byOwnAgent names the sender, not the answering agent. Returns the message's id. */
+export async function sendForOwner(ctx: Ctx, me: Person, agent: AgentRow, text: string, fresh?: string, byOwnAgent = false): Promise<string> {
   const messageId = randomUUID();
   const before = await lastSeq(ctx, agent.id);
   const jobId = await writeToAgent(ctx, me, agent, { text, pictures: [], assistant: { message: messageId, own: agent.kind === 'assistant', ...(fresh ? { fresh } : {}) } });
@@ -25,7 +25,7 @@ export async function sendForOwner(ctx: Ctx, me: Person, agent: AgentRow, text: 
     .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->'assistant'->>'message' = ${messageId}`))
     .orderBy(desc(agentEvents.seq))
     .limit(1);
-  await ctx.db.insert(assistantReplies).values({ companyId: me.companyId, assistantId: me.assistant!.id, agentId: agent.id, messageId, jobId, afterSeq: said?.seq ?? before });
+  await ctx.db.insert(assistantReplies).values({ companyId: me.companyId, assistantId: me.assistant!.id, agentId: agent.id, messageId, jobId, byOwnAgent, afterSeq: said?.seq ?? before });
   ctx.assistants.collect(me.companyId);
   return messageId;
 }

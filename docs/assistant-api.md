@@ -170,7 +170,7 @@ The kinds of event and their `data`:
 | `request` | `{ request }` | A request now waits for the owner. `request` is as in `GET /api/assistant/requests`. |
 | `request_closed` | `{ requestId, status }` | The request waits for the owner no more: it was answered, here or in Hornhoof, withdrawn, or no longer the owner's. `status` is the request's status now: `open`, `answered`, `approved`, `declined`, `withdrawn` or `resolved_internal`. |
 
-`byOwnAgent` is true when the assistant's own agent sent the original message through `send_message`, and false when the assistant program sent it through HTTP or MCP. It names the sender of the original message, not the agent answering it. The value stays the same in every `reply` and the `reply_end` for that message, including after a restart or continued turn. A direct `tell_owner` reply has `byOwnAgent: true`.
+`byOwnAgent` is true when the assistant's own agent sent the original message through `send_message`, and false when the assistant program sent it through HTTP or MCP. It names the sender of the original message, not the agent answering it. The value stays the same in every `reply` and the `reply_end` for that message, including after a restart or continued turn. A direct `tell_owner` reply has `byOwnAgent: true`. Events kept before contract 3 retain their earlier data; old events are not rewritten. Pending answers started before the update use false.
 
 `messageId` is `null` in a `reply` only when it holds words the assistant's own agent (`data.agent.id` is the `agentId` of `GET /api/assistant/me`) sends its owner on its own, with `tell_owner`, and answers no message of the program. No `reply_end` follows it. Show every such reply to the owner as it is, and never send it back to the agent as a message.
 

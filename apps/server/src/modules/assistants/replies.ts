@@ -28,7 +28,7 @@ async function passOn(ctx: Ctx, row: ReplyRow, told: Told): Promise<boolean> {
   if (!said.length) return row.answered;
   const agent = await agentOf(ctx, row.agentId);
   for (const words of said) {
-    const data = { messageId: row.messageId, agent, text: textOf(words.data) };
+    const data = { messageId: row.messageId, agent, byOwnAgent: row.byOwnAgent, text: textOf(words.data) };
     const seq = await storeEvent(ctx.db, { companyId: row.companyId, assistantId: row.assistantId, kind: 'reply', data }, async tx => {
       await tx.update(assistantReplies).set({ afterSeq: words.seq, answered: true }).where(eq(assistantReplies.id, row.id));
     });
@@ -56,7 +56,7 @@ async function collectOne(ctx: Ctx, row: ReplyRow, told: Told, graceMs: number, 
     if (!row.endedAt) await ctx.db.update(assistantReplies).set({ endedAt: ended }).where(eq(assistantReplies.id, row.id));
     return left;
   }
-  const data = { messageId: row.messageId, agent: await agentOf(ctx, row.agentId), answered, failed: job?.status === 'failed' };
+  const data = { messageId: row.messageId, agent: await agentOf(ctx, row.agentId), byOwnAgent: row.byOwnAgent, answered, failed: job?.status === 'failed' };
   const seq = await storeEvent(ctx.db, { companyId: row.companyId, assistantId: row.assistantId, kind: 'reply_end', data }, async tx => {
     await tx.delete(assistantReplies).where(eq(assistantReplies.id, row.id));
   });
@@ -68,7 +68,7 @@ async function collectOne(ctx: Ctx, row: ReplyRow, told: Told, graceMs: number, 
    no message of the program that it answers, and no end. The program passes on every such reply, so nothing else keeps one:
    a reply to a message always names it. */
 export async function tellOwner(ctx: Ctx, to: { companyId: string; assistantId: string }, agentId: string, text: string, told: Told): Promise<void> {
-  const data = { messageId: null, agent: await agentOf(ctx, agentId), text };
+  const data = { messageId: null, agent: await agentOf(ctx, agentId), byOwnAgent: true, text };
   told(to.assistantId, await storeEvent(ctx.db, { ...to, kind: 'reply', data }), 'reply', true);
 }
 
