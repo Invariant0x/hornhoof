@@ -424,7 +424,9 @@ describe('rows a test was still making when it ended', { shuffle: false }, () =>
 
   it('do not hold up the end of a test that left the clock not real', async () => {
     /* Hooks run last first: the clock is real again only after the wait for rows. */
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const db = await createTestDb();
     await acme(db);
     vi.useFakeTimers();
