@@ -238,9 +238,9 @@ describe('AgentWindow', () => {
     expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
-  it('says that turns wait while the machine is low on free memory, and he can still be written to', async () => {
+  it('says that turns wait while the machine is busy, and he can still be written to', async () => {
     open({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, memoryWait: true } }] });
-    expect(await screen.findByText('The machine is low on free memory. Turns wait to start and go on by themselves once memory frees up. Nothing that already runs there is stopped.')).toBeInTheDocument();
+    expect(await screen.findByText('The machine is busy: it is low on free memory or its processors are loaded. Turns wait and go on by themselves, one by one, once it has room. Nothing that already runs there is stopped.')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
