@@ -453,7 +453,7 @@ export type StreamMessage =
   | { type: 'backlog'; spot: { departmentId: string | null } }
   | { type: 'context'; agentId: string; used: number }
   /* A plan's owner finished or gave up a sign-in on one of its machines; only the owner hears it. */
-  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code?: number | null; line?: string | null; owner: string };
 
 export type TaskStatus = 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker' | 'assistant'; role: Lang | null };

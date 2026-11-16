@@ -422,7 +422,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'login.done':
-      if (id.kind === 'node') await signedIn(ctx, id.nodeId, msg.ok, msg.error);
+      if (id.kind === 'node') await signedIn(ctx, id.nodeId, msg.ok, msg.error, { code: msg.code ?? null, line: msg.line ?? null });
       return;
     case 'load': {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node load

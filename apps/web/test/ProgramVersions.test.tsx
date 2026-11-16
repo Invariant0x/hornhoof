@@ -25,6 +25,22 @@ describe('program versions on a machine', () => {
     expect(screen.getByRole('button')).toBeDisabled();
   });
 
+  const REASON = 'Error: claude native binary not installed. Either postinstall did not run ... or the platform-native optional dependency was not downloaded (--omit=optional)';
+  it.each([
+    ['en', 'Installed only in part, installing it again.', 'It does not start, even installed again:', 'It does not start, even installed again.'],
+    ['ru', 'Установлена не полностью, ставим заново.', 'Не запускается, даже установленная заново:', 'Не запускается, даже установленная заново.'],
+  ])('says a program is installed again, or why it still does not start, in %s, and never that it needs a sign-in', (language, reinstalling, broken, brokenBare) => {
+    localStorage.setItem('hh-lang', language);
+    render(<LanguageProvider><ProgramVersions {...defaults} programs={[
+      { ...claude, repair: 'reinstalling' }, { id: 'codex', version: '3.0.0', updating: false, failed: true, repair: 'broken', reason: REASON },
+      { id: 'kimi', version: null, updating: false, failed: false, repair: 'broken' },
+    ]} /></LanguageProvider>);
+    expect(screen.getByText(reinstalling)).toBeInTheDocument();
+    expect(screen.getByText(`${broken} ${REASON}`)).toBeInTheDocument();
+    expect(screen.getByText(brokenBare)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in|войти|вход/i)).toBeNull();
+  });
+
   it.each(['machine-1', 'builtin'])('requests %s once while waiting and refreshes the card after the response', async id => {
     let release!: () => void;
     const pending = new Promise<void>(resolve => { release = resolve; });

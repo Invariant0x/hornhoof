@@ -888,6 +888,8 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ask span { flex: 1 1 280px; }
 .test { display: grid; gap: 6px; }
+/* A sign-in's reason holds what its program said, which may be one long word, such as a path. */
+.test.failed { overflow-wrap: anywhere; }
 .test.ok { color: var(--ok); }
 .test details summary { cursor: pointer; color: var(--cyan-ink); }
 .test pre { margin: 6px 0 0; padding: 10px; max-height: 240px; overflow: auto; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); }

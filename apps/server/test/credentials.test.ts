@@ -463,7 +463,7 @@ describe('signing a plan in from Hornhoof', () => {
     expect(seal).toMatchObject({ kind: 'claude_token', version: 1 });
     expect(seal.recipients.map(r => r.nodeId).sort()).toEqual([a.nodeId, b.nodeId].sort());
     await until(() => stream.messages.some(m => m.type === 'subscription.signin'));
-    expect(stream.messages.find(m => m.type === 'subscription.signin')).toEqual({ type: 'subscription.signin', subscriptionId: plan, nodeId: a.nodeId, ok: true, error: null, owner: expect.any(String) });
+    expect(stream.messages.find(m => m.type === 'subscription.signin')).toEqual({ type: 'subscription.signin', subscriptionId: plan, nodeId: a.nodeId, ok: true, error: null, code: null, line: null, owner: expect.any(String) });
     na.send({ type: 'status', loggedIn: true, limits: null });
     await until(async () => (await db.select({ s: subscriptions.status }).from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.s === 'ready');
   });
@@ -479,6 +479,16 @@ describe('signing a plan in from Hornhoof', () => {
     /* The CEO sees the plan's state change, not its sign-in. */
     await until(() => ceoStream.messages.some(m => m.type === 'org'));
     expect(ceoStream.messages.some(m => m.type === 'subscription.signin')).toBe(false);
+  });
+
+  it('tells the owner the code and the last line of a sign-in that ended early', async () => {
+    const { app, oleg, o, online } = await plans();
+    const olegStream = await openStream(app, oleg);
+    const no = await online(o, KEY('o'), false);
+    const line = 'Error: claude native binary not installed.';
+    no.send({ type: 'login.done', ok: false, error: 'The sign-in ended before it finished, so nothing changed.', code: 1, line });
+    await until(() => olegStream.messages.some(m => m.type === 'subscription.signin'));
+    expect(olegStream.messages.find(m => m.type === 'subscription.signin')).toMatchObject({ ok: false, code: 1, line });
   });
 
   it('gives the Codex plan to the machine it was signed in on', async () => {
