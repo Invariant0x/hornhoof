@@ -5,6 +5,51 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.29.2] - 2026-11-16
+
+The orchestrator does everything in the company in any turn, as its owner, and limits a company wants are written in
+its notebook: what is not forbidden is allowed. It also connects one more mail account to a channel with the settings of
+an account the company has, so no password passes through it.
+
+### Changed
+
+- The orchestrator took a decision only for the person its turn answered: after an employee's message, a notice of
+  Hornhoof or a person who runs one department, it could not write to the database, change people, resources, cards,
+  approvals, wait dates or channels, and asked for a confirmation instead. Now it goes as the CEO or the CEO delegate who
+  wrote into its turn, or else as the company's owner, whoever asked. Machines keep their own rule: a command runs only
+  where the machine's owner opened it. A department's head is unchanged. Known limits: a decision the orchestrator takes
+  as the owner names the owner in the task's log, not the person or employee who asked; only a company with no active
+  owner still waits for the CEO's word.
+- The skills of the orchestrator and the notebook say so: limits are written in the company's notebook, and the rest is
+  done without asking anyone to confirm it.
+
+### Added
+
+- outbound_account_add connects one more mail account to a channel with the settings of an account the company already
+  has, sending from its own address, like kate@ next to hello@; the settings go from one account to the other inside
+  Hornhoof and never through a model. outbound_account_bind makes an employee the one who writes from an account. Both
+  are the orchestrator's; a new password or another server a person still gives on the channel's screen.
+
+### Russian
+
+Оркестратор делает в компании все в любом ходе, как ее владелец, а ограничения компания пишет в своем блокноте: что не
+запрещено, то разрешено. Еще он подключает к каналу рассылки новый почтовый ящик с настройками ящика, который у
+компании уже есть, и пароль через него не проходит.
+
+- Оркестратор принимал решение только за того человека, кому отвечал его ход: после сообщения сотрудника, уведомления
+  Hornhoof или человека, который ведет один отдел, он не мог писать в базу, менять людей, ресурсы, карточки, правила
+  согласований, сроки ожидания и каналы и вместо этого просил подтверждения. Теперь он действует как CEO или
+  заместитель CEO, если тот писал в ход, а иначе как владелец компании, кто бы ни попросил. У машин свое правило:
+  команда идет только там, где владелец машины ее открыл. Руководители отделов работают как раньше. Известные пределы:
+  в журнале задачи решение, принятое как владелец, записано за владельцем, а не за тем, кто попросил; только компания
+  без действующего владельца по-прежнему ждет слова CEO.
+- Навыки оркестратора и блокнота говорят то же: ограничения записаны в блокноте компании, остальное делается без
+  просьб о подтверждении.
+- outbound_account_add подключает к каналу еще один почтовый ящик с настройками ящика, который у компании уже есть, со
+  своим адресом отправителя, например kate@ рядом с hello@; настройки переходят из ящика в ящик внутри Hornhoof и не
+  проходят через модель. outbound_account_bind назначает сотрудника, который пишет с ящика. Оба инструмента у
+  оркестратора; новый пароль или другой сервер по-прежнему вводит человек на экране канала.
+
 ## [0.29.1] - 2026-11-16
 
 A program no longer closes under a turn it has just begun, an update that waits for the agents no longer stops the
