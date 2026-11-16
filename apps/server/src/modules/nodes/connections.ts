@@ -15,7 +15,8 @@ const ERROR_CHARS = 300;
 
 const CONNECTED = 'A node connected.';
 const DISCONNECTED = 'A node lost its connection.';
-/* The built-in node has no machine of its own, so its connections go only to the log. */
+/* The built-in node of a server with no machine id, or of a machine no company has, has no machine to go with: its
+   connections go only to the log. */
 const BUILTIN_NAMES = { machine: 'built-in', node: 'builtin' };
 
 type Writes = Pick<Ctx, 'db' | 'log'>;
@@ -29,34 +30,46 @@ const ADDRESS = /([a-z][a-z0-9+.-]*:\/\/)(?:[^\s/?#]*@)?([^\s?#]*)(?:[?#]\S*?)?(
    a short text, 123 bytes of a close reason and 300 characters from a node, so the search stays cheap. */
 const oneLine = (text: string | null, limit: number) => (text === null ? null : text.replace(ADDRESS, '$1$2').replace(/\p{Cc}/gu, ' ').slice(0, limit));
 
-async function nodeOn(db: Db, nodeId: string) {
-  const [node] = await db
-    .select({ companyId: nodes.companyId, machineId: nodes.machineId, hostname: machines.hostname })
-    .from(nodes)
-    .innerJoin(machines, eq(machines.id, nodes.machineId))
-    .where(eq(nodes.id, nodeId));
-  return node ?? null;
+/* Where a node's connections go: a node's on its machine; a built-in node's on the machine whose network id it runs under,
+   with no node of its own (#1060). None for a node that is gone, or a built-in node with no machine of a company. */
+type Place = { companyId: string; machineId: string; nodeId: string | null; hostname: string };
+
+async function placeOf(db: Db, id: NodeIdentity): Promise<Place | null> {
+  if (id.kind === 'node') {
+    const [node] = await db
+      .select({ companyId: nodes.companyId, machineId: nodes.machineId, hostname: machines.hostname })
+      .from(nodes)
+      .innerJoin(machines, eq(machines.id, nodes.machineId))
+      .where(eq(nodes.id, id.nodeId));
+    return node ? { ...node, nodeId: id.nodeId } : null;
+  }
+  const [machine] = await db
+    .select({ companyId: machines.companyId, machineId: machines.id, hostname: machines.hostname })
+    .from(machines)
+    .where(and(eq(machines.networkId, id.machine), isNull(machines.revokedAt)));
+  return machine ? { ...machine, nodeId: null } : null;
 }
 
+const connectionsOf = (place: Place) => (place.nodeId ? eq(nodeConnections.nodeId, place.nodeId) : and(eq(nodeConnections.machineId, place.machineId), isNull(nodeConnections.nodeId)));
+const namesOf = (place: Place) => ({ machine: place.hostname, node: place.nodeId ?? BUILTIN_NAMES.node });
+
 export async function nodeConnected(ctx: Writes, id: NodeIdentity, link: string, at: Date): Promise<void> {
-  if (id.kind !== 'node') return void ctx.log.info({ ...BUILTIN_NAMES, offlineMs: null }, CONNECTED);
-  const node = await nodeOn(ctx.db, id.nodeId);
-  if (!node) return;
-  const [before] = await ctx.db.select({ at: nodeConnections.disconnectedAt }).from(nodeConnections).where(eq(nodeConnections.nodeId, id.nodeId)).orderBy(desc(nodeConnections.connectedAt)).limit(1);
-  await ctx.db.insert(nodeConnections).values({ id: link, companyId: node.companyId, machineId: node.machineId, nodeId: id.nodeId, connectedAt: at });
-  ctx.log.info({ machine: node.hostname, node: id.nodeId, offlineMs: before?.at ? at.getTime() - before.at.getTime() : null }, CONNECTED);
+  const place = await placeOf(ctx.db, id);
+  if (!place) return void (id.kind === 'builtin' && ctx.log.info({ ...BUILTIN_NAMES, offlineMs: null }, CONNECTED));
+  const [before] = await ctx.db.select({ at: nodeConnections.disconnectedAt }).from(nodeConnections).where(connectionsOf(place)).orderBy(desc(nodeConnections.connectedAt)).limit(1);
+  await ctx.db.insert(nodeConnections).values({ id: link, companyId: place.companyId, machineId: place.machineId, nodeId: place.nodeId, connectedAt: at });
+  ctx.log.info({ ...namesOf(place), offlineMs: before?.at ? at.getTime() - before.at.getTime() : null }, CONNECTED);
 }
 
 export async function nodeDisconnected(ctx: Writes, id: NodeIdentity, end: LinkEnd): Promise<void> {
   const reason = oneLine(end.reason, REASON_CHARS);
   const error = oneLine(end.error, ERROR_CHARS);
   const line = { cause: end.cause, code: end.code, reason, error };
-  if (id.kind !== 'node') return void ctx.log.info({ ...BUILTIN_NAMES, ...line }, DISCONNECTED);
-  const node = await nodeOn(ctx.db, id.nodeId);
-  if (!node) return;
+  const place = await placeOf(ctx.db, id);
+  if (!place) return void (id.kind === 'builtin' && ctx.log.info({ ...BUILTIN_NAMES, ...line }, DISCONNECTED));
   /* A server stopping has ended it already. */
   await ctx.db.update(nodeConnections).set({ disconnectedAt: end.at, cause: end.cause, closeCode: end.code, closeReason: reason, error }).where(sql`${nodeConnections.id} = ${end.link} and ${nodeConnections.disconnectedAt} is null`);
-  ctx.log.info({ machine: node.hostname, node: id.nodeId, ...line }, DISCONNECTED);
+  ctx.log.info({ ...namesOf(place), ...line }, DISCONNECTED);
 }
 
 /* Whether the node connected again while a turn waited in line for it, between the time the turn was queued and the time it
@@ -79,8 +92,10 @@ export async function waitedForReturn(db: Db, turn: Pick<typeof jobs.$inferSelec
 
 /* What a node says of a drop goes with the connection before its new one, whichever way the server saw that end. */
 export async function nodeReported(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'node.reconnect' }>): Promise<void> {
-  if (id.kind !== 'node' || !(await hasCurrentKey(ctx, id))) return;
-  const [, before] = await ctx.db.select({ id: nodeConnections.id }).from(nodeConnections).where(eq(nodeConnections.nodeId, id.nodeId)).orderBy(desc(nodeConnections.connectedAt)).limit(2);
+  if (!(await hasCurrentKey(ctx, id))) return;
+  const place = await placeOf(ctx.db, id);
+  if (!place) return;
+  const [, before] = await ctx.db.select({ id: nodeConnections.id }).from(nodeConnections).where(connectionsOf(place)).orderBy(desc(nodeConnections.connectedAt)).limit(2);
   if (!before) return;
   const report = NodeReconnect.parse(msg);
   await ctx.db

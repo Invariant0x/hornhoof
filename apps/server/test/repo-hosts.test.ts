@@ -226,30 +226,20 @@ describe('create_repository', () => {
     expect((await deptOf(c, c.sales.id)).repoUrl).toBe('https://github.com/acme/sales.git');
     expect(asked).toHaveLength(1);
 
-    /* Then the department keeps one, and another waits for a person's word. */
+    /* Then the department keeps one, and another goes in a turn of its own too, as the owner. */
     const again = await call(await c.tools(c.orchestrator), { department: c.sales.id, name: 'sales-docs' });
-    expect(again.isError).toBe(true);
-    expect(again.content[0]!.text).toMatch(/keeps a repository already/);
-    expect(asked).toHaveLength(1);
+    expect(again.isError, again.content[0]!.text).toBeFalsy();
+    expect(asked).toHaveLength(2);
   });
 
-  it("creates nothing in a turn of its own for a department that keeps a repository, its own or a product's", async () => {
+  it("creates another one in a turn of its own for a department that keeps a repository, as the owner", async () => {
     const c = await company();
     expect((await saveCompanyKey(c, c.ceoToken, { owner: 'acme', token: COMPANY_KEY })).statusCode).toBe(200);
     await c.db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, c.product.id));
     const asked = github(c);
-
-    for (const department of [c.dev.id, c.product.id]) {
-      const refused = await call(await c.tools(c.orchestrator), { department, name: 'dev' });
-      expect(refused.isError, department).toBe(true);
-      expect(refused.content[0]!.text).toMatch(/keeps a repository already/);
-    }
-    /* Nor in a turn that answers a person who does not set its repositories. */
-    const forSam = await call(await c.tools(c.orchestrator, c.ids.sam), { department: c.dev.id, name: 'dev' });
-    expect(forSam.content[0]!.text).toMatch(/keeps a repository already/);
-    expect(asked).toEqual([]);
-    expect((await c.db.select().from(departments).where(eq(departments.parentId, c.dev.id))).map(d => d.name)).toEqual(['Shop']);
-    expect((await deptOf(c, c.dev.id)).repoUrl).toBeNull();
+    const made = await call(await c.tools(c.orchestrator, c.ids.sam), { department: c.dev.id, name: 'dev' });
+    expect(made.isError, made.content[0]!.text).toBeFalsy();
+    expect(asked).toHaveLength(1);
   });
 
   it("creates any other one for the CEO or the department's owner, in a turn that answers them", async () => {

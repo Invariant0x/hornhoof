@@ -141,14 +141,14 @@ export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { i
 }
 
 /* Agents with a job running right now, of these only when named. employees: of the company's employees alone, as the
-   screens count them; an assistant's own agent works for its owner, not for the company. */
-export async function workingCount(db: Db, companyId: string, among?: string[], employees = false): Promise<number> {
+   screens count them; an assistant's own agent works for its owner, not for the company. apart: jobs left out. */
+export async function workingCount(db: Db, companyId: string, among?: string[], employees = false, apart: string[] = []): Promise<number> {
   if (among?.length === 0) return 0;
   const assistantsOwn = db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant')));
   const [row] = await db
     .select({ n: countDistinct(jobs.agentId) })
     .from(jobs)
-    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), notStep, among ? inArray(jobs.agentId, among) : undefined, employees ? notInArray(jobs.agentId, assistantsOwn) : undefined));
+    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), notStep, among ? inArray(jobs.agentId, among) : undefined, employees ? notInArray(jobs.agentId, assistantsOwn) : undefined, apart.length ? notInArray(jobs.id, apart) : undefined));
   return Number(row?.n ?? 0);
 }
 
