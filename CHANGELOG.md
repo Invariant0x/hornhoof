@@ -24,6 +24,7 @@ A department's messaging is found on its screen, and a busy machine gets its tur
 - The orchestrator and the heads get onto a node whose updater went away before stopping it, within their 3 minutes.
 - program_screen shows a busy employee's program from its running turn, without a false no_program.
 - Four tests of the keeper's lease move fake clocks instead of waiting in real time.
+- The assignment card's browser check loads the page once per test and fits its time on a busy machine.
 
 ## [0.29.2] - 2026-11-16
 
