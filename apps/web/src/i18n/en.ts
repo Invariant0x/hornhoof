@@ -289,14 +289,32 @@ export const en = {
     addedBy: (name: string, when: string) => `Added by ${name}, ${when}.`,
     log: 'History',
     logTitle: (name: string) => `History of ${name}`,
-    logLine: (kind: 'used' | 'created' | 'changed' | 'removed', who: string, task: number | null, target: 'browser' | 'phone' | null, status: string | null) =>
+    logLine: (kind: 'used' | 'created' | 'changed' | 'removed', who: string, task: number | null, target: 'browser' | 'phone' | null, ended: string) =>
       kind === 'used'
-        ? `${who} signed in${target === 'phone' ? ' on a phone' : target === 'browser' ? ' in the browser' : ''}${task !== null ? ` for task #${task}` : ''}: ${status ?? 'sent'}.`
+        ? `${who} used it${target === 'phone' ? ' on a phone' : target === 'browser' ? ' in the browser' : ''}${task !== null ? ` for task #${task}` : ''}. ${ended}`
         : kind === 'created'
           ? `${who} added it.`
           : kind === 'changed'
             ? `${who} changed it.`
             : `${who} removed it.`,
+    /* How a use ended, by the status Hornhoof keeps for it. */
+    ended: {
+      sent: 'Still typing.',
+      filled: 'Typed in.',
+      signed_in: 'Signed in.',
+      field_not_found: 'No sign-in field was found.',
+      wrong_field: 'The field was not one for a password, so nothing was typed.',
+      rejected: 'The site did not take the login or password.',
+      needs_person: 'A person has to go on from here.',
+      robot_check: 'The site asked to prove it is not a robot.',
+      browser_refused: 'The site does not let this browser in.',
+      target_gone: 'The page or the phone session was already closed.',
+      expired: 'It came too late, so nothing was typed.',
+      unsupported: 'That machine cannot type it there.',
+      failed: 'It did not work.',
+      node_offline: 'The machine was offline.',
+      no_answer: 'The machine did not answer in time.',
+    },
     change: 'Change',
     remove: 'Remove',
     removeAsk: (name: string) => `Remove ${name}? Employees can no longer sign in with it.`,

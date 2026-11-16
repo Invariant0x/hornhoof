@@ -156,6 +156,10 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
 const scopeText = (v: ReturnType<typeof useT>['vault'], scope: Scope) =>
   scope.kind === 'department' ? v.keptForDepartment(scope.departmentName) : scope.kind === 'agent' ? v.keptForAgent(scope.agentName) : v.forEveryone;
 
+/* A use's end in words: a status this window does not know yet reads as not working, never as its code. */
+const endedText = (v: ReturnType<typeof useT>['vault'], status: string | null): string =>
+  status === null ? v.ended.sent : Object.hasOwn(v.ended, status) ? v.ended[status as keyof typeof v.ended] : v.ended.failed;
+
 function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine[] | null; onClose(): void }) {
   const t = useT();
   const v = t.vault;
@@ -169,7 +173,7 @@ function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine
         <ul className="outbound-list outbound-entries">
           {lines.map(line => (
             <li key={line.id} className="outbound-entry">
-              <span>{v.logLine(line.kind, line.person?.name ?? line.agent?.name ?? '', line.task?.number ?? null, line.target, line.status)}</span>
+              <span>{v.logLine(line.kind, line.person?.name ?? line.agent?.name ?? '', line.task?.number ?? null, line.target, endedText(v, line.status))}</span>
               <small>{when(line.at)}</small>
             </li>
           ))}

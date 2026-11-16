@@ -131,11 +131,17 @@ describe('the Passwords group of the settings', () => {
   it('shows the history of a sign-in with who used it and for which task', async () => {
     mockApi({
       'GET /api/vault': [200, { entries: [ENTRY] }],
-      'GET /api/vault/v1/log': [200, { log: [{ id: 'l1', kind: 'used', person: null, agent: { id: 'a2', name: 'Nora' }, task: { id: 't', number: 42 }, target: 'browser', status: 'signed_in', at: '2030-01-01T10:00:00.000Z' }] }],
+      'GET /api/vault/v1/log': [200, { log: [
+        { id: 'l1', kind: 'used', person: null, agent: { id: 'a2', name: 'Nora' }, task: { id: 't', number: 42 }, target: 'browser', status: 'signed_in', at: '2030-01-01T10:00:00.000Z' },
+        { id: 'l2', kind: 'used', person: null, agent: { id: 'a2', name: 'Nora' }, task: null, target: 'phone', status: 'node_offline', at: '2030-01-01T09:30:00.000Z' },
+      ] }],
     });
     const user = userEvent.setup();
     open();
     await user.click(await screen.findByRole('button', { name: 'History' }));
-    expect(await screen.findByText('Nora signed in in the browser for task #42: signed_in.')).toBeInTheDocument();
+    /* How each use ended, in words, and no word of signing in where it did not. */
+    expect(await screen.findByText('Nora used it in the browser for task #42. Signed in.')).toBeInTheDocument();
+    expect(screen.getByText('Nora used it on a phone. The machine was offline.')).toBeInTheDocument();
+    expect(screen.queryByText(/signed_in|node_offline/)).toBeNull();
   });
 });
