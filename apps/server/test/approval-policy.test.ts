@@ -203,9 +203,8 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toHaveLength(1);
   });
 
-  it('asks only for a new kind: a kind goes free once approved, however it is typed', async () => {
+  it('defaults to asking only for a new kind: a kind goes free once approved, however it is typed', async () => {
     const c = await company();
-    await c.setRule(c.ceoToken, c.dev.id, 'message', { mode: 'new_kinds' });
     const ask = await bruno(c);
     await ask({ channel: 'message', kind: 'Welcome  email' });
     const [first] = await openRequests(c);
@@ -215,6 +214,18 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toEqual([]);
     await ask({ channel: 'message', kind: 'invoice reminder' });
     expect(await openRequests(c)).toHaveLength(1);
+  });
+
+  it('keeps an explicit every rule asking after a kind was approved', async () => {
+    const c = await company();
+    await c.setRule(c.ceoToken, c.dev.id, 'message', { mode: 'every' });
+    const ask = await bruno(c);
+    await ask({ channel: 'message', kind: 'welcome' });
+    const [first] = await openRequests(c);
+    await answer(c, first!.id, true);
+    await ask({ channel: 'message', kind: 'welcome' });
+    expect(await openRequests(c)).toHaveLength(1);
+    expect(await ruleFor(c, c.dev.id, 'message')).toMatchObject([{ mode: 'every' }]);
   });
 
   it('keeps a declined or waiting kind new: only an approval makes it known', async () => {

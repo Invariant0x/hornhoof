@@ -1280,6 +1280,7 @@ export const en = {
       ownerIs: (name: string) => `Department owner: ${name}.`,
       ownerHint: 'The owner gets this department\'s approvals and decisions first. Everyone given the department runs it in full as well: hires and removes its employees, changes its sub-units and repository and answers its approvals.',
       noCandidates: 'Nobody else has access to this department yet. Give someone access on the People screen, then name them here.',
+      defaultHint: 'By default, messages, prices and publications need no approval, commits need approval every time, and other work asks only for a new kind. Keep restrictions in the department rules or notebook.',
       rulesHint: 'The rules stay as they are when the owner changes. The CEO and the CEO delegate can always answer any approval themselves.',
       mode: 'How it is approved',
       modes: { every: 'Every one to me', new_kinds: 'Only new kinds', within_limits: 'No approval within limits', none: 'No approval' },

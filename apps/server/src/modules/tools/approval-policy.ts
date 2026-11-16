@@ -246,13 +246,13 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
   );
 }
 
-const NO_PERSON = 'This turn answers no person who may change this: the last message in it came from an employee or from Hornhoof. Nothing was changed. Ask the CEO or the CEO delegate, or for a rule the department\'s owner.';
+const NO_PERSON = 'No active owner is available, or input for this turn is still being recorded. Nothing was changed. Check the department owner or the CEO.';
 const NOT_YOURS = 'This department is not yours. Nothing was changed. You set only your own department\'s approvals and wait dates.';
 
 type Change = (url: string, payload: object) => Promise<ReturnType<typeof say>>;
 
-/* A change calls the route the screen calls, as the person whose words the agent's turn answers now, under the input lock, so
-   the route allows it what that person may, and no employee, timer or task can ask for it. */
+/* A change calls the screen's route under the input lock with the agent's current principal: a head's department owner,
+   otherwise the CEO, and the orchestrator's company principal. */
 function changeAsPerson(ctx: Ctx, app: FastifyInstance, job: ToolJob): Change {
   return (url, payload) =>
     withInputLock(ctx, job.agentId, async () => {
@@ -265,7 +265,7 @@ function changeAsPerson(ctx: Ctx, app: FastifyInstance, job: ToolJob): Change {
 }
 
 const ORCHESTRATOR_WHO = 'In any turn: as the CEO or the CEO delegate who wrote to you, or else as the company\'s owner.';
-const HEAD_WHO = 'Only for your own department, and only in a turn that answers a person who runs it or the CEO, as their decision.';
+const HEAD_WHO = 'Only for your own department, in any turn with its named owner\'s rights, or the CEO\'s when it has none. No fresh human message is needed. Follow its rules and notebook.';
 
 /* The tools that set a department's approvals and wait dates; mine says which department the agent may name. */
 function registerPolicyTools(server: McpServer, change: Change, who: string, mine: (department: string) => boolean): void {
@@ -287,7 +287,7 @@ function registerPolicyTools(server: McpServer, change: Change, who: string, min
     {
       description:
         'Sets how long a department gives a kind of wait: after, review, person, run or external, at a stage of a run or at all. ownerMs, headMs, decisionMs: when its owner, its head and then the department\'s owner are told, counted from when the wait began. reviewIntervalMs: how often the head looks at it again after that. ' +
-        'The first one set makes the department strict: from then on a wait of a kind with no dates set and no promise is refused, so set them all that are needed. A question to a person is never refused: it then waits with no dates. Write down only what the person said: there are no standard numbers. ' +
+        'The first one set makes the department strict: from then on a wait of a kind with no dates set and no promise is refused, so set them all that are needed. A question to a person is never refused: it then waits with no dates. Choose within your department rules and authority; never invent a person\'s promise. There are no standard numbers. ' +
         who,
       inputSchema: { department: Department, kind: z.enum(WAIT_SOURCE_KINDS), stage: z.string().trim().max(40).optional(), ownerMs: z.number().int().positive(), headMs: z.number().int().positive(), decisionMs: z.number().int().positive(), reviewIntervalMs: z.number().int().positive() },
     },

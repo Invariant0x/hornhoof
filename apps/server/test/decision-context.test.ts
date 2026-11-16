@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, teams } from '../src/db/schema.js';
-import { ceoPrincipal, decisionPrincipal, machinePrincipal, typedWentIn, withInputLock } from '../src/modules/conversation/decision-context.js';
+import { ceoPrincipal, checkDelegation, decisionPrincipal, machinePrincipal, standingPrincipal, typedWentIn, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { repeatedTurn } from '../src/modules/conversation/turn-words.js';
@@ -647,5 +647,57 @@ describe('management after the turn that answered a person ended', () => {
     for (const name of ['hire', 'build_structure', 'change_employee', 'reset_employee', 'set_team_urgent_only', 'set_repository', 'database']) expect(names, name).not.toContain(name);
     expect((await call(client, 'hire', { department: c.dev.id, people: [{ role: 'DEV-QA' }] })).isError).toBe(true);
     expect(await staffOf(c, c.dev.id)).toEqual(['DEV-BE', 'DEV-HEAD']);
+  });
+});
+
+
+describe("a head's department principal in any turn", () => {
+  async function headTurn(c: Awaited<ReturnType<typeof company>>, agentId = c.hana.id) {
+    const [turn] = await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId, kind: 'conversation', prompt: 'Department work', timeoutMs: 900000, status: 'running' }).returning();
+    return turn!;
+  }
+
+  it('uses the named department owner in both decision and management calls with no human message', async () => {
+    const c = await company();
+    await c.db.update(departments).set({ ownerPersonId: c.ids.dan }).where(eq(departments.id, c.dev.id));
+    const turn = await headTurn(c);
+    for (const find of [decisionPrincipal, standingPrincipal]) expect(await find(c.db, turn.id)).toEqual({ personId: c.ids.dan, sourceSeq: null });
+  });
+
+  it('uses the active CEO if no department owner is named, and never uses a worker as a principal', async () => {
+    const c = await company();
+    const turn = await headTurn(c);
+    expect(await decisionPrincipal(c.db, turn.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
+    const worker = await headTurn(c, c.bruno.id);
+    expect(await decisionPrincipal(c.db, worker.id)).toBeNull();
+    expect(await standingPrincipal(c.db, worker.id)).toBeNull();
+  });
+
+  it('rechecks a changed owner, disabled owner and lost department access instead of keeping old authority', async () => {
+    const c = await company();
+    const turn = await headTurn(c);
+    await c.db.update(departments).set({ ownerPersonId: c.ids.dan }).where(eq(departments.id, c.dev.id));
+    const delegated = { agentId: c.hana.id, jobId: turn.id, personId: c.ids.dan, sourceSeq: null };
+    await checkDelegation(c.db, delegated);
+    await c.db.update(departments).set({ ownerPersonId: c.ids.zed }).where(eq(departments.id, c.dev.id));
+    await expect(checkDelegation(c.db, delegated)).rejects.toMatchObject({ status: 409, reason: 'decision_context_changed' });
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, c.ids.zed));
+    expect(await decisionPrincipal(c.db, turn.id)).toEqual({ personId: c.ids.ivan, sourceSeq: null });
+    await c.db.update(departments).set({ ownerPersonId: c.ids.dan }).where(eq(departments.id, c.dev.id));
+    await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.dan}`, payload: { access: { whole: true } }, ...as(c.tokens.ceo) });
+    await c.db.update(people).set({ scopeKind: 'listed' }).where(eq(people.id, c.ids.dan));
+    await expect(checkDelegation(c.db, delegated)).rejects.toMatchObject({ status: 409, reason: 'decision_context_changed' });
+  });
+
+  it('has no principal with pending input, a stopped turn or no active owner', async () => {
+    const c = await company();
+    const turn = await headTurn(c);
+    await c.db.update(jobs).set({ decisionInputPending: true }).where(eq(jobs.id, turn.id));
+    expect(await decisionPrincipal(c.db, turn.id)).toBeNull();
+    await c.db.update(jobs).set({ decisionInputPending: false, status: 'done' }).where(eq(jobs.id, turn.id));
+    expect(await standingPrincipal(c.db, turn.id)).toBeNull();
+    await c.db.update(jobs).set({ status: 'running' }).where(eq(jobs.id, turn.id));
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, c.ids.ivan));
+    expect(await decisionPrincipal(c.db, turn.id)).toBeNull();
   });
 });

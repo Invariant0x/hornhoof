@@ -295,6 +295,7 @@ export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
   return (
     <div className="appr">
       {view.canSetOwner ? <OwnerPick view={view} path={departmentPath} onChanged={load} /> : <OwnerWords owner={view.owner} />}
+      <p className="muted">{t.defaultHint}</p>
       <p className="muted">{t.rulesHint}</p>
       <div className="appr-rules">
         {view.rules.map(rule => (
