@@ -92,11 +92,11 @@ Who the assistant is, whom it acts for, and what that person is in the company n
     "telegram": { "username": "olga_k", "id": 5550001 }
   },
   "company": { "name": "Acme" },
-  "contract": 2
+  "contract": 3
 }
 ```
 
-* `contract` is the version of this API the server keeps. 2 takes `freshText` and up to 50000 characters of `text` in a message. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
+* `contract` is the version of this API the server keeps. 3 supports attachment downloads with `GET /api/assistant/attachments/:id` and adds `byOwnAgent` to `reply` and `reply_end`. It keeps the message limits of 2: `freshText` and up to 50000 characters of `text`. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
 * `program` is `avaclone`, `openclaw`, `hermes` or `other`.
 * `agentId` is the assistant's own agent, or `null` until its owner picks a plan for it. `agentReady` is true while that agent can answer now: it has a plan, and the plan is ready on a machine that is online. Read it again from time to time, for example every minute, to tell the owner when the agent stops being ready.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
@@ -165,10 +165,12 @@ The kinds of event and their `data`:
 
 | `kind` | `data` | Meaning |
 | --- | --- | --- |
-| `reply` | `{ messageId, agent: { id, name, kind }, text }` | Words of the agent's answer to the assistant's message. A long answer comes as several replies, in order. |
-| `reply_end` | `{ messageId, agent: { id, name, kind }, answered, failed }` | The answer to the message is over. `answered` is false when the agent said nothing; `failed` is true when its turn failed. |
+| `reply` | `{ messageId, agent: { id, name, kind }, byOwnAgent, text }` | Words of the agent's answer to the assistant's message. A long answer comes as several replies, in order. |
+| `reply_end` | `{ messageId, agent: { id, name, kind }, byOwnAgent, answered, failed }` | The answer to the message is over. `answered` is false when the agent said nothing; `failed` is true when its turn failed. |
 | `request` | `{ request }` | A request now waits for the owner. `request` is as in `GET /api/assistant/requests`. |
 | `request_closed` | `{ requestId, status }` | The request waits for the owner no more: it was answered, here or in Hornhoof, withdrawn, or no longer the owner's. `status` is the request's status now: `open`, `answered`, `approved`, `declined`, `withdrawn` or `resolved_internal`. |
+
+`byOwnAgent` is true when the assistant's own agent sent the original message through `send_message`, and false when the assistant program sent it through HTTP or MCP. It names the sender of the original message, not the agent answering it. The value stays the same in every `reply` and the `reply_end` for that message, including after a restart or continued turn. A direct `tell_owner` reply has `byOwnAgent: true`.
 
 `messageId` is `null` in a `reply` only when it holds words the assistant's own agent (`data.agent.id` is the `agentId` of `GET /api/assistant/me`) sends its owner on its own, with `tell_owner`, and answers no message of the program. No `reply_end` follows it. Show every such reply to the owner as it is, and never send it back to the agent as a message.
 
@@ -499,7 +501,7 @@ curl -s -H "$H" "$BASE/api/assistant/events?after=0&wait=50"
 
 curl -s -H "$H" "$BASE/api/assistant/events?after=57&wait=50"
 # {"events":[{"seq":58,"kind":"request","at":"…","data":{"request":{"id":"f19b…","kind":"choice","topic":"task","text":"Which payment provider do we take?","options":["Stripe","PayPal"],"answerable":true,…}}},
-#            {"seq":61,"kind":"reply_end","at":"…","data":{"messageId":"d41e…","agent":{…},"answered":true,"failed":false}}],"next":61}
+#            {"seq":61,"kind":"reply_end","at":"…","data":{"messageId":"d41e…","agent":{…},"byOwnAgent":false,"answered":true,"failed":false}}],"next":61}
 
 # Ava asks Olga in her own chat, and Olga says Stripe.
 curl -s -H "$H" -H 'Content-Type: application/json' -d '{"pick":0}' $BASE/api/assistant/requests/f19b…/answer

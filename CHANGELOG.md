@@ -5,6 +5,16 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## Unreleased
+
+### Changed
+
+- The assistant API reports contract 3, including attachment downloads and `byOwnAgent` in `reply` and `reply_end`: true when the assistant's own agent sent the original message, false for a message from its program.
+
+### Russian
+
+- API ассистента сообщает контракт 3: скачивание вложений и `byOwnAgent` в `reply` и `reply_end`, true для исходного сообщения собственного агента и false для сообщения программы ассистента.
+
 ## [0.29.2] - 2026-11-16
 
 The orchestrator does everything in the company in any turn, as its owner, and limits a company wants are written in
