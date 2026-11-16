@@ -1,16 +1,16 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 import { migrationsThrough } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 
 it('preserves existing company, job, event and attachment data when adding empty operator structures', async () => {
   const previous = await mkdtemp(join(tmpdir(), 'hh-operator-migration-'));
-  const client = new PGlite();
+  const client = await freshPglite();
   onTestFinished(async () => { await client.close(); await rm(previous, { recursive: true, force: true }); });
   await cp(MIGRATIONS, previous, { recursive: true });
   const journalFile = join(previous, 'meta', '_journal.json');
