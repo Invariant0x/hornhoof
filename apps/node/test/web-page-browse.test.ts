@@ -122,6 +122,8 @@ function fakeBrowser(o: FakeOptions = {}) {
     newPage: async () => page,
     on: (event, fn) => { listeners.set(event, [...(listeners.get(event) ?? []), fn]); return context; },
     close: () => { calls.push('close'); return o.close === 'hang' ? new Promise(() => {}) : Promise.resolve(); },
+    addCookies: async cookies => { calls.push(`cookies ${cookies.map(c => `${c.name}@${c.domain}`).join(' ')}`); },
+    addInitScript: async (_fn, arg) => { calls.push(`stored ${arg.origin} ${arg.items.map(i => i.name).join(' ')}`); },
   };
   return {
     calls, launches, reached, started, collecting, launching,
@@ -245,6 +247,31 @@ describe('hh-browse reading one address in a browser on the node', () => {
     expect(result.text).toContain('Pruner costs 18 EUR');
     expect(result.links[0]).toEqual({ text: 'Hand trowel', url: 'https://shop.example/items/1' });
     expect(removed).toEqual(['/tmp/hh-browse-555-old', '/tmp/hh-browse-700-run1']);
+  });
+
+  it('opens the page with a saved sign-in: its cookies and stored values go in before the page, in the browser it was made in', async () => {
+    const { browser, deps } = setUp();
+    const signIn = {
+      session: {
+        cookies: [
+          { name: 'sid', value: 'cookie-value-0123456789', domain: '.shop.example', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' as const },
+          { name: 'pref', value: 'dark', domain: 'shop.example', path: '/', expires: 4_102_444_800, httpOnly: false, secure: true, sameSite: 'Strict' as const },
+        ],
+        origins: [{ origin: 'https://shop.example', localStorage: [{ name: 'token', value: 'stored-value-0123456789' }] }],
+      },
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/140.0',
+    };
+    const result = await browse(asked('https://shop.example/catalogue', { signIn }), deps);
+    expect(result.status).toBe('ok');
+    expect(browser.launches[0]!.options.userAgent).toBe('Mozilla/5.0 (X11; Linux x86_64) Chrome/140.0');
+    expect(browser.calls.slice(0, 3)).toEqual(['cookies sid@.shop.example pref@shop.example', 'stored https://shop.example token', 'goto https://shop.example/catalogue load']);
+  });
+
+  it('opens a public page with no sign-in and the browser as it is', async () => {
+    const { browser, deps } = setUp();
+    await browse(asked('https://shop.example/catalogue'), deps);
+    expect(browser.launches[0]!.options.userAgent).toBeUndefined();
+    expect(browser.calls.filter(call => /^(cookies|stored) /.test(call))).toEqual([]);
   });
 
   it('waits for the requests the page still makes after it loaded before it reads it', async () => {

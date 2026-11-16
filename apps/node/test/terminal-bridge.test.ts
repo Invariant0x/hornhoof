@@ -129,6 +129,18 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(up.seen).toHaveLength(2);
   });
 
+  it("hands on a page hh-browse opens with the agent's saved sign-in, with the turn's token", async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'tok-turn-1');
+    const asked = JSON.stringify({ address: 'https://partner.example/account' });
+    expect((await fetch(`${a.attachUrl}/browse`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer bridge' }, body: asked })).status).toBe(200);
+    expect(up.seen[0]).toMatchObject({ method: 'POST', url: '/api/attachments/browse', auth: 'Bearer tok-turn-1', body: asked });
+  });
+
   it("says when the agent's program has listed its tools during a turn, and gives up after the time it was given", async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});

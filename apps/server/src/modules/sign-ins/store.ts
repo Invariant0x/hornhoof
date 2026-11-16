@@ -58,13 +58,32 @@ export async function removeSignIn(ctx: Ctx, row: SignIn): Promise<void> {
   await ctx.db.delete(savedSignIns).where(eq(savedSignIns.id, row.id));
 }
 
-/* The agent's newest sign-in of the site an address is on, opened: a sign-in kept under accounts.example.com serves a
-   page of example.com too, as its cookies were set for both. */
+/* Whether a browser sends a cookie of that domain to that host: the host itself, or one under it. */
+const cookieFor = (domain: string, host: string): boolean => {
+  const d = domain.replace(/^\./, '').toLowerCase();
+  return d.length > 0 && (host === d || host.endsWith(`.${d}`));
+};
+
+/* Whether a sign-in serves a page: one of its cookies goes to the page's host, as a browser sends it, or the page is of the
+   site it was kept under. A sign-in kept under accounts.example.com with cookies of .example.com serves www.example.com. */
+export function servesPage(site: string, session: SiteSession, address: string): boolean {
+  let host: string;
+  try {
+    host = new URL(address).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return sameSite(site, address) || session.cookies.some(c => cookieFor(c.domain, host));
+}
+
+/* The agent's newest sign-in that serves the page at the address, opened. */
 export async function sessionFor(ctx: Ctx, agentId: string, address: string): Promise<{ row: SignIn; session: SiteSession } | null> {
   if (!siteOf(address)) return null;
-  const row = (await signInsOf(ctx, agentId)).find(r => sameSite(r.site, address));
-  if (!row) return null;
-  return { row, session: SiteSession.parse(JSON.parse(decryptSecret(row.sessionEnc, ctx.config.secret))) };
+  for (const row of await signInsOf(ctx, agentId)) {
+    const session = SiteSession.parse(JSON.parse(decryptSecret(row.sessionEnc, ctx.config.secret)));
+    if (servesPage(row.site, session, address)) return { row, session };
+  }
+  return null;
 }
 
 /* What a person sees of a sign-in: never a value. */

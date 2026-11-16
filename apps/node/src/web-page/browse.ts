@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import type { SignedInPlain } from '@hornhoof/protocol';
 import { checkAddress, vetHost, type Lookup } from './address.js';
 import { afterTwoFrames, collectPage, ROBOT_MARKERS, type PageSample } from './collect.js';
 import { FOLDER_PREFIX, profileOf, reapProfile, sweepStale, type Folders, type ProcessTable } from './processes.js';
@@ -22,7 +23,8 @@ export const realClock: Clock = {
 };
 
 export type Limits = { timeoutMs: number; maxText: number; maxLinks: number; maxBytes: number };
-export type BrowseRequest = { address: string; screenshot: string | null; fullPage: boolean; waitFor: string | null; limits: Limits; signal?: AbortSignal };
+/* signIn: a sign-in saved for the agent, which goes into the browser before the page; only the node's own process gets it. */
+export type BrowseRequest = { address: string; screenshot: string | null; fullPage: boolean; waitFor: string | null; limits: Limits; signal?: AbortSignal; signIn?: SignedInPlain };
 
 /* What hh-browse uses of Playwright's Chromium. */
 export type BrowserRequest = { url(): string; isNavigationRequest(): boolean; frame(): unknown };
@@ -36,11 +38,15 @@ export type BrowserPage = {
   waitForSelector(selector: string, options: { state: 'visible'; timeout: number }): Promise<unknown>;
   screenshot(options: Shot): Promise<Buffer>;
 };
+/* The values a site stored in a browser for one origin, which a page of that origin finds again. */
+export type StoredValues = { origin: string; items: { name: string; value: string }[] };
 export type BrowserContext = {
   pages(): BrowserPage[];
   newPage(): Promise<BrowserPage>;
   on(event: 'request' | 'requestfinished' | 'requestfailed', listener: (request: BrowserRequest) => void): unknown;
   close(): Promise<void>;
+  addCookies(cookies: SignedInPlain['session']['cookies']): Promise<void>;
+  addInitScript(script: (values: StoredValues) => void, values: StoredValues): Promise<void>;
 };
 export type LaunchOptions = {
   headless: true;
@@ -53,6 +59,8 @@ export type LaunchOptions = {
   handleSIGTERM: false;
   handleSIGHUP: false;
   timeout: number;
+  /* The browser a saved sign-in was made in, which the site sees again. */
+  userAgent?: string;
 };
 export type Launcher = { launchPersistentContext(dir: string, options: LaunchOptions): Promise<BrowserContext> };
 
@@ -227,7 +235,26 @@ function launchOptions(call: Call, proxy: Proxy): LaunchOptions {
     handleSIGTERM: false,
     handleSIGHUP: false,
     timeout: call.left(call.settleMs),
+    ...(call.request.signIn?.userAgent ? { userAgent: call.request.signIn.userAgent } : {}),
   };
+}
+
+/* Runs in each page before its own scripts: a page of the origin finds what the site stored there. */
+export function storeValues({ origin, items }: StoredValues): void {
+  if (location.origin !== origin) return;
+  for (const item of items) localStorage.setItem(item.name, item.value);
+}
+
+/* A saved sign-in goes into the browser before the page is opened: its cookies, and the values its site stored. */
+async function signInto(call: Call, context: BrowserContext): Promise<void> {
+  const signIn = call.request.signIn;
+  if (!signIn) return;
+  const { cookies, origins } = signIn.session;
+  const putIn = async () => {
+    if (cookies.length) await context.addCookies(cookies);
+    for (const { origin, localStorage } of origins) if (localStorage.length) await context.addInitScript(storeValues, { origin, items: localStorage });
+  };
+  await must(call, putIn(), call.settle.done, () => lateRead(call), 'The saved sign-in could not go into the browser');
 }
 
 async function launch(call: Call, proxy: Proxy): Promise<BrowserContext> {
@@ -289,6 +316,7 @@ async function readPage(call: Call): Promise<BrowseResult> {
   const { request } = call;
   const proxy = (call.proxy = await startProxy({ lookup: call.deps.lookup, maxBytes: request.limits.maxBytes, credentials: call.credentials, dial: call.deps.dial, listen: call.deps.listen }));
   const context = (call.context = await launch(call, proxy));
+  await signInto(call, context);
   const first = context.pages()[0];
   const page = await must(call, first ? Promise.resolve(first) : context.newPage(), call.settle.done, () => lateRead(call), 'The browser could not open a page');
   const requests = watchRequests(context, page);

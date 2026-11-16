@@ -198,7 +198,7 @@ const ELSEWHERE: Record<string, string> = {
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
 const NO_AGENT_DATA: string[] = [
-  'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/auth/login', 'POST /api/auth/logout',
+  'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/attachments/browse', 'POST /api/auth/login', 'POST /api/auth/logout',
   'POST /api/outbound/accounts', 'POST /api/outbound/accounts/:id/events', 'POST /api/outbound/accounts/:id/bind', 'POST /api/outbound/accounts/:id/release', 'POST /api/outbound/accounts/:id/revoke', 'POST /api/outbound/accounts/:id/rotate', 'POST /api/outbound/attempts/:id/settle', 'GET /api/outbound/channels/:id/accounts',
   'POST /api/outbound/messages', 'GET /api/outbound/messages/:id', 'POST /api/outbound/channels', 'POST /api/outbound/channels/:id/policies', 'POST /api/outbound/channels/:id/stop', 'POST /api/outbound/channels/:id/reopen',
   'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',

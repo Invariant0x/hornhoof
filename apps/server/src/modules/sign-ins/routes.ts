@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { agentFor } from '../agents/find.js';
 import { useSessionStore } from '../vault/fill.js';
+import { signInBrowseRoutes } from './browse.js';
 import { keepVaultSignIn, removeSignIn, signInOf, signInsOf, signInViews } from './store.js';
 
 /* The saved sign-ins on an employee's card: a person who sees the employee reads where it is signed in and revokes a
@@ -15,6 +16,7 @@ const unknownSignIn = () => new ApiError(404, 'not_found', 'This employee has no
 export function signInRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* A site sign-in the vault's browser got is kept for the agent whose turn asked for it. */
   useSessionStore(ctx, keepVaultSignIn);
+  signInBrowseRoutes(app, ctx);
 
   app.get('/api/agents/:id/sign-ins', async req => {
     const { agent } = await agentFor(ctx, req);

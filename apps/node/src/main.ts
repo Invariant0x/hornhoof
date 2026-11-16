@@ -27,6 +27,8 @@ import { holdExact } from './redact.js';
 import { SecretFills } from './secret-fill/index.js';
 import { browserFillAdapter, type FillLauncher } from './secret-fill/browser.js';
 import { systemDeps as browseDeps } from './web-page/cli.js';
+import { browse } from './web-page/browse.js';
+import { openSignedIn, type SignedInDeps } from './web-page/signed-in.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -312,6 +314,22 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   });
   /* The node's own browser, in the node's process: a sign-in typed there never passes a process an agent runs. */
   fills.register(browserFillAdapter({ ...browseDeps(), launcher: () => browseDeps().launcher() as unknown as FillLauncher }));
+  /* A page an agent's hh-browse opens with its saved sign-in, in the node's own browser too: the sign-in never passes a
+     process an agent runs, and the picture comes back as bytes, never as a file of the node's. */
+  const signedIn: SignedInDeps = {
+    open: sealed => unseal(sealed, keyPair.identity),
+    hide: (values, until) => {
+      holdExact(values, until);
+      for (const v of values) known.add(v);
+    },
+    send: m => void send?.(m),
+    browse: async ({ screenshot, ...request }) => {
+      let shot: Buffer | null = null;
+      const result = await browse({ ...request, screenshot: screenshot ? 'signed-in.png' : null }, { ...browseDeps(), writeFile: (_path, bytes) => { shot = bytes; } });
+      return { result, shot };
+    },
+    now: () => Date.now(),
+  };
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
   /* What agents' programs send their tools with no turn running goes on the link as it is now, and waits for no other. */
@@ -413,7 +431,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, ...(fills.kinds().length ? { fills: fills.kinds() } : {}), account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, ...(fills.kinds().length ? { fills: fills.kinds() } : {}), signedInBrowse: true, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       host?.operatorReplay();
       testMessages.replay();
       for (const m of waiting.splice(0)) emit(m);
@@ -458,6 +476,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
     if (m.type === 'secret.fill') return fills.handle(m);
+    if (m.type === 'signin.browse') return openSignedIn(m, signedIn);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       outside.stop(m.jobId);

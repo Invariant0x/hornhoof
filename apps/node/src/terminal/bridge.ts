@@ -227,8 +227,9 @@ export class Bridge {
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
     const peer = await this.peer(req);
     const owned = this.fromOwner(key, req.socket, peer);
-    /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
-    if (kind === 'attach' && event !== undefined && event !== 'file') return reply(res, 404, '');
+    /* Under the picture address: pictures and files sent, a task's file downloaded at /file, and a page hh-browse opens
+       with the agent's saved sign-in at /browse. */
+    if (kind === 'attach' && event !== undefined && event !== 'file' && event !== 'browse') return reply(res, 404, '');
     /* Capture the inode first, then keep the bounded body while ancestry is checked. A completed body survives the
        caller closing its socket; it is never applied until ownership succeeds. */
     const reading = readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
