@@ -1531,6 +1531,14 @@ body:has(.form-foot) .version-mark { display: none; }
 .offline-plan { display: grid; gap: 8px; min-width: 0; }
 .offline-moves { display: flex; flex-wrap: wrap; gap: 8px; }
 .offline-moves .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+/* A plan's fallback plans in their order: each name on its own line, its model and its moves after it, the moves wrapping
+   below the model as one group when tight. */
+.plan-fallbacks { display: grid; gap: 8px; min-inline-size: 0; font-size: 13.5px; }
+.plan-fallbacks > small { font-size: 12.5px; color: var(--muted); }
+.fallback-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.fallback-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-inline-size: 0; }
+.fallback-name { flex: 1 0 100%; min-inline-size: 0; overflow-wrap: anywhere; }
+.fallback-moves { display: flex; flex-wrap: wrap; gap: 8px; }
 .ac-obsolete { max-width: 100%; font-size: 12.5px; color: var(--muted); }
 .ac-failure summary { cursor: pointer; overflow-wrap: anywhere; }
 .ac-failure pre { margin: 6px 0 0; padding: 8px 10px; max-height: 160px; overflow: auto; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-mono); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
