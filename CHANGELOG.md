@@ -5,7 +5,7 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
-## [0.31.0]
+## [Unreleased]
 
 ### Fixed
 
@@ -27,6 +27,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `failures` shows `next` for each blocked task, taken from its holder's last report.
 - Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
+- A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
+- Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
 
 ### Changed
 
@@ -46,6 +49,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
 - `run_tests` runs only on `main`, `turn-N` or `release-` branches; any other branch gets `tests_not_release` and a sentence why.
 - A release's first run runs every test, its later runs only what failed or changed; Tests and reviewers check locally and name no runs.
+- The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent the message.
+- A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
+- Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
 
 ## [0.29.2] - 2026-11-16
 
