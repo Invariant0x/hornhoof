@@ -85,8 +85,9 @@ export async function doorBefore(appPort: number, intercept: Intercept): Promise
 }
 
 /* The company's server: its app on a port of its own, and beside it the keeper of a machine that keeps the data, which
-   reports the test's own address as the place to dial it at. */
-export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}, intercept?: Intercept) {
+   reports the test's own address as the place to dial it at. With manual time, bootstrap takes its steps directly
+   instead of waiting for recurring timers. */
+export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.ProcessEnv = {}, keeperEnv: NodeJS.ProcessEnv = {}, intercept?: Intercept, manual = false) {
   const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_HOST_ID: HOST_ID, ...env });
   const ceo = await setUpCompany(app);
   await app.listen({ host: '127.0.0.1', port: 0 });
@@ -127,7 +128,12 @@ export async function company(extra: Partial<KeeperOptions> = {}, env: NodeJS.Pr
     await app.close();
   };
   onTestFinished(stop);
+  if (manual) {
+    await until(() => keeper['identity']!.certificate() !== null);
+    await keeper['peers']!['readOnce']();
+  }
   peerPort = (await keeper.peerPorts()).peer;
+  if (manual) await keeper['identity']!['report']();
   const serverRow = async () => (await db.select().from(machines).where(eq(machines.networkId, HOST_ID)))[0];
   if (!extra.addresses) await until(async () => (await serverRow())?.peerPort === peerPort);
   const rowOf = async (id: string) => (await db.select().from(machines).where(eq(machines.id, id)))[0]!;
