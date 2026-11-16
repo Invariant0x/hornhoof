@@ -124,18 +124,18 @@ describe('the backups routes', () => {
     expect((await c.view<HolderView>(from(first))).keeps).toBe(false);
   });
 
-  it('gives the recovery file to the CEO alone, on his own session', async () => {
+  it('gives the recovery file to the CEO alone, and to the orchestrator acting for him', async () => {
     const c = await company();
     const zed = await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
-    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    for (const who of [as(zed), { headers: orchestratorHeaders(c.owner.id, orchestrator!.id) }]) {
-      const refused = await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...who });
-      expect([refused.statusCode, (refused.json() as { error: { reason: string } }).error.reason]).toEqual([403, 'not_owner_session']);
-    }
+    const refused = await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(zed) });
+    expect([refused.statusCode, (refused.json() as { error: { reason: string } }).error.reason]).toEqual([403, 'not_owner_session']);
     const given = await c.recoveryFile();
     expect(given.statusCode).toBe(200);
     expect(given.headers['cache-control']).toBe('no-store');
     expect((given.json() as { name: string; text: string }).text).toContain('AGE-SECRET-KEY-1');
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const inside = await c.app.inject({ method: 'POST', url: '/api/backups/recovery', headers: orchestratorHeaders(c.owner.id, orchestrator!.id) });
+    expect((inside.json() as { text: string }).text).toContain('AGE-SECRET-KEY-1');
     /* Before the company has its authority there is nothing a file could be checked against later. */
     const young = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID });
     const token = await setUpCompany(young.app);

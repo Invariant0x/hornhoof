@@ -646,7 +646,7 @@ describe('autonomous release for exact commits to main', () => {
     expect((await toggle(c.danaToken, c.dev.id, false)).json()).toMatchObject({ autonomousRelease: false });
   });
 
-  it('forbids agents, employee/external words, assistants, delegates and people who do not run the department from enabling or disabling autonomous release', async () => {
+  it('forbids heads, employee/external words, assistants, delegates and people who do not run the department from enabling or disabling autonomous release, and lets the orchestrator for the CEO', async () => {
     const c = await company();
     await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, c.ids.wes));
 
@@ -689,16 +689,6 @@ describe('autonomous release for exact commits to main', () => {
     expect(filteredJournal.statusCode).toBe(200);
     expect(filteredJournal.json().entries).toEqual([]);
 
-    /* Orchestrator acting on a turn, EVEN when answering the CEO, is an agent and MUST be refused. */
-    const orchDirect = await c.app.inject({
-      method: 'PUT',
-      url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
-      headers: orchestratorHeaders(c.ids.ceo, c.orchestrator.id),
-      payload: { enabled: true },
-    });
-    expect(orchDirect.statusCode).toBe(403);
-    expect(orchDirect.json().error.reason).toBe('autonomous_release_not_allowed');
-
     /* Orchestrator cannot relax the commit channel via set_approval_policy either. */
     const orchTools = await c.tools(c.orchestrator, c.ids.ceo);
     const relaxCommit = (await orchTools.callTool({
@@ -729,6 +719,15 @@ describe('autonomous release for exact commits to main', () => {
     expect(botAttempt.statusCode).toBeGreaterThanOrEqual(400);
 
     expect((await c.policy(c.ceoToken, c.dev.id)).json().autonomousRelease).toBe(false);
+
+    /* The orchestrator acts as the CEO, who runs every department. */
+    const orchDirect = await c.app.inject({
+      method: 'PUT',
+      url: `/api/departments/${c.dev.id}/approval-policy/autonomous-release`,
+      headers: orchestratorHeaders(c.ids.ceo, c.orchestrator.id),
+      payload: { enabled: true },
+    });
+    expect(orchDirect.json()).toMatchObject({ autonomousRelease: true, canSetAutonomousRelease: true });
   });
 
   it('immediately restores human approval cards when the CEO turns autonomous release off, while preserving journal history', async () => {

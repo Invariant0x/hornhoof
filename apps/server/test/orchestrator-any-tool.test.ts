@@ -91,4 +91,17 @@ describe('the orchestrator takes any tool of Hornhoof when it needs it', () => {
     expect((await c.db.select().from(people).where(eq(people.id, id)))[0]!.isCeoDelegate).toBe(true);
     expect(JSON.parse((await call('api', { path: '/api/people' })).text).people).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Maria' })]));
   });
+
+  it("is refused no screen of a person's own: Google Sheets, a Telegram bot, who a person is in Telegram, the owner's key", async () => {
+    const c = await company();
+    const { call } = await orchestrator(c);
+    const maria = await invitePerson(c.app, c.ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
+    const id = (await c.app.inject({ url: '/api/me', ...as(maria) })).json().person.id as string;
+
+    expect(await call('api', { path: '/api/google-sheets' })).toEqual({ text: '{"google":null}', error: false });
+    expect((await call('api', { method: 'DELETE', path: `/api/agents/${c.head.id}/telegram` })).error).toBe(false);
+    expect((await call('api', { method: 'PATCH', path: `/api/people/${id}`, body: { telegram: '@maria' } })).error).toBe(false);
+    expect((await c.db.select().from(people).where(eq(people.id, id)))[0]!.telegramUsername).toBe('maria');
+    expect(await call('api', { path: '/api/me/key' })).toEqual({ text: '{"key":null}', error: false });
+  });
 });

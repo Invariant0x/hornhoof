@@ -90,16 +90,6 @@ const JOB_STATUS = ['status', 'error', 'finished_at'];
 const URGENCY: Record<string, string[]> = { tasks: ['urgent'], teams: ['urgent_only'] };
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
-/* Whether the orchestrator's own SQL may change this column: what its role is granted below, said once more for
-   whatever else lets the orchestrator write a value of its own. */
-export function orchestratorWrites(table: string, column: string): boolean {
-  if (HIDDEN.includes(table) || READ_ONLY.includes(table) || SECRET[table]?.includes(column)) return false;
-  if (table === 'departments') return !DEPARTMENT_SETTINGS.includes(column);
-  if (table === 'agents') return !AGENT_FIXED.includes(column);
-  if (table === 'jobs') return JOB_STATUS.includes(column);
-  return !URGENCY[table]?.includes(column);
-}
-
 /* The rights stay the first guard, whatever the check of the text sees: PUBLIC loses EXECUTE on every overload of these, in the
    catalog of this database, so neither role can call them. Runs at every start, so a new overload is covered too. */
 export const REFUSED_NAME_PATTERN = `^(${REFUSED_FUNCTIONS.map(name => name.replace('*', '.*')).join('|')})$`;
