@@ -43,6 +43,7 @@ import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from 
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
+import { fallbackMove } from '../subscriptions/fallback.js';
 import { claimMail, inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
@@ -1112,6 +1113,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running || await waitsForWords(ctx, agentId)) return;
+  /* Between turns: onto a fallback plan while its own holds its turns back, and home again once it does not. What follows
+     reads the plan it is on after that. */
+  await fallbackMove(ctx, agentId);
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
@@ -1290,6 +1294,9 @@ async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null;
   if (all.some(n => why(n) === null)) return null;
   return why(own ?? all.find(n => ctx.hub.isOnline(nodeIdentity(n.id))) ?? all[0]!);
 }
+
+/* The same for a plan the agent is not on yet, which a fallback asks of the plan it would go to. */
+export const planWaitsFor = waitsFor;
 
 /* The update its next turn waits for: of its own machine or, with that one away, of the one its plan has left. */
 async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null } | undefined, sub: { id: string; kind: 'personal' | 'api_key' } | null, shown: NodeIdentity | null): Promise<MachineDrain | null> {
