@@ -50,30 +50,34 @@ afterEach(() => {
 });
 
 describe('marks of a connection', () => {
-  it('say how it is paid in a word and a sign, in the ink of the page: color carries no meaning', async () => {
+  /* Since #1048 a sign by the name, its words its name and tooltip, stands for the word in a badge. */
+  it('say how it is paid in a sign by the name with its words, in the quiet ink of the page: color carries no meaning', async () => {
     lists();
     show();
     await screen.findByRole('table');
-    for (const [text, word] of [['Claude', 'By subscription'], ['WXYZ', 'By tokens']] as const) {
-      const badge = within(row(text)).getByText(word).closest('.badge')!;
-      expect(badge).toHaveClass('ctype');
-      expect(badge.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    for (const [text, kind] of [['Claude', 'personal'], ['WXYZ', 'api_key']] as const) {
+      const sign = within(row(text)).getByRole('img', { name: en.subs.kindHint[kind] });
+      expect(sign).toHaveClass('pay-sign');
+      expect(sign).toHaveAttribute('title', en.subs.kindHint[kind]);
+      expect(sign.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+      expect(within(row(text)).queryByText(en.subs.pay[kind])).toBeNull();
+      expect(row(text).querySelector('.badge')).toBeNull();
     }
-    expect(decl('.badge.ctype', 'color')).toBe('var(--ink)');
-    expect(decl('.badge.ctype', 'border-color')).toBe('var(--line2)');
-    expect(decl('.badge.pay-tokens', 'color')).toBeUndefined();
-    expect(decl('.badge.pay-plan', 'color')).toBeUndefined();
+    expect(decl('.pay-sign', 'color')).toBe('var(--muted)');
   });
 
-  it('mark the orchestrator without the color of attention', async () => {
+  /* Since #1048 the orchestrator's role is a small line under the name, not a badge. */
+  it('mark the orchestrator in a small line under the name, without the color of attention', async () => {
     lists();
     show();
     await screen.findByRole('table');
-    expect(within(row('WXYZ')).getByText('Orchestrator')).toHaveClass('badge', 'orch-role');
-    expect(decl('.badge.orch-role', 'color')).toBe('var(--muted)');
-    expect(decl('.badge.orch-role', 'border-color')).toBe('var(--line2)');
+    const role = within(row('WXYZ')).getByText('Orchestrator');
+    expect(role.tagName).toBe('SMALL');
+    expect(role.parentElement).toHaveClass('nm');
+    expect(role).not.toHaveClass('badge');
+    expect(decl('.nm small', 'color')).toBe('var(--muted)');
     /* Not the orchestrator's window, which is .orch: a mark of its own class takes none of its place on the page. */
-    expect(within(row('WXYZ')).getByText('Orchestrator')).not.toHaveClass('orch');
+    expect(role).not.toHaveClass('orch');
   });
 });
 

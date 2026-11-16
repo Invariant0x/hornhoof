@@ -30,12 +30,21 @@ function useTokens(sub: SubView): Tokens | null {
   return own ?? (sub.tokens ? { tokens: sub.tokens, models: [] } : null);
 }
 
+/* A figure in one piece that reads left to right, its number with its unit or percent sign, so a page laid out right to
+   left keeps «25 млн» whole and the words around it stand mirrored (Design #1053). */
+const Piece = ({ text }: { text: string }) => <bdi dir="ltr">{text}</bdi>;
+
+/* A count of tokens on screen, short from a million. */
+export function TokenCount({ count }: { count: number }) {
+  const { language } = useLanguage();
+  return <Piece text={tokenCount(language, count)} />;
+}
+
 /* A period's tile: the short count on screen, the whole one in its name and tooltip, then input, output and cache. */
 function PeriodGauge({ label, sum, t, language }: { label: string; sum: TokenSum; t: Messages; language: Language }) {
-  const n = (count: number) => tokenCount(language, count);
   const full = t.subs.tokens.full(new Intl.NumberFormat(language).format(sum.total), sum.total);
   const split = [[t.subs.tokens.input, sum.input], [t.subs.tokens.output, sum.output], [t.subs.tokens.cache, sum.cacheRead + sum.cacheWrite]] as const;
-  return <Gauge label={label} name={`${label}: ${full}`} title={full} figure={n(sum.total)} sub={split.map(([term, count]) => <span key={term}>{`${term} ${n(count)}`}</span>)} empty={!sum.turns} />;
+  return <Gauge label={label} name={`${label}: ${full}`} title={full} figure={<TokenCount count={sum.total} />} sub={split.map(([term, count]) => <span key={term}>{`${term} `}<TokenCount count={count} /></span>)} empty={!sum.turns} />;
 }
 
 /* Each model's share of the connection's 30 days, the largest first, under the name the connection lists it by. */
@@ -50,7 +59,7 @@ function ModelShares({ sub, models }: { sub: SubView; models: ModelTokens[] }) {
     <h6 className="part-h">{t.subs.tokens.byModel}</h6>
     <ul>{models.map(m => <li key={m.model ?? ''}>
       <span className="mname">{name(m.model)}</span>
-      <span className="dd">{new Intl.NumberFormat(language).format(m.total)}<small>{share.format(m.total / whole)}</small></span>
+      <span className="dd"><Piece text={new Intl.NumberFormat(language).format(m.total)} /><small><Piece text={share.format(m.total / whole)} /></small></span>
       <span className="bar" aria-hidden="true"><i style={{ inlineSize: `${(m.total * 100) / whole}%` }} /></span>
     </li>)}</ul>
   </div>;

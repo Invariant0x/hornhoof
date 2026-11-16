@@ -19,8 +19,7 @@ import { LimitCell, LimitMeters } from '../ui/PlanLimits';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { ApiForm } from '../ui/ApiForm';
-import { TokenGauges } from '../ui/Tokens';
-import { tokenCount } from '../ui/token-count';
+import { TokenCount, TokenGauges } from '../ui/Tokens';
 import { Edge } from '../ui/Edge';
 import { clock, limitState, planStateOnMachine, shortName, stateOf, subName, TERMINAL_SIGNIN, waitsThere, windowName, windowUsage } from '../ui/subscription';
 import { PlanSteps } from '../ui/PlanSteps';
@@ -98,8 +97,7 @@ function SubscriptionName({ sub: s }: { sub: SubView }) {
 
 /* What the connection's turns used in 30 days, or nothing from an older server. */
 function TokensCell({ sub: s }: { sub: SubView }) {
-  const { language } = useLanguage();
-  return s.tokens ? <span className="num">{tokenCount(language, s.tokens.month.total)}</span> : null;
+  return s.tokens ? <span className="num"><TokenCount count={s.tokens.month.total} /></span> : null;
 }
 
 /* A limit's column. An API has no plan limits: it says so once across both limit columns, under the name of both. */
