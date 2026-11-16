@@ -119,10 +119,21 @@ sent to the authors of 1076 and 1079 and to be confirmed by them:
   `SiteSession` into `hh-browse`. A phone fill produces no `SiteSession`, so phone
   sign-ins do not feed this store, which is correct.
 
-The one open confirmation from task 1076 is that it persists no session itself and
-leaves persistence to this hook, and that the site origin is an acceptable key.
-The published code already shows the hook is unimplemented (`state.sessions` is
-null until registered), so development of the store proceeds on that contract.
+The author of task 1076 confirmed the boundary on 2026-11-16 (contract unchanged
+at `ff00fe24721c439ff065e5eef2e85b21fb1621e3`). Task 1076 persists no session:
+the session passes through the server in memory only, never into a log or the
+vault log, and without the hook `vault_fill` answers `savedSignIn: false`. The key
+is `new URL(address).origin` within (companyId, agentId), where `address` is the
+address the agent named in `vault_fill` that passed `sameSite` with the entry's
+site, not the page after redirects. The hook answers `Promise<boolean>`; task 1076
+catches a thrown error and answers false.
+
+One consequence for this store: a `SiteSession` can hold cookies of several
+domains of one site (for example `accounts.google.com` and `google.com`), while
+its key is the single origin the agent named. So `hh-browse` finds a saved
+sign-in by site, with the same `sameSite` relation the vault uses, not by exact
+origin equality, and injects only the cookies whose domain matches the requested
+page's site.
 
 ## Stored state and ownership
 
