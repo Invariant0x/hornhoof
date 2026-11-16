@@ -295,6 +295,8 @@ type Options = {
 const WAITING = 'This agent starts with its next turn.';
 const TOOLS_LOST = "could not reach Hornhoof's tools when its program connected, so the program starts again in its session.";
 const STOP_WAIT_MS = 5000;
+/* Why a program that was to sleep or close stays, or stays watched: it began a turn of its own meanwhile. */
+const TURN_BEGAN = 'it began a turn of its own';
 /* How many Enter waits live words give Hornhoof's own prompt to be taken before they go in. */
 const ENTER_TRIES = 3;
 /* What a typed turn keeps at most while Hornhoof has not answered it. */
@@ -1552,8 +1554,9 @@ export class TerminalHost {
   }
 
   private async look(a: Agent): Promise<void> {
-    /* A program that sleeps did not end: nothing of it is left to tell. */
-    if (a.restarting || a.asleep) return;
+    /* A program that sleeps did not end: nothing of it is left to tell, unless a turn opened as it slept, as one its hook
+       told of late does. That turn has no program, and ends as one whose program is gone. */
+    if (a.restarting || (a.asleep && !a.turn)) return;
     this.drain(a);
     const turn = a.turn;
     if (managedTurn(turn)) return;
@@ -2968,13 +2971,22 @@ export class TerminalHost {
     return this.inputMayGo(a, a.launch.job);
   }
 
-  /* Gone only when tmux says so: until then it still counts as there. */
-  private async closeProgram(a: Agent): Promise<RetireResult> {
+  /* What the program logged since the node last looked can begin a turn of its own, as the words Codex held and takes once
+     its turn is over: that turn keeps it. */
+  private turnBegins(a: Agent): boolean {
     this.drain(a);
+    return Boolean(a.turn || a.busy);
+  }
+
+  /* Gone only when tmux says so: until then it still counts as there. A turn the program began as tmux ended it is the
+     watch's to end, as one whose program is gone. */
+  private async closeProgram(a: Agent): Promise<RetireResult> {
+    if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.intentional(a, 'completed');
     await this.opts.tmux.kill(a.name);
     if (await this.opts.tmux.has(a.name)) return busy('its session is still there');
     this.operator?.exited(a.key, { code: null, signal: null });
+    if (a.turn) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programIs(a, false);
     Object.assign(a, { hash: null, instance: null, launch: null, sessionId: null, tail: null, fresh: false, started: null });
@@ -2984,11 +2996,12 @@ export class TerminalHost {
   /* The program sleeps: it ends, and its pane stays with what it printed for people to scroll back through. Its session stays
      the agent's, which Hornhoof gives the next turn to start it again in. */
   private async sleepProgram(a: Agent): Promise<RetireResult> {
-    this.drain(a);
+    if (this.turnBegins(a)) return busy(TURN_BEGAN);
     this.intentional(a, 'completed');
     await this.opts.tmux.stop(a.name);
     if (await this.opts.tmux.alive(a.name)) return busy('its program still runs');
     this.operator?.exited(a.key, { code: null, signal: null });
+    if (a.turn) return busy(TURN_BEGAN);
     this.unwatch(a);
     this.programAsleep(a);
     Object.assign(a, { hash: null, instance: null, launch: null, tail: null, fresh: false, started: null });
