@@ -1,15 +1,14 @@
-import { FILL_PASSWORD_MIN, FillTotp, type FillPlain } from '@hornhoof/protocol';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { knowsAgentId, type AgentViewer } from '../../auth/agent-view.js';
-import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
+import { encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, people, tasks, vaultEntries, vaultLog } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
+import { parseCode } from './totp.js';
 
-/* The company's vault of site sign-ins: what a person types into the form, how it is kept, and what anyone sees of it. The
-   password and the code secret go in through here and come out only sealed to a node; no view, log or answer holds them. */
+/* The company's site sign-ins, encrypted at rest. Views for people and the log never hold passwords or code secrets. */
 
 export type Entry = typeof vaultEntries.$inferSelect;
 
@@ -23,7 +22,8 @@ type ScopeInput = z.infer<typeof Scope>;
 const Name = z.string().trim().min(1).max(80);
 const Site = z.string().trim().min(1).max(2048);
 const Login = z.string().trim().min(1).max(320);
-const Password = z.string().min(FILL_PASSWORD_MIN).max(1024);
+const PASSWORD_MIN = 4;
+const Password = z.string().min(PASSWORD_MIN).max(1024);
 /* A code secret as an authenticator shows it, or the otpauth:// address of its QR code; empty for none. */
 const Code = z.string().max(2048);
 
@@ -47,7 +47,7 @@ const FIELD_WORDS: Record<string, string> = {
   name: 'a name of 1 to 80 characters',
   site: 'a site or address',
   login: 'a login',
-  password: `a password of at least ${FILL_PASSWORD_MIN} characters`,
+  password: `a password of at least ${PASSWORD_MIN} characters`,
   code: 'a one-time code secret',
   scope: 'who may use the entry',
   removeCode: 'whether to remove the code',
@@ -60,40 +60,6 @@ export function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   const fields = [...new Set(parsed.error.issues.map(i => String(i.path[0] ?? '')))].filter(Boolean);
   const words = fields.map(f => FIELD_WORDS[f] ?? f);
   throw invalid(words.length ? `The entry needs ${words.join(', ')}.` : 'The entry is not complete.');
-}
-
-const BASE32 = /^[A-Z2-7]+$/;
-const ALGORITHMS: Record<string, FillTotp['algorithm']> = { SHA1: 'SHA1', SHA256: 'SHA256', SHA512: 'SHA512' };
-const badCode = () => invalid('The one-time code secret is not one an authenticator gives. Copy it again from the site, or leave it empty.');
-
-/* The code of a site: its secret as an authenticator app shows it, in groups and any case, or the otpauth://totp/ address
-   of its QR code with its digits, period and algorithm. */
-function parseCode(raw: string): FillTotp {
-  const text = raw.trim();
-  let secret = text;
-  let digits = 6;
-  let period = 30;
-  let algorithm: FillTotp['algorithm'] = 'SHA1';
-  if (/^otpauth:/i.test(text)) {
-    let url: URL;
-    try {
-      url = new URL(text);
-    } catch {
-      throw badCode();
-    }
-    if (url.host.toLowerCase() !== 'totp') throw badCode();
-    secret = url.searchParams.get('secret') ?? '';
-    digits = Number(url.searchParams.get('digits') ?? 6);
-    period = Number(url.searchParams.get('period') ?? 30);
-    const named = ALGORITHMS[(url.searchParams.get('algorithm') ?? 'SHA1').toUpperCase()];
-    if (!named) throw badCode();
-    algorithm = named;
-  }
-  secret = secret.replace(/[\s-]+/g, '').replace(/=+$/, '').toUpperCase();
-  if (!BASE32.test(secret)) throw badCode();
-  const parsed = FillTotp.safeParse({ secret, digits, period, algorithm });
-  if (!parsed.success) throw badCode();
-  return parsed.data;
 }
 
 const sealedCode = (ctx: Ctx, raw: string | undefined): string | null => (raw && raw.trim() ? encryptSecret(JSON.stringify(parseCode(raw)), ctx.config.secret) : null);
@@ -178,15 +144,6 @@ export async function companyEntries(ctx: Ctx, companyId: string): Promise<Entry
   return ctx.db.select().from(vaultEntries).where(eq(vaultEntries.companyId, companyId)).orderBy(sql`lower(${vaultEntries.name})`);
 }
 
-/* The values a node types, opened only to seal them to that node. */
-export function plainOf(ctx: Ctx, entry: Entry): FillPlain {
-  return {
-    login: entry.login,
-    password: decryptSecret(entry.passwordEnc, ctx.config.secret),
-    totp: entry.totpEnc ? FillTotp.parse(JSON.parse(decryptSecret(entry.totpEnc, ctx.config.secret))) : null,
-  };
-}
-
 type Names = { people: Map<string, string>; agents: Map<string, string>; departments: Map<string, string>; tasks: Map<string, number> };
 
 async function namesFor(ctx: Ctx, ids: { people: string[]; agents: string[]; departments: string[]; tasks: string[] }): Promise<Names> {
@@ -250,10 +207,6 @@ export async function entryLog(ctx: Ctx, entryId: string, viewer: Pick<AgentView
     person: who(names.people, r.personId),
     agent: who(names.agents, r.agentId),
     task: r.taskId ? { id: r.taskId, number: names.tasks.get(r.taskId) ?? null } : null,
-    target: r.target,
-    fields: r.fields,
-    status: r.status,
     at: r.at.toISOString(),
-    endedAt: r.endedAt?.toISOString() ?? null,
   }));
 }

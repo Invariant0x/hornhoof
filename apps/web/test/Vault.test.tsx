@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
 import { Settings } from '../src/screens/Settings';
 import type { VaultEntry } from '../src/ui/Vault';
 import { ME, mockApi, ORG_WITH_TEAMS } from './api-mock';
@@ -128,20 +129,23 @@ describe('the Passwords group of the settings', () => {
     await waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/vault/v1')).toBe(true));
   });
 
-  it('shows the history of a sign-in with who used it and for which task', async () => {
+  it.each([
+    ['en', 'History', 'Nora took the sign-in for task #42.', 'Nora took the sign-in.'],
+    ['ru', 'История', 'Nora: получены данные для входа для задачи #42.', 'Nora: получены данные для входа.'],
+  ])('shows who took the sign-in and for which task in %s', async (lang, history, withTask, withoutTask) => {
+    localStorage.setItem('hh-lang', lang);
     mockApi({
       'GET /api/vault': [200, { entries: [ENTRY] }],
       'GET /api/vault/v1/log': [200, { log: [
-        { id: 'l1', kind: 'used', person: null, agent: { id: 'a2', name: 'Nora' }, task: { id: 't', number: 42 }, target: 'browser', status: 'signed_in', at: '2030-01-01T10:00:00.000Z' },
-        { id: 'l2', kind: 'used', person: null, agent: { id: 'a2', name: 'Nora' }, task: null, target: 'phone', status: 'node_offline', at: '2030-01-01T09:30:00.000Z' },
+        { id: 'l1', kind: 'taken', person: null, agent: { id: 'a2', name: 'Nora' }, task: { id: 't', number: 42 }, at: '2030-01-01T10:00:00.000Z' },
+        { id: 'l2', kind: 'taken', person: null, agent: { id: 'a2', name: 'Nora' }, task: null, at: '2030-01-01T09:30:00.000Z' },
       ] }],
     });
     const user = userEvent.setup();
-    open();
-    await user.click(await screen.findByRole('button', { name: 'History' }));
-    /* How each use ended, in words, and no word of signing in where it did not. */
-    expect(await screen.findByText('Nora used it in the browser for task #42. Signed in.')).toBeInTheDocument();
-    expect(screen.getByText('Nora used it on a phone. The machine was offline.')).toBeInTheDocument();
-    expect(screen.queryByText(/signed_in|node_offline/)).toBeNull();
+    render(<LanguageProvider><Settings me={ME} group="passwords" onClose={() => {}} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: history }));
+    expect(await screen.findByText(withTask)).toBeInTheDocument();
+    expect(screen.getByText(withoutTask)).toBeInTheDocument();
+    expect(screen.queryByText(/taken|signed_in|node_offline/)).toBeNull();
   });
 });

@@ -1,25 +1,22 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { FILL_FIELDS } from '@hornhoof/protocol';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { decryptSecret } from '../../crypto/secrets.js';
+import { jobs, vaultLog } from '../../db/schema.js';
 import { refusal } from '../../errors.js';
 import { mayUse, type VaultAgent } from './access.js';
-import { fillEntry } from './fill.js';
-import { companyEntries, entryViews } from './store.js';
+import { companyEntries, entryById, entryByName, entryViews, notAllowed, unknownEntry } from './store.js';
+import { parseCode, totpCode } from './totp.js';
 
-/* The vault for an agent: which sign-ins it may use, and having its node type one into a sign-in form. The agent names an
-   entry; no value ever reaches it, its tools or its turn. */
-
-type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
-const said = (value: unknown, isError = false, image?: string) => ({
-  content: [{ type: 'text' as const, text: JSON.stringify(value) }, ...(image ? [{ type: 'image' as const, data: image, mimeType: 'image/png' }] : [])] as Content[],
+const said = (value: unknown, isError = false) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(value) }],
   ...(isError ? { isError } : {}),
 });
 
-async function answer(call: () => Promise<{ value: unknown; image?: string }>) {
+async function answer(call: () => Promise<unknown>) {
   try {
-    const { value, image } = await call();
-    return said(value, false, image);
+    return said(await call());
   } catch (err) {
     const refused = refusal(err);
     if (refused) return said(refused.body, true);
@@ -27,44 +24,49 @@ async function answer(call: () => Promise<{ value: unknown; image?: string }>) {
   }
 }
 
+/* Only the current code leaves the server, never the secret or the other periods' codes. */
+function currentCode(ctx: Ctx, sealed: string, at: number) {
+  const stored = JSON.parse(decryptSecret(sealed, ctx.config.secret)) as { secret: string; digits: number; period: number; algorithm: string };
+  const totp = parseCode(`otpauth://totp/entry?${new URLSearchParams({ secret: stored.secret, digits: String(stored.digits), period: String(stored.period), algorithm: stored.algorithm })}`);
+  return { value: totpCode(totp, at), validForSeconds: totp.period - Math.floor(at / 1000) % totp.period };
+}
+
+async function takeEntry(ctx: Ctx, agent: VaultAgent, ref: string) {
+  const entry = (await entryById(ctx, ref)) ?? (await entryByName(ctx, agent.companyId, ref));
+  if (!entry) throw unknownEntry();
+  if (!mayUse(entry, agent)) throw notAllowed('This entry is not available to you.');
+  const at = new Date();
+  const password = decryptSecret(entry.passwordEnc, ctx.config.secret);
+  const code = entry.totpEnc ? currentCode(ctx, entry.totpEnc, at.getTime()) : undefined;
+  const [job] = agent.jobId ? await ctx.db.select({ taskId: jobs.taskId }).from(jobs).where(and(eq(jobs.id, agent.jobId), eq(jobs.companyId, agent.companyId), eq(jobs.agentId, agent.id))) : [];
+  await ctx.db.insert(vaultLog).values({ companyId: entry.companyId, entryId: entry.id, entryName: entry.name, site: entry.site, kind: 'taken', agentId: agent.id, taskId: job?.taskId ?? null, at });
+  return { name: entry.name, site: entry.site, login: entry.login, password, ...(code ? { code } : {}) };
+}
+
 export function registerVaultTools(server: McpServer, ctx: Ctx, agent: () => Promise<VaultAgent>): void {
   server.registerTool(
     'vault_entries',
     {
       description:
-        "The company's saved site sign-ins you may use: each entry's name, site, login and whether it has a one-time code. Passwords and codes are never shown; " +
-        'sign in with vault_fill by the entry name.',
+        "The company's saved site sign-ins you may use: each entry's name, site, login and whether it has a one-time code. " +
+        'Ask for the login, password and current code with vault_entry by the entry name.',
     },
-    () =>
-      answer(async () => {
-        const me = await agent();
-        const views = await entryViews(ctx, (await companyEntries(ctx, me.companyId)).filter(e => mayUse(e, me)));
-        return { value: { entries: views.map(({ name, site, login, hasCode, scope }) => ({ name, site, login, hasCode, scope: scope.kind })) } };
-      }),
+    () => answer(async () => {
+      const me = await agent();
+      const views = await entryViews(ctx, (await companyEntries(ctx, me.companyId)).filter(e => mayUse(e, me)));
+      return { entries: views.map(({ name, site, login, hasCode, scope }) => ({ name, site, login, hasCode, scope: scope.kind })) };
+    }),
   );
   server.registerTool(
-    'vault_fill',
+    'vault_entry',
     {
       description:
-        "Has your node type a vault entry's login, password and current one-time code into a sign-in form, with no value passing you. " +
-        "target browser: the node's own browser opens the address (the entry's site by default), fills each step and keeps the sign-in for hh-browse; " +
-        'a site that refuses automated browsers answers browser_refused, then ask a person or use a company phone. ' +
-        'target phone: tap the field on the phone session you hold first, then name that one field. ' +
-        'The answer is a status (filled, signed_in, rejected, needs_person, robot_check, browser_refused, ...) and, from the browser, a screenshot with every sign-in field painted over.',
-      inputSchema: {
-        entry: z.string().trim().min(1).max(200).describe('The entry name, as vault_entries lists it.'),
-        target: z.enum(['browser', 'phone']).describe('Where to type it.'),
-        address: z.string().max(2048).optional().describe("browser: the sign-in page's address, when it is not the entry's site."),
-        phoneSession: z.uuid().optional().describe('phone: the phone session you hold.'),
-        element: z.string().min(1).max(200).optional().describe('phone: the field from the screen tree; the focused field when left out.'),
-        fields: z.array(z.enum(FILL_FIELDS)).min(1).max(3).optional().describe('Which to type: login, password, code. browser: all the entry has, by default; phone: the one field you tapped.'),
-      },
+        "Gives you a saved sign-in's login, password and current one-time code as text, if you may use it. " +
+        'Type them into the sign-in form of its site yourself, as a person would. The code includes the seconds it remains valid. ' +
+        'Never copy these values into a task, chat, report, file or commit. The code secret stays on the server. ' +
+        'The log records who took the entry, when and for which task, without the values.',
+      inputSchema: { entry: z.string().trim().min(1).max(200).describe('The entry name, as vault_entries lists it.') },
     },
-    args =>
-      answer(async () => {
-        const done = await fillEntry(ctx, await agent(), args);
-        const { shot, ...rest } = done;
-        return { value: rest, ...(shot ? { image: shot } : {}) };
-      }),
+    ({ entry }) => answer(async () => takeEntry(ctx, await agent(), entry)),
   );
 }

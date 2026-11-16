@@ -1,0 +1,14 @@
+Task 1143 paused by the head on Ivan's instruction. This is an unfinished snapshot, not a review candidate.
+
+Base: f13ddda4da04fb5f8c9fd2277d0b1eefe7374092, previously on task-1076.
+Saved to task-1143 as requested; task-1076 is not pushed or changed on the remote.
+
+Started: remove the node/protocol secret fill mechanism and its tests, move TOTP to server vault/totp.ts, replace vault_fill with vault_entry, simplify the vault log schema, allow writes through the person routes when the orchestrator acts for a person. Added or changed tests for the text response, access, the take log, orchestrator writes and translated web history. Tool list assertions now name vault_entry.
+
+Evidence: apps/server: npx --no-install vitest run test/vault-tools.test.ts test/vault.test.ts --maxWorkers=1, before implementation, exited 1 with 4 failures and 9 passes. Missing vault_entry and the old 403 for orchestrator writes are reproduced. Full output: red-server.log. npm ci and the protocol build succeeded before that RED run.
+
+No GREEN run or final type/lint/build/author/browser checks were completed. A mistakenly rooted web command has no valid test evidence. No tests or builds of this saved implementation are claimed to pass. git diff --check is clean.
+
+Remaining: regenerate the unpublished vault migration and snapshot to match the changed schema; finish Vault.tsx and en/ru history and helper text; add server TOTP vector/parsing tests; review all removals and run the named local checks in the task body, including route-access and agent-view-table, followed by types/lint/build/author/browser checks. Review, Security and Tests have not started. No integration or release is authorized.
+
+Head decision: do not add separate orchestrator vault write tools and do not touch tools/control.ts. Route POST/PATCH/DELETE /api/vault support is in this task; use through tools comes after task 1160.

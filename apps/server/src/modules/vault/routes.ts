@@ -7,16 +7,10 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import { changeEntry, companyEntries, createEntry, entryById, entryLog, entryViews, EntryChange, NewEntry, notAllowed, parseBody, removeEntry, unknownEntry, type Entry } from './store.js';
 
 /* The vault for people: any person of the company sees what entries there are and adds one; the person who added an entry
-   and the CEO change and remove it. A password or code secret comes in only from a person at the form, never from an
-   agent acting as one, and never goes back out. */
+   and the CEO change and remove it. The orchestrator may act for a person too. Passwords and code secrets never go back
+   out through these routes. */
 
 const IdParams = z.strictObject({ id: z.string() });
-
-/* A person at the form, not an agent acting for one. */
-function typing(me: Person): Person {
-  if (me.via) throw notAllowed('Only a person types a password into the vault, at its form in Hornhoof.');
-  return me;
-}
 
 /* The entry, when it is of this person's company; an entry of another company is refused, never told apart from ours. */
 async function entryOf(ctx: Ctx, me: Person, id: string): Promise<Entry> {
@@ -37,14 +31,14 @@ export function vaultRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.post('/api/vault', async (req, reply) => {
-    const me = typing(await requirePerson(req, ctx.db));
+    const me = await requirePerson(req, ctx.db);
     const input = parseBody(NewEntry, req.body);
     const [view] = await entryViews(ctx, [await createEntry(ctx, me.companyId, me.id, input)]);
     return reply.code(201).send(view);
   });
 
   app.patch('/api/vault/:id', async req => {
-    const me = typing(await requirePerson(req, ctx.db));
+    const me = await requirePerson(req, ctx.db);
     const entry = await entryOf(ctx, me, IdParams.parse(req.params).id);
     requireOwnOrCeo(me, entry);
     const input = parseBody(EntryChange, req.body);
@@ -53,7 +47,7 @@ export function vaultRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.delete('/api/vault/:id', async (req, reply) => {
-    const me = typing(await requirePerson(req, ctx.db));
+    const me = await requirePerson(req, ctx.db);
     const entry = await entryOf(ctx, me, IdParams.parse(req.params).id);
     requireOwnOrCeo(me, entry);
     await removeEntry(ctx, entry, me.id);

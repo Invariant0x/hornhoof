@@ -54,12 +54,21 @@ describe('the company vault for people', () => {
     expect((await c.add(c.ceoSession, entry({ name: 'partner SITE' }))).statusCode).toBe(409);
   });
 
-  it('takes values only from a person, never from an agent acting as one', async () => {
+  it('lets the orchestrator add, change and remove for a person, without returning values', async () => {
     const c = await vaultCompany();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const res = await c.app.inject({ method: 'POST', url: '/api/vault', payload: { ...entry(), scope: { kind: 'company' } }, headers: orchestratorHeaders(c.ceo.id, orchestrator!.id) });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(201);
+    const headers = orchestratorHeaders(c.ceo.id, orchestrator!.id);
+    const id = res.json().id as string;
+    const changed = await c.app.inject({ method: 'PATCH', url: `/api/vault/${id}`, payload: { password: 'changed-pw-1234' }, headers });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body).not.toContain('changed-pw-1234');
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/vault/${id}`, headers })).statusCode).toBe(204);
     expect(await c.db.select().from(vaultEntries)).toEqual([]);
+    const log = await c.db.select().from(vaultLog).orderBy(vaultLog.at);
+    expect(log.map(l => [l.kind, l.personId])).toEqual([['created', c.ceo.id], ['changed', c.ceo.id], ['removed', c.ceo.id]]);
+    expect(JSON.stringify(log)).not.toContain(PASSWORD);
   });
 
   it('narrows an entry to a department or an agent of this company only', async () => {
@@ -117,7 +126,7 @@ describe('the company vault for people', () => {
     /* Aide is Clara's own assistant. */
     const [aidePerson] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Aide', status: 'active', isAgent: true, assistantOf: c.clara.id, scopeKind: 'listed' }).returning();
     await c.db.insert(assistants).values({ personId: aidePerson!.id, companyId: c.companyId, program: 'avaclone', agentId: c.aide.id });
-    const used = { companyId: c.companyId, entryId: id, entryName: 'Partner site', site: 'https://partner.example/login', kind: 'used' as const, taskId: c.task.id, target: 'browser' as const, fields: ['login' as const, 'password' as const], status: 'signed_in' };
+    const used = { companyId: c.companyId, entryId: id, entryName: 'Partner site', site: 'https://partner.example/login', kind: 'taken' as const, taskId: c.task.id };
     await c.db.insert(vaultLog).values([{ ...used, agentId: c.aide.id }, { ...used, agentId: c.nora.id }]);
 
     const users = async (session: string) => {

@@ -1,0 +1,93 @@
+
+ RUN  v5.0.5 /data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1076/apps/server
+
+ ❯ test/vault.test.ts (9 tests | 1 failed) 4638ms
+   ❯ the company vault for people (9)
+     ✓ keeps the password and the code secret encrypted and never gives them back 1435ms
+     ✓ takes an entry from any person of the company and reads a code from an authenticator address 262ms
+     ✓ refuses a short password, a broken code and a taken name without saying what was typed 193ms
+     × lets the orchestrator add, change and remove for a person, without returning values 162ms
+     ✓ narrows an entry to a department or an agent of this company only 1598ms
+     ✓ lets the author and the CEO change and remove an entry, keeps the stored values when none are typed, and logs it 342ms
+     ✓ answers 403 to a person of another company for any entry it names, and lists none of ours 207ms
+     ✓ shows the log of an entry with who, when and for which task, and no values 194ms
+     ✓ shows a person's own assistant's use only to its owner, and a task only by its number 182ms
+ ❯ test/vault-tools.test.ts (4 tests | 3 failed) 4030ms
+   ❯ the vault for agents (4)
+     ✓ lists only the entries each agent may use, without passwords or code secrets 1836ms
+     × gives the login, password and current code as text, and logs the take without values 330ms
+     × gives a narrowed entry only to its department or agent, including an assistant by default 855ms
+     × refuses entries kept for others, another company and unknown names, without a take 1005ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/vault-tools.test.ts > the vault for agents > gives the login, password and current code as text, and logs the take without values
+AssertionError: expected true to be undefined
+
+- Expected:
+undefined
+
++ Received:
+true
+
+ ❯ test/vault-tools.test.ts:41:27
+     39|     const { token } = await c.startTurn(c.nora.id, c.task.id);
+     40|     const reply = await call(c, token, 'vault_entry', { entry: 'partne…
+     41|     expect(reply.isError).toBeUndefined();
+       |                           ^
+     42|     expect(valueOf(reply)).toEqual({ name: 'Partner site', site: 'http…
+     43|     vi.setSystemTime(1111111110_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/vault-tools.test.ts > the vault for agents > gives a narrowed entry only to its department or agent, including an assistant by default
+SyntaxError: Unexpected token 'M', "MCP error "... is not valid JSON
+ ❯ valueOf test/vault-tools.test.ts:10:44
+      8| const CODE = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+      9| type ToolReply = { content: { type: string; text: string }[]; isError?…
+     10| const valueOf = (reply: ToolReply) => JSON.parse(reply.content[0]!.tex…
+       |                                            ^
+     11| const call = async (c: Awaited<ReturnType<typeof vaultCompany>>, token…
+     12|   (await (await mcp(c.app, token)).callTool({ name, arguments: args })…
+ ❯ test/vault-tools.test.ts:60:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/vault-tools.test.ts > the vault for agents > refuses entries kept for others, another company and unknown names, without a take
+SyntaxError: Unexpected token 'M', "MCP error "... is not valid JSON
+ ❯ valueOf test/vault-tools.test.ts:10:44
+      8| const CODE = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+      9| type ToolReply = { content: { type: string; text: string }[]; isError?…
+     10| const valueOf = (reply: ToolReply) => JSON.parse(reply.content[0]!.tex…
+       |                                            ^
+     11| const call = async (c: Awaited<ReturnType<typeof vaultCompany>>, token…
+     12|   (await (await mcp(c.app, token)).callTool({ name, arguments: args })…
+ ❯ test/vault-tools.test.ts:77:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/vault.test.ts > the company vault for people > lets the orchestrator add, change and remove for a person, without returning values
+AssertionError: expected 403 to be 201 // Object.is equality
+
+- Expected
++ Received
+
+- 201
++ 403
+
+ ❯ test/vault.test.ts:61:28
+     59|     const [orchestrator] = await c.db.select().from(agents).where(eq(a…
+     60|     const res = await c.app.inject({ method: 'POST', url: '/api/vault'…
+     61|     expect(res.statusCode).toBe(201);
+       |                            ^
+     62|     const headers = orchestratorHeaders(c.ceo.id, orchestrator!.id);
+     63|     const id = res.json().id as string;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 9 passed (13)
+   Start at  22:27:46
+   Duration  18.68s (tests 62%, transform 24%, import 14%)
+

@@ -69,7 +69,7 @@ const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
 let vaultUses = 0;
 const aVaultUse = async (c: AclCompany, agent: Crew): Promise<Call> => {
   const [entry] = await c.db.insert(vaultEntries).values({ companyId: c.companyId, name: `Sign-in ${++vaultUses} of ${String(agent)}`, site: 'https://partner.example', login: 'team', passwordEnc: 'x', createdBy: c.ids.ceo, updatedBy: c.ids.ceo }).returning();
-  await c.db.insert(vaultLog).values({ companyId: c.companyId, entryId: entry!.id, entryName: entry!.name, site: entry!.site, kind: 'used', agentId: c.crew[agent].id, target: 'browser', fields: ['password'], status: 'signed_in' });
+  await c.db.insert(vaultLog).values({ companyId: c.companyId, entryId: entry!.id, entryName: entry!.name, site: entry!.site, kind: 'taken', agentId: c.crew[agent].id });
   return { method: 'GET', url: `/api/vault/${entry!.id}/log` };
 };
 
