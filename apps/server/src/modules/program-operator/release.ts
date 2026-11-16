@@ -4,6 +4,7 @@ import { and, eq, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programOperatorCases } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { liveSubscription } from '../conversation/queue.js';
 import { agentParty } from '../events/parties.js';
@@ -49,7 +50,7 @@ export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, inpu
   if (!found.recoveryHold) return noHold(found);
   const state = await requestRecoveryState(ctx, found);
   const result = await operatorTransaction(ctx, async (tx, inside) => {
-    await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, found.agentId)).for('update');
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, found.agentId)).for('update');
     const [row] = await tx.select().from(programOperatorCases).where(eq(programOperatorCases.id, found.id)).for('update');
     return row?.recoveryHold ? decide(inside, me, row, input.reason, state) : noHold(row ?? found);
   });

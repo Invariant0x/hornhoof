@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { accessOf, canReach } from '../../auth/access.js';
 import { agents, people, requests, taskEvents, tasks, taskWaits, waitNotices, type TaskEventKind } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { insertOrDeliverTurn, liveSubscription, pump } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
@@ -27,7 +28,7 @@ export async function recordWaitNotice(db: Writer, notice: NewWaitNotice): Promi
 
 /* A task's waits on one employee are one episode until its work moves: the last work move names it. */
 async function waitEpisode(db: Pick<Db, 'select'>, taskId: string): Promise<number> {
-  const [last] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), inArray(taskEvents.kind, WORK_MOVES)))
+  const [last] = await db.select(idOnly(taskEvents)).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), inArray(taskEvents.kind, WORK_MOVES)))
     .orderBy(desc(taskEvents.id)).limit(1);
   return last?.id ?? 0;
 }

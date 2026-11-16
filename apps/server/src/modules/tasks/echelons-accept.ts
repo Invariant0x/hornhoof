@@ -3,6 +3,7 @@ import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requests } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { confirmAutonomousMainAcceptance, verifyAutonomousMainAcceptance } from './autonomous-release.js';
 import { NO_DEPARTMENT_CHECKER } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
@@ -34,7 +35,7 @@ function requireReady(route: Route, input: AcceptanceInput): void {
 
 
 async function humanMainApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string | null> {
-  const [approval] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id),
+  const [approval] = await db.select(idOnly(requests)).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id),
     eq(requests.kind, 'approval'), eq(requests.status, 'approved'), eq(requests.commit, commit), isNotNull(requests.answeredBy), isNotNull(requests.answeredAt))).limit(1);
   return approval?.id ?? null;
 }

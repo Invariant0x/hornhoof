@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, programOperatorCases } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { authorizeOperator, operatorRefused, type OperatorCaller } from './authorization.js';
 import { escalateCase, syncOperatorCases } from './cases.js';
@@ -29,7 +30,7 @@ export async function reportOperatorCase(ctx: Ctx, caller: OperatorCaller, input
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 async function recordReport(tx: Tx, inside: Ctx, caller: OperatorCaller, input: ReportInput, targetId: string) {
-  await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, targetId)).for('update');
+  await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, targetId)).for('update');
   const current = await authorizeOperator(inside, caller, input.case, undefined, true);
   if (current.row.escalationJobId) return current.row;
   const decision = input.outcome === 'denied' ? await deniedDecision(inside, caller, current.row) : null;

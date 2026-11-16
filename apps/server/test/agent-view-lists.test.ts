@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { idOnly } from '../src/db/selections.js';
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { agents, attachments, departments, improvements, jobs, machines, proposals, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
 import { REQUIRED_OPERATIONS_ROLES } from '../src/modules/operations/required.js';
@@ -182,7 +183,7 @@ describe('a long text kept as a file of its task', () => {
   const WORDS = 'Private long words. '.repeat(400).trim();
   type Detail = { task: { files: { id: string; by: { id: string; name: string } | null }[]; log: { text: string; data: { fullTexts?: { id: string }[] } }[] } };
   const fileOf = async (c: AclCompany, taskId: string) => {
-    const [file] = await c.db.select({ id: attachments.id }).from(attachments).where(eq(attachments.taskId, taskId));
+    const [file] = await c.db.select(idOnly(attachments)).from(attachments).where(eq(attachments.taskId, taskId));
     return file!.id;
   };
 

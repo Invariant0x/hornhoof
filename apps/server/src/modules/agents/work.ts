@@ -3,6 +3,7 @@ import type { Db } from '../../db/client.js';
 import { viewerOf } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import { agents, jobs, requests, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { seesTask } from '../tasks/sight.js';
 import { notStep } from '../tools/steps.js';
 
@@ -57,7 +58,7 @@ export async function agentWork(db: Db, companyId: string) {
   const asked = await db.select({ agentId: requests.agentId, taskId: requests.taskId })
     .from(requests).where(and(eq(requests.companyId, companyId), eq(requests.status, 'open')));
   const afterIds = [...new Set(openTasks.flatMap(t => t.after))];
-  const notDone = new Set(afterIds.length ? (await db.select({ id: tasks.id }).from(tasks).where(and(inArray(tasks.id, afterIds), ne(tasks.status, 'done')))).map(t => t.id) : []);
+  const notDone = new Set(afterIds.length ? (await db.select(idOnly(tasks)).from(tasks).where(and(inArray(tasks.id, afterIds), ne(tasks.status, 'done')))).map(t => t.id) : []);
   const facts: Facts = { openTasks, running, asked, notDone };
   return { openTasks, running, busy: new Set(running.map(j => j.agentId)), doing: (agent: Agent) => doing(agent, facts) };
 }
