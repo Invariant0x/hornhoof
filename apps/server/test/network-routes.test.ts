@@ -10,7 +10,7 @@ import { authority, certificates, companies, machines, peerSecrets, people } fro
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { UPLOAD_SPARE } from '../src/modules/keeper/uploads.js';
 import { saveLink } from '../src/modules/link/link.js';
-import { LEFT_SLOTS_FRESH_MS } from '../src/modules/network/routes.js';
+import { LEFT_SLOTS_FRESH_MS } from '../src/modules/copies/left-slots.js';
 import { certFacts, issuedBy } from '../src/modules/network/authority.js';
 import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
 
