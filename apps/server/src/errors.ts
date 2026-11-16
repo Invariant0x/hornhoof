@@ -115,6 +115,7 @@ export type ErrorReason =
   | 'task_changed'
   | 'task_not_yours'
   | 'test_mode_conflict'
+  | 'tests_not_release'
   | 'task_invalid'
   | 'urgent_not_allowed'
   | 'urgent_follows_parent'

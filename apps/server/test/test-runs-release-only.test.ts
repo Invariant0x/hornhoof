@@ -1,20 +1,23 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { departments, tasks, testRuns } from '../src/db/schema.js';
+import { startRun } from '../src/modules/testruns/runs.js';
 import { company } from './test-runs-company.js';
 
 /* A shared run of every test goes only on a release; a change is checked by its author's local tests of what it touched. */
 describe('where a test run may go', () => {
-  it('starts nothing on a task branch or any other, reads no repository for it, and says why', async () => {
+  it('refuses a task branch or any other with tests_not_release, reads no repository for it, and says why', async () => {
     const c = await company();
     const read = vi.spyOn(c.app.ctx, 'readCommit');
-    const { call } = await c.turn(c.bruno);
+    const { call, job } = await c.turn(c.bruno);
     for (const input of [{ branch: `task-${c.task.number}` }, { suite: 'unit', branch: 'task-1-checkout' }, { command: 'npm test', branch: 'task-1-checkout' }, { branch: 'feature-cart' }, { branch: 'mainline' }, { branch: 'turn-x' }]) {
       const answer = await call('run_tests', input);
-      expect(answer.error).toBe(false);
+      expect(answer.error).toBe(true);
       expect(answer.text).toMatch(/is no release branch: shared test runs go only to main, a turn's branch turn-<number> or a release-<name> branch, so check your change with local tests of what it touched\.$/);
     }
     expect((await call('run_tests', { branch: 'feature-cart' })).text).toMatch(/^feature-cart is no release branch/);
+    const runJob = { id: job.id, companyId: job.companyId, agentId: c.bruno.id, agentKind: 'employee', departmentId: c.dev.id } as never;
+    await expect(startRun(c.app.ctx, runJob, { task: c.task.id, branch: 'feature-cart' })).rejects.toMatchObject({ status: 409, reason: 'tests_not_release' });
     expect(read).not.toHaveBeenCalled();
     expect(await c.db.select().from(testRuns)).toEqual([]);
   });
