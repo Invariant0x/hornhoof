@@ -10,6 +10,7 @@ import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { branchHolds, ensureTurnBranch, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
+import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R, the head of
    turn-<number>, main under it, the full run on R, the results R brings with the verdicts on them, and what approved R: a
@@ -37,16 +38,18 @@ export function newerVersion(a: string, b: string): boolean {
   return false;
 }
 
-/* The real full run of R: of the turn branch at R, every part passed, nothing reused, and no newer run of R failed since. */
+/* A whole run of R's release: of the turn branch at R, with no one suite, every part passed, taking only what its release proved, and
+   no newer run of R failed since. */
 async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, departmentId: string, runId: string, commit: string): Promise<void> {
-  const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no full run of ${commit} on ${branch}: ${why}. A release needs a real full run on its exact commit: every test, nothing reused.`);
+  const notFull = (why: string) => refuse(409, 'task_invalid', `Run ${runId} is no whole run of ${commit} on ${branch}: ${why}. A release needs a whole run of its own on its exact commit: the first run of its release, or a later one that took only what its release proved.`);
   const [run] = await db.select().from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.companyId, turn.companyId)));
   if (!run) throw notFull('there is no such run');
   if (run.departmentId !== departmentId || run.branch !== branch || run.commitSha !== commit) throw notFull(`it ran ${run.branch ?? 'no branch'} at ${run.commitSha ?? 'no commit'}`);
   if (run.status !== 'passed') throw notFull(`it ${run.status === 'running' ? 'is still running' : run.status}`);
-  if (run.fileCache && (run.fileCache.mode !== 'full' || run.fileCache.reused > 0)) throw notFull(`it reused ${run.fileCache.reused} green results`);
+  if (run.environmentRequest?.suite) throw notFull(`it ran only the suite ${run.environmentRequest.suite}`);
+  if (!ofItsRelease(run.fileCache)) throw notFull(`it took ${run.fileCache!.reused} green results from before releases were kept`);
   const parts = await db.select({ status: testParts.status }).from(testParts).where(eq(testParts.runId, run.id));
-  if (!parts.length || parts.length !== run.parts || parts.some(part => part.status !== 'passed')) throw notFull('not every part of it passed');
+  if (parts.length !== run.parts || parts.some(part => part.status !== 'passed') || (!parts.length && !keptEverything(run))) throw notFull('not every part of it passed');
   const [newer] = await db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
 }

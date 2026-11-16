@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -267,88 +267,27 @@ describe('a turn has its own branch', () => {
 });
 
 describe('a reviewer', () => {
-  const verdictEvents = (c: Awaited<ReturnType<typeof company>>, taskId: string) =>
-    c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict'))).orderBy(asc(taskEvents.createdAt));
-
-  it('is told where each run stands for the current pinned candidate', async () => {
+  it('is told to check what it touched with local tests, as the full run happens once at release', async () => {
     const c = await company();
     const review = await reviewOpen(c);
     const [rita] = await c.db.select().from(agents).where(eq(agents.id, c.rita.id));
     for (const w of [{ why: 'review' as const }, { why: 'review' as const, text: 'cart.ts:1 is wrong.' }]) {
       const prompt = wakePrompt(rita!, review, { agentId: c.rita.id, taskId: review.id, ...w });
-      expect(prompt).toContain('testEvidence');
-      expect(prompt).toContain('another commit proves nothing');
+      expect(prompt).toContain('Check what you touched with local tests; the full run happens once at release.');
+      expect(prompt).not.toContain('testEvidence');
     }
   });
 
-  it('keeps the exact commits of the runs a verdict stood on in the log', async () => {
+  it('records a verdict with no test runs in it', async () => {
     const c = await company();
     const review = await reviewOpen(c);
     await c.aRun({ branch: 'turn-4' });
     const { call } = await c.turn(c.rita, review.id);
     const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
     expect(given.error).toBe(false);
-    expect(given.text).not.toContain('proves nothing');
-    const [event] = await verdictEvents(c, review.id);
-    expect(event!.data.evidence).toEqual([{ run: 1, status: 'passed', branch: 'turn-4', commitSha: TEST_COMMIT, head: TEST_COMMIT, freshness: 'current', proves: true }]);
-  });
-
-  it('hears that a passing verdict rests on no proof when the run is on an older commit, and the log keeps that', async () => {
-    const c = await company();
-    const review = await reviewOpen(c);
-    await c.aRun({ branch: 'turn-4' });
-    c.branchesAt(NEW_COMMIT);
-    const { call } = await c.turn(c.rita, review.id);
-    const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
-    expect(given.error).toBe(false);
-    expect(given.text).toContain('Test run 1 passed');
-    expect(given.text).toContain(TEST_COMMIT);
-    expect(given.text).toContain(NEW_COMMIT);
-    expect(given.text).toContain('proves nothing');
-    const [event] = await verdictEvents(c, review.id);
-    expect(event!.data.evidence).toEqual([{ run: 1, status: 'passed', branch: 'turn-4', commitSha: TEST_COMMIT, head: NEW_COMMIT, freshness: 'stale', proves: false }]);
-  });
-
-  it('hears nothing of old runs when a newer one proves the branch', async () => {
-    const c = await company();
-    const review = await reviewOpen(c);
-    await c.aRun({ branch: 'turn-4', commitSha: OLD_COMMIT });
-    await c.aRun({ branch: 'turn-4' });
-    const { call } = await c.turn(c.rita, review.id);
-    expect((await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' })).text).not.toContain('proves nothing');
-  });
-
-  it('keeps an unpassed candidate with its current Review owner and records no invented run evidence', async () => {
-    const c = await company();
-    const review = await reviewOpen(c);
-    const { call } = await c.turn(c.rita, review.id);
-    expect((await call('verdict', { task: review.number, pass: false, reviewedCommit: TEST_COMMIT, comment: 'cart.ts:1 is wrong.' })).text).not.toContain('proves nothing');
-    const [event] = await verdictEvents(c, review.id);
+    expect(given.text).not.toContain('Test run');
+    const [event] = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, review.id), eq(taskEvents.kind, 'verdict')));
     expect(event!.data).not.toHaveProperty('evidence');
-    const [current] = await c.db.select().from(tasks).where(eq(tasks.id, review.id));
-    expect(current).toMatchObject({ assigneeAgentId: c.rita.id, executorAgentId: c.bruno.id, status: 'working' });
-  });
-
-  it('hears the same of a run from before commits were pinned', async () => {
-    const c = await company();
-    const review = await reviewOpen(c);
-    await c.aRun({ branch: 'turn-4', commitSha: null });
-    const { call } = await c.turn(c.rita, review.id);
-    const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
-    expect(given.text).toContain('Test run 1 passed on no pinned commit');
-    expect(given.text).toContain('proves nothing');
-  });
-
-  it('says the same as the repository is away, as it cannot be taken for proof', async () => {
-    const c = await company();
-    const review = await reviewOpen(c);
-    await c.aRun({ branch: 'turn-4' });
-    c.ctx.readCommit = async () => ({ problem: 'The repository did not answer.' });
-    const { call } = await c.turn(c.rita, review.id);
-    const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
-    expect(given.error).toBe(false);
-    expect(given.text).toContain('proves nothing');
-    expect(given.text).toContain('The repository did not answer.');
   });
 });
 
@@ -374,13 +313,13 @@ describe('an approval of a commit', () => {
   });
 
   /* A product run as its environment described it: the everyday profile leaves out what only the profiles of a release run. */
-  const productRun = (profile: string, kept = 0, candidate = false) => ({
+  const productRun = (profile: string, kept = 0) => ({
     command: '',
     environmentRequest: { version: 1, repositoryScope: { companyId: c0, repositoryOwnerId: c0, repoUrlHash: 'a'.repeat(64) }, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 1, problem: null } as never,
-    environmentSnapshot: { profile, ...(candidate ? { candidate: { baseCommit: OLD_COMMIT, baseFingerprints: [], fingerprints: [] } } : {}), description: { manifest: {
+    environmentSnapshot: { profile, description: { manifest: {
       defaultProfile: 'fast', profiles: [{ id: 'fast', requiredSuiteIds: ['server'] }, { id: 'final', requiredSuiteIds: ['server', 'server-postgres', 'browser'] }, { id: 'full', requiredSuiteIds: ['server', 'server-postgres', 'browser', 'browser-matrix'] }],
       suites: ['server', 'server-postgres', 'browser', 'browser-matrix'].map(id => ({ id })), execution: { version: 2, fullRun: { replaces: 'final', profile: 'full' } } } } } as never,
-    fileCache: { mode: kept ? 'cached' : 'full', turn: 4, mainLine: false, fingerprints: [], reused: kept, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] } as never,
+    fileCache: { mode: kept ? 'cached' : 'full', release: 'turn-4', fingerprints: [], reused: kept, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] } as never,
   });
   const c0 = '00000000-0000-4000-8000-000000000001';
 
@@ -388,21 +327,22 @@ describe('an approval of a commit', () => {
     const c = await company();
     await c.aRun(productRun('fast', 113));
     const { res, request } = await asked(c);
-    const narrow = 'Test run 1 passed on this commit with profile fast, which left out the suites server-postgres, browser and browser-matrix, and took the green result of an earlier run for 113 test files instead of running them. Only a run of profile full with no suite and no candidate runs every suite and every test file anew.';
+    const narrow = 'Test run 1 passed on this commit with profile fast, which left out the suites server-postgres, browser and browser-matrix, and took the green result of an earlier run of its release for 113 test files instead of running them.';
     expect(res.text).toContain(narrow);
     expect(request.text).toContain(narrow);
     await c.aRun(productRun('full'));
     await c.aRun(productRun('final', 4));
     const proof = await commitProof(c.db, c.task, TEST_COMMIT);
-    expect(proof).toMatchObject({ run: 2, scope: { profile: 'full', leftOut: [], kept: 0, since: null } });
+    expect(proof).toEqual(expect.objectContaining({ run: 2, scope: { profile: 'full', leftOut: [], kept: 0 } }));
     expect(proofLine(proof)).toContain('Test run 2 passed on this commit with profile full: every suite and every test file ran anew.');
     expect(proofLine(proof)).not.toContain('()');
   });
 
-  it('says a candidate run checked only what changed since its base', async () => {
+  it('names a later whole run of the release, which took what its release proved, before a newer narrower one', async () => {
     const c = await company();
-    await c.aRun(productRun('full', 0, true));
-    expect(proofLine(await commitProof(c.db, c.task, TEST_COMMIT))).toContain(`Test run 1 passed on this commit with profile full, which checked only the test files that changed since ${OLD_COMMIT}. Only a run of profile full with no suite and no candidate runs every suite and every test file anew.`);
+    await c.aRun(productRun('full', 5));
+    await c.aRun(productRun('fast'));
+    expect(proofLine(await commitProof(c.db, c.task, TEST_COMMIT))).toContain('Test run 1 passed on this commit with profile full, which took the green result of an earlier run of its release for 5 test files instead of running them.');
   });
 
   it('does not take a run on another commit for proof of this one, and says so', async () => {

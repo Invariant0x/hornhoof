@@ -3,21 +3,28 @@ import { describe, expect, it, vi } from 'vitest';
 import { departments, tasks, testRuns } from '../src/db/schema.js';
 import { company } from './test-runs-company.js';
 
-/* All whole runs go once per release, on its release branch; a change is checked in its author's own workspace. */
+/* A shared run of every test goes only on a release; a change is checked by its author's local tests of what it touched. */
 describe('where a test run may go', () => {
-  it('refuses a whole run, one suite and a command on a task branch or any other, and reads no repository for it', async () => {
+  it('starts nothing on a task branch or any other, reads no repository for it, and says why', async () => {
     const c = await company();
     const read = vi.spyOn(c.app.ctx, 'readCommit');
     const { call } = await c.turn(c.bruno);
-    for (const input of [{}, { suite: 'unit' }, { profile: 'full' }, { command: 'npm test' }, { command: 'npm test', branch: 'task-1-checkout' }, { branch: `task-${c.task.number}` }, { branch: 'feature-cart' }, { branch: 'mainline' }, { branch: 'turn-x' }]) {
-      const refused = await call('run_tests', input);
-      expect(refused.error).toBe(true);
-      expect(refused.text).toMatch(/^tests_not_release: /);
-      expect(refused.text).toContain('AGENTS.md');
+    for (const input of [{ branch: `task-${c.task.number}` }, { suite: 'unit', branch: 'task-1-checkout' }, { command: 'npm test', branch: 'task-1-checkout' }, { branch: 'feature-cart' }, { branch: 'mainline' }, { branch: 'turn-x' }]) {
+      const answer = await call('run_tests', input);
+      expect(answer.error).toBe(false);
+      expect(answer.text).toMatch(/is no release branch: shared test runs go only to main, a turn's branch turn-<number> or a release-<name> branch, so check your change with local tests of what it touched\.$/);
     }
-    expect((await call('run_tests', {})).text).toContain(`#${c.task.number}'s own branch is not a release branch`);
-    expect((await call('run_tests', { branch: 'feature-cart' })).text).toContain('feature-cart is not a release branch');
+    expect((await call('run_tests', { branch: 'feature-cart' })).text).toMatch(/^feature-cart is no release branch/);
     expect(read).not.toHaveBeenCalled();
+    expect(await c.db.select().from(testRuns)).toEqual([]);
+  });
+
+  it('takes no task branch of a repository whose results go to its own main line straight either', async () => {
+    const c = await company();
+    const [product] = await c.db.insert(departments).values({ companyId: c.dev.companyId, parentId: c.dev.id, name: 'Shop app', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop-app.git' }).returning();
+    await c.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, c.task.id));
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_tests', { command: 'npm test', branch: `task-${c.task.number}` })).text).toContain('is no release branch');
     expect(await c.db.select().from(testRuns)).toEqual([]);
   });
 
@@ -28,6 +35,7 @@ describe('where a test run may go', () => {
     for (const [index, branch] of ['main', 'turn-31', 'release-0.30.0', 'release-network', 'network-1'].entries()) {
       const started = await call('run_tests', { command: 'npm test', branch });
       expect(started.error, started.text).toBe(false);
+      expect(started.text).not.toContain('no release branch');
       await call('stop_tests', { run: index + 1 });
     }
     expect((await c.db.select({ branch: testRuns.branch }).from(testRuns)).map(run => run.branch).sort()).toEqual(['main', 'network-1', 'release-0.30.0', 'release-network', 'turn-31']);
@@ -37,17 +45,5 @@ describe('where a test run may go', () => {
     const c = await company();
     const { call } = await c.turn(c.bruno);
     expect((await call('run_work', { command: 'make', branch: `task-${c.task.number}` })).error).toBe(false);
-  });
-
-  it('takes any branch of a repository whose results go to its own main line straight, as each of them is a release of its own', async () => {
-    const c = await company();
-    const [product] = await c.db.insert(departments).values({ companyId: c.dev.companyId, parentId: c.dev.id, name: 'Shop app', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop-app.git' }).returning();
-    await c.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, c.task.id));
-    const { call } = await c.turn(c.bruno);
-    for (const [index, branch] of [undefined, `task-${c.task.number}-checkout`, 'task-99'].entries()) {
-      const started = await call('run_tests', { command: 'npm test', ...(branch ? { branch } : {}) });
-      expect(started.error, started.text).toBe(false);
-      await call('stop_tests', { run: index + 1 });
-    }
   });
 });

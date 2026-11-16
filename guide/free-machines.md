@@ -1,12 +1,12 @@
 # Tests and heavy work on free machines
 
-> In short: an agent checks its change in its own workspace, including installs, named test files, types, lint, builds and quality checks. Only whole suites or declared profiles go through `run_tests`, split into groups over free machines. Other non-check work can use `run_work`. Only machines lent to test runs take this work, and a loaded one takes none.
+> In short: an agent checks its change in its own workspace, including installs, named test files, types, lint, builds and quality checks. Every test of a release runs together once, through `run_tests`, split into groups over free machines. Other non-check work can use `run_work`. Only machines lent to test runs take this work, and a loaded one takes none.
 
 The names in `code`, like `run_tests` or `pool`, are tools the agents use. You do not type them.
 
 ## Where do the tests run?
 
-An agent runs the whole test suite of a release branch with `run_tests`: `main`, a turn's branch or a `release-` branch. Hornhoof refuses it on a task's own branch, except where each task goes to `main` on its own. Checks of the agent's own change need no `run_tests`: they run right away in its own workspace. Install from the lockfile once there, and again when it changes. A test command with no named files, or with a directory, glob, loop or variable as its selection, counts as a whole suite. Named browser test files run locally when the browser is there; installing it is allowed. Hornhoof sends it to whichever machine of the company is freest at that moment, while the agents keep working where they are.
+An agent runs every test of a release with `run_tests`, only on `main`, a turn's branch or a `release-` branch. The first run of a release runs every test file; each later run of the same release runs only what failed or changed since. Hornhoof sends the run to whichever machine of the company is freest at that moment, while the agents keep working where they are. On any other branch, a task's own above all, `run_tests` starts nothing: an agent checks its change right away in its own workspace, by local tests of what it touched. Install from the lockfile once there, and again when it changes. A test command with no named files, or with a directory, glob, loop or variable as its selection, counts as a whole suite. Named browser test files run locally when the browser is there; installing it is allowed.
 
 A test runner that can split a suite runs it in parts, one part on each of several machines at once.
 

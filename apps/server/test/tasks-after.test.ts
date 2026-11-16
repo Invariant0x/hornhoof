@@ -10,7 +10,7 @@ import { taskDetail } from '../src/modules/tasks/views.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { candidateChecks } from './development-echelons-verification.js';
+import { verified } from './development-echelons-verification.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 const NONE = 'Genuine dependency in the existing behavior test.';
@@ -47,10 +47,7 @@ async function company() {
   const snapshot = async (id: string) => { const task = await read(id); return routeSnapshot(await routeOf(db, task), task.assigneeAgentId); };
   const accept = async (id: string) => {
     const task = await read(id), current = await snapshot(id);
-    const [tester] = await db.select().from(agents).where(eq(agents.id, task.assigneeAgentId!));
-    const checks = await candidateChecks({ ctx, db, task, tester: tester! }, current, HEAD);
-    const run = await checks.run();
-    await report(ctx, tester!.id, id, checks.verified([run.id]));
+    await report(ctx, task.assigneeAgentId!, id, verified(current));
     const ready = await snapshot(id);
     return report(ctx, head.id, id, { done: true, summary: 'Observed the verified candidate in turn-17.', acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
   };
