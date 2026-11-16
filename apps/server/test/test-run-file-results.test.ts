@@ -16,17 +16,17 @@ const print = (name: string) => name.repeat(64).slice(0, 64);
 const PRINTS = { 'test/a.test.ts': print('a'), 'test/b.test.ts': print('b'), 'test/c.test.ts': print('c') } as Record<string, string>;
 const fingerprints = (over: Record<string, string> = {}) => FILES.map(file => ({ suiteId: 'unit', file, fingerprint: over[file] ?? PRINTS[file]! }));
 
-const manifest = (preparation = false) => parseTestEnvironment({
+const manifest = (preparation = false, full = true) => parseTestEnvironment({
   version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
   profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'final', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
   dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
   suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, keep: ['.metrics/mutate'] }],
   impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
   mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
-  execution: { version: 2, fullRun: { replaces: 'final', profile: 'full' }, ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
+  execution: { version: 2, ...(full ? { fullRun: { replaces: 'final', profile: 'full' } } : {}), ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
 });
 
-async function fixture(turnNumber = 3, preparation = false) {
+async function fixture(turnNumber = 3, preparation = false, full = true) {
   const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' }), url = await listen(app);
   await setUpCompany(app);
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
@@ -51,7 +51,7 @@ async function fixture(turnNumber = 3, preparation = false) {
       environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }, minutes) }).returning();
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
-    const value = manifest(preparation), manifestSource = JSON.stringify(value);
+    const value = manifest(preparation, full), manifestSource = JSON.stringify(value);
     const description = { version: 1 as const, repositoryScope: scope, commitSha: TEST_COMMIT, manifestSource, manifest: value, manifestHash: await hashTestEnvironment(manifestSource), inputDigests: [], inventory: FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: described };
     const reply: TestsDescribed = { type: 'tests.described', requestId: stored!.environmentRequest!.requestId!, commitSha: TEST_COMMIT, result: { status: 'ready', description, ...(prints ? { fingerprints: prints } : {}) } };
     await acceptDescription(app.ctx, BUILTIN, reply);
@@ -119,6 +119,19 @@ describe('reusing green test results', () => {
     const second = await f.start({}, fingerprints({ 'test/c.test.ts': print('d') }));
     expect(await f.ranFiles(second)).toEqual(['test/a.test.ts', 'test/c.test.ts']);
     expect((await f.runOf(second)).fileCache).toMatchObject({ mode: 'cached', release: 'turn-3', reused: 1 });
+  });
+
+  /* A manifest that names no full run reuses nothing: no run of it leaves a file out, and a later run of a release only takes
+     longer. */
+  it('runs every test file in each run of a release when the manifest names no full run', async () => {
+    const f = await fixture(3, false, false);
+    const first = await f.start({});
+    expect(await f.ranFiles(first)).toEqual(FILES);
+    await f.finish(first);
+    await until(async () => (await f.told()).includes('Test run 1 passed'));
+    const second = await f.start({});
+    expect(await f.ranFiles(second)).toEqual(FILES);
+    expect((await f.runOf(second)).fileCache).toBeNull();
   });
 
   it('runs everything anew in the first run of each release, of another turn as of a release branch', async () => {
