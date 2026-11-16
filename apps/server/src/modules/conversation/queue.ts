@@ -308,7 +308,7 @@ export async function goesElsewhere(ctx: Ctx, agentId: string, from: NodeIdentit
   const sub = await liveSubscription(ctx, agentId);
   if (!sub) return false;
   const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
-  const place = agent ? await placement(ctx, agent, sub) : null;
+  const place = agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
   return place !== null && !sameNode(place.node, from);
 }
 
@@ -796,14 +796,18 @@ type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; builtin
    assistant's own agent works for its owner alone, so it waits as a worker does. */
 const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
 
+/* Whether a node has room for the agent's turn, only asked: the agent is not put among the turns that wait for room. */
+const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent), true);
+
 /* Where the agent's next turn goes. A company key's to a built-in node: the one its program is on while that is ready,
    else the server's own, else another machine's, which is a move as a plan's agent on another node is; it waits while
    the one picked waits for an update or has no room. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
-   node can take it. A turn that would start a new program goes only to a machine with free memory for it; roomy: whether
-   a node has, which the agent's state also asks as if every node had. */
-async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id)): Promise<Placement | null> {
+   node can take it. A turn that would start a new program goes only to a machine with free memory for it, and an
+   employee's turn goes to none that works past what it carries; roomy: whether a node has room, which the agent's state
+   also asks as if every node had. */
+async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent))): Promise<Placement | null> {
   if (sub.kind === 'api_key') {
     const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
     if (!machine) return null;
@@ -1286,14 +1290,14 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const sub = await liveSubscription(ctx, agentId);
   const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
-  const place = sub && agent ? await placement(ctx, agent, sub) : null;
+  const place = sub && agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
   const shown = await shownNode(ctx, agentId, place);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   return {
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
-    memoryWait: !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, CONVERSATION_NODE, () => true))),
+    memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, CONVERSATION_NODE, () => true))),
     ...await planState(ctx, agent, sub),
     reason,
     browserError,

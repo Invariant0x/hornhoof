@@ -351,7 +351,8 @@ describe('migration 0059', () => {
     { column_name: 'error', is_nullable: 'YES' },
     { column_name: 'id', is_nullable: 'NO' },
     { column_name: 'machine_id', is_nullable: 'NO' },
-    { column_name: 'node_id', is_nullable: 'NO' },
+    /* Since 0129 a connection of a machine's built-in node, which has no node of its own, has none (#1060). */
+    { column_name: 'node_id', is_nullable: 'YES' },
     { column_name: 'report', is_nullable: 'YES' },
   ];
 

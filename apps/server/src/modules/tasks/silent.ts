@@ -133,13 +133,19 @@ export function signInTurn(program: Pick<TurnProgram, 'signAt'>, job: Pick<Job, 
   return program.signAt === 0 ? (job.startedAt ?? job.createdAt).getTime() : program.signAt;
 }
 
-/* worked: the turn's last sign besides its program's reports, an event of its work or a call of a Hornhoof tool. A node
-   that streams the work of a program with no screen is not silent, nor is a program that calls Hornhoof. */
-const lastHeard = (at: number, worked: number | undefined): number => Math.max(at, worked ?? 0);
+/* When Hornhoof last heard of a turn: its node's last report of its program, or the turn's start before the first one,
+   or the turn's last sign besides (worked): an event of its work or a call of a Hornhoof tool. A node that streams the
+   work of a program with no screen is not silent, nor is a program that calls Hornhoof. */
+const heardAt = (job: Pick<Job, 'startedAt' | 'createdAt'>, program: TurnProgram | null, worked: number | undefined): number =>
+  Math.max(program?.reportedAt ?? (job.startedAt ?? job.createdAt).getTime(), worked ?? 0);
 
-function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number, worked: number | undefined): TurnAlarm | null {
-  const heard = lastHeard(program.reportedAt, worked);
-  if (nowMs - heard >= SILENT_TURN_MS) return { reason: 'node_silent', since: heard };
+/* A running turn Hornhoof heard nothing of for SILENT_TURN_MS, the node_silent alarm: nothing tells when it ends, so
+   nothing waits for it to end. worked: the turn's last sign besides its program's reports, as lastTurnSigns gives it. */
+export function lostTurn(ctx: Ctx, job: Pick<Job, 'id' | 'startedAt' | 'createdAt'>, nowMs: number, worked?: number): boolean {
+  return nowMs - heardAt(job, mapOf(turnPrograms, ctx).get(job.id)?.program ?? null, worked) >= SILENT_TURN_MS;
+}
+
+function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number): TurnAlarm | null {
   if (signAt !== null) {
     if (program.state === 'asking') return null;
     const threshold = program.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
@@ -153,9 +159,9 @@ function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: num
 type Watched = { job: Job; program: TurnProgram | null; worked: number | undefined };
 
 function alarmForTurn({ job, program, worked }: Watched, nowMs: number): TurnAlarm | null {
-  if (program) return alarmForProgram(program, signInTurn(program, job), nowMs, worked);
-  const heard = lastHeard((job.startedAt ?? job.createdAt).getTime(), worked);
-  return nowMs - heard >= SILENT_TURN_MS ? { reason: 'node_silent', since: heard } : null;
+  const heard = heardAt(job, program, worked);
+  if (nowMs - heard >= SILENT_TURN_MS) return { reason: 'node_silent', since: heard };
+  return program ? alarmForProgram(program, signInTurn(program, job), nowMs) : null;
 }
 
 function alarmForTask(turn: Watched, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
