@@ -6,7 +6,7 @@ import { agentChanges, agentEvents, agentFallbacks, agents, people, subscription
 import { loggable } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
-import { budgetUntil, enqueueTurn, insertTurn, limitUntil, orchestratorOf, planWaitsFor, pump } from '../conversation/queue.js';
+import { budgetUntil, enqueueTurn, insertTurn, limitUntil, orchestratorOf, planHeld, planWaitsFor, pump } from '../conversation/queue.js';
 import { orchestratorServing, runsTier, servingSubscriptions } from '../tools/staff.js';
 
 /* Hornhoof's own doing: no person decided it and the orchestrator did not act for one. */
@@ -39,13 +39,14 @@ async function tierOf(ctx: Ctx, agent: Agent) {
   return tierIn(role ?? { tier: 'standard' }, team);
 }
 
-/* The plans the employee may go on to from its own, in order: those named for that plan, else every plan of the company
-   that may serve it, oldest first. Only plans that serve where it works and run its role's strength count. */
+/* The plans the employee may go on to from its own, in order: those named for that plan, else every personal plan of the
+   company that may serve it, oldest first. An API key is paid by the token, so it takes them only where a person named it.
+   Only plans that serve where it works and run its role's strength count. */
 async function fallbacksOf(ctx: Ctx, agent: Agent, home: Plan): Promise<Target[]> {
   const serving = agent.kind === 'orchestrator' ? await orchestratorServing(ctx, agent.companyId) : await servingSubscriptions(ctx, agent.companyId, await agentSpot(ctx.db, agent));
   const tier = await tierOf(ctx, agent);
   const may = new Set(serving.filter(s => tier === null || runsTier(s.provider, tier)).map(s => s.id));
-  const named: PlanFallback[] = home.fallbacks.length ? home.fallbacks : serving.map(s => ({ subscription: s.id, model: null }));
+  const named: PlanFallback[] = home.fallbacks.length ? home.fallbacks : serving.filter(s => s.kind === 'personal').map(s => ({ subscription: s.id, model: null }));
   const out: Target[] = [];
   for (const entry of named) {
     if (entry.subscription === home.id || !may.has(entry.subscription)) continue;
@@ -142,7 +143,7 @@ const holdMinute = (until: string) => {
 async function stuckOn(ctx: Ctx, home: Plan): Promise<Agent[]> {
   const on = await ctx.db.select().from(agents).where(and(eq(agents.subscriptionId, home.id), isNull(agents.removedAt), isNull(agents.switchedOffAt), ne(agents.kind, 'assistant'))).orderBy(asc(agents.createdAt));
   const stuck: Agent[] = [];
-  for (const agent of on) if (heldUntil(home, agent.kind) && !(await firstWithRoom(ctx, agent, home, null))) stuck.push(agent);
+  for (const agent of on) if ((await planHeld(ctx, agent, home)) && !(await firstWithRoom(ctx, agent, home, null))) stuck.push(agent);
   return stuck;
 }
 
@@ -154,6 +155,13 @@ function noRoomText(home: Plan & { ownerName: string }, until: string, stuck: Ag
   );
 }
 
+/* The orchestrator can read it now: its own plan takes its turns. One held on a plan with no fallback hears nothing it could
+   read only once the limit is over; the notice to Operations of a turn held that long stands for it. */
+async function readsNow(ctx: Ctx, orchestrator: Agent): Promise<boolean> {
+  const plan = orchestrator.subscriptionId ? await planOf(ctx, orchestrator.subscriptionId) : null;
+  return Boolean(plan && !heldUntil(plan, orchestrator.kind));
+}
+
 /* The orchestrator hears once of a plan whose hold stops work that no fallback can take: once for each hold, by its reset. */
 const told = new WeakMap<Ctx, Set<string>>();
 async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Promise<void> {
@@ -161,11 +169,11 @@ async function tellNoRoom(ctx: Ctx, home: Plan, until: string, from: Agent): Pro
   const seen = told.get(ctx) ?? new Set<string>();
   told.set(ctx, seen);
   if (seen.has(caseId)) return;
+  const orchestrator = await orchestratorOf(ctx, home.companyId);
+  if (!orchestrator || orchestrator.removedAt || !(await readsNow(ctx, orchestrator))) return;
   seen.add(caseId);
   const [before] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'failureCase' = ${caseId}`).limit(1);
-  const orchestrator = before ? null : await orchestratorOf(ctx, home.companyId);
-  if (!orchestrator || orchestrator.removedAt) return;
-  const stuck = await stuckOn(ctx, home);
+  const stuck = before ? [] : await stuckOn(ctx, home);
   if (!stuck.length) return;
   const [owner] = await ctx.db.select({ name: people.name }).from(people).where(eq(people.id, home.ownerPersonId));
   const text = noRoomText({ ...home, ownerName: owner?.name ?? '' }, until, stuck);
@@ -194,8 +202,9 @@ export async function fallbackMove(ctx: Ctx, agentId: string): Promise<boolean> 
   const now = kept ? await planOf(ctx, kept.subscriptionId) : null;
   if (now && (await hasRoom(ctx, agent, now))) return false;
   const target = await firstWithRoom(ctx, agent, home, now?.id ?? null);
+  /* Only work the plan really holds back waits: a person's own message still goes past the share set for tasks. */
   if (!target) {
-    await tellNoRoom(ctx, home, until, agent);
+    if (await planHeld(ctx, agent, home)) await tellNoRoom(ctx, home, until, agent);
     return false;
   }
   const moved = await goOn(ctx, agent, home, kept ?? null, target);

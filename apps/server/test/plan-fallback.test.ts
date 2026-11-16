@@ -1,8 +1,9 @@
 import type { Limits } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agentChanges, agents, jobs, subscriptions, tasks } from '../src/db/schema.js';
+import { agentChanges, agents, jobs, machines, nodes, subscriptions, tasks } from '../src/db/schema.js';
 import { pump } from '../src/modules/conversation/queue.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -16,8 +17,8 @@ const HOUR = 60 * MIN;
 const LIMIT_GRACE_MS = 5_000;
 const usageLimit = { kind: 'usage_limit' as const, text: 'You have hit your usage limit.', retryable: false };
 
-/* Acme's company key, which Hana, Bruno, Walt and the orchestrator run on, with Bruno at work on a task, and another key of
-   the company beside it that serves everyone. The clock goes only as far as a test moves it. */
+/* Acme's company key, which Hana, Bruno, Walt and the orchestrator run on, with Bruno at work on a task, and a plan of the
+   CEO's beside it on a machine of his, which serves everyone. The clock goes only as far as a test moves it. */
 async function atWork() {
   const c = await failureCompany();
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
@@ -25,7 +26,13 @@ async function atWork() {
   await echelonsTurn(c.db, c.companyId);
   const plan = async (label: string, provider: 'openai_api' | 'anthropic_api' = 'openai_api') =>
     (await c.db.insert(subscriptions).values({ companyId: c.companyId, provider, kind: 'api_key', targetKind: 'any', label, status: 'ready', ownerPersonId: c.sub.ownerPersonId }).returning())[0]!;
-  const spare = await plan('Spare key');
+  const personal = async (label: string, provider: 'codex' | 'claude' = 'codex') => {
+    const [sub] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider, kind: 'personal', label, status: 'ready', ownerPersonId: c.sub.ownerPersonId }).returning();
+    const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: `machine-of-${label}`, hostname: `${label.toLowerCase()}-box` }).returning();
+    await c.db.insert(nodes).values({ companyId: c.companyId, machineId: box!.id, subscriptionId: sub!.id, status: 'ready', version: '0.29.2', keyHash: `key-of-${label}` });
+    return sub!;
+  };
+  const spare = await personal('Spare');
   await c.db.update(agents).set({ model: 'claude-opus-5-5', effort: 'high' }).where(eq(agents.id, c.agent.id));
   const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, resultKind: 'code' });
   await wakeAll(c.ctx, [{ agentId: c.agent.id, taskId: task.id, why: 'assigned' }]);
@@ -35,11 +42,15 @@ async function atWork() {
   const limits = (id: string, value: Limits) => c.db.update(subscriptions).set({ limits: value, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, id));
   const resetsAt = () => new Date(Date.now() + HOUR).toISOString();
   const full = (until = resetsAt()): Limits => ({ status: 'rejected', windows: [{ name: 'seven_day', utilization: 1, resetsAt: until }] });
-  const done = (id: string) => handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: id, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null }, new Date());
+  /* A turn ends as the node it went out to tells it. */
+  const done = async (id: string) => {
+    const [job] = await c.db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, id));
+    await handleNodeMessage(c.ctx, job?.nodeId ? nodeIdentity(job.nodeId) : BUILTIN, { type: 'job.done', jobId: id, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null }, new Date());
+  };
   const runningOf = async (agentId: string) => (await c.db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))))[0];
   const card = async (id: string) => (await c.app.inject({ url: `/api/agents/${id}`, ...c.as(c.ceo) })).json();
   const planChanges = (id: string) => c.db.select().from(agentChanges).where(and(eq(agentChanges.agentId, id), eq(agentChanges.field, 'subscription'))).orderBy(asc(agentChanges.createdAt));
-  return { ...c, plan, spare, task, first, orchestrator: orchestrator!, agentOf, limits, full, resetsAt, done, runningOf, card, planChanges };
+  return { ...c, plan, personal, spare, task, first, orchestrator: orchestrator!, agentOf, limits, full, resetsAt, done, runningOf, card, planChanges };
 }
 
 describe('a plan at its limit', () => {
@@ -101,18 +112,21 @@ describe('a plan at its limit', () => {
     expect(await c.agentOf(c.watcher.id)).toMatchObject({ subscriptionId: c.sub.id });
   });
 
-  it('tells the orchestrator once, clearly, when no fallback has room, and keeps everyone where they are', async () => {
+  it('tells the orchestrator once, clearly, when no fallback has room, and spends no API key nobody named', async () => {
     const c = await atWork();
     await c.limits(c.spare.id, c.full());
+    /* The orchestrator works on a key of its own, which nobody named as a fallback. */
+    await c.db.update(agents).set({ subscriptionId: (await c.plan('Orchestrator key')).id }).where(eq(agents.id, c.orchestrator.id));
     await c.fail(c.first.id, usageLimit);
     for (let i = 0; i < 3; i++) for (const id of [c.agent.id, c.head.id, c.watcher.id]) await pump(c.ctx, id);
 
     for (const id of [c.agent.id, c.head.id, c.watcher.id]) expect(await c.agentOf(id)).toMatchObject({ subscriptionId: c.sub.id });
-    const told = await c.turnsOf(c.orchestrator.id);
+    const told = (await c.turnsOf(c.orchestrator.id)).filter(turn => turn.prompt.includes('no fallback plan has room'));
     expect(told).toHaveLength(1);
     expect(told[0]!.prompt).toContain(c.sub.label);
     expect(told[0]!.prompt).toMatch(/no fallback/i);
-    for (const name of ['Hana', 'Bruno', 'Walt']) expect(told[0]!.prompt).toContain(name);
+    /* It names those whose work waits: Bruno's task. Hana and Walt have nothing queued. */
+    expect(told[0]!.prompt).toContain('so their work waits: Bruno.');
   });
 
   it('takes the fallbacks named for the plan in their order, with the model named, past one with no room', async () => {
@@ -156,8 +170,8 @@ describe('a plan at its limit', () => {
 describe('the fallbacks of a plan', () => {
   it('are kept in the order a person gives, and shown with the plan', async () => {
     const c = await atWork();
-    const other = await c.plan('Other key');
-    const fallbacks = [{ subscription: other.id, model: null }, { subscription: c.spare.id, model: 'gpt-6-luna' }];
+    const key = await c.plan('Other key');
+    const fallbacks = [{ subscription: c.spare.id, model: null }, { subscription: key.id, model: 'gpt-6-luna' }];
     const saved = await c.app.inject({ method: 'PATCH', url: `/api/subscriptions/${c.sub.id}`, payload: { fallbacks }, ...c.as(c.ceo) });
     expect(saved.statusCode).toBe(200);
     expect(saved.json().subscription.fallbacks).toEqual(fallbacks);
@@ -168,10 +182,10 @@ describe('the fallbacks of a plan', () => {
   it.each([
     { name: 'the plan itself', pick: (c: Awaited<ReturnType<typeof atWork>>) => ({ subscription: c.sub.id, model: null }) },
     { name: 'a plan the company does not have', pick: () => ({ subscription: '00000000-0000-4000-8000-000000000000', model: null }) },
-    { name: 'a model the plan does not run', pick: (c: Awaited<ReturnType<typeof atWork>>) => ({ subscription: c.spare.id, model: 'no-such-model' }) },
+    { name: 'a model the plan does not run', pick: async (c: Awaited<ReturnType<typeof atWork>>) => ({ subscription: (await c.plan('Key')).id, model: 'no-such-model' }) },
   ])('refuses $name', async ({ pick }) => {
     const c = await atWork();
-    const refused = await c.app.inject({ method: 'PATCH', url: `/api/subscriptions/${c.sub.id}`, payload: { fallbacks: [pick(c)] }, ...c.as(c.ceo) });
+    const refused = await c.app.inject({ method: 'PATCH', url: `/api/subscriptions/${c.sub.id}`, payload: { fallbacks: [await pick(c)] }, ...c.as(c.ceo) });
     expect(refused.statusCode).toBe(400);
     expect((await c.db.select().from(subscriptions).where(eq(subscriptions.id, c.sub.id)))[0]!.fallbacks).toEqual([]);
   });
