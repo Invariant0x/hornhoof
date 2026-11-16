@@ -246,9 +246,9 @@ export const en = {
     connected: 'Connected',
     notConnected: 'Not connected',
   },
-  /* The Passwords group: the company's saved site sign-ins, which agents use without seeing a password or a code. */
+  /* The Passwords group: the company's saved site sign-ins, which employees and assistants take to sign in themselves. */
   vault: {
-    intro: 'Sign-ins to sites that the company keeps for its employees and assistants. They sign in with them without ever seeing the password or the one-time code.',
+    intro: 'Sign-ins to sites that the company keeps for its employees and assistants. They take the login, the password and the one-time code from here and sign in themselves. The password is never shown on this screen.',
     none: 'No sign-ins are saved yet.',
     add: 'Add a sign-in',
     addTitle: 'New sign-in',
@@ -256,65 +256,35 @@ export const en = {
     name: 'Name',
     nameHint: 'Employees ask for the sign-in by this name.',
     site: 'Site',
-    siteHint: 'The address of the sign-in page, such as https://example.com/login. The password goes only into pages of this site.',
+    siteHint: 'The address of the sign-in page, such as https://example.com/login, or the name of the app.',
     login: 'Login',
     password: 'Password',
-    passwordHint: 'Typed only here. Nobody sees it again, not in Hornhoof, not an employee.',
+    passwordHint: 'Kept encrypted and never shown on this screen again. Employees and assistants get it when they sign in.',
     passwordKeep: 'Leave it empty to keep the saved password.',
     code: 'One-time code key (optional)',
     codeHint: 'The key the site gives for an authenticator app, or the otpauth:// address from its QR code. Leave it empty if the site asks for no code.',
     codeKeep: 'Leave it empty to keep the saved key.',
     removeCode: 'Remove the one-time code key',
-    scope: 'Who may use it',
-    scopeHint: 'Every employee and assistant of the company, unless you keep it for one department or one employee.',
-    scopeCompany: 'Everyone in the company',
-    scopeDepartment: 'One department',
-    scopeAgent: 'One employee',
-    department: 'Department',
-    agent: 'Employee',
-    choose: 'Choose',
     needName: 'Give the sign-in a name.',
     needSite: 'Enter the site or its address.',
     needLogin: 'Enter the login.',
-    needPassword: (min: number) => `Enter a password of at least ${min} characters.`,
+    needPassword: 'Enter the password.',
     badCode: 'This is not a key an authenticator app takes. Copy it again from the site, or leave it empty.',
-    needDepartment: 'Choose the department.',
-    needAgent: 'Choose the employee.',
     nameTaken: 'A sign-in with this name is already saved.',
     loginIs: (login: string) => `Login: ${login}.`,
     withCode: 'With a one-time code.',
-    forEveryone: 'For everyone in the company.',
-    keptForDepartment: (name: string) => `Only for the department ${name}.`,
-    keptForAgent: (name: string) => `Only for ${name}.`,
     addedBy: (name: string, when: string) => `Added by ${name}, ${when}.`,
+    added: (when: string) => `Added ${when}.`,
     log: 'History',
     logTitle: (name: string) => `History of ${name}`,
-    logLine: (kind: 'used' | 'created' | 'changed' | 'removed', who: string, task: number | null, target: 'browser' | 'phone' | null, ended: string) =>
-      kind === 'used'
-        ? `${who} used it${target === 'phone' ? ' on a phone' : target === 'browser' ? ' in the browser' : ''}${task !== null ? ` for task #${task}` : ''}. ${ended}`
+    logLine: (kind: 'created' | 'changed' | 'removed' | 'taken', who: string, task: number | null) =>
+      kind === 'taken'
+        ? `${who} took it${task !== null ? ` for task #${task}` : ''}.`
         : kind === 'created'
           ? `${who} added it.`
           : kind === 'changed'
             ? `${who} changed it.`
             : `${who} removed it.`,
-    /* How a use ended, by the status Hornhoof keeps for it. */
-    ended: {
-      sent: 'Still typing.',
-      filled: 'Typed in.',
-      signed_in: 'Signed in.',
-      field_not_found: 'No sign-in field was found.',
-      wrong_field: 'The field was not one for a password, so nothing was typed.',
-      rejected: 'The site did not take the login or password.',
-      needs_person: 'A person has to go on from here.',
-      robot_check: 'The site asked to prove it is not a robot.',
-      browser_refused: 'The site does not let this browser in.',
-      target_gone: 'The page or the phone session was already closed.',
-      expired: 'It came too late, so nothing was typed.',
-      unsupported: 'That machine cannot type it there.',
-      failed: 'It did not work.',
-      node_offline: 'The machine was offline.',
-      no_answer: 'The machine did not answer in time.',
-    },
     change: 'Change',
     remove: 'Remove',
     removeAsk: (name: string) => `Remove ${name}? Employees can no longer sign in with it.`,
@@ -2294,7 +2264,7 @@ export const en = {
     google_sheets_share_needed: 'A service account opens the spreadsheets it creates to no one else. Enter the email of the Google account to share them with.',
     vault_invalid: 'Check the fields of the sign-in and try again.',
     vault_unknown: 'This sign-in is no longer saved.',
-    vault_not_allowed: 'Only the person who added this sign-in and the CEO change or remove it.',
+    vault_not_allowed: 'This sign-in belongs to another company.',
     vault_name_taken: 'A sign-in with this name is already saved.',
     relay_unreachable: 'hornhoof.org does not answer now. Try again in a few minutes.',
     link_taken: 'This link is taken already. Pick another name.',

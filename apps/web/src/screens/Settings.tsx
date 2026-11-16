@@ -253,7 +253,7 @@ function GroupContent({ group, me, reached, onRenamed, onOpenTask }: GroupProps)
     );
   }
   if (group === 'company') return <CompanyGroup me={me} />;
-  if (group === 'passwords') return <Vault me={me} />;
+  if (group === 'passwords') return <Vault />;
   return group === 'integrations' ? <Integrations reached={reached!} /> : <ExternalMessaging onOpenTask={onOpenTask} />;
 }
 
