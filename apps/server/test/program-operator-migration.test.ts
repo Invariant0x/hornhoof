@@ -1,25 +1,23 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
-import { migrationsThrough } from './migrations-before.js';
+import { migrationsCut, migrationsThrough } from './migrations-before.js';
 import { freshPglite } from './helpers-db.js';
 
 it('preserves existing company, job, event and attachment data when adding empty operator structures', async () => {
-  const previous = await mkdtemp(join(tmpdir(), 'hh-operator-migration-'));
   const client = await freshPglite();
-  onTestFinished(async () => { await client.close(); await rm(previous, { recursive: true, force: true }); });
-  await cp(MIGRATIONS, previous, { recursive: true });
-  const journalFile = join(previous, 'meta', '_journal.json');
-  const journal = JSON.parse(await readFile(journalFile, 'utf8')) as { entries: { tag: string }[] };
-  const at = journal.entries.findIndex(entry => /^\d{4}_program_operator$/.test(entry.tag));
-  expect(at).toBeGreaterThan(-1);
-  const operator = journal.entries[at]!;
-  journal.entries.splice(at);
-  await writeFile(journalFile, JSON.stringify(journal));
+  onTestFinished(() => client.close());
+  /* The install from before the operator: the journal up to it and the SQL of each migration there. */
+  let operator!: { tag: string };
+  const previous = await migrationsCut('hh-operator-migration-', entries => {
+    const at = entries.findIndex(entry => /^\d{4}_program_operator$/.test(entry.tag));
+    expect(at).toBeGreaterThan(-1);
+    operator = entries[at]!;
+    return entries.slice(0, at);
+  });
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: previous });
   await client.exec(`
