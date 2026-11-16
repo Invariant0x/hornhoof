@@ -34,6 +34,7 @@ import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
 import { closeCheck, openCheck } from '../tools/outside.js';
 import { vaultNodeGone, vaultNodeMessage } from '../vault/fill.js';
+import { phoneNodeGone } from '../phones/rpc.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 const LOAD_SEEN_MS = 60_000;
@@ -473,6 +474,7 @@ export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void>
   /* A newer connection of the same node keeps the views. */
   if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueLost(ctx, id); }
   vaultNodeGone(ctx, id);
+  phoneNodeGone(ctx, id);
   if (id.kind !== 'node') return;
   await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));
 }
