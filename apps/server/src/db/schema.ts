@@ -1186,6 +1186,19 @@ export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 's
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
+/* A permanent suppression fingerprint, carried by ordinary replication and merges. Never keeps the selected text. */
+export const secretRedactions = pgTable('secret_redactions', {
+  id: id(),
+  companyId: companyId(),
+  fingerprint: text('fingerprint').notNull(),
+  characters: integer('characters').notNull(),
+  personId: uuid('person_id').notNull().references(() => people.id),
+  createdAt: createdAt(),
+}, t => [
+  uniqueIndex('secret_redactions_fingerprint').on(t.companyId, t.fingerprint),
+  check('secret_redactions_length', sql`${t.characters} > 0`),
+]);
+
 export const taskEvents = pgTable(
   'task_events',
   {

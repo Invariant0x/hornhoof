@@ -491,6 +491,7 @@ export type TaskDetail = TaskLine & {
   echelonFindings: EchelonFindingsView;
   /* The person reading it may pause and resume it. */
   mayPause?: boolean;
+  mayHideSecret?: boolean;
   body: string;
   parent: { id: string; number: number; title: string } | null;
   /* The tasks of its turn it comes after, and where each stands. */

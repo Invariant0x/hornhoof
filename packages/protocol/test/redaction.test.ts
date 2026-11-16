@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { CREDENTIALS, cleanDiagnostic, HIDDEN, hiddenBy, PRIVATE_PATHS } from '../src/redaction.js';
 
 describe('a diagnostic cleaned for a reader who may not read where it comes from', () => {
+  it('hides labelled Russian passwords and keeps ordinary prose and identifiers', () => {
+    expect(hiddenBy('пароль: "two words"; password = test123!\nПароль qwerty123!', CREDENTIALS)).toBe('пароль: [hidden]; password = [hidden]\nПароль [hidden]');
+    for (const plain of ['Change the password tomorrow', 'Сменить пароль завтра', 'Reset password', 'task #267', 'd44ecb8c7d3d0b6d7ce690e01c25046f0404b212', 'e5cd054b-2620-421c-b07b-546bfbcdbedf']) {
+      expect(hiddenBy(plain, CREDENTIALS)).toBe(plain);
+    }
+  });
   it('hides credentials by their shape', () => {
     const cases: [string, string][] = [
       ['token ghp_abcDEF0123456789abcdef0123 refused', `token ${HIDDEN} refused`],

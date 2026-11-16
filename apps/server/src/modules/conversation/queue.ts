@@ -1,4 +1,5 @@
 import { countOnly, idOnly, only } from '../../db/selections.js';
+import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
@@ -350,6 +351,7 @@ const peopleTurns = and(isNull(jobs.taskId), eq(jobs.inboxWake, false));
 
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
+  t = hideCredentialsIn(t);
   const combined = t.message?.report ? await combineReport(ctx, t) : null;
   const id = combined ?? (await insertFreshTurn(ctx, t));
   await keepLetter(ctx, t, id, 'unread');
@@ -450,6 +452,7 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent, li
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
    turn that took a message of the CEO or the CEO delegate answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
+  t = hideCredentialsIn(t);
   const jobId = await withInputLock(ctx, t.agentId, () => insertOrDeliverTurn(ctx, t));
   await pump(ctx, t.agentId);
   return jobId;

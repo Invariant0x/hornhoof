@@ -43,6 +43,7 @@ const OUTBOUND = [
 /* The rule of every table of public. A table this does not name stops a merge, so a new table is given its rule when it
    is made. */
 export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
+  secret_redactions: add('protected'),
   /* Join codes, tickets and waiting wakes go; a sign-in count and the link's certificate belong to the machine that
      leads. So do a notice that waits to be handed over, which its wait raises again, what a machine built of a
      harness, which lies on the leader's own disk, and the physical programs a server watched on its nodes, with what

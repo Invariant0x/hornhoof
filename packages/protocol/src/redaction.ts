@@ -7,6 +7,8 @@ type Pattern = readonly [RegExp, string];
 
 /* Credentials by their shape, for those a program has not let anyone learn yet. */
 export const CREDENTIALS: readonly Pattern[] = [
+  [/((?<![\p{L}\p{N}_])(?:пароль|password|passwd)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}&]+)/giu, `$1${HIDDEN}`],
+  [/((?<![\p{L}\p{N}_])(?:пароль|password|passwd)\s+)(?:"[^"\r\n]+"|'[^'\r\n]+'|(?=[^\s,;]*[\d!@#$%])[^\s,;]+)/giu, `$1${HIDDEN}`],
   [/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z]+ )?PRIVATE KEY-----|$)/g, HIDDEN],
   [/\b(?:Proxy-Authorization|Authorization|Cookie|Set-Cookie)\s*:[^\r\n]*/gi, HIDDEN],
   [/\b(?:Bearer|Basic)\s+[^\s,;]+/gi, HIDDEN],
@@ -25,6 +27,19 @@ export const PRIVATE_PATHS: readonly Pattern[] = [
 ];
 
 export const hiddenBy = (text: string, patterns: readonly Pattern[]): string => patterns.reduce((out, [pattern, hidden]) => out.replace(pattern, hidden), text);
+
+/* Stored prose keeps its paths and structure, with credentials removed before it is copied or archived. */
+export const hideCredentials = (text: string): string => hiddenBy(text, CREDENTIALS);
+
+export function hideCredentialsIn<T>(value: T): T;
+export function hideCredentialsIn(value: unknown): unknown {
+  if (typeof value === 'string') return hideCredentials(value);
+  if (Array.isArray(value)) return value.map(item => hideCredentialsIn(item));
+  if (value && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, hideCredentialsIn(item)]));
+  }
+  return value;
+}
 
 /* A diagnostic with no credential and no private path in it, for a reader who may not read where it comes from. Clean it
    before cutting it, so that no part of either is left at the edge. */
