@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, testRuns, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { type Task } from '../tasks/engine.js';
 import { routeOf } from '../tasks/echelons-store.js';
@@ -67,7 +68,7 @@ async function turnBranchOf(db: Reader['db'], task: Task): Promise<string | null
    department and its products keep, as a turn may change several. */
 async function turnPlaces(db: Reader['db'], task: Task): Promise<string[]> {
   if (task.productId || !task.departmentId) return [task.productId, task.departmentId].filter((id): id is string => Boolean(id));
-  const products = await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, task.departmentId));
+  const products = await db.select(idOnly(departments)).from(departments).where(eq(departments.parentId, task.departmentId));
   return [task.departmentId, ...products.map(p => p.id)];
 }
 
@@ -89,14 +90,4 @@ export async function taskEvidence(ctx: Reader, task: Task): Promise<RunEvidence
       return { run: run.number, status: run.status, branch: run.branch, command: commandShown(run.command), ...evidence, proves: run.status === 'passed' && evidence.freshness === 'current' };
     }),
   );
-}
-
-/* What the log of a verdict keeps of the runs it stood on. */
-export const keptEvidence = (runs: RunEvidence[]) => runs.map(({ run, status, branch, commitSha, head, freshness, proves }) => ({ run, status, branch, commitSha, head, freshness, proves }));
-
-/* What a reviewer hears who passes the work when the run that passed proves nothing about what the branch holds now. */
-export function noProofNote(runs: RunEvidence[], pass: boolean): string {
-  const passed = runs.find(r => r.status === 'passed');
-  if (!pass || !passed || runs.some(r => r.proves)) return '';
-  return ` Test run ${passed.run} passed on ${passed.commitSha ?? 'no pinned commit'}, but it proves nothing about what you reviewed: ${passed.why}`;
 }

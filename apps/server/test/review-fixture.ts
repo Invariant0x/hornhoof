@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { expect } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, taskEvents, testParts, testRuns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, taskEvents } from '../src/db/schema.js';
 import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import { echelonsTurn, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -29,12 +29,6 @@ export async function fixture() {
   let commit = FIRST;
   ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -3 +3 @@\n-old\n+new' });
   ctx.readCommit = async () => ({ branch: `task-${task.number}`, commitSha: commit });
-  const [job] = await db.insert(jobs).values({ companyId, subscriptionId: claude!.id, agentId: author.id, taskId: task.id, kind: 'conversation', prompt: 'Work', timeoutMs: 1000 }).returning();
-  const run = async (commitSha: string, number: number) => {
-    const [r] = await db.insert(testRuns).values({ companyId, taskId: task.id, agentId: author.id, jobId: job!.id, departmentId: dev!.id, number, branch: `task-${task.number}`, commitSha, command: 'pytest unit', timeoutMs: 1000, status: 'passed', finishedAt: new Date() }).returning();
-    await db.insert(testParts).values({ companyId, runId: r!.id, part: 1, status: 'passed', commit: commitSha, exitCode: 0 });
-    return r!;
-  };
   const event = async (kind: 'submitted' | 'verdict') => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, kind))).orderBy(taskEvents.id)).at(-1)!;
   let toolNumber = 0;
   const tools = async (actor = reviewer) => {
@@ -43,7 +37,7 @@ export async function fixture() {
     await db.insert(jobs).values({ companyId, agentId: actor.id, subscriptionId: actor.subscriptionId!, taskId: task.id, kind: 'conversation', prompt: 'Review', status: 'running', timeoutMs: 1000, toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
-  return { ctx, db, task, head, author, reviewer, run, event, tools, hire, ceo: ceo!, advance: () => { commit = SECOND; } };
+  return { ctx, db, task, head, author, reviewer, event, tools, hire, ceo: ceo!, advance: () => { commit = SECOND; } };
 }
 
 type Finding = { findingId: string; revision: string; reviewedCommit: string; reviewerId: string; reviewerVendor: string; taskId: string; authorId: string };
@@ -64,7 +58,6 @@ export async function rejectedFinding(category: 'security' | 'data' | 'spec' | '
   const fix = async () => {
     f.advance();
     f.ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -3 +3 @@\n-old\n+fixed' });
-    await f.run(SECOND, 1);
     return submit(f.ctx, f.reviewer.id, f.task.id, { summary: 'Fixed the lost total', evidence: 'Unit check', review: { baseCommit: BASE } });
   };
   return { ...f, finding, confirm, read, fix, returned };

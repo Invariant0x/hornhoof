@@ -6,11 +6,13 @@ import { accessOf } from '../../auth/access.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, autonomousReleases, departments, people, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { evidenceOf } from '../testruns/evidence.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { scopeKey } from '../testruns/load.js';
-import { ranEverything, runScope, scopeSource } from '../testruns/purpose.js';
+import { runScope, scopeSource } from '../testruns/purpose.js';
+import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 import { passedProductPart } from '../testruns/receipts.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { routeOf, type Route } from './echelons-store.js';
@@ -37,7 +39,6 @@ type VerifiedVerdict = {
   reviewerName: string;
   stage: string;
   baseCommitSha: string;
-  allowedRunBranches: Set<string>;
 };
 type VerifiedProof = { department: Dept; repo: Repo; run: VerifiedRun; verdict: VerifiedVerdict; baseCommitSha: string };
 type VerdictRow = { id: number; agentId: string | null; pass: boolean; wrongGoal: boolean; stage: string; reviewedCommit: string };
@@ -66,7 +67,7 @@ export type AutonomousReleaseEntry = {
 export async function maySetAutonomousRelease(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
   if (me.status !== 'active' || Boolean(me.via) || Boolean(me.assistant)) return false;
   const [row] = await db
-    .select({ id: people.id })
+    .select(idOnly(people))
     .from(people)
     .where(and(eq(people.id, me.id), eq(people.companyId, me.companyId), eq(people.status, 'active'), eq(people.isAgent, false)));
   if (!row) return false;
@@ -83,7 +84,7 @@ export async function isAutonomousReleaseEnabled(db: Pick<QueryDb, 'select'>, de
 
 export async function hasAutonomousReleaseEntries(db: Pick<QueryDb, 'select'>, companyId: string, departmentId?: string): Promise<boolean> {
   const scope = departmentId ? and(eq(autonomousReleases.companyId, companyId), eq(autonomousReleases.departmentId, departmentId)) : eq(autonomousReleases.companyId, companyId);
-  const [row] = await db.select({ id: autonomousReleases.id }).from(autonomousReleases).where(scope).limit(1);
+  const [row] = await db.select(idOnly(autonomousReleases)).from(autonomousReleases).where(scope).limit(1);
   return Boolean(row);
 }
 
@@ -113,7 +114,7 @@ function validPartAt(part: Part, index: number, companyId: string, commit: strin
 }
 
 function completeRunParts(parts: Part[], run: Run, companyId: string, commit: string): boolean {
-  return run.parts > 0 && parts.length === run.parts && parts.every((part, i) => validPartAt(part, i, companyId, commit));
+  return (run.parts > 0 || keptEverything(run)) && parts.length === run.parts && parts.every((part, i) => validPartAt(part, i, companyId, commit));
 }
 
 function hasWholeEnvironmentRequest(run: Run): boolean {
@@ -134,15 +135,16 @@ function matchingSnapshot(run: Run, companyId: string, departmentId: string, com
   return commitMatches && matchingRepoScope(description.repositoryScope, run.environmentRequest.repositoryScope, companyId, departmentId) ? parsed.data : null;
 }
 
-function isFullManifestScope(snapshot: Snapshot, reused: number): boolean {
-  const scope = runScope(scopeSource(snapshot), undefined, reused);
-  if (!ranEverything(scope) || !snapshot.description.manifest.suites.length) return false;
-  return scope.fullProfile === null || scope.profile === scope.fullProfile;
+/* Every suite of the release's profile ran, in full or taking only what its release proved. */
+function checksWholeRelease(run: Run, snapshot: Snapshot): boolean {
+  const scope = runScope(scopeSource(snapshot), undefined, 0), fullRun = snapshot.description.manifest.execution?.fullRun;
+  if (scope.leftOut.length || !snapshot.description.manifest.suites.length) return false;
+  return !fullRun || (scope.profile === fullRun.profile && ofItsRelease(run.fileCache));
 }
 
 async function validFullProductRun(run: Run, parts: Part[], companyId: string, departmentId: string, commit: string): Promise<boolean> {
   const snapshot = matchingSnapshot(run, companyId, departmentId, commit);
-  if (!snapshot || !isFullManifestScope(snapshot, run.fileCache?.reused ?? 0)) return false;
+  if (!snapshot || !checksWholeRelease(run, snapshot)) return false;
   try {
     await validateEnvironmentDescription(snapshot.description);
   } catch {
@@ -155,20 +157,21 @@ function isMainRepository(department: Dept, repo?: Repo): boolean {
   return (department.repoBranch ?? 'main') === 'main' && (!repo || repo.branch === 'main');
 }
 
-function isAllowedRunBranch(branch: string | null, allowedRunBranches: Set<string>): boolean {
-  return Boolean(branch && (allowedRunBranches.has(branch) || RELEASE_BRANCH_RE.test(branch)));
+/* A shared run checks a release: of main, or of a release-X.Y.Z branch before main moves. */
+function isReleaseRunBranch(branch: string | null): boolean {
+  return branch === 'main' || Boolean(branch && RELEASE_BRANCH_RE.test(branch));
 }
 
-function isPassedCommitRun(run: Run, commit: string, allowedRunBranches: Set<string>): boolean {
-  return run.status === 'passed' && Boolean(run.finishedAt) && run.commitSha === commit && isAllowedRunBranch(run.branch, allowedRunBranches);
+function isPassedCommitRun(run: Run, commit: string): boolean {
+  return run.status === 'passed' && Boolean(run.finishedAt) && run.commitSha === commit && isReleaseRunBranch(run.branch);
 }
 
 function matchesLegacyFullCommand(department: Dept, command: string): boolean {
   return command === department.repoFullTestCommand && coversEveryPart(command);
 }
 
-async function isWholeSuiteGreenRun(db: QueryDb, companyId: string, department: Dept, commit: string, run: Run, allowedRunBranches: Set<string>): Promise<boolean> {
-  if (!isPassedCommitRun(run, commit, allowedRunBranches)) return false;
+async function isWholeSuiteGreenRun(db: QueryDb, companyId: string, department: Dept, commit: string, run: Run): Promise<boolean> {
+  if (!isPassedCommitRun(run, commit)) return false;
   const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
   if (!completeRunParts(parts, run, companyId, commit)) return false;
   return run.command === '' ? validFullProductRun(run, parts, companyId, department.id, commit) : matchesLegacyFullCommand(department, run.command);
@@ -191,7 +194,7 @@ async function isCurrentRunEvidence(ctx: FreshnessReader, run: Run, checkFreshne
   return evidence.freshness === 'current';
 }
 
-/* Condition (a): completed green full run_tests run on that exact 40-char SHA with proves: true. */
+/* Condition (a): a completed green whole run of a release, on main or a release-X.Y.Z branch, at that exact 40-char SHA with proves: true. */
 async function verifiedFullRun(
   ctx: FreshnessReader,
   db: QueryDb,
@@ -199,7 +202,6 @@ async function verifiedFullRun(
   department: Dept,
   commit: string,
   checkFreshness: boolean,
-  allowedRunBranches: Set<string>,
 ): Promise<VerifiedRun | null> {
   const failedAfter = await newestFailedNumber(db, companyId, department.id, commit);
   const runs = await db
@@ -210,7 +212,7 @@ async function verifiedFullRun(
     .limit(25);
   for (const run of runs) {
     if (run.number <= failedAfter) break;
-    if ((await isWholeSuiteGreenRun(db, companyId, department, commit, run, allowedRunBranches)) && (await isCurrentRunEvidence(ctx, run, checkFreshness))) {
+    if ((await isWholeSuiteGreenRun(db, companyId, department, commit, run)) && (await isCurrentRunEvidence(ctx, run, checkFreshness))) {
       return { id: run.id, number: run.number };
     }
   }
@@ -249,10 +251,9 @@ async function candidateIntegratesToMain(
   verdictTask: Task,
   route: Route,
   commit: string,
-): Promise<{ candidate: EchelonCandidate; allowedRunBranches: Set<string> } | null> {
+): Promise<EchelonCandidate | null> {
   const candidate = await loadCurrentCommitCandidate(db, verdictTask, route, commit);
-  if (!candidate || !candidateBranchLeadsToMain(verdictTask.number, candidate.branch)) return null;
-  return { candidate, allowedRunBranches: new Set<string>(['main', candidate.branch]) };
+  return candidate && candidateBranchLeadsToMain(verdictTask.number, candidate.branch) ? candidate : null;
 }
 
 function taskInRepoScope(task: Task, placeIds: string[]): boolean {
@@ -349,14 +350,13 @@ async function verifiedPrimaryVerdict(
   route: Route,
   latestByStage: Map<string, VerdictRow>,
   baseCommitSha: string,
-  allowedRunBranches: Set<string>,
 ): Promise<VerifiedVerdict | null> {
   const authors = await commitAuthors(db, verdictTask, askingTask);
   if (!(await securityStageVerified(db, askingTask.companyId, route.state.security.required, latestByStage.get('security'), authors))) return null;
   const primary = primaryStageRow(latestByStage);
   if (!primary) return null;
   const reviewer = await activeReviewer(db, askingTask.companyId, primary.agentId, authors);
-  return reviewer ? { eventId: primary.id, stage: primary.stage, ...reviewer, baseCommitSha, allowedRunBranches } : null;
+  return reviewer ? { eventId: primary.id, stage: primary.stage, ...reviewer, baseCommitSha } : null;
 }
 
 async function queryCandidateVerdicts(db: QueryDb, companyId: string, taskId: string, candidateId: string): Promise<VerdictRow[]> {
@@ -385,10 +385,10 @@ async function taskVerdictOnCommit(
   const route = await routeOf(db, verdictTask);
   const eligible = await candidateIntegratesToMain(db, verdictTask, route, commit);
   if (!eligible) return null;
-  const rows = await queryCandidateVerdicts(db, verdictTask.companyId, verdictTask.id, eligible.candidate.id);
+  const rows = await queryCandidateVerdicts(db, verdictTask.companyId, verdictTask.id, eligible.id);
   const latestByStage = allLatestStagesPassed(rows, commit);
   if (!latestByStage) return null;
-  return verifiedPrimaryVerdict(db, verdictTask, askingTask, route, latestByStage, eligible.candidate.baseCommit, eligible.allowedRunBranches);
+  return verifiedPrimaryVerdict(db, verdictTask, askingTask, route, latestByStage, eligible.baseCommit);
 }
 
 async function candidateTaskIdsOnCommit(db: QueryDb, companyId: string, placeIds: string[], commit: string): Promise<string[]> {
@@ -469,7 +469,7 @@ async function verifyAllConditions(ctx: Reader, task: Task, commit: string): Pro
   if (!verdict) return null;
   const baseCommitSha = await verifiedMainLine(ctx, found.repo, verdict.baseCommitSha, commit);
   if (!baseCommitSha) return null;
-  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, found.department, commit, true, verdict.allowedRunBranches);
+  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, found.department, commit, true);
   return run ? { department: found.department, repo: found.repo, run, verdict, baseCommitSha } : null;
 }
 
@@ -485,7 +485,7 @@ async function reverifyInTransaction(tx: Tx, task: Task, commit: string, departm
   if (!(await enabledMainInTransaction(tx, task.companyId, department.id))) return null;
   const verdict = await verifiedIndependentVerdict(tx, task, department.id, commit);
   if (!verdict) return null;
-  const run = await verifiedFullRun(null, tx, task.companyId, department, commit, false, verdict.allowedRunBranches);
+  const run = await verifiedFullRun(null, tx, task.companyId, department, commit, false);
   return run ? { run, verdict } : null;
 }
 
@@ -593,7 +593,7 @@ export async function verifyAutonomousMainAcceptance(ctx: Reader, task: Task, co
   if (!target) return null;
   const verdict = await verifiedIndependentVerdict(ctx.db, task, target.department.id, commit);
   if (!verdict || !(await verifiedRecordedLine(ctx, target.repo, verdict.baseCommitSha, target.recorded.baseCommitSha, commit))) return null;
-  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true, verdict.allowedRunBranches);
+  const run = await verifiedFullRun(ctx, ctx.db, task.companyId, target.department, commit, true);
   return run
     ? {
         entryId: target.recorded.id,
@@ -611,7 +611,7 @@ export async function confirmAutonomousMainAcceptance(
   proof: RecordedMainApproval,
 ): Promise<string | null> {
   const [existing] = await tx
-    .select({ id: autonomousReleases.id })
+    .select(idOnly(autonomousReleases))
     .from(autonomousReleases)
     .where(
       and(

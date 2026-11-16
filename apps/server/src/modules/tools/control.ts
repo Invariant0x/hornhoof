@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance, HTTPMethods } from 'fastify';
 import { z } from 'zod';
+import { idOnly } from '../../db/selections.js';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
@@ -402,7 +403,7 @@ async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url,
   const [owner] = personId
     ? [{ id: personId }]
     : await ctx.db
-        .select({ id: people.id })
+        .select(idOnly(people))
         .from(people)
         .where(and(eq(people.companyId, job.companyId), eq(people.isOwner, true)));
   if (!owner) return say('This company has no owner to act for.', true);

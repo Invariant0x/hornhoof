@@ -4,6 +4,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { pumpTests } from '../src/modules/testruns/runs.js';
@@ -95,7 +96,7 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
   };
   /* A file on the task, as an agent puts it there. */
   const putFile = async (name: string, text: string, taskId = task.id) => {
-    const [made] = await db.select({ id: jobs.id }).from(jobs).limit(1);
+    const [made] = await db.select(idOnly(jobs)).from(jobs).limit(1);
     const bytes = Buffer.from(text);
     await db.insert(attachments).values({ companyId, jobId: made!.id, agentId: bruno.id, taskId, name, mediaType: 'application/octet-stream', bytes, size: bytes.length });
   };

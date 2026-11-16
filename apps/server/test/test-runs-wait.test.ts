@@ -1,6 +1,7 @@
 import { deferred as waitRaceBarrier } from '../../../test-support/deferred.mjs';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { idOnly } from '../src/db/selections.js';
 import { ApiError } from '../src/errors.js';
 import * as waitNotices from '../src/modules/tasks/wait-notices.js';
 import { agentEvents, agents, jobs, pendingWakes, people, taskEvents, tasks, taskWaits, testParts, testRuns, waitPolicies } from '../src/db/schema.js';
@@ -12,7 +13,7 @@ import { company, done, idle, nextOf, reportHost } from './test-runs-company.js'
 const anHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
 const RUN_TOOLS = [
-  { tool: 'run_tests', state: 'test_run', stop: 'stop_tests', args: {}, name: 'Test run', why: 'tests' },
+  { tool: 'run_tests', state: 'test_run', stop: 'stop_tests', args: { branch: 'main' }, name: 'Test run', why: 'tests' },
   { tool: 'run_work', state: 'work_run', stop: 'stop_work', args: { branch: 'main' }, name: 'Work run', why: 'work' },
 ] as const;
 
@@ -180,7 +181,7 @@ describe('a run that ends while the one who started it waits', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const t = await c.turn(c.bruno);
-    await t.call('run_tests', { command: 'make one' });
+    await t.call('run_tests', { branch: 'main', command: 'make one' });
     await t.call('run_work', { command: 'make two', branch: 'main' });
     await t.call('wait_for', { task: c.task.number, reason: 'The first', until: anHour(), run: 1 });
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));
@@ -209,8 +210,8 @@ describe('a run that ends while the one who started it waits', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const t = await c.turn(c.bruno);
-    await t.call('run_tests', { command: 'make one' });
-    await t.call('run_tests', { command: 'make two' });
+    await t.call('run_tests', { branch: 'main', command: 'make one' });
+    await t.call('run_tests', { branch: 'main', command: 'make two' });
     await t.call('wait_for', { task: c.task.number, reason: 'The second', until: anHour(), run: 2 });
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, t.job.id));
     const one = await nextOf(ann.node, 'tests.run');
@@ -251,7 +252,7 @@ describe('a run that ends while the one who started it waits', () => {
       const c = await company();
       const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
-      await t.call('run_tests', { command: 'make check' });
+      await t.call('run_tests', { branch: 'main', command: 'make check' });
       await t.call('wait_for', { task: c.task.number, reason: 'The run, I forgot to name it', until: anHour() });
       await finish(c, t.job.id);
       const { until: deadline, operation } = (await taskRow(c)).externalWait!;
@@ -283,8 +284,8 @@ describe('a run that ends while the one who started it waits', () => {
       const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
       const ann = await c.machine(c.ann, 'ann-pc');
       const t = await c.turn(c.bruno);
-      await t.call('run_tests', { command: 'make one' });
-      await t.call('run_tests', { command: 'make two' });
+      await t.call('run_tests', { branch: 'main', command: 'make one' });
+      await t.call('run_tests', { branch: 'main', command: 'make two' });
       await t.call('wait_for', { task: c.task.number, reason: 'The second', until: anHour(), run: 2 });
       await finish(c, t.job.id);
       const operation = (await taskRow(c)).externalWait!.operation!;
@@ -326,7 +327,7 @@ describe('a run that ends while the one who started it waits', () => {
       const c = await company();
       const ivan = await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
-      await t.call('run_tests', { command: 'make check' });
+      await t.call('run_tests', { branch: 'main', command: 'make check' });
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
       await nextOf(ivan.node, 'tests.ack');
       await finish(c, t.job.id);
@@ -345,7 +346,7 @@ describe('a run that ends while the one who started it waits', () => {
       const c = await company();
       await c.machine(c.ceo, 'dev-mac');
       const head = await c.turn(c.head, c.task.id);
-      await head.call('run_tests', { command: 'make check' });
+      await head.call('run_tests', { branch: 'main', command: 'make check' });
       const refused = await (await c.turn(c.bruno)).call('wait_for', { task: c.task.number, reason: 'The run', until: anHour(), run: 1 });
       expect(refused.error).toBe(true);
     });
@@ -357,7 +358,7 @@ describe('a run that ends while the one who started it waits', () => {
       return (await c.db.select().from(taskWaits).where(eq(taskWaits.sourceKey, `run:${run!.id}`)))[0]!;
     };
     const policy = async (c: Awaited<ReturnType<typeof company>>, stage: string, ownerMs: number) => {
-      const [ceo] = await c.db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
+      const [ceo] = await c.db.select(idOnly(people)).from(people).where(eq(people.isOwner, true));
       await c.db.insert(waitPolicies).values({
         companyId: c.task.companyId, departmentId: c.dev.id, kind: 'run', stage, version: 1, ownerMs, headMs: 2 * ownerMs, decisionMs: 3 * ownerMs, reviewIntervalMs: 4 * ownerMs, createdByPersonId: ceo!.id,
       });
@@ -378,7 +379,7 @@ describe('a run that ends while the one who started it waits', () => {
       await policy(c, 'execution', 7_200_000);
       const t = await c.turn(c.bruno);
       const startedAt = Date.now();
-      await t.call('run_tests', { command: 'make check', minutes: 5 });
+      await t.call('run_tests', { branch: 'main', command: 'make check', minutes: 5 });
       const queued = await runWait(c);
       expect(queued).toMatchObject({ state: 'active', generation: 1, ownerAgentId: c.bruno.id, sourceState: { stage: 'queue' } });
       expect(queued.ownerDueAt!.getTime()).toBeGreaterThanOrEqual(startedAt + 3_600_000);
@@ -399,7 +400,7 @@ describe('a run that ends while the one who started it waits', () => {
       await policy(c, 'queue', 3_600_000);
       await policy(c, 'retry', 60_000);
       const t = await c.turn(c.bruno);
-      await t.call('run_tests', { command: 'make check' });
+      await t.call('run_tests', { branch: 'main', command: 'make check' });
       await nextOf(ivan.node, 'tests.run');
       await until(async () => (await runWait(c)).sourceState.stage === 'execution');
       expect(await runWait(c)).toMatchObject({ state: 'active', generation: 1 });
@@ -420,9 +421,9 @@ describe('a run that ends while the one who started it waits', () => {
       reportHost(c, one.nodeId, 'linux');
       reportHost(c, other.nodeId, 'linux');
       const { call } = await c.turn(c.bruno);
-      await call('run_tests', { command: 'make one' });
+      await call('run_tests', { branch: 'main', command: 'make one' });
       await nextOf(one.node, 'tests.run');
-      expect((await call('run_tests', { command: 'make two' })).text).toMatch(/Test run 2.*waits for a free machine/);
+      expect((await call('run_tests', { branch: 'main', command: 'make two' })).text).toMatch(/Test run 2.*waits for a free machine/);
       const [two] = await c.db.select().from(testRuns).where(eq(testRuns.number, 2));
       const [wait] = await c.db.select().from(taskWaits).where(eq(taskWaits.sourceKey, `run:${two!.id}`));
       expect(wait).toMatchObject({ state: 'active', sourceState: { stage: 'host_slot' } });
@@ -435,7 +436,7 @@ describe('a run that ends while the one who started it waits', () => {
     ] as const)('ends once with its result when %s', async (_name, state, status, over) => {
       const c = await company();
       const ivan = await c.machine(c.ceo, 'dev-mac');
-      await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
+      await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make check' });
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run'), over));
       await nextOf(ivan.node, 'tests.ack');
       await until(async () => (await runWait(c)).endedAt !== null);
@@ -447,7 +448,7 @@ describe('a run that ends while the one who started it waits', () => {
       const c = await company();
       await c.machine(c.ceo, 'dev-mac');
       const t = await c.turn(c.bruno);
-      await t.call('run_tests', { command: 'make check' });
+      await t.call('run_tests', { branch: 'main', command: 'make check' });
       await t.call('stop_tests', { run: 1 });
       const [run] = await c.db.select().from(testRuns);
       expect(await runWait(c)).toMatchObject({ state: 'cancelled', proofRef: `run:${run!.id}:stopped` });
@@ -456,7 +457,7 @@ describe('a run that ends while the one who started it waits', () => {
     it('ends with its task closed meanwhile, and the run ending later changes nothing', async () => {
       const c = await company();
       const ivan = await c.machine(c.ceo, 'dev-mac');
-      await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
+      await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make check' });
       const part = await nextOf(ivan.node, 'tests.run');
       expect((await (await c.turn(c.head, null)).call('cancel_task', { task: c.task.number, why: 'Not needed.' })).error).toBe(false);
       const ended = await runWait(c);
@@ -470,7 +471,7 @@ describe('a run that ends while the one who started it waits', () => {
     it('is refused with its run where the department set dates and none for where a run starts', async () => {
       const c = await company();
       await policy(c, 'execution', 3_600_000);
-      const started = await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
+      const started = await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make check' });
       expect(started.error).toBe(true);
       expect(started.text).toContain('sets dates for its waits');
       expect(await c.db.select().from(testRuns)).toEqual([]);
@@ -481,7 +482,7 @@ describe('a run that ends while the one who started it waits', () => {
       const c = await company();
       await policy(c, 'queue', 3_600_000);
       await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.head.id));
-      const started = await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
+      const started = await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make check' });
       expect(started.error).toBe(false);
       expect(await runWait(c)).toMatchObject({ state: 'legacy_needs_plan' });
     });

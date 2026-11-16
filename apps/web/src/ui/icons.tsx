@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { ProviderId } from '../types';
+import type { ProviderId, SubView } from '../types';
 
 export function AgentIcon({ label }: { label?: string }) {
   return (
@@ -68,6 +68,18 @@ export function AlertIcon() {
     <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M8 1.8l6.4 11.6H1.6z" />
       <path d="M8 6.2v3.4M8 11.4v.2" />
+    </svg>
+  );
+}
+
+/* How a connection is paid: arrows going round for a plan's subscription, a stack of coins for an API's tokens. Words
+   beside it or the label of what holds it say so. */
+export function PayIcon({ kind }: { kind: SubView['kind'] }) {
+  return (
+    <svg className="sign" viewBox="0 0 24 24" aria-hidden="true">
+      {kind === 'api_key'
+        ? <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>
+        : <><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9" /><path d="M20 4v5h-5" /><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15" /><path d="M4 20v-5h5" /></>}
     </svg>
   );
 }

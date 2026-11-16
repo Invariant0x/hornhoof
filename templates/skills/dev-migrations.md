@@ -12,5 +12,5 @@ You can evolve a database while preserving existing data and a known upgrade pat
 - Data moves go in the migration itself, tested on a copy of realistic data.
 - Keep each migration one transaction where the database allows it, so a failure leaves nothing half done.
 - Add indexes for the queries you add. Watch locks on large tables.
-- Test: a fresh database migrates to the end, and a database at the previous release migrates forward with its data intact. Write the failing regression first and run named migration test files in your own workspace; a whole suite uses run_tests, split into groups over free machines on the exact candidate, including fresh and upgraded data, repeat application and both directions when supported. Report an unsupported down migration explicitly.
+- Test: a fresh database migrates to the end, and a database at the previous release migrates forward with its data intact. Write the failing regression first and run named migration test files in your own workspace, including fresh and upgraded data, repeat application and both directions when supported. Report an unsupported down migration explicitly.
 - Say in your report whether going back to the previous release still works on the new schema, so the release notes can warn about it.

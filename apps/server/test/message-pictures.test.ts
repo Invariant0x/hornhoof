@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, attachments, departments, jobs, people } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { MESSAGE_FILE_BYTES } from '../src/modules/conversation/pictures.js';
 import { dropOldFiles } from '../src/modules/tasks/attachments.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, ownPlan } from './helpers.js';
@@ -309,6 +310,6 @@ describe("getting a message's picture", () => {
     const fresh = await uploaded(app, ceo, bruno.id);
     await db.update(attachments).set({ createdAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) }).where(eq(attachments.id, old.id));
     expect(await dropOldFiles(db, new Date())).toBe(1);
-    expect((await db.select({ id: attachments.id }).from(attachments)).map(a => a.id)).toEqual([fresh.id]);
+    expect((await db.select(idOnly(attachments)).from(attachments)).map(a => a.id)).toEqual([fresh.id]);
   });
 });

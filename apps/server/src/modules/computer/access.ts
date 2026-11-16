@@ -9,6 +9,7 @@ import { actsAsCeo } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { computerRuns, machineAccess, machines, people, personKeys, type MachineRole } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { askerOf, KEEPER_MARK } from '../network/via.js';
 import { readGrant, type Grant } from './grant.js';
@@ -348,7 +349,7 @@ export class Computers {
     const since = new Date(now.getTime() - WAITING_MS);
     const [row] = known ? [known] : await tx.select({ id: machines.id, hostname: machines.hostname, networkId: machines.networkId }).from(machines).where(eq(machines.id, machineId));
     const taken = alias(computerRuns, 'taken');
-    const inTheWay = tx.select({ id: taken.id }).from(taken).where(and(eq(taken.machineId, machineId), or(eq(taken.state, 'sent'), and(isNotNull(taken.sentAt), gt(taken.doneAt, since)))));
+    const inTheWay = tx.select(idOnly(taken)).from(taken).where(and(eq(taken.machineId, machineId), or(eq(taken.state, 'sent'), and(isNotNull(taken.sentAt), gt(taken.doneAt, since)))));
     await tx
       .update(computerRuns)
       .set({ state: 'done', exit: CLOSED_EXIT, output: staleLine(row ? this.nameOf(row) : 'The machine'), doneAt: now })
@@ -424,7 +425,7 @@ export class Computers {
   /* The answer of a command the machine's keeper took; false when it took no such command, or answered it already. */
   async answer(machineId: string, runId: string, result: RunResult): Promise<boolean> {
     return this.ctx.db.transaction(async tx => {
-      await tx.select({ id: machines.id }).from(machines).where(eq(machines.id, machineId)).for('update');
+      await tx.select(idOnly(machines)).from(machines).where(eq(machines.id, machineId)).for('update');
       const done = await tx
         .update(computerRuns)
         .set({ state: 'done', exit: result.exit, output: result.output.slice(-OUTPUT_MAX), doneAt: this.now() })
@@ -479,7 +480,7 @@ export class Computers {
     const until = typeof said.untilSec === 'number' && said.untilSec * 1000 > now.getTime() ? new Date(said.untilSec * 1000) : null;
     const asked = said.asked && typeof said.asked.reason === 'string' && typeof said.asked.at === 'string' ? { askedReason: said.asked.reason.slice(0, 500), askedAt: new Date(said.asked.at) } : { askedReason: null, askedAt: null };
     const taken = await this.ctx.db.transaction(async tx => {
-      await tx.select({ id: machines.id }).from(machines).where(eq(machines.id, mine.id)).for('update');
+      await tx.select(idOnly(machines)).from(machines).where(eq(machines.id, mine.id)).for('update');
       const row = { machineId: mine.id, companyId: mine.companyId, until, grant: null, openedBy: until ? mine.personId : null, openedAt: until ? now : null, ...asked };
       return (await tx.insert(machineAccess).values(row).onConflictDoNothing().returning({ id: machineAccess.machineId })).length > 0;
     });

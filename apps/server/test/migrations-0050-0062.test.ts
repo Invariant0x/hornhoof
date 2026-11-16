@@ -24,9 +24,10 @@ describe('limits freshness migration', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    /* Later migrations add columns of their own, empty: 0125 the address and protocol of an API connection. */
-    expect((await db.execute(sql`select to_jsonb(s) - 'limits_updated_at' - 'base_url' - 'api_protocol' as data from subscriptions s`)).rows).toEqual(before);
-    expect((await db.execute(sql`select limits_updated_at, base_url, api_protocol from subscriptions`)).rows).toEqual([{ limits_updated_at: null, base_url: null, api_protocol: null }]);
+    /* Later migrations add columns of their own, empty: 0125 the address and protocol of an API connection, 0131 the
+       fallbacks of a plan. */
+    expect((await db.execute(sql`select to_jsonb(s) - 'limits_updated_at' - 'base_url' - 'api_protocol' - 'fallbacks' as data from subscriptions s`)).rows).toEqual(before);
+    expect((await db.execute(sql`select limits_updated_at, base_url, api_protocol, fallbacks from subscriptions`)).rows).toEqual([{ limits_updated_at: null, base_url: null, api_protocol: null, fallbacks: [] }]);
   });
 });
 

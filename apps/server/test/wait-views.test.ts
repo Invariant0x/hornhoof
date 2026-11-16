@@ -2,6 +2,7 @@ import { TaskWaitView } from '@hornhoof/protocol/waits';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, tasks, taskWaits, turns, waitPolicies } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { ask, createTask, updateTask, type Task } from '../src/modules/tasks/engine.js';
 import { afterSourceKey } from '../src/modules/tasks/wait-state.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
@@ -19,7 +20,7 @@ const comesAfter = async (c: AclCompany, title: string, holder: { id: string }, 
    through the company's tasks, so it is put there as it is. */
 const apartWork = async (c: AclCompany, title: string) => {
   const [ava] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Ava', model: '' }).returning();
-  const [open] = await c.db.select({ id: turns.id }).from(turns).where(eq(turns.status, 'open'));
+  const [open] = await c.db.select(idOnly(turns)).from(turns).where(eq(turns.status, 'open'));
   const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 900, turnId: open?.id ?? null, title, departmentId: c.sales.id, assigneeAgentId: ava!.id, createdByPersonId: c.ids.ceo }).returning();
   return { task: task!, agent: ava! };
 };

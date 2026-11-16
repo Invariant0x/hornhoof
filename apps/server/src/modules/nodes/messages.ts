@@ -1,8 +1,9 @@
 import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
-import { and, count, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { ON_NODE } from '../jobs/dispatch.js';
@@ -33,6 +34,7 @@ import { programsLive } from './program-room.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
+import { fallBackFrom, heldUntil } from '../subscriptions/fallback.js';
 import { closeCheck, openCheck } from '../tools/outside.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -61,14 +63,14 @@ const completionValue = (value: unknown, stopped: string | null): SQL => sql`cas
    from before machines' built-in nodes were told apart names none, and is the one of this server's own. */
 export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
-  const ofKeys = inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const ofKeys = inArray(jobs.subscriptionId, ctx.db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
   const here = id.machine === ownMachine(ctx.config) ? or(eq(jobs.builtinMachine, id.machine), isNull(jobs.builtinMachine)) : eq(jobs.builtinMachine, id.machine);
   return and(ofKeys, here)!;
 }
 
 /* The turns that run on the node now, as Hornhoof has them. */
 async function workingOn(ctx: Ctx, id: NodeIdentity): Promise<number> {
-  const [row] = await ctx.db.select({ n: count() }).from(jobs).where(and(jobsOf(id, ctx), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
+  const [row] = await ctx.db.select(countOnly()).from(jobs).where(and(jobsOf(id, ctx), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
   return Number(row?.n ?? 0);
 }
 
@@ -212,10 +214,23 @@ async function afterReading(ctx: Ctx, planId: string, reading: Limits, now: Date
 
 async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
   if (!msg.limits && !msg.models) return;
+  const held = msg.limits ? await planHeldNow(ctx, planId) : true;
   await ctx.db
     .update(subscriptions)
     .set({ ...(msg.limits ? await afterReading(ctx, planId, msg.limits, now) : {}), ...(msg.models ? { models: msg.models } : {}) })
     .where(and(eq(subscriptions.id, planId), isNull(subscriptions.removedAt)));
+  if (!held) await fallBackIfHeld(ctx, planId);
+}
+
+/* Whether the plan holds a worker's turns back now: at its limit, or past the share set for tasks. */
+async function planHeldNow(ctx: Ctx, planId: string): Promise<boolean> {
+  const [plan] = await ctx.db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.id, planId));
+  return Boolean(plan && heldUntil(plan, 'worker'));
+}
+
+/* A plan that has just come to its limit or its share for tasks sends everyone on it to a fallback at once. */
+async function fallBackIfHeld(ctx: Ctx, planId: string | null): Promise<void> {
+  if (planId && (await planHeldNow(ctx, planId))) await fallBackFrom(ctx, planId);
 }
 
 const planState = async (ctx: Ctx, id: string) =>
@@ -268,7 +283,7 @@ async function parkUnknown(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promis
   const kind = PARKED_AS[msg.type];
   const jobId = msg.type === 'job.started' || msg.type === 'job.event' || msg.type === 'job.done' || msg.type === 'agent.restarted' ? msg.jobId : null;
   if (!kind || !jobId || !z.uuid().safeParse(jobId).success || !(await mergePending(ctx.db))) return false;
-  const [known] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, jobId));
+  const [known] = await ctx.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.id, jobId));
   if (known) return false;
   await park(ctx.db, { jobId, node: id, kind, body: msg });
   if (msg.type === 'job.done') ctx.hub.send(id, { type: 'job.ack', jobId });
@@ -292,7 +307,7 @@ async function placeWaiting(ctx: Ctx, id: NodeIdentity, ids: string[]): Promise<
   }
   /* The server's own built-in node runs the turns that name no machine: those need no place. */
   if (id.machine === ownMachine(ctx.config)) return;
-  const ofKeys = inArray(jobs.subscriptionId, db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
+  const ofKeys = inArray(jobs.subscriptionId, db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
   await db.update(jobs).set({ builtinMachine: id.machine }).where(and(waits, ofKeys));
 }
 
@@ -308,7 +323,7 @@ async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: 
   if (ids.length) await placeWaiting(ctx, id, ids);
   const open = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(and(inArray(jobs.id, running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
   const keep = new Set(open.map(j => j.id));
-  const known = new Set(ids.length ? (await db.select({ id: jobs.id }).from(jobs).where(inArray(jobs.id, ids))).map(j => j.id) : []);
+  const known = new Set(ids.length ? (await db.select(idOnly(jobs)).from(jobs).where(inArray(jobs.id, ids))).map(j => j.id) : []);
   for (const jobId of running) {
     if (keep.has(jobId)) continue;
     if (pending && ids.includes(jobId) && !known.has(jobId)) await park(db, { jobId, node: id, kind: 'listed', body: {} });
@@ -418,15 +433,19 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       }
       /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does, and the
          map says until when. */
+      let refused: string | null = null;
       if (finished.length && (msg.failure?.kind === 'usage_limit' || (!msg.failure && msg.error === 'agent_failed' && id.kind === 'node'))) {
         const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, msg.jobId));
         const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime(), msg.failure?.kind === 'usage_limit');
         if (held) {
           await db.update(subscriptions).set({ limits: held, limitsUpdatedAt: now }).where(eq(subscriptions.id, sub.id));
           for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });
+          refused = sub.id;
         }
       }
       if (finished.length) await afterJob(ctx, msg.jobId);
+      /* Everyone on the plan goes on to a fallback, not only the one whose turn it refused. */
+      await fallBackIfHeld(ctx, refused);
       /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
       ctx.hub.send(id, { type: 'job.ack', jobId: msg.jobId });
       return;

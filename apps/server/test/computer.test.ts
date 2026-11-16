@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, computerRuns, departments, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { ORCHESTRATOR_SKILLS } from '../src/modules/agents/instructions.js';
 import { Computers } from '../src/modules/computer/access.js';
 import { deliverLive, withInputLock } from '../src/modules/conversation/decision-context.js';
@@ -71,7 +72,7 @@ function withWait(c: Pick<Company, 'app' | 'control' | 'machine'>, waitMs: numbe
 
 const accessOf = async (c: Pick<Company, 'db' | 'machine'>) => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, c.machine)))[0];
 /* The commands that wait for the machine's keeper or are out with it. */
-const pending = (db: Company['db']) => db.select({ id: computerRuns.id }).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
+const pending = (db: Company['db']) => db.select(idOnly(computerRuns)).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
 
 
 type Result = { content: { type: string; text: string }[]; isError?: boolean };

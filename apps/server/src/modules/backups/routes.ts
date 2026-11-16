@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { certificates, companies, machines, people, recoveryKeys } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { notAMachine } from '../network/join.js';
 import { authorityOf, findThisMachine, networkMachine } from '../network/store.js';
@@ -65,7 +66,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* What the server's own keeper hears: whom to seal to and what was made, with who holds it. */
   async function makerView(): Promise<MakerView> {
-    const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
+    const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
     const data = await db.select({ ageKey: machines.ageKey }).from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'data'), isNotNull(machines.ageKey)));
     const recovery = company ? await activeRecovery(db, config) : null;
     /* The last backup of the database in use as it is now: a database set aside before a merge is none of it, and
@@ -147,7 +148,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!who.own) throw notKeeper();
     leads();
     const { head, from } = RecordBody.parse(req.body);
-    const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
+    const [company] = await db.select(idOnly(companies)).from(companies).limit(1);
     const authority = await authorityOf(db, config);
     if (!company || !authority) throw new ApiError(409, 'conflict', 'The company has no certificate authority yet.', 'no_authority');
     let manifest;
@@ -186,7 +187,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/backups/recovery', async req => {
     const me = ceo(await requirePerson(req, db));
     const active = await activeRecovery(db, config);
-    const [newest] = active ? [] : await db.select({ id: recoveryKeys.id }).from(recoveryKeys).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt))).limit(1);
+    const [newest] = active ? [] : await db.select(idOnly(recoveryKeys)).from(recoveryKeys).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt))).limit(1);
     /* A key that is not retired and is not the company's now was saved with another link. */
     return { recoveryNeeded: !active, linkChanged: Boolean(newest) };
   });
@@ -198,7 +199,7 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     const rows = await bundleRows(db, { limit: LISTED, forks: 'none' });
     const forks = await bundleRows(db, { forks: { since: new Date(Date.now() - FORK_KEEP_MS) } });
     const active = await activeRecovery(db, config);
-    const [newest] = await db.select({ id: recoveryKeys.id }).from(recoveryKeys).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt))).limit(1);
+    const [newest] = await db.select(idOnly(recoveryKeys)).from(recoveryKeys).where(and(eq(recoveryKeys.companyId, me.companyId), isNull(recoveryKeys.retiredAt))).limit(1);
     const [maker] = active ? await db.select({ name: people.name }).from(people).where(eq(people.id, active.madeBy)) : [];
     const cored = await db.select().from(machines).where(and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), isNotNull(machines.networkId)));
     const own = await findThisMachine(db, config);
