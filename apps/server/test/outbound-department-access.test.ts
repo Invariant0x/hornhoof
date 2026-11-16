@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { departments, outboundPermissions, people } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { company } from './department-owner-fixture.js';
 import { appFixture, as, invitePerson } from './helpers.js';
 
@@ -29,7 +30,7 @@ async function fourDepartments() {
     const given = { departments: [mkt!.id, c.sales.id, support!.id, biz!.id] };
     const maxToken = await invitePerson(c.app, c.ceoToken, { name: 'Max', email: 'max@acme.com', access: given });
     const louiseToken = await invitePerson(c.app, c.ceoToken, { name: 'Louise', email: 'louise@acme.com', access: given });
-    const [max] = await c.db.select({ id: people.id }).from(people).where(eq(people.email, 'max@acme.com'));
+    const [max] = await c.db.select(idOnly(people)).from(people).where(eq(people.email, 'max@acme.com'));
     expect((await c.setOwner(c.ceoToken, mkt!.id, max!.id)).statusCode).toBe(200);
     const post = (url: string, payload: object, token: string) => c.app.inject({ method: 'POST', url, payload, ...as(token) });
     const channel = (await post('/api/outbound/channels', { departmentId: mkt!.id, ...B2C }, c.ceoToken)).json() as { channelId: string };
