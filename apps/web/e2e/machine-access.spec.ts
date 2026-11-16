@@ -27,14 +27,14 @@ const WORDS = {
   en: {
     machines: 'Machines', block: 'Computer access', closed: 'Access closed', open: 'Access open', full: 'Full access for the team', asks: 'Asks for access',
     forOrchestrator: 'For the orchestrator', forTeam: 'Every company agent', openedBy: 'Opened by: Ivan', until: /^Until /,
-    choose: 'Open access', close: 'Close access', who: 'Who gets access?', duration: 'Access duration', hour: '1 hour', hours: '8 hours', day: '1 day',
+    openCard: 'Open the card of ', choose: 'Open access', close: 'Close access', who: 'Who gets access?', duration: 'Access duration', hour: '1 hour', hours: '8 hours', day: '1 day',
     orchestrator: 'Orchestrator', team: 'Every company agent', cancel: 'Cancel', confirm: 'Open full access for the whole team?', fullButton: 'Open full access',
     openHour: 'Open for 1 hour', notNow: 'Not now', offline: 'The machine is not responding. Access can be opened when it is online.', owner: "Decided by the machine's owner alone.",
   },
   ru: {
     machines: 'Машины', block: 'Доступ к компьютерам', closed: 'Доступ закрыт', open: 'Доступ открыт', full: 'Полный доступ для команды', asks: 'Просит доступ',
     forOrchestrator: 'Для оркестратора', forTeam: 'Все агенты компании', openedBy: 'Открыл: Ivan', until: /^До /,
-    choose: 'Открыть доступ', close: 'Закрыть доступ', who: 'Кому открыть доступ?', duration: 'Срок доступа', hour: '1 ч', hours: '8 ч', day: 'Сутки',
+    openCard: 'Открыть карточку ', choose: 'Открыть доступ', close: 'Закрыть доступ', who: 'Кому открыть доступ?', duration: 'Срок доступа', hour: '1 ч', hours: '8 ч', day: 'Сутки',
     orchestrator: 'Оркестратору', team: 'Всем агентам компании', cancel: 'Отмена', confirm: 'Открыть полный доступ всей команде?', fullButton: 'Открыть полный доступ',
     openHour: 'Открыть на 1 ч', notNow: 'Не сейчас', offline: 'Машина не отвечает. Доступ можно открыть, когда она появится в сети.', owner: 'Решение принимает только владелец машины.',
   },
@@ -200,6 +200,7 @@ for (const look of LOOKS) {
     expect(errors).toEqual([]);
   });
 
+  /* Each card opens from the list, in the page, so that no load is cut off by a new one. */
   test(`says each state of access, and who may act on it: ${named(look)}`, async ({ page }) => {
     const { card, sent, errors, words } = await openMachines(page, look, 'm5');
     /* Asked for: the reason, the hour and the answers. */
@@ -212,7 +213,7 @@ for (const look of LOOKS) {
     await expect(asked.getByText(words.asks, { exact: true })).toHaveCount(0);
     expect(sent.map(one => one.path)).toEqual(['/api/machines/m5/access/decline']);
     /* Anna's machine, open to the orchestrator by her: the CEO closes it but does not open it. */
-    await page.goto('/machines/m2');
+    await page.getByRole('button', { name: `${words.openCard}build-node`, exact: true }).click();
     const anna = blockOf(page.getByRole('article', { name: 'build-node', exact: true }), words);
     await expect(anna.getByText(words.open, { exact: true })).toBeVisible();
     await expect(anna.getByText(words.openedBy.replace('Ivan', 'Anna'), { exact: true })).toBeVisible();
@@ -220,12 +221,12 @@ for (const look of LOOKS) {
     await expect(anna.getByRole('button', { name: words.choose, exact: true })).toHaveCount(0);
     await snap(page.getByRole('article', { name: 'build-node', exact: true }), 'open-by-another');
     /* Full access on the Mac. */
-    await page.goto('/machines/m3');
+    await page.getByRole('button', { name: `${words.openCard}studio-mac`, exact: true }).click();
     const mac = blockOf(page.getByRole('article', { name: 'studio-mac', exact: true }), words);
     await expect(mac.getByText(words.full, { exact: true })).toBeVisible();
     await expect(mac.getByText(words.forTeam, { exact: true })).toBeVisible();
     /* Offline: nothing to open. */
-    await page.goto('/machines/m4');
+    await page.getByRole('button', { name: `${words.openCard}test-node`, exact: true }).click();
     const away = blockOf(page.getByRole('article', { name: 'test-node', exact: true }), words);
     await expect(away.getByText(words.offline, { exact: true })).toBeVisible();
     await expect(away.getByRole('button')).toHaveCount(0);
