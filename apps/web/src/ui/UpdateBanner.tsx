@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
+import type { UpdateCalledOff, UpdatesView, UpdateWaiting } from '../types';
 import type { Updates } from '../updates';
 import { UpdateProgress } from './UpdateProgress';
 import { buildText, versionText } from './VersionMark';
@@ -25,16 +26,44 @@ function store(key: string, value: string): void {
   }
 }
 
+type WaitNote = { waiting: UpdateWaiting } | { calledOff: UpdateCalledOff };
+
+/* An update that waits for the agents, or one its deadline called off, until the person saw that. */
+function waitNoteOf({ waiting, calledOff }: UpdatesView['updater']): WaitNote | null {
+  if (waiting) return { waiting };
+  return calledOff && stored(CALLED_OFF) !== calledOff.at ? { calledOff } : null;
+}
+
+/* Until when an update waits for the agents, with the way to call it off; or that its deadline called it off. */
+function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: () => void; onSeen: (at: string) => void }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const hour = (iso: string) => new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+  if ('waiting' in note) {
+    return (
+      <>
+        <span>{t.updates.waiting(versionText(note.waiting), hour(note.waiting.until))}</span>
+        <button className="btn small ghost" type="button" onClick={onCallOff}>{t.updates.callOff}</button>
+      </>
+    );
+  }
+  return (
+    <>
+      <span>{t.updates.calledOff(versionText(note.calledOff), hour(note.calledOff.at))}</span>
+      <button className="btn small ghost" type="button" onClick={() => onSeen(note.calledOff.at)}>{t.updates.ok}</button>
+    </>
+  );
+}
+
 /* Under the top bar: a newer build to take, an update waiting for the agents or running, or how the last one ended. */
 export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetails: () => void }) {
   const t = useT();
-  const { language } = useLanguage();
   const [, rerender] = useState(0);
   const [failure, setFailure] = useState<unknown>(null);
   const { view } = updates;
   if (!view) return null;
-  const { status, waiting, calledOff } = view.updater;
-  const time = (iso: string) => new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+  const { status } = view.updater;
+  const note = waitNoteOf(view.updater);
 
   async function act(run: () => Promise<void>) {
     setFailure(null);
@@ -58,20 +87,8 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
         <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
       </>
     );
-  } else if (waiting) {
-    body = (
-      <>
-        <span>{t.updates.waiting(versionText(waiting), time(waiting.until))}</span>
-        <button className="btn small ghost" type="button" onClick={() => void act(updates.callOff)}>{t.updates.callOff}</button>
-      </>
-    );
-  } else if (calledOff && stored(CALLED_OFF) !== calledOff.at) {
-    body = (
-      <>
-        <span>{t.updates.calledOff(versionText(calledOff), time(calledOff.at))}</span>
-        <button className="btn small ghost" type="button" onClick={() => hide(CALLED_OFF, calledOff.at)}>{t.updates.ok}</button>
-      </>
-    );
+  } else if (note) {
+    body = <WaitNoteBody note={note} onCallOff={() => void act(updates.callOff)} onSeen={at => hide(CALLED_OFF, at)} />;
   } else if (status && stored(SEEN) !== status.id) {
     body = (
       <>
