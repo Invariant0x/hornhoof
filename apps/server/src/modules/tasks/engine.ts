@@ -1,5 +1,6 @@
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
+import { nudgeTrackerKeepers } from '../tracker/nudge.js';
 import { followedStage } from '../tracker/pipelines.js';
 import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
@@ -292,6 +293,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     return row;
   });
   published(ctx, row);
+  if (row.status !== task.status) await nudgeTrackerKeepers(ctx, row, n.actor.agentId);
   if (unstuck) ctx.bus.publish(row.companyId, { type: 'requests', spot: taskSpot(row) });
   for (const t of started) published(ctx, t);
   linesMoved(ctx, lit);
@@ -576,6 +578,7 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
   const setup = await prepareNewTask(ctx, actor, input);
   const { task, wakes, independent } = await ctx.db.transaction(tx => insertNewTask(tx, actor, input, setup));
   published(ctx, task);
+  await nudgeTrackerKeepers(ctx, task, actor.agentId);
   if (independent) published(ctx, independent);
   await handOff(ctx, actor, task);
   if (independent) await handOff(ctx, actor, independent);
@@ -797,6 +800,8 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
     waiting = after.waiting;
   }, wakes);
   for (const t of ended) published(ctx, t);
+  /* The task's own department heard of it with the move; work under it elsewhere is heard of in its own. */
+  for (const departmentId of new Set(ended.map(t => t.departmentId).filter(d => d !== task.departmentId))) await nudgeTrackerKeepers(ctx, { companyId: task.companyId, departmentId }, actor.agentId);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, wakes, closed: [taskId, ...ended.map(t => t.id)], waiting };
 }
@@ -1456,6 +1461,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   });
   const now = await loadTask(ctx.db, task.id);
   published(ctx, now);
+  if (now.status !== task.status) await nudgeTrackerKeepers(ctx, now, actor.agentId);
   await handOff(ctx, actor, now);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { request: row, task: now, wakes };
@@ -1515,5 +1521,7 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
     if (started) await note(tx, started, { kind: 'status', actor: { agentId: job.agentId! }, data: { fromStatus: 'open', toStatus: 'working' } });
     return started;
   });
-  if (row) published(ctx, row);
+  if (!row) return;
+  published(ctx, row);
+  await nudgeTrackerKeepers(ctx, row, job.agentId);
 }

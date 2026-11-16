@@ -25,6 +25,7 @@ import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
+import { registerTrackerTools } from '../tracker/tools.js';
 import { registerTelegramTools } from '../telegram/tools.js';
 import { registerGoogleSheetsTools } from '../google/tools.js';
 import { registerTestTools } from '../testruns/tools.js';
@@ -71,7 +72,9 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
     { description: "The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates. An employee with ownText has text of its own over its role's, which may narrow the work it takes: ask it before you give it work its role would." },
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
+  const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
   registerTaskTools(server, ctx, job);
+  registerTrackerTools(server, ctx, job, grants);
   registerInboxTools(server, ctx, job);
   registerTelegramTools(server, ctx, job);
   registerGoogleSheetsTools(server, ctx, job);
@@ -79,7 +82,6 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
   registerOutboundTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
     registerBriefingTool(server, ctx, job);
-    const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
     registerWatchTools(server, ctx, job, grants);
     registerTestTools(server, ctx, job);
     if (job.agentKind === 'head') {

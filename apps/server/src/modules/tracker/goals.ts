@@ -5,6 +5,7 @@ import { agents, companies, departments, goalEvents, goals, people, tasks, type 
 import { deptName } from '../departments/templates.js';
 import { refuse, type Actor, type Tx } from '../tasks/engine.js';
 import { logOf, type LogLine } from '../tasks/views.js';
+import { nudgeTrackerKeepers } from './nudge.js';
 import { placeOwner, requireAnswersFor, spotOf } from './responsible.js';
 
 export type Goal = typeof goals.$inferSelect;
@@ -13,7 +14,7 @@ export type GoalChange = Partial<Pick<Goal, 'title' | 'why' | 'parentGoalId' | '
 export type NewGoal = GoalChange & Pick<Goal, 'title' | 'departmentId'>;
 /* Whoever writes may change goals in this place, or it throws: people by their access, agents by their department. */
 export type GoalGuard = (spot: Spot) => Promise<void>;
-type Live = Pick<Ctx, 'db' | 'bus'>;
+type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates'>>;
 
 export type GoalView = {
   id: string;
@@ -84,6 +85,7 @@ export async function createGoal(ctx: Live, companyId: string, actor: Actor, gua
     return row!;
   });
   publish(ctx, companyId);
+  await nudgeTrackerKeepers(ctx, goal, actor.agentId);
   return goal;
 }
 
@@ -127,11 +129,13 @@ const FIELD_NAMES: Record<(typeof CHANGEABLE)[number], string> = {
 export async function setGoalStatus(ctx: Live, companyId: string, actor: Actor, guard: GoalGuard, id: string, status: GoalStatus, version: number): Promise<Goal> {
   const before = await loadGoal(ctx.db, companyId, id);
   await guard(await spotOf(ctx.db, companyId, before.departmentId));
-  return changeGoal(ctx, companyId, id, version, async (tx, goal) => {
+  const goal = await changeGoal(ctx, companyId, id, version, async (tx, goal) => {
     if (goal.status === status) return null;
     await goalNote(tx, goal, 'status', actor, { fromStatus: goal.status, toStatus: status });
     return { status };
   });
+  if (before.status !== status) await nudgeTrackerKeepers(ctx, goal, actor.agentId);
+  return goal;
 }
 
 /* Every goal of the company with its progress, by number. A task counts for the goal it serves and for every goal above

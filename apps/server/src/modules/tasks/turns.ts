@@ -8,6 +8,7 @@ import { newTrackerFields, type TrackerFields, type TrackerInput } from '../trac
 import { keepWakes } from './outbox.js';
 import { refuseNotUrgent } from './urgency.js';
 import { handOff } from './pulses.js';
+import { nudgeTrackerKeepers } from '../tracker/nudge.js';
 import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 import { backlogChanged, readBacklog, takeBacklog, type BacklogItem } from '../backlog/store.js';
 
@@ -147,6 +148,7 @@ async function announce(ctx: Live, given: Given[]): Promise<void> {
     published(ctx, g.task);
     await handOff(ctx, { agentId: g.task.createdByAgentId! }, g.task);
   }
+  for (const departmentId of new Set(given.map(g => g.task.departmentId))) await nudgeTrackerKeepers(ctx, { companyId: given[0]!.task.companyId, departmentId }, given[0]!.task.createdByAgentId);
 }
 
 export const turnName = (t: Pick<Turn, 'number' | 'title' | 'goal'>) => `Turn ${t.number} "${t.title || t.goal}"`;

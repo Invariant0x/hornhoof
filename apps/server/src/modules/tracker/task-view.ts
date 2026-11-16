@@ -25,6 +25,9 @@ async function goalsServed(db: Ctx['db'], rows: Pick<Task, 'id'>[]): Promise<Map
   return new Map(found.rows.map(r => [r.id, r.goal_id]));
 }
 
+/* The goal one task serves: its own, or that of the task at the top of the work it is part of. */
+export const goalServed = async (db: Ctx['db'], task: Pick<Task, 'id'>): Promise<string | null> => (await goalsServed(db, [task])).get(task.id) ?? null;
+
 /* What the tracker shows of the tasks, read in one go for all of them. */
 export async function trackerLookups(db: Ctx['db'], rows: Pick<Task, 'id' | 'createdAt' | 'responsiblePersonId'>[], waits: (t: Pick<Task, 'id'>) => TaskWait[], agentName: (id: string) => string | undefined): Promise<TrackerLookups> {
   const served = rows.length ? await goalsServed(db, rows) : new Map<string, string>();
