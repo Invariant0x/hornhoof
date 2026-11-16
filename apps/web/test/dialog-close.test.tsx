@@ -7,7 +7,7 @@ import type { Updates } from '../src/updates';
 import { ME, mockApi } from './api-mock';
 
 const updates: Updates = {
-  view: { current: { version: '0.6.1', commit: 'a', migrations: 1 }, available: false, latest: null, versions: [], error: null, checkedAt: null, updater: { present: false, status: null, waiting: null } },
+  view: { current: { version: '0.6.1', commit: 'a', migrations: 1 }, available: false, latest: null, versions: [], error: null, checkedAt: null, updater: { present: false, status: null, waiting: null, calledOff: null } },
   busy: false, starting: false, target: null, offline: false, maintenance: false, asking: false, cut: null,
   check: async () => {}, update: async () => {}, callOff: async () => {}, confirmCut: async () => {}, dropCut: () => {},
 };

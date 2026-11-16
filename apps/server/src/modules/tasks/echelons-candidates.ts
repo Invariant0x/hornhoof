@@ -1,5 +1,4 @@
-import { posix } from 'node:path';
-import { RepoPath } from './review-schema.js';
+import { isTestPath, pathInScope, RepoPath } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
 import { DocumentCandidate, EchelonCandidate, type HandedCandidate } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, sql } from 'drizzle-orm';
@@ -13,14 +12,12 @@ import type { Route } from './echelons-store.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { exactComparison, type Review } from './review-context.js';
 
-const TEST_FILE_PATTERNS = ['**/test/**', '**/tests/**', '**/e2e/**', '**/*.test.*', '**/*.spec.*'] as const;
-
 export function isTestFilePath(path: string): boolean {
-  return RepoPath.safeParse(path).success && TEST_FILE_PATTERNS.some(pattern => posix.matchesGlob(path, pattern));
+  return RepoPath.safeParse(path).success && isTestPath(path);
 }
 
 function pathWithinScope(path: string, patterns: readonly string[], allowed?: ReadonlySet<string>): boolean {
-  return RepoPath.safeParse(path).success && (allowed?.has(path) === true || patterns.some(pattern => posix.matchesGlob(path, pattern)));
+  return RepoPath.safeParse(path).success && (allowed?.has(path) === true || pathInScope(path, patterns));
 }
 
 export function producedCandidate(route: Route, producer: CheckerIdentity, review: Review, allowedPaths?: ReadonlySet<string>): EchelonCandidate {

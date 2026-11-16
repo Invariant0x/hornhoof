@@ -6,13 +6,22 @@ import { cleanProjects, project } from './project.mjs';
 
 afterEach(cleanProjects);
 
-test('extracts exactly the requested release, including its summary and subsections', () => {
+test('extracts exactly the requested release, its list under Fixed, Added and Changed', () => {
   const p = project();
-  const want = '## [0.5.0] - 2026-11-04\nA simpler checkout.\n\n### Fixed\n- Preserve a cart.\n\n### Before you update\nBack up first.\n';
+  const want = '## [0.5.0] - 2026-11-04\n\n### Fixed\n\n- Preserve a cart.\n\n### Changed\n\n- Before you update: back up first.\n';
   writeFileSync(join(p.root, 'CHANGELOG.md'), '# Changelog\n\n## [Unreleased]\nNext work.\n\n' + want + '\n## [0.4.0] - 2026-10-01\nOld work.\n');
   const result = p.run('release-notes.mjs', '0.5.0');
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, want);
+});
+
+test('gives a GitHub release no notes in another language', () => {
+  const p = project();
+  writeFileSync(join(p.root, 'CHANGELOG.md'), '## [0.5.0] - 2026-11-04\n\n### Fixed\n\n- Preserve a cart.\n\n### Russian\n\n- Корзина сохраняется.\n');
+  const result = p.run('release-notes.mjs', '0.5.0');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CHANGELOG\.md notes for 0\.5\.0 may only have ### Fixed, ### Added and ### Changed, not "### Russian"/);
+  assert.equal(result.stdout, '');
 });
 
 test('defaults to the root version', () => {

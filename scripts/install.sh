@@ -541,9 +541,40 @@ prepare_node_stop() {
 }
 # What a failed start tells the person. Once the join used the code, running it again only gets a 410.
 RETRY='Run this command again.'
+
+is_old_node() {
+  case "$1" in
+    *[!A-Za-z0-9_.-]*) return 1 ;;
+    hornhoof-*-*-old-?*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+node_healthy() {
+  [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}} {{.State.Restarting}}' "$1" 2> /dev/null || true)" = 'true false' ]
+}
+
+next_old_node() {
+  local cand="$1-old-$$" n=1
+  while "${DOCKER[@]}" inspect --format '{{.Id}}' "$cand" > /dev/null 2>&1; do
+    cand="$1-old-$${n:+_$n}"
+    n=$((n + 1))
+  done
+  printf '%s' "$cand"
+}
+
+restore_old_node() {
+  local name=$1 old=$2
+  "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
+  [ -n "$old" ] || return 0
+  "${DOCKER[@]}" rename "$old" "$name" > /dev/null 2>&1 || true
+  "${DOCKER[@]}" update --restart=unless-stopped "$name" > /dev/null 2>&1 || true
+  "${DOCKER[@]}" start "$name" > /dev/null 2>&1 || true
+}
+
 # start_node <name> <id> <provider> [key]: the key goes into the node's volume through stdin, never on a command line.
 start_node() {
-  local name=$1 id=$2 provider=$3 key=${4:-}
+  local name=$1 id=$2 provider=$3 key=${4:-} old='' started=1
   if [ -n "$key" ]; then
     printf '%s %s %s %s\n' "$NODE_SERVER" "$id" "$provider" "$key" |
       "${DOCKER[@]}" run --rm -i --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-key ||
@@ -552,7 +583,18 @@ start_node() {
   say "Starting $name."
   host_env "$name"
   prepare_node_stop "$name" "${5:-node_update}"
-  "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
+  if "${DOCKER[@]}" inspect --format '{{.Id}}' "$name" > /dev/null 2>&1; then
+    old=$(next_old_node "$name")
+    if "${DOCKER[@]}" rename "$name" "$old" > /dev/null 2>&1; then
+      "${DOCKER[@]}" update --restart=no "$old" > /dev/null 2>&1 || true
+      if [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$old" 2> /dev/null || true)" = true ]; then
+        "${DOCKER[@]}" stop --time 5 "$old" > /dev/null 2>&1 || true
+      fi
+    else
+      old=''
+      "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
+    fi
+  fi
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
   # Root inside the container only: the node runs its agents as a user of their own, keeps its key and programs from
   # them and checks which agent calls its tools. Nothing from the host is mounted and no new privileges can be gained.
@@ -561,7 +603,14 @@ start_node() {
   "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
     --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_PTRACE \
     --security-opt no-new-privileges --security-opt apparmor=unconfined --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
-    ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
+    ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$IMAGE" > /dev/null || started=''
+  if [ -z "$started" ] || ! node_healthy "$name"; then
+    restore_old_node "$name" "$old"
+    fail "Could not start $name (docker logs $name shows why). $RETRY"
+  fi
+  if [ -n "$old" ]; then
+    "${DOCKER[@]}" rm -f "$old" > /dev/null 2>&1 || true
+  fi
   STARTED="$STARTED $name"
 }
 
@@ -606,6 +655,7 @@ existing_nodes() {
   "${DOCKER[@]}" ps -a --filter "label=$LABEL" --format '{{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.server"}}' 2> /dev/null |
     while read -r name id server; do
       [ -n "$name" ] || continue
+      if is_old_node "$name"; then continue; fi
       if [ -n "$known" ] && [ -n "$server" ] && [ "$server" != "$SERVER" ]; then continue; fi
       if [ -n "$known" ] && [ -z "$server" ]; then
         own=$("${DOCKER[@]}" exec "$name" cat /data/node.json 2> /dev/null | sed -n 's/^ *"server": *"\([^"]*\)".*/\1/p')
@@ -616,6 +666,29 @@ existing_nodes() {
         if [ "$own" != "$NODE_SERVER" ]; then continue; fi
       fi
       printf '%s:%s ' "$name" "$id"
+    done
+}
+
+# Renamed -old-* node containers of this server never run again: auto-restart comes off at once, and each goes once the
+# node container it was renamed from runs and is not restarting (or right away on --uninstall).
+sweep_old_nodes() {
+  local mode=${1:-} known=1 base
+  case "$SERVER" in __HORNHOOF_* | '') known='' ;; esac
+  "${DOCKER[@]}" ps -a --filter "label=$LABEL" --format '{{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.server"}}' 2> /dev/null |
+    while read -r name _ server; do
+      is_old_node "$name" || continue
+      if [ -n "$known" ] && [ "$server" != "$SERVER" ]; then continue; fi
+      if [ "$mode" = all ]; then
+        "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
+        continue
+      fi
+      if [ "$("${DOCKER[@]}" inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$name" 2> /dev/null || true)" != no ]; then
+        "${DOCKER[@]}" update --restart=no "$name" > /dev/null 2>&1 || true
+      fi
+      base=${name%-old-*}
+      if node_healthy "$base"; then
+        "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
+      fi
     done
 }
 
@@ -908,6 +981,7 @@ node_mode() {
     step 3 'Updating the nodes on this computer' 'Each node here moves to the version just downloaded once what it runs has ended. There is nothing to do.'
   fi
 
+  sweep_old_nodes
   existing=$(existing_nodes)
   for entry in $existing; do
     name=${entry%%:*}
@@ -1181,6 +1255,16 @@ uninstall_mode() {
       ;;
   esac
   for name in $names; do "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true; done
+  if [ -n "$core" ]; then
+    asked=$SERVER
+    while IFS= read -r SERVER; do
+      [ -n "$SERVER" ] || continue
+      sweep_old_nodes all
+    done <<< "$(core_servers "$core/.env")"
+    SERVER=$asked
+  else
+    sweep_old_nodes all
+  fi
   if [ -n "$core" ]; then remove_core "$core"; fi
   drop_nodes_updater
   say "The nodes are removed."
@@ -1444,6 +1528,7 @@ sweep_nodes() {
   linked=$(cd "$SERVER_DIR" && public_link "$@")
   port=$(port_of "$SERVER_DIR/.env")
   for SERVER in $public $linked "http://localhost:$port"; do
+    sweep_old_nodes
     for entry in $(existing_nodes); do
       name=${entry%%:*}
       id=${entry#*:}
@@ -2468,6 +2553,7 @@ worker_nodes_update() {
   front=$(port_of "$env_file")
   while IFS= read -r SERVER; do
     [ -n "$SERVER" ] || continue
+    sweep_old_nodes
     for entry in $(existing_nodes); do
       name=${entry%%:*}
       id=${entry#*:}

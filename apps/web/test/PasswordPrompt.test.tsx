@@ -7,6 +7,7 @@ import { CommandBox } from '../src/ui/CommandBox';
 import { useOwnerKey } from '../src/ui/PasswordPrompt';
 import { keyDefaults } from '../src/owner-key-store';
 import { mockApi, TEST_KEY } from './api-mock';
+import { commandCode } from './command-code';
 
 const JOIN = 'curl -fsSL https://corp.hornhoof.test/install.sh | bash -s -- --join abc';
 const NO_KEY = { 'GET /api/me/key': [200, { key: null }] as [number, unknown] };
@@ -18,7 +19,7 @@ describe('a join command and the key of who looks at it', () => {
   it("shows the command with the viewer's key, and asks nothing when they have one", async () => {
     mockApi({});
     show();
-    expect(await screen.findByText(`${JOIN} --owner-key ${TEST_KEY.publicKey}`)).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(`${JOIN} --owner-key ${TEST_KEY.publicKey}`))).toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });
 
@@ -82,7 +83,7 @@ describe('a join command and the key of who looks at it', () => {
     keyDefaults.subtle = undefined as unknown as SubtleCrypto;
     mockApi({});
     show();
-    expect(await screen.findByText(`${JOIN} --owner-key ${TEST_KEY.publicKey}`)).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(`${JOIN} --owner-key ${TEST_KEY.publicKey}`))).toBeInTheDocument();
     expect(screen.queryByText(/This page is open at an address without https/)).not.toBeInTheDocument();
   });
 

@@ -1,6 +1,7 @@
 import { deferred as waitRaceBarrier } from '../../../test-support/deferred.mjs';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { idOnly } from '../src/db/selections.js';
 import { ApiError } from '../src/errors.js';
 import * as waitNotices from '../src/modules/tasks/wait-notices.js';
 import { agentEvents, agents, jobs, pendingWakes, people, taskEvents, tasks, taskWaits, testParts, testRuns, waitPolicies } from '../src/db/schema.js';
@@ -357,7 +358,7 @@ describe('a run that ends while the one who started it waits', () => {
       return (await c.db.select().from(taskWaits).where(eq(taskWaits.sourceKey, `run:${run!.id}`)))[0]!;
     };
     const policy = async (c: Awaited<ReturnType<typeof company>>, stage: string, ownerMs: number) => {
-      const [ceo] = await c.db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
+      const [ceo] = await c.db.select(idOnly(people)).from(people).where(eq(people.isOwner, true));
       await c.db.insert(waitPolicies).values({
         companyId: c.task.companyId, departmentId: c.dev.id, kind: 'run', stage, version: 1, ownerMs, headMs: 2 * ownerMs, decisionMs: 3 * ownerMs, reviewIntervalMs: 4 * ownerMs, createdByPersonId: ceo!.id,
       });

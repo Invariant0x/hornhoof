@@ -27,10 +27,36 @@ if [ "${1:-}" = context ] && [ "${2:-}" = show ]; then echo "${STUB_CONTEXT:-des
 if ! works; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
 has() { case " $* " in *" $WORD "*) return 0 ;; esac; return 1; }
 stopped() {
+  [ -f "$STUB_STATE/stopped-$1" ] && return 0
   case " ${STUB_STOPPED:-} " in
     *" $1 "*) [ ! -f "$STUB_STATE/started-$1" ] ;;
     *) return 1 ;;
   esac
+}
+CONTAINERS="$STUB_STATE/containers"
+restart_of_seed() {
+  local w
+  for w in ${STUB_RESTART_POLICIES:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done
+  printf 'unless-stopped'
+}
+init_containers() {
+  [ -f "$CONTAINERS" ] && return 0
+  : > "$CONTAINERS"
+  local n name server
+  for n in ${STUB_CONTAINERS:-}; do
+    name=${n%%=*}
+    server=''
+    case "$n" in *=*) server=${n#*=} ;; esac
+    printf '%s|%s|%s\n' "$name" "$server" "$(restart_of_seed "$name")" >> "$CONTAINERS"
+  done
+}
+has_container() {
+  init_containers
+  grep -Fq "^$1|" "$CONTAINERS" 2> /dev/null || grep -Eq "^$(printf '%s' "$1" | sed 's/[.[\*^$()+?{|]/\\&/g')\|" "$CONTAINERS" 2> /dev/null
+}
+container_line() {
+  init_containers
+  awk -F'|' -v want="$1" '$1 == want { print; exit }' "$CONTAINERS"
 }
 # STUB_NODE_RUNNING is the image the server's built-in node runs now; STUB_IMAGE_IDS words are "ref=id" for tags that
 # point at the same image.
@@ -240,9 +266,44 @@ case "$1" in
         echo "lock-$n" ;;
       *) echo cid-app ;;
     esac ;;
-  rm) if [ "${2:-}" = "$(cat "$PORTS/lock" 2> /dev/null)" ]; then rm -f "$PORTS/lock"; fi ;;
+  rm)
+    if [ "${2:-}" = "$(cat "$PORTS/lock" 2> /dev/null)" ]; then rm -f "$PORTS/lock"; fi
+    init_containers
+    for arg in "${@:2}"; do
+      case "$arg" in -*) continue ;; esac
+      awk -F'|' -v gone="$arg" '$1 != gone' "$CONTAINERS" > "$CONTAINERS.new" && mv "$CONTAINERS.new" "$CONTAINERS"
+      rm -f "$STUB_STATE/started-$arg" "$STUB_STATE/stopped-$arg" "$STUB_STATE/new-$arg"
+    done ;;
+  rename)
+    init_containers
+    from=${2:-}; to=${3:-}
+    [ -n "$(container_line "$from")" ] && [ -z "$(container_line "$to")" ] || { echo "Error: cannot rename $from to $to" >&2; exit 1; }
+    awk -F'|' -v f="$from" -v t="$to" 'BEGIN { OFS="|" } $1 == f { $1 = t } { print }' "$CONTAINERS" > "$CONTAINERS.new" && mv "$CONTAINERS.new" "$CONTAINERS"
+    if [ -f "$STUB_STATE/started-$from" ]; then mv "$STUB_STATE/started-$from" "$STUB_STATE/started-$to"; fi
+    if [ -f "$STUB_STATE/stopped-$from" ]; then mv "$STUB_STATE/stopped-$from" "$STUB_STATE/stopped-$to"; fi
+    rm -f "$STUB_STATE/new-$from" ;;
+  update)
+    init_containers
+    pol=''
+    for arg in "${@:2}"; do
+      case "$arg" in --restart=*) pol=${arg#--restart=} ;; esac
+    done
+    target=${!#}
+    [ -n "$(container_line "$target")" ] || exit 1
+    if [ -n "$pol" ]; then
+      awk -F'|' -v c="$target" -v p="$pol" 'BEGIN { OFS="|" } $1 == c { $3 = p } { print }' "$CONTAINERS" > "$CONTAINERS.new" && mv "$CONTAINERS.new" "$CONTAINERS"
+    fi ;;
+  start)
+    init_containers
+    target=${!#}
+    [ -n "$(container_line "$target")" ] || exit 1
+    rm -f "$STUB_STATE/stopped-$target"
+    touch "$STUB_STATE/started-$target" ;;
   # The built-in node's container stops.
-  stop) if [ -n "${STUB_RUNNING_SERVICES:-}" ] && [ "${!#}" = nodecid ]; then not_running node; fi ;;
+  stop)
+    if [ -n "${STUB_RUNNING_SERVICES:-}" ] && [ "${!#}" = nodecid ]; then not_running node; fi
+    rm -f "$STUB_STATE/started-${!#}"
+    touch "$STUB_STATE/stopped-${!#}" ;;
   # STUB_NO_OVERLAY=1: a build from before machines had the company's core.
   cp)
     case "$2" in
@@ -264,6 +325,28 @@ case "$1" in
   inspect)
     # STUB_NODE_ENV: the settings a node was started with, one per line.
     case "${3:-}" in *.Config.Env*) printf '%b' "${STUB_NODE_ENV:-}"; exit 0 ;; esac
+    if [ "${3:-}" = '{{.HostConfig.RestartPolicy.Name}}' ]; then
+      line=$(container_line "${!#}")
+      [ -n "$line" ] || exit 1
+      cut -d'|' -f3 <<< "$line"
+      exit 0
+    fi
+    if [ "${3:-}" = '{{.State.Running}} {{.State.Restarting}}' ]; then
+      target=${!#}
+      [ -n "$(container_line "$target")" ] || exit 1
+      run_state=true
+      if stopped "$target"; then run_state=false; fi
+      if [ -f "$STUB_STATE/new-$target" ]; then
+        case " ${STUB_NEW_NODE_STOPPED:-} " in *" $target "*) run_state=false ;; esac
+      fi
+      rest_state=false
+      case " ${STUB_RESTARTING:-} " in *" $target "*) rest_state=true ;; esac
+      if [ -f "$STUB_STATE/new-$target" ]; then
+        case " ${STUB_NEW_NODE_RESTARTING:-} " in *" $target "*) rest_state=true ;; esac
+      fi
+      echo "$run_state $rest_state"
+      exit 0
+    fi
     if [ "${3:-}" = '{{.State.Running}}' ]; then if stopped "${!#}"; then echo false; else echo true; fi; exit 0; fi
     # STUB_NODE_IMAGES words are "name=image", the image a node was started from.
     if [ "${3:-}" = '{{.Config.Image}}' ]; then for n in ${STUB_NODE_IMAGES:-}; do [ "${n%%=*}" = "${!#}" ] && echo "${n#*=}"; done; exit 0; fi
@@ -272,7 +355,9 @@ case "$1" in
       *io.hornhoof.since*) [ -f "$PORTS/lock" ] || exit 1; echo "$(cat "$PORTS/lock") ${STUB_LOCK_SINCE:-$(date +%s)}" ;;
       *hornhoof-port-lock) if [ "${STUB_LOCK_TAKEN:-}" = 1 ]; then echo lock-other; else cat "$PORTS/lock" 2> /dev/null; fi ;;
       *PortBindings*) echo "${STUB_BOUND_PORTS:-}$(for s in ${STUB_SERVERS:-} ${STUB_CORES:-}; do printf ' %s' "${s##*:}"; done)" ;;
-      *) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
+      *)
+        if [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ]; then id_of "$STUB_NODE_RUNNING"; exit 0; fi
+        if [ "${3:-}" = '{{.Id}}' ]; then [ -n "$(container_line "${!#}")" ] && echo "cid-${!#}" || exit 1; exit 0; fi ;;
     esac ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
@@ -307,7 +392,13 @@ case "$1" in
       *com.docker.compose.service=keeper*) for s in ${STUB_CORES:-}; do IFS=: read -r p d _ <<< "$s"; echo "$p|$d|ghcr.io/invariant0x/hornhoof:latest|keeper-$p"; done; exit 0 ;;
       *com.docker.compose.project=*) for s in ${STUB_SERVERS:-} ${STUB_CORES:-}; do IFS=: read -r p d _ <<< "$s"; case "$* " in *"com.docker.compose.project=$p "*) echo "$d" ;; esac; done; exit 0 ;;
     esac
-    for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
+    init_containers
+    while IFS='|' read -r name server _; do
+      [ -n "$name" ] || continue
+      base=$name
+      case "$name" in hornhoof-*-*-old-?*) base=${name%-old-*} ;; esac
+      echo "$name id-of-$base $server"
+    done < "$CONTAINERS" ;;
   network)
     init_networks
     case "${2:-}" in
@@ -375,7 +466,20 @@ case "$1" in
     WORD=set-server; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; [ "${STUB_SET_SERVER:-ok}" != fail ] || exit 1; fi
     WORD=-d; if has "$@"; then
       [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }
-      prev=''; for a in "$@"; do [ "$prev" = --name ] && touch "$STUB_STATE/started-$a"; prev=$a; done
+      init_containers
+      cname=''; srv=''
+      prev=''
+      for a in "$@"; do
+        [ "$prev" = --name ] && cname=$a
+        case "$a" in hornhoof.server=*) srv=${a#hornhoof.server=} ;; esac
+        prev=$a
+      done
+      if [ -n "$cname" ]; then
+        [ -z "$(container_line "$cname")" ] || { echo "Conflict. The container name \"/$cname\" is already in use" >&2; exit 1; }
+        printf '%s|%s|unless-stopped\n' "$cname" "$srv" >> "$CONTAINERS"
+        rm -f "$STUB_STATE/stopped-$cname"
+        touch "$STUB_STATE/started-$cname" "$STUB_STATE/new-$cname"
+      fi
       echo "0123456789ab"
     fi
     WORD=--take-over; if has "$@"; then take_over_helper "$@"; fi ;;

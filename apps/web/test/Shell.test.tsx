@@ -155,11 +155,11 @@ describe('Shell', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    expect(await screen.findByText('Version 0.4.0 (abc1234)')).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('.account-menu .menu-version')).toHaveTextContent('Version 0.4.0 (abc1234)'));
   });
 
   it.each([
-    ['who sees the whole company', ME, ['Improvements', 'Versions', 'Settings', 'About', 'Log out']],
+    ['who sees the whole company', ME, ['Settings', 'Improvements', 'Versions', 'About', 'Log out']],
     ['who sees only some departments', { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } }, ['Settings', 'About', 'Log out']],
   ])('keeps the account menu short for a person %s: no themes, language, feedback or outbound', async (_who, me, items) => {
     mockApi({ 'GET /api/org': [200, ORG] });
@@ -204,6 +204,76 @@ describe('Shell', () => {
       await user.click(document.body);
     });
     expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
+  });
+});
+
+/* The account menu as Design's reference draws it (spec 1.1, section 3, and its picture): its heading, then rows in four
+   groups with a line between them, giving access, Settings, the pages of the whole company, About and Log out; a group
+   with nothing in it and its line not drawn. */
+describe('the account menu', () => {
+  const closed = accessView('dev-laptop', { machine: { id: 'm1' } });
+  const OPEN = { id: 'i1', title: 'Install jq', text: 'jq', seen: 1, status: 'open', result: null, at: '2026-11-15T09:00:00.000Z', updatedAt: '2026-11-15T09:00:00.000Z', agent: { id: 'w1', name: 'Wendy' }, department: { id: 'd9', name: 'Operations' }, decidedBy: null, scope: 'company', code: null };
+  const LISTED = { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } };
+
+  /* What the menu holds from its top: its heading, a line, or a row by its words, its count apart. */
+  const rows = (menu: HTMLElement) => [...menu.children].map(child => {
+    if (child.matches('.am-head')) return 'head';
+    if (child.matches('hr.am-sep')) return '—';
+    if (child.matches('button.mi')) return [...child.children].map(part => part.textContent).join(' + ');
+    return `? ${child.tagName} ${child.className}`;
+  });
+
+  async function open(me: typeof ME, routes: Parameters<typeof mockApi>[0] = {}) {
+    const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }], ...routes });
+    const user = userEvent.setup();
+    render(<LanguageProvider><Shell me={me} onSignOut={() => {}} /></LanguageProvider>);
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    return { calls, user, menu: document.querySelector<HTMLElement>('.account-menu')! };
+  }
+
+  it('puts giving access first, then Settings, then Improvements with its count, the inbox and Versions, then About and Log out', async () => {
+    const { menu } = await open(ME, {
+      'GET /api/machines/here': [200, { machine: closed.machine, view: closed }],
+      'GET /api/feedback': [200, { inbox: true }],
+      'GET /api/improvements': [200, { improvements: [OPEN, { ...OPEN, id: 'i2' }, { ...OPEN, id: 'i3', status: 'done' }] }],
+    });
+    await waitFor(() => expect(rows(menu)).toEqual([
+      'head', '—', 'Give the orchestrator access to this machine (dev-laptop)', '—', 'Settings',
+      '—', 'Improvements + 2', 'Feedback inbox', 'Versions',
+      '—', 'About', 'Log out',
+    ]));
+    expect(within(menu).getByRole('button', { name: 'Improvements, 2 to decide' })).toBeInTheDocument();
+    expect(within(menu.querySelector('.am-head')!).getByText('ivan@acme.com').closest('bdi')).toHaveAttribute('dir', 'ltr');
+    expect(menu.querySelector('.am-head > .menu-version')).toHaveTextContent('Version 0.4.0 (abc1234)');
+    expect(within(menu).getByText('0.4.0 (abc1234)', { selector: 'bdi' })).toHaveAttribute('dir', 'ltr');
+  });
+
+  it('draws no empty group and no line of its own for a person who sees only some departments', async () => {
+    const { menu } = await open(LISTED);
+    await waitFor(() => expect(rows(menu)).toEqual(['head', '—', 'Settings', '—', 'About', 'Log out']));
+  });
+
+  it('draws each row as a line of the panel 44 px high, its words at the start, with no frame', () => {
+    expect(decl('.mi', 'display')).toBe('flex');
+    expect(decl('.mi', 'align-items')).toBe('center');
+    expect(decl('.mi', 'justify-content')).toBe('space-between');
+    expect(decl('.mi', 'inline-size')).toBe('100%');
+    expect(decl('.mi', 'min-block-size')).toBe('44px');
+    expect(decl('.mi', 'padding')).toBe('8px 12px');
+    expect(decl('.mi', 'text-align')).toBe('start');
+    expect(decl('.mi', 'border')).toBe('0');
+    expect(decl('.mi', 'background')).toBe('transparent');
+    expect(decl('.mi', 'font')).toBe('500 14px/1.4 var(--f-body)');
+    expect(decl('.mi:hover', 'background')).toBe('var(--surface2)');
+    expect(decl('.mi:active', 'background')).toBe('var(--glow)');
+    expect(decl('.mi:focus-visible', 'outline')).toBe('2px solid var(--cyan-ink)');
+    expect(decl('.mi:focus-visible', 'outline-offset')).toBe('2px');
+    expect(decl('.account-menu', 'inline-size')).toBe('min(280px, calc(100vw - 32px))');
+    expect(decl('.account-menu', 'padding')).toBe('6px');
+    expect(decl('.account-menu', 'width')).toBeUndefined();
+    expect(decl('.am-sep', 'margin-block')).toBe('6px');
+    expect(decl('.am-sep', 'border-block-start')).toBe('1px solid var(--line)');
+    expect(decl('.am-head', 'padding')).toBe('8px 12px 10px');
   });
 });
 

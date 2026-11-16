@@ -1,3 +1,4 @@
+import { countOnly, idOnly } from '../../db/selections.js';
 import { earlierWork } from '../departments/branches.js';
 import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
@@ -5,7 +6,7 @@ import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
@@ -239,7 +240,7 @@ class TaskTools {
 
   private async underCap(agent: Agent, adding = 1): Promise<void> {
     const [made] = await this.db
-      .select({ n: count() })
+      .select(countOnly())
       .from(tasks)
       .where(and(eq(tasks.createdByAgentId, agent.id), gte(tasks.createdAt, await this.startedAt())));
     if (Number(made?.n ?? 0) + adding > TURN_TASKS) throw refuse(409, 'task_invalid', `One turn creates at most ${TURN_TASKS} tasks. Finish this turn and go on in the next.`);
@@ -287,7 +288,7 @@ class TaskTools {
 
   private async underQuestionCap(): Promise<void> {
     const [asked] = await this.db
-      .select({ n: count() })
+      .select(countOnly())
       .from(requests)
       .where(and(eq(requests.agentId, this.job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, await this.startedAt())));
     if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
@@ -295,7 +296,7 @@ class TaskTools {
 
   private async checkProduct(agent: Agent, id: string | undefined): Promise<void> {
     if (!id) return;
-    const [product] = await this.db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, id), eq(departments.parentId, agent.departmentId!)));
+    const [product] = await this.db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, id), eq(departments.parentId, agent.departmentId!)));
     if (!product) throw refuse(404, 'department_unknown', `${id} is not a product of your department.`);
   }
 

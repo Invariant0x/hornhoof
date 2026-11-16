@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { agentEvents, agents, jobs, machines, mapReturns, nodes, people, programDeliveries, subscriptions, tasks, teams } from '../../src/db/schema.js';
+import { idOnly } from '../../src/db/selections.js';
 import { appendTurnEvent } from '../../src/modules/events/store.js';
 import { workStarts } from '../../src/modules/org/map-state.js';
 import { reserveDelivery } from '../../src/modules/program-operator/deliveries.js';
@@ -42,7 +43,7 @@ it('commits the first subtask report in a running turn alongside its live tool e
   const pg = await privatePostgres();
   const fixture = await runFixture(pg);
   const [actorA, actorB] = fixture.actors;
-  const [sub] = await pg.db.select({ id: subscriptions.id }).from(subscriptions);
+  const [sub] = await pg.db.select(idOnly(subscriptions)).from(subscriptions);
   const [, head] = await pg.db.insert(agents).values([
     { companyId: fixture.companyId, subscriptionId: sub!.id, kind: 'orchestrator', name: 'Orchestrator', roleKey: 'ORCH', model: '' },
     { companyId: fixture.companyId, subscriptionId: sub!.id, departmentId: fixture.departmentId, kind: 'head', name: 'Head of development', roleKey: 'DEV-HEAD', model: '' },
@@ -64,7 +65,7 @@ it('commits the first subtask report in a running turn alongside its live tool e
   await installReportAndEventBarriers(pg);
 
   const barrier = await pg.pool('report_barrier').connect();
-  let pending: Promise<[Awaited<ReturnType<typeof report>>, void]> | undefined;
+  let pending: Promise<[Awaited<ReturnType<typeof report>>, boolean]> | undefined;
   try {
     await barrier.query('SELECT pg_advisory_lock(885, 1), pg_advisory_lock(885, 2)');
     pending = Promise.all([
@@ -104,8 +105,8 @@ it('commits head createTask alongside concurrent agent delivery reservation with
   const pg = await privatePostgres();
   const fixture = await runFixture(pg);
   const [actorA, actorB] = fixture.actors;
-  const [person] = await pg.db.select({ id: people.id }).from(people);
-  const [sub] = await pg.db.select({ id: subscriptions.id }).from(subscriptions);
+  const [person] = await pg.db.select(idOnly(people)).from(people);
+  const [sub] = await pg.db.select(idOnly(subscriptions)).from(subscriptions);
   const [head] = await pg.db.insert(agents).values({
     companyId: fixture.companyId, subscriptionId: sub!.id, departmentId: fixture.departmentId, kind: 'head', name: 'Head of development', roleKey: 'DEV-HEAD', model: '',
   }).returning();

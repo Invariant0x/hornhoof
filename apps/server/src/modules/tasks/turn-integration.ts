@@ -1,6 +1,7 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { exactComparison } from './review-context.js';
@@ -10,12 +11,12 @@ import { ensureOpenTurn, openTurnOf } from './turn-department.js';
    accepted into its branch turn-<number>; its release takes that branch to main. A product, or a part of a department, that
    keeps a repository of its own has no turn: its results go to its main line straight, with a person approving each. */
 
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged'>>;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readMerged' | 'readBranches' | 'createBranch'>>;
 type Turn = typeof turns.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
 export type IntegrationTarget = { repo: Repo; branch: string; turn: Turn | null };
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
 /* The repository the result is in and the branch it goes to: its department's open turn, opened if it has none, or its own
    main line. None where it keeps no repository. */
@@ -66,11 +67,58 @@ export async function headOf(ctx: Reader, repo: Repo, branch: string): Promise<s
   }
 }
 
+type Maker = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'readBranches' | 'createBranch'>>;
+type Heads = Awaited<ReturnType<NonNullable<Ctx['readBranches']>>>;
+export type TurnBranch = { head: string; made: boolean } | { problem: string };
+
+/* Where a turn's branch is made from: the commit the turn starts from, else the release it came from, else main's head. */
+const startOf = (turn: Turn, heads: Record<string, string>, main: string): string | undefined => turn.startCommit ?? turn.baseCommit ?? heads[main];
+
+/* The branch another made while this one was being made, read again after the push was refused. */
+function madeMeanwhile(after: Heads, branch: string): TurnBranch | null {
+  const head = 'problem' in after ? undefined : after.heads[branch];
+  return head ? { head, made: false } : null;
+}
+
+/* A turn that started nowhere starts from the commit its branch was made from. */
+async function keepStart(db: Maker['db'], turn: Turn, from: string): Promise<void> {
+  if (turn.startCommit) return;
+  await db.update(turns).set({ startCommit: from }).where(and(eq(turns.id, turn.id), eq(turns.status, 'open'), isNull(turns.startCommit)));
+}
+
+/* The branch of an open turn, made where the repository has none yet, from where the turn starts. It is only ever made, never
+   moved: one that is there, or one another made meanwhile, stays as it is. */
+export async function ensureTurnBranch(ctx: Maker, repo: Repo, turn: Turn): Promise<TurnBranch> {
+  const branch = `turn-${turn.number}`;
+  const { readBranches, createBranch } = ctx;
+  if (!readBranches || !createBranch) return { problem: `${branch} could not be read. Try again.` };
+  const heads = () => readBranches(repo, 5_000).catch((): Heads => ({ problem: `Hornhoof could not read the branches of ${repo.url}.` }));
+  const before = await heads();
+  if ('problem' in before) return { problem: `${branch} could not be read: ${before.problem}` };
+  const there = before.heads[branch];
+  if (there) return { head: there, made: false };
+  const from = startOf(turn, before.heads, repo.branch);
+  if (!from) return { problem: `${branch} is not in ${repo.url}, and neither is ${repo.branch} to make it from.` };
+  const made = await createBranch(repo, branch, from, 10_000).catch(() => ({ problem: `Hornhoof could not create the branch ${branch} in ${repo.url}.` }));
+  if ('problem' in made) return madeMeanwhile(await heads(), branch) ?? { problem: `${branch} is not in the repository yet, and ${made.problem}` };
+  await keepStart(ctx.db, turn, from);
+  return { head: from, made: true };
+}
+
+/* The head of the turn branch, made first where the repository has none yet, as after a migration or a repository just
+   connected. */
+async function turnHead(ctx: Reader, target: IntegrationTarget & { turn: Turn }): Promise<string> {
+  const head = await headOf(ctx, target.repo, target.branch);
+  if (head) return head;
+  const branch = await ensureTurnBranch(ctx, target.repo, target.turn);
+  if ('problem' in branch) throw refuse(409, 'task_changed', branch.problem);
+  return branch.head;
+}
+
 /* The turn branch holds the result's commit, and the commit the turn started from, the head of the turn before it as that
    one was released: else what that turn left out would be lost from every release. */
 export async function requireInTurn(ctx: Reader, target: IntegrationTarget & { turn: Turn }, commit: string, how: string): Promise<string> {
-  const head = await headOf(ctx, target.repo, target.branch);
-  if (!head) throw refuse(409, 'task_changed', `${target.branch} could not be read. Try again.`);
+  const head = await turnHead(ctx, target);
   if (!(await branchHolds(ctx, target.repo, head, commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${commit}: ${how}`);
   const start = target.turn.startCommit;
   if (start && !(await branchHolds(ctx, target.repo, head, start))) {

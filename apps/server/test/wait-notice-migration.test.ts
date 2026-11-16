@@ -1,16 +1,16 @@
-import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 describe('durable wait notices migration', () => {
   it('creates an empty outbox with durable deduplication and a pending index on a fresh database', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -25,7 +25,7 @@ describe('durable wait notices migration', () => {
   });
 
   it('upgrades the previous schema twice with existing legacy waits and wakes intact', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsBefore('task_wait_notices') });
@@ -45,7 +45,7 @@ describe('durable wait notices migration', () => {
 
   /* Two companies with every kind of source open, and what is over beside them. Each thing that exists today keeps its facts. */
   async function beforeWaits() {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsBefore('task_wait_ownership') });
@@ -132,7 +132,7 @@ describe('durable wait notices migration', () => {
   });
 
   it('creates the private tables empty, seeding no policy for any company', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: MIGRATIONS });

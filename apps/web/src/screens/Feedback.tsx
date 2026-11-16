@@ -164,19 +164,23 @@ function KindPicker({ kind, onPick }: { kind: FeedbackKind; onPick: (kind: Feedb
    the place it stands in has one. */
 function WriteStep({ flow, onCancel }: { flow: Flow; onCancel?: () => void }) {
   const t = useT();
-  const [problem, setProblem] = useState('');
+  const [untitled, setUntitled] = useState(false);
   const { draft, busy } = flow;
   function next(event: FormEvent) {
     event.preventDefault();
-    const untitled = !draft.title.trim();
-    setProblem(untitled ? t.feedback.titleRequired : '');
-    if (!untitled) void flow.look();
+    const missing = !draft.title.trim();
+    setUntitled(missing);
+    if (!missing) void flow.look();
+  }
+  function editTitle(title: string) {
+    flow.edit({ title });
+    if (title.trim()) setUntitled(false);
   }
   return (
-    <form className="form-grid" noValidate onSubmit={next}>
+    <form className="form-grid fb-form" noValidate onSubmit={next}>
       <KindPicker kind={draft.kind} onPick={kind => flow.edit({ kind })} />
-      <Field label={t.feedback.titleLabel} problem={problem || undefined}>
-        {p => <input {...p} value={draft.title} maxLength={TITLE_MAX} onChange={event => flow.edit({ title: event.target.value })} />}
+      <Field label={t.feedback.titleLabel} problem={untitled ? t.feedback.titleRequired : undefined}>
+        {p => <input {...p} value={draft.title} maxLength={TITLE_MAX} onChange={event => editTitle(event.target.value)} />}
       </Field>
       <Field label={t.feedback.text}>
         {p => <textarea {...p} className="fb-input" rows={6} value={draft.text} maxLength={TEXT_MAX} onChange={event => flow.edit({ text: event.target.value })} />}

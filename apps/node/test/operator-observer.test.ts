@@ -46,7 +46,8 @@ describe('program delivery evidence', () => {
   });
 
   it('does not call authenticated queue waiting missing activity, but detects a lost queue connection', async () => {
-    const client = new CheckClient(() => true); client.online(true); setCheckClient(client);
+    /* A connection lost past its lease, which here has no grace: the queue is lost as the connection drops. */
+    const client = new CheckClient(() => true, 0); client.online(true); setCheckClient(client);
     const pending = client.acquire({ agentId: agentKey, jobId });
     const rejected = pending.catch(() => {});
     const c = fixture(); c.attempt(); c.observer.receipt(deliveryId, 'taken');
@@ -72,7 +73,7 @@ describe('program delivery evidence', () => {
       c.at(899999); c.observer.tick(); expect(c.alarms()).toEqual([]);
       c.at(900000); c.observer.tick();
       expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'recorded_no_activity' })]);
-    } finally { lease.release(); client.online(false); }
+    } finally { lease.release(); client.stop(); }
   });
   it('credits a completed source without clearing a newer native question', () => {
     const c = fixture(); c.attempt();
@@ -243,7 +244,7 @@ describe('bounded evidence backpressure', () => {
         expect.objectContaining({ reason: 'question_waiting', questionId: nextQuestion.id }),
         expect.objectContaining({ reason: 'assignment_unrecorded', deliveryId }),
       ]);
-    } finally { client.online(false); await rejected; }
+    } finally { client.stop(); await rejected; }
   });
 
   it.each(['launch', 'attempt', 'receipt', 'finalize', 'alarm', 'activity', 'exit'] as const)('keeps %s retryable without consuming state at capacity', operation => {

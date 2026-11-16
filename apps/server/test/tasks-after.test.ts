@@ -3,6 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { cancel, comment, createTask as createTaskEngine, report, startWork, submit, updateTask as updateTaskEngine, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -411,16 +412,16 @@ describe('an independent part of a dependent task', () => {
     const api = (await member('Checkout API', bruno.id)).task;
     const input = { title: 'Dependent work', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, after: [api.id] };
     const before = {
-      tasks: (await db.select({ id: tasks.id }).from(tasks)).length,
-      events: (await db.select({ id: taskEvents.id }).from(taskEvents)).length,
-      wakes: (await db.select({ id: pendingWakes.id }).from(pendingWakes)).length,
+      tasks: (await db.select(idOnly(tasks)).from(tasks)).length,
+      events: (await db.select(idOnly(taskEvents)).from(taskEvents)).length,
+      wakes: (await db.select(idOnly(pendingWakes)).from(pendingWakes)).length,
     };
     await expect(createTaskEngine(ctx, { agentId: head.id }, input)).rejects.toMatchObject({ reason: 'task_invalid', message: 'A task with after needs independentPart or independentNone.' });
     await expect(createTaskEngine(ctx, { agentId: head.id }, { ...input, independentPart: { title: 'Tests', brief: '', body: 'Write tests.', executor: bruno.id }, independentNone: 'Both.' })).rejects.toMatchObject({ reason: 'task_invalid' });
     await expect(createTaskEngine(ctx, { agentId: head.id }, { ...input, after: [], independentNone: 'Not needed.' })).rejects.toMatchObject({ reason: 'task_invalid' });
-    expect((await db.select({ id: tasks.id }).from(tasks)).length).toBe(before.tasks);
-    expect((await db.select({ id: taskEvents.id }).from(taskEvents)).length).toBe(before.events);
-    expect((await db.select({ id: pendingWakes.id }).from(pendingWakes)).length).toBe(before.wakes);
+    expect((await db.select(idOnly(tasks)).from(tasks)).length).toBe(before.tasks);
+    expect((await db.select(idOnly(taskEvents)).from(taskEvents)).length).toBe(before.events);
+    expect((await db.select(idOnly(pendingWakes)).from(pendingWakes)).length).toBe(before.wakes);
   });
 
   it('starts the independent child while the parent waits and exposes the declaration', async () => {

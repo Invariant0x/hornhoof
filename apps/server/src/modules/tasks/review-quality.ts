@@ -4,6 +4,7 @@ import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { jobs, taskEvents, taskRoutes, tasks, testParts, testRuns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from './engine.js';
 import { RepoPath, ReviewSha } from './review-schema.js';
@@ -160,7 +161,7 @@ export async function authorQuality(db: Store, taskId: string, commit: string | 
 export async function recordAuthorCheck(db: Db, taskId: string, value: Input, validate?: (tx: Tx) => Promise<void>): Promise<number> {
   const input = AuthorCheckInput.parse(value);
   return db.transaction(async tx => {
-    await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).for('update');
+    await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.id, taskId)).for('update');
     await validate?.(tx);
     const bound = await binding(tx, taskId, input.runId);
     assertInput(input, bound);

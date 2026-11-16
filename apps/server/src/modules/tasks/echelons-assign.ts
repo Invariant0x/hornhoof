@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { agents, departments, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 import type { Route } from './echelons-store.js';
@@ -11,7 +12,7 @@ import { modelCapability, modelProvider, reviewEligibility, sameChecker, type Ch
 type Reader = { db: Ctx['db'] | Tx };
 
 export async function departmentHead(db: Reader['db'], task: Task): Promise<string> {
-  const [head] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt)).limit(1);
+  const [head] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt)).limit(1);
   if (!head) throw new ApiError(409, 'conflict', 'The department needs a head to receive this stage result.', 'task_invalid');
   return head.id;
 }
@@ -107,6 +108,6 @@ export async function checkingIdentity(ctx: Reader, task: Task, route: Route, ca
 /* Inside the transaction that commits a checker's result: the card is held until it commits, so a model, subscription
    or ability change either lands before this read and refuses the result, or waits until the result is in. */
 export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
-  if (task.assigneeAgentId) await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
+  if (task.assigneeAgentId) await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
   return checkingIdentity({ db: tx }, task, route, candidate);
 }

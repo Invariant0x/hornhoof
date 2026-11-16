@@ -1,8 +1,8 @@
-import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 
 const COMPANY = '00000000-0000-4000-8000-000000000101';
 const DEPARTMENT = '00000000-0000-4000-8000-000000000102';
@@ -19,7 +19,7 @@ const HUMAN_REQUEST = '00000000-0000-4000-8000-00000000010b';
 it('assigns live recipients and durable wakes to open legacy stuck requests only', async () => {
   const beforeFolder = await migrationsBefore('live_stuck_recipients');
   const throughFolder = await migrationsThrough('live_stuck_recipients');
-  const client = new PGlite(); onTestFinished(() => client.close());
+  const client = await freshPglite(); onTestFinished(() => client.close());
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: beforeFolder });
   await client.exec(`
