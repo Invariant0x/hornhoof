@@ -10,6 +10,7 @@ import { RoundTrips } from '../modules/keeper/round-trips.js';
 import { certFacts } from '../modules/network/authority.js';
 import { sameSubnet } from '../modules/network/ids.js';
 import { APP_AUTHORITY, DB_AUTHORITY, PEER_PATHS } from './peer-server.js';
+import { streamDeadline } from './stream-deadline.js';
 
 /* A data machine to keep a session to. machine: its row's id, which its certificate names. networkId: its keeper's id,
    which its services at the relay are named after. relayPort: the loopback port this keeper's visitor frpc opens to it,
@@ -256,7 +257,7 @@ export class PeerSessions {
       /* A session that ended since throws here, and the promise rejects with it. */
       const stream = session.h2.request({ ':method': method, ':path': path, ...(length === undefined ? {} : { 'content-length': length }) }, { endStream: !body });
       let answered = false;
-      stream.setTimeout(this.opts.streamIdleMs ?? STREAM_IDLE_MS, () => stream.destroy(new Error('The stream to the leader stopped moving.')));
+      streamDeadline(stream, this.opts.streamIdleMs ?? STREAM_IDLE_MS, () => stream.destroy(new Error('The stream to the leader stopped moving.')), body);
       stream.on('error', err => void (answered || reject(err)));
       stream.once('response', headers => {
         answered = true;
