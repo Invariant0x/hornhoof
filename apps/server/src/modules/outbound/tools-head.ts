@@ -19,7 +19,7 @@ import { channelsOfDepartment } from './views.js';
    their own screen, and these tools say where. */
 
 export const WHERE_ACCOUNTS =
-  'A person who runs the department connects a mail account (SMTP) or a webhook, with its password or key, in Settings under External messaging, or on the department\'s screen under About the department, in External messaging. Never ask for a password or key in a message and never pass one on.';
+  'A person who runs the department connects a mail account (SMTP) or a webhook, with its password or key, in Settings under External messaging, or on the department\'s screen under External messaging. Never ask for a password or key in a message and never pass one on.';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const ASK_THEM = 'Only the people who run this department decide this, or the CEO; ask them';
