@@ -35,13 +35,7 @@ export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>
     const [value] = await f.db.select().from(testRuns).where(and(eq(testRuns.taskId, f.task.id), eq(testRuns.agentId, f.tester.id))).orderBy(desc(testRuns.number)).limit(1);
     return value!;
   };
-  const manualRun = async (commit = finalCommit, parts = 1) => {
-    const value = await start('Changed tests');
-    const [finished] = await f.db.update(testRuns).set({ status: 'passed', finishedAt: new Date(), commitSha: commit, parts }).where(eq(testRuns.id, value!.id)).returning();
-    if (parts) await f.db.update(testParts).set({ status: 'passed', commit, exitCode: 0 }).where(eq(testParts.runId, value!.id));
-    else await f.db.delete(testParts).where(eq(testParts.runId, value!.id));
-    return finished!;
-  };
+  const manualRun = () => start('Changed tests');
   const run = async (commit = finalCommit, parts = 1, options: { finalChecks?: boolean; cache?: boolean; suitesOnly?: boolean } = {}) => {
     const value = await start(), request = { ...value.environmentRequest!, requestId: randomUUID(), builtin: true, sentAt: new Date().toISOString() };
     await f.db.update(testRuns).set({ environmentRequest: request }).where(eq(testRuns.id, value.id));

@@ -18,17 +18,17 @@ const print = (name: string) => name.repeat(64).slice(0, 64);
 const PRINTS = { 'test/a.test.ts': print('a'), 'test/b.test.ts': print('b'), 'test/c.test.ts': print('c') } as Record<string, string>;
 const fingerprints = (over: Record<string, string> = {}) => FILES.map(file => ({ suiteId: 'unit', file, fingerprint: over[file] ?? PRINTS[file]! }));
 
-const manifest = (preparation = false) => parseTestEnvironment({
+const manifest = (preparation = false, fullRun = true) => parseTestEnvironment({
   version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
   profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'final', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
   dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
   suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, keep: ['.metrics/mutate'] }],
   impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
   mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
-  execution: { version: 2, fullRun: { replaces: 'final', profile: 'full' }, ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
+  execution: { version: 2, ...(fullRun ? { fullRun: { replaces: 'final', profile: 'full' } } : {}), ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
 });
 
-async function fixture(turnNumber = 3, preparation = false) {
+async function fixture(turnNumber = 3, preparation = false, fullRun = true) {
   const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' }), url = await listen(app);
   await setUpCompany(app);
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
@@ -53,7 +53,7 @@ async function fixture(turnNumber = 3, preparation = false) {
       environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }, undefined, minutes) }).returning();
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
-    const value = manifest(preparation), manifestSource = JSON.stringify(value);
+    const value = manifest(preparation, fullRun), manifestSource = JSON.stringify(value);
     const description = { version: 1 as const, repositoryScope: scope, commitSha: TEST_COMMIT, manifestSource, manifest: value, manifestHash: await hashTestEnvironment(manifestSource), inputDigests: [], inventory: FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: described };
     const reply: TestsDescribed = { type: 'tests.described', requestId: stored!.environmentRequest!.requestId!, commitSha: TEST_COMMIT, result: { status: 'ready', description, ...(prints ? { fingerprints: prints } : {}) } };
     await acceptDescription(app.ctx, BUILTIN, reply);
@@ -190,6 +190,7 @@ describe('reusing green test results', () => {
   /* A part that runs into its limit sends the whole release check again, so the full run takes an hour a part and at least two. */
   it('gives each part of a full run an hour when no limit was asked and splits it in two on one machine, and keeps a limit that was asked', async () => {
     const f = await fixture(5);
+    await f.finish(await f.start({ profile: 'final' }));
     const full = await f.start({ profile: 'full' });
     expect((await f.runOf(full)).timeoutMs).toBe(3_600_000);
     expect((await f.partsOf(full)).filter(part => part.environmentSelection!.selection.kind === 'batch')).toHaveLength(2);
@@ -230,7 +231,7 @@ describe('reusing green test results', () => {
   it('counts a task without a turn by the turn open now, and by none with none open', async () => {
     const f = await fixture(5);
     await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
-    await f.finish(await f.start({ profile: 'fast' }));
+    await f.finish(await f.start({ profile: 'final' }));
     const full = await f.start({ profile: 'full' });
     expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
     await f.finish(full);
@@ -243,6 +244,7 @@ describe('reusing green test results', () => {
     const one = await f.start({ profile: 'full', suite: 'unit' });
     expect((await f.runOf(one)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
     await f.finish(one);
+    await f.finish(await f.start({ profile: 'final' }));
     const full = await f.start({ profile: 'full' });
     expect(await f.ranFiles(full)).toEqual(FILES);
     expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
@@ -250,7 +252,7 @@ describe('reusing green test results', () => {
 
   it('does not make the next run a full run after a full run that failed', async () => {
     const f = await fixture(5);
-    await f.finish(await f.start({ profile: 'fast' }));
+    await f.finish(await f.start({ profile: 'final' }));
     await f.finish(await f.start({ profile: 'full' }), { ok: false });
     const next = await f.start({ profile: 'final' });
     expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
@@ -345,6 +347,7 @@ describe('reusing green test results', () => {
 
     it('keeps a full run of a task branch off the turn\'s line, and a run of the turn\'s branch is no full run until it names the full profile', async () => {
       const f = await fixture(5);
+      await f.finish(await f.start({ profile: 'final' }, undefined, TASK_BRANCH));
       const named = await f.start({ profile: 'full' }, undefined, TASK_BRANCH);
       expect((await f.runOf(named)).fileCache).toMatchObject({ mode: 'full', turn: 5, mainLine: false });
       await f.finish(named);
@@ -389,7 +392,7 @@ describe('reusing green test results', () => {
 
   it('shows a mismatch when a file green at its fingerprint fails in the full run, and stops trusting that result', async () => {
     const f = await fixture(5);
-    await f.finish(await f.start({ profile: 'fast' }));
+    await f.finish(await f.start({ profile: 'final' }));
     const full = await f.start({ profile: 'full' });
     await f.finish(full, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' }] });
     const run = await f.runOf(full);
@@ -433,7 +436,7 @@ describe('reusing green test results', () => {
 
   it('forgets what a result came to once a passing run says nothing of the file', async () => {
     const f = await fixture();
-    await f.finish(await f.start({}), { files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed', note: 'old' }] });
+    await f.finish(await f.start({ profile: 'final' }), { files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed', note: 'old' }] });
     await f.finish(await f.start({ profile: 'full' }));
     expect((await f.greenRows()).map(row => row.note)).toEqual([null, null, null]);
   });
@@ -557,5 +560,46 @@ describe('zero-part product reuse receipts', () => {
     }
     await f.db.update(testRuns).set(ended).where(eq(testRuns.id, id));
     expect(await verifies()).toBe(true);
+  });
+});
+
+/* The full run of a release runs every test file anew, so it goes once, at the end: a release that failed is mended by the
+   profile it replaces, which runs only what failed or changed, and the full run follows once that passed on the same commit. */
+describe('the full run of a release', () => {
+  it('refuses the full run before profile final passed on its commit, runs nothing for it, and takes it after', async () => {
+    const f = await fixture(5);
+    const early = await f.start({ profile: 'full' });
+    expect(await f.runOf(early)).toMatchObject({ status: 'failed', environmentSnapshot: null, environmentRequest: { problem: { code: 'full_run_early' } } });
+    expect(await f.partsOf(early)).toMatchObject([{ status: 'failed', error: 'full_run_early', environmentSelection: null }]);
+    await until(async () => (await f.told()).includes('Test run 1 failed'));
+    expect(await f.told()).toContain(`Profile full runs every test file anew, once per release, after profile final passed on this same commit ${TEST_COMMIT}`);
+    await f.finish(await f.start({ profile: 'final' }));
+    const full = await f.start({ profile: 'full' });
+    expect(await f.ranFiles(full)).toEqual(FILES);
+    expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', reused: 0 });
+  });
+
+  it('takes no final run that failed, ran one suite or checked another commit', async () => {
+    const f = await fixture(5);
+    await f.finish(await f.start({ profile: 'final' }), { ok: false });
+    await f.finish(await f.start({ profile: 'final', suite: 'unit' }));
+    const other = await f.start({ profile: 'final' });
+    await f.finish(other);
+    await f.db.update(testRuns).set({ commitSha: 'f'.repeat(40) }).where(eq(testRuns.id, other));
+    const full = await f.start({ profile: 'full' });
+    expect((await f.runOf(full)).environmentRequest!.problem).toMatchObject({ code: 'full_run_early' });
+  });
+
+  it('runs one suite of the full profile, and another profile, without waiting for profile final', async () => {
+    const f = await fixture(5);
+    expect(await f.ranFiles(await f.start({ profile: 'full', suite: 'unit' }))).toEqual(FILES);
+    expect(await f.ranFiles(await f.start({ profile: 'fast' }))).toEqual(FILES);
+  });
+
+  it('has no such order where the manifest declares no full run', async () => {
+    const f = await fixture(5, false, false);
+    const full = await f.start({ profile: 'full' });
+    expect(await f.ranFiles(full)).toEqual(FILES);
+    expect((await f.runOf(full)).environmentRequest!.problem).toBeNull();
   });
 });

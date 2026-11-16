@@ -30,12 +30,10 @@ describe('Tests verifies the final candidate without changing it', () => {
     expect((await f.detail()).echelons).toMatchObject({ phase: 'ready', candidateId: f.snapshot.candidateId });
     expect(moved.wakes.map(w => w.agentId)).toEqual([f.head.id]);
   });
-  it('does not accept a passed manual command as proof of the candidate applicable test scope', async () => {
+  /* Only a product run bound to the candidate narrows to the test files its change reaches; a command could run the whole suite. */
+  it("refuses a manual command bound to the candidate on its task branch", async () => {
     const f = await testsFixture();
-    const run = await f.manualRun();
-    expect(run.command).toBe('Changed tests');
-    expect(run.environmentSnapshot).toBeNull();
-    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
+    await expect(f.manualRun()).rejects.toMatchObject({ reason: 'tests_not_release' });
     expect((await f.detail()).echelons.phase).toBe('active');
   });
   it.each(['base', 'manifest', 'missing-fingerprint', 'duplicate-fingerprint', 'receipt', 'receipt-commit', 'selection'] as const)('rejects %s evidence after a product run has passed', async problem => {
