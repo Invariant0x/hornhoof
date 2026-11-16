@@ -90,6 +90,17 @@ describe('a plan at its limit', () => {
     expect(await c.runningOf(c.agent.id)).toMatchObject({ subscriptionId: c.sub.id });
   });
 
+  it('brings an employee back on the next round of the reconciler after a restart of the server lost its wake', async () => {
+    const c = await atWork();
+    await c.fail(c.first.id, usageLimit);
+    expect(await c.agentOf(c.watcher.id)).toMatchObject({ subscriptionId: c.spare.id });
+    vi.clearAllTimers();
+    vi.setSystemTime(Date.now() + HOUR + LIMIT_GRACE_MS + MIN);
+    const { reconcile } = await import('../src/modules/tasks/reconcile.js');
+    await reconcile(c.ctx);
+    expect(await c.agentOf(c.watcher.id)).toMatchObject({ subscriptionId: c.sub.id });
+  });
+
   it('tells the orchestrator once, clearly, when no fallback has room, and keeps everyone where they are', async () => {
     const c = await atWork();
     await c.limits(c.spare.id, c.full());

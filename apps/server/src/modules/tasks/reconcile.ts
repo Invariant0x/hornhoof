@@ -12,6 +12,7 @@ import { checkSignInFailures, sendWaitingFailureAlarms } from './failures.js';
 import { askOfRunningTurns, moveStalledQueues } from './orphan-turns.js';
 import { checkSilentTurns } from './silent.js';
 import { wakeAll } from './wake.js';
+import { settleFallbacks } from '../subscriptions/fallback.js';
 
 const MACHINE_AWAY_MS = 5 * 60_000;
 const LOST_WAKE_MS = 2 * 60_000;
@@ -112,6 +113,7 @@ export async function reconcile(ctx: Ctx, now = new Date()): Promise<void> {
     await checkSilentTurns(ctx, now);
     await checkSignInFailures(ctx, now);
     await sendWaitingFailureAlarms(ctx);
+    await settleFallbacks(ctx);
   } finally {
     reconciling.delete(ctx);
   }

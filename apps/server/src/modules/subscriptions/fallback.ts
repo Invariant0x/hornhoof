@@ -210,6 +210,14 @@ export async function fallBackFrom(ctx: Ctx, planId: string): Promise<void> {
   for (const { id } of on) await pump(ctx, id);
 }
 
+/* Each round of the reconciler: whoever is on a fallback while its own plan takes its turns again comes back between turns,
+   also when the wake set for that was lost with a restart of the server. */
+export async function settleFallbacks(ctx: Ctx): Promise<void> {
+  const away = await ctx.db.select({ agentId: agentFallbacks.agentId, kind: agents.kind, home: subscriptions }).from(agentFallbacks)
+    .innerJoin(agents, eq(agents.id, agentFallbacks.agentId)).innerJoin(subscriptions, eq(subscriptions.id, agentFallbacks.homeSubscriptionId));
+  for (const { agentId, kind, home } of away) if (home.removedAt || !heldUntil(home, kind)) await pump(ctx, agentId);
+}
+
 /* The fallback an employee is on, for its card: its own plan and when that plan's hold ends, as far as it is known now. */
 export async function fallbackOf(ctx: Ctx, agent: Pick<Agent, 'id' | 'kind' | 'subscriptionId'>): Promise<{ home: string; until: string | null } | null> {
   const [kept] = await ctx.db.select().from(agentFallbacks).where(eq(agentFallbacks.agentId, agent.id));
