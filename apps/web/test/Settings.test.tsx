@@ -90,6 +90,18 @@ describe('the public link under Company & access', () => {
     expect(screen.queryByRole('link', { name: AGREEMENT })).not.toBeInTheDocument();
   });
 
+  it('makes Remove link the pink secondary button, last of its row', async () => {
+    mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
+    render(<Settings me={ME} group="company" onClose={() => {}} />);
+    const remove = await screen.findByRole('button', { name: 'Remove link' });
+    expect(remove).toHaveClass('btn', 'ghost', 'danger');
+    expect(remove.parentElement!.lastElementChild).toBe(remove);
+    expect(screen.getByRole('button', { name: 'Change name' })).not.toHaveClass('danger');
+    /* The pink of a danger button is the shared rule of Oracle and Trinity: pink words, a pink frame on hover. */
+    expect(decl(':is(.btn.ghost, .act).danger', 'color')).toBe('var(--pink-ink)');
+    expect(decl('.btn.ghost.danger:hover', 'box-shadow')).toBe('inset 0 0 0 1px var(--pink)');
+  });
+
   it('removes the link after asking', async () => {
     const calls = mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }], 'DELETE /api/link': [204] });
     const user = userEvent.setup();
@@ -308,6 +320,29 @@ describe('Settings in the account menu', () => {
     expect(await groups(dialog)).toEqual(['Profile', 'Appearance & language']);
   });
 
+  /* Design took one group at a time on three conditions (#970, finding 3): the open item stands out and is the current
+     page, the open group's heading stands at its top, and at a phone's width the items wrap in rows, whole words. */
+  it('marks the open group in the list and stands its heading first, the items in rows at a phone width', async () => {
+    mockApi({ 'GET /api/google-sheets': [200, { google: null }], 'GET /api/outbound': [200, OUTBOUND], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
+    render(<Settings me={ME} group="integrations" onClose={() => {}} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    const nav = within(dialog).getByRole('navigation', { name: 'Settings groups' });
+    await waitFor(() => expect(within(nav).getAllByRole('button')).toHaveLength(5));
+    expect(within(nav).getAllByRole('button').filter(button => button.hasAttribute('aria-current')).map(button => [button.textContent, button.getAttribute('aria-current')])).toEqual([['Integrations', 'page']]);
+    const group = dialog.querySelector('.sgroup')!;
+    expect(group.firstElementChild).toHaveClass('g-head');
+    expect(group.firstElementChild!.firstElementChild).toBe(within(dialog).getByRole('heading', { level: 3, name: 'Integrations' }));
+    const current = ".settings-nav .btn[aria-current='page']";
+    expect(decl(current, 'background')).toBe('var(--surface2)');
+    expect(decl(current, 'color')).toBe('var(--cyan-ink)');
+    expect(decl(current, 'border-inline-start-color')).toBe('var(--cyan-ink)');
+    expect(decl(current, 'box-shadow', '(max-width: 760px)')).toBe('inset 0 0 0 1px var(--cyan-ink), inset 0 -4px 0 var(--cyan-ink)');
+    expect(decl('.settings-nav', 'flex-direction', '(max-width: 760px)')).toBe('row');
+    expect(decl('.settings-nav', 'flex-wrap', '(max-width: 760px)')).toBe('wrap');
+    expect(decl('.settings-nav .btn', 'white-space')).toBe('normal');
+    expect(decl('.settings-nav .btn', 'overflow-wrap')).toBe('break-word');
+  });
+
   it('names the groups in Russian, in the menu and on the window', async () => {
     localStorage.setItem('hh-lang', 'ru');
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/google-sheets': [200, { google: null }], 'GET /api/outbound': [200, OUTBOUND] });
@@ -362,6 +397,18 @@ describe('the language under Appearance & language', () => {
     await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Язык' }), 'English');
     expect(screen.getByRole('button', { name: 'Map' })).toBeInTheDocument();
     expect(localStorage.getItem('hh-lang')).toBe('en');
+  });
+
+  it('puts its hint 4 px under its heading and the list 8 px under the hint, with no margin of the browser', () => {
+    expect(decl('.settings-window .lang-part', 'gap')).toBe('4px');
+    expect(decl('.lang-part > p', 'margin')).toBe('0');
+    expect(decl('.lang-part > .select-wrap', 'margin-block-start')).toBe('4px');
+  });
+
+  it('draws text and buttons with the same widths in every engine', () => {
+    expect(decl('body', 'text-rendering')).toBe('geometricPrecision');
+    /* Chromium's own styles give its controls text-rendering: auto; they take the page's instead. */
+    expect(decl('button', 'text-rendering')).toBe('inherit');
   });
 
   it('draws the list 44 px high from the theme tokens, at most 360 px wide, with its own arrow at the end of either direction', () => {
