@@ -1,33 +1,49 @@
 # Changelog
 
-Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD`,
-one plain summary, and short entries under `### Added`, `### Changed` and
-`### Fixed`. Include `### Before you update` only when people need to take action.
-The middle number is the turn; the last counts releases between turns.
+Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD` and is one short list in English: one
+line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, with no summary and no translation. A
+step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
+number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
 ## [0.31.0]
 
-The orchestrator clears any employee's inbox, and a machine its owner opened stays open to the orchestrator for as
-long as access lasts.
+### Fixed
+
+- The first result of a new turn is no longer refused because its `turn-N` branch was missing; the server makes it.
+- A program with no screen no longer raises false `node_silent` alarms while its turn is working.
+- An update no longer cuts short a turn that streams its work without a screen.
+- A held turn whose program is gone ends as interrupted, and the next turn goes out.
+- No more false "assignment words not recorded" cases when Claude Code starts a turn for its own notice.
+- Releasing a hold calls a program busy exactly when `program_screen` does.
+- A machine taken off the company's checks no longer lends its built-in node to test and work runs.
+- Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
+- The glow and focus ring of a card follow its cut corner, with no dark triangle there.
+- The map's zoom label, such as 115%, is no longer cut off.
 
 ### Added
 
-- The orchestrator reads any employee's inbox and marks its letters read or done, picked by id, kind, source, task or
-  "received before", with a reason. The CEO and the CEO's delegate do the same with `POST /api/agents/:id/inbox/mark`,
-  for which there is no screen yet. Each such mark goes into the employee's log: who marked how many letters, and why.
-  Another employee gets 403 on an inbox not its own, and an assistant key gets 401. Every new company gets this in the
-  orchestrator's skills.
+- The orchestrator reads and marks any employee's inbox, with a reason that goes into the employee's log.
+- The CEO and the CEO's delegate mark any employee's letters with `POST /api/agents/:id/inbox/mark`.
+- `failures` shows `next` for each blocked task, taken from its holder's last report.
+- Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
+- A task's allowed paths can be globs, and test files and folders are always allowed beside them.
 
 ### Changed
 
-- Once a machine's owner opens it, the orchestrator works on it in any of its turns while access is open: notices,
-  employees' letters, wake-ups and later turns, not only until that person writes again. Other machines stay closed. A
-  turn whose last words come from a person without rights to the machine, or from no one Hornhoof can name, is still
-  refused. Known limits: the rule looks at the words of the turn, not at data, so the orchestrator still reads tasks and
-  inboxes, a program's session can remember such a person's words from an earlier turn, and a head can pass their
-  request on in a letter, which counts as an employee's words; a turn woken by a task, comment, answer or cancel of a
-  person without rights, or by a department owner on a machine not theirs, now refuses commands there, and the work
-  goes on in the next turn; merges from the network wake the orchestrator as Hornhoof and count as no one's words.
+- A machine its owner opened stays open to the orchestrator in all its turns while access lasts, not just one.
+- Commands on a machine are refused when the turn's last words come from someone without rights or unknown.
+- A message to a busy or reconnecting employee waits for its next turn instead of being lost.
+- A message that cannot be delivered names a reason code, the recipient and the task.
+- Personal assistants are hidden from Operations' SQL reads and from the program operator.
+- The full release check runs in two to four parts of up to an hour each.
+- Release test profiles also reuse green results proved at commits main already holds.
+- A full machine of the company keeps its place whatever its memory, free disk or disk speed.
+- Machines always says why a machine has no place.
+- A machine's card stands in three blocks, and its connection history reads as plain lines.
+- Install commands read left to right in any language, and their flags never break.
+- Machines filters start with All and a count, with chips of at least 44 px.
+- Table headers and row buttons are 44 px in every table.
+- A field you must correct has a pink frame, and the Feedback title error clears as you type.
 
 ## [0.29.2] - 2026-11-16
 
