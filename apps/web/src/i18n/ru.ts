@@ -1896,7 +1896,6 @@ export const ru: Messages = {
       mode: 'Рисовать',
       modes: { work: 'Цели и задачи', stages: 'Этапы конвейера' },
       count: (n: number) => `${n} ${plural('ru', n, { one: 'открытая задача', few: 'открытые задачи', many: 'открытых задач', other: 'открытой задачи' })}`,
-      partOf: 'часть',
       waitsFor: 'ждет',
       neededFor: 'нужна для',
       empty: 'Рисовать здесь пока нечего.',

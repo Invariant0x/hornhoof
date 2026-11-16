@@ -1889,7 +1889,6 @@ export const en = {
       mode: 'Draw',
       modes: { work: 'Goals and tasks', stages: 'Pipeline stages' },
       count: (n: number) => (n === 1 ? '1 open task' : `${n} open tasks`),
-      partOf: 'part of',
       waitsFor: 'waits for',
       neededFor: 'needed for',
       empty: 'Nothing to draw here yet.',
