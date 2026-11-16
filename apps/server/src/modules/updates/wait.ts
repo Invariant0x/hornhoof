@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { enqueueTurn, pumpWaiting } from '../conversation/queue.js';
 import { workingCount } from '../events/store.js';
@@ -55,7 +56,7 @@ function calledOffText(called: CalledOff, minutes: number): string {
 
 /* The orchestrator hears of it, as it runs updates for the CEO and may have asked for this one. */
 async function tellOrchestrator(ctx: Ctx, companyId: string, text: string): Promise<void> {
-  const [orchestrator] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  const [orchestrator] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   if (!orchestrator) return;
   const detail = { en: 'update called off', ru: 'обновление отменено' };
   await enqueueTurn(ctx, { companyId, agentId: orchestrator.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'service', tasks: [], detail } } });

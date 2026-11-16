@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { and, desc, eq, gt, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { refusePaused } from './pause.js';
@@ -49,7 +50,7 @@ function waitOf(input: WaitAsked, now: Date): ExternalWait {
 
 /* The one run this wait is for: of the one who waits, on this task, still going. A result already on its way cannot be waited for. */
 async function namedRun(ctx: Ctx, task: Task, agentId: string, number: number): Promise<string> {
-  const [run] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(
+  const [run] = await ctx.db.select(idOnly(testRuns)).from(testRuns).where(and(
     eq(testRuns.companyId, task.companyId), eq(testRuns.number, number), eq(testRuns.taskId, task.id), eq(testRuns.agentId, agentId), eq(testRuns.status, 'running'),
   ));
   if (!run) throw refuse(409, 'task_invalid', `You have no run ${number} going on #${task.number}. If it ended, read its result instead of waiting for it.`);
@@ -83,13 +84,13 @@ export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: 
 
 /* The last of the agent's events, which a call to wait counts words on its task from. */
 export async function lastEventOf(ctx: Ctx, agentId: string): Promise<number> {
-  const [last] = await ctx.db.select({ seq: agentEvents.seq }).from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(desc(agentEvents.seq)).limit(1);
+  const [last] = await ctx.db.select(only(agentEvents, 'seq')).from(agentEvents).where(eq(agentEvents.agentId, agentId)).orderBy(desc(agentEvents.seq)).limit(1);
   return last?.seq ?? 0;
 }
 
 /* Words on the task that came after the call to wait: into the running turn, they cannot have been read before it. */
 async function newMessage(ctx: Ctx, agentId: string, taskId: string, heard: number): Promise<boolean> {
-  const [message] = await ctx.db.select({ seq: agentEvents.seq }).from(agentEvents).where(and(
+  const [message] = await ctx.db.select(only(agentEvents, 'seq')).from(agentEvents).where(and(
     eq(agentEvents.agentId, agentId), gt(agentEvents.seq, heard), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->'task'->>'id' = ${taskId}`,
   )).limit(1);
   return Boolean(message);
@@ -97,11 +98,11 @@ async function newMessage(ctx: Ctx, agentId: string, taskId: string, heard: numb
 
 /* Whether words on the task wait for its holder, the end of a run among them: in a turn, or still in the outbox. */
 async function unreadMessage(ctx: Ctx, agentId: string, taskId: string): Promise<boolean> {
-  const [message] = await ctx.db.select({ id: jobs.id }).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
+  const [message] = await ctx.db.select(idOnly(jobs)).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
     eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), eq(agentEvents.kind, 'message'),
     sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment', 'unblocked', 'tests', 'work')`,
   )).limit(1);
-  const [comment] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(and(
+  const [comment] = await ctx.db.select(idOnly(pendingWakes)).from(pendingWakes).where(and(
     eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), inArray(pendingWakes.why, ['comment', 'unblocked', 'tests', 'work']),
   )).limit(1);
   return Boolean(message || comment);
@@ -213,7 +214,7 @@ const planHold = (state: AgentNow, onTask: boolean): string | null => (state.lim
    getting back on the line. */
 async function waitsInLine(ctx: Ctx, agentId: string, turn: { id: string; createdAt: Date }, state: AgentNow): Promise<boolean> {
   if (state.busy) return true;
-  const [ahead] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, turn.id), lte(jobs.createdAt, turn.createdAt))).limit(1);
+  const [ahead] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, turn.id), lte(jobs.createdAt, turn.createdAt))).limit(1);
   if (ahead) return true;
   return state.reason === 'machine_offline' && (await reconnecting(ctx, agentId));
 }
@@ -233,7 +234,7 @@ async function notWaiting(ctx: Ctx, agentId: string, id: string): Promise<string
 
 /* A letter in the inbox waits there for the turn that takes it, which other letters wait for too, whatever holds that turn back. */
 async function inInbox(ctx: Ctx, id: string): Promise<boolean> {
-  const [kept] = await ctx.db.select({ inboxWake: jobs.inboxWake }).from(jobs).where(eq(jobs.id, id));
+  const [kept] = await ctx.db.select(only(jobs, 'inboxWake')).from(jobs).where(eq(jobs.id, id));
   return kept?.inboxWake === true;
 }
 

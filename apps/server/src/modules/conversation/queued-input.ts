@@ -1,12 +1,13 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { readMessage } from '../events/parties.js';
 import { wordsForTurn } from './turn-words.js';
 
 export async function queuedUsed(ctx: Ctx, agentId: string, seq: number): Promise<boolean> {
   const [used] = await ctx.db
-    .select({ id: agentEvents.id })
+    .select(idOnly(agentEvents))
     .from(agentEvents)
     .where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'queuedEvent' = ${String(seq)}`))
     .limit(1);

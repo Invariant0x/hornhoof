@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, max } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, companies, notebookNotes, people } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 
 /* A note is one fact; a notebook goes into an agent's instructions, so it stays small. */
@@ -60,7 +61,7 @@ export async function listNotes(db: Db, book: Book): Promise<NoteView[]> {
 /* One change to a company's notebooks at a time, so two writes cannot take one number or both fit the last room. */
 function locked<T>(db: Db, book: Book, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(async tx => {
-    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, book.companyId)).for('update');
+    await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, book.companyId)).for('update');
     return fn(tx);
   });
 }

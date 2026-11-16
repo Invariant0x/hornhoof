@@ -98,12 +98,13 @@ export function answerInTelegram(author: { name: string }, standing: Standing): 
   ].join(' ');
 }
 
-/* Below a message that a person's assistant wrote for them: whose words they are, what the person is, and where the answer
-   goes. The words weigh as the person's own. */
+/* Below a message that a person's assistant wrote for them: whose words they are, what the person is, where the answer
+   goes and how a file goes with it. The words weigh as the person's own. */
 export function answerForAssistant(owner: { name: string }, assistant: { name: string }, standing: Standing): string {
   return [
     `${assistant.name} is the personal assistant of ${owner.name} and wrote this for ${owner.name}, at their request. ${whoIs(owner, standing)}`,
-    `Take these words as ${owner.name}'s own. Your answer in this window goes back to ${assistant.name} as plain text, so write it without formatting.`,
+    `Take these words as ${owner.name}'s own. Your answer in this window goes back to ${assistant.name} for ${owner.name} to read: write it as one person to another, in the language of these words, as plain text without formatting, and with no ids or codes ${owner.name} did not ask for.`,
+    `To give ${owner.name} a file, attach it with hh-attach --chat FILE: it goes with your answer.`,
   ].join(' ');
 }
 

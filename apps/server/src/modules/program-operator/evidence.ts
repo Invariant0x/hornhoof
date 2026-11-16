@@ -3,6 +3,7 @@ import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, nodes, programDeliveries, programInstances, subscriptions } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { hasCurrentKey } from '../nodes/nodes.js';
 import type { NodeIdentity } from '../nodes/hub.js';
@@ -34,7 +35,7 @@ export async function acceptOperatorEvidence(ctx: Ctx, node: NodeIdentity, input
 async function drawnCheck(ctx: Ctx, nodeId: string, frame: OperatorEvidence): Promise<{ fact: OperatorEvidence; png: Buffer | null }> {
   if (frame.type !== 'program.operator_needed' || !frame.check?.screen) return { fact: frame, png: null };
   const fact = { ...frame, check: { ...frame.check, screen: null } };
-  const [job] = await ctx.db.select({ companyId: jobs.companyId }).from(jobs).where(and(eq(jobs.id, frame.jobId!), eq(jobs.agentId, frame.agentKey), eq(jobs.nodeId, nodeId)));
+  const [job] = await ctx.db.select(only(jobs, 'companyId')).from(jobs).where(and(eq(jobs.id, frame.jobId!), eq(jobs.agentId, frame.agentKey), eq(jobs.nodeId, nodeId)));
   if (!job) return { fact, png: null };
   try {
     return { fact, png: renderPicture(frame.check.screen, await pictureSecrets(ctx, job.companyId)).rendered.png };
@@ -75,7 +76,7 @@ async function recordEvidence(tx: Tx, inside: Ctx, nodeId: string, frame: Operat
     .innerJoin(agents, eq(agents.id, jobs.agentId)).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).innerJoin(nodes, eq(nodes.id, jobs.nodeId))
     .where(and(eq(jobs.id, frame.jobId), eq(jobs.agentId, frame.agentKey), eq(nodes.id, nodeId), eq(nodes.companyId, agents.companyId), eq(jobs.companyId, agents.companyId), eq(subscriptions.kind, 'personal'), isNotNull(nodes.keyHash), isNull(agents.removedAt))).for('no key update', { of: agents });
   if (!job || !await validDelivery(tx, frame, job.companyId, nodeId)) return false;
-  const [old] = await tx.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.companyId, job.companyId), sql`${agentEvents.data}->>'operatorEvidenceId' = ${frame.evidenceId}`));
+  const [old] = await tx.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.companyId, job.companyId), sql`${agentEvents.data}->>'operatorEvidenceId' = ${frame.evidenceId}`));
   if (old) return sameFact(old.data, frame);
   if (!await bindInstance(tx, job.companyId, nodeId, frame)) return false;
   const [stored] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: frame.agentKey, jobId: frame.jobId, kind: 'message', createdAt: now,

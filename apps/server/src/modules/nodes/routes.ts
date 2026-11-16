@@ -11,6 +11,7 @@ import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { linkOf, publicUrl } from '../link/link.js';
@@ -81,7 +82,7 @@ const alreadyThere = () => new ApiError(409, 'conflict', 'This machine runs it a
    they had rows of their own. None while the node has a key: a machine key and a command are all a join shows, so a
    second command must not take a working node over. */
 async function keyNode(tx: Db, at: { companyId: string; machineId: string; subscriptionId: string | null }, keyHash: string): Promise<string | null> {
-  const [had] = at.subscriptionId ? await tx.select({ id: nodes.id }).from(nodes).where(eq(nodes.subscriptionId, at.subscriptionId)).limit(1) : [];
+  const [had] = at.subscriptionId ? await tx.select(idOnly(nodes)).from(nodes).where(eq(nodes.subscriptionId, at.subscriptionId)).limit(1) : [];
   const [node] = await tx
     .insert(nodes)
     .values({ ...(at.subscriptionId && !had ? { id: at.subscriptionId } : {}), ...at, keyHash, status: 'needs_login' })
@@ -104,7 +105,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [code] = await db.select().from(nodeCodes).where(eq(nodeCodes.codeHash, codeHash));
     if (!code) throw new ApiError(404, 'not_found', 'This install command is not valid. Copy it again from Hornhoof.', 'code_unknown');
     /* A person who was disabled after getting the command cannot connect machines with it. */
-    const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, code.personId));
+    const [owner] = await db.select(only(people, 'status')).from(people).where(eq(people.id, code.personId));
     if (owner?.status !== 'active') throw codeUsed();
     /* A command to add plans to one machine is left unused on any other. */
     if (code.machineId) {
@@ -134,7 +135,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
          that wait for a machine, so one that joined elsewhere keeps its machines and nothing else. Two commands for one
          plan that join at once take turns here, so the second sees the first one's node. */
       if (code.subscriptionIds.length) {
-        await tx.select({ id: subscriptions.id }).from(subscriptions).where(inArray(subscriptions.id, code.subscriptionIds)).orderBy(asc(subscriptions.id)).for('update');
+        await tx.select(idOnly(subscriptions)).from(subscriptions).where(inArray(subscriptions.id, code.subscriptionIds)).orderBy(asc(subscriptions.id)).for('update');
       }
       const subs = await tx
         .select({ id: subscriptions.id, provider: subscriptions.provider })
@@ -220,7 +221,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [sub] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, subscription), eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
     if (!sub) throw new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
     if (sub.ownerPersonId !== me.id) throw new ApiError(403, 'forbidden', 'Only the owner of this subscription can do this.', 'not_owner');
-    const [there] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.machineId, machine.id), eq(nodes.subscriptionId, sub.id), liveNode));
+    const [there] = await db.select(idOnly(nodes)).from(nodes).where(and(eq(nodes.machineId, machine.id), eq(nodes.subscriptionId, sub.id), liveNode));
     if (there) throw new ApiError(409, 'conflict', 'This subscription is on this machine already.', 'already_on_machine');
     reply.code(201);
     return createInstallCommand(db, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id], machineId: machine.id });
@@ -268,7 +269,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
        within the last day that they could not reach it there. */
     const refusing = () =>
       db
-        .select({ hostname: machines.hostname })
+        .select(only(machines, 'hostname'))
         .from(machines)
         .where(and(eq(machines.companyId, me.companyId), live, eq(machines.role, 'worker'), eq(machines.directFails, true), gt(machines.reportAt, new Date(Date.now() - CORE_OFFER_MS))))
         .orderBy(machines.createdAt);

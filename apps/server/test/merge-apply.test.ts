@@ -6,6 +6,7 @@ import {
   agentChanges, agentEvents, agents, attachments, companies, computerRuns, departments, jobs, machineAccess, machines, mapReturns, nodes, notebookNotes, people, personAccess, programInstances,
   programOperatorCases, sessions, subscriptions, taskEvents, tasks, teams, testParts, testRuns, turns,
 } from '../src/db/schema.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { nodeSource, withSource } from '../src/db/sources.js';
 import { MergeRefused, runMerge, type MergeResult } from '../src/modules/merge/apply.js';
 import { complete } from '../src/modules/merge/check.js';
@@ -66,7 +67,7 @@ async function stand() {
   const kept = (id: string) => rowsOf<Kept>(db, sql`SELECT * FROM net.merge_rows WHERE merge = ${id} ORDER BY tbl, how`);
   const consumed = (id: string) => rowsOf<{ journal: string; how: string }>(db, sql`SELECT journal, how FROM net.merge_consumed WHERE merge = ${id}`);
   const mergeRow = async (id: string) => (await rowsOf<{ status: string; path: string | null; xact: string | null; tasks: string[]; counts: Record<string, unknown>; task_wanted: boolean; from_at: Date | null; to_at: Date | null; applied_at: Date | null }>(db, sql`SELECT * FROM net.merges WHERE id = ${id}`))[0]!;
-  const titleOf = async (side: Db, id: string) => (await side.select({ title: tasks.title }).from(tasks).where(eq(tasks.id, id)))[0]?.title ?? null;
+  const titleOf = async (side: Db, id: string) => (await side.select(only(tasks, 'title')).from(tasks).where(eq(tasks.id, id)))[0]?.title ?? null;
   return { sides, db, acme: acme!, on, owner: owner!, plan: plan!, staff, orchestrator: orchestrator!, dev: dev!, head: head!, ana: ana!, ben: ben!, turn: turn!, one, two, task, merge, checked, conflicts, kept, consumed, mergeRow, titleOf };
 }
 
@@ -200,7 +201,7 @@ describe('a merge applied', () => {
     const [there, here] = [await said(fork.db), await said(s.db)];
     const { id, result } = await s.merge(fork);
     expect(result.counts).toMatchObject({ added: 0, skipped: 2 });
-    expect((await s.db.select({ id: agentEvents.id }).from(agentEvents)).map(row => row.id)).toEqual([here.id]);
+    expect((await s.db.select(idOnly(agentEvents)).from(agentEvents)).map(row => row.id)).toEqual([here.id]);
     expect((await s.consumed(id)).map(entry => entry.how)).toEqual(['skipped', 'skipped']);
     expect(await s.kept(id)).toMatchObject([{ tbl: 'agent_events', key: { id: there.id }, how: 'skipped' }]);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
@@ -775,7 +776,7 @@ describe('a merge applied', () => {
     const fork = await s.sides.fork();
     for (let n = 3; n < 15; n += 1) await s.task(fork.db, n, `Task ${n}`, { turnId: null });
     const state = async () => ({
-      tasks: (await s.db.select({ id: tasks.id }).from(tasks)).length,
+      tasks: (await s.db.select(idOnly(tasks)).from(tasks)).length,
       journal: await rowsOf(s.db, sql`SELECT count(*)::int AS n FROM net.journal`),
       records: await rowsOf(s.db, sql`SELECT (SELECT count(*) FROM net.merge_conflicts)::int AS conflicts, (SELECT count(*) FROM net.merge_consumed)::int AS consumed, (SELECT count(*) FROM net.merge_rows)::int AS kept`),
     });

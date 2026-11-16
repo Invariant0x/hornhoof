@@ -7,7 +7,7 @@ import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf, type Route, skippedData } from './echelons-store.js';
 import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { loadTask, move, refuse, waitsForPerson, type Moved, type Task, type Tx, type Wake } from './engine.js';
-import { bindReviewEvidence, type ReviewVerdict } from './review-verdict.js';
+import type { ReviewVerdict } from './review-verdict.js';
 import { refusePaused } from './pause.js';
 import { turnkeyWork } from './turnkey.js';
 
@@ -49,9 +49,8 @@ async function verdictIssues(ctx: Reader, task: Task, route: Route, candidate: C
 }
 
 function verdictData(route: Route, candidate: Checked, identity: CheckerIdentity, verdict: Verdict, issues: Awaited<ReturnType<typeof issuesForEchelon>>, state: Route['state']) {
-  const evidence = isCommit(candidate) ? bindReviewEvidence(verdict.evidence ?? [], candidate.commit) : [];
   return { issues, pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, ...(isCommit(candidate) ? { reviewedCommit: candidate.commit } : {}), routeRevision: route.revision, checker: identity,
-    ...(evidence.length ? { evidence } : {}), ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
+    ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
   };
 }
 

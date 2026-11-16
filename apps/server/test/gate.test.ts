@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { GateBusy, WriteGate, writeGate } from '../src/db/gate.js';
 import { companies, departments, teams } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { agentSqlOn } from './helpers.js';
 import { openTestDb } from './helpers-db.js';
 
@@ -131,7 +132,7 @@ describe("the gate of the app's writes", () => {
     const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
     const [sales] = await db.insert(departments).values({ companyId: company!.id, name: 'Sales', roleCode: 'SALES' }).returning();
     const team = (name: string) => ({ companyId: company!.id, departmentId: sales!.id, name });
-    const names = async () => (await db.select({ name: teams.name }).from(teams).orderBy(teams.name)).map(row => row.name);
+    const names = async () => (await db.select(only(teams, 'name')).from(teams).orderBy(teams.name)).map(row => row.name);
     const agents = agentSqlOn(client);
     /* The roles are made before the gate closes, which is no write of the app's. */
     await agents.run('SELECT 1', 'read');
@@ -145,12 +146,12 @@ describe("the gate of the app's writes", () => {
     await settle();
     /* Reads go on meanwhile. */
     expect(await names()).toEqual([]);
-    expect(await db.transaction(tx => tx.select({ name: departments.name }).from(departments), { accessMode: 'read only' })).toEqual([{ name: 'Sales' }]);
+    expect(await db.transaction(tx => tx.select(only(departments, 'name')).from(departments), { accessMode: 'read only' })).toEqual([{ name: 'Sales' }]);
     expect((await agents.run('SELECT name FROM departments', 'read'))[0]!.rows).toEqual([{ name: 'Sales' }]);
     expect(writeGate.inside()).toBe(0);
     work.free();
     await Promise.all([merge, inTransaction, run, byAgent]);
     expect(await names()).toEqual(['Alone', 'In a transaction']);
-    expect(await db.select({ name: departments.name }).from(departments).where(eq(departments.id, sales!.id))).toEqual([{ name: 'Renamed' }]);
+    expect(await db.select(only(departments, 'name')).from(departments).where(eq(departments.id, sales!.id))).toEqual([{ name: 'Renamed' }]);
   });
 });

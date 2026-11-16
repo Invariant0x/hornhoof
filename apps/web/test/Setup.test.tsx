@@ -37,6 +37,7 @@ async function fillFirstTwoSteps(user: ReturnType<typeof userEvent.setup>, passw
 describe('Setup', () => {
   /* The server logs the setup link, and the link carries the code. */
   beforeEach(() => window.history.replaceState(null, '', '/setup?code=LINK-CODE-123'));
+  afterEach(() => vi.useRealTimers());
 
   it('keeps Next disabled until the company has a name', async () => {
     const user = userEvent.setup();
@@ -167,15 +168,19 @@ describe('Setup', () => {
   });
 
   it('offers a Google AI plan, which Antigravity runs, as a personal plan for the orchestrator', async () => {
+    /* The clock also runs by itself, so the screen's own waiting works beside the step the test takes. */
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, command: 'curl x' }] });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Setup onDone={() => {}} />);
+    /* The random name's check goes out before anything is typed, as it does on a slow machine. */
+    await act(() => vi.advanceTimersByTimeAsync(1000));
     await fillFirstTwoSteps(user);
     await user.click(screen.getByRole('radio', { name: 'My subscription' }));
     expect(screen.getByRole('radio', { name: 'My subscription' })).toHaveAccessibleDescription(/Google AI plan/);
     await user.click(screen.getByRole('radio', { name: 'Antigravity' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
-    expect(calls[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'antigravity' } });
+    expect(posted(calls)[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'antigravity' } });
   });
 
   it('takes the setup code from the link without asking for it', () => {
