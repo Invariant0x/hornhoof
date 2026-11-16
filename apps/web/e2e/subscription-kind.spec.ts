@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { SubView, TokenPeriods, TokenSum } from '../src/types';
+import type { ModelTokens, SubView, TokenPeriods, TokenSum } from '../src/types';
 import { box, serveApi } from './api';
 
 /* What Ivan asked of the list of Subscriptions & API: long words took more room in a row than what it holds. How each
@@ -42,6 +42,8 @@ const LONG: SubView = {
   api: { baseUrl: 'https://llm.northern-region.example/v1', protocol: 'openai' }, models: [{ id: 'coder', name: 'coder' }], target: { kind: 'any', id: null }, tokens: periods(0),
 };
 const LIST = [CLAUDE, CODEX, ROUTER, LONG];
+/* The key's 30 days by model, so its card shows each model's count and share. */
+const MODELS: Record<string, ModelTokens[]> = { 's-router': [{ model: 'qwen/qwen-3-coder', total: 15_000_000 }, { model: null, total: 10_000_000 }] };
 /* What a person reads as each name, in every language. */
 const NAMES: Record<string, string> = { 's-claude': 'Claude Max', 's-codex': 'Codex Pro', 's-router': 'OpenRouter ••••WXYZ', 's-long': `${LONG.label} ••••M3N4` };
 const KEYS: Record<string, string> = { 's-claude': 'node-a', 's-codex': 'Maria', 's-router': 'WXYZ', 's-long': 'M3N4' };
@@ -57,7 +59,7 @@ async function openList(page: Page, lang: 'en' | 'ru', skin: string, width: numb
   await page.route(url => pathOf(url) === '/api/subscriptions', route => route.fulfill({ json: { subscriptions: LIST } }));
   await page.route(url => /^\/api\/subscriptions\/[^/]+\/tokens$/.test(pathOf(url)), route => {
     const sub = LIST.find(s => s.id === pathOf(route.request().url()).split('/')[3])!;
-    return route.fulfill({ json: { tokens: sub.tokens, models: [] } });
+    return route.fulfill({ json: { tokens: sub.tokens, models: MODELS[sub.id] ?? [] } });
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(direction => { document.documentElement.dir = direction; }, dir);
@@ -167,6 +169,96 @@ for (const { lang, skin, width, dir } of LOOKS) {
       expect.soft(await role.count(), `the line under ${NAMES[s.id]} on its card`).toBe(s.isOrchestrator ? 1 : 0);
       if (s.isOrchestrator && await role.count() === 1) await lineUnder(role, title, dir);
     }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}
+
+/* Every token count on the screen, read where it stands: its number and its unit (or percent sign) left to right as one
+   piece, and the words around it mirrored where the page reads right to left: a tile's line starts with its word from the
+   right, and a model's share stands left of its count. Each miss is named, so one run shows them all. */
+async function tokenCountsInRtl(page: Page, t: typeof en): Promise<string[]> {
+  return page.evaluate(({ column, title }) => {
+    const out: string[] = [];
+    /* The box of the characters [from, to) of an element's text, whatever elements inside hold them. */
+    const rectOf = (el: Element, from: number, to: number) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      let seen = 0;
+      let started = false;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const length = node.textContent!.length;
+        if (!started && from < seen + length) { range.setStart(node, from - seen); started = true; }
+        if (started && to <= seen + length) { range.setEnd(node, to - seen); break; }
+        seen += length;
+      }
+      return range.getBoundingClientRect();
+    };
+    /* The count that ends an element's text [from, to), with the words before it, if any. */
+    const count = (where: string, el: Element, from = 0, to = el.textContent!.length) => {
+      const text = el.textContent!.slice(from, to);
+      const found = /(\d(?:[\d.,\s]*\d)?)(\s*)([^\d\s.,]*)\s*$/.exec(text);
+      if (!found) return out.push(`${where}: no count in "${text}"`);
+      const [, number, gap, unit] = found;
+      const at = from + found.index;
+      const n = rectOf(el, at, at + number!.length);
+      const whole = unit ? rectOf(el, at, at + number!.length + gap!.length + unit.length) : n;
+      if (unit) {
+        const u = rectOf(el, at + number!.length + gap!.length, at + number!.length + gap!.length + unit.length);
+        if (n.right > u.left + 1) out.push(`${where}: "${text.slice(found.index).trim()}" reads unit first (number at x=${Math.round(n.left)}, "${unit}" at x=${Math.round(u.left)})`);
+      }
+      const words = text.slice(0, found.index).trim();
+      if (words) {
+        const start = from + text.indexOf(words);
+        const w = rectOf(el, start, start + words.length);
+        if (w.left < whole.right - 1) out.push(`${where}: "${words}" stands left of its count "${text.slice(found.index).trim()}"`);
+      }
+      return out.length;
+    };
+    /* Only the cards' tokens parts: their limits are the meter's own (#1037). */
+    const parts = [...document.querySelectorAll('article .part')].filter(part => part.querySelector('.part-h')?.textContent === title);
+    const all = (selector: string) => selector.startsWith('article ') ? parts.flatMap(part => [...part.querySelectorAll(selector.slice(8))]) : [...document.querySelectorAll(selector)];
+    const cells = all(`tr.rm td[data-label="${column}"]`);
+    if (!cells.length) out.push('no token cells in the list');
+    cells.forEach((cell, i) => count(`list row ${i + 1}`, cell));
+    const figures = all('article .g-f b');
+    if (!figures.length) out.push('no tile figures');
+    figures.forEach((figure, i) => count(`tile ${i + 1}`, figure));
+    const lines = all('article .g-s > span');
+    if (!lines.length) out.push('no tile lines');
+    lines.forEach((line, i) => count(`tile line ${i + 1}`, line));
+    const shares = all('article .models .dd');
+    if (!shares.length) out.push('no model shares');
+    shares.forEach((dd, i) => {
+      const small = dd.querySelector('small')!;
+      const length = dd.textContent!.length;
+      const split = length - small.textContent!.length;
+      count(`model ${i + 1} count`, dd, 0, split);
+      count(`model ${i + 1} share`, small);
+      const [whole, share] = [rectOf(dd, 0, split), small.getBoundingClientRect()];
+      if (share.right > whole.left + 1) out.push(`model ${i + 1}: share "${small.textContent}" stands right of its count "${dd.textContent!.slice(0, split)}"`);
+    });
+    return out;
+  }, { column: t.subs.tokensColumn, title: t.subs.tokens.title });
+}
+
+/* Design #1053: a page laid out right to left read a token count unit first, «млн 25» for «25 млн». */
+for (const { lang, skin, width } of LOOKS.filter(look => look.dir === 'rtl')) {
+  const mode = skin === 'light' ? 'light' : `dark ${skin}`;
+  test(`Subscriptions: each token count reads number then unit right to left, ${lang} ${mode} ${width} rtl`, async ({ page, browserName }, info) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const t = await openList(page, lang, skin, width, 'rtl');
+    for (const s of [ROUTER, CLAUDE]) await rowOf(page, s).locator('button.rowbtn').click();
+    const router = page.getByRole('article', { name: /WXYZ/ });
+    await expect(router.locator('.models li')).toHaveCount(2);
+    /* The look as it stands, before anything is judged: the whole page, and the key's tokens close. */
+    await shootWhole(page, info.outputPath(`tokens-rtl-${browserName}-${lang}-${skin}-${width}.png`));
+    const part = router.locator('.part').filter({ has: page.getByRole('heading', { name: t.subs.tokens.title, exact: true }) });
+    await part.scrollIntoViewIfNeeded();
+    await part.screenshot({ path: info.outputPath(`tokens-rtl-card-${browserName}-${lang}-${skin}-${width}.png`) });
+
+    expect(await tokenCountsInRtl(page, t)).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);
   });

@@ -5,6 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Subscriptions } from '../src/screens/Subscriptions';
+import { tokenCount } from '../src/ui/token-count';
 import type { SubView } from '../src/types';
 import { ME, mockApi, ORG, SUBS } from './api-mock';
 import { decl } from './css';
@@ -254,5 +255,30 @@ describe('the Tokens part of an open card', () => {
     const card = await openCard('Claude');
     await waitFor(() => expect(card.querySelectorAll('.blk-facts .gauge').length).toBeGreaterThan(0));
     expect(card.querySelector('.models')).toBeNull();
+  });
+
+  /* Design #1053: a page laid out right to left read a count unit first, «млн 25» for «25 млн». Each count is one piece
+     that reads left to right, and the words by it stay outside that piece, so they stand mirrored. */
+  it.each([['en', 'Tokens, 30 days'], ['ru', 'Токены, 30 дней']])('in %s holds each token count and each model share in one piece read left to right', async (language, column) => {
+    lists();
+    show(language);
+    await screen.findByRole('table');
+    const cell = row('WXYZ').querySelector(`td[data-label="${column}"]`)!;
+    const card = await openCard('WXYZ');
+    const part = await waitFor(() => {
+      const found = [...card.querySelectorAll('.blk-facts .part')].find(p => p.querySelector('.models'));
+      expect(found).toBeDefined();
+      return found as HTMLElement;
+    });
+    const pieces = (el: Element) => [...el.querySelectorAll('bdi')].map(b => `${b.getAttribute('dir')} ${b.textContent}`);
+    const counts = periods(1_250_000);
+    expect(pieces(cell)).toEqual([`ltr ${tokenCount(language, ROUTER.tokens!.month.total)}`]);
+    expect([...part.querySelectorAll('.g-f b')].map(pieces)).toEqual((['today', 'week', 'month', 'all'] as const).map(p => [`ltr ${tokenCount(language, counts[p].total)}`]));
+    const today = [...part.querySelectorAll('.gauge')][0]!;
+    const lines = [...today.querySelectorAll('.g-s > span')];
+    expect(lines.map(pieces)).toEqual([counts.today.input, counts.today.output, counts.today.cacheRead + counts.today.cacheWrite].map(c => [`ltr ${tokenCount(language, c)}`]));
+    for (const line of lines) expect(line.lastChild?.nodeName, line.textContent!).toBe('BDI');
+    const share = new Intl.NumberFormat(language, { style: 'percent' });
+    expect([...part.querySelectorAll('.models .dd')].map(pieces)).toEqual(MODELS.map(m => [`ltr ${n(language, m.total)}`, `ltr ${share.format(m.total / 26_250_000)}`]));
   });
 });
