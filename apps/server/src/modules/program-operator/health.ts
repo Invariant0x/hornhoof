@@ -2,6 +2,7 @@ import { OperatorNodeMessage, PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/p
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { limitUntil } from '../conversation/queue.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases } from './cases.js';
@@ -19,7 +20,7 @@ export async function checkOperatorHealth(ctx: Ctx, now = new Date()): Promise<v
   const entries = await ctx.db.selectDistinct({ agentId: programOperatorCases.agentId }).from(programOperatorCases).where(needsHealth);
   for (const { agentId } of entries) {
     await operatorTransaction(ctx, async (tx, inside) => {
-      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update');
+      await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, agentId)).for('update');
       const rows = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), needsHealth)).for('update');
       for (const row of rows) await restoreCase(inside, row, now);
     });
@@ -57,7 +58,7 @@ async function operatorAvailable(ctx: Ctx, row: typeof programOperatorCases.$inf
   if (!selected) return false;
   const { agent, job, plan } = selected;
   if (!availableAgent(agent, row.companyId) || !availableTurn(job, agent.id) || !availablePlan(plan, row.companyId)) return false;
-  const [stuck] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true)))).limit(1);
+  const [stuck] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true)))).limit(1);
   return !stuck;
 }
 

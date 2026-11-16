@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import type { Deps } from '../src/app.js';
 import { appFixture, as, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
@@ -27,7 +28,7 @@ export async function company(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger
     const danaToken = await invitePerson(app, ceoToken, { name: 'Dana', email: 'dana@acme.com', access: { departments: [devDept!.id] } });
     const samToken = await invitePerson(app, ceoToken, { name: 'Sam', email: 'sam@acme.com', access: { departments: [salesDept!.id] } });
     const wholeToken = await invitePerson(app, ceoToken, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
-    const idOf = async (email: string) => (await db.select({ id: people.id }).from(people).where(eq(people.email, email)))[0]!.id;
+    const idOf = async (email: string) => (await db.select(idOnly(people)).from(people).where(eq(people.email, email)))[0]!.id;
     const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: devDept!.id, assigneeAgentId: worker.id, executor: true, resultKind: 'code' })).task;
     const salesTask = (await createTask(app.ctx, { agentId: salesHead.id }, { title: 'Deal', brief: '', body: '', departmentId: salesDept!.id, assigneeAgentId: seller.id, executor: true })).task;
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));

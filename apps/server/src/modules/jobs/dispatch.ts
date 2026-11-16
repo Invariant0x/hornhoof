@@ -4,6 +4,7 @@ import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import type { Checker } from '../../checker.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { jobs, subscriptions } from '../../db/schema.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
@@ -106,7 +107,7 @@ const FromOpenAi = z.object({ model: z.string(), choices: z.tuple([z.object({ me
 type Spoken = { model: string; text: string };
 type Direct = { vendorId: string; url: string; call: (request: FreshModelRequest, key: string) => { headers: Record<string, string>; body: object }; heard: (answer: unknown) => Spoken | null };
 
-const parsedWith = <T>(schema: z.ZodType<T>, read: (value: T) => Spoken) => (answer: unknown): Spoken | null => {
+const parsedWith = <T>(schema: Checker<T>, read: (value: T) => Spoken) => (answer: unknown): Spoken | null => {
   const parsed = schema.safeParse(answer);
   return parsed.success ? read(parsed.data) : null;
 };

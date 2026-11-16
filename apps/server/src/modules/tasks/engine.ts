@@ -1,3 +1,4 @@
+import { countOnly, idOnly } from '../../db/selections.js';
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
@@ -16,7 +17,7 @@ import { isStaged } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -88,7 +89,7 @@ async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
 async function workUnderDone(tx: Tx, closed: Task, actorId: string | undefined): Promise<Wake[]> {
   const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
   if (!parent?.assigneeAgentId || CLOSED.includes(parent.status) || parent.assigneeAgentId === actorId) return [];
-  const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
+  const [open] = await tx.select(idOnly(tasks)).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
   return open || (await openAfter(tx, parent)).length ? [] : [{ agentId: parent.assigneeAgentId, taskId: parent.id, why: 'subtasks' }];
 }
 
@@ -232,15 +233,15 @@ function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
 }
 
 async function lockMovePrerequisites(tx: Tx, task: Task, after: string[]): Promise<void> {
-  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
-  await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, after)).orderBy(asc(tasks.id)).for('share');
+  await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+  await tx.select(idOnly(tasks)).from(tasks).where(inArray(tasks.id, after)).orderBy(asc(tasks.id)).for('share');
   await refuseCircle(tx, task, after);
 }
 
 async function lockClosingParent(tx: Tx, task: Task, set: Partial<Task>): Promise<void> {
   if (!set.status || !CLOSED.includes(set.status) || !task.parentId) return;
-  if (!set.after?.length) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
-  await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, task.parentId)).for('no key update');
+  if (!set.after?.length) await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+  await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.id, task.parentId)).for('no key update');
 }
 
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
@@ -255,7 +256,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
        is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
     /* A result joins a turn as a release closes the turn: the company goes first, then the task rows, as in every move of
        turns, so the release sees it or it sees the release. */
-    if (n.data?.turnCleanup || n.data?.independentPart || set.turnId) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
+    if (n.data?.turnCleanup || n.data?.independentPart || set.turnId) await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, task.companyId)).for('no key update');
     if (set.after?.length) await lockMovePrerequisites(tx, task, set.after);
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
@@ -304,7 +305,7 @@ export const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string)
 
 /* Whether the task waits for a person's word other than Hornhoof's note that it stood still. */
 export async function waitsForPerson(db: Db | Tx, taskId: string): Promise<boolean> {
-  const [open] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), notInArray(requests.kind, ['stuck']))).limit(1);
+  const [open] = await db.select(idOnly(requests)).from(requests).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), notInArray(requests.kind, ['stuck']))).limit(1);
   return !!open;
 }
 
@@ -368,7 +369,7 @@ async function workingAgent(db: Db | Tx, companyId: string | null, id: string) {
   const agent = await liveAgent(db, companyId, id);
   if (agent.switchedOffAt) throw refuse(409, 'switched_off', `${agent.name} is switched off right now. Give the work to someone who is on.`);
   const [sub] = agent.subscriptionId
-    ? await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.id, agent.subscriptionId), isNull(subscriptions.removedAt)))
+    ? await db.select(idOnly(subscriptions)).from(subscriptions).where(and(eq(subscriptions.id, agent.subscriptionId), isNull(subscriptions.removedAt)))
     : [];
   if (!sub) throw refuse(409, 'no_subscription', `${agent.name} has no subscription to run on. Give them one on their card first.`);
   return agent;
@@ -380,7 +381,7 @@ async function checkIndependentExecutor(db: Db, departmentId: string | null, par
 }
 
 async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor, plan: StageRoute): Promise<{ child: Task; wake: Wake }> {
-  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, parent.companyId)).for('no key update');
+  await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, parent.companyId)).for('no key update');
   const last = await lastTaskNumber(tx, parent.companyId);
   const [child] = await tx.insert(tasks).values({
     companyId: parent.companyId,
@@ -506,7 +507,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   let independent: Task | null = null;
   const wakes: Wake[] = [];
   /* Numbers go up one by one per company, so creating tasks waits on the company row. */
-  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('no key update');
+  await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, assignee.companyId)).for('no key update');
   /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
   const above = await parentForNewTask(tx, parent);
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
@@ -735,7 +736,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
 async function afterCancelled(tx: Tx, actor: Actor, cancelled: Task[]): Promise<{ wakes: Wake[]; waiting: Task[] }> {
   const left = await tx.select().from(tasks).where(comingAfter(cancelled, holdsAny(tasks.after, cancelled.map(t => t.id)))).orderBy(asc(tasks.number));
   const [orchestrator] = left.some(t => !t.createdByAgentId)
-    ? await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, cancelled[0]!.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)))
+    ? await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, cancelled[0]!.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)))
     : [];
   const wakes: Wake[] = [];
   const waiting: Task[] = [];
@@ -999,11 +1000,11 @@ const NEW_PIECE: TaskEventKind[] = ['created', 'assigned', 'started', 'submitted
 
 /* Whether a comment opened the task again since its last piece of work began: the answer it was blocked for came then. */
 async function openedByComment(db: Db, taskId: string): Promise<boolean> {
-  const [piece] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), or(
+  const [piece] = await db.select(idOnly(taskEvents)).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), or(
     inArray(taskEvents.kind, NEW_PIECE),
     and(eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'fields' ?| array['title', 'brief', 'body', 'owner', 'assigneeAgentId']`),
   ))).orderBy(desc(taskEvents.id)).limit(1);
-  const [opened] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(
+  const [opened] = await db.select(idOnly(taskEvents)).from(taskEvents).where(and(
     eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'comment'), sql`${taskEvents.data}->>'unblocked' = 'true'`, gt(taskEvents.id, piece?.id ?? 0),
   )).limit(1);
   return Boolean(opened);
@@ -1126,7 +1127,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
 /* What an employee asks people reaches the orchestrator first, to put into plain words for them; not what it asks itself. */
 async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: string): Promise<Wake[]> {
   const [orchestrator] = await db
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   return orchestrator && orchestrator.id !== agentId ? [{ agentId: orchestrator.id, taskId: task.id, why: 'explain', text: requestId }] : [];
@@ -1223,7 +1224,7 @@ export async function lastMove(db: Db | Tx, taskId: string) {
 async function turnsGoneOn(db: Db, agentId: string, task: Task): Promise<number> {
   const last = await lastMove(db, task.id);
   const [before] = await db
-    .select({ n: count() })
+    .select(countOnly())
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), sql`${taskEvents.data}->>'afterReturn' is distinct from 'true'`, last ? gt(taskEvents.createdAt, last.createdAt) : undefined));
   return Number(before?.n ?? 0);
@@ -1248,7 +1249,7 @@ export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Mo
 export async function uncountedSinceMove(db: Db, agentId: string, task: Task): Promise<boolean> {
   const last = await lastMove(db, task.id);
   const [one] = await db
-    .select({ id: taskEvents.id })
+    .select(idOnly(taskEvents))
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), sql`${taskEvents.data}->>'afterReturn' = 'true'`, last ? gt(taskEvents.createdAt, last.createdAt) : undefined))
     .limit(1);
@@ -1355,7 +1356,7 @@ const STATUS_AT_STAGE: Partial<Record<string, Task['status']>> = { tests: 'open'
    at. One whose route waits for an owner stays waiting, where the next eligible owner is looked for. Null leaves it as it is. */
 async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefined): Promise<Task['status'] | null> {
   if (was !== 'waiting') return null;
-  const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
+  const [left] = await tx.select(countOnly()).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
   if (Number(left!.n)) return null;
   const route = await routeOf(tx, task);
   if (!isStaged(route.state.resultKind)) return 'working';

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { machines, nodeConnections, nodes } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { connectionHistory } from './connection-history.js';
 
@@ -16,7 +17,7 @@ export function connectionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const [machine] = await db
-      .select({ id: machines.id })
+      .select(idOnly(machines))
       .from(machines)
       .where(and(eq(machines.id, id), eq(machines.companyId, me.companyId), isNull(machines.revokedAt), me.scopeKind === 'company' ? undefined : eq(machines.personId, me.id)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');

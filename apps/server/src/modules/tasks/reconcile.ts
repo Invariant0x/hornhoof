@@ -1,6 +1,7 @@
 import { and, eq, gt, gte, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, pendingWakes, requests, subscriptions, tasks, testRuns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { agentState, goesElsewhere, liveSubscription } from '../conversation/queue.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
@@ -58,23 +59,23 @@ async function wakesDue(task: Task, move: Move): Promise<Wake[]> {
 /* Tasks waiting for other work or an answer already have a way to continue. */
 export async function waitsOnPurpose(ctx: Ctx, task: Task): Promise<boolean> {
   if ((await openAfter(ctx.db, task)).length) return true;
-  const [subtask] = await ctx.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
+  const [subtask] = await ctx.db.select(idOnly(tasks)).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
   if (subtask) return true;
-  const [asked] = await ctx.db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open'))).limit(1);
+  const [asked] = await ctx.db.select(idOnly(requests)).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open'))).limit(1);
   if (asked) return true;
-  const [testing] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.status, 'running'))).limit(1);
+  const [testing] = await ctx.db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.status, 'running'))).limit(1);
   return Boolean(testing);
 }
 
 /* Only an available holder without a turn covering the move needs a wake. */
 async function canWake(ctx: Ctx, w: Wake, movedAt: Date, before: Date): Promise<boolean> {
-  const [agent] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  const [agent] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!agent || !(await liveSubscription(ctx, agent.id))) return false;
   const state = await agentState(ctx, agent.id);
   if (!state.ready || state.busy || state.queued) return false;
-  const [pending] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(eq(pendingWakes.agentId, agent.id)).limit(1);
+  const [pending] = await ctx.db.select(idOnly(pendingWakes)).from(pendingWakes).where(eq(pendingWakes.agentId, agent.id)).limit(1);
   if (pending) return false;
-  const [covered] = await ctx.db.select({ id: jobs.id }).from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId)).where(and(eq(jobs.agentId, agent.id), or(
+  const [covered] = await ctx.db.select(idOnly(jobs)).from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId)).where(and(eq(jobs.agentId, agent.id), or(
     inArray(jobs.status, ['queued', 'running']),
     and(or(eq(tasks.id, w.taskId), eq(tasks.parentId, w.taskId)), or(gt(jobs.createdAt, movedAt), and(lte(jobs.startedAt, movedAt), gte(jobs.finishedAt, movedAt)))),
     sql`coalesce(${jobs.finishedAt}, ${jobs.createdAt}) >= ${before}`,

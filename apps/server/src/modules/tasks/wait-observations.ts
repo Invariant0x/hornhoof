@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { and, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { CLOSED, openAfter, type Task } from './engine.js';
 import { waitingCycles } from './wait-graph.js';
 import { workOfOpenTurn } from './turn-department.js';
@@ -47,14 +48,14 @@ async function taskWaitReason(ctx: Ctx, task: Task, now: Date): Promise<string |
 
 async function waitingForTasks(ctx: Ctx, task: Task): Promise<string | null> {
   if ((await openAfter(ctx.db, task)).length) return 'waiting for prerequisite tasks';
-  const [child] = await ctx.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
+  const [child] = await ctx.db.select(idOnly(tasks)).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
   return child ? 'waiting for subtasks' : null;
 }
 
 async function waitingForService(ctx: Ctx, task: Task): Promise<string | null> {
-  const [request] = await ctx.db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open'))).limit(1);
+  const [request] = await ctx.db.select(idOnly(requests)).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open'))).limit(1);
   if (request) return 'waiting for a person';
-  const [test] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.status, 'running'))).limit(1);
+  const [test] = await ctx.db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.status, 'running'))).limit(1);
   return test ? 'waiting for a test run' : null;
 }
 
@@ -72,7 +73,7 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   const scope = await departmentScope(ctx, turn.companyId, departmentId);
   const work = await ctx.db.select().from(tasks).where(and(workOfOpenTurn(turn.id), inArray(tasks.departmentId, scope), notInArray(tasks.status, [...CLOSED])));
   if (!work.length) return null;
-  const employees = ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)));
+  const employees = ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)));
   const conversations = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, turn.companyId), eq(jobs.kind, 'conversation'), or(inArray(jobs.agentId, employees), inArray(jobs.taskId, work.map(task => task.id)))));
   if (conversations.some(job => job.status === 'running')) return null;
   /* A department where all of it waits for something known, in time, has nothing to say. */

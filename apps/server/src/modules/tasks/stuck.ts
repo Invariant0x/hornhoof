@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, requestInternal, requests, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { CLOSED, move, refuse, taskSpot, type Actor, type Answer, type Request, type Task, type Wake } from './engine.js';
 import { stuckRecipient } from './stuck-route.js';
 import { routeOf } from './echelons-store.js';
@@ -27,7 +28,7 @@ function requireRequestRecipient(job: ToolJob, found: Found): void {
 
 async function requireResolverJob(ctx: Ctx, job: ToolJob): Promise<void> {
   const [running] = await ctx.db
-    .select({ id: jobs.id })
+    .select(idOnly(jobs))
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(and(eq(jobs.id, job.id), eq(jobs.companyId, job.companyId), eq(jobs.agentId, job.agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), inArray(agents.kind, ['head', 'orchestrator'])))
@@ -82,7 +83,7 @@ export async function resolveStuck(ctx: Ctx, job: ToolJob, requestId: string, a:
 }
 
 export async function resolveStuckComment(ctx: Ctx, job: ToolJob, taskId: string, text: string): Promise<{ request: Request; task: Task; wakes: Wake[] } | null> {
-  const [found] = await ctx.db.select({ id: requests.id }).from(requests)
+  const [found] = await ctx.db.select(idOnly(requests)).from(requests)
     .where(and(eq(requests.taskId, taskId), eq(requests.kind, 'stuck'), eq(requests.audience, 'internal'), eq(requests.status, 'open'), eq(requests.triageAgentId, job.agentId)))
     .orderBy(desc(requests.createdAt)).limit(1);
   return found ? resolveStuck(ctx, job, found.id, { answer: text }) : null;
