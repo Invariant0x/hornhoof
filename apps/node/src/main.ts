@@ -25,6 +25,8 @@ import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, take
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { holdExact } from './redact.js';
 import { SecretFills } from './secret-fill/index.js';
+import { browserFillAdapter, type FillLauncher } from './secret-fill/browser.js';
+import { systemDeps as browseDeps } from './web-page/cli.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -308,6 +310,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     send: m => void send?.(m),
     log,
   });
+  /* The node's own browser, in the node's process: a sign-in typed there never passes a process an agent runs. */
+  fills.register(browserFillAdapter({ ...browseDeps(), launcher: () => browseDeps().launcher() as unknown as FillLauncher }));
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
   /* What agents' programs send their tools with no turn running goes on the link as it is now, and waits for no other. */

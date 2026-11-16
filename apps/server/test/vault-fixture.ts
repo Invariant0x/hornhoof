@@ -8,8 +8,8 @@ export const NODE_KEY = 'v'.repeat(40);
 
 /* A company with two departments, an employee in each, an assistant, a person of each department and a person of another
    company, for the vault's people API and its tools. */
-export async function vaultCompany() {
-  const { app, db, config } = await testApp({ NODE_KEY });
+export async function vaultCompany(logger?: Parameters<typeof testApp>[1]) {
+  const { app, db, config } = await testApp({ NODE_KEY }, logger);
   const wsUrl = await listen(app);
   const ceoSession = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
