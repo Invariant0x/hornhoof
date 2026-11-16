@@ -5,6 +5,21 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.29.1] - 2026-11-16
+
+An update that waits for the agents no longer stops the company's work without end.
+
+### Fixed
+
+- An update asked for when the agents finish held every new turn of the company until no agent worked, and a turn whose
+  machine had stopped reporting never let it go. A turn whose node said nothing of its program for ten minutes is no
+  longer waited for, and the wait has a deadline: 30 minutes, or `idleWaitMinutes` from 1 to 240. If the agents have
+  not finished by then, the update is called off: nothing running stops, the turns start again, and the orchestrator
+  and the update banner say why. The banner, the answer to the request and `check_updates` name the turns the update
+  waits for and until when. Known limits: right after a server restart a long turn counts from its start until its node
+  reports again; only agents' turns can be lost, so other running work still holds the wait; and the wait lives in the
+  server's memory, so a restart drops it and the update has to be asked for again.
+
 ## [0.29.0] - 2026-11-15
 
 A department runs its own outbound messages and its own work without the CEO, Settings is one window in four groups
