@@ -15,6 +15,21 @@ describe('Tests verifies the final candidate without changing it', () => {
       candidateId: f.snapshot.candidateId, commit: f.finalCommit, routeRevision: f.snapshot.revision + 1, testedRevision: f.snapshot.revision,
     } });
   });
+  it('takes the report of an agent that still names its test runs, as an earlier build asked, and leaves them out', async () => {
+    const f = await testsFixture();
+    const { verification } = f.verified();
+    const moved = await report(f.ctx, f.tester.id, f.task.id, { ...f.verified(), verification: { ...verification, runIds: [randomUUID()] } });
+    expect(moved.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toEqual({ verifiedCandidate: {
+      candidateId: f.snapshot.candidateId, commit: f.finalCommit, routeRevision: f.snapshot.revision + 1, testedRevision: f.snapshot.revision,
+    } });
+  });
+  it('refuses a report that names a field no build knew', async () => {
+    const f = await testsFixture();
+    const { verification } = f.verified();
+    await expect(report(f.ctx, f.tester.id, f.task.id, { ...f.verified(), verification: { ...verification, runs: [] } as typeof verification }).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons.phase).toBe('active');
+  });
   it.each(['candidate', 'revision'] as const)('refuses a report naming another %s', async problem => {
     const f = await testsFixture();
     const { verification } = f.verified();
