@@ -694,6 +694,27 @@ describe('freshText', () => {
     expect(plain.freshPrompt).toBeUndefined();
   });
 
+  it('carries the files of the message for its own agent to open, in the text and in freshText alike', async () => {
+    const c = await company();
+    const { ava, agent } = await ready(c);
+    const upload = async (name: string) => {
+      const got = await c.app.inject({ method: 'POST', url: `/api/assistant/files?name=${name}`, headers: { ...bearer(ava.key).headers, 'content-type': 'audio/ogg' }, payload: Buffer.from('OggS\0\x02') });
+      expect(got.statusCode).toBe(201);
+      return got.json().file as { id: string; name: string };
+    };
+    const first = await upload('voice.ogg');
+    expect((await write(c, ava.key, { text: 'Listen to this', freshText: 'The frame', files: [first.id] })).statusCode).toBe(202);
+    const fresh = await runWith(c.node, 'The frame');
+    expect(fresh.prompt).toContain(`voice.ogg: hh-fetch message ${first.id}`);
+    finish(c, fresh, 's1');
+    await idle(c, agent.id);
+    const second = await upload('again.ogg');
+    expect((await write(c, ava.key, { text: 'And this', freshText: 'The frame again', files: [second.id] })).statusCode).toBe(202);
+    const run = await runWith(c.node, 'And this');
+    expect(run.prompt).toContain(`again.ogg: hh-fetch message ${second.id}`);
+    expect(run.freshPrompt).toContain(`again.ogg: hh-fetch message ${second.id}`);
+  });
+
   it("is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session", async () => {
     const c = await company();
     const { ava } = await ready(c);

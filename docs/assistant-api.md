@@ -1,6 +1,6 @@
 # Assistant API
 
-A personal assistant is an outside program, such as AvaClone, OpenClaw, Hermes Agent or any program that speaks HTTP or MCP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, reads what they answer, and answers the requests that wait for its owner. It may do everything its owner may, and everything it does is marked as done through it.
+A personal assistant is an outside program, such as AvaClone, OpenClaw, Hermes Agent or any program that speaks HTTP or MCP, that acts in Hornhoof for one person of a company: its owner. It writes to the company's agents as its owner would, sends them files of any kind, reads what they answer with the files they attach, and answers the requests that wait for its owner. It may do everything its owner may, and everything it does is marked as done through it.
 
 This document is the whole contract. A program built from it alone works with Hornhoof.
 
@@ -33,7 +33,7 @@ An assistant may have an agent of its own in Hornhoof that thinks for it. A prog
 * Only the owner picks the plan the agent thinks on, on the assistant's card in People, and only one of the owner's own personal plans. The first plan picked makes the agent; another plan moves it there. With "No plan" it stays without one and cannot answer.
 * Only the owner sees the agent and writes to it, in its window or through the assistant. Nobody else does, the CEO included, and the orchestrator does not change it. It is not an employee: it has no department or role, takes no tasks and is not counted on the map.
 * Its card in Hornhoof cannot be edited, reset or removed (`409 assistant_agent_card`). Its plan changes on the assistant's card.
-* It reads a message exactly as the program sends it, with nothing added. It keeps its conversation from one message to the next, so `text` need carry only the new words. With each message the program may also send `freshText`, its whole conversation: the persona, the facts about the owner and everything said so far. The agent reads `freshText` in place of `text` only when its turn starts a new session, for example its first turn, after it moved to another plan or machine, after its skills address was set or cleared (see "Skills"), or after its owner cleared its conversation in its window; otherwise Hornhoof leaves it aside. A machine whose Hornhoof node is older than the server does not tell a cleared conversation, and its agent reads `text` then. Its window shows `text`.
+* It reads a message exactly as the program sends it, with nothing added but a line for each file that came with it, naming the file and the command that opens it. It keeps its conversation from one message to the next, so `text` need carry only the new words. With each message the program may also send `freshText`, its whole conversation: the persona, the facts about the owner and everything said so far. The agent reads `freshText` in place of `text` only when its turn starts a new session, for example its first turn, after it moved to another plan or machine, after its skills address was set or cleared (see "Skills"), or after its owner cleared its conversation in its window; otherwise Hornhoof leaves it aside. A machine whose Hornhoof node is older than the server does not tell a cleared conversation, and its agent reads `text` then. Its window shows `text`.
 * Its answer is the text for the owner, in the `reply` and `reply_end` events of the message, as for any agent.
 * Its owner may also write to it in its window, and its answer to that stays in the window. When the owner asks there to be written to in their chat, the agent sends those words with the tool `tell_owner` (`text`, 1 to 50000 characters): Hornhoof keeps each call's words as one `reply` with `messageId` `null` and no `reply_end`, and wakes the program as for any event. The program shows these words to the owner, and never sends them back as a turn.
 * In Hornhoof it acts with the owner's rights, through the tools in "MCP" below; `send_message` does not write to itself. While the assistant's card has a skills address, it asks the program for the program's own skills with `persona_call`, and gives the program files by their ids: see "Skills" and "GET /api/assistant/attachments/:id".
@@ -62,6 +62,12 @@ An error answers with a status and this body:
 
 `code` is one of `validation` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict` (409), `too_many` (429), `unavailable` (503). `reason`, where there is one, is stable and meant for programs; `message` is for people and may change. A program decides by status and `reason`.
 
+Where there is a `reason`, `message` speaks to the owner as a person would, says what did not happen and why, and may be shown to them as it is: in Russian when the call's `Accept-Language` starts with `ru`, and in English otherwise. For example, with `Accept-Language: ru`:
+
+```json
+{ "error": { "code": "not_found", "message": "Такого файла в Hornhoof нет, или вам его там не открыть.", "reason": "attachment_unknown" } }
+```
+
 | Status | `reason` | When |
 | --- | --- | --- |
 | 400 | none | The body or the query is not as below. `message` names the field. |
@@ -71,7 +77,10 @@ An error answers with a status and this body:
 | 403 | `decision_not_allowed` | The owner does not take this decision. |
 | 404 | `agent_unknown` | There is no such agent in the company, or it was removed. |
 | 404 | `request_unknown` | There is no such request in the company. |
-| 404 | `attachment_unknown` | There is no such file visible to the owner: see "GET /api/assistant/attachments/:id". |
+| 404 | `attachment_unknown` | There is no such file visible to the owner: see "GET /api/assistant/attachments/:id". In a message, a file not sent for that agent with `POST /api/assistant/files`. |
+| 400 | `file_empty` | The file sent has no bytes. |
+| 413 | `file_too_big` | The file sent is over 50 MB. |
+| 413 | `attachment_invalid` | Hornhoof has no room left for the company's files. |
 | 409 | `orchestrator_not_ready`, `agent_not_ready` | The agent cannot answer right now, for example while it has no plan to run on, or the message has no `agentId` and the assistant has no agent of its own yet. Try again later. |
 | 409 | `request_closed` | The request is answered already. |
 | 400 | `task_invalid` | The answer does not fit the request: see "Answer a request". |
@@ -96,7 +105,7 @@ Who the assistant is, whom it acts for, and what that person is in the company n
 }
 ```
 
-* `contract` is the version of this API the server keeps. 3 supports attachment downloads with `GET /api/assistant/attachments/:id` and adds `byOwnAgent` to `reply` and `reply_end`. It keeps the message limits of 2: `freshText` and up to 50000 characters of `text`. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
+* `contract` is the version of this API the server keeps. 3 supports attachment downloads with `GET /api/assistant/attachments/:id`, files sent with `POST /api/assistant/files` and named in a message's `files`, the `files` an agent attaches to a `reply`, `message` in the owner's language, and adds `byOwnAgent` to `reply` and `reply_end`. It keeps the message limits of 2: `freshText` and up to 50000 characters of `text`. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
 * `program` is `avaclone`, `openclaw`, `hermes` or `other`.
 * `agentId` is the assistant's own agent, or `null` until its owner picks a plan for it. `agentReady` is true while that agent can answer now: it has a plan, and the plan is ready on a machine that is online. Read it again from time to time, for example every minute, to tell the owner when the agent stops being ready.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
@@ -123,12 +132,13 @@ The agents the assistant may write to now, in the order they were hired.
 Writes to an agent for the owner, as the owner would in the agent's window.
 
 ```json
-{ "agentId": "…", "text": "How are the leads this week?", "freshText": "…" }
+{ "agentId": "…", "text": "How are the leads this week?", "freshText": "…", "files": ["…"] }
 ```
 
 * `agentId`: the agent to write to. Without it, the message goes to the assistant's own agent; while there is none, the call answers `409 agent_not_ready`.
-* `text`: 1 to 50000 characters after spaces at both ends are trimmed.
-* `freshText`, optional: 1 to 200000 characters after the same trimming. The whole conversation for the assistant's own agent, which reads it instead of `text` when its turn starts a new session: see "The assistant's own agent". Hornhoof leaves it aside for any other agent. No other field is allowed.
+* `text`: 1 to 50000 characters after spaces at both ends are trimmed. It may be left out when `files` has a file; the agent then reads the files' names as the words.
+* `freshText`, optional: 1 to 200000 characters after the same trimming. The whole conversation for the assistant's own agent, which reads it instead of `text` when its turn starts a new session: see "The assistant's own agent". Hornhoof leaves it aside for any other agent.
+* `files`, optional: up to 10 ids from `POST /api/assistant/files`, each sent for this same agent. The agent gets each file as a file its owner sent from its window: its name and the command that opens it, and the window shows it with the message. No other field is allowed.
 * Characters are counted as JavaScript counts a string's length, in UTF-16 code units. Hornhoof never cuts a text: a longer one answers `400`. The whole body may be up to 2 MiB, so both texts fit even when every letter is written as a `\uXXXX` escape; a bigger body answers `413`.
 * Answers `202` with the message's id. The agent's answer comes later, as events with that id.
 
@@ -137,6 +147,30 @@ Writes to an agent for the owner, as the owner would in the agent's window.
 ```
 
 The agent reads the message as the owner's own words, marked as written by the assistant, and is told who the owner is in the company. A message to an agent that is busy waits for it, as a person's does. If the message answers a question the agent asked the owner in its window, Hornhoof records it as the owner's answer given by the assistant.
+
+### POST /api/assistant/files?name=&lt;file name&gt;&amp;agentId=&lt;id&gt;
+
+Sends a file for a message to an agent, as its owner adds one in the agent's window. Any file goes: a photo, a video, a voice message, an archive, a table, of any type and any format. The body is the file's raw bytes, under the `Content-Type` the program has for it, or `application/octet-stream`; Hornhoof keeps the bytes as they came and reads no type from them but a PNG, JPEG or WebP picture's.
+
+```
+POST /api/assistant/files?name=IMG_0042.heic&agentId=8a3c…
+Authorization: Bearer hha_…
+Content-Type: image/heic
+
+<the file's bytes>
+```
+
+* `name`: the file's name, which the agent and the window show. Without it a file is called `file`.
+* `agentId`: the agent the message goes to. Without it, the assistant's own agent, as for a message.
+* Answers `201` with the file's id and the name it is kept under. Name the id in `files` of the next `POST /api/assistant/messages` to the same agent; until then the file goes nowhere.
+
+```json
+{ "file": { "id": "3f0c9a6e-…", "name": "IMG_0042.heic" } }
+```
+
+* Refusals, each with words for the owner in `message`: `400 file_empty` for no bytes, `413 file_too_big` for more than 50 MB, `413 attachment_invalid` when Hornhoof has no room left for the company's files, and for the agent the same as for a message (`404 agent_unknown`, `403 assistant_agent_refused`, `409 agent_not_ready`).
+* When a file is refused, tell the owner the words of `message`. When the program still sends the rest of the message, add a line to `text` naming the file that did not come and why, so the agent knows of it too.
+* Hornhoof keeps a file 30 days after it was sent, as every file of a message.
 
 ### GET /api/assistant/events?after=&lt;seq&gt;&amp;wait=&lt;seconds&gt;
 
@@ -165,10 +199,12 @@ The kinds of event and their `data`:
 
 | `kind` | `data` | Meaning |
 | --- | --- | --- |
-| `reply` | `{ messageId, agent: { id, name, kind }, byOwnAgent, text }` | Words of the agent's answer to the assistant's message. A long answer comes as several replies, in order. |
+| `reply` | `{ messageId, agent: { id, name, kind }, byOwnAgent, text, files }` | Words of the agent's answer to the assistant's message. A long answer comes as several replies, in order. `files` is there only when the agent attached files to these words: see below. |
 | `reply_end` | `{ messageId, agent: { id, name, kind }, byOwnAgent, answered, failed }` | The answer to the message is over. `answered` is false when the agent said nothing; `failed` is true when its turn failed. |
 | `request` | `{ request }` | A request now waits for the owner. `request` is as in `GET /api/assistant/requests`. |
 | `request_closed` | `{ requestId, status }` | The request waits for the owner no more: it was answered, here or in Hornhoof, withdrawn, or no longer the owner's. `status` is the request's status now: `open`, `answered`, `approved`, `declined`, `withdrawn` or `resolved_internal`. |
+
+`files` in a `reply` lists the files the agent attached to its answer with `hh-attach --chat`, each as `{ id, name }`, and `text` may then be empty. Download each with `GET /api/assistant/attachments/:id` and pass it on to the owner under its name. When one cannot be downloaded or delivered, tell the owner plainly that it did not arrive and why, and write it to the agent with `POST /api/assistant/messages`, so both know.
 
 `byOwnAgent` is true when the assistant's own agent sent the original message through `send_message`, and false when the assistant program sent it through HTTP or MCP. It names the sender of the original message, not the agent answering it. The value stays the same in every `reply` and the `reply_end` for that message, including after a restart or continued turn. A direct `tell_owner` reply has `byOwnAgent: true`. Events kept before contract 3 retain their earlier data; old events are not rewritten. Pending answers started before the update use false.
 
@@ -241,7 +277,7 @@ No other field is allowed. Answers `200`:
 
 ### GET /api/assistant/attachments/:id
 
-Downloads a file its owner may download in Hornhoof now, by its attachment id. This includes files on tasks, in agent chats and in messages or requests, and files the assistant's own agent put there: see "Skills" for how that id comes to the program. The call carries the key as every call does.
+Downloads a file its owner may download in Hornhoof now, by its attachment id. This includes files on tasks, in agent chats and in messages or requests, and files the assistant's own agent put there. The ids come in a `reply`'s `files` and in a skill's arguments: see "Skills". The call carries the key as every call does.
 
 ```
 GET /api/assistant/attachments/3f0c9a6e-…
@@ -281,7 +317,7 @@ A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or 
 | `list_requests` | none | `GET /api/assistant/requests` |
 | `answer_request` | `requestId`, and `answer`, `pick`, `approve` or `retry` as in the call's body | `POST /api/assistant/requests/:id/answer` |
 
-* A tool checks what the call checks, acts with the same rights and answers with the call's JSON, as text.
+* A tool checks what the call checks, acts with the same rights and answers with the call's JSON, as text. Files go only over the calls above: `send_message` takes no `files`.
 * `send_message` also gives `next`: the number of the assistant's newest event before the message. Its answer comes after it, so `read_events` with `after` set to `next` reads the answer.
 * A refusal comes back as a tool error (`isError: true`) whose text is the call's error body, `{ "error": { "code", "message", "reason" } }`, with the same `reason`. Arguments that do not fit the tool's schema are refused in words before the call.
 * `read_events` with a `wait` holds the tool call as the long poll holds the call, for up to 50 seconds. Give tool calls at least 60 seconds in the program's settings.
@@ -320,13 +356,13 @@ X-Hornhoof-Signature: sha256=<64 hex characters>
 
 ### A file for a skill
 
-A skill may take a file the agent makes or has, for example a report to send in the owner's chat. The file goes by its id:
+A skill may take a file the agent makes or has, for example a report to put in the owner's calendar, or to send in the owner's chat when the agent answers no message of the program. A file the agent attaches while it answers a message of the program goes to the owner by itself, in the reply's `files`. The file goes to a skill by its id:
 
 1. In its turn, the agent puts the file in Hornhoof with `hh-attach --chat FILE` (any file up to 50 MB), which prints the file's name and its id. Its instructions tell it to.
 2. The agent calls `persona_call` with that id in the skill's arguments, under the name the program's message gives for it, for example `{"name":"send_file","arguments":{"attachmentId":"3f0c9a6e-…"}}`.
 3. The program downloads the file with `GET /api/assistant/attachments/3f0c9a6e-…` and its key, takes the name from `Content-Disposition`, and answers the skill's call.
 
-Hornhoof serves the bytes; the assistant program performs the external delivery. A successful download is no proof that a file reached Telegram or another destination. The program returns `ok: false` and a reason when it refuses delivery, for example `file_unknown`; the agent receives that refusal through `persona_call` as an error, with instructions to tell the owner the file did not arrive. Hornhoof cannot detect a delivery failure the program does not report.
+Hornhoof serves the bytes; the assistant program performs the external delivery. A successful download is no proof that a file reached Telegram or another destination. The program returns `ok: false` when it refuses delivery, and says in `text`, in words, what did not happen and why, for example "The file did not reach Telegram: it is over 50 MB." rather than a code such as `file_unknown`; the agent receives that refusal through `persona_call` as an error, with instructions to tell the owner the file did not arrive. Hornhoof cannot detect a delivery failure the program does not report.
 
 The program may download the file again, for example when it tries again. Hornhoof keeps the file 30 days after the agent put it, as every file of an agent's chat.
 
@@ -468,7 +504,8 @@ The `platforms` part is there only when the card has an events address. Hermes' 
 
 | What | Limit |
 | --- | --- |
-| Message text | 1 to 50000 characters |
+| Message text | 1 to 50000 characters, or none with files |
+| Files of a message | up to 10, each up to 50 MB, kept 30 days |
 | A message's `freshText` | up to 200000 characters |
 | A message's body | 2 MiB |
 | Long poll wait | 0 to 50 seconds |

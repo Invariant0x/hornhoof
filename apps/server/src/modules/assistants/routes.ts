@@ -13,15 +13,24 @@ import type { AgentRow } from '../agents/find.js';
 import { agentState } from '../conversation/queue.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
+import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
+import { FILE_BYTES } from '../tasks/attachments.js';
 import { AnswerBody, answerRequest } from '../tasks/routes.js';
 import { fileFor } from './files.js';
 import { sendForOwner } from './messages.js';
 import { waitingFor } from './requests.js';
+import { FILES_URL, inOwnersWords } from './words.js';
 
-/* With no agent named, the words go to the assistant's own agent. */
-/* text: the new words. freshText: the program's whole conversation, which the assistant's own agent reads in their place
-   when its turn starts a new session. Nothing is cut: longer words are refused. */
-export const MessageBody = z.object({ agentId: z.uuid().optional(), text: z.string().trim().min(1).max(50_000), freshText: z.string().trim().min(1).max(200_000).optional() }).strict();
+/* Words of one message. Nothing is cut: longer words are refused. */
+export const Words = z.string().trim().min(1).max(50_000);
+/* With no agent named, the words go to the assistant's own agent. text: the new words, which a message with files may
+   leave out. freshText: the program's whole conversation, which the assistant's own agent reads in their place when its
+   turn starts a new session. files: what the program sent this agent before, by the ids it got for them. */
+export const MessageBody = z
+  .object({ agentId: z.uuid().optional(), text: Words.optional(), freshText: z.string().trim().min(1).max(200_000).optional(), files: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
+  .strict()
+  .refine(m => m.text || m.files.length, 'Write something or add a file.');
+const FileQuery = z.object({ agentId: z.uuid().optional(), name: z.string().optional() }).strict();
 /* A program may send each letter of both texts as an escape of six bytes. */
 export const MESSAGE_BYTES = 2 * 1024 * 1024;
 export const ASSISTANT_CONTRACT = 3;
@@ -47,6 +56,13 @@ async function writableAgent(ctx: Ctx, me: Person, id: string): Promise<AgentRow
     throw new ApiError(403, 'forbidden', 'The person this assistant belongs to does not write to this agent, so neither does the assistant.', 'assistant_agent_refused');
   }
   return agent;
+}
+
+/* The agent the assistant writes or sends a file to: the one it names, or else its own. */
+async function addressee(ctx: Ctx, me: Person, agentId: string | undefined, mine: string | null): Promise<AgentRow> {
+  const id = agentId ?? mine;
+  if (!id) throw new ApiError(409, 'conflict', "This assistant has no agent of its own yet: its owner picks a plan for it on the assistant's card in People.", 'agent_not_ready');
+  return writableAgent(ctx, me, id);
 }
 
 /* The assistant's own agent, if its owner picked a plan for it once. */
@@ -96,13 +112,21 @@ export async function agentsFor(ctx: Ctx, me: Person) {
 
 /* senderAgentId comes from the authenticated MCP job, never from the message body. */
 export async function writeFor(ctx: Ctx, me: Person, body: unknown, senderAgentId?: string) {
-  const { agentId, text, freshText } = MessageBody.parse(body);
+  const { agentId, text = '', freshText, files } = MessageBody.parse(body);
   const mine = await ownAgentOf(ctx, me.assistant!.id);
-  const own = agentId ?? mine;
-  if (!own) throw new ApiError(409, 'conflict', "This assistant has no agent of its own yet: its owner picks a plan for it on the assistant's card in People.", 'agent_not_ready');
-  const agent = await writableAgent(ctx, me, own);
-  const id = await sendForOwner(ctx, me, agent, text, agent.id === mine ? freshText : undefined, senderAgentId === mine);
+  const agent = await addressee(ctx, me, agentId, mine);
+  const id = await sendForOwner(ctx, me, agent, { text, fresh: agent.id === mine ? freshText : undefined, files, byOwnAgent: senderAgentId === mine });
   return { message: { id, agentId: agent.id } };
+}
+
+/* A file of any kind the assistant sends an agent, to name in its next message to it: kept as its owner's own, as a file
+   the owner sends from the agent's window. */
+export async function keepFor(ctx: Ctx, me: Person, query: unknown, body: unknown) {
+  const { agentId, name } = FileQuery.parse(query);
+  const agent = await addressee(ctx, me, agentId, await ownAgentOf(ctx, me.assistant!.id));
+  const bytes = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
+  if (!bytes.length) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
+  return { file: await keepMessageFile(ctx, me, agent.id, bytes, name ?? '') };
 }
 
 /* A long poll: the events after a number at once, or the first that comes within the wait, until the asker goes. */
@@ -120,32 +144,47 @@ export function answerFor(ctx: Ctx, me: Person, params: unknown, body: unknown) 
   return answerRequest(ctx, me, id, AnswerBody.parse(body));
 }
 
-/* What a person's assistant does for them, with its key: reads who it is for and whom it may write to, writes to agents,
-   reads what happened since, answers what waits for its owner, all with the owner's rights, and downloads the files its own
-   agent put for it. */
+/* What a person's assistant does for them, with its key: reads who it is for and whom it may write to, writes to agents
+   and sends them files, reads what happened since, answers what waits for its owner, all with the owner's rights, and
+   downloads the files its owner may. A refusal tells the owner why in their words. */
 export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
-  app.get('/api/assistant/me', async req => whoAmI(ctx, await requireAssistant(req, db)));
+  void app.register(async scope => {
+    scope.setErrorHandler(inOwnersWords);
 
-  app.get('/api/assistant/agents', async req => agentsFor(ctx, await requireAssistant(req, db)));
+    scope.get('/api/assistant/me', async req => whoAmI(ctx, await requireAssistant(req, db)));
 
-  app.post('/api/assistant/messages', { bodyLimit: MESSAGE_BYTES }, async (req, reply) => {
-    const sent = await writeFor(ctx, await requireAssistant(req, db), req.body);
-    reply.code(202);
-    return sent;
+    scope.get('/api/assistant/agents', async req => agentsFor(ctx, await requireAssistant(req, db)));
+
+    scope.post('/api/assistant/messages', { bodyLimit: MESSAGE_BYTES }, async (req, reply) => {
+      const sent = await writeFor(ctx, await requireAssistant(req, db), req.body);
+      reply.code(202);
+      return sent;
+    });
+
+    /* A file comes as its raw bytes, whatever type the program gives it. */
+    void scope.register(async files => {
+      files.removeAllContentTypeParsers();
+      files.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: FILE_BYTES }, (_req, body, done) => done(null, body));
+      files.post(FILES_URL, { bodyLimit: FILE_BYTES }, async (req, reply) => {
+        const kept = await keepFor(ctx, await requireAssistant(req, db), req.query, req.body);
+        reply.code(201);
+        return kept;
+      });
+    });
+
+    scope.get('/api/assistant/events', async (req, reply) => {
+      const me = await requireAssistant(req, db);
+      const gone = new AbortController();
+      reply.raw.once('close', () => gone.abort());
+      return eventsFor(ctx, me, req.query, gone.signal);
+    });
+
+    scope.get('/api/assistant/requests', async req => requestsFor(ctx, await requireAssistant(req, db)));
+
+    scope.post('/api/assistant/requests/:id/answer', async req => answerFor(ctx, await requireAssistant(req, db), req.params, req.body));
+
+    scope.get('/api/assistant/attachments/:id', async (req, reply) => fileFor(ctx, await requireAssistant(req, db), req.params, reply));
   });
-
-  app.get('/api/assistant/events', async (req, reply) => {
-    const me = await requireAssistant(req, db);
-    const gone = new AbortController();
-    reply.raw.once('close', () => gone.abort());
-    return eventsFor(ctx, me, req.query, gone.signal);
-  });
-
-  app.get('/api/assistant/requests', async req => requestsFor(ctx, await requireAssistant(req, db)));
-
-  app.post('/api/assistant/requests/:id/answer', async req => answerFor(ctx, await requireAssistant(req, db), req.params, req.body));
-
-  app.get('/api/assistant/attachments/:id', async (req, reply) => fileFor(ctx, await requireAssistant(req, db), req.params, reply));
 }
