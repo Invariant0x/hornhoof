@@ -125,7 +125,8 @@ for (const look of LOOKS) {
 
     await page.goto(`/departments/${DEPT}`);
     await page.getByRole('button', { name: t.settings.groups.messaging, exact: true }).click();
-    const own = page.getByRole('complementary', { name: t.settings.groups.messaging });
+    /* The part itself, under the panel's own head and its close button. */
+    const own = page.getByRole('complementary', { name: t.settings.groups.messaging }).locator('.outbound-setup');
     await expect(own.getByRole('heading', { name: t.outboundSetup.channelsTitle })).toBeVisible();
     await fits(page, own);
     await shot(page, own.getByRole('heading', { name: t.outboundSetup.channelsTitle }), `department-${browserName}-${name}`);
