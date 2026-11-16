@@ -112,6 +112,11 @@ describe('the vault for agents', () => {
     expect(JSON.parse(textOf(otherTurn))).toMatchObject({ error: { code: 'not_found' } });
     const elsewhere = await call(c, token, 'vault_fill', { entry: 'Partner site', target: 'browser', address: 'https://partner.example.evil.test/login' });
     expect(JSON.parse(textOf(elsewhere))).toMatchObject({ error: { code: 'forbidden' } });
+    /* An address above the entry's own host would let the node type into any other host under it, other people's pages
+       on a site that gives each its own. */
+    await c.add(c.ceoSession, { name: 'Shop', site: 'https://shop.partner.example/login', login: 'team@acme.test', password: 'pw-shop-12345' });
+    const above = await call(c, token, 'vault_fill', { entry: 'Shop', target: 'browser', address: 'https://partner.example/' });
+    expect(JSON.parse(textOf(above))).toMatchObject({ error: { code: 'forbidden' } });
     await c.add(c.ceoSession, { name: 'App only', site: 'Partner app', login: 'team@acme.test', password: 'pw-app-12345' });
     const noAddress = await call(c, token, 'vault_fill', { entry: 'App only', target: 'browser', address: 'https://partner.example/login' });
     expect(JSON.parse(textOf(noAddress))).toMatchObject({ error: { code: 'validation' } });

@@ -77,6 +77,16 @@ const webAddress = (value: string): boolean => {
   }
 };
 
+/* An address an agent asks for: of the entry's own host or one under it, never one above it. The node types on every
+   page of the same site as that address, so an address above the entry's host would open the hosts beside it, such
+   as other people's pages on a site that gives each its own. */
+const ofEntrySite = (site: string, address: string): boolean => {
+  if (!webAddress(address) || !sameSite(site, address)) return false;
+  const host = new URL(site).hostname.toLowerCase();
+  const asked = new URL(address).hostname.toLowerCase();
+  return asked === host || asked.endsWith(`.${host}`);
+};
+
 const invalid = (message: string) => new ApiError(400, 'validation', message, 'vault_invalid');
 
 /* The entry by its id or its name. Another company's id is refused as not this agent's, never as unknown. */
@@ -113,7 +123,7 @@ async function targetFor(ctx: Ctx, state: State, agent: VaultAgent, entry: Entry
     if (!webAddress(entry.site)) throw invalid("This entry's site is not a web address, so the browser does not know where it may sign in. A person sets the address in the vault.");
     const address = req.address ?? entry.site;
     /* The values go only into a page of the entry's own site, wherever an agent asks. */
-    if (!webAddress(address) || !sameSite(entry.site, address)) throw notAllowed("This address is not of the entry's site.");
+    if (!ofEntrySite(entry.site, address)) throw notAllowed("This address is not of the entry's site.");
     const { node } = agent.jobId ? await nodeOfJob(ctx, agent.jobId) : { node: null };
     return { node, target: { kind: 'browser', address } };
   }

@@ -316,14 +316,31 @@ export const ru: Messages = {
     addedBy: (name: string, when: string) => `Добавил(а) ${name}, ${when}.`,
     log: 'История',
     logTitle: (name: string) => `История входа ${name}`,
-    logLine: (kind: 'used' | 'created' | 'changed' | 'removed', who: string, task: number | null, target: 'browser' | 'phone' | null, status: string | null) =>
+    logLine: (kind: 'used' | 'created' | 'changed' | 'removed', who: string, task: number | null, target: 'browser' | 'phone' | null, ended: string) =>
       kind === 'used'
-        ? `${who} вошел${target === 'phone' ? ' на телефоне' : target === 'browser' ? ' в браузере' : ''}${task !== null ? ` для задачи #${task}` : ''}: ${status ?? 'отправлено'}.`
+        ? `${who}: вход${target === 'phone' ? ' на телефоне' : target === 'browser' ? ' в браузере' : ''}${task !== null ? ` для задачи #${task}` : ''}. ${ended}`
         : kind === 'created'
           ? `${who}: добавлено.`
           : kind === 'changed'
             ? `${who}: изменено.`
             : `${who}: удалено.`,
+    ended: {
+      sent: 'Еще вводится.',
+      filled: 'Введено.',
+      signed_in: 'Вход выполнен.',
+      field_not_found: 'Поле входа не найдено.',
+      wrong_field: 'Это поле не для пароля, ничего не введено.',
+      rejected: 'Площадка не приняла логин или пароль.',
+      needs_person: 'Дальше нужен человек.',
+      robot_check: 'Площадка попросила доказать, что это не робот.',
+      browser_refused: 'Площадка не пускает этот браузер.',
+      target_gone: 'Страница или сеанс телефона уже закрыты.',
+      expired: 'Пришло слишком поздно, ничего не введено.',
+      unsupported: 'Эта машина так вводить не умеет.',
+      failed: 'Не получилось.',
+      node_offline: 'Машина была не в сети.',
+      no_answer: 'Машина не ответила вовремя.',
+    },
     change: 'Изменить',
     remove: 'Удалить',
     removeAsk: (name: string) => `Удалить ${name}? Сотрудники больше не смогут входить с ним.`,
