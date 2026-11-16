@@ -10,6 +10,43 @@ ownDatabases();
 const ASSISTANT_TABLES = ['assistants', 'assistant_events', 'assistant_seqs', 'assistant_replies', 'assistant_requests'];
 
 describe('personal assistants migration', () => {
+  it('adds a required reply origin with a false default on fresh and upgraded installations', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0129_builtin_node_connections') });
+    await client.exec(`
+      insert into companies (id, name) values ('00000000-0000-4000-8000-000000000001', 'Acme');
+      insert into people (id, company_id, name, email, status, scope_kind)
+        values ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', 'Ivan', 'ivan@example.com', 'active', 'company');
+      insert into people (id, company_id, name, status, scope_kind, is_agent, assistant_of)
+        values ('00000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000001', 'Ava', 'active', 'listed', true, '00000000-0000-4000-8000-000000000002');
+      insert into assistants (person_id, company_id, program)
+        values ('00000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000001', 'avaclone');
+      insert into subscriptions (id, company_id, provider, kind, label, owner_person_id, status)
+        values ('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000001', 'codex', 'personal', 'Plan', '00000000-0000-4000-8000-000000000002', 'ready');
+      insert into agents (id, company_id, kind, name, model)
+        values ('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000001', 'worker', 'Developer', '');
+      insert into jobs (id, company_id, subscription_id, agent_id, prompt, timeout_ms)
+        values ('00000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000004', 'Hello', 60000);
+      insert into assistant_replies (company_id, assistant_id, agent_id, message_id, job_id, after_seq)
+        values ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000005', 7);
+    `);
+    const before = (await db.execute(sql`select to_jsonb(r) as row from assistant_replies r`)).rows;
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const column = sql`select data_type, is_nullable, column_default from information_schema.columns where table_name = 'assistant_replies' and column_name = 'by_own_agent'`;
+    const expected = [{ data_type: 'boolean', is_nullable: 'NO', column_default: 'false' }];
+    expect((await db.execute(column)).rows).toEqual(expected);
+    expect((await db.execute(sql`select to_jsonb(r) - 'by_own_agent' as row from assistant_replies r`)).rows).toEqual(before);
+    expect((await db.execute(sql`select by_own_agent from assistant_replies`)).rows).toEqual([{ by_own_agent: false }]);
+    await db.execute(sql`update assistant_replies set by_own_agent = true`);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select by_own_agent from assistant_replies`)).rows).toEqual([{ by_own_agent: true }]);
+    await expect(db.execute(sql`update assistant_replies set by_own_agent = null`)).rejects.toThrow();
+    expect((await drizzle(await freshInstall()).execute(column)).rows).toEqual(expected);
+  });
+
   it('makes every person a person and no assistant, adds its tables empty and touches no older row', async () => {
     const client = await freshPglite();
     onTestFinished(() => client.close());
