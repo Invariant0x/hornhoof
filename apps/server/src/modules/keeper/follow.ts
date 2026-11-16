@@ -97,6 +97,10 @@ export type FollowKeeperOptions = {
   peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
 };
 
+/* Whether the copy is being poured in: made or made again, or not begun yet, as the leader says of a copy that said
+   nothing. */
+const pouring = (copy: CopyReport | null): boolean => copy === null || copy.state === 'making' || copy.state === 'remaking';
+
 /* The keeper of a machine that keeps a copy of the company's data and does not lead. It is a worker's keeper with a
    database: it reaches the leader as a worker does and serves the company on its own address, and besides that it
    makes this machine's copy and keeps it, opens a door through which its database reaches the leader's, and serves a
@@ -201,6 +205,7 @@ export class FollowKeeper {
         const copy = this.maker.report();
         return copy ? { copy } : {};
       },
+      copying: () => pouring(this.maker.report()),
       onView: view => this.heard(view),
       ...opts.worker,
     });

@@ -4,7 +4,6 @@ import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, people, subscriptions, telegramReplies } from '../../db/schema.js';
-import { ApiError } from '../../errors.js';
 import { identityOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
@@ -22,15 +21,13 @@ const waiting = new WeakMap<Ctx, Map<string, Waiting>>();
 
 const nothingBefore = async (): Promise<void> => {};
 
-export const messageNotDelivered = (): ApiError => new ApiError(409, 'conflict', 'The message did not reach the employee. Check its window and try again.', 'agent_not_ready');
-
 function liveEnvelope(ctx: Ctx, companyId: string, agentId: string, source?: MessageSource) {
   return incomingEnvelope(ctx, companyId, agentId, source?.personId, source?.data);
 }
 
 /* Words for an agent whose turn runs in a live terminal go into that turn at once, typed as a person types; with taskId,
-   only into a turn on that task. The running turn's job, or null when none runs or the words could not go in. before
-   runs once the turn is found, before the words go. */
+   only into a turn on that task. The running turn's job, or null when none runs or the words could not go in, which then
+   wait in the agent's line for its next turn. before runs once the turn is found, before the words go. */
 export async function sayLive(
   ctx: Ctx,
   agentId: string,
@@ -38,7 +35,6 @@ export async function sayLive(
   taskId?: string,
   source?: MessageSource,
   before: (jobId: string) => Promise<void> = nothingBefore,
-  required = false,
 ): Promise<string | null> {
   const [running] = await ctx.db
     .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, createdBy: jobs.createdBy, sub: subscriptions })
@@ -52,8 +48,7 @@ export async function sayLive(
   if (await answersSomeoneElse(ctx, running, source)) return null;
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
-  if (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) return running.id;
-  return missedLive(required);
+  return (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) ? running.id : null;
 }
 
 /* Whether a person's words would go into a turn that answers someone else in Telegram. Every word of a turn goes back to
@@ -77,11 +72,6 @@ const fromTelegram = (data: unknown): boolean => !!data && typeof data === 'obje
 /* A node without live terminals never takes words into a turn, nor a program that takes typed words as a turn of its own:
    they wait for the next one. */
 const takesLiveWords = (ctx: Ctx, node: NodeIdentity, provider: string): boolean => ctx.hub.hasTerminals(node) && !NEXT_TURN_WORDS.includes(provider);
-
-function missedLive(required: boolean): null {
-  if (required) throw messageNotDelivered();
-  return null;
-}
 
 type Words = { agentKey: string; text: string; ref: string };
 

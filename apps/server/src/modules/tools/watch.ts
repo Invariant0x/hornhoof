@@ -8,7 +8,8 @@ import { worksIn } from '../departments/inside.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { answerBy, wrote } from '../conversation/prompt.js';
-import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, reconnecting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { keepUndelivered, NOT_DELIVERED, UndeliveredRecord, undeliveredLine } from '../conversation/undelivered.js';
 import { deptName } from '../departments/templates.js';
 import type { WithEvent } from '../events/store.js';
 import { returnAlongLine } from '../org/map-state.js';
@@ -22,6 +23,7 @@ import { agentSeesTask } from '../tasks/views.js';
 import { authorizeAccess, OPERATIONS_ROLES } from '../program-operator/access.js';
 import { registerOperatorTools, registerProgramAccessTools, registerStopTool } from '../program-operator/tools.js';
 import { registerReleaseTool } from '../program-operator/release.js';
+import { nextSection } from './next-section.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
 
@@ -64,14 +66,19 @@ function failureReason(failure: Failure, result: string | null, open: boolean): 
   return reason ? reason.slice(0, TAIL) : null;
 }
 
-type FailedRow = { agentId: string | null; departmentId: string | null; tail: string; failure: Failure; result: string | null; sight: TaskSight | null };
+type FailedRow = { agentId: string | null; departmentId: string | null; tail: string; failure: Failure; result: string | null; sight: TaskSight | null; error: string | null; task: number | null };
+
+/* A turn Hornhoof failed for a message before it kept why still names its recipient and its task. */
+const undeliveredBefore = (row: FailedRow): string | null =>
+  row.error === NOT_DELIVERED && row.agentId ? undeliveredLine({ reason: 'reason_not_recorded', recipient: row.agentId, task: row.task }) : null;
 
 /* A failed turn as a reader gets it: its department by name, the end of its output and why it failed. */
 function failedLine<T extends FailedRow>(row: T, reader: Reader | undefined, names: Map<string, string>) {
   /* What decides the reader's view stays out of what it reads. */
   const { agentId, departmentId, tail, failure, result, sight, ...line } = row;
   const open = opensTurn(reader, sight, { id: agentId, departmentId });
-  return shownAll({ ...line, department: (departmentId && names.get(departmentId)) || null, tail: shown(tail, open).slice(-TAIL), reason: failureReason(failure, result, open) }, open);
+  const reason = failureReason(failure, result, open) ?? undeliveredBefore(row);
+  return shownAll({ ...line, department: (departmentId && names.get(departmentId)) || null, tail: shown(tail, open).slice(-TAIL), reason }, open);
 }
 
 type SeenRow = { agentId: string; departmentId: string | null; sight: TaskSight | null; agent: string; text: string; at: Date; task: number | null };
@@ -107,15 +114,21 @@ const WHY_TAIL = 500;
 /* Queued turns Hornhoof ended unsent on purpose, as their task went to another holder or waits for the tasks before it: no
    program ran, so there is nothing to find. */
 const ENDED_UNSENT = ['handed_on', 'waiting'];
-/* The start of what a holder said when it stopped, and its end when it says more than the start holds, as the reader gets it. */
+/* The start of what a holder said when it stopped, and its end when it says more than the start holds, as the reader gets it,
+   with what it said comes next, cleaned for every reader. */
 function heldWords(said: { text: string } | undefined, open: boolean) {
   const text = said ? shown(said.text, open) : null;
-  return { why: text === null ? null : text.slice(0, TAIL), whyTail: text !== null && text.length > TAIL ? text.slice(-WHY_TAIL) : null };
+  return {
+    why: text === null ? null : text.slice(0, TAIL),
+    whyTail: text !== null && text.length > TAIL ? text.slice(-WHY_TAIL) : null,
+    next: said ? nextSection(said.text) : null,
+  };
 }
 const FAILED_MAX = 50;
 /* Tool calls and results read for where agents stumbled, the newest first. */
 const STUMBLES_MAX = 1000;
 const STOPS_MAX = 50;
+const UNDELIVERED_MAX = 50;
 const GROUPS_MAX = 30;
 
 /* Messages each running turn sent, counted before the next one goes out so two at once cannot both pass; the oldest turns
@@ -187,11 +200,72 @@ function registerRoleTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   if (job.roleKey === PROGRAM_OPERATOR_ROLE) registerOperatorTools(server, ctx, job);
 }
 
+/* What a message that waits for a turn waits for: the update its machine gets ready for, its machine getting back on the
+   line, or a turn of its own after the one that runs or waits. */
+const WAITS = {
+  update: 'Its machine waits for an update, so the turn starts after it.',
+  reconnect: 'Its machine is getting back on the line, so the turn starts once it is back.',
+  line: 'It gets this with its next turn, not at once.',
+};
+type Waits = keyof typeof WAITS;
+const waitsOf = (state: { ready: boolean; machineDrain: unknown }): Waits => (state.machineDrain ? 'update' : state.ready ? 'line' : 'reconnect');
+
 /* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */
-async function sentLine(ctx: Ctx, name: string, jobId: string, machineWaits: boolean): Promise<string> {
+async function sentLine(ctx: Ctx, name: string, jobId: string, waits: Waits): Promise<string> {
   const [turn] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
   if (turn?.status !== 'queued') return `Sent to ${name}.`;
-  return `Sent to ${name}. ${machineWaits ? 'Its machine waits for an update, so the turn starts after it.' : 'It gets this with its next turn, not at once.'}`;
+  return `Sent to ${name}. ${WAITS[waits]}`;
+}
+
+/* Why a message does not go, as a code a failure collector groups by and as words its sender reads. */
+type Refusal = { reason: string; text: string };
+
+const nobody = (employee: string): Refusal => ({ reason: 'recipient_unknown', text: `There is no employee with id ${employee}. Call agents to see the current ids.` });
+
+/* The sender and the employee it writes to, or why it may not: the employee is not there, is the sender itself, is out of
+   its reach, or is switched off. */
+async function partiesOf(ctx: Pick<Ctx, 'db'>, job: ToolJob, employee: string, reachable: (me: Agent, target: Agent) => Promise<boolean>): Promise<{ me: Agent; target: Agent } | Refusal> {
+  const [me] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
+  const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
+  if (!me || !target) return nobody(employee);
+  if (target.id === me.id) return { reason: 'recipient_is_sender', text: 'That is you. Write to another employee.' };
+  if (!(await reachable(me, target)))
+    return target.kind === 'orchestrator' ? nobody(employee) : { reason: 'other_department', text: `${target.name} works in another department. Ask your head, who has the orchestrator pass it on.` };
+  if (target.switchedOffAt) return { reason: 'switched_off', text: `${target.name} is switched off and takes no work until a person switches it on.` };
+  return { me, target };
+}
+
+/* Why the employee's turn cannot go out now nor wait for it, or null: a machine getting back on the line takes it once it is back. */
+async function cannotTake(ctx: Ctx, me: Agent, target: Agent, state: Awaited<ReturnType<typeof agentState>>): Promise<Refusal | null> {
+  if (state.ready || (state.reason === 'machine_offline' && (await reconnecting(ctx, target.id)))) return null;
+  return { reason: state.reason ?? 'cannot_run', text: await cannotRun(ctx, me, target, state.reason) };
+}
+
+/* A refusal its sender hears with its code, the employee and the task, as it is kept for failures. */
+async function refused(ctx: Ctx, job: ToolJob, refusal: Refusal, employee: string, task: number | string | undefined) {
+  const line = await keepUndelivered(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, { reason: refusal.reason, recipient: employee, task: task ?? null });
+  return say(cleanDiagnostic(`${refusal.text}\n${line}`), true);
+}
+
+/* The messages employees could not deliver since then, as their senders' turns kept them, newest first. Their words were
+   cleaned when they were kept, and are again for a reader who may not open the sender's work. */
+async function undeliveredSince(ctx: Pick<Ctx, 'db'>, companyId: string, since: Date, reader: Reader | undefined) {
+  const rows = await ctx.db
+    .select({ agentId: agents.id, departmentId: agents.departmentId, agent: agents.name, data: agentEvents.data, at: agentEvents.createdAt, sight: SIGHT })
+    .from(agentEvents)
+    .innerJoin(agents, eq(agents.id, agentEvents.agentId))
+    .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
+    .leftJoin(tasks, eq(tasks.id, jobs.taskId))
+    .where(and(eq(agentEvents.companyId, companyId), eq(agentEvents.kind, 'tool_result'), sql`${agentEvents.data}->'undelivered' is not null`, gte(agentEvents.createdAt, since)))
+    .orderBy(desc(agentEvents.seq))
+    .limit(UNDELIVERED_MAX);
+  const staff = new Map((await ctx.db.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.companyId, companyId))).map(a => [a.id, a.name]));
+  return rows.flatMap(({ agentId, departmentId, sight, data, ...row }) => {
+    const kept = UndeliveredRecord.safeParse(data);
+    if (!kept.success) return [];
+    const { recipient, task, reason } = kept.data.undelivered;
+    return [shownAll({ ...row, recipient, to: staff.get(recipient) ?? null, task, reason, text: kept.data.summary }, opensTurn(reader, sight, { id: agentId, departmentId }))];
+  });
 }
 
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
@@ -289,7 +363,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       {
         description:
           'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the reason Hornhoof recorded, the end of its output and the task, and the tasks blocked now, ' +
-          'with the start of what their holder said when it stopped, its end in whyTail when it is longer, and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
+          'with the start of what their holder said when it stopped, its end in whyTail when it is longer, in next the Next section of that report or else its last 500 characters, and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
+          'In undelivered, the messages employees sent with message_employee that neither went in nor wait in line, newest first: who sent them, the reason code, the recipient and the task. ' +
           'The words of work you may not open, as task shows it, come with no credential and no private path in them. ' +
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
           'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
@@ -369,6 +444,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           const open = opensTask(reader, sight);
           stops.push(shownAll({ ...stop, lastTurn: turnEnd(last, open) }, open));
         }
+        const undelivered = await undeliveredSince(ctx, job.companyId, since, reader);
         return json({
           failed: failed.map(row => failedLine(row, reader, names)),
           blocked,
@@ -376,6 +452,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip unused tally example field
           installed: installed.map(({ value, example: _, ...i }) => ({ command: value, ...i })),
           stops,
+          undelivered,
         });
       },
     );
@@ -459,6 +536,9 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       .limit(1);
     return !answered;
   };
+  /* Who may write to whom: within reach, or answering the one who wrote last. */
+  const reachable = async (me: Agent, target: Agent) => (await inReach(me, target)) || (await owesAnswer(me, target));
+
   server.registerTool(
     'message_employee',
     {
@@ -471,18 +551,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     },
     async ({ employee, text, task: ref }) => {
       if (carriesFile(text)) return say(encodedHint(), true);
-      const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
-      const [target] = await db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
-      if (!me || !target) return say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true);
-      if (target.id === me.id) return say('That is you. Write to another employee.', true);
-      if (!(await inReach(me, target)) && !(await owesAnswer(me, target)))
-        return target.kind === 'orchestrator'
-          ? say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true)
-          : say(`${target.name} works in another department. Ask your head, who has the orchestrator pass it on.`, true);
-      if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
+      const parties = await partiesOf(ctx, job, employee, reachable);
+      if ('reason' in parties) return refused(ctx, job, parties, employee, ref);
+      const { me, target } = parties;
       const state = await agentState(ctx, target.id);
-      if (!state.ready) return say(await cannotRun(ctx, me, target, state.reason), true);
-      if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
+      const unable = await cannotTake(ctx, me, target, state);
+      if (unable) return refused(ctx, job, unable, employee, ref);
+      if (!(await counted(me.id))) return refused(ctx, job, { reason: 'send_limit', text: `One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.` }, employee, ref);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
       return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
           companyId: job.companyId,
@@ -503,7 +578,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
           });
         }
-        return say(await sentLine(ctx, target.name, id, state.machineDrain !== null));
+        return say(await sentLine(ctx, target.name, id, waitsOf(state)));
       }, taskMessageFailure);
     },
   );

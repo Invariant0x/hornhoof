@@ -2330,9 +2330,13 @@ catch_up_nodes() {
       NODES_AT=$((now + poll))
       act_on_nodes "$answer" "$behind"
       ;;
+    # Only a Hornhoof server's own refusal of a path it does not know says it is from before. Another 404, as the public
+    # link gives for a moment while the machine that leads fences itself, is a server away: the next look asks again.
     404)
-      printf 'This server is from before nodes wait for their work, so they stay on their image and what they run goes on.\n'
-      NODES_AT=$((now + NODES_RETRY))
+      if jq -e '.error.code == "not_found"' "$answer" > /dev/null 2>&1; then
+        printf 'This server is from before nodes wait for their work, so they stay on their image and what they run goes on.\n'
+        NODES_AT=$((now + NODES_RETRY))
+      fi
       ;;
   esac
   rm -f "$answer"

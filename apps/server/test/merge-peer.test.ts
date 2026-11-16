@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, jobs, machines, people, subscriptions } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, machines, people, subscriptions } from '../src/db/schema.js';
 import { copyOrder } from '../src/modules/copies/slots.js';
 import { LeaseHolder } from '../src/modules/keeper/lease-holder.js';
 import { leaseStore } from '../src/modules/keeper/lease-store.js';
@@ -15,6 +15,7 @@ import * as apply from '../src/modules/merge/apply.js';
 import { fastWay } from '../src/modules/merge/check.js';
 import * as facts from '../src/modules/merge/facts.js';
 import { Merger } from '../src/modules/merge/merger.js';
+import * as snapshot from '../src/modules/merge/snapshot.js';
 import { builtinOf } from '../src/modules/nodes/hub.js';
 import { applyParkedMessages } from '../src/modules/nodes/messages.js';
 import { park } from '../src/modules/nodes/parked.js';
@@ -430,5 +431,103 @@ describe("the old database of a copy on another machine", () => {
       broughtOldLeaderRow: 1,
       wroteConcurrentRow: 1,
     });
+  });
+});
+
+describe('a merge that needs more of the old database than it read ahead', () => {
+  type Stand = Awaited<ReturnType<typeof stand>>;
+  /* A database that led, so it is merged the whole way, with a department only it holds. */
+  const led = async (s: Stand, first: (side: Side) => Promise<unknown> = async () => undefined) => {
+    await s.db.update(machines).set({ copyOld: 3, copyOldLed: 7 }).where(eq(machines.id, s.machine.id));
+    let only!: { id: string };
+    const old = await s.copied(async side => {
+      await first(side);
+      [only] = await side.db.insert(departments).values({ companyId: s.acme.id, name: 'Only there', roleCode: 'THERE' }).returning();
+    });
+    await old.client.exec(`INSERT INTO net_local.state (term_number, term_machine, machine, cluster) VALUES (7, 'copy', 'copy', 'cluster-of-the-copy')`);
+    return { old, brought: async () => (await s.db.select().from(departments).where(eq(departments.id, only.id))).length === 1 };
+  };
+  /* The merge, where the leader does meanwhile after each read of the old database ahead and before the merge takes its
+     locks, with the read's number from 1: the merge as it ended, how many times it read ahead, and what it asked for more. */
+  const merging = async (s: Stand, meanwhile: (read: number) => Promise<unknown>) => {
+    const ahead = snapshot.prepareSource;
+    let reads = 0;
+    const reading = vi.spyOn(snapshot, 'prepareSource').mockImplementation(async (...args) => {
+      const read = await ahead(...args);
+      await meanwhile(++reads);
+      return read;
+    });
+    const noted = vi.spyOn(snapshot, 'noteMoreNeeded');
+    onTestFinished(() => {
+      reading.mockRestore();
+      noted.mockRestore();
+    });
+    s.door(true);
+    await s.look();
+    const [merge] = (await s.merges()) as (MergeRow & { cutoff: string | Date | null })[];
+    return { merge: merge!, reads, asked: noted.mock.calls.map(([, , err]) => err.extra) };
+  };
+  const once = (work: () => Promise<unknown>) => async (read: number) => (read === 1 ? work() : undefined);
+  /* What the leader keeps of a restore the old database knows nothing of: with it, the two are compared row by row. */
+  const restoreHere = (s: Stand, attempt = randomUUID()) => s.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at) VALUES (${attempt}::uuid, ${randomUUID()}::uuid, '2026-11-10T08:00:00.000Z')`);
+
+  it('reads every row of it again when the leader went through a restore meanwhile, and merges by comparing', async () => {
+    const s = await stand();
+    const { brought } = await led(s);
+    const { merge, reads, asked } = await merging(s, once(() => restoreHere(s)));
+    expect({ status: merge.status, path: merge.path, error: merge.error, reads, asked }).toEqual({ status: 'merged', path: 'compare', error: null, reads: 2, asked: [{ compare: true }] });
+    expect(await brought()).toBe(true);
+  });
+
+  it('reads its journal again when what made the leader compare is gone by the time the merge locks', async () => {
+    const s = await stand();
+    const { brought } = await led(s);
+    const attempt = randomUUID();
+    await restoreHere(s, attempt);
+    const { merge, reads, asked } = await merging(s, once(() => s.db.execute(sql`DELETE FROM net.restores WHERE attempt = ${attempt}::uuid`)));
+    expect({ status: merge.status, path: merge.path, error: merge.error, reads, asked }).toEqual({ status: 'merged', path: 'journal', error: null, reads: 2, asked: [{ journal: true }] });
+    expect(await brought()).toBe(true);
+  });
+
+  it("reads its journal again from further back when the leader's horizon went back meanwhile", async () => {
+    const s = await stand();
+    const { old, brought } = await led(s);
+    const [{ below }] = (await old.client.query<{ below: string | Date }>('SELECT below FROM net.horizon')).rows as [{ below: string | Date }];
+    /* The leader pruned later than the old database did, and then holds its journal from where the old one does. */
+    await s.db.execute(sql`UPDATE net.horizon SET below = below + interval '4 days'`);
+    const { merge, reads, asked } = await merging(s, once(() => s.db.execute(sql`UPDATE net.horizon SET below = below - interval '4 days'`)));
+    const dayBefore = new Date(new Date(below).getTime() - 86_400_000);
+    expect({ status: merge.status, path: merge.path, error: merge.error, reads, asked, cutoff: new Date(merge.cutoff!).toISOString() })
+      .toEqual({ status: 'merged', path: 'journal', error: null, reads: 2, asked: [{ cutoff: dayBefore }], cutoff: dayBefore.toISOString() });
+    expect(await brought()).toBe(true);
+  });
+
+  it("reads the bytes of a file again when the leader's own one went meanwhile, and writes it whole", async () => {
+    const s = await stand();
+    const [orchestrator] = await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    /* Both hold the file alike, so its bytes are not read ahead. */
+    const [file] = await s.db.insert(attachments).values({ companyId: s.acme.id, agentId: orchestrator!.id, mediaType: 'text/plain', bytes: new TextEncoder().encode('the file'), size: 8 }).returning();
+    const { brought } = await led(s);
+    await restoreHere(s);
+    const { merge, reads, asked } = await merging(s, once(() => s.db.delete(attachments).where(eq(attachments.id, file!.id))));
+    expect({ status: merge.status, path: merge.path, error: merge.error, reads, asked })
+      .toEqual({ status: 'merged', path: 'compare', error: null, reads: 2, asked: [{ files: [{ table: 'attachments', key: { id: file!.id } }] }] });
+    const [back] = await s.db.select().from(attachments).where(eq(attachments.id, file!.id));
+    expect(new TextDecoder().decode(back!.bytes)).toBe('the file');
+    expect(await brought()).toBe(true);
+  });
+
+  it('stops after reading it three times more, with nothing written, while the leader goes on changing under it', async () => {
+    const s = await stand();
+    const { brought } = await led(s);
+    await s.db.execute(sql`UPDATE net.horizon SET below = below + interval '5 days'`);
+    const departmentsBefore = (await s.db.select().from(departments)).length;
+    /* Every time, its horizon is a day further back by the time the merge locks. */
+    const { merge, reads, asked } = await merging(s, () => s.db.execute(sql`UPDATE net.horizon SET below = below - interval '1 day'`));
+    expect({ status: merge.status, path: merge.path, error: merge.error, tries: merge.tries, reads, asked: asked.length })
+      .toEqual({ status: 'pending', path: null, error: 'The merge stopped: More rows are needed from the merge source.', tries: 1, reads: 4, asked: 3 });
+    expect(await brought()).toBe(false);
+    expect((await s.db.select().from(departments)).length).toBe(departmentsBefore);
+    expect(await rowsOf<{ n: number }>(s.db, sql`SELECT ((SELECT count(*) FROM net.merge_consumed) + (SELECT count(*) FROM net.merge_rows) + (SELECT count(*) FROM net.merge_conflicts))::int AS n`)).toEqual([{ n: 0 }]);
   });
 });

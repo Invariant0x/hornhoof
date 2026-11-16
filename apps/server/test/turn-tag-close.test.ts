@@ -63,6 +63,45 @@ describe('the server closes a turn by the tag of its release', () => {
     expect(await loadTask(f.db, late.id)).toMatchObject({ turnId: next!.id });
   });
 
+  it('makes the branch of the next turn from the head of the one released, which it keeps as where the next one starts', async () => {
+    const f = await released();
+    f.repo.heads[f.branch] = LATER;
+    f.repo.holds[LATER] = [f.R, ...f.repo.holds[f.R]!];
+    await f.round();
+    const next = await f.open();
+    expect(next).toMatchObject({ startCommit: LATER, baseCommit: f.R });
+    expect(f.repo.made).toEqual([{ branch: `turn-${next.number}`, commit: LATER }]);
+    expect(f.repo.heads[f.branch]).toBe(LATER);
+    expect(f.repo.heads.main).toBe(f.R);
+    await f.round();
+    expect(f.repo.made).toHaveLength(1);
+  });
+
+  it('leaves the branch of the next turn as it is when somebody made it already', async () => {
+    const f = await released();
+    const [{ last }] = await f.db.select({ last: sql<number>`max(${turns.number})` }).from(turns).where(eq(turns.companyId, f.task.companyId)) as [{ last: number }];
+    f.repo.heads[`turn-${Number(last) + 1}`] = OTHER;
+    await f.round();
+    const next = await f.open();
+    expect(next.number).toBe(Number(last) + 1);
+    expect(f.repo.heads[`turn-${next.number}`]).toBe(OTHER);
+    expect(f.repo.made).toBeUndefined();
+    expect(next).toMatchObject({ startCommit: f.R });
+  });
+
+  it('closes the turn even when the branch of the next one cannot be made, and says why in the log', async () => {
+    const f = await released();
+    const warned: string[] = [];
+    const warn = f.ctx.log.warn.bind(f.ctx.log);
+    f.ctx.log.warn = ((...args: Parameters<typeof warn>) => { warned.push(String(args.at(-1))); return warn(...args); }) as typeof warn;
+    f.repo.refusing = 'Hornhoof could not create the branch in https://github.com/acme/app.git: it answered 403, so its token may not push to it.';
+    await f.round();
+    const next = await f.open();
+    expect(await f.db.select().from(turns).where(eq(turns.id, f.turn.id)).then(rows => rows[0])).toMatchObject({ status: 'closed', version: 'v1.7.0' });
+    expect(f.repo.heads[`turn-${next.number}`]).toBeUndefined();
+    expect(warned.join('\n')).toMatch(new RegExp(`turn-${next.number}.*403`));
+  });
+
   it('keeps the snapshot of the turn its tag closes, before the next one opens', async () => {
     const f = await released();
     await f.round();

@@ -17,6 +17,7 @@ import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
 import { pickBuiltin } from '../nodes/builtin.js';
 import { cameBack } from '../nodes/connections.js';
+import { shownAway } from '../nodes/machine-away.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -451,17 +452,18 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   return jobId;
 }
 
-/* Direct messages need the node's receipt, including when their topic is a task. The caller owns the input lock. */
-export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): Promise<string> {
+/* Words go into the turn that runs when its node says they went in, and otherwise wait in the agent's line for its next
+   turn, including when their topic is a task. The caller owns the input lock. */
+export async function insertOrDeliverTurn(ctx: Ctx, t: Turn): Promise<string> {
   if (isMail(t) && takesInsteadOfTurn(t) && (await inboxModeOf(ctx.db, t.agentId)).effective === 'inbox') return intoInbox(ctx, t);
-  const combined = await combineReport(ctx, t, { send: deliverLockedInput, required });
+  const combined = await combineReport(ctx, t, { send: deliverLockedInput });
   if (combined) {
     if (isMail(t)) await keepLetter(ctx, t, combined, (await runsNow(ctx, combined)) ? 'read' : 'unread');
     return combined;
   }
   const message = t.repeated ? undefined : t.message;
   const into = message
-    ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
+    ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message } }, async (jobId, kept) => {
         if (await actsForCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
         await showMessage(ctx, t, jobId, kept, true);
       })
@@ -1215,6 +1217,26 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
 
 /* A node that waits or restarts for an update is not away: it comes back by itself, and its turns wait in line for it. */
 const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isReady(node) || nodeHeld(ctx, node);
+
+/* A node is getting back on the line until it says hello: while its socket is open, or closed while its machine is not
+   off for as long as a card of it takes. The machine of a built-in node has no card, so one whose socket is closed is away. */
+async function comingBack(ctx: Ctx, node: NodeIdentity, machineId?: string): Promise<boolean> {
+  if (ctx.hub.isReady(node)) return false;
+  return ctx.hub.isOnline(node) || (machineId !== undefined && !(await shownAway(ctx, machineId)));
+}
+
+/* Whether the machine an agent's turns wait for is only getting back on the line: they wait in line for it, and go out
+   once it says hello. One with work in progress waits for its own machine alone, as its turns do. */
+export async function reconnecting(ctx: Ctx, agentId: string): Promise<boolean> {
+  const sub = await liveSubscription(ctx, agentId);
+  if (!sub) return false;
+  if (sub.kind === 'api_key') return comingBack(ctx, ownBuiltin(ctx.config));
+  const [agent] = await ctx.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+  const all = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready');
+  const own = all.find(n => n.id === agent?.nodeId);
+  const waited = own && (await holdsWork(ctx, agentId)) ? [own] : all;
+  return (await Promise.all(waited.map(n => comingBack(ctx, nodeIdentity(n.id), n.machineId)))).some(Boolean);
+}
 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
