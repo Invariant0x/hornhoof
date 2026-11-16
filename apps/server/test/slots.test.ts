@@ -7,14 +7,16 @@ const A = `aaaaaaaaaaaaaaaa${'1'.repeat(48)}`;
 const B = `bbbbbbbbbbbbbbbb${'2'.repeat(48)}`;
 const slotOf = (id: string, attempt: number) => `copy_${id.slice(0, 16)}_${attempt}`;
 
-type Slot = { name: string; active: boolean; pid: number | null };
+/* copying: a walsender named after the slot runs, as one does while a table's first copy goes over; it holds no slot
+   then, so Postgres lists the slot as read by nobody. */
+type Slot = { name: string; active: boolean; pid: number | null; copying?: boolean };
 
 /* The leader's Postgres as far as the sweep asks it: its slots, the machines that hold the data, and what was done. */
 function server(slots: Slot[], copies: { networkId: string; copyName: string | null }[], stuck: string[] = []) {
   const did: string[] = [];
   const sql: Sql = {
     query: async <R>(text: string, params: unknown[] = []) => {
-      if (text.includes('FROM pg_replication_slots')) return { rows: slots.map(slot => ({ ...slot })) as R[] };
+      if (text.includes('FROM pg_replication_slots')) return { rows: slots.map(slot => ({ copying: false, ...slot })) as R[] };
       if (text.includes('FROM public.machines')) return { rows: copies as R[] };
       if (text.includes('pg_terminate_backend')) {
         did.push(`end ${String(params[0])}`);
@@ -86,6 +88,20 @@ describe("the leader's slots", () => {
     expect(await at(SYNC_SLOT_IDLE_MS + 60_000)).toEqual([]);
     expect(await at(2 * SYNC_SLOT_IDLE_MS + 60_000)).toEqual([sync]);
     expect(since.size).toBe(0);
+  });
+
+  it("keeps a slot of a table's first copy for as long as that copy goes over, though Postgres lists it as read by nobody", async () => {
+    const sync = 'pg_16384_sync_16500_7';
+    const s = server([{ name: sync, active: false, pid: null, copying: true }], []);
+    const since = new Map<string, number>();
+    const at = (ms: number) => sweepSlots(s.sql, () => undefined, since, ms);
+    /* A big table over a slow link: its rows go over for half an hour. */
+    for (let ms = 0; ms <= 3 * SYNC_SLOT_IDLE_MS; ms += SLOTS_EVERY_MS) expect(await at(ms)).toEqual([]);
+    expect(since.has(sync)).toBe(false);
+    /* Its copy ended without getting through, as when the link was cut: its ten minutes start then. */
+    s.slots[0]!.copying = false;
+    expect(await at(3 * SYNC_SLOT_IDLE_MS + 60_000)).toEqual([]);
+    expect(await at(4 * SYNC_SLOT_IDLE_MS + 60_000)).toEqual([sync]);
   });
 
   it('says so when a slot will not go, and tries again with the next sweep', async () => {
