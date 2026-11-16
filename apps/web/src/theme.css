@@ -866,7 +866,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .test details summary { cursor: pointer; color: var(--cyan-ink); }
 .test pre { margin: 6px 0 0; padding: 10px; max-height: 240px; overflow: auto; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); }
 .command-box { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.trust { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
+.trust { font-size: 13px; padding-inline-start: 10px; border-inline-start: 3px solid var(--amber-ink); }
 /* The plans to connect: a card each, with its tick, its mark, its name and what it takes. */
 .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; min-width: 0; border: 0; padding: 0; margin: 0; }
 .plan { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; min-height: 44px; padding: 12px; border: 1px solid var(--line2); background: var(--surface); cursor: pointer; }

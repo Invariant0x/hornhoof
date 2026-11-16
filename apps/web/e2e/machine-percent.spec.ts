@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type Language, type Messages } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { MachineView, Org, SubView } from '../src/types';
+import type { MachineView, Org, ShownCommand, SubView } from '../src/types';
 import type { BuiltinSkinId } from '../src/skins/registry';
 import { ME, serveApi } from './api';
 
@@ -12,7 +12,8 @@ import { ME, serveApi } from './api';
    share of a plan's limit on the Subscriptions screen. The small unit beside the figure of a meter, a machine's memory,
    disk and processor and a plan's limit, keeps its own size, colour and font. Each number of a plan's limits stands with
    its unit in one piece that reads left to right, and each phrase around such pieces reads whole, in the order and the
-   direction its dictionary writes it, on a page laid out either way. */
+   direction its dictionary writes it, on a page laid out either way. The stripe beside what running a machine's command
+   means, on the screen and on a machine's card, stands on the side its lines start from, with its gap, either way. */
 test.describe.configure({ timeout: 180_000 });
 
 const GIB = 1024 ** 3;
@@ -53,11 +54,17 @@ const PLAN_BOTH: SubView = {
     complete: true,
   },
 };
+/* A command to join a machine, shown at the top of the screen, and one that brings the core to build-a, shown on its card:
+   neither joins with a key, so both show as they are, each with what running it means. */
+const COMMANDS: ShownCommand[] = [
+  { id: 'c-machine', kind: 'machine', plans: [], machine: null, command: 'curl -fsSL https://hq.example.com/install.sh | bash', expiresAt: new Date(NOW + 3600_000).toISOString() },
+  { id: 'c-core', kind: 'core', plans: [], machineId: 'm1', machine: 'build-a', command: 'curl -fsSL https://hq.example.com/install.sh | bash', expiresAt: new Date(NOW + 3600_000).toISOString() },
+];
 /* Where what a phrase says first stands: both shipped languages write left to right. A language added to the registry fails
    to compile here until its way is added. */
 const READS: Record<Language, 'left' | 'right'> = { en: 'left', ru: 'left' };
 
-async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN]) {
+async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN], commands: ShownCommand[] = []) {
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await serveApi(page);
@@ -69,7 +76,7 @@ async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, w
   await page.route('**/api/org', route => route.fulfill({ json: org }));
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: MACHINES, builtin: null, priority: false, move: null, canMove: false, copies: null } }));
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: tab === 'subscriptions' ? plans : [] } }));
-  await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [] } }));
+  await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands } }));
   await page.route('**/api/machines/access', route => route.fulfill({ json: { views: [] } }));
   await page.goto('/');
   await page.getByRole('navigation').getByRole('button', { name: WORDS[language].shell.tabs[tab], exact: true }).click();
@@ -345,6 +352,40 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
       }
       /* A model's week: its words follow its number with their separator, as the name reads. */
       expect.soft(`${dir} ${seven} , Opus: ${await place(meters.nth(2).locator('.g-l'), seven, ', Opus')}`).toBe(`${dir} ${seven} , Opus: ${reads}`);
+      expect(await noSideScroll(page)).toBe(true);
+    }
+  });
+
+  test(`draws the stripe beside what running a machine's command means on the side its lines start from, ${skin} ${language} ${width}`, async ({ page }, info) => {
+    const t = WORDS[language];
+    await openScreen(page, language, skin, width, height, 'machines', [PLAN], COMMANDS);
+    const card = page.getByRole('article', { name: 'build-a', exact: true });
+    if (!(await card.isVisible())) await page.getByRole('button', { name: t.tables.openCard('build-a'), exact: true }).click();
+    const stripes: [string, Locator][] = [['screen', page.locator('.panel .trust')], ['card', card.locator('.trust')]];
+    for (const [, stripe] of stripes) await expect(stripe).toHaveText(t.machines.trust);
+    /* Pictures first, both ways, so a look that fails still leaves them. */
+    for (const dir of ['ltr', 'rtl'] as const) {
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+      for (const [where, stripe] of stripes) await stripe.screenshot({ path: info.outputPath(`trust-${where}-${skin}-${language}-${width}-${dir}.png`) });
+    }
+    /* The stripe and its gap stand where the lines start, nothing on the other side, and the text starts right after both.
+       Each side is looked at softly, so one run names every stripe on the wrong side. */
+    for (const dir of ['ltr', 'rtl'] as const) {
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+      for (const [where, stripe] of stripes) {
+        const seen = await stripe.evaluate((el, dir) => {
+          const [start, end] = dir === 'rtl' ? ['right', 'left'] as const : ['left', 'right'] as const;
+          const style = getComputedStyle(el);
+          const box = el.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const lines = [...range.getClientRects()];
+          const gap = start === 'left' ? Math.min(...lines.map(r => r.left)) - box.left : box.right - Math.max(...lines.map(r => r.right));
+          const side = (s: 'left' | 'right') => `${style.getPropertyValue(`border-${s}-width`)} ${style.getPropertyValue(`padding-${s}`)}`;
+          return `start ${side(start)}, end ${side(end)}, text after ${Math.round(gap)}px`;
+        }, dir);
+        expect.soft(`${dir} ${where}: ${seen}`).toBe(`${dir} ${where}: start 3px 10px, end 0px 0px, text after 13px`);
+      }
       expect(await noSideScroll(page)).toBe(true);
     }
   });
