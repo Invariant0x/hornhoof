@@ -23,9 +23,17 @@ export async function hasSkills(db: Ctx['db'], agentId: string): Promise<boolean
 }
 
 type Called = { ok: boolean; text: string };
-const failed = (text: string): Called => ({ ok: false, text });
+const failed = (text: string): Called => ({
+  ok: false,
+  text: `The skill did not complete successfully. Do not report success. Tell your owner what failed and why; for a refused file delivery, say that the file did not arrive.\n\nReason: ${text}`,
+});
 const timedOut = (err: unknown) => err instanceof Error && err.name === 'TimeoutError';
 const late = `The assistant's program did not answer within ${SKILL_WAIT_MS / 1000} seconds.`;
+
+function skillAnswer(parsed: z.infer<typeof Answer>): Called {
+  const text = parsed.data === undefined ? parsed.text : `${parsed.text}\n\n${JSON.stringify(parsed.data)}`;
+  return parsed.ok ? { ok: true, text } : failed(text);
+}
 
 /* The answer's text, or null past the most an agent reads. */
 async function capped(res: Response): Promise<string | null> {
@@ -91,5 +99,5 @@ export async function callSkill(ctx: Ctx, job: { id: string; agentId: string }, 
   } catch {
     return failed("The assistant's program answered without ok and text in JSON.");
   }
-  return { ok: parsed.ok, text: parsed.data === undefined ? parsed.text : `${parsed.text}\n\n${JSON.stringify(parsed.data)}` };
+  return skillAnswer(parsed);
 }
