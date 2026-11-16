@@ -14,6 +14,7 @@ import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
+import { HideSecret } from './HideSecret';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -87,7 +88,7 @@ const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string
   interrupted: (t, e, when) => cutText(t, e.data, when),
   away: awayText,
 };
-const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => systemText[e.kind]?.(t, e, when) || e.text;
+const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => field(e.data, 'secretHidden') === true ? t.tasks.hideSecret.done : systemText[e.kind]?.(t, e, when) || e.text;
 
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
@@ -213,7 +214,7 @@ const evidenceOf = (data: unknown): string | null => {
   return typeof raw === 'string' && raw ? raw : null;
 };
 
-function LogEntry({ entry, when }: { entry: TaskLogLine; when: (at: string) => string }) {
+function LogEntry({ entry, when, task, onChanged }: { entry: TaskLogLine; when: (at: string) => string; task: TaskDetail; onChanged: () => void }) {
   const t = useT();
   const said = entry.kind === 'created' ? null : lineText(t, entry, when) || null;
   const evidence = evidenceOf(entry.data);
@@ -225,6 +226,7 @@ function LogEntry({ entry, when }: { entry: TaskLogLine; when: (at: string) => s
       </span>
       <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
       <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
+      {task.mayHideSecret && (said || evidence) && <HideSecret taskId={task.id} onChanged={onChanged} />}
     </li>
   );
 }
@@ -239,6 +241,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
   return (
     <>
       <TaskHeader task={task} org={org} />
+      {task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} />}
       <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
       {task.parent && (
         <p className="tp-parent">
@@ -266,7 +269,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
         <h4>{t.tasks.log}</h4>
         <ol className="tp-log" aria-label={t.tasks.log}>
           {task.log.map((e, i) => (
-            <LogEntry key={i} entry={e} when={when} />
+            <LogEntry key={i} entry={e} when={when} task={task} onChanged={onChanged} />
           ))}
         </ol>
       </section>

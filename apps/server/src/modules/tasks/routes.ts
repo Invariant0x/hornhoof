@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
+import { hideTaskSecret } from './hide-secret.js';
 import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
@@ -250,7 +251,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   /* The task as this person reads it. */
-  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: await runsDepartment(db, me, task.departmentId) });
+  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: await runsDepartment(db, me, task.departmentId), mayHideSecret: !me.via && !me.assistant && await runsDepartment(db, me, task.departmentId) });
 
   /* The departments whose tasks this person reads, for the Tasks screen to choose from: every one of the company. mine: one
      of the person's own, whose work and list for later turns they change. */
@@ -367,6 +368,14 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!(await acknowledgeCard(ctx, me.id, id))) throw refuse(404, 'task_unknown', 'This card is not yours or does not exist.');
     ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null, parentId: null } });
     return { ok: true };
+  });
+
+  app.post('/api/tasks/:id/hide-secret', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { value } = z.object({ value: z.string().min(1).max(65536) }).strict().parse(req.body);
+    const task = await shown(me, id);
+    return { task: await detail(me, await hideTaskSecret(ctx, me, task, value)) };
   });
 
   app.post('/api/tasks/:id/comments', async (req, reply) => {

@@ -32,6 +32,45 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('a task', () => {
+  it('lets an authorized person hide an existing secret, then clears the input', async () => {
+    const user = userEvent.setup();
+    const task = { ...TASK_DETAIL, mayHideSecret: true, body: 'OldMarker1077!' };
+    const calls = shell({
+      'GET /api/tasks/t12': [200, { task }],
+      'POST /api/tasks/t12/hide-secret': [200, { task: { ...task, body: '[hidden]' } }],
+    });
+    const panel = await openTask(user);
+    await user.click(within(panel).getAllByRole('button', { name: 'Hide secret' })[0]!);
+    await user.type(within(panel).getByLabelText('Secret to hide'), 'OldMarker1077!');
+    await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
+    await waitFor(() => expect(calls.some(c => c.path === '/api/tasks/t12/hide-secret')).toBe(true));
+    await waitFor(() => expect(within(panel).queryByLabelText('Secret to hide')).not.toBeInTheDocument());
+  });
+
+  it('does not offer secret hiding without permission from the server', async () => {
+    const user = userEvent.setup();
+    shell();
+    const panel = await openTask(user);
+    expect(within(panel).queryByRole('button', { name: 'Hide secret' })).not.toBeInTheDocument();
+  });
+
+  it('clears a secret after a failed request and lets the person cancel', async () => {
+    const user = userEvent.setup();
+    shell({
+      'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayHideSecret: true } }],
+      'POST /api/tasks/t12/hide-secret': [403, { error: { code: 'forbidden', message: 'Access changed.' } }],
+    });
+    const panel = await openTask(user);
+    await user.click(within(panel).getAllByRole('button', { name: 'Hide secret' })[0]!);
+    const input = within(panel).getByLabelText('Secret to hide');
+    expect(within(panel).getByRole('button', { name: 'Hide everywhere' })).toBeDisabled();
+    await user.type(input, 'OldMarker1077!');
+    await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('The secret could not be hidden.');
+    expect(input).toHaveValue('');
+    await user.click(within(panel).getByRole('button', { name: 'Cancel', exact: true }));
+    expect(within(panel).queryByLabelText('Secret to hide')).not.toBeInTheDocument();
+  });
   afterEach(() => localStorage.removeItem('hh-lang'));
   it.each([
     ['en', { workKind: 'bug', riskClass: 'money' }, 'Bug, risk: money'],
