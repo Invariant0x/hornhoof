@@ -263,7 +263,7 @@ describe('a live program its queue waits behind', () => {
 
   it.each([
     { jobId: 'another-turn' }, { result: 'refused' as const }, { state: 'working' as const },
-    { tool: 'Bash' }, { input: 'text' as const }, { input: 'unknown' as const },
+    { tool: 'Bash' }, { input: 'words' as const }, { input: 'unknown' as const },
     { undelivered: true }, { instance: null }, { snapshot: null },
     { question: { id: 'q', kind: 'permission' as const, text: 'Allow?', tool: 'Bash', callId: null } },
   ])('does not close from unsafe or uncertain screen %j', async unsafe => {
