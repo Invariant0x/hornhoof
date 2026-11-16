@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Setup } from '../src/screens/Setup';
 import { mockApi, type Call, withKey } from './api-mock';
 import { decl } from './css';
+import { commandCode } from './command-code';
 
 /* The same long random name for every start, so the tests know what the Link field holds before anything is typed. */
 vi.mock('@hornhoof/protocol/link', async importOriginal => ({ ...(await importOriginal<typeof import('@hornhoof/protocol/link')>()), randomLinkName: () => 'r4nd0mr4nd0mr4nd0m' }));
@@ -128,7 +129,7 @@ describe('Setup', () => {
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(posted(calls)[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'codex' } });
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
-    expect(await screen.findByText(withKey(command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(command)))).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     expect(screen.getByText('Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.')).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
@@ -339,7 +340,7 @@ describe("the setup's command and its owner's key", () => {
     await vi.waitFor(() => expect(calls.some(call => call.method === 'PUT' && call.path === '/api/me/key')).toBe(true));
     const sent = calls.find(call => call.method === 'PUT' && call.path === '/api/me/key')!.body as { password: string; publicKey: string };
     expect(sent.password).toBe('a password typed here');
-    expect(await screen.findByText(`${command} --owner-key ${sent.publicKey}`)).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(`${command} --owner-key ${sent.publicKey}`))).toBeInTheDocument();
     /* The only password field is long gone: nothing was asked a second time. */
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });
@@ -395,7 +396,7 @@ describe('the new link on the setup screen', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(await screen.findByText(withKey(command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(command)))).toBeInTheDocument();
   });
 
   it('goes to the map with Next when the setup made no command', async () => {
