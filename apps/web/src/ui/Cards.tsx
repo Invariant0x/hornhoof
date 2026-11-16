@@ -6,8 +6,17 @@ export function Facts({ items, className = 'facts' }: { items: [string, ReactNod
   return <dl className={className}>{items.map(([label, value]) => <Fragment key={label}><dt>{label}</dt><dd>{value}</dd></Fragment>)}</dl>;
 }
 
-export function CardHead({ mark, name, tier, badges, state, line }: { mark: ReactNode; name: string; tier?: string | null; badges?: ReactNode; state: ReactNode; line?: ReactNode }) {
-  return <header className="card-h"><div className="card-t">{mark}<h3>{name}{tier && <> <small>{tier}</small></> }</h3>{badges}</div><div className="stline">{state}{line && <span>{line}</span>}</div></header>;
+/* A name with a sign right after its last letter. A line may break before any picture, even after a space that never
+   breaks, so only the last letter and the sign stand in a span that never wraps, and the rest of the name wraps as ever. */
+export function NameWithSign({ name, sign }: { name: string; sign: ReactNode }) {
+  const letters = Array.from(name);
+  const last = letters.pop();
+  return <>{letters.join('')}<span className="name-end">{last}{sign}</span></>;
+}
+
+/* sign: a mark right after the name's last letter; under: a small line under the name. */
+export function CardHead({ mark, name, tier, sign, badges, under, state, line }: { mark: ReactNode; name: string; tier?: string | null; sign?: ReactNode; badges?: ReactNode; under?: ReactNode; state: ReactNode; line?: ReactNode }) {
+  return <header className="card-h"><div className="card-t">{mark}<h3>{sign ? <NameWithSign name={name} sign={sign} /> : name}{tier && <> <small>{tier}</small></> }</h3>{badges}{under && <small className="card-under">{under}</small>}</div><div className="stline">{state}{line && <span>{line}</span>}</div></header>;
 }
 
 export function CardFrame({ label, accent, head, children, extra }: { label: string; accent?: boolean; head: ReactNode; children: ReactNode; extra?: ReactNode }) {
@@ -25,7 +34,7 @@ export function Part({ title, children }: { title: string; children: ReactNode }
 }
 
 /* name and title: what the tile says in full, where its figure is short. */
-export function Gauge({ label, figure, unit, used, sub, empty = false, name, title }: { label: string; figure: ReactNode; unit?: string; used?: number | null; sub?: ReactNode; empty?: boolean; name?: string; title?: string }) {
+export function Gauge({ label, figure, unit, used, sub, empty = false, name, title }: { label: ReactNode; figure: ReactNode; unit?: string; used?: number | null; sub?: ReactNode; empty?: boolean; name?: string; title?: string }) {
   return <Edge className={`gauge${empty ? ' na' : ''}`} cut={8} name={name} title={title}><span className="g-l">{label}</span><p className="g-f"><b>{figure}</b>{unit && <span>{unit}</span>}</p>{used !== undefined && used !== null && <Bar used={used} />}{sub && <span className="g-s">{sub}</span>}</Edge>;
 }
 

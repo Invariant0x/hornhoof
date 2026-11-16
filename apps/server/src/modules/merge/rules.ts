@@ -106,7 +106,7 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   repo_hosts: rows('access'),
   google_sheets: rows('access'),
 
-  ...each(['subscriptions', 'nodes', 'plan_credentials'], rows('plans')),
+  ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
   machines: rows('machines'),
   computer_runs: rows('machines'),

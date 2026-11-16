@@ -30,6 +30,21 @@ describe('the port corridor of tests', () => {
     await expect(listenIn(denied as unknown as Server)).rejects.toMatchObject({ code: 'EACCES' });
   });
 
+  it('opens the next server past the port the last one took, so a process never opens again a port it has just closed', async () => {
+    const { first, last } = corridorShare(), size = last - first + 1, tried: number[] = [];
+    /* A server whose first port is taken, as a test worker sharing the corridor may hold it: it takes the port after. */
+    const pushed = Object.assign(new EventEmitter(), {
+      listen(port: number) { tried.push(port); queueMicrotask(() => tried.length < 2 ? pushed.emit('error', Object.assign(new Error('in use'), { code: 'EADDRINUSE' })) : pushed.emit('listening')); },
+    });
+    const taken = await listenIn(pushed as unknown as Server);
+    expect(taken).toBe(tried[1]);
+    /* That server is closed; a client may still keep a connection to it, which it would take for one on the same port. */
+    const free = Object.assign(new EventEmitter(), { listen() { queueMicrotask(() => free.emit('listening')); } });
+    const next = await listenIn(free as unknown as Server);
+    expect(next).not.toBe(taken);
+    expect(next - first).toBe((taken - first + 1) % size);
+  });
+
   it('starts a server that takes its port as it starts, like a Fastify app, on a port of its share, passing over one taken meanwhile', async () => {
     const { first, last } = corridorShare(), tried: number[] = [];
     const started = await listenAt(async port => {
