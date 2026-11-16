@@ -255,12 +255,15 @@ async function putBack(client: PGlite, { tables, numbers }: Rows): Promise<void>
 /* Rows fixture() is still making or putting back. */
 const making = new Set<Promise<unknown>>();
 
+/* A turn of the event loop as the real clock gives it, as a test can end with the clock not real. */
+const { setImmediate: nextTurn } = globalThis;
+
 /* A test whose end waits for rows goes on to the rows it asks for next, which stand on them, within a turn of the event
    loop. */
 async function madeAll(): Promise<void> {
   do {
     await Promise.allSettled(making);
-    await new Promise(next => setImmediate(next));
+    await new Promise(next => nextTurn(next));
   } while (making.size);
 }
 
