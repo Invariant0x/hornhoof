@@ -11,6 +11,7 @@ import type { ToolJob } from '../tools/job.js';
 import { queuedRunState } from '../nodes/check-slot-view.js';
 import { repoAt } from '../departments/repository.js';
 import { harnessState } from './harness.js';
+import { FULL_RUN_MINUTES } from './describe.js';
 import { startRun, stopRun, taskFor, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
@@ -32,6 +33,8 @@ const TaskRef = (what: string) =>
     .describe(`The task ${what}, by number; by default the one this turn is on.`);
 const Parts = z.number().int().min(1).max(MAX_TEST_PARTS).optional().describe('How many parts to split it into; 1 by default.');
 const Minutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional().describe(`The time limit of each part, ${TEST_MINUTES} minutes by default.`);
+const TestMinutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional()
+  .describe(`The time limit of each part, ${TEST_MINUTES} minutes by default and ${FULL_RUN_MINUTES} for the full run, which goes out in 2 to 4 parts that each fit in it.`);
 
 /* Whole suites and assigned non-check work use the free machines. Checks of a change stay in its owner's workspace. */
 export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -39,7 +42,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        "Runs the whole test suite or a declared profile, split into groups over the free machines. Checks of your own change run in your own workspace and need no run_tests: contributors on individual task branches (in echelons or parallel turnkey teams) and intermediate gates never call run_tests on working task branches; one release owner runs run_tests once per release candidate on the combined release branch before main (or on the single commit of a standalone release to main). Without command, runs the pinned product manifest suite/profile with reusable isolated preparation, splits it over the free machines and collects the result. Where the manifest declares a full run, a test file whose fingerprint (the file, the code it depends on, the environment) already has a green result does not run again and a failed file always does. Profile final takes a result only from the repository's main branch or the turn's, and every so many turns everything runs on the turn's branch and any mismatch with the kept results is named. Without profile a run checks the manifest's default profile, which may leave suites out. The check of a release is a run of the profile the manifest names for its full run (execution.fullRun.profile), with no suite and no candidate: it runs every suite and every test file anew and keeps no earlier result. The result says what a run left out. " +
+        "Runs the whole test suite or a declared profile, split into groups over the free machines. Checks of your own change run in your own workspace and need no run_tests: contributors on individual task branches (in echelons or parallel turnkey teams) and intermediate gates never call run_tests on working task branches; one release owner runs run_tests once per release candidate on the combined release branch before main (or on the single commit of a standalone release to main). Without command, runs the pinned product manifest suite/profile with reusable isolated preparation, splits it over the free machines and collects the result. Where the manifest declares a full run, a test file whose fingerprint (the file, the code it depends on, the environment) already has a green result does not run again and a failed file always does. Profile final takes a result only from the repository's main branch or the turn's, or from a commit the main branch holds now, and every so many turns everything runs on the turn's branch and any mismatch with the kept results is named. Without profile a run checks the manifest's default profile, which may leave suites out. The check of a release is a run of the profile the manifest names for its full run (execution.fullRun.profile), with no suite and no candidate: it runs every suite and every test file anew and keeps no earlier result. The result says what a run left out. " +
         "With command, runs the manual whole-suite command and returns at once with the run's number; a command that names a test file the pinned commit does not have is refused before any part goes out. " +
         "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
         "a part that checked another one fails the run. The product's harness is ready there before the command starts: dependencies and what the repository prepares are in place, so a command needs no installation or build. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. " +
@@ -55,7 +58,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         candidate: EchelonRun.optional().describe('At Tests, name the exact current candidateId and route revision. The server binds this run to that assignment and pins its branch and commit.'),
         branch: Branch.optional().describe("By default the task's own: task-<number>, or the only branch that starts with task-<number>-."),
         parts: Parts,
-        minutes: Minutes,
+        minutes: TestMinutes,
       },
     },
     async input => answer(() => startRun(ctx, job, input)),

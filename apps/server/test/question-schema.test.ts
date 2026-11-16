@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
-import { createTestDb } from './helpers-db.js';
+import { createTestDb, freshPglite } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 const COMPANY = '00000000-0000-4000-8000-000000000001';
@@ -117,7 +117,7 @@ describe('canonical private question storage', () => {
 
 /* Only the head or orchestrator named on an internal stuck request can answer it, and one from before names nobody. */
 it('leaves a stuck request open at the upgrade with the people it already asked', async () => {
-  const client = new PGlite(); onTestFinished(() => client.close());
+  const client = await freshPglite(); onTestFinished(() => client.close());
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: await migrationsBefore('internal_first_questions') });
   await client.exec(LEGACY);
@@ -130,7 +130,7 @@ it('leaves a stuck request open at the upgrade with the people it already asked'
 it('upgrades only its prefix, retaining terminal decisions and independent open source identities', async () => {
   const beforeFolder = await migrationsBefore('internal_first_questions');
   const throughFolder = await migrationsThrough('internal_first_questions');
-  const client = new PGlite(); onTestFinished(() => client.close());
+  const client = await freshPglite(); onTestFinished(() => client.close());
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: beforeFolder });
   await client.exec(LEGACY);

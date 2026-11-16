@@ -640,6 +640,7 @@
           "apps/server/test/agents.test.ts",
           "apps/server/test/api-connections.test.ts",
           "apps/server/test/composable-skills.test.ts",
+          "apps/server/test/computer.test.ts",
           "apps/server/test/conversation.test.ts",
           "apps/server/test/credentials.test.ts",
           "apps/server/test/department-echelons-template.test.ts",
