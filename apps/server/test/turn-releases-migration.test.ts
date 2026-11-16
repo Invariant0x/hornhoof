@@ -7,6 +7,7 @@ import { MIGRATIONS } from '../src/db/client.js';
 import { agents, people, subscriptions } from '../src/db/schema.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { appOn, TEST_API_KEY } from './helpers.js';
+import { freshPglite } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 const ACME = '00000000-0000-4000-8000-000000000a01';
@@ -25,7 +26,7 @@ const TURNKEY = { ...CODE, stage: null, stages: [], resultKind: 'turnkey' };
 /* Acme as turn 24 left it: Development running turn 24 in echelons with a closed turn 23 behind it and a planned turn 25
    after it, Marketing running a turn of its own, Design running none. */
 async function migrated(): Promise<PGlite> {
-  const client = new PGlite();
+  const client = await freshPglite();
   onTestFinished(() => client.close());
   await migrate(drizzle(client), { migrationsFolder: await migrationsBefore('turn_releases') });
   await client.exec(`

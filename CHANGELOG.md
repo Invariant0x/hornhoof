@@ -5,6 +5,92 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.29.0] - 2026-11-15
+
+A department runs its own outbound messages and its own work without the CEO, Settings is one window in four groups
+behind a short account menu, and status words in tables no longer break letter by letter.
+
+### Before you update
+
+- Migrations 0127 and 0128 come with this release. 0127 adds an empty table `outbound_setup_events`, the log of who set
+  up a department's messages. 0128 moves autonomous release from the company to each department: every department
+  starts with it off, and the company's switch is removed. Before you update a server, check whether the company had
+  it on with `SELECT autonomous_release FROM companies;`. If it says true, turn it on again for the top-level
+  departments after the update with `UPDATE departments SET autonomous_release = true WHERE parent_id IS NULL;`.
+
+### Added
+
+- The people who run a department, and its head on their word, connect the department's mail account or webhook, make
+  its channels, set their daily limits and whether a direct message goes without a yes to each one, stop and reopen
+  them, publish or take back catalog revisions, and read the log of who set up what and through which head. It shows
+  under External messaging in Settings for each department they run, and on the department's screen under About the
+  department. A password or key goes to the server once and never comes back, and a head never reads it. Limits,
+  consent, content checks, prices and public posts keep asking as before.
+- The people who run a department, and its head on their word, also run its keys, its autonomous release, its approval
+  policies, its description and its work without the CEO.
+- An assistant's program can download the files its own agent attached, and the agent offers to call another assistant
+  only while its assistant has a skills address.
+
+### Changed
+
+- The account menu keeps Improvements, Versions, Settings, About and Log out. Settings opens on Profile, your own name,
+  and holds four groups: Appearance & language, with the skins two by two and the language in one list; Integrations,
+  with Google Sheets and the company's GitHub key on one card each; External messaging; and Company & access, with the
+  public link and the backups. Writing to Hornhoof developers is inside About. Each group has its own address under
+  `/settings`, and the old addresses `/profile`, `/themes`, `/outbound` and `/feedback` are gone.
+- Settings keeps its heading and Done at the top and scrolls only its body.
+- The account menu, About, Settings, Subscriptions & API, a department's approvals and its outbound setup look as Design
+  checked them: buttons, fields and lists 44 px high, actions at the end of a row, pink buttons that stop or remove, no
+  number arrows in fields, and the same widths in Chromium, Firefox and WebKit.
+
+### Fixed
+
+- The turn tag on the orchestrator's circle on the map is readable again while decisions wait: it no longer takes the
+  amber glow as its background.
+- Status words in tables no longer break letter by letter, so Ready no longer shows as Read over y on Subscriptions &
+  API. No column is narrower than its longest word, and a table that does not fit by whole words shows its rows as
+  entries.
+- On Machines, the open card of your own machine keeps the button that makes it a full machine of the company inside
+  the card, and showing the install command no longer turns the wide table of machines into entries.
+
+### Russian
+
+Отдел сам ведет свои внешние рассылки и свою работу без CEO, Настройки стали одним окном из четырех групп за коротким
+меню учетной записи, а слова статусов в таблицах больше не рвутся по буквам.
+
+- Перед обновлением: в выпуске миграции 0127 и 0128. 0127 добавляет пустую таблицу `outbound_setup_events`, журнал
+  того, кто настраивал рассылки отдела. 0128 переносит автономный выпуск с компании на каждый отдел: у всех отделов он
+  сначала выключен, а переключатель компании убран. Перед обновлением сервера проверьте, был ли он включен у компании:
+  `SELECT autonomous_release FROM companies;`. Если ответ true, после обновления снова включите его отделам верхнего
+  уровня: `UPDATE departments SET autonomous_release = true WHERE parent_id IS NULL;`.
+- Те, кто ведет отдел, и глава отдела по их слову подключают почтовый ящик или вебхук отдела, создают его каналы,
+  задают дневные лимиты и то, уходит ли личное сообщение без «да» на каждое, останавливают и снова открывают каналы,
+  публикуют и отзывают версии каталога и читают журнал того, кто что настроил и через какого главу. Это есть во
+  «Внешних рассылках» в Настройках для каждого отдела, который человек ведет, и на экране отдела в разделе «Об
+  отделе». Пароль или ключ уходит на сервер один раз и обратно не возвращается, а глава его никогда не читает. Лимиты,
+  согласие, проверки текста, цены и публичные посты спрашивают, как и раньше.
+- Те, кто ведет отдел, и глава по их слову также сами ведут его ключи, автономный выпуск, правила одобрений, описание
+  и работу без CEO.
+- Программа ассистента может скачать файлы, которые приложил его собственный агент, а агент предлагает позвать другого
+  ассистента, только пока у его ассистента есть адрес навыков.
+- В меню учетной записи остались Улучшения, Версии, Настройки, О программе и Выход. Настройки открываются на Профиле, с
+  вашим именем, и состоят из четырех групп: «Оформление и язык», где скины стоят по два в ряд, а язык выбирается из
+  одного списка; «Интеграции», где у Google Sheets и ключа GitHub компании по своей карточке; «Внешние рассылки»; и
+  «Компания и доступ», с публичной ссылкой и резервными копиями. Написать разработчикам Hornhoof можно внутри «О
+  программе». У каждой группы свой адрес в `/settings`, а старых адресов `/profile`, `/themes`, `/outbound` и
+  `/feedback` больше нет.
+- Заголовок и «Готово» в Настройках стоят наверху, а прокручивается только содержимое.
+- Меню учетной записи, «О программе», Настройки, «Подписки и API», одобрения отдела и настройка его рассылок выглядят
+  так, как их проверил Дизайн: кнопки, поля и списки высотой 44 px, действия в конце строки, розовые кнопки остановки
+  и удаления, без стрелок у числовых полей и с одинаковой шириной в Chromium, Firefox и WebKit.
+- Плашка хода на круге оркестратора на карте снова читается, пока ждут решения: она больше не берет янтарное свечение
+  себе в фон.
+- Слова статусов в таблицах больше не рвутся по буквам, и Ready на «Подписках и API» больше не стоит как Read над y.
+  Ни одна колонка не уже своего самого длинного слова, а таблица, которая не помещается целыми словами, показывает
+  строки записями.
+- На экране «Машины» в раскрытой карточке своей машины кнопка, которая делает ее полной машиной компании, остается
+  внутри карточки, а показ команды установки больше не превращает широкую таблицу машин в записи.
+
 ## [0.24.2] - 2026-11-15
 
 Opening access to a computer by its button lets the orchestrator work on that computer right away without asking the
