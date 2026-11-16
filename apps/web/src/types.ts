@@ -973,10 +973,12 @@ export type ComputerAccessView = {
   openedBy?: { id: string; name: string } | null;
   openedAt?: string | null;
 };
-/* Who a machine opens to, and for how many hours its owner opens it. */
+/* Who a machine opens to, and for how long its owner opens it (#1119): the first duration is what opens when nothing
+   else is chosen, and the owner's signature spans exactly the chosen seconds. */
 export type AccessScope = 'orchestrator' | 'all_agents';
-export const ACCESS_HOURS = [1, 8, 24] as const;
-export type AccessHours = (typeof ACCESS_HOURS)[number];
+export const ACCESS_DURATIONS = ['1h', '8h', '24h'] as const;
+export type AccessDuration = (typeof ACCESS_DURATIONS)[number];
+export const DURATION_S: Record<AccessDuration, number> = { '1h': 3600, '8h': 28_800, '24h': 86_400 };
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'core'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */

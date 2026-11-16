@@ -20,7 +20,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const note = window.getByText(t.window.notes.asksFor(ASKED.machine.hostname, ASKED.asked!.reason));
       await expect(note).toBeVisible();
       await expect(window.getByRole('region', { name: t.window.computerAsks(ASKED.machine.hostname) })).toHaveCount(0);
-      await expect(window.getByRole('button', { name: t.window.computerOpen, exact: true })).toHaveCount(0);
+      await expect(window.getByRole('button', { name: t.machines.computer.openFor['1h'], exact: true })).toHaveCount(0);
       await expect(window.getByRole('link', { name: t.window.notes.answer, exact: true })).toBeVisible();
       const below = await box(note);
       const terminal = await box(window.locator('.t-term'));

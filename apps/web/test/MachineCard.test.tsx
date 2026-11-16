@@ -93,9 +93,10 @@ describe("the lower part of a machine's card", () => {
     expect(within(system).getByRole('heading', { name: 'Agent programs' })).toBeInTheDocument();
     expect(fact('Claude Code')).toBe('2.1.0');
     expect(within(system).getByRole('button', { name: 'Update programs' })).toBeInTheDocument();
-    expect(within(system).getByRole('heading', { name: 'Computer access' })).toBeInTheDocument();
-    expect(within(system).getByText(/^Access to dev-laptop is open until .+\.$/)).toBeInTheDocument();
-    expect(within(system).getByRole('button', { name: 'Close access' })).toBeInTheDocument();
+    const access = within(system).getByRole('region', { name: 'Computer access' });
+    expect(within(access).getByText('Access open')).toBeInTheDocument();
+    expect(within(access).getByText(/^Until .+/)).toBeInTheDocument();
+    expect(within(access).getByRole('button', { name: 'Close access' })).toBeInTheDocument();
   });
 
   it("keeps every setting and action of the owner in the third block, the question before Disconnect too", async () => {

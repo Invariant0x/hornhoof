@@ -104,11 +104,11 @@ async function openMachines(page: Page, look: Look, id: string) {
   await page.route(/\/api\/machines\/[^/]+\/access\/(open|close|decline)$/, route => {
     const path = new URL(route.request().url()).pathname;
     const [, , , key, , action] = path.split('/');
-    const body = route.request().postDataJSON() as { scope?: Scope; hours?: number } | null;
+    const body = route.request().postDataJSON() as { scope?: Scope; duration?: '1h' | '8h' | '24h' } | null;
     sent.push({ path, body });
     const now = views[key!]!;
     views[key!] = action === 'open'
-      ? { ...now, asked: null, ...opened(body?.scope ?? 'orchestrator', body?.hours ?? 24) }
+      ? { ...now, asked: null, ...opened(body?.scope ?? 'orchestrator', { '1h': 1, '8h': 8, '24h': 24 }[body?.duration ?? '1h']) }
       : { ...now, asked: null, until: action === 'close' ? null : now.until, scope: action === 'close' ? null : now.scope, openedBy: action === 'close' ? null : now.openedBy, canOpen: now.machine.personId === IVAN.id };
     return route.fulfill({ json: views[key!] });
   });
@@ -120,6 +120,8 @@ async function openMachines(page: Page, look: Look, id: string) {
 }
 
 const blockOf = (card: Locator, words: (typeof WORDS)['en']) => card.getByRole('region', { name: words.block, exact: true });
+/* A picture of the card for Design, by the state it shows. */
+const snap = (card: Locator, name: string) => card.screenshot({ path: test.info().outputPath(`${name}.png`), animations: 'disabled' });
 
 /* The block inside its card and the screen, every button at least 44 px, no word cut. */
 async function expectFits(page: Page, card: Locator, block: Locator, width: number) {
@@ -141,8 +143,10 @@ for (const look of LOOKS) {
     const block = blockOf(card, words);
     await expect(block.getByText(words.closed, { exact: true })).toBeVisible();
     await expectFits(page, card, block, look.width);
+    await snap(card, 'closed');
     await block.getByRole('button', { name: words.choose, exact: true }).click();
     await expect(block.getByText(words.who, { exact: true })).toBeVisible();
+    await snap(card, 'choose');
     /* One hour is chosen until another is pressed. */
     const durations = block.getByRole('group', { name: words.duration });
     await expect(durations.getByRole('button', { name: words.hour, exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -153,8 +157,9 @@ for (const look of LOOKS) {
     await expect(block.getByText(words.forOrchestrator, { exact: true })).toBeVisible();
     await expect(block.getByText(words.until)).toBeVisible();
     await expect(block.getByText(words.openedBy, { exact: true })).toBeVisible();
-    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'orchestrator', hours: 1 } }]);
+    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'orchestrator', duration: '1h' } }]);
     await expectFits(page, card, block, look.width);
+    await snap(card, 'open');
     /* Closing asks nothing. */
     await block.getByRole('button', { name: words.close, exact: true }).click();
     await expect(block.getByText(words.closed, { exact: true })).toBeVisible();
@@ -172,6 +177,9 @@ for (const look of LOOKS) {
     await block.getByRole('button', { name: words.team, exact: true }).click();
     await expect(block.getByText(words.confirm, { exact: true })).toBeVisible();
     await expectFits(page, card, block, look.width);
+    await snap(card, 'confirm');
+    /* Right to left, the question keeps its mark at its end. */
+    if (look.dir === 'rtl') expect(await block.getByText(words.confirm, { exact: true }).evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
     expect(sent).toEqual([]);
     await block.getByRole('button', { name: words.cancel, exact: true }).click();
     await expect(block.getByText(words.confirm, { exact: true })).toHaveCount(0);
@@ -183,7 +191,12 @@ for (const look of LOOKS) {
     await block.getByRole('button', { name: words.fullButton, exact: true }).click();
     await expect(block.getByText(words.full, { exact: true })).toBeVisible();
     await expect(block.getByText(words.forTeam, { exact: true })).toBeVisible();
-    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'all_agents', hours: 8, confirm: true } }]);
+    await snap(card, 'full');
+    expect(sent).toEqual([{ path: '/api/machines/m1/access/open', body: { scope: 'all_agents', duration: '8h', confirm: true } }]);
+    /* At its time the card closes by itself, before the server says so. */
+    await page.clock.fastForward(8 * HOUR + 1000);
+    await expect(block.getByText(words.closed, { exact: true })).toBeVisible();
+    await expect(block.getByText(words.forTeam, { exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
@@ -194,6 +207,7 @@ for (const look of LOOKS) {
     await expect(asked.getByText(words.asks, { exact: true })).toBeVisible();
     await expect(asked.getByText(REASON)).toBeVisible();
     await expectFits(page, card, asked, look.width);
+    await snap(card, 'asks');
     await asked.getByRole('button', { name: words.notNow, exact: true }).click();
     await expect(asked.getByText(words.asks, { exact: true })).toHaveCount(0);
     expect(sent.map(one => one.path)).toEqual(['/api/machines/m5/access/decline']);
@@ -204,6 +218,7 @@ for (const look of LOOKS) {
     await expect(anna.getByText(words.openedBy.replace('Ivan', 'Anna'), { exact: true })).toBeVisible();
     await expect(anna.getByRole('button', { name: words.close, exact: true })).toBeVisible();
     await expect(anna.getByRole('button', { name: words.choose, exact: true })).toHaveCount(0);
+    await snap(page.getByRole('article', { name: 'build-node', exact: true }), 'open-by-another');
     /* Full access on the Mac. */
     await page.goto('/machines/m3');
     const mac = blockOf(page.getByRole('article', { name: 'studio-mac', exact: true }), words);
@@ -214,6 +229,7 @@ for (const look of LOOKS) {
     const away = blockOf(page.getByRole('article', { name: 'test-node', exact: true }), words);
     await expect(away.getByText(words.offline, { exact: true })).toBeVisible();
     await expect(away.getByRole('button')).toHaveCount(0);
+    await snap(page.getByRole('article', { name: 'test-node', exact: true }), 'offline');
     expect(errors).toEqual([]);
   });
 }

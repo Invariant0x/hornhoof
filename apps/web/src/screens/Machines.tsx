@@ -605,8 +605,8 @@ function CopiesLine({ copies }: { copies: CopiesView }) {
   </>;
 }
 
-/* The second block: whose machine it is and what system it runs, where the company opens on it and its agent
-   programs. */
+/* The second block: whose machine it is and what system it runs, where the company opens on it, its agent programs
+   and its computer access. */
 function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: boolean; controls: MachineControls }) {
   const t = useT();
   const m = row.source;
@@ -616,6 +616,7 @@ function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: b
     <CardBlock title={t.cards.systemBlock}>
       {facts.length > 0 && <Facts items={facts} />}
       <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
+      {row.access && <MachineAccessBlock view={row.access} onChanged={() => void controls.refresh()} />}
     </CardBlock>
   );
 }
@@ -653,7 +654,6 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
       <div className="mc-blocks">
         <ServerBlock row={row} me={me} order={order} refresh={controls.refresh} />
         <SystemBlock row={row} editable={editable} controls={controls} />
-        {row.access && <MachineAccessBlock view={row.access} onChanged={() => void controls.refresh()} />}
         {m && <OwnerBlock machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
       </div>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}

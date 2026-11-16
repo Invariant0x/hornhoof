@@ -37,9 +37,8 @@ async function openNotes(page: Page, look: Look, program: Record<string, unknown
   return opened;
 }
 
-/* The words of a note, found by themselves; and the note that holds them, which says them to a screen reader. */
-const noteOf = (window: Locator, text: string | RegExp) => window.getByText(text);
-const statusOf = (window: Locator, words: Locator) => window.getByRole('status').filter({ has: words });
+/* A note, by its words: the whole note, which says them to a screen reader, led by its framed word. */
+const noteOf = (window: Locator, text: string) => window.getByRole('status').filter({ hasText: text });
 
 /* Each note on the screen, under the terminal and its input line, inside the window; one under another. */
 async function expectStacked(page: Page, window: Locator, notes: Locator[], width: number) {
@@ -72,17 +71,20 @@ for (const look of LOOKS) {
     const memory = noteOf(window, t.memoryWait);
     const limit = noteOf(window, t.limitUntil('').split(' ').slice(0, 4).join(' '));
     await expectStacked(page, window, [asleep, memory, limit], look.width);
+    await page.screenshot({ path: test.info().outputPath('agent-notes.png'), animations: 'disabled' });
     /* The three that are not the memory's stand in one column, each under the one before. */
     const [a, l] = [await box(asleep), await box(limit)];
     expect(Math.abs(a.x - l.x)).toBeLessThanOrEqual(1);
     /* Each is led by the word of its kind, in a frame. */
     for (const [note, word] of [[asleep, t.notes.asleep], [memory, t.notes.memory], [limit, t.notes.wait]] as const) {
-      const framed = statusOf(window, note).getByText(word, { exact: true });
+      const framed = note.getByText(word, { exact: true });
       await expect(framed).toBeVisible();
       expect(await framed.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth))).toBeGreaterThanOrEqual(1);
     }
     /* Right to left, the words keep their order and their full stop at the end. */
     if (look.dir === 'rtl') expect(await memory.evaluate(el => getComputedStyle(el).direction)).toBe('rtl');
+    /* Its words keep their own order: they start with the framed word and end with their full stop. */
+    expect(await memory.getByText(t.memoryWait, { exact: true }).evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
     expect(errors).toEqual([]);
   });
 
@@ -92,15 +94,21 @@ for (const look of LOOKS) {
     /* No strip, no buttons that open or close a machine. */
     await expect(window.getByRole('region', { name: t.machineAccess('node-a'), exact: true })).toHaveCount(0);
     await expect(window.getByRole('region', { name: t.computerAsks('node-b'), exact: true })).toHaveCount(0);
-    for (const name of [t.computerClose, t.computerOpen, t.computerNotNow]) await expect(window.getByRole('button', { name, exact: true })).toHaveCount(0);
+    const c = messages[look.lang].machines.computer;
+    for (const name of [t.computerClose, c.choose, c.openFor['1h'], t.computerNotNow]) await expect(window.getByRole('button', { name, exact: true })).toHaveCount(0);
     const asks = noteOf(window, t.computerAsks('node-b'));
     const open = noteOf(window, 'node-a');
     await expectStacked(page, window, [asks, open], look.width);
-    await expect(statusOf(window, asks).getByText(t.notes.asks, { exact: true })).toBeVisible();
-    await expect(statusOf(window, open).getByText(t.notes.access, { exact: true })).toBeVisible();
-    /* The link of the request opens its machine's card in Machines. */
-    await statusOf(window, asks).getByRole('link', { name: t.notes.answer, exact: true }).click();
+    await page.screenshot({ path: test.info().outputPath('agent-access-notes.png'), animations: 'disabled' });
+    await expect(asks.getByText(t.notes.asks, { exact: true })).toBeVisible();
+    await expect(open.getByText(t.notes.access, { exact: true })).toBeVisible();
+    /* The link of the request opens its machine's card in Machines, and the window steps aside for it. */
+    await page.route(url => url.pathname === '/api/machines' || url.pathname === '/api/subscriptions', route =>
+      route.fulfill({ json: new URL(route.request().url()).pathname === '/api/machines' ? { machines: [], builtin: null } : { subscriptions: [] } }),
+    );
+    await asks.getByRole('link', { name: t.notes.answer, exact: true }).click();
     await expect(page).toHaveURL(/\/machines\/node-b$/);
+    await expect(window).toBeHidden();
     expect(posts).toEqual([]);
     expect(errors).toEqual([]);
   });
