@@ -68,7 +68,7 @@ describe('a task', () => {
     await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
     expect(await within(panel).findByRole('alert')).toHaveTextContent('The secret could not be hidden.');
     expect(input).toHaveValue('');
-    await user.click(within(panel).getByRole('button', { name: 'Cancel', exact: true }));
+    await user.click(within(panel).getByRole('button', { name: /^Cancel$/ }));
     expect(within(panel).queryByLabelText('Secret to hide')).not.toBeInTheDocument();
   });
   afterEach(() => localStorage.removeItem('hh-lang'));

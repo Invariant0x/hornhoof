@@ -43,7 +43,7 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
     await expect(input).toHaveValue(marker);
     const form = panel.getByRole('form', { name: words.action });
     for (const direction of ['ltr', 'rtl']) {
-      await form.evaluate((element, direction) => { element.dir = direction; }, direction);
+      await form.evaluate((element, direction) => { element.setAttribute('dir', direction); }, direction);
       const geometry = await form.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth, controls: [...element.querySelectorAll('button')].map(button => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })) }));
       expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
       for (const control of geometry.controls) {
