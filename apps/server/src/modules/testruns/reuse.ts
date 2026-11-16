@@ -113,8 +113,9 @@ async function releaseStart(db: Db, run: Run, scope: RepositoryScope, release: s
     .orderBy(asc(testRuns.createdAt)).limit(1);
   return full?.createdAt ?? null;
 }
-/* A manifest that names no full run reuses nothing, as nothing would ever check what it reused. The first run of a release with no
-   one suite runs everything; any other takes what its release proved since then. */
+/* A manifest that names no full run reuses nothing: each of its runs runs every test file of its profile again, so none is ever
+   left out and a later run of a release only takes longer. A repository gets reuse by naming its full run. The first run of a
+   release with no one suite runs everything; any other takes what its release proved since then. */
 export type RunMode = { mode: Mode; release: string; since: Date | null } | null;
 export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEnvironmentV1, scope: RepositoryScope, printed: boolean): Promise<RunMode> {
   if (!manifest.execution?.fullRun) return null;
