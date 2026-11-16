@@ -4,7 +4,7 @@ import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type Oper
 import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { insertTurn, limitUntil, pump, takesTurns } from '../conversation/queue.js';
@@ -50,7 +50,7 @@ async function resolveUnqualifiedCases(ctx: Ctx, frame: OperatorEvidence, qualif
 }
 
 async function instanceFacts(ctx: Ctx, agentId: string, instance: string): Promise<OperatorEvidence[]> {
-  const rows = await ctx.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${instance}`))
+  const rows = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->'operatorEvidence'->>'instance' = ${instance}`))
     .orderBy(sql`(${agentEvents.data}->'operatorEvidence'->>'ordinal')::bigint`);
   return rows.flatMap(({ data }) => {
     const parsed = OperatorNodeMessage.safeParse((data as { operatorEvidence?: unknown }).operatorEvidence);
@@ -305,7 +305,7 @@ export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Dat
 async function pumpCaseNotices(ctx: Ctx, row: Case): Promise<void> {
   for (const id of [row.operatorJobId, row.escalationJobId, row.continuationJobId, row.resolution?.holdCall?.job]) {
     if (!id) continue;
-    const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(eq(jobs.id, id));
+    const [job] = await ctx.db.select(only(jobs, 'agentId')).from(jobs).where(eq(jobs.id, id));
     if (job?.agentId) await pump(ctx, job.agentId);
   }
 }

@@ -1,6 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { machines } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { freshState } from '../keeper/state.js';
 
 /* How fast the leader sends to each machine, as its keeper last measured it, into the machines' rows: each live row
@@ -12,7 +13,7 @@ export async function storeThroughput(ctx: Ctx, now = Date.now()): Promise<numbe
   let written = 0;
   for (const [id, { mbps }] of Object.entries(said)) {
     if (!/^[0-9a-f-]{36}$/.test(id)) continue;
-    const [row] = await ctx.db.select({ linkMbps: machines.linkMbps }).from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
+    const [row] = await ctx.db.select(only(machines, 'linkMbps')).from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
     if (!row || row.linkMbps === mbps) continue;
     await ctx.db.update(machines).set({ linkMbps: mbps }).where(eq(machines.id, id));
     written += 1;

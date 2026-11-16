@@ -1,8 +1,8 @@
-import type { InputHTMLAttributes } from 'react';
+import type { ComponentPropsWithRef } from 'react';
 
 /* A box to tick drawn by us, so it is the same in every browser: the input stays the browser's for the keyboard and for
    readers, its frame and tick are ours. Its name comes from the label it stands in. */
-export function TickBox(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+export function TickBox(props: Omit<ComponentPropsWithRef<'input'>, 'type'>) {
   return (
     <span className="tick-box">
       <input {...props} type="checkbox" />
