@@ -7,6 +7,7 @@ import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
 import { actorOf, changedBy, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, telegramBots, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { unreadCount } from '../conversation/inbox.js';
 import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
@@ -127,7 +128,7 @@ async function applyTeamPatch(db: Ctx['db'], agent: AgentRow, next: AgentRow, te
   if (team === undefined) return;
   if (team !== null) {
     if (agent.kind !== 'worker' || !agent.departmentId) throw invalid('A department head cannot be in a sub-unit.', 'unknown_place');
-    const [found] = await db.select({ id: teams.id }).from(teams).where(and(eq(teams.id, team), eq(teams.departmentId, agent.departmentId)));
+    const [found] = await db.select(idOnly(teams)).from(teams).where(and(eq(teams.id, team), eq(teams.departmentId, agent.departmentId)));
     if (!found) throw invalid('This sub-unit does not exist in this department.', 'unknown_place');
   }
   next.teamId = team;
@@ -253,7 +254,7 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   const named = await cardPlaces(db, agent);
   const views = new Map((await subViews(db, online, undefined, me)).map(v => [v.id, keyEndFor(me, v)]));
-  const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
+  const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
   /* An employee's card shows what people edit. A head's department notebook has its own window and its own access; it
      counts all the same in what every turn sends. */
   const told = await instructionsOf(ctx, agent);
@@ -542,7 +543,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
   await requireDepartmentChanger(db, me, found.departmentId);
   if (found.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
   await changing(ctx, found, async agent => {
-    const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
+    const [running] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'), notStep)).limit(1);
     if (running) throw new ApiError(409, 'conflict', 'This employee is working. Stop it first.', 'agent_working');
     /* A task it holds or does would wait for it for good. */
     const held = await db

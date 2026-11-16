@@ -3,6 +3,7 @@ import { and, count, desc, eq, inArray, sql, sum } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { limiter, type Attempts } from '../../auth/limit.js';
 import { companies, feedbackInbox, feedbackSignals, FEEDBACK_KINDS } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { cleaned, TEXT_MAX, TITLE_MAX, type IssueLink, type Report, type Shown } from './report.js';
 
@@ -81,7 +82,7 @@ export const fingerprintOfReport = (report: Pick<Shown, 'kind' | 'title'> & { fa
 const issueOf = (card: { issueNumber: number | null; issueUrl: string | null }): IssueLink | null => (card.issueNumber !== null && card.issueUrl ? { number: card.issueNumber, url: card.issueUrl } : null);
 
 async function companyOf(ctx: Pick<Ctx, 'db'>): Promise<string> {
-  const [company] = await ctx.db.select({ id: companies.id }).from(companies).where(eq(companies.singleton, true));
+  const [company] = await ctx.db.select(idOnly(companies)).from(companies).where(eq(companies.singleton, true));
   if (!company) throw new ApiError(503, 'unavailable', 'This Hornhoof is not set up yet.');
   return company.id;
 }
