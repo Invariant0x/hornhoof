@@ -1,5 +1,5 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES, programName } from '../providers';
@@ -274,9 +274,10 @@ function PlanSettings({ sub: s, me, controls }: PlanProps) {
       {SHARES.map(n => <option key={n} value={String(n)}>{`${n}%`}</option>)}
     </select>
   );
-  const share: [string, ReactNode][] = s.kind === 'personal' ? [[t.subs.share, editable ? select : s.budget === null ? t.subs.shareAll : `${s.budget}%`]] : [];
-  const fallbacks = <PlanFallbacks sub={s} plans={controls.plans} editable={editable || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} />;
-  return <Part title={t.tables.settings}><Facts items={[...share, [t.subs.fallbacks, fallbacks]]} /></Part>;
+  return <>
+    {s.kind === 'personal' && <Part title={t.tables.settings}><Facts items={[[t.subs.share, editable ? select : s.budget === null ? t.subs.shareAll : `${s.budget}%`]]} /></Part>}
+    <Part title={t.subs.fallbacks}><PlanFallbacks sub={s} plans={controls.plans} editable={editable || changesApi(s, me)} onChange={list => controls.setFallbacks(s, list)} /></Part>
+  </>;
 }
 
 function TestButtons({ sub: s, me, controls: c }: PlanProps) {
