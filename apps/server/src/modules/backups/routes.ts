@@ -41,7 +41,7 @@ type KeptMerge = { id: string; status: 'pending' | 'applied' | 'merged' | 'remov
 const rowsOf = <T>(answer: unknown): T[] => (Array.isArray(answer) ? answer : (answer as { rows: T[] }).rows);
 
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
-const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO does this, from his own session.', 'not_owner_session');
+const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO does this, by himself or through the orchestrator.', 'not_owner_session');
 
 /* Backups as the app keeps them: it records the bundles its own keeper made, picks the machines that keep each, tells
    every keeper what to seal to or what to hold, and gives the CEO the recovery file and the list. It never holds a
@@ -52,9 +52,9 @@ export function backupRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (ctx.mode.current() !== 'lead') throw new ApiError(503, 'unavailable', 'This server does not lead the company now.');
   };
 
-  /* The company's CEO on their own session: never the orchestrator acting for them, and nobody else. */
+  /* The company's CEO, by himself or through the orchestrator, and nobody else. */
   function ceo(me: Person): Person {
-    if (!me.isOwner || me.via) throw notCeo();
+    if (!me.isOwner || me.viaHead) throw notCeo();
     return me;
   }
   /* Who is not a keeper gets no further. */

@@ -354,13 +354,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       /* Whether this person sees the order the server passes on in. */
       priority: held !== null,
       /* The request to move the server, for everyone who sees machines, and whether this person may ask for one: the CEO
-         on his own session, while this app leads. */
+         or the orchestrator acting for him, while this app leads. */
       move: await moveView(db),
-      canMove: me.isOwner && !me.via && ctx.mode.current() === 'lead',
+      canMove: me.isOwner && !me.viaHead && ctx.mode.current() === 'lead',
     };
   });
 
-  const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO does this, from his own session.', 'not_owner_session');
+  const notCeo = () => new ApiError(403, 'forbidden', 'Only the CEO does this, by himself or through the orchestrator.', 'not_owner_session');
 
   /* A live machine its owner, or someone who sees the whole company, may change. */
   async function ownMachine(me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
@@ -384,10 +384,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* The CEO's choice of a machine's place in the order the server passes on in: left to the score, a place by hand,
-     or kept from the server. His alone, on his own session. */
+     or kept from the server. His alone, by himself or through the orchestrator. */
   app.put('/api/machines/:id/priority', async (req, reply) => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.via) throw notCeo();
+    if (!me.isOwner || me.viaHead) throw notCeo();
     const { id } = IdParams.parse(req.params);
     const { pin } = PriorityBody.parse(req.body);
     await ownMachine(me, id);
@@ -395,10 +395,11 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
-  /* The CEO's request to move the server to this machine, and its taking off. His alone, on his own session. */
+  /* The CEO's request to move the server to this machine, and its taking off. His alone, by himself or through the
+     orchestrator. */
   app.post('/api/machines/:id/move', async (req, reply) => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.via) throw notCeo();
+    if (!me.isOwner || me.viaHead) throw notCeo();
     const { id } = IdParams.parse(req.params);
     await ownMachine(me, id);
     await askMove(ctx, id, me.id);
@@ -407,7 +408,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.delete('/api/machines/:id/move', async (req, reply) => {
     const me = await requirePerson(req, db);
-    if (!me.isOwner || me.via) throw notCeo();
+    if (!me.isOwner || me.viaHead) throw notCeo();
     const { id } = IdParams.parse(req.params);
     await ownMachine(me, id);
     await cancelMove(ctx, id);

@@ -60,7 +60,7 @@ function telegramChange(input: string | null | undefined, now: TelegramColumns):
 /* A Telegram account speaks to the bots as the person it is set for, so it is set from a person's own screen: for
    themselves, or by whoever changes that person, and for the CEO or the CEO delegate only by the CEO. */
 function guardTelegram(me: Person, target: Pick<Person, 'id' | 'isOwner' | 'isCeoDelegate'>): void {
-  if (me.via) throw new ApiError(403, 'forbidden', 'Who a person is in Telegram is set only from a person\'s own screen.');
+  if (me.viaHead) throw new ApiError(403, 'forbidden', 'Who a person is in Telegram is set only from a person\'s own screen, or by the orchestrator.');
   if (target.id !== me.id && (target.isOwner || target.isCeoDelegate) && !me.isOwner) {
     throw new ApiError(403, 'forbidden', 'Only the CEO sets who the CEO or the CEO delegate is in Telegram.', 'owner_locked');
   }

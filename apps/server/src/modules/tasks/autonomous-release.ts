@@ -62,10 +62,10 @@ export type AutonomousReleaseEntry = {
   createdAt: string;
 };
 
-/* Who turns a department's autonomous release on or off: a signed-in person, never an agent or an assistant acting for one,
-   who runs that department. The CEO runs every department. */
+/* Who turns a department's autonomous release on or off: a signed-in person who runs that department, or the orchestrator
+   acting for the CEO, who runs every department; never a head or an assistant acting for one. */
 export async function maySetAutonomousRelease(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
-  if (me.status !== 'active' || Boolean(me.via) || Boolean(me.assistant)) return false;
+  if (me.status !== 'active' || Boolean(me.viaHead) || Boolean(me.assistant)) return false;
   const [row] = await db
     .select(idOnly(people))
     .from(people)

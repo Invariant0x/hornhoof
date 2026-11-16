@@ -38,8 +38,6 @@ type Hire = Omit<StaffLine, 'checked'>;
 /* Answers longer than this are cut, so one view does not fill the orchestrator's context. */
 const MAX_ANSWER = 30_000;
 
-/* Pages the orchestrator does not read with view: live streams, files and sign-in. */
-const UNREAD = /^\/api\/(stream|attachments|auth|invites|setup|nodes)(\/|$)|\/terminal$/;
 /* Routes that stream for as long as someone listens, with no answer to wait for: the live stream and the sockets. */
 const STREAMS = /^\/api\/(stream|nodes\/socket)$|\/terminal$/;
 
@@ -135,7 +133,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     { path: z.string().trim().min(1).max(500).describe('The page address, starting with /api/.') },
     ({ path }) => {
       const url = new URL(path, 'http://hornhoof');
-      if (!url.pathname.startsWith('/api/') || UNREAD.test(url.pathname)) return `${url.pathname} is not a page view reads. Use an /api/ page from the list.`;
+      if (!url.pathname.startsWith('/api/') || STREAMS.test(url.pathname)) return `${url.pathname} is not a page view reads. Use an /api/ page from the list.`;
       return { method: 'GET', url: url.pathname + url.search };
     },
   );

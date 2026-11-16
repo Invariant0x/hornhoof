@@ -16,24 +16,24 @@ it("refuses the orchestrator's own call that carries no turn of a person with th
     expect(row!.status).toBe('open');
   });
 
-it('shows the computer to people of the whole company and lets only the CEO and the delegate decide it, from their own screen', async () => {
+it('shows the computer to people of the whole company and lets only the CEO, the delegate and the orchestrator decide it', async () => {
     const c = await staffed();
+    const inside = { headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) };
     expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.zed) })).json()).toMatchObject({ asked: null, canAnswer: false });
     expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.delegate) })).json()).toMatchObject({ asked: { reason: 'Inspect disk space.' }, canAnswer: true });
     expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.dan) })).statusCode).toBe(403);
-    expect((await c.app.inject({ url: '/api/computer', headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) })).statusCode).toBe(403);
+    expect((await c.app.inject({ url: '/api/computer', ...inside })).json()).toMatchObject({ asked: { reason: 'Inspect disk space.' }, canAnswer: true });
     for (const action of ['decline', 'close', 'open']) {
       for (const token of [c.tokens.zed, c.tokens.dan]) {
         const res = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(token) });
         expect(res.statusCode, `${action} by a person without the right`).toBe(403);
       }
-      const viaOrchestrator = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
-      expect(viaOrchestrator.statusCode, `${action} by the orchestrator`).toBe(403);
     }
     const asked = async () => (await c.ctx.computer.states(c.acme.id)).find(state => state.machine.id === c.machine)!.asked;
     expect(await asked()).not.toBeNull();
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.delegate) })).statusCode).toBe(200);
     expect(await asked()).toBeNull();
+    expect((await c.app.inject({ method: 'POST', url: '/api/computer/close', ...inside })).statusCode).toBe(200);
   });
 
 it('lets only the CEO and the delegate apply the structure card, and the people of a department its staff, with or without the card', async () => {

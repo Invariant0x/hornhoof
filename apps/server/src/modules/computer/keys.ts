@@ -31,10 +31,10 @@ const keyExists = () => new ApiError(409, 'conflict', 'You have a key already.',
    machine pins the public half from the command its owner ran there, and only what that key signs opens the machine. */
 export function keyRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
-  /* A person's own session only: the orchestrator acts for the CEO in much, and never holds or makes anyone's key. */
+  /* A person's own session, or the orchestrator acting for the CEO, who types the password as a person does: never a head. */
   const ownSession = async (req: FastifyRequest): Promise<Person> => {
     const me = await requirePerson(req, db);
-    if (me.via) throw new ApiError(403, 'forbidden', 'Only the person themselves may do this.');
+    if (me.viaHead) throw new ApiError(403, 'forbidden', 'Only the person themselves may do this.');
     return me;
   };
 

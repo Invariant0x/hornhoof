@@ -211,19 +211,17 @@ describe('the sealing routes', () => {
     expect(theirs.json().error.reason).toBe('not_owner');
   });
 
-  it('are closed to the orchestrator acting for the owner', async () => {
+  it('are open to the orchestrator acting for the owner', async () => {
     const { app, db, plan, a, online } = await plans('kimi');
     await online(a, KEY('a'));
     const [owner] = await db.select(idOnly(people)).from(people).where(eq(people.isOwner, true));
     const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(eq(agents.kind, 'orchestrator'));
     const headers = orchestratorHeaders(owner!.id, orchestrator!.id);
     const listed = await app.inject({ url: `/api/subscriptions/${plan}/recipients`, headers });
-    expect(listed.statusCode).toBe(403);
-    expect(listed.json().error.reason).toBe('not_owner');
+    expect(listed.json()).toMatchObject({ recipients: [{ nodeId: a.nodeId }] });
     const body = { kind: 'kimi_key', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('kimi') }] };
     const sent = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/credential`, payload: body, headers });
-    expect(sent.statusCode).toBe(403);
-    expect(await stored(db, plan)).toEqual([]);
+    expect(sent.json()).toEqual({ stored: 1 });
   });
 
   it("keep a key the owner sealed in the browser, hand it to the plan's nodes and refuse a Codex or Claude sign-in", async () => {
@@ -286,6 +284,20 @@ describe('signing a plan in from Hornhoof', () => {
     const stop = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin/stop`, payload: { nodeId: b.nodeId }, ...as(ceo) });
     expect(stop.statusCode).toBe(204);
     expect(await nextOf(nb, 'login.stop')).toEqual({ type: 'login.stop' });
+  });
+
+  it("starts the sign-in for the orchestrator, on the owner's plan and on any other person's", async () => {
+    const { app, db, oleg, plan, b, online } = await plans();
+    const nb = await online(b, KEY('b'), false);
+    const [owner] = await db.select(idOnly(people)).from(people).where(eq(people.isOwner, true));
+    const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(eq(agents.kind, 'orchestrator'));
+    const headers = orchestratorHeaders(owner!.id, orchestrator!.id);
+    const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, headers });
+    expect(res.json()).toEqual({ nodeId: b.nodeId, hostname: 'dev-laptop' });
+    expect(await nextOf(nb, 'login.start')).toEqual({ type: 'login.start', fresh: false });
+    const olegs = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(oleg) })).json().subscriptions[0].id as string;
+    const theirs = await app.inject({ method: 'POST', url: `/api/subscriptions/${olegs}/signin`, payload: { fresh: false }, headers });
+    expect([theirs.statusCode, theirs.json().error.reason]).toEqual([409, 'no_node_online']);
   });
 
   it('starts the sign-in only on a machine with a key, which the new sign-in can be sealed to', async () => {
@@ -502,7 +514,7 @@ describe('which account a plan runs on', () => {
     expect(ceoOrg.orchestrator.subscription.accounts[0].email).toBe('ivan.plans@example.com');
   });
 
-  it("keeps the address from other people who see the whole company, and from the orchestrator acting for the CEO", async () => {
+  it("keeps the address from other people who see the whole company, and shows it to the orchestrator acting for the CEO", async () => {
     const { app, db, ceo, oleg, plan, a, url } = await plans();
     const na = await connectNode(url, a.key);
     na.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true, account: IVAN });
@@ -514,7 +526,7 @@ describe('which account a plan runs on', () => {
     const seen = await app.inject({ method: 'GET', url: '/api/subscriptions', headers: orchestratorHeaders(owner!.id, orchestrator!.id) });
     expect(seen.statusCode).toBe(200);
     expect(seen.body).toContain('"tier":"max"');
-    expect(seen.body).not.toContain('@');
+    expect(seen.body).toContain(IVAN.email);
   });
 
   it('gets a note when its machines are on different plans of the maker', async () => {
