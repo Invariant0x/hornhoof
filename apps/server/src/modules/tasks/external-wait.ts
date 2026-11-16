@@ -197,9 +197,9 @@ export async function sendTaskMessage(ctx: Ctx, input: TaskMessage, turn: Messag
    dropped as stale before it started, did not reach the recipient, and go again. */
 async function sentBefore(ctx: Ctx, agentId: string, message: TurnMessage, taskId: string | null): Promise<string | null> {
   if (!message.by || !message.byTurn) return null;
-  const [sender] = await ctx.db.select({ startedAt: jobs.startedAt }).from(jobs).where(eq(jobs.id, message.byTurn));
+  const [sender] = await ctx.db.select(only(jobs, 'startedAt')).from(jobs).where(eq(jobs.id, message.byTurn));
   if (!sender?.startedAt) return null;
-  const [before] = await ctx.db.select({ jobId: agentEvents.jobId }).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId)).where(and(
+  const [before] = await ctx.db.select(only(agentEvents, 'jobId')).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId)).where(and(
     eq(agentEvents.agentId, agentId), gte(agentEvents.createdAt, sender.startedAt), sql`${agentEvents.data}->>'from' = 'agent'`, eq(agentEvents.kind, 'message'),
     sql`${agentEvents.data}->>'by' = ${message.by}`, sql`${agentEvents.data}->>'byTurn' = ${message.byTurn}`, sql`${agentEvents.data}->>'text' = ${message.text}`,
     taskId ? sql`${agentEvents.data}->'task'->>'id' = ${taskId}` : sql`${agentEvents.data}->'task' is null`,
