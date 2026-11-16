@@ -5,6 +5,30 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.31.0]
+
+The orchestrator clears any employee's inbox, and a machine its owner opened stays open to the orchestrator for as
+long as access lasts.
+
+### Added
+
+- The orchestrator reads any employee's inbox and marks its letters read or done, picked by id, kind, source, task or
+  "received before", with a reason. The CEO and the CEO's delegate do the same with `POST /api/agents/:id/inbox/mark`,
+  for which there is no screen yet. Each such mark goes into the employee's log: who marked how many letters, and why.
+  Another employee gets 403 on an inbox not its own, and an assistant key gets 401. Every new company gets this in the
+  orchestrator's skills.
+
+### Changed
+
+- Once a machine's owner opens it, the orchestrator works on it in any of its turns while access is open: notices,
+  employees' letters, wake-ups and later turns, not only until that person writes again. Other machines stay closed. A
+  turn whose last words come from a person without rights to the machine, or from no one Hornhoof can name, is still
+  refused. Known limits: the rule looks at the words of the turn, not at data, so the orchestrator still reads tasks and
+  inboxes, a program's session can remember such a person's words from an earlier turn, and a head can pass their
+  request on in a letter, which counts as an employee's words; a turn woken by a task, comment, answer or cancel of a
+  person without rights, or by a department owner on a machine not theirs, now refuses commands there, and the work
+  goes on in the next turn; merges from the network wake the orchestrator as Hornhoof and count as no one's words.
+
 ## [0.29.0] - 2026-11-15
 
 A department runs its own outbound messages and its own work without the CEO, Settings is one window in four groups

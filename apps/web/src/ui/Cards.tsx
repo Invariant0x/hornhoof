@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useId, type ReactNode } from 'react';
 import { Bar } from './Bar';
 import { Edge } from './Edge';
 
@@ -12,6 +12,12 @@ export function CardHead({ mark, name, tier, badges, state, line }: { mark: Reac
 
 export function CardFrame({ label, accent, head, children, extra }: { label: string; accent?: boolean; head: ReactNode; children: ReactNode; extra?: ReactNode }) {
   return <article className="wcard" aria-label={label}><Edge className="machine" cut={12} accent={accent} corner={accent}>{head}<div className="blocks">{children}</div>{extra}</Edge></article>;
+}
+
+/* A block of its own at the bottom of a card: a heading that names it for the eye and for a screen reader, then its parts. */
+export function CardBlock({ title, children }: { title: string; children: ReactNode }) {
+  const id = useId();
+  return <section className="blk mc-blk" aria-labelledby={id}><h4 id={id}>{title}</h4>{children}</section>;
 }
 
 export function Part({ title, children }: { title: string; children: ReactNode }) {

@@ -76,6 +76,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   test_suite_memory: add('work'),
   outbound_contact_events: add('protected'),
   outbound_events: add('protected'),
+  /* Who set up a department's messages, on a person's word: written once, and never changed. */
+  outbound_setup_events: add('protected'),
   autonomous_releases: { kind: 'add', topic: 'protected', task: 'task_id', hereOnly: ['verdict_event_id'] },
   /* The record of a turn's release stands for the approval of its commit, by a person or by the autonomous release log. */
   turn_releases: { kind: 'add', topic: 'protected', task: 'task_id' },

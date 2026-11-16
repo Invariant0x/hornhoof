@@ -99,9 +99,14 @@ describe("what the Machines tab says of the company's data", () => {
       .insert(machines)
       .values({ companyId: s.acme.id, personId: s.owner.id, machineKey: 'next', hostname: 'm-next', kind: 'computer', role: 'worker', networkId: 'e'.repeat(64), serverOrder: 4, serverWhy: 'next', reportAt: NOW })
       .returning();
+    const [phone] = await s.db
+      .insert(machines)
+      .values({ companyId: s.acme.id, personId: s.owner.id, machineKey: 'phone', hostname: 'm-phone', kind: 'phone', role: null, reportAt: NOW })
+      .returning();
+    /* What a machine measures keeps it from nothing: one with little memory, room and a slow disk waits only for the ranking. */
     const [small] = await s.db
       .insert(machines)
-      .values({ companyId: s.acme.id, personId: s.owner.id, machineKey: 'small', hostname: 'm-small', kind: 'computer', role: 'worker', networkId: 'f'.repeat(64), reportAt: NOW, memory: 2 * 2 ** 30, diskFree: 500 * 2 ** 30, fsyncP99Ms: 3 })
+      .values({ companyId: s.acme.id, personId: s.owner.id, machineKey: 'small', hostname: 'm-small', kind: 'computer', role: 'worker', networkId: 'f'.repeat(64), reportAt: NOW, memory: 2 * 2 ** 30, diskFree: 2 ** 30, fsyncP99Ms: 59.1 })
       .returning();
     const [left] = await s.db
       .insert(machines)
@@ -111,8 +116,21 @@ describe("what the Machines tab says of the company's data", () => {
     expect(views.get(s.leader.id)).toEqual({ number: 1, why: 'server', pin: null, unfit: null, copy: null, leftAt: null, led: null });
     expect(views.get(held.id)).toMatchObject({ number: 2, why: null, unfit: null, copy: { line: 'catching_up' }, leftAt: null });
     expect(views.get(next!.id)).toEqual({ number: 4, why: 'next', pin: null, unfit: null, copy: null, leftAt: null, led: null });
-    expect(views.get(small!.id)).toEqual({ number: null, why: null, pin: null, unfit: { why: 'memory', memory: 2 * 2 ** 30 }, copy: null, leftAt: null, led: null });
+    expect(views.get(phone!.id)).toEqual({ number: null, why: null, pin: null, unfit: { why: 'phone' }, copy: null, leftAt: null, led: null });
+    expect(views.get(small!.id)).toEqual({ number: null, why: null, pin: null, unfit: null, copy: null, leftAt: null, led: null });
     expect(views.get(left!.id)).toMatchObject({ number: null, copy: null, leftAt: ago(86_400_000).toISOString() });
+  });
+
+  it('says why a machine that holds the data has no place', async () => {
+    const s = await stand();
+    /* Its copy is up to date, but its person no longer sees the whole company, until the ranking takes the data from it. */
+    const [anna] = await s.db.insert(people).values({ companyId: s.acme.id, name: 'Anna', email: 'anna@acme.test', status: 'active', scopeKind: 'listed' }).returning();
+    const held = await s.copy('m-anna', { personId: anna!.id, copyState: 'ready', copyAt: NOW, serverOrder: null, fsyncP99Ms: 59.1 });
+    s.keeper([{ name: held.name, state: 'sync' }]);
+    expect((await dataViews(s.app.ctx, NOW)).get(held.id)).toEqual({ number: null, why: null, pin: null, unfit: { why: 'scope', person: 'Anna', departments: 0 }, copy: { line: 'ready' }, leftAt: null, led: null });
+    /* One of the CEO's with no place yet says nothing against it, whatever its disk does. */
+    const mine = await s.copy('m-mine', { copyState: 'ready', copyAt: NOW, serverOrder: null, fsyncP99Ms: 59.1 });
+    expect((await dataViews(s.app.ctx, NOW)).get(mine.id)).toMatchObject({ number: null, unfit: null });
   });
 
   it('shows the place and the pin', async () => {
