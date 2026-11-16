@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
-import { agentEvents, agents, assistantEvents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, assistantEvents, attachments, companies, departments, jobs, nodes, people, programInstances, programOperatorCases, subscriptions } from '../src/db/schema.js';
 import { ASSISTANT_WITHOUT_SKILLS, instructionsOf } from '../src/modules/agents/instructions.js';
 import { putOnPlan } from '../src/modules/assistants/setup.js';
 import { appendEvent, publishWorking } from '../src/modules/events/store.js';
@@ -456,15 +456,15 @@ describe('GET /api/assistant/attachments/:id', () => {
     }
   });
 
-  it('answers a file it may not have exactly as one that is not there: of another agent, of a person, of another company, or no id at all', async () => {
+  it('answers a file its owner may not have exactly as one that is not there: of another owner\'s assistant, another company, or no id at all', async () => {
     const c = await company();
     const { ava, agent, run } = await talking(c);
     const turnOf = async (agentId: string, companyId = c.owner.companyId, subscriptionId = c.plan) =>
       (await c.db.insert(jobs).values({ companyId, subscriptionId, agentId, kind: 'conversation', prompt: 'Hi', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 }).returning())[0]!.id;
     const file = async (values: Partial<typeof attachments.$inferInsert>) =>
       (await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, name: 'file.bin', mediaType: 'application/octet-stream', bytes: BYTES, size: BYTES.length, ...values }).returning())[0]!.id;
-    const bo = await assistantOf(c, c.ceo, c.owner.id, 'Bo');
-    expect((await pick(c, c.ceo, bo.id, c.plan)).statusCode).toBe(200);
+    const bo = await assistantOf(c, c.olgaSession, c.olga.id, 'Bo');
+    expect((await pick(c, c.olgaSession, bo.id, c.olgaPlan)).statusCode).toBe(200);
     const boAgent = await ownAgent(c, bo.id);
     const [other] = await c.db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
     const [otherPerson] = await c.db.insert(people).values({ companyId: other!.id, name: 'Other person', email: 'other@example.test', status: 'active', scopeKind: 'company' }).returning();
@@ -473,9 +473,7 @@ describe('GET /api/assistant/attachments/:id', () => {
     const refused = {
       'an id nothing has': randomUUID(),
       'no id at all': 'not-a-uuid',
-      "the orchestrator's file": await file({ agentId: c.orchestrator.id, jobId: await turnOf(c.orchestrator.id) }),
       "another assistant's agent's file": await file({ agentId: boAgent.id, jobId: await turnOf(boAgent.id) }),
-      'a picture its owner sent its agent': await file({ personId: c.owner.id, name: 'mine.png', mediaType: 'image/png' }),
       "Hornhoof's picture of its agent's program": await file({ jobId: run.jobId, name: null, mediaType: 'image/png' }),
       "another company's file": await file({ companyId: other!.id, agentId: otherAgent!.id, jobId: await turnOf(otherAgent!.id, other!.id, otherPlan!.id) }),
     };
@@ -488,6 +486,23 @@ describe('GET /api/assistant/attachments/:id', () => {
     expect(JSON.parse(unknown.body).error).toMatchObject({ code: 'not_found', reason: 'attachment_unknown' });
     for (const [what, id] of Object.entries(refused)) expect(seen(await download(c, ava.key, id)), what).toEqual(unknown);
     expect((await download(c, ava.key, await attach(c, run.toolToken!, 'own.bin', BYTES))).statusCode).toBe(200);
+  });
+
+  it('keeps operator case files closed even when they are named files of its own agent and visible to its owner', async () => {
+    const c = await company();
+    const { ava, agent, run } = await talking(c);
+    const [node] = await c.db.select().from(nodes).where(eq(nodes.subscriptionId, c.plan));
+    const instance = randomUUID();
+    await c.db.insert(programInstances).values({ id: instance, companyId: c.owner.companyId, agentId: agent.id, nodeId: node!.id });
+    const [incident] = await c.db.insert(programOperatorCases).values({ companyId: c.owner.companyId, agentId: agent.id, jobId: run.jobId, nodeId: node!.id, instance, reason: 'assignment_unrecorded', evidenceKey: 'file-test', capability: randomUUID(), deadlineAt: new Date('2099-01-01') }).returning();
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, jobId: run.jobId, operatorCaseId: incident!.id, name: 'case.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    expect((await c.app.inject({ url: `/api/attachments/${picture!.id}`, ...as(c.ceo) })).statusCode).toBe(200);
+    const got = await download(c, ava.key, picture!.id);
+    const missing = await download(c, ava.key, randomUUID());
+    expect(got.statusCode).toBe(404);
+    expect(got.body).toBe(missing.body);
+    expect(got.headers['content-type']).toBe(missing.headers['content-type']);
+    expect(got.headers['content-disposition']).toBeUndefined();
   });
 });
 
