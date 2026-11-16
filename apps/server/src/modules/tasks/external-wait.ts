@@ -8,9 +8,9 @@ import { ApiError } from '../../errors.js';
 import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { refusePaused } from './pause.js';
 import { wakeAll } from './wake.js';
-import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
+import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, reconnecting, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
-import { messageNotDelivered } from '../conversation/live.js';
+import { messageNotDelivered, NOT_DELIVERED, refusedMessage, taskNamed, undeliveredLine } from '../conversation/undelivered.js';
 import { dropMail, inboxChanged } from '../conversation/inbox.js';
 import { recordRequestedNotice, requestedWaitNotice } from './wait-notices.js';
 import { checkWaitHealth } from './wait-monitor.js';
@@ -172,19 +172,27 @@ type MessageTurn = Parameters<typeof enqueueTurn>[1] & { message: TurnMessage };
 type ResumedWait = { task: Task; before: ExternalWait };
 type QueuedMessage = { id: string; resumed?: ResumedWait };
 
-/* Input precedes the agent line, as it does for a decision that changes its own agent. */
-export function queueTaskMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
-  return withInputLock(ctx, input.agentId, () => queueMessage(ctx, input, turn));
+/* Input precedes the agent line, as it does for a decision that changes its own agent. An employee's message that is
+   refused is kept where failures reads it, and its sender hears why, to whom and on which task. */
+export async function queueTaskMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
+  try {
+    return await withInputLock(ctx, input.agentId, () => queueMessage(ctx, input, turn));
+  } catch (error) {
+    const sender = input.actor.agentId;
+    throw sender ? await refusedMessage(ctx, { companyId: input.companyId, agentId: sender }, { recipient: input.agentId, task: input.task }, error) : error;
+  }
 }
 
+/* An employee's message goes into the turn that runs or waits in its recipient's line; a person's may wait for whatever
+   holds that line back. */
 async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
   const required = !!input.actor.agentId;
   const queued: QueuedMessage = await onAgent(ctx, input.agentId, async () => input.task === undefined
-    ? { id: await insertOrDeliverTurn(ctx, turn, required) }
-    : queueBoundMessage(ctx, { ...input, task: input.task }, turn, required));
+    ? { id: await insertOrDeliverTurn(ctx, turn) }
+    : queueBoundMessage(ctx, { ...input, task: input.task }, turn));
   try {
     await pump(ctx, input.agentId);
-    if (required) await onAgent(ctx, input.agentId, () => confirmMessage(ctx, input.agentId, queued.id));
+    if (required) await onAgent(ctx, input.agentId, () => confirmMessage(ctx, input, queued.id));
   } catch (error) {
     const resumed = queued.resumed;
     if (resumed) await onAgent(ctx, input.agentId, () => restoreWait(ctx, resumed, input.actor));
@@ -193,30 +201,61 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
   return queued.id;
 }
 
-/* Whether a turn that did not go out waits for something that ends by itself: the update its machine gets ready for, the
-   turn that runs or a turn ahead of it. One its plan cannot run for now, at its limit or past the share set for tasks,
-   does not: the sender hears at once and can tell someone else. */
-async function waitsItsLine(ctx: Ctx, agentId: string, id: string): Promise<boolean> {
-  const [turn] = await ctx.db.select({ taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
-  if (!turn) return false;
-  const state = await agentState(ctx, agentId);
-  if (state.machineDrain && state.machineDrain.state !== 'postponed') return true;
-  if (state.limitUntil || (state.budgetUntil && turn.taskId)) return false;
+type AgentNow = Awaited<ReturnType<typeof agentState>>;
+
+/* The update its machine gets ready for, which a turn waits out. */
+const updating = (state: AgentNow): boolean => Boolean(state.machineDrain && state.machineDrain.state !== 'postponed');
+
+/* What its plan holds a turn back for, which the sender should not wait out: its limit, or the share set for tasks. */
+const planHold = (state: AgentNow, onTask: boolean): string | null => (state.limitUntil ? 'plan_at_limit' : state.budgetUntil && onTask ? 'plan_budget' : null);
+
+/* Whether a turn waits in line for something that ends by itself: the turn that runs, a turn ahead of it, or its machine
+   getting back on the line. */
+async function waitsInLine(ctx: Ctx, agentId: string, turn: { id: string; createdAt: Date }, state: AgentNow): Promise<boolean> {
   if (state.busy) return true;
-  const [ahead] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, id), lte(jobs.createdAt, turn.createdAt))).limit(1);
-  return Boolean(ahead);
+  const [ahead] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, turn.id), lte(jobs.createdAt, turn.createdAt))).limit(1);
+  if (ahead) return true;
+  return state.reason === 'machine_offline' && (await reconnecting(ctx, agentId));
 }
 
-/* A turn that cannot go out fails, its sender hears so, and its letter waits for nobody. A letter in the inbox waits there for
-   the turn that takes it, which other letters wait for too, whatever holds that turn back. */
-async function confirmMessage(ctx: Ctx, agentId: string, id: string): Promise<void> {
+/* Why a turn that did not go out cannot wait its line, or null when it waits for something that ends by itself. One its
+   plan cannot run for now does not: the sender hears at once and can tell someone else, as it does of one that cannot run
+   for any other reason, or whose turn did not go out. */
+async function notWaiting(ctx: Ctx, agentId: string, id: string): Promise<string | null> {
+  const [turn] = await ctx.db.select({ id: jobs.id, taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
+  if (!turn) return 'turn_not_sent';
+  const state = await agentState(ctx, agentId);
+  if (updating(state)) return null;
+  const held = planHold(state, turn.taskId !== null);
+  if (held) return held;
+  return (await waitsInLine(ctx, agentId, turn, state)) ? null : (state.reason ?? 'turn_not_sent');
+}
+
+/* A letter in the inbox waits there for the turn that takes it, which other letters wait for too, whatever holds that turn back. */
+async function inInbox(ctx: Ctx, id: string): Promise<boolean> {
   const [kept] = await ctx.db.select({ inboxWake: jobs.inboxWake }).from(jobs).where(eq(jobs.id, id));
-  if (kept?.inboxWake || (await waitsItsLine(ctx, agentId, id))) return;
-  await ctx.db.update(jobs).set({ status: 'failed', error: 'message_not_delivered', finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
-  const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id));
+  return kept?.inboxWake === true;
+}
+
+/* The turn of a message that cannot wait fails with the line that says why, unless it went out or failed on its way. */
+async function failUndelivered(ctx: Ctx, input: TaskMessage, id: string, why: string) {
+  const line = undeliveredLine({ reason: why, recipient: input.agentId, task: taskNamed(input.task) });
+  await ctx.db.update(jobs).set({ status: 'failed', error: NOT_DELIVERED, result: line, finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
+  const [job] = await ctx.db.select({ status: jobs.status, error: jobs.error }).from(jobs).where(eq(jobs.id, id));
+  return job;
+}
+
+/* A turn that failed on its own way out names its own reason. */
+const ownReason = (job: { error: string | null } | undefined, why: string): string => (job?.error && job.error !== NOT_DELIVERED ? job.error : why);
+
+/* A turn that cannot go out nor wait its line fails with why, its sender hears so, and its letter waits for nobody. */
+async function confirmMessage(ctx: Ctx, input: TaskMessage, id: string): Promise<void> {
+  const why = (await inInbox(ctx, id)) ? null : await notWaiting(ctx, input.agentId, id);
+  if (why === null) return;
+  const job = await failUndelivered(ctx, input, id, why);
   if (job && job.status !== 'failed') return;
-  if (await dropMail(ctx.db, agentId, id)) await inboxChanged(ctx, agentId);
-  throw messageNotDelivered();
+  if (await dropMail(ctx.db, input.agentId, id)) await inboxChanged(ctx, input.agentId);
+  throw messageNotDelivered(ownReason(job, why));
 }
 
 /* A failed send preserves the previous wait unless another task action has already replaced it. */
@@ -228,14 +267,14 @@ async function restoreWait(ctx: Ctx, resumed: ResumedWait, actor: Actor): Promis
   }
 }
 
-async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number | string }, turn: MessageTurn, required: boolean): Promise<QueuedMessage> {
+async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number | string }, turn: MessageTurn): Promise<QueuedMessage> {
   const task = await taskByRef(ctx, input.companyId, input.task);
   if (!task) throw refuse(404, 'task_unknown', `There is no task ${input.task} you can message.`);
   const party = (id: string) => ctx.db.select({ id: agents.id, kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, id));
   const [sender] = input.actor.agentId ? await party(input.actor.agentId) : [];
   const [recipient] = await party(input.agentId);
   requireMessageTask(task, recipient, sender);
-  const id = await insertOrDeliverTurn(ctx, { ...turn, ...await taskTurn(ctx, task, input.agentId, turn.message) }, required);
+  const id = await insertOrDeliverTurn(ctx, { ...turn, ...await taskTurn(ctx, task, input.agentId, turn.message) });
   if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
   const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true }, markRecord(task.externalWait, 'check_back'));
   return { id, resumed: { task: resumed, before: task.externalWait } };
