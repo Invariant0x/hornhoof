@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CheckCoordinator } from '../src/modules/nodes/check-slots-queue.js';
 import type { CheckQueueReply } from '@hornhoof/protocol';
 
@@ -109,5 +109,63 @@ describe('a lease counts from when the machine was last heard', () => {
     expect(sent.filter(s => s.reply.state === 'ended').map(s => s.node)).toEqual(['quiet']);
     expect(sent).toContainEqual({ node: 'home', reply: { type: 'check.state', id: c, state: 'running', position: 0 } });
     queue.close();
+  });
+});
+
+/* #1060: a machine whose connection drops for a moment keeps its leases for 90 s, and its claim once back keeps the lease it
+   held. A claim to resume a lease the server no longer holds, or one from another machine, is ended, never queued anew; a
+   machine that does not come back within 90 s loses its leases as before. */
+describe('a machine whose connection drops keeps its leases for 90 s', () => {
+  const setup = () => {
+    vi.useFakeTimers({ now: 0 });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const heard = new Map<string, number>([['home', 0], ['quiet', 0], ['other', 0]]);
+    const sent: { node: string; reply: CheckQueueReply }[] = [];
+    const queue = new CheckCoordinator({ warmupMs: 0, now: () => Date.now(), heard: node => heard.get(node) ?? null, send: (node, reply) => { sent.push({ node, reply }); } });
+    onTestFinished(() => { queue.close(); });
+    for (const [node, host] of [['home', 'host-A'], ['quiet', 'host-B'], ['other', 'host-C']]) queue.node(node!, host!, { cpus: 10, load: 0, at: 0 });
+    return { heard, sent, queue, ended: () => sent.filter(s => s.reply.state === 'ended').map(s => `${s.node} ${s.reply.id}`) };
+  };
+
+  it('keeps the lease of a machine back within 90 s and answers its claim with the lease it held', async () => {
+    const { heard, sent, queue, ended } = setup();
+    queue.acquire('home', { type: 'check.acquire', id: a, label: 'part 4' });
+    await tick();
+    queue.away('home');
+    await vi.advanceTimersByTimeAsync(10_000);
+    heard.set('home', Date.now());
+    queue.acquire('home', { type: 'check.acquire', id: a, label: 'part 4', resume: true });
+    await tick();
+    expect(sent.at(-1)).toEqual({ node: 'home', reply: { type: 'check.state', id: a, state: 'running', position: 0 } });
+    for (let at = 20_000; at <= 200_000; at += 20_000) { await vi.advanceTimersByTimeAsync(20_000); heard.set('home', Date.now()); }
+    expect(ended()).toEqual([]);
+  });
+
+  it('ends the leases of a machine away for 90 s, and its late claim, without queueing it anew', async () => {
+    const { sent, queue, ended } = setup();
+    queue.acquire('quiet', { type: 'check.acquire', id: b, label: 'part 2' });
+    await tick();
+    queue.away('quiet');
+    await vi.advanceTimersByTimeAsync(89_000);
+    expect(ended()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ended()).toEqual([`quiet ${b}`]);
+    queue.node('quiet', 'host-B', { cpus: 10, load: 0, at: Date.now() });
+    queue.acquire('quiet', { type: 'check.acquire', id: b, label: 'part 2', resume: true });
+    await tick();
+    expect(ended()).toEqual([`quiet ${b}`, `quiet ${b}`]);
+    expect(sent.filter(s => s.reply.id === b && s.reply.state !== 'ended').map(s => s.reply.state)).toEqual(['running']);
+  });
+
+  it('ends a claim to resume a lease that another machine holds, and leaves that lease alone', async () => {
+    const { sent, queue, ended } = setup();
+    queue.acquire('home', { type: 'check.acquire', id: a, label: 'part 4' });
+    await tick();
+    queue.acquire('other', { type: 'check.acquire', id: a, label: 'part 4', resume: true });
+    await tick();
+    expect(ended()).toEqual([`other ${a}`]);
+    expect(sent.filter(s => s.node === 'other' && s.reply.state !== 'ended')).toEqual([]);
+    queue.release('other', a); await tick();
+    expect(ended()).toEqual([`other ${a}`]);
   });
 });
