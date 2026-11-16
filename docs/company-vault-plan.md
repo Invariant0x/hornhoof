@@ -166,6 +166,21 @@ storageState, source: 'vault' | 'person' })`, keyed by agent so both employees a
 assistants work. Pending 1075's answer; if 1075 names another function or format,
 only the call in `modules/vault/fill.ts` changes.
 
+## Agreed and changed during Development
+
+- The authors of 1075 and 1079 confirmed the contract at `21cf42d0` on 2026-11-16: one mechanism, owned by 1076.
+- The phone target also carries `site`, the entry's web address or null, so the phone adapter checks that a page open in
+  the phone's browser is of the entry's site before typing.
+- `sameSite(address, page)` in `@hornhoof/protocol`: the same host or one under the other, never a step down from https.
+  The node's browser types only on such pages, and the server refuses an address an agent names that is not of the
+  entry's site, so no agent can send a value to another site's form. A browser fill needs an entry whose site is a web
+  address.
+- The node registers adapters with `fills.register(adapter)` on the `SecretFills` instance in `main.ts`.
+- The server takes the other modules through two hooks in `modules/vault/fill.ts`: `usePhoneTargets(ctx, fn)` for 1079's
+  resolver and `useSessionStore(ctx, fn)` for 1075's saved sign-ins. Until 1075 connects it, a browser sign-in answers
+  `savedSignIn: false`.
+- The Passwords group shows when the server answers `GET /api/vault`, like the other probed groups.
+
 ## Server
 
 ### Stored state (one new Drizzle migration, shipped ones untouched)
