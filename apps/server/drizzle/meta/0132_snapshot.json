@@ -1,6 +1,6 @@
 {
-  "id": "63b8953a-a29d-49e8-b108-56a100175e85",
-  "prevId": "20027849-3655-4fc0-8348-c47ebbe46c0e",
+  "id": "15443e17-276e-4771-91de-6892e60b2095",
+  "prevId": "3c28bc6c-017a-4bb7-a39a-d71f7e6d3da9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -439,6 +439,115 @@
           "tableTo": "people",
           "columnsFrom": [
             "person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_fallbacks": {
+      "name": "agent_fallbacks",
+      "schema": "",
+      "columns": {
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "home_subscription_id": {
+          "name": "home_subscription_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "home_model": {
+          "name": "home_model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "home_effort": {
+          "name": "home_effort",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscription_id": {
+          "name": "subscription_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_fallbacks_agent_id_agents_id_fk": {
+          "name": "agent_fallbacks_agent_id_agents_id_fk",
+          "tableFrom": "agent_fallbacks",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_fallbacks_company_id_companies_id_fk": {
+          "name": "agent_fallbacks_company_id_companies_id_fk",
+          "tableFrom": "agent_fallbacks",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_fallbacks_home_subscription_id_subscriptions_id_fk": {
+          "name": "agent_fallbacks_home_subscription_id_subscriptions_id_fk",
+          "tableFrom": "agent_fallbacks",
+          "tableTo": "subscriptions",
+          "columnsFrom": [
+            "home_subscription_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_fallbacks_subscription_id_subscriptions_id_fk": {
+          "name": "agent_fallbacks_subscription_id_subscriptions_id_fk",
+          "tableFrom": "agent_fallbacks",
+          "tableTo": "subscriptions",
+          "columnsFrom": [
+            "subscription_id"
           ],
           "columnsTo": [
             "id"
@@ -2685,6 +2794,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "hardware_key": {
+          "name": "hardware_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -2731,6 +2846,22 @@
             },
             {
               "expression": "serial",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"company_phones\".\"removed_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "company_phones_hardware": {
+          "name": "company_phones_hardware",
+          "columns": [
+            {
+              "expression": "hardware_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -6577,7 +6708,7 @@
           "name": "node_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "connected_at": {
           "name": "connected_at",
@@ -13816,6 +13947,13 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "fallbacks": {
+          "name": "fallbacks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "base_url": {
           "name": "base_url",

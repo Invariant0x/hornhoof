@@ -6,6 +6,7 @@ import { hiddenParty, knowsAgentId, viewerOf, type AgentViewer } from '../../aut
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { agents, companies, departments, INBOX_MODES, LETTER_KINDS, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { mayChangeRules } from '../departments/approval-policy.js';
@@ -155,7 +156,7 @@ export function inboxRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const { mode } = ModeBody.parse(req.body);
     /* A product's id is not a department's: its mode is its department's. */
-    const [department] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId), isNull(departments.parentId)));
+    const [department] = await db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId), isNull(departments.parentId)));
     if (!department) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     if (!(await mayChangeRules(db, me, department.id))) throw new ApiError(403, 'forbidden', "Only this department's owner, the CEO or the CEO delegate changes how its employees take their mail.", 'not_owner');
     await db.update(departments).set({ inboxMode: mode }).where(eq(departments.id, department.id));

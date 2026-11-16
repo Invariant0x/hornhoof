@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
@@ -53,12 +54,12 @@ function recipient(task: Task, agentId: string, why = ''): boolean {
 /* Escalations reach the live department head even when a worker created the task. */
 async function wakeRecipient(db: Store, task: Task, agentId: string, why = ''): Promise<boolean> {
   if (why === 'blocked' && !recipient(task, agentId, why)) {
-    const [head] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+    const [head] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
     return head !== undefined;
   }
   if (why !== 'after_cancelled') return recipient(task, agentId, why);
   if (task.createdByAgentId) return task.createdByAgentId === agentId;
-  const [orchestrator] = await db.select({ id: agents.id }).from(agents)
+  const [orchestrator] = await db.select(idOnly(agents)).from(agents)
     .where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   return orchestrator?.id === agentId;
 }
@@ -177,7 +178,7 @@ export async function recordStale(db: Store, jobId: string, agentId: string, tas
 /* take holds these task rows until it claims the jobs. A concurrent task move cannot slip between the check and claim. */
 export async function discardStaleTurns(db: Store, waiting: readonly TaskTurn[]): Promise<boolean> {
   const ids = [...new Set(waiting.map(j => j.taskId).filter((id): id is string => id !== null))];
-  if (ids.length) await db.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, ids)).orderBy(asc(tasks.id)).for('share');
+  if (ids.length) await db.select(idOnly(tasks)).from(tasks).where(inArray(tasks.id, ids)).orderBy(asc(tasks.id)).for('share');
   let stale = false;
   for (const job of waiting) stale = (await discardStaleTurn(db, job)) || stale;
   return stale;
@@ -188,7 +189,7 @@ export async function waitingTaskTurn(db: Db, agentId: string, taskId: string): 
   const waiting = await db.select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId }).from(jobs)
     .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).orderBy(asc(jobs.createdAt));
   await discardStaleTurns(db, waiting);
-  const [current] = await db.select({ id: jobs.id }).from(jobs)
+  const [current] = await db.select(idOnly(jobs)).from(jobs)
     .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).limit(1);
   return current;
 }

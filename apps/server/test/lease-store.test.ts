@@ -331,6 +331,45 @@ async function silentServer() {
   return { url: `postgres://u:p@127.0.0.1:${port}/d`, opened: () => opened, openNow: () => open.size };
 }
 
+/* A server that lets each connection in as a database does, and then never answers a statement, as a database whose
+   disk hangs does. */
+async function hangingServer() {
+  const open = new Set<net.Socket>();
+  let asked = 0;
+  const server = net.createServer(socket => {
+    open.add(socket);
+    socket.on('error', () => {});
+    socket.on('close', () => open.delete(socket));
+    let started = false;
+    socket.on('data', () => {
+      if (started) return void (asked += 1);
+      started = true;
+      /* AuthenticationOk, then ReadyForQuery while idle. */
+      socket.write(Buffer.from([0x52, 0, 0, 0, 8, 0, 0, 0, 0, 0x5a, 0, 0, 0, 5, 0x49]));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  onTestFinished(() => {
+    for (const socket of open) socket.destroy();
+    server.close();
+  });
+  const { port } = server.address() as AddressInfo;
+  return { url: `postgres://u:p@127.0.0.1:${port}/d`, asked: () => asked };
+}
+
+/* Waits for what the sockets bring, a turn of the event loop at a time, and moves no clock: vi.waitFor would move a
+   faked one. */
+async function turnsUntil(done: () => boolean): Promise<void> {
+  while (!done()) await new Promise<void>(resolve => setImmediate(resolve));
+}
+
+/* Whether a promise has settled yet, either way. */
+function settling(answer: Promise<unknown>): { done: boolean } {
+  const seen = { done: false };
+  answer.then(() => void (seen.done = true), () => void (seen.done = true));
+  return seen;
+}
+
 describe("the keeper's connection", () => {
   it('gives up on a database that never answers, and opens a new connection for the next query', async () => {
     const silent = await silentServer();
@@ -353,6 +392,34 @@ describe("the keeper's connection", () => {
     expect((await rest).map(answer => answer.status)).toEqual(['rejected', 'rejected']);
     expect(silent.opened()).toBe(3);
     await until(() => silent.openNow() === 0);
+  });
+
+  it('gives a connection and each statement the time the disk asks for at that moment', async () => {
+    const silent = await silentServer();
+    const hanging = await hangingServer();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
+    let ms = 3000;
+    /* A connection to a database that never answers waits as long as the disk asks, and no longer. */
+    const connecting = keeperSql(silent.url, { timeoutMs: () => ms });
+    onTestFinished(() => connecting.close());
+    const first = settling(connecting.query('SELECT 1'));
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(first.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await turnsUntil(() => first.done);
+    /* A statement on a connection that came in waits as long as the disk asks when it is sent, read anew each time. */
+    const asking = keeperSql(hanging.url, { timeoutMs: () => ms });
+    onTestFinished(() => asking.close());
+    for (const [round, wait] of [[1, 3000], [2, 5000]] as const) {
+      ms = wait;
+      const answer = settling(asking.query('SELECT 1'));
+      await turnsUntil(() => hanging.asked() === round);
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect([round, answer.done]).toEqual([round, false]);
+      await vi.advanceTimersByTimeAsync(1);
+      await turnsUntil(() => answer.done);
+    }
   });
 });
 

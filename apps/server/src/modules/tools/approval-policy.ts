@@ -1,13 +1,14 @@
 import { WAIT_SOURCE_KINDS, WaitPlan } from '@hornhoof/protocol/waits';
 import { APPROVAL_MODES, ApprovalAmount, ApprovalChannel, approvalNeeded, kindKey, ruleOf } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, count, eq, gte, inArray } from 'drizzle-orm';
+import { and, eq, gte, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorHeaders } from '../../auth/internal.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
+import { countOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
@@ -82,7 +83,7 @@ async function heldTask(ctx: Pick<Ctx, 'db'>, job: ToolJob, ref: number | string
 async function askedInTurn(db: Ctx['db'], job: ToolJob): Promise<number> {
   const [started] = await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id));
   const [asked] = await db
-    .select({ n: count() })
+    .select(countOnly())
     .from(requests)
     .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, started?.at ?? new Date(0))));
   return Number(asked?.n ?? 0);
@@ -262,7 +263,7 @@ function changeAsPerson(ctx: Ctx, app: FastifyInstance, job: ToolJob): Change {
     });
 }
 
-const ORCHESTRATOR_WHO = "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.";
+const ORCHESTRATOR_WHO = 'In any turn: as the CEO or the CEO delegate who wrote to you, or else as the company\'s owner.';
 const HEAD_WHO = 'Only for your own department, and only in a turn that answers a person who runs it or the CEO, as their decision.';
 
 /* The tools that set a department's approvals and wait dates; mine says which department the agent may name. */

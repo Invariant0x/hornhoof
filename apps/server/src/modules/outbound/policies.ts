@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { modelChecks, outboundAttempts, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundMessages, outboundPolicies, supportTickets, type StopReason } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { isOn } from '../model-checks/lifecycle.js';
 import type { Tx } from '../tasks/engine.js';
@@ -134,7 +135,7 @@ export const channelIn = async (db: Pick<Db, 'select'>, companyId: string, chann
 export async function addPolicy(ctx: Pick<Ctx, 'db'>, at: { companyId: string; channelId: string; createdBy: string }, value: OutboundPolicyValue) {
   const digest = digestOf(value);
   return ctx.db.transaction(async tx => {
-    await tx.select({ id: outboundChannels.id }).from(outboundChannels).where(eq(outboundChannels.id, at.channelId)).for('update');
+    await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, at.channelId)).for('update');
     const [newest] = await tx.select({ revision: outboundPolicies.revision }).from(outboundPolicies).where(eq(outboundPolicies.channelId, at.channelId)).orderBy(desc(outboundPolicies.revision)).limit(1);
     const [row] = await tx.insert(outboundPolicies).values({ ...at, revision: (newest?.revision ?? 0) + 1, digest, value }).returning();
     return { id: row!.id, revision: row!.revision, digest };
@@ -144,7 +145,7 @@ export async function addPolicy(ctx: Pick<Ctx, 'db'>, at: { companyId: string; c
 /* A person's stop. Nothing new is admitted after it commits, and stopping what is stopped changes nothing. */
 export async function stopByPerson(ctx: Pick<Ctx, 'db'>, channelId: string, now = new Date()): Promise<Channel> {
   return ctx.db.transaction(async tx => {
-    await tx.select({ id: outboundChannels.id }).from(outboundChannels).where(eq(outboundChannels.id, channelId)).for('update');
+    await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, channelId)).for('update');
     await stopChannel(tx, channelId, 'channel_stopped', now);
     const [row] = await tx.select().from(outboundChannels).where(eq(outboundChannels.id, channelId));
     return row!;
@@ -157,7 +158,7 @@ const RECORD_TABLES = [outboundChannels, outboundCatalogRevisions, supportTicket
    accounts and messages it holds. */
 export async function outboundRecordsOf(db: Pick<Db, 'select'>, inside: string[], name: string): Promise<string | null> {
   for (const table of RECORD_TABLES) {
-    const rows = await db.select({ id: table.id }).from(table).where(or(inArray(table.departmentId, inside), inArray(table.productId, inside))).limit(1);
+    const rows = await db.select(idOnly(table)).from(table).where(or(inArray(table.departmentId, inside), inArray(table.productId, inside))).limit(1);
     if (rows.length) return `${name} has outbound channels, catalog or tickets on record, and cannot be removed.`;
   }
   return null;
@@ -168,7 +169,7 @@ const bucketsIn = (a: Pick<Attempt, 'accountBucketId' | 'domainBucketId'>) => [a
 /* The buckets of attempts, one way round, before what they count is changed. */
 export async function lockBuckets(tx: Tx, attempts: readonly Pick<Attempt, 'accountBucketId' | 'domainBucketId'>[]): Promise<void> {
   const ids = [...new Set(attempts.flatMap(bucketsIn))].sort();
-  if (ids.length) await tx.select({ id: outboundDailyUsage.id }).from(outboundDailyUsage).where(inArray(outboundDailyUsage.id, ids)).orderBy(outboundDailyUsage.id).for('update');
+  if (ids.length) await tx.select(idOnly(outboundDailyUsage)).from(outboundDailyUsage).where(inArray(outboundDailyUsage.id, ids)).orderBy(outboundDailyUsage.id).for('update');
 }
 
 /* A reservation given back: nothing was handed to any transport, so its place is free again. */
@@ -187,7 +188,7 @@ async function reservationsOf(tx: Tx, messageIds: readonly string[]): Promise<At
 /* Cancels the queued messages to a contact, giving back what they had reserved. Its numbers stay with each. The caller
    holds the contact, and buckets come before messages, as in every other path. */
 export async function cancelQueuedTo(tx: Tx, contactId: string, code: GateCode, now: Date): Promise<void> {
-  const queued = await tx.select({ id: outboundMessages.id }).from(outboundMessages).where(and(eq(outboundMessages.contactId, contactId), inArray(outboundMessages.status, [...QUEUED])));
+  const queued = await tx.select(idOnly(outboundMessages)).from(outboundMessages).where(and(eq(outboundMessages.contactId, contactId), inArray(outboundMessages.status, [...QUEUED])));
   const ids = queued.map(m => m.id).sort();
   await lockBuckets(tx, await reservationsOf(tx, ids));
   for (const id of ids) await cancelOne(tx, id, code, now);

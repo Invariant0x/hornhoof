@@ -136,24 +136,25 @@ for (const { lang, skin, width } of LOOKS) {
     const rows = page.locator('tr.rm');
     const row = (text: string) => rows.filter({ hasText: text });
     await expect(rows).toHaveCount(4);
-    await expect(row('Max').locator('.badge.pay-plan')).toHaveText(t.subs.pay.personal);
-    for (const last4 of ['WXYZ', 'K7Q2', 'M3N4']) await expect(row(last4).locator('.badge.pay-tokens')).toHaveText(t.subs.pay.api_key);
+    await expect(row('Max').getByRole('img', { name: t.subs.kindHint.personal, exact: true })).toBeVisible();
+    for (const last4 of ['WXYZ', 'K7Q2', 'M3N4']) await expect(row(last4).getByRole('img', { name: t.subs.kindHint.api_key, exact: true })).toBeVisible();
     /* A desk has the column; a phone shows each row as entries, each value under the name of its column. */
     if (width > 600) await expect(page.getByRole('columnheader', { name: t.subs.tokensColumn })).toBeVisible();
     else await expect(row('WXYZ').getByRole('cell', { name: `${t.subs.tokensColumn} ${n(ROUTER.tokens!.month.total)}`, exact: true })).toBeVisible();
     await expect(row('WXYZ')).toContainText(n(ROUTER.tokens!.month.total));
-    await expect(row('M3N4').getByRole('img')).toHaveAccessibleName('Codex');
+    await expect(row('M3N4').getByRole('img').first()).toHaveAccessibleName('Codex');
     await expect(row('Max')).toContainText(n(PLAN.tokens!.month.total));
-    /* How each is paid reads by its word and sign, in the ink of the page, as the orchestrator's mark is quiet. */
+    /* How each is paid reads by its sign in the quiet ink of the orchestrator's role, a small line under its name. */
     const ink = await page.evaluate(() => getComputedStyle(document.body).color);
-    for (const badge of await rows.locator('.badge.ctype').all()) {
-      await expect(badge.locator('svg')).toBeVisible();
-      await expect(badge).toHaveCSS('color', ink);
+    const orchestrator = row('WXYZ').locator('td.k-name').getByText(t.subs.orchestrator, { exact: true });
+    await expect(orchestrator).toBeVisible();
+    const quiet = await orchestrator.evaluate(el => getComputedStyle(el).color);
+    expect(quiet).not.toBe(ink);
+    for (const sign of await rows.locator('.pay-sign').all()) {
+      await expect(sign.locator('svg')).toBeVisible();
+      await expect(sign).toHaveCSS('color', quiet);
     }
-    const orchestrator = row('WXYZ').locator('.badge.orch-role');
-    await expect(orchestrator).toHaveText(t.subs.orchestrator);
-    expect(await orchestrator.evaluate(el => getComputedStyle(el).color)).not.toBe(ink);
-    /* A mark stands inside the name's cell, a line high. */
+    /* The role stands inside the name's cell, a line high. */
     const [mark, nameCell] = [await box(orchestrator), await box(row('WXYZ').locator('td.k-name'))];
     expect(mark.x + mark.width).toBeLessThanOrEqual(nameCell.x + nameCell.width + 1);
     expect(mark.height).toBeLessThan(30);
@@ -185,7 +186,7 @@ for (const { lang, skin, width } of LOOKS) {
     await row('WXYZ').locator('button.rowbtn').click();
     const card = page.getByRole('article', { name: /WXYZ/ });
     await expect(card).toBeVisible();
-    await expect(card.locator('.badge.pay-tokens')).toHaveText(t.subs.pay.api_key);
+    await expect(card.locator('.card-h').getByRole('img', { name: t.subs.kindHint.api_key, exact: true })).toBeVisible();
     const part = card.locator('.blk-facts .part').filter({ has: page.locator('.part-h', { hasText: new RegExp(`^${t.subs.tokens.title}$`) }) });
     const gauges = part.locator('.gauge');
     await expect(gauges).toHaveCount(4);
@@ -308,13 +309,28 @@ for (const { lang, skin, width, dir } of OWNER_LOOKS) {
     await expect(page.getByRole('heading', { level: 1, name: t.subs.heading, exact: true })).toBeVisible();
     await page.evaluate(async () => { await document.fonts.ready; });
     const section = page.locator('section.subs');
-    const pieces = { head: '.people-head', connect: '.head-actions > .btn', tools: '.tools', table: '.tbl' };
+    const pieces = { head: '.people-head', connect: '.head-actions > .btn', tools: '.tools', table: '.tbl', sortHeader: 'thead .sorth', sortButton: '.sortbar .sortb', rowButton: '.rowbtn' };
     expect(await tabsWhole(page)).toEqual([]);
     expect.soft(await offences(section, { danger: [], groups: '.head-actions' })).toEqual([]);
     const measured: Measured[] = [{ browser: browserName, look, screen: 'subscriptions', sizes: await sizes(section, pieces) }];
     await wholePage(page, info.outputPath(`subs-list-${look}-${browserName}.png`));
 
-    await page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn').click();
+    const rowButton = page.locator('tr.rm').filter({ hasText: 'MKT1' }).locator('button.rowbtn');
+    const sortControl = (await section.locator('thead').isVisible()) ? section.locator('button.sorth').first() : section.locator('button.sortb').first();
+    for (const [label, target] of [['header', sortControl], ['row', rowButton]] as const) {
+      await target.focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await expect(target).toBeFocused();
+      expect(await focusRing(page)).toBe('ring');
+      await around(page, target, info.outputPath(`subs-${label}-focus-${look}-${browserName}.png`));
+    }
+    if (dir === 'rtl') {
+      const [btnBox, chevBox] = [await box(rowButton), await box(rowButton.locator('.chev'))];
+      expect(btnBox.x + btnBox.width - (chevBox.x + chevBox.width)).toBeLessThanOrEqual(2);
+    }
+
+    await rowButton.click();
     const card = page.getByRole('article', { name: /MKT1/ });
     const name = subName(t, MARKETING_KEY);
     const remove = card.getByRole('button', { name: t.subs.removeLabel(name), exact: true });

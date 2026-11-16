@@ -289,6 +289,83 @@ describe('the lease the keeper holds', () => {
   });
 });
 
+describe('a lease on a disk that writes slowly', () => {
+  /* A holder whose disk measured the given fsync p99, and that is told whether another machine could lead now: one that
+     holds a copy that finished. */
+  function slowDisk(fsyncP99Ms: number | null, sole: boolean, lease = fakeLease()) {
+    let now = T0;
+    const lines: string[] = [];
+    const ended: number[] = [];
+    const said = { sole, fsyncP99Ms };
+    const h = new LeaseHolder({
+      lease, updaterBusy: () => false, now: () => now, log: line => lines.push(line), onEnd: () => void ended.push(now.wall),
+      fsyncP99: () => said.fsyncP99Ms, sole: () => said.sole,
+    });
+    const after = (ms: number) => void (now = { wall: now.wall + ms, mono: now.mono + ms });
+    const count = (method: string) => lease.calls.filter(call => call.method === method).length;
+    return { h, lease, lines, ended, said, after, count };
+  }
+
+  it('keeps the lease and the sessions of the only machine that could lead through late ticks and slow renewals', async () => {
+    let commits = true;
+    const k = slowDisk(2949, true, fakeLease({ renew: async () => commits }));
+    await k.h.tick();
+    await k.h.look();
+    expect(k.h.mode()).toBe('lead');
+    /* Each tick waits on the disk: the renewal sent at the one before commits, and the next comes 6.3 s after. */
+    for (let ticks = 0; ticks < 5; ticks++) {
+      k.after(6300);
+      await k.h.tick();
+      expect([ticks, k.h.mode(), k.h.term()?.number]).toEqual([ticks, 'lead', 1]);
+    }
+    /* One renewal ran out of time on the disk, and the next tick comes 8 s after: the lease still stands. */
+    commits = false;
+    k.after(1000);
+    await k.h.tick();
+    commits = true;
+    k.after(8000);
+    await k.h.tick();
+    expect([k.h.mode(), k.h.term()?.number, k.count('fence'), k.count('endSessions'), k.ended]).toEqual(['lead', 1, 0, 0, []]);
+    expect(k.lines.filter(line => line.startsWith('The lease ended'))).toEqual([]);
+  });
+
+  it('still fences where another machine holds a copy that finished, on a tick later than a slow disk explains', async () => {
+    const k = slowDisk(2949, false);
+    await k.h.tick();
+    await k.h.look();
+    /* 8 s between two ticks is what three statements at their time on this disk may take: the lease holds. */
+    k.after(8000);
+    await k.h.tick();
+    expect([k.h.mode(), k.count('fence')]).toEqual(['lead', 0]);
+    /* A tick 9.5 s late is no slow disk: the connection was lost, and the lease ends as before. */
+    k.after(9500);
+    await k.h.tick();
+    expect([k.h.mode(), k.count('fence'), k.ended.length]).toEqual(['read', 1, 1]);
+    expect(k.lines.at(-1)).toContain('The lease ended (a tick came 9.5 s after the one before)');
+  });
+
+  it('fences a late tick as before where the disk is fast and another machine holds a copy that finished', async () => {
+    const k = slowDisk(30, false);
+    await k.h.tick();
+    k.after(7000);
+    await k.h.tick();
+    expect(k.lines.at(-1)).toContain('The lease ended (a tick came 7 s after the one before)');
+  });
+
+  it('ends a lease that lapsed even on the only machine that could lead, since the database no longer holds it', async () => {
+    let commits = true;
+    const k = slowDisk(2949, true, fakeLease({ renew: async () => commits }));
+    await k.h.tick();
+    await k.h.look();
+    commits = false;
+    for (let s = 0; s < 10; s++) {
+      k.after(1000);
+      await k.h.tick();
+    }
+    expect([k.h.mode(), k.count('fence'), k.lines.at(-1)]).toEqual(['read', 1, expect.stringContaining('The lease ended (no renewal for 10 s)')]);
+  });
+});
+
 describe('a lease that takes a proof', () => {
   /* A holder that is told whether a proof is needed, which one it has, why its lease must end, and what lets it take one. */
   function proving() {
