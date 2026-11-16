@@ -190,7 +190,7 @@ describe('ApprovalPolicy', () => {
     const { container } = render(
       <>
         <ApprovalPolicy departmentId="d1" />
-        <DepartmentMessaging departmentId="d1" title="External messaging" />
+        <DepartmentMessaging departmentId="d1" />
       </>,
     );
     await screen.findByRole('combobox', { name: t.owner });
