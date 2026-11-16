@@ -52,8 +52,9 @@ export function sameSite(address: string, page: string): boolean {
 
 export const FillTarget = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('browser'), address: FillAddress }),
-  /* element: the phone's own reference to the field, from its sanitized tree; none types into the focused field. */
-  z.strictObject({ kind: z.literal('phone'), phoneSessionId: z.uuid(), generation: z.number().int().nonnegative(), element: z.string().min(1).max(200).nullable() }),
+  /* element: the phone's own reference to the field, from its sanitized tree; none types into the focused field. site:
+     the entry's web address, so a page open in the phone's browser is checked to be of its site; none for an app. */
+  z.strictObject({ kind: z.literal('phone'), phoneSessionId: z.uuid(), generation: z.number().int().nonnegative(), element: z.string().min(1).max(200).nullable(), site: FillAddress.nullable() }),
 ]);
 export type FillTarget = z.infer<typeof FillTarget>;
 

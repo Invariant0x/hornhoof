@@ -21,7 +21,7 @@ const fill = (over: Record<string, unknown> = {}) => ({
 describe('secret fill messages', () => {
   it('carries a browser and a phone fill from the server to a node', () => {
     expect(parseServerMessage(JSON.stringify(fill()))).toEqual(fill());
-    const phone = fill({ fields: ['password'], target: { kind: 'phone', phoneSessionId: PHONE_SESSION, generation: 3, element: 'node-17' } });
+    const phone = fill({ fields: ['password'], target: { kind: 'phone', phoneSessionId: PHONE_SESSION, generation: 3, element: 'node-17', site: 'https://example.com/login' } });
     expect(parseServerMessage(JSON.stringify(phone))).toEqual(phone);
   });
 
@@ -40,10 +40,11 @@ describe('secret fill messages', () => {
   });
 
   it('bounds the element reference of a phone target', () => {
-    const phone = (element: unknown) => fill({ target: { kind: 'phone', phoneSessionId: PHONE_SESSION, generation: 0, element } });
+    const phone = (element: unknown, site: unknown = null) => fill({ target: { kind: 'phone', phoneSessionId: PHONE_SESSION, generation: 0, element, site } });
     expect(SecretFill.safeParse(phone(null)).success).toBe(true);
     expect(SecretFill.safeParse(phone('')).success).toBe(false);
     expect(SecretFill.safeParse(phone('x'.repeat(201))).success).toBe(false);
+    expect(SecretFill.safeParse(phone(null, 'file:///sdcard')).success).toBe(false);
   });
 
   it('answers with a status and the filled fields only', () => {
