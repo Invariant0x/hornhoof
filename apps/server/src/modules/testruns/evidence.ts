@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, testRuns, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { type Task } from '../tasks/engine.js';
 import { routeOf } from '../tasks/echelons-store.js';
@@ -67,7 +68,7 @@ async function turnBranchOf(db: Reader['db'], task: Task): Promise<string | null
    department and its products keep, as a turn may change several. */
 async function turnPlaces(db: Reader['db'], task: Task): Promise<string[]> {
   if (task.productId || !task.departmentId) return [task.productId, task.departmentId].filter((id): id is string => Boolean(id));
-  const products = await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, task.departmentId));
+  const products = await db.select(idOnly(departments)).from(departments).where(eq(departments.parentId, task.departmentId));
   return [task.departmentId, ...products.map(p => p.id)];
 }
 

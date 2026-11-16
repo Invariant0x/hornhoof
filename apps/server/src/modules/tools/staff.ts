@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, subscriptions, SUBSCRIPTION_STATUSES, teams, type Provider, type ScopeKind } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { deptName } from '../departments/templates.js';
 import { holderOf, isOperations, isRequiredRole, REQUIRED_OPERATIONS_ROLES } from '../operations/required.js';
 import type { Role } from '../templates/load.js';
@@ -89,7 +90,7 @@ async function connected(db: Db, companyId: string, accept: (sub: Sub, owner: Ow
    department holding it, or any department. */
 async function servesPlace(db: Db, spot: Spot): Promise<(sub: Sub, owner: Owner) => Promise<boolean>> {
   const places = [spot.departmentId, spot.parentId].filter((id): id is string => Boolean(id));
-  const teamIds = places.length ? (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, places))).map(t => t.id) : [];
+  const teamIds = places.length ? (await db.select(idOnly(teams)).from(teams).where(inArray(teams.departmentId, places))).map(t => t.id) : [];
   return async (sub, owner) => {
     if (sub.kind === 'personal') return canReach(await accessOf(db, owner), spot);
     return sub.targetKind === 'any' || (sub.targetKind === 'department' && places.includes(sub.targetId ?? '')) || (sub.targetKind === 'team' && teamIds.includes(sub.targetId ?? ''));
@@ -170,8 +171,8 @@ export function grantingSkillOn(templates: Ctx['templates'], lines: readonly Lin
 export async function checkStaff(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, dept: Dept, lines: Line[]): Promise<string | null> {
   const { db, templates } = ctx;
   if (!dept.templateKey) return `${deptName(dept)} has no template, so Hornhoof has no roles for it.`;
-  const products = new Set((await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, dept.id))).map(p => p.id));
-  const deptTeams = new Set((await db.select({ id: teams.id }).from(teams).where(eq(teams.departmentId, dept.id))).map(t => t.id));
+  const products = new Set((await db.select(idOnly(departments)).from(departments).where(eq(departments.parentId, dept.id))).map(p => p.id));
+  const deptTeams = new Set((await db.select(idOnly(teams)).from(teams).where(eq(teams.departmentId, dept.id))).map(t => t.id));
   const serving = new Map<string, Map<string, Serving>>();
   const servingAt = async (product: string | null) => {
     const key = product ?? '';

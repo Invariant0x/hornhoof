@@ -3,6 +3,7 @@ import { TOOL_QUIET_ALARM_MS, type TurnAlarm, type TurnAlarmReason, type TurnPro
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
 import { operationsStaff } from '../program-operator/access.js';
 import { headOf } from './failures.js';
@@ -238,7 +239,7 @@ export async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> 
   const seen = alertedSet(ctx);
   if (seen.has(jobId)) return true;
   const [row] = await ctx.db
-    .select({ id: agentEvents.id })
+    .select(idOnly(agentEvents))
     .from(agentEvents)
     .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'silentJob' = ${jobId}`))
     .limit(1);
@@ -247,7 +248,7 @@ export async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> 
 }
 
 export async function operationsWatchers(ctx: Ctx, companyId: string): Promise<Agent[]> {
-  const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
+  const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
   const rows = await ctx.db
     .select()
     .from(agents)
@@ -256,7 +257,7 @@ export async function operationsWatchers(ctx: Ctx, companyId: string): Promise<A
         eq(agents.companyId, companyId),
         or(
           inArray(agents.departmentId, ops),
-          inArray(agents.departmentId, ctx.db.select({ id: departments.id }).from(departments).where(inArray(departments.parentId, ops))),
+          inArray(agents.departmentId, ctx.db.select(idOnly(departments)).from(departments).where(inArray(departments.parentId, ops))),
           inArray(agents.roleKey, ['OPS-WATCH', 'OPS-HEAD']),
         ),
         isNull(agents.removedAt),

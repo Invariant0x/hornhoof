@@ -3,6 +3,7 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, departments, jobs, machines, nodes, pendingWakes, people, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
@@ -603,7 +604,7 @@ it('gives a part to a node of another build and processor of the class that desc
     await until(() => JSON.stringify(testCapabilities(c.app.ctx, nodeIdentity(entry.id)).testRuntimes) === JSON.stringify(testRuntimes));
   };
   /* The machine gives a run without a snapshot to its first node, so that one describes it. */
-  const order = await c.db.select({ id: nodes.id }).from(nodes).where(inArray(nodes.id, connected.map(entry => entry.id))).orderBy(asc(nodes.createdAt), asc(nodes.id));
+  const order = await c.db.select(idOnly(nodes)).from(nodes).where(inArray(nodes.id, connected.map(entry => entry.id))).orderBy(asc(nodes.createdAt), asc(nodes.id));
   const [describer, other] = order.map(row => connected.find(entry => entry.id === row.id)!) as [typeof connected[number], typeof connected[number]];
   await advertise(describer, x64);
   const { call } = await c.turn(c.bruno);

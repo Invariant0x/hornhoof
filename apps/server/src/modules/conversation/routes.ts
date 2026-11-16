@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { idOnly } from '../../db/selections.js';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
@@ -152,7 +153,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     const started = await onAgent(ctx, agent.id, async () => {
       if (!(await agentState(ctx, agent.id)).ready) return false;
       if ((await listEvents(db, agent.id, 0, 1)).length) return false;
-      const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running']))).limit(1);
+      const [open] = await db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running']))).limit(1);
       if (open) return false;
       const [company] = await db.select({ template: companies.template }).from(companies).where(eq(companies.id, me.companyId)).limit(1);
       const depts = await db.select({ id: departments.id, templateKey: departments.templateKey, parentId: departments.parentId }).from(departments).where(eq(departments.companyId, me.companyId));

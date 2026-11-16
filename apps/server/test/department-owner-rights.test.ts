@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { canDecide, type Decider } from '../src/auth/decisions.js';
 import { decisionOwner, type Candidate, type DecisionSubject } from '../src/auth/decision-owner.js';
 import { agents, departments, jobs, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { company } from './department-owner-fixture.js';
 import { as, invitePerson } from './helpers.js';
 
@@ -92,7 +93,7 @@ describe('a department owner on the screen', () => {
     const removed = await send(c, c.danaToken, 'POST', '/api/departments/build', { items: [{ department: c.product.id, remove: true }] });
     expect(removed.statusCode, removed.body).toBe(201);
     expect(await c.db.select().from(departments).where(eq(departments.parentId, c.dev.id))).toEqual([]);
-    expect(await c.db.select({ id: departments.id }).from(departments).where(eq(departments.id, stand!.id))).toEqual([{ id: stand!.id }]);
+    expect(await c.db.select(idOnly(departments)).from(departments).where(eq(departments.id, stand!.id))).toEqual([{ id: stand!.id }]);
   });
 
   it('removes an employee of their department, which someone who sees the whole company but has no department may not', async () => {

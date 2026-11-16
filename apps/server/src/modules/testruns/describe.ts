@@ -4,6 +4,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection, type TestRunFileCache } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
@@ -185,7 +186,7 @@ async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProble
   await ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(pendingDescription(run.id)).for('update');
     if (!locked) return;
-    const [existing] = await tx.select({ id: testParts.id }).from(testParts).where(eq(testParts.runId, run.id));
+    const [existing] = await tx.select(idOnly(testParts)).from(testParts).where(eq(testParts.runId, run.id));
     if (existing) return;
     await tx.update(testRuns).set({ parts: 1, environmentRequest: { ...locked.environmentRequest!, problem } }).where(eq(testRuns.id, run.id));
     await tx.insert(testParts).values({ companyId: run.companyId, runId: run.id, part: 1, status: 'failed', error: problem.code, tail: problem.detail, finishedAt: new Date() });

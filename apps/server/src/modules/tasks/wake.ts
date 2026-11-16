@@ -1,6 +1,7 @@
 import { isStaged } from '@hornhoof/protocol/echelons';
-import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
@@ -137,7 +138,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
 export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent?.switchedOffAt || agent.kind === 'orchestrator') return;
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'), notStep)).limit(1);
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'), notStep)).limit(1);
   if (running) return;
   const [change] = await ctx.db
     .select({ personId: agentChanges.personId, byOrchestrator: agentChanges.byOrchestrator })
@@ -403,7 +404,7 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
 
 async function programWorked(ctx: Ctx, jobId: string): Promise<boolean> {
   const [fact] = await ctx.db
-    .select({ id: agentEvents.id })
+    .select(idOnly(agentEvents))
     .from(agentEvents)
     .where(and(eq(agentEvents.jobId, jobId), or(inArray(agentEvents.kind, ['tool', 'tool_result', 'todo']), and(eq(agentEvents.kind, 'program'), sql`${agentEvents.data}->'program'->>'state' <> 'gone'`))))
     .limit(1);
@@ -412,7 +413,7 @@ async function programWorked(ctx: Ctx, jobId: string): Promise<boolean> {
 
 async function programWorkedOnTask(ctx: Ctx, jobId: string, taskId: string): Promise<boolean> {
   const [fact] = await ctx.db
-    .select({ id: agentEvents.id })
+    .select(idOnly(agentEvents))
     .from(agentEvents)
     .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['tool', 'tool_result', 'todo']), sql`${agentEvents.data}->'task'->>'id' = ${taskId}`))
     .limit(1);
@@ -549,7 +550,7 @@ const isUnstartedMemberWork = (task: Task, agentId: string): boolean => task.exe
 
 async function freeForQueued(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string } | null> {
   if (!isUnstartedMemberWork(task, agentId) || !await transferableWork(ctx, task)) return null;
-  const [started] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.taskId, task.id), isNotNull(jobs.startedAt))).limit(1);
+  const [started] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.taskId, task.id), isNotNull(jobs.startedAt))).limit(1);
   if (started) return null;
   const found = await rolePeers(ctx, agentId, false);
   if (!found) return null;
@@ -562,7 +563,7 @@ async function freeForQueued(ctx: Ctx, agentId: string, task: Task): Promise<{ i
 
 async function handQueuedToFree(ctx: Ctx, agent: Agent, task: Task, w: Wake): Promise<Moved | null> {
   if (w.why !== 'assigned') return null;
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'running'))).limit(1);
   if (!running) return null;
   const other = await freeForQueued(ctx, agent.id, task);
   return other ? handOver(ctx, task, other.id, `${agent.name} is busy with another turn, so ${other.name} takes the unstarted work.`) : null;
@@ -577,8 +578,8 @@ async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null): Pro
 }
 
 async function hasOpenTaskWork(db: Ctx['db'], task: Task): Promise<boolean> {
-  const [subtasks] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
-  const [asked] = await db.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
+  const [subtasks] = await db.select(countOnly()).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
+  const [asked] = await db.select(countOnly()).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
   return Boolean(Number(subtasks?.n ?? 0) || Number(asked?.n ?? 0) || (await openAfter(db, task)).length);
 }
 
@@ -586,7 +587,7 @@ async function waitingOnTask(ctx: Ctx, agentId: string, task: Task): Promise<boo
   const { db } = ctx;
   /* A turn already waiting on this task, or on one it gave out, comes back to it anyway. */
   const [next] = await db
-    .select({ id: jobs.id })
+    .select(idOnly(jobs))
     .from(jobs)
     .innerJoin(tasks, eq(tasks.id, jobs.taskId))
     .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), or(eq(tasks.id, task.id), eq(tasks.parentId, task.id))))
@@ -594,7 +595,7 @@ async function waitingOnTask(ctx: Ctx, agentId: string, task: Task): Promise<boo
   if (next) return true;
   /* Its test run's result wakes it on the task. */
   const [testing] = await db
-    .select({ id: testRuns.id })
+    .select(idOnly(testRuns))
     .from(testRuns)
     .where(and(eq(testRuns.taskId, task.id), eq(testRuns.agentId, agentId), eq(testRuns.status, 'running')))
     .limit(1);
@@ -604,7 +605,7 @@ async function waitingOnTask(ctx: Ctx, agentId: string, task: Task): Promise<boo
 
 async function taskMovedInTurn(db: Ctx['db'], agentId: string, task: Task, startedAt: Date) {
   const [moves] = await db
-    .select({ n: count() })
+    .select(countOnly())
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, startedAt), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
   if (Number(moves?.n ?? 0)) {
@@ -637,7 +638,7 @@ type HeldJob = typeof jobs.$inferSelect & { agentId: string; startedAt: Date };
 
 async function commentsInTurn(db: Ctx['db'], agentId: string, task: Task, startedAt: Date): Promise<number> {
   const [told] = await db
-    .select({ n: count() })
+    .select(countOnly())
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, startedAt), eq(taskEvents.kind, 'comment')));
   return Number(told?.n ?? 0);
