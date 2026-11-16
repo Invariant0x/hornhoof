@@ -53,6 +53,10 @@ function claimsOf(ctx: Ctx, token: string): z.infer<typeof Claims> {
 
 export type AttachmentJob = ToolJob & { attachmentTaskId?: string };
 
+export function checkAttachmentTask(job: AttachmentJob, taskId: string | null, toChat: boolean): void {
+  if (job.attachmentTaskId && (taskId !== job.attachmentTaskId || toChat)) throw new ApiError(403, 'forbidden', 'This attachment permission is only for files on the task of this turn.', 'attachment_hidden');
+}
+
 /* Verify the live turn again when the bytes arrive: stopping it or moving the program invalidates an earlier grant. */
 export async function attachmentJobOf(ctx: Ctx, req: FastifyRequest): Promise<AttachmentJob> {
   const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
