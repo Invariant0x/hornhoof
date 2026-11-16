@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { brokenHeaderWords, tableFits } from './api';
-import { LONG, noSideScroll, openMachines, SIZES, within } from './machine-priority-steps';
+import { LONG, noSideScroll, openMachines, SIZES, within, WORDS } from './machine-priority-steps';
 
 /* The Priority column: header words stay whole, the table stands in its frame, and machines stand in their order. */
 
@@ -39,6 +39,10 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     /* A machine with no number has a dash, and its words for a reader of the screen. */
     await expect(page.locator('td.k-prio .pdash')).toHaveCount(2);
     for (const dash of await page.locator('td.k-prio .pdash').all()) await expect(dash).toBeVisible();
+    /* The dash of a machine that cannot take the server says why, as its card does. */
+    const why = page.locator('tr.rm[aria-label="marat-pc"] td.k-prio');
+    await expect(why.locator('.sr')).toHaveText(WORDS[language].scope);
+    await expect(why.locator('.pdash')).toHaveAttribute('title', WORDS[language].scope);
     for (const cell of await page.locator('td.k-prio').all()) expect(await within(cell, page.locator('table.dt'))).toBe(true);
     expect(await noSideScroll(page)).toBe(true);
     await page.screenshot({ path: info.outputPath(shot('table')), fullPage: true });

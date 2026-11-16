@@ -68,7 +68,7 @@ export async function prepare(page: Page, inbox: { value: boolean }) {
   await page.route('**/api/improvements', route => route.fulfill({ json: { improvements: [FINDING, SENT, FIXED] } }));
 }
 
-async function setLook(page: Page, choice: Choice, language: Language) {
+export async function setLook(page: Page, choice: Choice, language: Language) {
   await page.evaluate(({ choice, collection, language }) => {
     localStorage.setItem('hh-skins', collection);
     localStorage.setItem('hh-theme', choice);
@@ -80,7 +80,7 @@ export type Scene = { name: string; inbox: boolean; open: (page: Page, words: Me
 
 /* Writing to the developers inside About, opened from its button once About holds the focus it takes when it opens, so
    what a test types next stays where it is typed. */
-async function dialog(page: Page, words: Messages): Promise<Locator> {
+export async function dialog(page: Page, words: Messages): Promise<Locator> {
   await page.goto('/about');
   const about = page.getByRole('dialog', { name: words.about.title, exact: true });
   await expect(about).toBeFocused();
@@ -129,7 +129,7 @@ export const SCENES: Scene[] = [
 const PARTS = [':scope', 'header', 'h2', 'h3', '.field', '.field > label', '.field > .label', '.field-control', 'input', 'textarea', '.fb-kinds button', '.fb-note', '.fb-check', 'dt', 'dd', '.fb-hidden', '.form-foot', '.form-foot > *', '.imp', '.imp-meta', '.badge', '.fb-text', '.entry-actions > *', '.fb-issue', '.req-actions > *', '.imp-case', '.imp-fate', '.imp-fate a', '.imp-fixed'];
 
 /* A field keeps 44 px, a kind choice and a button of a form's foot or of a record from 44 px, the description from 120 px. */
-async function heights(place: Locator): Promise<string[]> {
+export async function heights(place: Locator): Promise<string[]> {
   return place.evaluate(root => {
     const wrong: string[] = [];
     const h = (e: Element) => Math.round(e.getBoundingClientRect().height * 100) / 100;
