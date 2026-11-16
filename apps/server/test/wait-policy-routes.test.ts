@@ -60,12 +60,12 @@ describe('through the orchestrator', () => {
   type Res = { content: { text: string }[]; isError?: boolean };
   const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Res;
 
-  it('sets dates only in a turn that answers one who may, and says what it set', async () => {
+  it('sets dates in any turn, as the owner for a person who may not or for nobody, and says what it set', async () => {
     const c = await company();
     const args = { department: c.dev.id, kind: 'after', ...dates };
-    expect((await call(await c.tools(c.orchestrator), 'set_wait_policy', args)).isError).toBe(true);
-    expect((await call(await c.tools(c.orchestrator, c.ids.sam), 'set_wait_policy', args)).isError).toBe(true);
-    expect(await c.db.select().from(waitPolicies)).toEqual([]);
+    expect((await call(await c.tools(c.orchestrator, c.ids.sam), 'set_wait_policy', args)).isError).toBeFalsy();
+    expect(await c.db.select().from(waitPolicies)).toMatchObject([{ kind: 'after', version: 1, createdByPersonId: c.ids.ceo }]);
+    await c.db.delete(waitPolicies);
     const ceos = await c.tools(c.orchestrator, c.ids.ceo);
     const set = await call(ceos, 'set_wait_policy', args);
     expect(set.isError, set.content[0]!.text).toBeFalsy();

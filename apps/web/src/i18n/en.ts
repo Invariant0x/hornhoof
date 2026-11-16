@@ -1127,7 +1127,7 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
-    memoryWait: 'The machine is low on free memory. Turns wait to start and go on by themselves once memory frees up. Nothing that already runs there is stopped.',
+    memoryWait: 'The machine is busy: it is low on free memory or its processors are loaded. Turns wait and go on by themselves, one by one, once it has room. Nothing that already runs there is stopped.',
     inputLeft: {
       kept: 'These words were left unsent in the program\'s input. Hornhoof took them out so the next assignment could go in, kept them here and did not run them. To send them, type them again.',
       by: (name: string) => `${name} typed in this terminal last.`,
@@ -1964,7 +1964,8 @@ export const en = {
     update: 'Update',
     whenIdle: 'Update when agents finish',
     later: 'Later',
-    waiting: (version: string) => `Hornhoof will update to ${version} when the agents finish.`,
+    waiting: (version: string, until: string) => `Hornhoof will update to ${version} when the agents finish. If they have not finished by ${until}, the update is called off and nothing stops.`,
+    calledOff: (version: string, at: string) => `The update to ${version} was called off at ${at}: the agents had not finished. Nothing was stopped.`,
     callOff: 'Call off',
     running: (version: string) => (version ? `Updating Hornhoof to ${version}` : 'Updating Hornhoof'),
     progress: 'Update progress',

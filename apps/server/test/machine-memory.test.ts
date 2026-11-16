@@ -78,6 +78,18 @@ describe('a new agent program on a machine short of free memory', () => {
     expect((await nextRun(mac)).prompt).toContain('Second');
   });
 
+  it('holds an employee\'s turn into a running program while the machine is overloaded and another turn runs there', async () => {
+    const { app, ceo, mac, bruno, vera, online } = await planOnOneMachine();
+    await online({ ...hello(8 * GIB, [bruno.id, vera.id]), load: { ...load(8 * GIB), load: 20 } });
+    await write(app, ceo, bruno.id, 'The only turn here');
+    expect((await nextRun(mac)).prompt).toContain('The only turn here');
+    await write(app, ceo, vera.id, 'Wait for the processors');
+    expect(await state(app, ceo, vera.id)).toMatchObject({ queued: 1, memoryWait: true });
+    expect(mac.queued()).toBe(0);
+    mac.send({ type: 'load', ...load(8 * GIB), live: [bruno.id, vera.id] });
+    expect((await nextRun(mac)).prompt).toContain('Wait for the processors');
+  });
+
   it('is not held on a node that does not say which programs run there', async () => {
     const { app, ceo, mac, bruno, online } = await planOnOneMachine();
     await online(hello(0.5 * GIB));

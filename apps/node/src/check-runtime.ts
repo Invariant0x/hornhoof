@@ -42,7 +42,7 @@ export function startCheckClient(dir: string, terminal: { user?: JobUser | null 
 }
 
 export function stopChecks(checks: CheckClient, parts: ReadonlyMap<string, { stop: AbortController }>): void {
-  checks.online(false);
+  checks.stop();
   for (const part of parts.values()) part.stop.abort(new Error('Machine check lease lost.'));
 }
 

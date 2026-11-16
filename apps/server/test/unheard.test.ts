@@ -40,7 +40,7 @@ describe('words the program never took', () => {
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, id));
     await pump(c.ctx, orchestrator!.id);
     expect(await c.jobOf(next.id)).toMatchObject({ status: 'running' });
-    expect(await decisionPrincipal(c.db, next.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, next.id)).toEqual({ personId: c.sub.ownerPersonId, sourceSeq: null });
   });
 
   it('keeps the CEO principal for unheard CEO words when an agent message or Hornhoof notice arrived after them', async () => {
@@ -124,7 +124,7 @@ describe('words the program never took', () => {
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: orchestrator!.id, jobId: null, text: TEXT }, new Date());
     const [unlinked] = await c.turnsOf(orchestrator!.id);
     expect(unlinked).toMatchObject({ createdBy: null, answersCeo: false });
-    expect(await decisionPrincipal(c.db, unlinked!.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, unlinked!.id)).toEqual({ personId: c.sub.ownerPersonId, sourceSeq: null });
   });
 
   it('keeps legacy requeues but does not infer a program operator reason from three log entries', async () => {

@@ -388,7 +388,6 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       send = next;
       online = true;
       outside.opened(next, tools);
-      checks.online(true);
       confirmed = acks;
       host?.closeViews();
       login?.closeViews();
@@ -397,6 +396,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
       next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
+      checks.online(true);
       host?.operatorReplay();
       testMessages.replay();
       for (const m of waiting.splice(0)) emit(m);
@@ -408,7 +409,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onClose: () => {
-      online = false; outside.closed(); stopChecks(checks, testing); testMessages.cancelDescriptions();
+      /* A drop stops no part: its leases wait for the node to come back, and end, with what runs under them, if it does not
+         within a lease (#1060). */
+      online = false; outside.closed(); checks.online(false); testMessages.cancelDescriptions();
     },
     onRefused: () => {
       log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
