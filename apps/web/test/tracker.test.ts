@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, pipelineTree, responsibles, shownEmployees, workingNow, type GraphNode } from '../src/tracker';
+import { boardColumns, filterTasks, graphPath, graphTree, layoutTree, listGroups, mine, NODE, pipelineTree, pruneGoals, responsibles, shownEmployees, waitingOn, workingNow, type GraphNode } from '../src/tracker';
 import type { Employee, GoalView, Org, Pipeline, TaskLine } from '../src/types';
 import { taskRoute } from './task-route';
 
@@ -109,6 +109,14 @@ describe('the filters', () => {
     expect(ids(workingNow(TASKS, org))).toEqual(['t412']);
     expect(workingNow(TASKS, null)).toEqual([]);
   });
+
+  it('finds the open tasks that wait for a person, and none that wait for an agent or are over', () => {
+    const since = '2026-11-16T08:00:00.000Z';
+    const waits = (over: Partial<TaskLine> & { id: string; number: number }, who: { kind: 'person' | 'agent'; id: string } | null) =>
+      task({ ...over, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ who: who && { ...who, name: '' }, since }] } });
+    const tasks = [waits({ id: 'a', number: 1, status: 'waiting' }, { kind: 'person', id: 'p3' }), waits({ id: 'b', number: 2 }, { kind: 'agent', id: 'p3' }), waits({ id: 'c', number: 3, status: 'done' }, { kind: 'person', id: 'p3' }), waits({ id: 'd', number: 4 }, null), ...TASKS];
+    expect(ids(waitingOn(tasks, 'p3'))).toEqual(['a']);
+  });
 });
 
 describe('the left panel', () => {
@@ -139,6 +147,12 @@ describe('the graph', () => {
     expect(titles(graphTree({ goal: 'g2' }, GOALS, TASKS))).toEqual([['g2', [['t412', [['s1t'], ['s2t']]], ['t419'], ['t502']]]]);
     expect(titles(graphTree({ department: 'd2' }, GOALS, [T412]))).toEqual([['g2', [['t412']]]]);
     expect(titles(graphTree({ task: 't412' }, GOALS, TASKS))).toEqual([['t412', [['s1t'], ['s2t']]]]);
+  });
+
+  it('keeps a goal in the tree only when work of those shown is under it, or when it is asked to stay', () => {
+    expect(titles(pruneGoals(graphTree({}, GOALS, [LOOSE]), () => false))).toEqual([['loose', [['t500']]]]);
+    expect(titles(pruneGoals(graphTree({}, GOALS, [S2]), () => false))).toEqual([['g1', [['g2', [['s2t']]]]]]);
+    expect(titles(pruneGoals(graphTree({}, GOALS, []), g => g.id === 'g1'))).toEqual([['g1']]);
   });
 
   it('places each level further along and each leaf on its own row, with solid lines for parts and dashed ones for waits', () => {

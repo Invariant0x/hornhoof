@@ -25,6 +25,7 @@ describe('workspace addresses', () => {
     ['/tasks?person=p2', { kind: 'tasks', personId: 'p2' }],
     ['/tasks/g1?card=goal', { kind: 'tasks', id: 'g1', card: 'goal' }],
     ['/tasks?department=d2&pipeline=pl1&view=board', { kind: 'tasks', department: 'd2', pipeline: 'pl1', view: 'board' }],
+    ['/tasks?department=d2&product=pd1', { kind: 'tasks', department: 'd2', product: 'pd1' }],
     ['/tasks?goal=g1&root=t12&view=graph', { kind: 'tasks', goal: 'g1', root: 't12', view: 'graph' }],
     ['/tasks?show=waits&person=p2', { kind: 'tasks', show: 'waits', personId: 'p2' }],
     ['/tasks?show=turns', { kind: 'tasks', show: 'turns' }],

@@ -107,6 +107,11 @@ export function workingNow(tasks: TaskLine[], org: Org | null): TaskLine[] {
   return tasks.filter(t => held.has(t.id));
 }
 
+/* The open tasks that wait for a person's answer or work. */
+export function waitingOn(tasks: TaskLine[], personId: string): TaskLine[] {
+  return tasks.filter(t => !closed(t) && (t.time?.waitsOn ?? []).some(w => w.who?.kind === 'person' && w.who.id === personId));
+}
+
 /* Who answers for the departments and the goals, in the departments' order: the departments each answers for and how many
    open tasks they hold. */
 export type Responsible = { person: PersonRef; departments: string[]; open: number };
@@ -161,6 +166,15 @@ export function graphTree(root: GraphRoot, goals: GoalView[], tasks: TaskLine[])
   const inPlace = new Set(place.map(g => g.id));
   const loose = tasks.filter(t => top(t) && !t.goal).sort(byNumber).map(taskNode);
   return [...place.filter(g => !g.parentId || !inPlace.has(g.parentId)).sort(byNumber).map(goalNode), ...(loose.length ? [{ kind: 'loose' as const, id: 'loose' as const, children: loose }] : [])];
+}
+
+/* The tree without the goals that hold none of the work shown, at any depth, but for those asked to stay. */
+export function pruneGoals(forest: GraphNode[], keep: (goal: GoalView) => boolean): GraphNode[] {
+  return forest.flatMap(node => {
+    const children = pruneGoals(node.children, keep);
+    if (node.kind === 'goal' && !children.length && !keep(node.goal)) return [];
+    return [{ ...node, children }];
+  });
 }
 
 /* A pipeline's stages as a tree under its name, each with the open tasks that stand on it. */

@@ -1,13 +1,16 @@
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { taskWaitText } from './task-wait';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
-import { useOrg } from '../org';
+import { mapPeople, useOrg } from '../org';
 import { cutLine } from '../restarts';
-import { placeName, useTask } from '../tasks';
-import type { Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
+import { placeName, useGoals, usePipelines, useTask } from '../tasks';
+import { graphPath } from '../tracker';
+import type { GoalView, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
+import { TaskEdit } from './TrackerForms';
+import { dueText, momentText, sinceSeconds, spanText, trackerLine, waitText } from './tracker-words';
 import { OfflineMachine } from './OfflineMachine';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
@@ -91,6 +94,8 @@ const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): st
 
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
+/* Where the card leads in the tracker: a goal's own card, and the graph grown from this task. */
+type Leads = { onOpenGoal?: (id: string) => void; onGraph?: (root: { task: string }) => void };
 
 /* Its kind and risk class, as far as someone said them. */
 function WorkLabels({ task }: { task: TaskDetail }) {
@@ -113,10 +118,14 @@ function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
   const meta = [placeName(t, org, task.department), task.product?.name, turnText].filter(Boolean).join(' / ');
   return (
     <header className="ac-head">
+      <p className="muted tp-kind">{task.parentId ? t.tracker.card.kinds.subtask : t.tracker.card.kinds.task}</p>
       <h3>{task.title}</h3>
       <p className="muted">{meta}</p>
       <WorkLabels task={task} />
-      <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
+      <p className="tp-state">
+        <span className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</span>
+        {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
+      </p>
       {task.assigneeOffline && <OfflineMachine offline={task.assigneeOffline} />}
       <ExternalTaskWait wait={task.externalWait} />
       {task.paused && <p className="muted">{t.tasks.pausedLine(task.paused.reason)}</p>}
@@ -148,11 +157,11 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged }: { waiting: Wait
 
 type RelatedItem = { id: string; number: number; title: string; status: TaskStatus };
 
-function TaskRelatedSection({ heading, ariaLabel, items, onOpen }: { heading: string; ariaLabel?: string; items: RelatedItem[]; onOpen: (id: string) => void }) {
+function TaskRelatedSection({ heading, items, onOpen }: { heading: string; items: RelatedItem[]; onOpen: (id: string) => void }) {
   const t = useT();
   if (items.length === 0) return null;
   return (
-    <section aria-label={ariaLabel}>
+    <section aria-label={heading}>
       <h4>{heading}</h4>
       <ul className="tp-subs">
         {items.map(item => (
@@ -213,15 +222,21 @@ const evidenceOf = (data: unknown): string | null => {
   return typeof raw === 'string' && raw ? raw : null;
 };
 
-function LogEntry({ entry, when }: { entry: TaskLogLine; when: (at: string) => string }) {
+/* The words of the tracker's own lines: a status in the person's language, and a person's name by id. */
+type Words = { states: Record<string, string>; names: (id: string) => string | undefined };
+
+/* A log line in words: who did what, with its text and, for work handed in, the evidence. The tracker's own lines, a status
+   change, an edit or work passed on to someone else, say it all in their title. */
+export function LogEntry({ entry, when, words }: { entry: TaskLogLine; when: (at: string) => string; words: Words }) {
   const t = useT();
-  const said = entry.kind === 'created' ? null : lineText(t, entry, when) || null;
+  const own = trackerLine(t, entry, authorOf(t, entry), words.states, words.names);
+  const said = own !== null || entry.kind === 'created' ? null : lineText(t, entry, when) || null;
   const evidence = evidenceOf(entry.data);
 
   return (
     <li className={entry.kind}>
       <span className="tp-ev">
-        {eventTitle(t, entry)} <time dateTime={entry.at}>{when(entry.at)}</time>
+        {own ?? eventTitle(t, entry)} <time dateTime={entry.at}>{when(entry.at)}</time>
       </span>
       <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
       <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
@@ -229,28 +244,132 @@ function LogEntry({ entry, when }: { entry: TaskLogLine; when: (at: string) => s
   );
 }
 
-function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting }) {
+/* Where the task belongs: the goals above it, from the company's, and the task it is part of. Each opens its own card. */
+export function CardPath({ goals, parent, onOpenGoal, onOpen }: { goals: { id: string; title: string }[]; parent?: { id: string; number: number; title: string } | null; onOpenGoal?: (id: string) => void; onOpen: (id: string) => void }) {
+  const t = useT();
+  if (!goals.length && !parent) return null;
+  return (
+    <nav className="tp-path" aria-label={t.tracker.card.path}>
+      <ol>
+        {goals.map(g => (
+          <li key={g.id}>{onOpenGoal ? <button className="linkish" type="button" onClick={() => onOpenGoal(g.id)}>{g.title}</button> : <span>{g.title}</span>}</li>
+        ))}
+        {parent && <li><button className="linkish" type="button" onClick={() => onOpen(parent.id)}>#{parent.number} {parent.title}</button></li>}
+      </ol>
+    </nav>
+  );
+}
+
+/* A fact under its name, the name labelling it for screen readers. */
+export function Fact({ name, children }: { name: string; children: ReactNode }) {
+  const id = useId();
+  return (
+    <>
+      <dt id={id}>{name}</dt>
+      <dd aria-labelledby={id}>{children}</dd>
+    </>
+  );
+}
+
+/* Who answers for it, who does it, its pipeline and stage, its date, and its time in words. */
+function TaskFacts({ task }: { task: TaskDetail }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const { pipelines } = usePipelines(!!task.pipelineId);
+  const words = t.tracker.card;
+  const pipeline = pipelines?.find(p => p.id === task.pipelineId);
+  const stage = pipeline?.stages.find(s => s.id === task.pipelineStageId);
+  const due = dueText(t, language, task);
+  const time = task.time;
+  const waits = waitText(t, task);
+  return (
+    <dl className="facts tp-facts" aria-label={words.facts}>
+      <Fact name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Fact>
+      <Fact name={words.executor}>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</Fact>
+      {pipeline && <Fact name={words.pipeline}>{stage ? `${pipeline.name}: ${stage.name}` : pipeline.name}</Fact>}
+      {due && <Fact name={words.due}><span className={due.late ? 'tp-late' : undefined}>{due.text}</span></Fact>}
+      {time && (
+        <Fact name={words.time}>
+          {words.inStatus(t.tasks.states[task.status], spanText(t, sinceSeconds(time.inStatusSince)))}
+          {time.workSeconds > 0 && <small>{words.worked(spanText(t, time.workSeconds))}</small>}
+          {waits && <small>{waits}</small>}
+        </Fact>
+      )}
+    </dl>
+  );
+}
+
+const LINK = /https?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g;
+
+/* What the work brought: its files, the last report on it, and the links people and employees left in comments. */
+function Materials({ task }: { task: TaskDetail }) {
+  const t = useT();
+  const report = [...task.log].reverse().find(e => e.kind === 'report' && e.text);
+  const links = [...new Set(task.log.filter(e => e.kind === 'comment').flatMap(e => e.text.match(LINK) ?? []))];
+  if (!task.files?.length && !report && !links.length) return null;
+  return (
+    <section className="tp-materials" aria-label={t.tracker.card.materials}>
+      <h4>{t.tracker.card.materials}</h4>
+      <TaskFiles files={task.files} />
+      {report && (
+        <div>
+          <h5>{t.tracker.card.report}</h5>
+          <LogParagraph text={report.text} fullRef={fullTextOf(report.data, 'text')} />
+        </div>
+      )}
+      {links.length > 0 && (
+        <div>
+          <h5>{t.tracker.card.links}</h5>
+          <ul className="tp-subs">
+            {links.map(href => <li key={href}><a className="req-link" href={href} target="_blank" rel="noopener noreferrer">{href}</a></li>)}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* The goals above a goal, from the company's down to the one given. */
+export function goalChain(id: string | null | undefined, goals: GoalView[] | undefined) {
+  return graphPath({ goal: id }, goals ?? [], []);
+}
+
+function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting; leads: Leads }) {
   const t = useT();
   const { language } = useLanguage();
   const { org } = useOrg();
-  const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const { goals } = useGoals(!!task.goal);
+  const [editing, setEditing] = useState(false);
+  const when = (at: string) => momentText(language, at);
   const closed = task.status === 'done' || task.status === 'cancelled';
+  const people = mapPeople(org);
+  const words: Words = { states: t.tasks.states, names: id => people.find(p => p.id === id)?.name };
+  const version = task.version;
+  const mayEdit = !!task.mayEdit && typeof version === 'number';
 
   return (
     <>
+      <CardPath goals={goalChain(task.goal?.id, goals)} parent={task.parent} onOpenGoal={leads.onOpenGoal} onOpen={onOpen} />
       <TaskHeader task={task} org={org} />
       <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
-      {task.parent && (
-        <p className="tp-parent">
-          {t.tasks.partOf}{' '}
-          <button className="linkish" type="button" onClick={() => onOpen(task.parent!.id)}>
-            #{task.parent.number} {task.parent.title}
-          </button>
-        </p>
+      {task.why && (
+        <section className="tp-why" aria-label={t.tracker.card.why}>
+          <h4>{t.tracker.card.why}</h4>
+          <p>{task.why}</p>
+        </section>
       )}
+      <TaskFacts task={task} />
+      {(leads.onGraph || (mayEdit && !editing)) && (
+        <div className="entry-actions tp-leads">
+          {leads.onGraph && <button className="btn ghost" type="button" onClick={() => leads.onGraph!({ task: task.id })}>{t.tracker.card.graphFromHere}</button>}
+          {mayEdit && !editing && <button className="btn ghost" type="button" onClick={() => setEditing(true)}>{t.tracker.card.edit}</button>}
+        </div>
+      )}
+      {mayEdit && editing && <TaskEdit task={{ ...task, version }} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} />}
       <TaskWorkflow workflow={task.echelons} task={task} org={org} />
       <TaskFindings findings={task.echelonFindings} workflow={task.echelons} />
-      <TaskRelatedSection heading={t.tasks.after} ariaLabel={t.tasks.after} items={task.after} onOpen={onOpen} />
+      <TaskRelatedSection heading={t.tracker.card.waitsFor} items={task.after} onOpen={onOpen} />
+      <TaskRelatedSection heading={t.tracker.card.neededFor} items={task.neededFor ?? []} onOpen={onOpen} />
       <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
       {task.brief && <p className="tp-brief">{task.brief}</p>}
       {task.body && (
@@ -260,13 +379,13 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
         </section>
       )}
       <TaskRelatedSection heading={t.tasks.subtasks} items={task.subtasks} onOpen={onOpen} />
-      <TaskFiles files={task.files} />
+      <Materials task={task} />
       <TaskQuestionsSection requests={task.requests} />
       <section>
         <h4>{t.tasks.log}</h4>
         <ol className="tp-log" aria-label={t.tasks.log}>
           {task.log.map((e, i) => (
-            <LogEntry key={i} entry={e} when={when} />
+            <LogEntry key={i} entry={e} when={when} words={words} />
           ))}
         </ol>
       </section>
@@ -339,6 +458,13 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
         </div>
       </div>
       {task.mayPause && <PauseActions task={task} busy={busy} pausing={pausing} why={why} setPausing={setPausing} setWhy={setWhy} run={run} />}
+      {task.mayPause && !task.parentId && (
+        <div className="ac-actions"><div className="entry-actions" role="group" aria-label={t.tracker.card.urgent}>
+          <button className="btn ghost" type="button" disabled={busy} onClick={() => void run(() => api.put(`/api/tasks/${task.id}/urgent`, { urgent: !task.urgent }))}>
+            {task.urgent ? t.tracker.card.notUrgent : t.tracker.card.makeUrgent}
+          </button>
+        </div></div>
+      )}
       {failure !== null && (
         <p className="alert" role="alert">
           {proseErrorText(t, failure)}
@@ -377,7 +503,7 @@ function PauseActions({ task, busy, pausing, why, setPausing, setWhy, run }: Pau
 /* Escape closes the panel before what lies under it, such as a department's tasks, which leave an Escape it took alone. */
 const closesTask = (e: KeyboardEvent, active: boolean): boolean => active && e.key === 'Escape' && !e.defaultPrevented;
 
-function useEscapeCloses(onClose: () => void, active: boolean): void {
+export function useEscapeCloses(onClose: () => void, active: boolean): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!closesTask(e, active)) return;
@@ -389,15 +515,16 @@ function useEscapeCloses(onClose: () => void, active: boolean): void {
   }, [onClose, active]);
 }
 
-export function TaskPanel({ taskId, onClose, onOpen, onHome, active = true, ...waiting }: { taskId: string; active?: boolean; onHome?: () => void; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
+/* kind: where the panel stands, beside the tracker at the end side. */
+export function TaskPanel({ taskId, kind, onClose, onOpen, onHome, onOpenGoal, onGraph, active = true, ...waiting }: { taskId: string; kind?: string; active?: boolean; onHome?: () => void; onClose: () => void; onOpen: (id: string) => void } & Waiting & Leads) {
   const t = useT();
   const { task, failure, load } = useTask(taskId);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
   useEscapeCloses(onClose, active);
   return (
-    <PanelFrame label={title} heading={task ? `#${task.number}` : ''} busy={!task && failure === null} onClose={onClose}>
+    <PanelFrame label={title} heading={task ? `#${task.number}` : ''} busy={!task && failure === null} kind={kind} onClose={onClose}>
       {failure !== null && (unavailableFailure(failure) ? <RouteUnavailable onHome={onHome} /> : <p className="alert" role="alert">{errorText(t, failure)}</p>)}
-      {task && !unavailableFailure(failure) && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
+      {task && !unavailableFailure(failure) && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} leads={{ onOpenGoal, onGraph }} />}
     </PanelFrame>
   );
 }

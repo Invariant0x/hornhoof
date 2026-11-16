@@ -11,7 +11,7 @@ export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
    view. personId: whose screen is looked at. A card is a task's, or with card a goal's. */
 export const TRACKER_SHOWS = ['waits', 'working', 'turns'] as const;
 export type TrackerShow = (typeof TRACKER_SHOWS)[number];
-export type TrackerPlace = { show?: TrackerShow; department?: string; pipeline?: string; goal?: string; root?: string; responsible?: string; personId?: string; view?: TrackerView };
+export type TrackerPlace = { show?: TrackerShow; department?: string; product?: string; pipeline?: string; goal?: string; root?: string; responsible?: string; personId?: string; view?: TrackerView };
 export type TasksRoute = { kind: 'tasks'; id?: string; card?: 'goal' } & TrackerPlace;
 
 export type Route =
@@ -31,7 +31,7 @@ const validId = (id: string): boolean => /^[A-Za-z0-9_-]+$/.test(id);
 const unavailable = (): Route => ({ kind: 'unavailable' });
 
 /* The query of the tracker, in the order an address writes it; each id the same safe kind as a path's. */
-const PLACE_KEYS = [['show', 'show'], ['department', 'department'], ['pipeline', 'pipeline'], ['goal', 'goal'], ['root', 'root'], ['responsible', 'responsible'], ['personId', 'person'], ['view', 'view']] as const;
+const PLACE_KEYS = [['show', 'show'], ['department', 'department'], ['product', 'product'], ['pipeline', 'pipeline'], ['goal', 'goal'], ['root', 'root'], ['responsible', 'responsible'], ['personId', 'person'], ['view', 'view']] as const;
 const placeValue = (key: (typeof PLACE_KEYS)[number][0], value: string | null | undefined): string | undefined => {
   if (!value) return undefined;
   if (key === 'show') return TRACKER_SHOWS.find(s => s === value);

@@ -85,8 +85,8 @@ export function useTask(id: string) {
 }
 
 /* The company's goals with their progress, fetched again when a goal or a task changes, as tasks move a goal's progress. */
-export function useGoals() {
-  const { data, failure, load } = useLive('/api/goals', (b: { goals: GoalView[] }) => b.goals, m => m.type === 'tracker' || m.type === 'task');
+export function useGoals(enabled = true) {
+  const { data, failure, load } = useLive(enabled ? '/api/goals' : null, (b: { goals: GoalView[] }) => b.goals, m => m.type === 'tracker' || m.type === 'task');
   return { goals: data, failure, load };
 }
 
@@ -97,8 +97,8 @@ export function useGoal(id: string) {
 }
 
 /* The pipelines of every department, with their stages in tree order. */
-export function usePipelines() {
-  const { data, failure, load } = useLive('/api/pipelines', (b: { pipelines: Pipeline[] }) => b.pipelines, m => m.type === 'tracker');
+export function usePipelines(enabled = true) {
+  const { data, failure, load } = useLive(enabled ? '/api/pipelines' : null, (b: { pipelines: Pipeline[] }) => b.pipelines, m => m.type === 'tracker');
   return { pipelines: data, failure, load };
 }
 
