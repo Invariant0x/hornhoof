@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { FillField, FillKind, FillStatus, FillTarget, NodeMessage, SecretFilled, SiteSession } from '@hornhoof/protocol';
+import { sameSite, type FillField, type FillKind, type FillStatus, type FillTarget, type NodeMessage, type SecretFilled, type SiteSession } from '@hornhoof/protocol';
 import { armor, Encrypter } from 'age-encryption';
 import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -110,8 +110,10 @@ function fieldsFor(entry: Entry, asked: FillField[] | undefined, target: FillKin
 
 async function targetFor(ctx: Ctx, state: State, agent: VaultAgent, entry: Entry, req: FillRequest): Promise<{ node: NodeIdentity | null; target: FillTarget }> {
   if (req.target === 'browser') {
+    if (!webAddress(entry.site)) throw invalid("This entry's site is not a web address, so the browser does not know where it may sign in. A person sets the address in the vault.");
     const address = req.address ?? entry.site;
-    if (!webAddress(address)) throw invalid('Name the address of the sign-in page: this entry\'s site is not a web address.');
+    /* The values go only into a page of the entry's own site, wherever an agent asks. */
+    if (!webAddress(address) || !sameSite(entry.site, address)) throw notAllowed("This address is not of the entry's site.");
     const { node } = agent.jobId ? await nodeOfJob(ctx, agent.jobId) : { node: null };
     return { node, target: { kind: 'browser', address } };
   }

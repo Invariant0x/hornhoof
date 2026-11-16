@@ -31,6 +31,25 @@ const webAddress = (value: string): boolean => {
 };
 export const FillAddress = z.string().max(FILL_ADDRESS_MAX).refine(webAddress, 'A sign-in opens only a web address.');
 
+const siteOf = (address: string): { protocol: string; host: string } | null => {
+  try {
+    const url = new URL(address);
+    return { protocol: url.protocol, host: url.hostname.toLowerCase() };
+  } catch {
+    return null;
+  }
+};
+
+/* A page of the same site as a sign-in's address, where its values may be typed: the same host or one under the other,
+   and never a step down from https. */
+export function sameSite(address: string, page: string): boolean {
+  const a = siteOf(address);
+  const b = siteOf(page);
+  if (!a || !b || !a.host || !b.host) return false;
+  if (b.protocol !== a.protocol && b.protocol !== 'https:') return false;
+  return a.host === b.host || a.host.endsWith(`.${b.host}`) || b.host.endsWith(`.${a.host}`);
+}
+
 export const FillTarget = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('browser'), address: FillAddress }),
   /* element: the phone's own reference to the field, from its sanitized tree; none types into the focused field. */

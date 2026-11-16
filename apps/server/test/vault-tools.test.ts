@@ -110,6 +110,11 @@ describe('the vault for agents', () => {
     expect(JSON.parse(textOf(byId))).toMatchObject({ error: { code: 'forbidden' } });
     const otherTurn = await call(c, token, 'vault_fill', { entry: 'Theirs', target: 'browser' });
     expect(JSON.parse(textOf(otherTurn))).toMatchObject({ error: { code: 'not_found' } });
+    const elsewhere = await call(c, token, 'vault_fill', { entry: 'Partner site', target: 'browser', address: 'https://partner.example.evil.test/login' });
+    expect(JSON.parse(textOf(elsewhere))).toMatchObject({ error: { code: 'forbidden' } });
+    await c.add(c.ceoSession, { name: 'App only', site: 'Partner app', login: 'team@acme.test', password: 'pw-app-12345' });
+    const noAddress = await call(c, token, 'vault_fill', { entry: 'App only', target: 'browser', address: 'https://partner.example/login' });
+    expect(JSON.parse(textOf(noAddress))).toMatchObject({ error: { code: 'validation' } });
     expect(c.node.queued()).toBe(0);
     expect(await c.db.select().from(vaultLog).where(eq(vaultLog.kind, 'used'))).toEqual([]);
   });
