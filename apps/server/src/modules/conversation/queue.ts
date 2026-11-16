@@ -15,7 +15,7 @@ import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../u
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { builtinOf, identityOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
+import { holdsBuiltin, holdsMachine, machineInstalls, nextToInstallHolds } from '../network/follow.js';
 import { pickBuiltin } from '../nodes/builtin.js';
 import { cameBack } from '../nodes/connections.js';
 import { shownAway } from '../nodes/machine-away.js';
@@ -1140,8 +1140,11 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
-     Asked here, before the turn's words are put together, and once more when the turn is taken. */
+     Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine
+     next to install, so the turns that run there end and it has its turn: the orchestrator's and the heads' wait up to
+     their limit. */
   if (await machineInstalls(db, place.nodeId)) return;
+  if (await nextToInstallHolds(ctx, place.nodeId, isLeader(agent))) return;
   const along: Along[] = [];
   for (const j of await goingAlong(ctx, agent, job, place.nodeId)) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
 
