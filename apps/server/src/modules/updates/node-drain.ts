@@ -29,6 +29,8 @@ class NodeDrains {
   private readonly records = new Map<string, Saved>();
   private readonly boots = new Map<string, string>();
   private readonly pending = new Map<string, Promise<void>>();
+  /* The nodes whose restart ran past what the orchestrator and the heads wait, for which they were woken. */
+  private readonly woken = new Set<string>();
   /* The last write of the nodes' records, which the next one follows. */
   private recorded: Promise<void> = Promise.resolve();
   private readonly path: string;
@@ -59,6 +61,17 @@ class NodeDrains {
     return [...this.records.values()].map(r => ({ node: this.nodeOf(r.key), view: r.view }));
   }
 
+  heldLong(node: NodeIdentity): boolean {
+    const record = this.records.get(keyOf(node));
+    return record ? this.overHold(record) : false;
+  }
+
+  /* A node that waits for an update takes no turn of theirs, however long it waits. One an updater was told is free
+     restarts within the limit, from when it was told; past it, see nodeHeldFrom. */
+  private overHold(record: Saved): boolean {
+    return record.view.state === 'restarting' && Date.now() - Date.parse(record.view.since) >= this.ctx.config.nodeLeaderHoldMs;
+  }
+
   async request(node: NodeIdentity): Promise<MachineDrain> {
     const key = keyOf(node);
     const at = Date.now();
@@ -84,6 +97,7 @@ class NodeDrains {
 
   cancel(node: NodeIdentity): void {
     if (!this.records.delete(keyOf(node))) return;
+    this.woken.delete(keyOf(node));
     this.save();
     this.record();
     this.wake();
@@ -93,8 +107,16 @@ class NodeDrains {
     for (const record of this.records.values()) {
       const lease = record.view.state === 'restarting' ? RESTART_LEASE_MS : REQUEST_LEASE_MS;
       if (Date.now() - record.touched > lease) { this.cancel(this.nodeOf(record.key)); continue; }
+      this.wakeLeaders(record);
       void this.check(record).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not check a node waiting for an update.'));
     }
+  }
+
+  /* Once, at the limit: nothing else starts the turns of the orchestrator and the heads that the restart kept waiting. */
+  private wakeLeaders(record: Saved): void {
+    if (this.woken.has(record.key) || !this.overHold(record)) return;
+    this.woken.add(record.key);
+    this.wake();
   }
 
   /* asked: an updater asks now, and hears the answer. */
@@ -179,13 +201,19 @@ export function startNodeDrains(ctx: Ctx): void {
 export const nodeDrain = (ctx: Ctx, node: NodeIdentity): MachineDrain | null => states.get(ctx.config)?.view(node) ?? null;
 /* Whether the node waits for an update: it takes no new turn and no test part. */
 export const nodeHeld = (ctx: Ctx, node: NodeIdentity): boolean => nodeDrain(ctx, node) !== null;
-/* Whether a new turn of this role stays off the node. Only a program operator's goes in while the node waits, since a
-   program there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer. Every
-   other turn, the orchestrator's and the heads' too, goes to another node or waits for this one to come back. A node that
-   restarts takes nothing. */
-export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined): boolean => {
+/* Whether the node restarts for longer than the orchestrator and the heads wait, since an updater was told it is free. */
+export const nodeHeldLong = (ctx: Ctx, node: NodeIdentity): boolean => states.get(ctx.config)?.heldLong(node) ?? false;
+/* Whether a new turn of this role stays off the node. While the node waits, only a program operator's goes in, since a
+   program there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer.
+   Every other turn, the orchestrator's and the heads' too, goes to another node or waits for this one to come back, so
+   the work on it ends however long it runs. A node that restarts takes nothing once its stop began: a node closes its
+   link as it stops, and one that comes back with a new boot ends the restart in its hello. While its link is ready, its
+   stop has not begun, as when the updater told it is free went away: the orchestrator and the heads come in past the
+   limit then. */
+export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader = false): boolean => {
   const state = nodeDrain(ctx, node)?.state;
-  return state === 'waiting' ? role !== PROGRAM_OPERATOR_ROLE : state === 'restarting';
+  if (state === 'waiting') return role !== PROGRAM_OPERATOR_ROLE;
+  return state === 'restarting' && !(leader && ctx.hub.isReady(node) && nodeHeldLong(ctx, node));
 };
 export const requestNodeDrain = (ctx: Ctx, node: NodeIdentity): Promise<MachineDrain> => states.get(ctx.config)!.request(node);
 export const cancelNodeDrain = (ctx: Ctx, node: NodeIdentity): void => states.get(ctx.config)?.cancel(node);
