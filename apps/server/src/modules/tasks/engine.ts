@@ -1,5 +1,6 @@
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { newTrackerFields, type TrackerFields, type TrackerInput } from '../tracker/task-fields.js';
+import { followedStage } from '../tracker/pipelines.js';
 import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
@@ -264,9 +265,10 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
     await lockClosingParent(tx, task, set);
+    const followed = await followedStage(tx, task, set);
     const [row] = await tx
       .update(tasks)
-      .set({ externalWait: null, ...set, ...(set.status && CLOSED.includes(set.status) ? { paused: null } : {}), version: task.version + 1, updatedAt: new Date() })
+      .set({ externalWait: null, ...set, ...followed, ...(set.status && CLOSED.includes(set.status) ? { paused: null } : {}), version: task.version + 1, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), eq(tasks.version, task.version)))
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
@@ -441,7 +443,7 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
-  const tracker = await newTrackerFields(ctx, assignee.companyId, taskSpot({ departmentId: input.departmentId, productId: input.productId ?? null }), parent, input);
+  const tracker = await newTrackerFields(ctx, assignee.companyId, taskSpot({ departmentId: input.departmentId, productId: input.productId ?? null }), parent, input, assignee.id);
   return { assignee, parent, declaration, plan: await departmentStages(ctx, input.departmentId), tracker };
 }
 

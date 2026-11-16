@@ -8,6 +8,7 @@ import { GOAL_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { refuse } from '../tasks/engine.js';
 import { createGoal, editGoal, goalLog, goalViews, loadGoal, setGoalStatus, type GoalChange, type GoalGuard } from './goals.js';
+import { createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const Version = z.number().int().min(0);
@@ -24,6 +25,18 @@ const GoalFields = {
 const NewGoalBody = z.strictObject({ ...GoalFields, department: z.uuid().nullable().default(null) }).partial({ why: true, parent: true, responsible: true, target: true, current: true, unit: true, due: true });
 const GoalPatch = z.strictObject({ ...GoalFields, version: Version }).partial().required({ version: true });
 const GoalStatusBody = z.strictObject({ status: z.enum(GOAL_STATUSES), version: Version });
+const Stage = z.strictObject({
+  key: z.string().trim().min(1).max(64),
+  id: z.uuid().optional(),
+  parent: z.string().trim().min(1).max(64).nullable(),
+  name: z.string().trim().min(1).max(60),
+  ownerRole: z.string().trim().min(1).max(40).optional(),
+  ownerAgentId: z.uuid().optional(),
+});
+const PipelineFields = { name: z.string().trim().min(1).max(80), why: z.string().trim().max(300), stages: z.array(Stage).max(MAX_STAGES) };
+const NewPipelineBody = z.strictObject({ ...PipelineFields, department: z.uuid() }).partial({ why: true });
+const PipelinePatch = z.strictObject({ ...PipelineFields, version: Version }).partial().required({ version: true });
+const PipelinesQuery = z.strictObject({ department: z.uuid().optional() });
 
 /* The names of a goal's fields on its card, as the table keeps them. */
 function goalChange(body: Partial<z.infer<typeof GoalPatch>>): GoalChange {
@@ -39,8 +52,9 @@ function goalChange(body: Partial<z.infer<typeof GoalPatch>>): GoalChange {
   };
 }
 
-/* A person sets the company's goals as the CEO or the CEO's delegate, and a department's goals when they reach it. */
-export const personGuard = (ctx: Pick<Ctx, 'db'>, me: Person): GoalGuard => async spot => {
+/* A person sets the company's goals as the CEO or the CEO's delegate, and a department's goals and pipelines when they
+   reach it. */
+export const personGuard = (ctx: Pick<Ctx, 'db'>, me: Person): GoalGuard & PipelineGuard => async spot => {
   if (actsAsCeo(me)) return;
   if (!spot.departmentId) throw new ApiError(403, 'forbidden', "Only the CEO or the CEO delegate sets the company's goals.", 'company_scope_only');
   if (!canReach(await accessOf(ctx.db, me), spot)) throw refuse(403, 'not_your_department', 'This department is not one you have.');
@@ -84,5 +98,36 @@ export function trackerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = GoalStatusBody.parse(req.body);
     await setGoalStatus(ctx, me.companyId, actorOf(me), personGuard(ctx, me), id, body.status, body.version);
     return { goal: (await goalViews(ctx, me.companyId)).find(g => g.id === id) };
+  });
+
+  app.get('/api/pipelines', async req => {
+    const me = await requirePerson(req, db);
+    const { department } = PipelinesQuery.parse(req.query);
+    return { pipelines: await pipelineViews(ctx, me.companyId, department) };
+  });
+
+  const pipelineView = async (companyId: string, id: string) => (await pipelineViews(ctx, companyId)).find(p => p.id === id);
+
+  app.post('/api/pipelines', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    const body = NewPipelineBody.parse(req.body);
+    const made = await createPipeline(ctx, me.companyId, actorOf(me), personGuard(ctx, me), body.department, { name: body.name, why: body.why ?? '', stages: body.stages });
+    reply.code(201);
+    return { pipeline: await pipelineView(me.companyId, made.id) };
+  });
+
+  app.patch('/api/pipelines/:id', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { version, ...change } = PipelinePatch.parse(req.body);
+    await editPipeline(ctx, me.companyId, personGuard(ctx, me), id, change, version);
+    return { pipeline: await pipelineView(me.companyId, id) };
+  });
+
+  app.post('/api/pipelines/:id/archive', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    await editPipeline(ctx, me.companyId, personGuard(ctx, me), id, { archived: true });
+    return { pipeline: await pipelineView(me.companyId, id) };
   });
 }

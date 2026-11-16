@@ -75,7 +75,7 @@ async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items
     if (!head) throw refuse(409, 'no_head', `"${item.title}": its department has no head yet. Propose staff for it first.`);
     if (await switchedOff(ctx.db, dept.id, head)) throw refuse(409, 'switched_off', `"${item.title}": its department is switched off right now. Give it no work until people switch it on.`);
     await headMayHold(ctx, by, companyId, item, head);
-    const tracker = await newTrackerFields(ctx, companyId, taskSpot({ departmentId: dept.id, productId: item.product ?? null }), null, item);
+    const tracker = await newTrackerFields(ctx, companyId, taskSpot({ departmentId: dept.id, productId: item.product ?? null }), null, item, head.id);
     placed.push({ ...item, department: dept.id, head, tracker });
   }
   return placed;
