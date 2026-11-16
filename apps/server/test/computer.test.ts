@@ -271,7 +271,7 @@ describe('access to the computer the server runs on', () => {
     expect(text(first)).toBe('Exit code 0.\nLinux\n');
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const [wokeJob] = await db.update(jobs).set({ createdBy: owner!.id }).where(and(eq(jobs.agentId, orchestrator.id), eq(jobs.status, 'running'))).returning();
-    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'message', data: { text: 'Hornhoof notice.' } });
+    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'message', data: { text: 'Hornhoof notice.', notification: { source: 'wait_ended', tasks: [] } } });
     const [second] = await Promise.all([call(await mcp(app, woke), 'computer', { command: 'uptime' }), answerAs(c, 'up 2 days\n')]);
     expect(text(second)).toBe('Exit code 0.\nup 2 days\n');
     /* Someone pressed Enter in its terminal: whose words went in is not known, so nothing runs. */
@@ -380,7 +380,10 @@ describe('access to the computer the server runs on', () => {
       builtin.send({ type: 'agent.said', ref: msg.ref, ok: true });
       expect((await taking).statusCode).toBe(200);
     }
-    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Checks finished.', from: 'agent', name: 'Hana' } });
+    const [sub] = await db.select().from(subscriptions);
+    const [ops] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [hana] = await db.insert(agents).values({ companyId: orchestrator.companyId, kind: 'head', name: 'Hana', model: 'claude-opus-5-5', roleKey: 'OPS-HEAD', departmentId: ops!.id, subscriptionId: sub!.id, skills: [] }).returning();
+    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Checks finished.', from: 'agent', name: 'Hana', by: hana!.id } });
     const events = await db.select().from(agentEvents).where(and(eq(agentEvents.jobId, note.jobId), eq(agentEvents.kind, 'message')));
     expect(events.length).toBe(6);
 

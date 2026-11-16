@@ -141,7 +141,8 @@ async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: 
    notice, an employee's letter or a wake started, a retry and every later turn, with no new word of the CEO. Only the last
    person whose words came into the turn can take it away: someone who may not direct commands there, as an Enter in the
    terminal or words that may have gone in unkept do, since whose they were is not known. A notice of a person's task,
-   comment or answer, and a letter of theirs that woke an inbox turn, are their words. A turn no words came into goes
+   comment or answer, and a letter of theirs that woke an inbox turn, are their words; words of an origin Hornhoof cannot
+   name, with no person, no sender or a notice of a kind it does not know, take it away too. A turn no words came into goes
    by whoever started it. Who the commands go for: that person, or the owner. A click answers no question, so this takes
    no decision and asks for nothing else. */
 export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string): Promise<string | null> {
