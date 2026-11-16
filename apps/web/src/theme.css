@@ -462,6 +462,20 @@ select:disabled { opacity: .55; }
 .outbound-setup .check-card:has([aria-invalid='true']) { border-color: var(--pink); }
 .outbound-setup .repo-form > .bad { margin: 0; font-size: 12px; color: var(--pink-ink); overflow-wrap: break-word; }
 .outbound-added { margin: 0; overflow-wrap: anywhere; }
+/* A revision as a person reads it before publishing it: its facts, its words with the places a message fills in marked,
+   and what changed, words put in underlined and words taken out struck through, the colour only repeating it. */
+.outbound-view { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); background: var(--surface2); overflow-wrap: break-word; }
+.outbound-facts { display: grid; gap: 4px; min-width: 0; margin: 0; }
+.outbound-facts dt { font-size: 12px; font-weight: 600; color: var(--muted); }
+.outbound-facts dd { display: grid; gap: 4px; min-width: 0; margin: 0; }
+.outbound-words { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.outbound-slot { display: inline-block; padding: 0 6px; border: 1px solid currentColor; color: var(--cyan-ink); font-size: 12px; font-weight: 600; line-height: 1.6; white-space: normal; }
+.outbound-changes { display: grid; gap: 4px; min-width: 0; padding-block-start: 8px; border-block-start: 1px solid var(--line); }
+.outbound-changes ins { color: var(--ok); text-decoration: underline; text-decoration-thickness: 2px; }
+.outbound-changes del { color: var(--pink-ink); text-decoration: line-through; }
+.outbound-changes del + ins { margin-inline-start: 4px; }
+.outbound-note { margin: 0; color: var(--muted); overflow-wrap: break-word; }
+.outbound-view > .entry-actions { margin-block-start: 4px; }
 /* The groups of the limits form: no frame of the browser, their heading a line of its own, their fields on the form's edge.
    What follows the heading is a block of its own under it, as every browser lays out a legend in its own way. */
 .outbound-numbers { display: block; min-inline-size: 0; margin: 0; margin-block-start: 8px; padding: 0; border: 0; }
