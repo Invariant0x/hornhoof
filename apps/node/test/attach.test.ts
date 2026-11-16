@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { listenIn } from '../../../test-support/ports.mjs';
+import { Bridge } from '../src/terminal/bridge.js';
+import { kimiProgram, prepareKimi } from '../src/terminal/programs.js';
 
 const SCRIPT = fileURLToPath(new URL('../hh-attach.cjs', import.meta.url));
 const FETCH = fileURLToPath(new URL('../hh-fetch.cjs', import.meta.url));
@@ -49,6 +51,37 @@ const attach = run(SCRIPT);
 const fetchFile = run(FETCH);
 
 describe('hh-attach', () => {
+  it("uses the node link for Kimi's terminal when the bridge has lost the turn token, and refuses once the turn ends", async () => {
+    const { url, got } = await hub();
+    let running = true;
+    const bridge = new Bridge(url.replace('/api/attachments', ''), () => {}, null, {
+      outside: async (key, body) => {
+        const call = JSON.parse(body) as { id: string; method: string };
+        if (key !== 'kimi-agent' || call.method !== 'attachments/token') throw new Error('Unexpected node authorization request.');
+        return { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: call.id, ...(running ? { result: { token: 'attachment-only-token' } } : { error: { message: 'No Hornhoof turn is running for this agent.' } }) }) };
+      },
+    });
+    await bridge.start();
+    onTestFinished(() => bridge.stop());
+    const dir = mkdtempSync(join(tmpdir(), 'hh-attach-kimi-'));
+    const file = join(dir, 'review.md');
+    writeFileSync(file, 'Security review');
+    const urls = bridge.agent('kimi-agent');
+    await prepareKimi(join(dir, 'home'), dir, urls.mcpUrl);
+    const { env } = kimiProgram.launch({ bin: 'kimi', home: join(dir, 'home'), workDir: dir, sessionId: 'recorded-session', model: null, instructionsFile: null, urls });
+    const configured = JSON.parse(readFileSync(join(dir, '.kimi-code/mcp.json'), 'utf8')) as { mcpServers: { hornhoof: { url: string } } };
+    expect(env.HH_ATTACH_URL === configured.mcpServers.hornhoof.url.replace('/mcp/', '/attach/')).toBe(true);
+    const sent = await attach(['--task', '1151', file], env);
+    expect(sent.code, sent.err).toBe(0);
+    expect(sent.out.trim()).toBe(`${file} id-1`);
+    expect(got.map(g => [g.url, g.auth, g.bytes.toString()])).toEqual([['/api/attachments?task=1151&name=review.md', 'Bearer attachment-only-token', 'Security review']]);
+    running = false;
+    const refused = await attach(['--task', '1151', file], env);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain('No Hornhoof turn is running');
+    expect(got).toHaveLength(1);
+  });
+
   it('sends each file with the turn token and prints the id to pass on', async () => {
     const { url, got } = await hub();
     const dir = mkdtempSync(join(tmpdir(), 'hh-attach-'));
