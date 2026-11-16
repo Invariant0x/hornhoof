@@ -142,7 +142,7 @@ describe('a run of other work', () => {
     const big = await nextOf(ann.node, 'tests.run');
     expect(big.command).toBe('big');
     /* Test runs still go to a node that knows only them. */
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     expect((await nextOf(old.node, 'tests.run')).kind ?? 'tests').toBe('tests');
     expect(await call('stop_work', { run: 2 })).toEqual({ text: 'Work run 2 is stopped.', error: false });
     expect(await nextOf(ann.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: big.partId });
@@ -155,7 +155,7 @@ describe('the pool of machines', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac');
     await c.machine(c.ann, 'ann-pc', idle({ load: 7.6 }));
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'npm test -- --shard={part}/{parts}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'npm test -- --shard={part}/{parts}', parts: 2 });
     const first = await nextOf(ivan.node, 'tests.run');
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const boss = await c.turn(orchestrator!, null);
@@ -185,7 +185,7 @@ describe('the pool of machines', () => {
     const lend = (machineId: string, lendsTests: boolean) => c.app.inject({ method: 'PATCH', url: `/api/machines/${machineId}`, payload: { lendsTests }, ...as(c.ceo) });
 
     await lend(ivan.machineId, false);
-    await (await c.turn(c.bruno)).call('run_tests', { command: 'npm test' });
+    await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'npm test' });
     expect(await why()).toEqual(['No computer lent to runs is online.']);
     await lend(ivan.machineId, true);
     expect(await why()).toEqual(['Short of the 4 GB of free memory it needs: dev-mac.']);
@@ -206,7 +206,7 @@ describe('the pool of machines', () => {
     await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'npm test' });
+    await call('run_tests', { branch: 'main', command: 'npm test' });
     const part = await nextOf(ann.node, 'tests.run');
     /* Ann has only Bruno's team of Development: the department itself would show her Bruno on any plan. */
     const [core] = await c.db.insert(teams).values({ companyId: c.bruno.companyId, departmentId: c.dev.id, name: 'Core' }).returning();
@@ -246,7 +246,7 @@ describe('the pool of machines', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac', idle(), { noRuns: 'This node runs without a user of its own for runs.' });
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'npm test' });
+    await call('run_tests', { branch: 'main', command: 'npm test' });
     expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
@@ -258,7 +258,7 @@ describe('the pool of machines', () => {
     const c = await company();
     const phone = await c.machine(c.ceo, 'dev-phone', idle(), { kind: 'phone' });
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'npm test' });
+    await call('run_tests', { branch: 'main', command: 'npm test' });
     expect(await gets(c.app.ctx, phone.node, 'tests.run')).toBe(false);
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);

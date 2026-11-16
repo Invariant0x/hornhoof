@@ -2,7 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { standingPrincipal } from '../src/modules/conversation/decision-context.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { disconnectMachines } from '../src/modules/nodes/disconnect.js';
@@ -131,7 +131,7 @@ describe("an agent's tools with no turn of it running", () => {
     /* A call that failed says so, and still nothing of what it carried. */
     await c.outside(c.agent.id, call(2, 'task', { task: 'secret-value-123' }));
     const last = (await c.stepsOf(c.agent.id)).at(-1)!;
-    const logged = await c.db.select({ data: agentEvents.data }).from(agentEvents).where(eq(agentEvents.jobId, last.id));
+    const logged = await c.db.select(only(agentEvents, 'data')).from(agentEvents).where(eq(agentEvents.jobId, last.id));
     expect(JSON.stringify(logged)).not.toContain('secret-value-123');
     expect(logged.map(l => l.data)).toEqual([{ name: 'task', input: '' }, { ok: false, summary: 'Called with no turn running.' }]);
   });
@@ -150,7 +150,7 @@ describe("an agent's tools with no turn of it running", () => {
 
     const urgent = await c.outside(c.orchestrator.id, call(1, 'set_urgent', { task: '#1', urgent: true }));
     expect(textOf(urgent)).toContain(ONLY_DEPARTMENT_OWNER);
-    expect((await c.db.select({ urgent: tasks.urgent }).from(tasks).where(eq(tasks.id, task!.id)))[0]!.urgent).toBe(false);
+    expect((await c.db.select(only(tasks, 'urgent')).from(tasks).where(eq(tasks.id, task!.id)))[0]!.urgent).toBe(false);
     const removed = await c.outside(c.orchestrator.id, call(2, 'remove_subscription', { subscription: c.sub.id }));
     expect(textOf(removed)).toContain(ONLY_CEO);
     expect(await c.db.select(idOnly(subscriptions)).from(subscriptions).where(eq(subscriptions.id, c.sub.id))).toHaveLength(1);

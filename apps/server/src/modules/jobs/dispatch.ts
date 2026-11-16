@@ -7,6 +7,7 @@ import type { Ctx } from '../../app.js';
 import type { Checker } from '../../checker.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { jobs, subscriptions } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { nodeHeldFrom } from '../updates/drain.js';
 
@@ -138,7 +139,7 @@ const secretOf = (ctx: Ctx, sub: { secretEnc: string | null }): string | null =>
 
 /* The oldest key of the provider, so the same one answers every time. */
 async function keyOf(ctx: Ctx, provider: ProviderId): Promise<string | null> {
-  const [sub] = await ctx.db.select({ secretEnc: subscriptions.secretEnc }).from(subscriptions).where(and(eq(subscriptions.provider, provider), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt))).orderBy(subscriptions.createdAt).limit(1);
+  const [sub] = await ctx.db.select(only(subscriptions, 'secretEnc')).from(subscriptions).where(and(eq(subscriptions.provider, provider), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt))).orderBy(subscriptions.createdAt).limit(1);
   return sub ? secretOf(ctx, sub) : null;
 }
 

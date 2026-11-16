@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, subscriptions, tasks, testParts, testRuns, type TestEnvironmentRequest } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { routeCheckMessage } from '../src/modules/nodes/check-slots.js';
 import { builtinOf, ownMachine } from '../src/modules/nodes/hub.js';
 import { interruptionOf, rememberBuiltinStop } from '../src/modules/nodes/restarts.js';
@@ -58,7 +59,7 @@ describe("the built-in nodes of several machines", () => {
     const part = async (n: number, builtinMachine: string | null) =>
       (await db.insert(testParts).values({ companyId, runId: run!.id, part: n, status: 'running', builtin: true, builtinMachine, startedAt: new Date() }).returning())[0]!;
     const [mine, theirs] = [await part(1, null), await part(2, COPY)];
-    const tailOf = async (id: string) => (await db.select({ tail: testParts.tail }).from(testParts).where(eq(testParts.id, id)))[0]!.tail;
+    const tailOf = async (id: string) => (await db.select(only(testParts, 'tail')).from(testParts).where(eq(testParts.id, id)))[0]!.tail;
     const waits = (machine: string, partId: string) => routeCheckMessage(ctx, builtinOf(machine), { type: 'tests.waiting', partId, position: 2 }, sql`true`);
     /* A word about a part of another machine's built-in node changes nothing. */
     await waits(OWN, theirs.id);

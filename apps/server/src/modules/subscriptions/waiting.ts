@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot, type Spot } from '../../auth/access.js';
 import { agentChanges, agents, companies, teams } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { modelForTier, tierIn } from '../agents/role-model.js';
 import { pump, pumpWaiting } from '../conversation/queue.js';
@@ -36,7 +36,7 @@ async function planOf(ctx: Pick<Ctx, 'templates'>, tx: Tx, agent: Agent, fresh: 
     return plan ? { id: plan.id, model: agent.model } : null;
   }
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
-  const [team] = agent.teamId ? await tx.select({ turnkey: teams.turnkey }).from(teams).where(eq(teams.id, agent.teamId)) : [];
+  const [team] = agent.teamId ? await tx.select(only(teams, 'turnkey')).from(teams).where(eq(teams.id, agent.teamId)) : [];
   const tier = tierIn(role ?? { tier: 'standard' }, team);
   const plan = (await at(await agentSpot(tx, agent))).find(p => fresh.has(p.id) && runsTier(p.provider, tier));
   return plan ? { id: plan.id, model: modelForTier(tier, plan.provider, plan.models) ?? '' } : null;

@@ -1,4 +1,4 @@
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { notificationMessage } from '../events/notifications.js';
 import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
 import { ensureOpenTurn } from '../tasks/turn-department.js';
@@ -120,7 +120,7 @@ async function structureSubject(db: Db, companyId: string, body: z.infer<typeof 
   const changed: string[] = [];
   for (const item of body.items) {
     if (isNew(item)) return CARD;
-    const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(and(eq(departments.id, item.department), eq(departments.companyId, companyId)));
+    const [dept] = await db.select(only(departments, 'parentId')).from(departments).where(and(eq(departments.id, item.department), eq(departments.companyId, companyId)));
     if (item.remove && !dept?.parentId) return CARD;
     changed.push(dept?.parentId ?? item.department);
   }
@@ -526,7 +526,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const heads = lines.filter(l => ctx.templates.roles.get(l.role)!.kind === 'head');
       if (heads.length > 1) throw invalid(`${deptName(dept)} can have one head; the card has ${heads.length}.`);
       if (heads.length) {
-        const [head] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt)));
+        const [head] = await tx.select(only(agents, 'name')).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt)));
         if (head) throw invalid(`${deptName(dept)} already has a head, ${head.name}.`);
       }
 
