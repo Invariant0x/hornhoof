@@ -86,7 +86,7 @@ describe('goals', () => {
     expect(goal).toMatchObject({ status: 'reached', why: 'People buy without calling us.' });
     expect(log.map((l: { kind: string; data: unknown; by: { name: string } }) => [l.kind, l.data, l.by.name])).toEqual([
       ['created', {}, 'Oleg'],
-      ['updated', { fields: ['why'] }, 'Oleg'],
+      ['edited', { fields: ['why'] }, 'Oleg'],
       ['status', { fromStatus: 'active', toStatus: 'reached' }, 'Ivan'],
     ]);
     expect(heard.filter(m => m.type === 'tracker')).toHaveLength(3);

@@ -86,7 +86,7 @@ export async function checkRemoval(ctx: Pick<Ctx, 'templates'>, tx: Tx, agent: {
 
 /* The orchestrator sees who came in his window. Before his conversation begins there is nobody to tell, and a line there
    would keep him from greeting the CEO. */
-async function tellOrchestrator(ctx: Ctx, companyId: string, department: string, hired: Hired[]): Promise<void> {
+export async function tellOrchestrator(ctx: Ctx, companyId: string, department: string, hired: Hired[]): Promise<void> {
   const orchestrator = await orchestratorOf(ctx, companyId);
   if (!orchestrator || !(await listEvents(ctx.db, orchestrator.id, 0, 1)).length) return;
   await appendEvent(ctx, { companyId, agentId: orchestrator.id, kind: 'applied', data: { proposalId: null, kind: 'staff', department, hired: hired.map(({ id, name, role }) => ({ id, name, role })) } });

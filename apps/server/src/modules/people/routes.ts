@@ -1,4 +1,5 @@
 import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { passResponsibility } from '../tracker/upgrade.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -192,6 +193,7 @@ export async function disablePerson(ctx: Ctx, personId: string, by?: Person): Pr
   await disconnectMachines(ctx, theirs.map(m => m.id));
   const [owner] = by ? [by] : await db.select(personColumns).from(people).where(and(eq(people.companyId, person.companyId), eq(people.isOwner, true)));
   if (owner) await releasePlansOf(ctx, person, owner);
+  await passResponsibility(ctx, person.companyId, personId);
 }
 
 export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -357,7 +359,10 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (leaving.length > 0) void afterLeave(ctx);
     /* A disabled person's plans stop serving the company: their machines disconnect and the orchestrator lets go. */
     if (status === 'disabled') await disablePerson(ctx, id, me);
-    else if (body.access) await releasePlansOf(ctx, changed, me);
+    else if (body.access) {
+      await releasePlansOf(ctx, changed, me);
+      await passResponsibility(ctx, me.companyId, id);
+    }
     if (status === 'disabled' && target.isAgent) await releaseAssistantAgent(ctx, id, me);
     const person = status === 'disabled' ? (await db.select(personColumns).from(people).where(eq(people.id, id)))[0]! : changed;
     tellOfChange(ctx, me.companyId, Boolean(status || body.access), person.name !== target.name);

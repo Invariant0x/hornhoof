@@ -34,6 +34,7 @@ import { handleNumbered } from './modules/nodes/numbered.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
 import { nodeSocket, SOCKET_OPTIONS } from './modules/nodes/socket.js';
 import { startOperationsCheck } from './modules/operations/ensure.js';
+import { startTrackerUpgrade } from './modules/tracker/upgrade.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { mapLayoutRoutes } from './modules/org/layout.js';
 import { peopleRoutes } from './modules/people/routes.js';
@@ -427,6 +428,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   backlogRoutes(app, ctx);
   startTimers(app, ctx);
   startOperationsCheck(app, ctx);
+  startTrackerUpgrade(app, ctx);
   terminalRoutes(app, ctx);
   agentRoutes(app, ctx);
   inboxRoutes(app, ctx);

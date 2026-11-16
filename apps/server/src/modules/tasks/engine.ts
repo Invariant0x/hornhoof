@@ -1221,7 +1221,8 @@ async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: num
 }
 
 /* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */
-export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status'] as const;
+/* status: work started, which the turn did, not the task. edited: what the tracker keeps of it, which gives no work. */
+export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status', 'edited'] as const;
 
 /* Comments and notes about a turn ending do not begin a new piece of work. */
 export async function lastMove(db: Db | Tx, taskId: string) {

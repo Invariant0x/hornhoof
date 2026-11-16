@@ -1177,7 +1177,7 @@ export const taskRoutes = pgTable('task_routes', {
   check('task_routes_paths', sql`jsonb_typeof(${t.paths}) = 'array'`),
 ]);
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status', 'edited'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */

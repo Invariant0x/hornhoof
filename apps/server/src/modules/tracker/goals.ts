@@ -40,7 +40,7 @@ const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.a
 const createdBy = (a: Actor) => ({ createdByPersonId: a.personId ?? null, createdByAgentId: a.agentId ?? null });
 
 /* One line of a goal's history, read the way a task's is. */
-export async function goalNote(tx: Tx, goal: Pick<Goal, 'id' | 'companyId'>, kind: 'created' | 'updated' | 'status' | 'responsible', actor: Actor | null, data: Record<string, unknown> = {}, text = '') {
+export async function goalNote(tx: Tx, goal: Pick<Goal, 'id' | 'companyId'>, kind: 'created' | 'edited' | 'status', actor: Actor | null, data: Record<string, unknown> = {}, text = '') {
   await tx.insert(goalEvents).values({ companyId: goal.companyId, goalId: goal.id, kind, ...(actor ? actorColumns(actor) : {}), text, data });
 }
 
@@ -114,7 +114,7 @@ export async function editGoal(ctx: Live, companyId: string, actor: Actor, guard
     const fields = CHANGEABLE.filter(f => change[f] !== undefined && !same(change[f], goal[f]));
     if (!fields.length) return null;
     if (fields.includes('parentGoalId') && change.parentGoalId) await checkParent(tx, goal, spot, change.parentGoalId);
-    await goalNote(tx, goal, 'updated', actor, { fields: fields.map(f => FIELD_NAMES[f]) });
+    await goalNote(tx, goal, 'edited', actor, { fields: fields.map(f => FIELD_NAMES[f]) });
     return Object.fromEntries(fields.map(f => [f, change[f]]));
   });
 }

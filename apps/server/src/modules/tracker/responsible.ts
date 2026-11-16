@@ -1,14 +1,15 @@
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { canReach, type Spot } from '../../auth/access.js';
+import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { departments, people } from '../../db/schema.js';
 import { candidates, decisionPerson } from '../tasks/decisions.js';
 import { refuse, type Tx } from '../tasks/engine.js';
 
 /* Who answers for work in a place nobody named one for: the person who takes the place's own decisions, by the rule its
    questions follow: its named owner, else the one person whose access lists it, else the CEO. */
-export const placeOwner = (ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<string> =>
-  decisionPerson(ctx, companyId, { source: 'request', kind: 'question', topic: 'task', spot });
+export const placeSubject = (spot: Spot): DecisionSubject => ({ source: 'request', kind: 'question', topic: 'task', spot });
+export const placeOwner = (ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<string> => decisionPerson(ctx, companyId, placeSubject(spot));
 
 /* Where a department sits, for whom reaches it: a sub-unit inside the department that holds it. None: the whole company. */
 export async function spotOf(db: Pick<Ctx['db'], 'select'> | Tx, companyId: string, departmentId: string | null): Promise<Spot> {
