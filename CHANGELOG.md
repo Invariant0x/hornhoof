@@ -44,6 +44,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Machines filters start with All and a count, with chips of at least 44 px.
 - Table headers and row buttons are 44 px in every table.
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
+- `run_tests` runs only on `main`, `turn-N` or `release-` branches; a task branch gets `tests_not_release`.
+- A release's full run needs a pass of the profile it replaces on that commit, else it ends with `full_run_early`.
 
 ## [0.29.2] - 2026-11-16
 

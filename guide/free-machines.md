@@ -6,7 +6,7 @@ The names in `code`, like `run_tests` or `pool`, are tools the agents use. You d
 
 ## Where do the tests run?
 
-An agent runs the whole test suite of a branch with `run_tests`. Checks of the agent's own change need no `run_tests`: they run right away in its own workspace. Install from the lockfile once there, and again when it changes. A test command with no named files, or with a directory, glob, loop or variable as its selection, counts as a whole suite. Named browser test files run locally when the browser is there; installing it is allowed. Hornhoof sends it to whichever machine of the company is freest at that moment, while the agents keep working where they are.
+An agent runs the whole test suite of a release branch with `run_tests`: `main`, a turn's branch or a `release-` branch. Hornhoof refuses it on a task's own branch, except where each task goes to `main` on its own. Checks of the agent's own change need no `run_tests`: they run right away in its own workspace. Install from the lockfile once there, and again when it changes. A test command with no named files, or with a directory, glob, loop or variable as its selection, counts as a whole suite. Named browser test files run locally when the browser is there; installing it is allowed. Hornhoof sends it to whichever machine of the company is freest at that moment, while the agents keep working where they are.
 
 A test runner that can split a suite runs it in parts, one part on each of several machines at once.
 
