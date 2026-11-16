@@ -57,8 +57,8 @@ and a map. Every department gets a product manager who keeps its work clear for 
 
 ### Changed
 
-- The old board of the Tasks tab, its three views and the tiles at the top are gone. A department's Tasks drawer opens
-  the tracker for that department.
+- The old board of the Tasks tab, its three views and the tiles at the top are gone. A department's own task list is
+  gone too: its "Department tasks" button opens the tracker at that department.
 
 ### Russian
 
@@ -101,8 +101,8 @@ and a map. Every department gets a product manager who keeps its work clear for 
 - Маршруты для людей: `GET/POST/PATCH /api/goals`, `PUT /api/goals/:id/status`, `GET/POST/PATCH /api/pipelines` и
   `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` по версии задачи, `PUT /api/tasks/:id/after` и
   `GET /api/tasks?responsible=`. `POST /api/tasks` принимает `parent`, и работа под задачей идет руководителю ее отдела.
-- Старой доски вкладки "Задачи", трех ее видов и плиток сверху больше нет. Ящик "Задачи" отдела открывает трекер этого
-  отдела.
+- Старой доски вкладки "Задачи", трех ее видов и плиток сверху больше нет. Своего списка задач у отдела тоже больше нет:
+  его кнопка "Задачи отдела" открывает трекер на этом отделе.
 
 ## [0.31.0]
 

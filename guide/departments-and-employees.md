@@ -23,7 +23,7 @@ On the map, a department's card has one square per employee, in the same colors.
 
 ## Where are a department's tasks and people?
 
-"Department tasks", "About the department" and "Speed" open at the same place on the left. Task details and employee settings also open on the left. The right side is for the employee's window.
+"Department tasks" opens the Tasks tab at this department, with its goals, pipelines and work. "About the department" and "Speed" open at the same place on the left. Task details and employee settings also open on the left. The right side is for the employee's window.
 
 ## Hire employees
 
