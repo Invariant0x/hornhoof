@@ -160,7 +160,7 @@ Content-Type: image/heic
 <the file's bytes>
 ```
 
-* `name`: the file's name, which the agent and the window show. Without it a file is called `file`.
+* `name`: the file's name, which the agent and the window show. Without it a file is called `file`, or `picture.png` (`.jpg`, `.webp`) for a picture.
 * `agentId`: the agent the message goes to. Without it, the assistant's own agent, as for a message.
 * Answers `201` with the file's id and the name it is kept under. Name the id in `files` of the next `POST /api/assistant/messages` to the same agent; until then the file goes nowhere.
 

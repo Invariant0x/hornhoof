@@ -10,10 +10,10 @@ import type { Person } from '../../auth/session.js';
 import { agents, assistants, companies, departments, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { AgentRow } from '../agents/find.js';
+import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
 import { agentState } from '../conversation/queue.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
-import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.js';
 import { FILE_BYTES } from '../tasks/attachments.js';
 import { AnswerBody, answerRequest } from '../tasks/routes.js';
 import { fileFor } from './files.js';
@@ -90,8 +90,9 @@ export async function whoAmI(ctx: Ctx, me: Person) {
       telegram: { username: view.telegram?.username ?? null, id: view.telegram?.id ?? null },
     },
     company: { name: company!.name },
-    /* Contract 3 includes attachment downloads and reply origin. A server with no contract here keeps the first,
-       which refuses a body with freshText. */
+    /* Which contract of this API the server keeps: 3 takes and gives files, says refusals in the owner's words and names
+       who sent the message a reply answers; 2 takes freshText and up to 50000 characters of text. A server with no
+       contract here keeps the first, which refuses a body with freshText. */
     contract: ASSISTANT_CONTRACT,
   };
 }
