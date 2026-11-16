@@ -1,0 +1,66 @@
+{
+  "status": "DEVELOPMENT_IN_PROGRESS",
+  "sourceCommit": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+  "base": "f4fb7eff1840c17bacd6826c109e341a35d076ba",
+  "passed": [
+    {
+      "command": "npx --no-install vitest run test/approval-policy.test.ts --no-file-parallelism",
+      "cwd": "packages/protocol",
+      "tests": 10,
+      "exitCode": 0,
+      "log": "green-protocol.log"
+    },
+    {
+      "command": "npm test -w apps/web -- test/ApprovalPolicy.test.tsx --pool=threads --no-file-parallelism",
+      "tests": 23,
+      "exitCode": 0,
+      "log": "green-web.log"
+    },
+    {
+      "command": "npm run -s build -w @hornhoof/protocol",
+      "exitCode": 0
+    },
+    {
+      "command": "ESLint of protocol and web changed paths before the controlled-clock scenario was added",
+      "sourceCommit": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "exitCode": 0,
+      "limit": "This is not the final full changed-path lint receipt."
+    }
+  ],
+  "failed": [
+    {
+      "command": "npm test -w apps/server -- test/head-department-control.test.ts --no-file-parallelism --pool=threads",
+      "tests": 8,
+      "failures": 8,
+      "reason": "All exceeded 20000 ms; behavior not proved",
+      "seconds": 1423.3,
+      "log": "head-timeouts.log"
+    },
+    {
+      "command": "PLAYWRIGHT_BROWSERS_PATH=/data/browsers npx --no-install playwright test e2e/approval-policy.spec.ts --config=e2e/approval-policy.config.ts --grep \"the CEO reads and changes\"",
+      "passed": 21,
+      "failed": 3,
+      "reason": "WebKit test timeouts at 120000 ms",
+      "log": "browser-edit-flow.log"
+    }
+  ],
+  "notRunOrUnfinished": [
+    "Full author selection: NOT_RUN by task instruction; see selection.json.",
+    "Head decision-context and server approval-policy need completion after load falls.",
+    "Decision-policy, decisions.test, decisions-answers-ceo, decisions-answers-department, decisions-answers-fallback, outbound-approvals, outbound-grants and outbound-department need completed named local results.",
+    "Server types including tests, web types and final changed-path lint have no completed passing receipt.",
+    "The controlled-clock browser matrix is incomplete; see browser-default-partial.log. Completed individual cases do not make the whole matrix pass."
+  ],
+  "next": {
+    "condition": "Host has 10 available cores. Wait for uptime load below 20, as the head directed.",
+    "order": [
+      "head-department-control.test.ts",
+      "decision-context.test.ts",
+      "approval-policy.test.ts",
+      "tsc server including tests with NODE_OPTIONS=--max-old-space-size=4096",
+      "remaining named checks and browser timeout cases"
+    ],
+    "deadlineOwner": "Head of development if load is still too high at 2026-11-16T20:00:00Z",
+    "review": "Do not submit to Review before access tests pass. Independent Review and Security are still required."
+  }
+}
