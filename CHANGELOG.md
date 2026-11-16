@@ -5,6 +5,26 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.29.3] - 2026-11-16
+
+A department's messaging is found on its screen, and a busy machine gets its turn to install the server's build.
+
+### Added
+
+- Each channel of a department to its contacts takes an address, with the person's consent to the channel's purpose.
+
+### Changed
+
+- The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
+
+### Fixed
+
+- External messaging is a button on the department screen, so whoever runs a department's messaging finds its channels.
+- The machine next to install the server's build takes no new work, so what runs there ends and it installs.
+- The orchestrator and the heads get onto a node whose updater went away before stopping it, within their 3 minutes.
+- program_screen shows a busy employee's program from its running turn, without a false no_program.
+- Four tests of the keeper's lease move fake clocks instead of waiting in real time.
+
 ## [0.29.2] - 2026-11-16
 
 The orchestrator does everything in the company in any turn, as its owner, and limits a company wants are written in
