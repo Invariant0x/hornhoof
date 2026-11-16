@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
@@ -12,8 +12,7 @@ import { changeEntry, companyEntries, createEntry, entryById, entryLog, entryVie
 const IdParams = z.strictObject({ id: z.string() });
 
 /* A person at the form, not an agent acting for one. */
-async function requireTyping(req: FastifyRequest, ctx: Ctx): Promise<Person> {
-  const me = await requirePerson(req, ctx.db);
+function typing(me: Person): Person {
   if (me.via) throw notAllowed('Only a person types a password into the vault, at its form in Hornhoof.');
   return me;
 }
@@ -37,14 +36,14 @@ export function vaultRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.post('/api/vault', async (req, reply) => {
-    const me = await requireTyping(req, ctx);
+    const me = typing(await requirePerson(req, ctx.db));
     const input = parseBody(NewEntry, req.body);
     const [view] = await entryViews(ctx, [await createEntry(ctx, me.companyId, me.id, input)]);
     return reply.code(201).send(view);
   });
 
   app.patch('/api/vault/:id', async req => {
-    const me = await requireTyping(req, ctx);
+    const me = typing(await requirePerson(req, ctx.db));
     const entry = await entryOf(ctx, me, IdParams.parse(req.params).id);
     requireOwnOrCeo(me, entry);
     const input = parseBody(EntryChange, req.body);
@@ -53,7 +52,7 @@ export function vaultRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.delete('/api/vault/:id', async (req, reply) => {
-    const me = await requireTyping(req, ctx);
+    const me = typing(await requirePerson(req, ctx.db));
     const entry = await entryOf(ctx, me, IdParams.parse(req.params).id);
     requireOwnOrCeo(me, entry);
     await removeEntry(ctx, entry, me.id);
