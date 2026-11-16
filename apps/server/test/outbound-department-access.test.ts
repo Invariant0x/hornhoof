@@ -95,3 +95,65 @@ describe('a person given several departments, not the whole company, runs the me
     expect(await m.c.db.select().from(outboundPermissions).where(eq(outboundPermissions.channelId, m.devChannelId))).toEqual([]);
   }, 60_000);
 });
+
+type Shown = { id: string; revision: number; status: string; value: { subject?: string; parts?: unknown[] }; createdAt: string; createdBy: { kind: string; name: string | null } };
+type Listed = { entryId: string; kind: string; locale: string | null; current: number | null; revisions: Shown[] };
+
+/* What a person publishes or takes back is the version they were shown: the screen sends its number and the newest one of
+   the entry it showed, and the server refuses when the entry got another version since. */
+describe('a person who runs a department publishes the version they were shown', () => {
+  const SALE = { ...TEMPLATE, subject: 'Spring sale', parts: [{ kind: 'text', text: 'Hello from the spring sale.' }] };
+  const SALE_AGAIN = { ...TEMPLATE, subject: 'Spring sale, last days', parts: [{ kind: 'text', text: 'The spring sale ends on Sunday.' }] };
+
+  async function proposed(m: Awaited<ReturnType<typeof fourDepartments>>, value: object, entryId?: string) {
+    const answer = await m.post('/api/outbound/catalog', { departmentId: m.mkt.id, channelId: m.channelId, value, ...(entryId ? { entryId } : {}) }, m.c.ceoToken);
+    expect(answer.statusCode, answer.body).toBe(200);
+    return answer.json() as { id: string; entryId: string; revision: number };
+  }
+  const entryIn = async (m: Awaited<ReturnType<typeof fourDepartments>>, entryId: string) => {
+    const catalog = await m.get(`/api/outbound/catalog?department=${m.mkt.id}`);
+    expect(catalog.statusCode, catalog.body).toBe(200);
+    return (catalog.json()['entries'] as Listed[]).find(e => e.entryId === entryId)!;
+  };
+
+  it('reads each version whole, with who proposed it and when, and nothing of another department', async () => {
+    const m = await fourDepartments();
+    const first = await proposed(m, SALE);
+    const entry = await entryIn(m, first.entryId);
+    expect(entry).toMatchObject({ kind: 'template', locale: 'en', current: null });
+    expect(entry.revisions).toHaveLength(1);
+    expect(entry.revisions[0]).toMatchObject({ id: first.id, revision: 1, status: 'proposed', value: SALE, createdBy: { kind: 'person', name: 'Ivan' } });
+    expect(Date.parse(entry.revisions[0]!.createdAt)).not.toBeNaN();
+    const other = await m.get(`/api/outbound/catalog?department=${m.c.dev.id}`);
+    expect([other.statusCode, reasonOf(other)]).toEqual([403, 'outbound_not_allowed']);
+  }, 60_000);
+
+  it('is refused when the entry got a newer version after the screen showed it, and publishes it once shown', async () => {
+    const m = await fourDepartments();
+    const first = await proposed(m, SALE);
+    const second = await proposed(m, SALE_AGAIN, first.entryId);
+    const stale = await m.post(`/api/outbound/catalog/${first.id}/publish`, { revision: 1, newest: 1 });
+    expect([stale.statusCode, reasonOf(stale)]).toEqual([409, 'outbound_changed']);
+    const wrong = await m.post(`/api/outbound/catalog/${second.id}/publish`, { revision: 1, newest: 2 });
+    expect([wrong.statusCode, reasonOf(wrong)]).toEqual([409, 'outbound_changed']);
+    expect((await entryIn(m, first.entryId)).revisions.map(r => [r.revision, r.status])).toEqual([[2, 'proposed'], [1, 'proposed']]);
+
+    const shown = await m.post(`/api/outbound/catalog/${second.id}/publish`, { revision: 2, newest: 2 });
+    expect(shown.statusCode, shown.body).toBe(200);
+    expect((await entryIn(m, first.entryId)).current).toBe(2);
+  }, 60_000);
+
+  it('takes back only the version they were shown, as the entry stood then', async () => {
+    const m = await fourDepartments();
+    const first = await proposed(m, SALE);
+    expect((await m.post(`/api/outbound/catalog/${first.id}/publish`, { revision: 1, newest: 1 })).statusCode).toBe(200);
+    await proposed(m, SALE_AGAIN, first.entryId);
+    const stale = await m.post(`/api/outbound/catalog/${first.id}/revoke`, { revision: 1, newest: 1 });
+    expect([stale.statusCode, reasonOf(stale)]).toEqual([409, 'outbound_changed']);
+    expect((await entryIn(m, first.entryId)).current).toBe(1);
+
+    const shown = await m.post(`/api/outbound/catalog/${first.id}/revoke`, { revision: 1, newest: 2 });
+    expect(shown.statusCode, shown.body).toBe(200);
+    expect((await entryIn(m, first.entryId)).current).toBeNull();
+  }, 60_000);
+});
