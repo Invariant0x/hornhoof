@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, type OutboundSetupKind } from '../../db/schema.js';
@@ -48,7 +48,11 @@ export type WebhookSettings = z.infer<typeof WebhookConfig>;
 export type AccountSettings = { adapter: 'smtp'; config: SmtpSettings } | { adapter: 'webhook'; config: WebhookSettings };
 
 const IdParams = z.strictObject({ id: z.uuid() });
-const SetupBody = z.strictObject({ channelId: z.uuid(), label: z.string().trim().min(1).max(200), config: z.unknown() });
+/* config: the settings a person gives. sameAs: an account whose settings the new one takes, with from as its own address,
+   which the orchestrator and a head use too, as no setting passes through them. */
+const SetupBody = z
+  .strictObject({ channelId: z.uuid(), label: z.string().trim().min(1).max(200), config: z.unknown().optional(), sameAs: z.uuid().optional(), from: z.string().optional() })
+  .refine(body => (body.config === undefined) !== (body.sameAs === undefined) && (body.from === undefined || body.sameAs !== undefined), { message: 'Give either config, or sameAs with an optional from.' });
 const RotateBody = z.strictObject({ config: z.unknown() });
 const BindBody = z.strictObject({ agentId: z.uuid() });
 const SettleBody = z.strictObject({ outcome: z.enum(['accepted', 'definitely_not_accepted']), evidence: z.string().trim().min(1).max(2000) });
@@ -201,15 +205,22 @@ function settingsFrom(ctx: Ctx, row: { configEnc: string; adapter: Channel['adap
 export const markInvalid = (ctx: Ctx, accountId: string, configGeneration: number, now = new Date()) =>
   ctx.db.update(outboundAccounts).set({ status: 'invalid', updatedAt: now }).where(and(eq(outboundAccounts.id, accountId), eq(outboundAccounts.configGeneration, configGeneration), eq(outboundAccounts.status, 'active')));
 
-/* A setting and its secret never pass through a model, a head's included: only a person gives them, on their own screen. */
+/* A setting and its secret never pass through a model, a head's included: only a person gives them, on their own screen. A
+   model connects an account only with the settings of one the company has, by sameAs. */
 function refuseModel(me: Person): void {
-  if (me.via) throw notYours('Only a person does this: settings never pass through a model.');
+  if (me.via) throw notYours('Only a person does this: settings never pass through a model. Connect it with sameAs, the settings of an account the company has, or ask a person to give new ones on the channel\'s screen.');
 }
 
-/* Who writes from an account is the decision of a person who runs the department, which its head may carry out. The
-   orchestrator never moves it. */
-function refuseOrchestrator(me: Person): void {
-  if (viaOrchestrator(me)) throw notYours('Only a person who runs this department, or its head carrying out their word, does this.');
+/* The settings of an account the caller runs, for a new account of a channel with the same adapter, sending from its own
+   address when one is given: they go from one account to the other inside Hornhoof, never through the caller. */
+async function settingsLike(ctx: Ctx, me: Person, channel: Channel, sameAs: string, from: string | undefined): Promise<unknown> {
+  const source = await runnableAccount(ctx, me, sameAs);
+  const settings = await currentSettings(ctx, source.id);
+  if (!settings) throw conflict('That account has no settings that can be used.');
+  if (settings.adapter !== channel.adapter) throw new ApiError(400, 'validation', `That account is ${settings.adapter}, and this channel is ${channel.adapter}.`, 'outbound_invalid', { fields: ['sameAs'] });
+  if (from === undefined) return settings.config;
+  if (settings.adapter !== 'smtp') throw new ApiError(400, 'validation', 'Only a mail account sends from an address.', 'outbound_invalid', { fields: ['from'] });
+  return { ...settings.config, from };
 }
 
 const idOf = (req: FastifyRequest): string => IdParams.parse(req.params).id;
@@ -255,10 +266,11 @@ export function accountRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
   app.post('/api/outbound/accounts', async req => {
     const me = await requirePerson(req, db);
-    refuseModel(me);
     const body = SetupBody.parse(req.body);
+    if (body.sameAs === undefined) refuseModel(me);
     const channel = await runnableChannel(ctx, me, body.channelId);
-    const made = await setupAccount(ctx, channel, { label: body.label, config: body.config, createdBy: me.id });
+    const config = body.sameAs === undefined ? body.config : await settingsLike(ctx, me, channel, body.sameAs, body.from);
+    const made = await setupAccount(ctx, channel, { label: body.label, config, createdBy: me.id });
     await logAccount(ctx, me, { ...channel, channelId: channel.id }, 'account_set_up', made);
     logged(req, me, made.accountId, 'set up');
     return made;
@@ -290,7 +302,6 @@ export function accountRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/outbound/accounts/:id/bind', async req => {
     const me = await requirePerson(req, db);
-    refuseOrchestrator(me);
     const account = await runnableAccount(ctx, me, idOf(req));
     const bound = await bindAccount(ctx, account, { agentId: BindBody.parse(req.body).agentId, createdBy: me.id });
     await logAccount(ctx, me, account, 'account_bound', bound);

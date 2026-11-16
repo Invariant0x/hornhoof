@@ -266,6 +266,34 @@ describe('a test run', () => {
     expect(await gets(c.app.ctx, back, 'tests.run')).toBe(false);
   });
 
+  /* #1060: a machine away past its lease keeps nothing of its part once the part runs on another machine. What it sends
+     back for it, should it come back with the part still running, counts for nothing, and it hears to stop it. */
+  it('takes no end from the machine that was away once its part runs on another machine, and tells it to stop', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
+    const ann = await c.machine(c.ann, 'ann-pc');
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test' });
+    const lost = await nextOf(ann.node, 'tests.run');
+    ann.node.close();
+    await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: ann.nodeId }));
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + 4 * 60_000));
+    const again = await nextOf(ivan.node, 'tests.run');
+    expect(again).toMatchObject({ part: 1, command: 'make test' });
+    expect(again.partId).not.toBe(lost.partId);
+    const back = await connectNode(c.url, ann.key);
+    back.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], load: idle(), tests: [lost.partId], work: true });
+    expect(await nextOf(back, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: lost.partId });
+    back.send(done(lost));
+    await nextOf(back, 'tests.ack');
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ status: 'running', parts: [{ status: 'running' }] });
+    expect(await c.wokeWith(c.bruno.id)).toBeNull();
+    ivan.node.send(done(again, { ok: false, exitCode: 1, error: 'failed' }));
+    await nextOf(ivan.node, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*Part 1 of 1 failed on dev-mac[^\n]*It ran again after ann-pc went offline\./);
+  });
+
   it("does not count a turn that ended while its test run goes on as standing still", async () => {
     const c = await company();
     await c.machine(c.ceo, 'dev-mac');

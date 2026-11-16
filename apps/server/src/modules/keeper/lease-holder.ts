@@ -1,6 +1,6 @@
 import type { LeaseKind, LeaseSync, Term } from '../../db/net.js';
 import type { LeaseStore } from './lease-store.js';
-import { LEASE_MS, leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from './lease.js';
+import { lateTickMs, LEASE_MS, leaseValid, nextLeaseStep, type Clocks, type Held, type LeaseStep } from './lease.js';
 import type { Mode } from './state.js';
 import { reasonOf as messageOf } from './machine-keys.js';
 
@@ -26,6 +26,11 @@ export type LeaseHolderOptions = {
      each take. Without it, and while none is needed, a lease is taken and renewed as on a machine that keeps the data
      alone. */
   proofs?: { needed(): boolean | null; proof(): Clocks | null; ended(): string | null; entry(): { sent: Clocks; term: Term } | null; clear(): void };
+  /* The fsync p99 this machine measured of its disk, none before it has one: a tick may come later on a slow disk. */
+  fsyncP99?: () => number | null;
+  /* Whether no other machine could lead now. A late tick then ends nothing, since no stall here can make two leaders.
+     Without it another could, and a late tick ends the lease. */
+  sole?: () => boolean;
 };
 
 /* What Postgres says when its disk is full. */
@@ -117,11 +122,18 @@ export class LeaseHolder {
     const proofs = needed === false ? null : this.opts.proofs!;
     const step = nextLeaseStep({
       now, last: this.last, held: this.held, maintenance: this.maintenance,
+      lateMs: this.lateMs(),
       ...(proofs ? { proof: proofs.proof(), ended: this.held ? proofs.ended() : null, entry: this.held ? undefined : proofs.entry() } : {}),
     });
     this.last = now;
     await this.take(lease, step);
     await this.prune(lease, now);
+  }
+
+  /* How late a tick may come now: without limit where no other machine could lead, else by the disk as measured. */
+  private lateMs(): number {
+    if (this.opts.sole?.()) return Number.POSITIVE_INFINITY;
+    return lateTickMs(this.opts.fsyncP99?.() ?? null);
   }
 
   /* Asks whether another machine holds the company's data. An answer that cannot be had keeps the last one. */

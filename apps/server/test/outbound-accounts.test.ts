@@ -116,14 +116,36 @@ describe('setting an account up', () => {
   it.each([
     ['setting up', '/api/outbound/accounts', (w: World) => ({ channelId: w.channel.id, label: 'Sales', config: SMTP })],
     ['rotating', (w: World) => `/api/outbound/accounts/${w.account.id}/rotate`, () => ({ config: SMTP })],
-    ['binding', (w: World) => `/api/outbound/accounts/${w.account.id}/bind`, (w: World) => ({ agentId: w.c.head.id })],
     ['settling', () => `/api/outbound/attempts/${randomUUID()}/settle`, () => ({ outcome: 'accepted', evidence: 'It left.' })],
-  ])('never takes %s from a model, even in a turn answering the CEO', async (_name, url, payload) => {
+  ])('never takes %s with settings from a model, even in a turn answering the CEO', async (_name, url, payload) => {
     const w = await world();
     const target = typeof url === 'string' ? url : url(w);
     const refused = await w.c.app.inject({ method: 'POST', url: target, payload: payload(w), headers: orchestratorHeaders(w.c.ids.ceo, w.c.orchestrator.id) });
     expect(refused.statusCode).toBe(403);
     expect(await bindingsOf(w, w.account.id)).toHaveLength(1);
+  });
+
+  it('sets one up with the settings of another account, from the orchestrator too, with its own address and no setting in the answer', async () => {
+    const w = await world();
+    const settingsOf = async (id: string) => JSON.parse(decryptSecret((await rowOf(w, id)).configEnc, w.ctx.config.secret)) as Record<string, unknown>;
+    const asOrchestrator = (payload: object) => w.c.app.inject({ method: 'POST', url: '/api/outbound/accounts', payload, headers: orchestratorHeaders(w.c.ids.ceo, w.c.orchestrator.id) });
+    const { channel, accountId: hello } = await aFreeAccount(w);
+    const made = await asOrchestrator({ channelId: channel.id, label: 'Kate', sameAs: hello, from: 'kate@acme.example' });
+    expect(made.statusCode, made.body).toBe(200);
+    expect(made.json()).toMatchObject({ label: 'Kate', senderDomain: 'acme.example', binding: null });
+    expect(made.body).not.toContain(PASSWORD);
+    expect(await settingsOf(made.json()['accountId'] as string)).toEqual({ ...SMTP, from: 'kate@acme.example' });
+    expect((await asOrchestrator({ channelId: channel.id, label: 'Both', sameAs: hello, config: SMTP })).statusCode).toBe(400);
+    expect((await asOrchestrator({ channelId: (await aWebhookChannel(w)).id, label: 'Hook', sameAs: hello })).statusCode).toBe(400);
+    expect((await post(w, '/api/outbound/accounts', { channelId: channel.id, label: 'Sam', sameAs: hello }, w.c.samToken)).statusCode).toBe(403);
+  });
+
+  it('takes who writes from an account from the orchestrator', async () => {
+    const w = await world();
+    const { accountId } = await aFreeAccount(w);
+    const bound = await w.c.app.inject({ method: 'POST', url: `/api/outbound/accounts/${accountId}/bind`, payload: { agentId: w.c.head.id }, headers: orchestratorHeaders(w.c.ids.ceo, w.c.orchestrator.id) });
+    expect(bound.statusCode, bound.body).toBe(200);
+    expect(await bindingsOf(w, accountId)).toHaveLength(1);
   });
 });
 

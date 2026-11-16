@@ -17,7 +17,7 @@ const MACHINE: MachineView = {
   lastSeenAt: null, load: null, plans: [], lendsTests: true, running: { agents: [], parts: [] },
 };
 const VERSION = { version: '0.6.1', commit: 'routes-fixture', migrations: 57 };
-const UPDATES: UpdatesView = { current: VERSION, available: false, latest: null, versions: [], checkedAt: null, error: null, updater: { present: false, status: null, waiting: null } };
+const UPDATES: UpdatesView = { current: VERSION, available: false, latest: null, versions: [], checkedAt: null, error: null, updater: { present: false, status: null, waiting: null, calledOff: null } };
 
 export async function serveRoutes(page: Page, options: { signedOut?: boolean; person?: 'p1' | 'p2' } = {}) {
   let signedIn = !options.signedOut;

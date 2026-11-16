@@ -32,6 +32,8 @@ async function dataKeeper(): Promise<Running> {
   const { statfsSync } = await import('node:fs');
   const { KEEPER_DIR } = await import('./modules/keeper/machine-keys.js');
   const { InternetMeasures } = await import('./modules/keeper/internet.js');
+  const { Measures } = await import('./modules/keeper/measures.js');
+  const { queryTimeoutMs } = await import('./modules/keeper/lease.js');
   const { pgSubscription, probeLink, Promoter } = await import('./modules/keeper/taking.js');
   const { othersFinished } = await import('./modules/keeper/proofs.js');
   const { termOf } = await import('./modules/keeper/promote.js');
@@ -40,6 +42,10 @@ async function dataKeeper(): Promise<Running> {
   const { LeadUpdate } = await import('./modules/keeper/lead-update.js');
   const config = loadConfig(process.env);
   const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
+  /* What the keeper measures of this machine, its disk's fsync p99 among it: what it reports, and what the keeper's
+     own statements on the lease and the copies may take. */
+  const measures = new Measures({ dir: KEEPER_DIR, internet: new InternetMeasures({ dir: KEEPER_DIR, log }) });
+  const paced = (url: string) => keeperSql(url, { timeoutMs: () => queryTimeoutMs(measures.fsyncP99()) });
   /* Where this machine's database listens, for the peers that keep data too. */
   const dbTarget = (): { host: string; port: number } | null => {
     if (!config.databaseUrl) return null;
@@ -60,15 +66,15 @@ async function dataKeeper(): Promise<Running> {
   };
   const sync =
     config.databaseUrl && config.machineId && slow
-      ? { catalog: pgCatalog(keeperSql(config.databaseUrl), slow, config.machineId), relay: new Relay(config.relayUrl), slots: { sql: slow, diskFree } }
+      ? { catalog: pgCatalog(paced(config.databaseUrl), slow, config.machineId), relay: new Relay(config.relayUrl), slots: { sql: slow, diskFree } }
       : undefined;
   return new Keeper({
-    config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log, lease: leaseOfMachine(config, log),
+    config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log, lease: leaseOfMachine(config, log, paced),
     published: publishedFrom(process.env), dbTarget: dbTarget(), addresses: addressesIn(process.env), hostname: process.env.HORNHOOF_HOSTNAME || null,
     /* The role copies read this machine's database with, made on a connection of its own each time. */
     copies: { replica: config.databaseUrl ? { connect: () => keeperSql(config.databaseUrl!, { timeoutMs: 20_000 }), password: replicaPassword(config.secret) } : null },
     sync,
-    internet: new InternetMeasures({ dir: KEEPER_DIR, log }),
+    measures,
     /* What its lease goes by once another machine holds a copy that finished: an answer of its own at the company's
        link or its copy's word each second, and its copy's promise or the relay's window to lead again. */
     proofs:
