@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { assistantReplies, assistants } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 
 /* How long the program has for one skill, and how much of its answer an agent reads. */
 export const SKILL_WAIT_MS = 120_000;
@@ -18,7 +19,7 @@ const Answer = z.object({ ok: z.boolean(), text: z.string(), data: z.unknown().o
 /* Whether the assistant whose own agent this is has a skills address now: only then is persona_call among its agent's tools
    and in its instructions. */
 export async function hasSkills(db: Ctx['db'], agentId: string): Promise<boolean> {
-  const [row] = await db.select({ agentId: assistants.agentId }).from(assistants).where(and(eq(assistants.agentId, agentId), isNotNull(assistants.skillsUrl), ne(assistants.skillsUrl, '')));
+  const [row] = await db.select(only(assistants, 'agentId')).from(assistants).where(and(eq(assistants.agentId, agentId), isNotNull(assistants.skillsUrl), ne(assistants.skillsUrl, '')));
   return row !== undefined;
 }
 
@@ -54,7 +55,7 @@ export async function callSkill(ctx: Ctx, job: { id: string; agentId: string }, 
   if (!to?.url) return failed("This assistant has no skills address, so its program's skills cannot be asked: its owner sets one on the assistant's card in People.");
   if (!to.secret) return failed("This assistant has no key yet, so its program's skills cannot be asked: its owner makes one on the assistant's card in People.");
   const [started] = await ctx.db
-    .select({ messageId: assistantReplies.messageId })
+    .select(only(assistantReplies, 'messageId'))
     .from(assistantReplies)
     .where(and(eq(assistantReplies.jobId, job.id), eq(assistantReplies.assistantId, to.assistantId)))
     .orderBy(desc(assistantReplies.createdAt))

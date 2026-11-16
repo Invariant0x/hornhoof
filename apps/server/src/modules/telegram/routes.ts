@@ -8,6 +8,7 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agentChanges, telegramBots, telegramReplies } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { agentFor, type AgentRow } from '../agents/find.js';
 import { deleteWebhook, getMe, TelegramError, type TelegramUser } from './api.js';
@@ -19,7 +20,7 @@ export type TelegramView = { username: string } | null;
 
 /* The bot an agent's card shows: its name in Telegram, never its token. */
 export async function telegramOf(db: Db, agentId: string): Promise<TelegramView> {
-  const [bot] = await db.select({ username: telegramBots.username }).from(telegramBots).where(eq(telegramBots.agentId, agentId));
+  const [bot] = await db.select(only(telegramBots, 'username')).from(telegramBots).where(eq(telegramBots.agentId, agentId));
   return bot ?? null;
 }
 

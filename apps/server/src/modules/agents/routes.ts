@@ -7,7 +7,7 @@ import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
 import { actorOf, changedBy, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, telegramBots, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { unreadCount } from '../conversation/inbox.js';
 import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
@@ -480,7 +480,7 @@ async function patched(ctx: Ctx, me: Person, agent: AgentRow, body: z.infer<type
   const [before] = agent.subscriptionId ? await db.select().from(subscriptions).where(eq(subscriptions.id, agent.subscriptionId)) : [];
   const [after] = next.subscriptionId ? await db.select().from(subscriptions).where(eq(subscriptions.id, next.subscriptionId)) : [];
   const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
-  const [team] = next.teamId ? await db.select({ turnkey: teams.turnkey }).from(teams).where(eq(teams.id, next.teamId)) : [];
+  const [team] = next.teamId ? await db.select(only(teams, 'turnkey')).from(teams).where(eq(teams.id, next.teamId)) : [];
   patchModel(agent, next, body, { before, after }, role && tierIn(role, team));
   patchEffort(agent, next, body, before, after);
 
@@ -547,7 +547,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
     if (running) throw new ApiError(409, 'conflict', 'This employee is working. Stop it first.', 'agent_working');
     /* A task it holds or does would wait for it for good. */
     const held = await db
-      .select({ number: tasks.number })
+      .select(only(tasks, 'number'))
       .from(tasks)
       .where(and(eq(tasks.assigneeAgentId, agent.id), notInArray(tasks.status, [...CLOSED])))
       .orderBy(asc(tasks.number));

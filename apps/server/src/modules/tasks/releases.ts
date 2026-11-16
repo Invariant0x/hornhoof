@@ -2,7 +2,7 @@ import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, autonomousReleases, companies, departments, people, requests, taskEvents, taskRoutes, tasks, testParts, testRuns, turnReleases, turns, type ReleasedTask } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
 import { taskByRef } from './views.js';
@@ -46,7 +46,7 @@ async function requireFullRun(db: Ctx['db'] | Tx, turn: Turn, branch: string, de
   if (run.departmentId !== departmentId || run.branch !== branch || run.commitSha !== commit) throw notFull(`it ran ${run.branch ?? 'no branch'} at ${run.commitSha ?? 'no commit'}`);
   if (run.status !== 'passed') throw notFull(`it ${run.status === 'running' ? 'is still running' : run.status}`);
   if (run.fileCache && (run.fileCache.mode !== 'full' || run.fileCache.reused > 0)) throw notFull(`it reused ${run.fileCache.reused} green results`);
-  const parts = await db.select({ status: testParts.status }).from(testParts).where(eq(testParts.runId, run.id));
+  const parts = await db.select(only(testParts, 'status')).from(testParts).where(eq(testParts.runId, run.id));
   if (!parts.length || parts.length !== run.parts || parts.some(part => part.status !== 'passed')) throw notFull('not every part of it passed');
   const [newer] = await db.select(idOnly(testRuns)).from(testRuns).where(and(eq(testRuns.companyId, turn.companyId), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed'), gt(testRuns.createdAt, run.createdAt))).limit(1);
   if (newer) throw notFull(`a newer run of the same commit failed, ${newer.id}`);
@@ -84,8 +84,8 @@ async function liveCheckers(db: Ctx['db'] | Tx, released: ReleasedTask[]): Promi
    the checkers that passed what R brings. */
 async function logAutonomous(tx: Tx, turn: Turn, task: Task, agentId: string, commit: string, base: string, runId: string, released: ReleasedTask[]): Promise<string | null> {
   const checkers = await liveCheckers(tx, released);
-  const [run] = await tx.select({ number: testRuns.number }).from(testRuns).where(eq(testRuns.id, runId));
-  const [holder] = await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const [run] = await tx.select(only(testRuns, 'number')).from(testRuns).where(eq(testRuns.id, runId));
+  const [holder] = await tx.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   if (!checkers || !run || !holder) return null;
   const unique = <T,>(items: T[]) => [...new Set(items)];
   const ids = unique(checkers.map(c => c.id));
@@ -113,7 +113,7 @@ async function acceptedResults(db: Ctx['db'], turn: Turn): Promise<Accepted[]> {
   const rows = await db.select().from(tasks).where(and(eq(tasks.companyId, turn.companyId), eq(tasks.turnId, turn.id))).orderBy(asc(tasks.number));
   const out: Accepted[] = [];
   for (const task of rows) {
-    const [report] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`(${taskEvents.data} ? 'acceptedCandidate' OR ${taskEvents.data} ? 'integration')`)).orderBy(desc(taskEvents.id)).limit(1);
+    const [report] = await db.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`(${taskEvents.data} ? 'acceptedCandidate' OR ${taskEvents.data} ? 'integration')`)).orderBy(desc(taskEvents.id)).limit(1);
     const accepted = report?.data.acceptedCandidate as { candidateId?: string; commit?: string } | undefined;
     const integration = report?.data.integration as { commit?: string } | undefined;
     const [route] = await db.select().from(taskRoutes).where(eq(taskRoutes.taskId, task.id));
@@ -130,7 +130,7 @@ async function acceptedResults(db: Ctx['db'], turn: Turn): Promise<Accepted[]> {
 }
 
 async function candidateOf(db: Ctx['db'], task: Task, candidateId: string): Promise<EchelonCandidate | null> {
-  const handed = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->'candidate'->>'id' = ${candidateId}`)).limit(1);
+  const handed = await db.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->'candidate'->>'id' = ${candidateId}`)).limit(1);
   const parsed = EchelonCandidate.safeParse(handed[0]?.data.candidate);
   return parsed.success ? parsed.data : null;
 }

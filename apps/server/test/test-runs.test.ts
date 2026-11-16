@@ -3,7 +3,7 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, departments, jobs, machines, nodes, pendingWakes, people, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
@@ -302,7 +302,7 @@ describe('a test run', () => {
     await call('run_tests', { command: 'make test' });
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, job.id));
     await afterJob(c.app.ctx, job.id);
-    expect((await c.db.select({ silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id)))[0]).toEqual({ silent: 0 });
+    expect((await c.db.select(only(tasks, 'silent')).from(tasks).where(eq(tasks.id, c.task.id)))[0]).toEqual({ silent: 0 });
     expect(await c.wokeWith(c.bruno.id)).toBeNull();
   });
 

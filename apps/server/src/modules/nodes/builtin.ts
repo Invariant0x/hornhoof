@@ -2,7 +2,7 @@ import { and, eq, exists, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, subscriptions, testParts } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { installingBuiltins } from '../network/follow.js';
 import { builtinOf, ownMachine, UNNAMED_BUILTIN } from './hub.js';
 
@@ -34,7 +34,7 @@ export const BUILTIN_NAME = 'the built-in node';
 /* What a built-in node is called where its work is listed: the server's own by its bare name, another by its machine's. */
 export async function builtinName(ctx: Ctx, db: Reader, machine: string): Promise<string> {
   if (machine === ownMachine(ctx.config)) return BUILTIN_NAME;
-  const [row] = await db.select({ hostname: machines.hostname }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+  const [row] = await db.select(only(machines, 'hostname')).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
   return row?.hostname ? `${BUILTIN_NAME} on ${row.hostname}` : BUILTIN_NAME;
 }
 

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, testRuns, turns } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { type Task } from '../tasks/engine.js';
 import { routeOf } from '../tasks/echelons-store.js';
@@ -58,7 +58,7 @@ export async function evidenceOf(ctx: Reader, run: Pick<Run, 'branch' | 'commitS
 /* The turn's branch, for the tasks about the turn's work as a whole, as its release: the turn such a task went into, else
    its department's open turn. */
 async function turnBranchOf(db: Reader['db'], task: Task): Promise<string | null> {
-  const [own] = task.turnId ? await db.select({ number: turns.number }).from(turns).where(eq(turns.id, task.turnId)) : [];
+  const [own] = task.turnId ? await db.select(only(turns, 'number')).from(turns).where(eq(turns.id, task.turnId)) : [];
   const turn = own ?? (await openTurnOf(db, task.companyId, task.departmentId));
   if (!turn || (await routeOf(db, task)).state.resultKind !== 'coordination') return null;
   return `turn-${turn.number}`;

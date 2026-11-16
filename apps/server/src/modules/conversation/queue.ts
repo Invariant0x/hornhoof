@@ -1,4 +1,4 @@
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
@@ -322,7 +322,7 @@ export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string
 
 /* A turn its words went into as it ran. */
 async function runsNow(ctx: Ctx, jobId: string): Promise<boolean> {
-  const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
+  const [job] = await ctx.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, jobId));
   return job?.status === 'running';
 }
 
@@ -1232,7 +1232,7 @@ export function pump(ctx: Ctx, agentId: string): Promise<void> {
 
 /* Every agent with turns waiting, after a machine came back or a subscription changed. */
 export async function pumpWaiting(ctx: Ctx): Promise<void> {
-  const waiting = await ctx.db.selectDistinct({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
+  const waiting = await ctx.db.selectDistinct(only(jobs, 'agentId')).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
   for (const { agentId } of waiting) if (agentId) await pump(ctx, agentId);
 }
 
@@ -1274,7 +1274,7 @@ export async function reconnecting(ctx: Ctx, agentId: string): Promise<boolean> 
   const sub = await liveSubscription(ctx, agentId);
   if (!sub) return false;
   if (sub.kind === 'api_key') return comingBack(ctx, ownBuiltin(ctx.config));
-  const [agent] = await ctx.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await ctx.db.select(only(agents, 'nodeId')).from(agents).where(eq(agents.id, agentId));
   const all = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready');
   const own = all.find(n => n.id === agent?.nodeId);
   const waited = own && (await holdsWork(ctx, agentId)) ? [own] : all;

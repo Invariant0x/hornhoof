@@ -6,7 +6,7 @@ import { accessOf } from '../../auth/access.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, autonomousReleases, departments, people, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { evidenceOf } from '../testruns/evidence.js';
 import { coversEveryPart } from '../testruns/github-status.js';
@@ -177,7 +177,7 @@ async function isWholeSuiteGreenRun(db: QueryDb, companyId: string, department: 
 
 async function newestFailedNumber(db: QueryDb, companyId: string, departmentId: string, commit: string): Promise<number> {
   const [failed] = await db
-    .select({ number: testRuns.number })
+    .select(only(testRuns, 'number'))
     .from(testRuns)
     .where(and(eq(testRuns.companyId, companyId), eq(testRuns.departmentId, departmentId), eq(testRuns.kind, 'tests'), eq(testRuns.commitSha, commit), eq(testRuns.status, 'failed')))
     .orderBy(desc(testRuns.number))
@@ -268,7 +268,7 @@ async function isAncestor(db: QueryDb, ancestor: Task, task: Task): Promise<bool
   while (parentId && !seen.has(parentId)) {
     if (parentId === ancestor.id) return true;
     seen.add(parentId);
-    const [row] = await db.select({ parentId: tasks.parentId }).from(tasks).where(and(eq(tasks.id, parentId), eq(tasks.companyId, task.companyId)));
+    const [row] = await db.select(only(tasks, 'parentId')).from(tasks).where(and(eq(tasks.id, parentId), eq(tasks.companyId, task.companyId)));
     parentId = row?.parentId ?? null;
   }
   return false;
@@ -312,7 +312,7 @@ async function activeReviewer(
 ): Promise<{ reviewerAgentId: string; reviewerName: string } | null> {
   if (!agentId || authors.has(agentId)) return null;
   const [reviewer] = await db
-    .select({ name: agents.name })
+    .select(only(agents, 'name'))
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   return reviewer ? { reviewerAgentId: agentId, reviewerName: reviewer.name } : null;
@@ -394,7 +394,7 @@ async function taskVerdictOnCommit(
 
 async function candidateTaskIdsOnCommit(db: QueryDb, companyId: string, placeIds: string[], commit: string): Promise<string[]> {
   const rows = await db
-    .select({ taskId: taskEvents.taskId })
+    .select(only(taskEvents, 'taskId'))
     .from(taskEvents)
     .innerJoin(tasks, eq(tasks.id, taskEvents.taskId))
     .where(
@@ -526,7 +526,7 @@ async function insertJournalRow(
 ): Promise<{ id: string; baseCommitSha: string } | null> {
   const fresh = await reverifyInTransaction(tx, task, commit, proof.department);
   if (!fresh || fresh.verdict.baseCommitSha !== proof.verdict.baseCommitSha) return null;
-  const [requester] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId)));
+  const [requester] = await tx.select(only(agents, 'name')).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId)));
   if (!requester) return null;
   const [inserted] = await tx
     .insert(autonomousReleases)

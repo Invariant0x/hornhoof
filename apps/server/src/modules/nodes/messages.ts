@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, turnTokens, type NodeStatus } from '../../db/schema.js';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { tokenRow } from '../subscriptions/tokens.js';
 import { said } from '../conversation/live.js';
 import { ON_NODE } from '../jobs/dispatch.js';
@@ -84,7 +84,7 @@ function holdForWaitingWords(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessag
 }
 
 async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'job.done' }>, now: Date) {
-  const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, msg.jobId), jobsOf(id, ctx)));
+  const [job] = await ctx.db.select(only(jobs, 'agentId')).from(jobs).where(and(eq(jobs.id, msg.jobId), jobsOf(id, ctx)));
   const finish = async () => {
     if (msg.error === 'cancelled') {
       const stale = await ctx.db.update(jobs).set({ tail: staleOutput(msg.tail) })

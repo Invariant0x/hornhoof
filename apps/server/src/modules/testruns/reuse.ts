@@ -2,6 +2,7 @@ import { KeptFiles, PREPARATION_UNIT, runsInClass, type EnvironmentSnapshot, typ
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { unitKey as keyOf } from './plan-environment.js';
 import { reusableUnits } from './reuse-evidence.js';
 import { openTurnOf } from '../tasks/turn-department.js';
@@ -108,7 +109,7 @@ export function reuseView(cache: TestRunFileCache | null, parts: Pick<Part, 'fai
 
 /* The turn a run belongs to: its task's, or the one its department runs now. */
 async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId' | 'departmentId'>): Promise<number | null> {
-  const [own] = await db.select({ number: turns.number }).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(eq(tasks.id, run.taskId));
+  const [own] = await db.select(only(turns, 'number')).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(eq(tasks.id, run.taskId));
   if (own) return own.number;
   return (await openTurnOf(db, run.companyId, run.departmentId))?.number ?? null;
 }
@@ -274,7 +275,7 @@ const fitsOneMessage = (suiteId: string, files: KeptFile[]): boolean => KeptFile
    longer fits one message the part's own go on alone: to a tool, no memory only costs time. */
 async function mergeKept(db: Db, scope: RepositoryScope, suiteId: string, files: KeptFile[]): Promise<void> {
   await db.transaction(async tx => {
-    const [kept] = await tx.select({ files: testSuiteMemory.files }).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
+    const [kept] = await tx.select(only(testSuiteMemory, 'files')).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
     const paths = new Set(files.map(file => file.path)), merged = [...(kept?.files ?? []).filter(file => !paths.has(file.path)), ...files];
     const value = fitsOneMessage(suiteId, merged) ? merged : files;
     await tx.insert(testSuiteMemory).values({ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, suiteId, files: value })
