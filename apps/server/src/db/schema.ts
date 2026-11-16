@@ -197,6 +197,7 @@ export const assistantReplies = pgTable(
     assistantId: uuid('assistant_id').notNull().references(() => people.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     messageId: uuid('message_id').notNull(),
+    byOwnAgent: boolean('by_own_agent').notNull().default(false),
     jobId: uuid('job_id').notNull().references(() => jobs.id),
     afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
     answered: boolean('answered').notNull().default(false),

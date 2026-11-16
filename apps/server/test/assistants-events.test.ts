@@ -76,15 +76,15 @@ describe("an assistant's events", () => {
     c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'On it.' } });
     const first = (await waiting).json();
     const agent = { id: c.orchestrator.id, name: c.orchestrator.name, kind: 'orchestrator' };
-    expect(first.events).toEqual([{ seq: expect.any(Number), kind: 'reply', at: expect.any(String), data: { messageId: sent.id, agent, text: 'On it.' } }]);
+    expect(first.events).toEqual([{ seq: expect.any(Number), kind: 'reply', at: expect.any(String), data: { messageId: sent.id, agent, byOwnAgent: false, text: 'On it.' } }]);
     expect(first.next).toBe(first.events[0].seq);
     c.builtin.send({ type: 'job.event', jobId: run.jobId, seq: 1, event: { kind: 'text', text: 'The plan is ready.' } });
     c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(async () => (await eventsOf(c, ava.key, first.next)).some(e => e.kind === 'reply_end'));
     const rest = await eventsOf(c, ava.key, first.next);
     expect(rest.map(e => [e.kind, e.data])).toEqual([
-      ['reply', { messageId: sent.id, agent, text: 'The plan is ready.' }],
-      ['reply_end', { messageId: sent.id, agent, answered: true, failed: false }],
+      ['reply', { messageId: sent.id, agent, byOwnAgent: false, text: 'The plan is ready.' }],
+      ['reply_end', { messageId: sent.id, agent, byOwnAgent: false, answered: true, failed: false }],
     ]);
     expect(rest[0]!.seq).toBeLessThan(rest[1]!.seq);
   });
@@ -102,7 +102,7 @@ describe("an assistant's events", () => {
     const run = await nextOf(c.builtin, 'job.run');
     c.builtin.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: null, result: '', tail: 'boom', error: 'agent_failed' });
     await until(async () => (await eventsOf(c, ava.key)).length > 0);
-    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply_end', { messageId: sent.id, agent: expect.objectContaining({ id: c.orchestrator.id }), answered: false, failed: true }]]);
+    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply_end', { messageId: sent.id, agent: expect.objectContaining({ id: c.orchestrator.id }), byOwnAgent: false, answered: false, failed: true }]]);
   });
 
   it('tell of a request that waits for the owner, from before the key too, and of its end once the assistant answers it', async () => {

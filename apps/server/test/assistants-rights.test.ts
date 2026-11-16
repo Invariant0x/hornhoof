@@ -41,7 +41,7 @@ describe("an assistant's key", () => {
         telegram: { username: null, id: null },
       },
       company: { name: 'Acme' },
-      contract: 2,
+      contract: 3,
     });
     for (const url of ['/api/people', '/api/me', '/api/subscriptions', '/api/machines', '/api/link', '/api/updates', '/api/requests', `/api/agents/${c.crew.owned.id}/events`]) {
       expect((await asAssistant(c, key, url)).statusCode, url).toBe(401);
