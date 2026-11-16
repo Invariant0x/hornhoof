@@ -19,6 +19,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
 - The glow and focus ring of a card follow its cut corner, with no dark triangle there.
 - The map's zoom label, such as 115%, is no longer cut off.
+- Kimi attaches task files through its node when its turn has no local token.
+- A database copy's first sync survives a slow link, and its drops no longer wait on the leader.
+- The leader frees at its next sweep the slots and origins of tables whose first copy broke off.
+- No test harness build is taken from the built-in node of a machine taken off the company's checks.
 
 ### Added
 
@@ -27,6 +31,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `failures` shows `next` for each blocked task, taken from its holder's last report.
 - Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- An employee on a personal plan at its limit goes on to a fallback plan with room, and back after the reset.
+- An employee's card shows its fallback plan, and a person sets the order of a plan's fallback plans.
 
 ### Changed
 
@@ -44,6 +50,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Machines filters start with All and a count, with chips of at least 44 px.
 - Table headers and row buttons are 44 px in every table.
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
+- Subscriptions show how each is paid as a sign by its short name, with the orchestrator under it.
+- Token counts and the names of token tiles stay in one piece and read left to right in any language.
 
 ## [0.29.2] - 2026-11-16
 
