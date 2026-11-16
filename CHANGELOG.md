@@ -27,6 +27,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The machine next to install the server's build takes no new work, so what runs there ends and it installs.
 - The orchestrator and the heads get onto a node whose updater went away before stopping it, within 3 minutes.
 - `program_screen` shows a busy employee's program from its running turn, without a false `no_program`.
+- The reason `outbound_changed` reads in plain words, in English and Russian, like the server's other reasons.
 
 ### Added
 
@@ -41,6 +42,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
 - Settings, Passwords keeps the company's site sign-ins, each with its login, password and one-time code.
 - Agents take a sign-in with `vault_entry`, which gives the current one-time code, and save one with `vault_save`.
+- A catalog revision opens whole, as a message would read, with its changes from the one in use marked word by word.
 - Each channel of a department to its contacts takes an address, with the person's consent to its purpose.
 
 ### Changed
@@ -62,6 +64,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Subscriptions show how each is paid as a sign by its short name, with the orchestrator under it.
 - Token counts and the names of token tiles stay in one piece and read left to right in any language.
 - The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent it.
+- `run_tests` runs only on `main`, `turn-N` and `release-` branches; others get `tests_not_release` with the reason.
+- A release's first run runs every test and later runs only what failed or changed; Tests and reviewers check locally.
+- Publishing or taking back a catalog revision acts only on the revision the person was shown.
 - A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
 - Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.

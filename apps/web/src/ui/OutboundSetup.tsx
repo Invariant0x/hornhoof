@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type R
 import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import type { Messages } from '../i18n/en';
+import { joined, RevisionView, whenOf } from './CatalogRevision';
 import { Field } from './Field';
 import { TickBox } from './TickBox';
 
@@ -39,6 +40,7 @@ type Revision = {
   revision: number;
   status: 'proposed' | 'published' | 'revoked';
   summary: string;
+  value: { kind?: string };
   createdAt: string;
   createdBy: { kind: 'person' | 'agent'; name: string | null };
   publishedBy: Named;
@@ -49,7 +51,8 @@ type LogEntry = { id: string; kind: keyof Messages['outboundSetup']['log']; chan
 
 export type RunDepartment = { id: string; name: string | null; templateKey: keyof Messages['templates'] | null };
 
-const errorOf = (t: Messages, err: unknown): string => (err instanceof ApiFailure && err.reason === 'outbound_invalid' ? t.outboundSetup.invalid : errorText(t, err));
+const reasonOf = (err: unknown): string | undefined => (err instanceof ApiFailure ? err.reason : undefined);
+const errorOf = (t: Messages, err: unknown): string => (reasonOf(err) === 'outbound_invalid' ? t.outboundSetup.invalid : errorText(t, err));
 
 /* A move that reloads what it changed, with its failure shown where it was made. */
 function useMove(onDone: () => void) {
@@ -90,9 +93,6 @@ const TONE: Record<string, 'active' | 'invited' | 'offline'> = { active: 'active
 function Status({ of, children }: { of: string; children: ReactNode }) {
   return <span className={`status ${TONE[of] ?? 'offline'}`}>{children}</span>;
 }
-
-/* Pieces of one line, the dot held to the piece before it, so that no line begins with it. */
-const joined = (pieces: readonly (string | null | undefined | false)[]): string => pieces.filter(Boolean).join('\u00a0· ');
 
 /* A mail account or a webhook for a channel. Its password or key leaves this form once and is forgotten here at once. */
 function AccountForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(): void; onCancel(): void }) {
@@ -453,23 +453,60 @@ function byWhom(s: Messages['outboundSetup'], person: Named, agent: Named): stri
   return agent ? s.byVia(person.name, agent.name) : s.by(person.name);
 }
 
-function RevisionLine({ revision, onChanged }: { revision: Revision; onChanged(): void }) {
-  const s = useT().outboundSetup;
+/* A revision with its view, the newest one open at once: what is published or taken back is the revision shown, as its
+   entry stood when it was shown, so a newer version since makes the server refuse and the catalog is read again. */
+const MOVES: Partial<Record<Revision['status'], 'publish' | 'revoke'>> = { proposed: 'publish', published: 'revoke' };
+
+/* Publishes or takes back the revision shown, with the newest one of its entry then; a newer one since reads it again. */
+function useRevisionMove(revision: Revision, newest: number, onChanged: () => void) {
   const { busy, failure, run } = useMove(onChanged);
-  const author = revision.createdBy.name ?? '';
-  const move = revision.status === 'proposed' ? 'publish' : revision.status === 'published' ? 'revoke' : null;
+  const act = (to: 'publish' | 'revoke') =>
+    run(async () => {
+      try {
+        await api.post(`/api/outbound/catalog/${revision.id}/${to}`, { revision: revision.revision, newest });
+      } catch (err) {
+        if (reasonOf(err) === 'outbound_changed') onChanged();
+        throw err;
+      }
+    });
+  return { busy, failure, act };
+}
+
+function RevisionHead({ revision }: { revision: Revision }) {
+  const s = useT().outboundSetup;
   return (
-    <li className="outbound-entry">
+    <>
       <span className="outbound-title">
         <b>{s.revision(revision.revision)}</b>
         <Status of={revision.status}>{s.statuses[revision.status]}</Status>
       </span>
       <span>{revision.summary}</span>
-      <small>{joined([s.wrote(author), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
-      {move && (
-        <EntryActions>
-          <button className={move === 'revoke' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/catalog/${revision.id}/${move}`, {}))}>{s[move]}</button>
-        </EntryActions>
+      <small>{joined([s.wrote(revision.createdBy.name ?? ''), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
+    </>
+  );
+}
+
+function RevisionLine({ entry, revision, onChanged }: { entry: Entry; revision: Revision; onChanged(): void }) {
+  const s = useT().outboundSetup;
+  const newest = entry.revisions[0]!.revision;
+  const { busy, failure, act } = useRevisionMove(revision, newest, onChanged);
+  const [open, setOpen] = useState(revision.revision === newest);
+  const viewId = useId();
+  const move = MOVES[revision.status];
+  return (
+    <li className="outbound-entry">
+      <RevisionHead revision={revision} />
+      <EntryActions>
+        <button className="btn ghost" type="button" aria-expanded={open} aria-controls={viewId} onClick={() => setOpen(!open)}>{open ? s.hide(revision.revision) : s.show(revision.revision)}</button>
+      </EntryActions>
+      {open && (
+        <RevisionView id={viewId} entry={entry} revision={revision}>
+          {move && (
+            <EntryActions>
+              <button className={move === 'revoke' ? 'btn ghost danger' : 'btn'} type="button" disabled={busy} onClick={() => void act(move)}>{s[move]}</button>
+            </EntryActions>
+          )}
+        </RevisionView>
       )}
       <Failure failure={failure} />
     </li>
@@ -489,7 +526,7 @@ function CatalogEntry({ entry, onChanged }: { entry: Entry; onChanged(): void })
           <span>{entry.current === null ? s.notInUse : s.inUse(entry.current)}</span>
         </p>
       </header>
-      <ul className="outbound-list outbound-entries">{entry.revisions.map(r => <RevisionLine key={r.id} revision={r} onChanged={onChanged} />)}</ul>
+      <ul className="outbound-list outbound-entries">{entry.revisions.map(r => <RevisionLine key={r.id} entry={entry} revision={r} onChanged={onChanged} />)}</ul>
     </div>
   );
 }
@@ -497,7 +534,7 @@ function CatalogEntry({ entry, onChanged }: { entry: Entry; onChanged(): void })
 function LogLine({ entry }: { entry: LogEntry }) {
   const s = useT().outboundSetup;
   const { language } = useLanguage();
-  const at = new Date(entry.at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const at = whenOf(language, entry.at);
   const what = s.log[entry.kind] ?? entry.kind;
   return (
     <li className="outbound-entry">

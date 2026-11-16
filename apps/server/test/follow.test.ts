@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodeCodes, nodes, people, subscriptions, testParts, testRuns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
 import { pickBuiltin } from '../src/modules/nodes/builtin.js';
 import { builtinOf } from '../src/modules/nodes/hub.js';
@@ -399,7 +400,7 @@ async function busyWorker(env: NodeJS.ProcessEnv = {}) {
   const [dev, bob, head] = [await hire('Dev', 'worker'), await hire('Bob', 'worker'), await hire('Hana', 'head')];
   const [long] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId, agentId: dev.id, nodeId, kind: 'conversation', prompt: 'A long one', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 }).returning();
   const turnFor = (agentId: string) => enqueueTurn(c.ctx, { companyId: c.companyId, agentId, prompt: 'Your turn', createdBy: null });
-  const statusOf = async (jobId: string) => (await c.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId)))[0]!.status;
+  const statusOf = async (jobId: string) => (await c.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, jobId)))[0]!.status;
   const end = (jobId: string) => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, jobId));
   /* Whether the node got a turn of this agent: once a pump of its own has run, every earlier one has sent what it would. */
   const gotTurnOf = async (agentId: string) => {

@@ -2,7 +2,7 @@ import { OperatorNodeMessage, PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/p
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { limitUntil } from '../conversation/queue.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases } from './cases.js';
@@ -17,7 +17,7 @@ const needsHealth = or(eq(programOperatorCases.status, 'open'), eq(programOperat
 export async function checkOperatorHealth(ctx: Ctx, now = new Date()): Promise<void> {
   await expireOperatorCases(ctx, now);
   await reconcileOperatorFallbacks(ctx, now);
-  const entries = await ctx.db.selectDistinct({ agentId: programOperatorCases.agentId }).from(programOperatorCases).where(needsHealth);
+  const entries = await ctx.db.selectDistinct(only(programOperatorCases, 'agentId')).from(programOperatorCases).where(needsHealth);
   for (const { agentId } of entries) {
     await operatorTransaction(ctx, async (tx, inside) => {
       await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, agentId)).for('update');
@@ -32,7 +32,7 @@ async function restoreCase(ctx: Ctx, row: typeof programOperatorCases.$inferSele
   if (row.status === 'open' && !await operatorAvailable(ctx, row)) await escalateCase(ctx, row, 'operator_unavailable', now);
   if (row.status === 'escalated' && !row.escalationJobId) await queueEscalation(ctx, row);
   if (!row.recoveryHold) return;
-  const evidence = await ctx.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->'operatorEvidence'->>'type' = 'program.recovery_ready'`, sql`${agentEvents.data}->'operatorEvidence'->>'case' = ${row.id}`));
+  const evidence = await ctx.db.select(only(agentEvents, 'data')).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->'operatorEvidence'->>'type' = 'program.recovery_ready'`, sql`${agentEvents.data}->'operatorEvidence'->>'case' = ${row.id}`));
   for (const fact of evidence) {
     const data = fact.data as { operatorEvidence?: unknown };
     const parsed = OperatorNodeMessage.safeParse(data.operatorEvidence);
@@ -76,6 +76,6 @@ function availablePlan(plan: typeof subscriptions.$inferSelect, companyId: strin
 
 export async function restoreOperatorNode(ctx: Ctx, node: NodeIdentity): Promise<void> {
   if (node.kind !== 'node') return;
-  const entries = await ctx.db.selectDistinct({ agentId: programOperatorCases.agentId }).from(programOperatorCases).where(eq(programOperatorCases.nodeId, node.nodeId));
+  const entries = await ctx.db.selectDistinct(only(programOperatorCases, 'agentId')).from(programOperatorCases).where(eq(programOperatorCases.nodeId, node.nodeId));
   for (const { agentId } of entries) await syncOperatorCases(ctx, agentId);
 }

@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../db/client.js';
 import { departments, people, personAccess, teams } from '../db/schema.js';
-import { idOnly } from '../db/selections.js';
+import { idOnly, only } from '../db/selections.js';
 import { ApiError } from '../errors.js';
 import type { Person } from './session.js';
 
@@ -31,7 +31,7 @@ export const WHOLE: Access = { whole: true, departments: new Set(), teams: new S
 export async function agentSpot(db: Db, agent: { departmentId: string | null; productId: string | null; teamId: string | null }): Promise<Spot> {
   if (agent.productId) return { departmentId: agent.productId, parentId: agent.departmentId, teamId: agent.teamId };
   if (!agent.departmentId) return { departmentId: null };
-  const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(eq(departments.id, agent.departmentId));
+  const [dept] = await db.select(only(departments, 'parentId')).from(departments).where(eq(departments.id, agent.departmentId));
   return { departmentId: agent.departmentId, parentId: dept?.parentId ?? null, teamId: agent.teamId };
 }
 

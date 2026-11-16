@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { carriesFile } from '../src/modules/tasks/attachments.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { listen, setUpCompany, testApp } from './helpers.js';
@@ -34,7 +35,7 @@ async function company() {
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
-  const log = async () => (await db.select({ kind: taskEvents.kind }).from(taskEvents).where(eq(taskEvents.taskId, task.id))).map(e => e.kind);
+  const log = async () => (await db.select(only(taskEvents, 'kind')).from(taskEvents).where(eq(taskEvents.taskId, task.id))).map(e => e.kind);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   return { orchestrator: orchestrator!, head, bruno, task, turn, log };
 }
