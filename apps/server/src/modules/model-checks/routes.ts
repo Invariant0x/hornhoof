@@ -6,6 +6,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf, listsDepartment } from '../../auth/access.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { departments, modelCheckDatasets, modelCheckEvaluations, modelChecks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { mayChangeRules, ownDepartment } from '../departments/approval-policy.js';
 import { isOn } from './lifecycle.js';
@@ -36,7 +37,7 @@ export function modelCheckRoutes(app: FastifyInstance, ctx: Ctx): void {
   };
 
   const placeOf = async ({ me, departmentId, kind }: Awaited<ReturnType<typeof changer>>, productId: string | null): Promise<CheckPlace> => {
-    const [product] = productId ? await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, productId), eq(departments.parentId, departmentId))) : [null];
+    const [product] = productId ? await db.select(idOnly(departments)).from(departments).where(and(eq(departments.id, productId), eq(departments.parentId, departmentId))) : [null];
     if (productId && !product) throw new ApiError(400, 'validation', 'This product is not one of this department.', 'model_check_place');
     return { companyId: me.companyId, departmentId, productId, kind };
   };

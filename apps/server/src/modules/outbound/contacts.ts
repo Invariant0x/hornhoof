@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import type { Checker } from '../../checker.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { outboundChannels, outboundContactEvents, outboundContacts, outboundPermissions } from '../../db/schema.js';
@@ -24,7 +25,7 @@ export const recipientDigest = (recipient: string): string => digestOf(spelled(r
 
 const EMAIL = z.email().max(320);
 const HANDLE = z.string().regex(/^\S{1,320}$/);
-const ADDRESS: Record<ContactKind, z.ZodType<string>> = { email: EMAIL, direct: HANDLE };
+const ADDRESS: Record<ContactKind, Checker<string>> = { email: EMAIL, direct: HANDLE };
 
 function readAddress(kind: ContactKind, address: string): string {
   const parsed = ADDRESS[kind].safeParse(spelled(address));

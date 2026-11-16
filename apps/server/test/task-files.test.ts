@@ -1,9 +1,10 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { attachments, agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
-import { createTask } from '../src/modules/tasks/engine.js';
+import { assistants, attachments, agents, companies, departments, jobs, machines, nodes, people, programInstances, programOperatorCases, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
+import { ask, comment, createTask } from '../src/modules/tasks/engine.js';
 import { dropOldFiles, FILE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -143,6 +144,157 @@ describe('the room for task files', () => {
       files.push(await counted(copy!.id, 10));
     }
     expect(await dropOldFiles(db, now)).toBe(1);
-    expect((await db.select({ id: attachments.id }).from(attachments)).map(a => a.id).sort()).toEqual([files[1]!.id, files[2]!.id].sort());
+    expect((await db.select(idOnly(attachments)).from(attachments)).map(a => a.id).sort()).toEqual([files[1]!.id, files[2]!.id].sort());
+  });
+});
+
+describe('cross-department hh-fetch and attachment boundaries', () => {
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('design-mockup-bytes')]);
+  const AUDIT = `${'Design review finding and layout notes.\n'.repeat(140)}End of audit.`;
+
+  it('lets Development and Design employees read each other task files, full-text reviews and request pictures via hh-fetch', async () => {
+    const { app, db, companyId, head, bruno, task: devTask, turn, attach, fetchFile } = await company();
+    const [sub] = await db.select().from(subscriptions);
+    const [design] = await db.insert(departments).values({ companyId, templateKey: 'design', roleCode: 'DES', position: 3 }).returning();
+    const [designHead, designer] = await db
+      .insert(agents)
+      .values([
+        { companyId, kind: 'head', name: 'Dina', roleKey: 'DES-HEAD', departmentId: design!.id, model: '', subscriptionId: sub!.id },
+        { companyId, kind: 'worker', name: 'Daria', roleKey: 'DES-UI', departmentId: design!.id, model: '', subscriptionId: sub!.id },
+      ])
+      .returning();
+    const designTask = (await createTask(app.ctx, { agentId: designHead!.id }, { title: 'Settings layout', brief: '', body: '', departmentId: design!.id, assigneeAgentId: designer!.id, executor: true })).task;
+
+    const designerToken = await turn(designer!);
+    const specFile = await attach(designerToken, `task=${designTask.number}&name=tokens.json`, Buffer.from('{"spacing":16}'));
+    expect(specFile.statusCode).toBe(201);
+    const optionShot = await app.inject({ method: 'POST', url: '/api/attachments', payload: PNG, headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${designerToken}` } });
+    expect(optionShot.statusCode).toBe(201);
+    const shotId = optionShot.json().id as string;
+    const unlinkedShot = await app.inject({ method: 'POST', url: '/api/attachments', payload: PNG, headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${designerToken}` } });
+    expect(unlinkedShot.statusCode).toBe(201);
+    await comment(app.ctx, { agentId: designer!.id }, designTask.id, AUDIT);
+    await ask(app.ctx, designer!.id, designTask.id, { kind: 'choice', text: 'Pick layout', options: [{ label: 'Variant A', image: shotId }, { label: 'Variant B', image: null }] });
+
+    const [auditFile] = (await db.select().from(attachments).where(eq(attachments.taskId, designTask.id))).filter(a => a.mediaType === 'text/plain');
+    expect(auditFile).toBeDefined();
+
+    for (const reader of [bruno, head]) {
+      const token = await turn(reader);
+      const gotSpec = await fetchFile(token, `task=${designTask.number}&file=tokens.json`);
+      expect(gotSpec.statusCode).toBe(200);
+      expect(gotSpec.payload).toBe('{"spacing":16}');
+
+      const gotAudit = await fetchFile(token, `task=${designTask.number}&file=${encodeURIComponent(auditFile!.name!)}`);
+      expect(gotAudit.statusCode).toBe(200);
+      expect(gotAudit.rawPayload.equals(Buffer.from(AUDIT))).toBe(true);
+
+      const gotAuditById = await fetchFile(token, `task=${designTask.number}&file=${auditFile!.id}`);
+      expect(gotAuditById.statusCode).toBe(200);
+      expect(gotAuditById.rawPayload.equals(Buffer.from(AUDIT))).toBe(true);
+
+      const gotShot = await fetchFile(token, `task=${designTask.number}&file=${shotId}`);
+      expect(gotShot.statusCode).toBe(200);
+      expect(gotShot.rawPayload.equals(PNG)).toBe(true);
+      expect(decodeURIComponent(String(gotShot.headers['x-file-name']))).toBe(`${shotId}.png`);
+
+      /* Loose unshown pictures never leak through task hh-fetch. */
+      expect((await fetchFile(token, `task=${designTask.number}&file=${unlinkedShot.json().id}`)).statusCode).toBe(404);
+    }
+
+    /* Design also reads Development screenshot archives directly from the Development task. */
+    const devToken = await turn(bruno);
+    const archive = Buffer.from('screens-archive-tar-gz');
+    expect((await attach(devToken, `task=${devTask.number}&name=screens.tar.gz`, archive)).statusCode).toBe(201);
+    const gotArchive = await fetchFile(designerToken, `task=${devTask.number}&file=screens.tar.gz`);
+    expect(gotArchive.statusCode).toBe(200);
+    expect(gotArchive.rawPayload.equals(archive)).toBe(true);
+  });
+
+  it('refuses another company, personal assistants, private secrets, message pictures, cross-department writes and deletes, and empty uploads', async () => {
+    const { app, db, companyId, ceo, bruno, sam, task, turn, attach, fetchFile } = await company();
+    const [sub] = await db.select().from(subscriptions);
+    const brunoToken = await turn(bruno);
+
+    /* Empty file upload check stays enforced on task and chat attachments. */
+    const emptyTask = await attach(brunoToken, `task=${task.number}&name=empty.txt`, Buffer.alloc(0));
+    expect([emptyTask.statusCode, emptyTask.json().error.reason]).toEqual([400, 'file_empty']);
+    const emptyChat = await attach(brunoToken, 'chat=1&name=empty.txt', Buffer.alloc(0));
+    expect([emptyChat.statusCode, emptyChat.json().error.reason]).toEqual([400, 'file_empty']);
+
+    const shared = await attach(brunoToken, `task=${task.number}&name=spec.pdf`, Buffer.from('company-spec'));
+    expect(shared.statusCode).toBe(201);
+    await comment(app.ctx, { agentId: bruno.id }, task.id, AUDIT);
+    const [fullText] = (await db.select().from(attachments).where(eq(attachments.taskId, task.id))).filter(a => a.mediaType === 'text/plain');
+    const shotRes = await app.inject({ method: 'POST', url: '/api/attachments', payload: PNG, headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${brunoToken}` } });
+    const shotId = shotRes.json().id as string;
+    await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'Check shot', images: [shotId] });
+
+    /* 1. Cross-department write/overwrite and delete stay refused. */
+    const samToken = await turn(sam);
+    expect((await attach(samToken, `task=${task.number}&name=spec.pdf`, Buffer.from('overwritten'))).statusCode).toBe(404);
+    expect((await attach(samToken, `task=${task.number}&name=new.txt`, Buffer.from('new'))).statusCode).toBe(404);
+    expect((await app.inject({ method: 'DELETE', url: `/api/attachments/file?task=${task.number}&file=spec.pdf`, headers: { authorization: `Bearer ${samToken}` } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'DELETE', url: `/api/attachments/${shared.json().id}`, headers: { authorization: `Bearer ${samToken}` } })).statusCode).toBe(404);
+    expect((await fetchFile(samToken, `task=${task.number}&file=spec.pdf`)).payload).toBe('company-spec');
+
+    /* 2. Foreign company agent cannot read or write any attachment of this company. */
+    const [foreign] = await db.insert(companies).values({ name: 'Foreign', singleton: false }).returning();
+    const [foreignPerson] = await db.insert(people).values({ companyId: foreign!.id, name: 'Foreign CEO', email: 'ceo@foreign.test', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+    const [foreignSub] = await db.insert(subscriptions).values({ companyId: foreign!.id, ownerPersonId: foreignPerson!.id, provider: 'claude', kind: 'personal', label: 'Foreign', status: 'ready' }).returning();
+    const [foreignAgent] = await db.insert(agents).values({ companyId: foreign!.id, kind: 'orchestrator', name: 'Foreign Orch', model: '', subscriptionId: foreignSub!.id }).returning();
+    const foreignToken = 'foreign-tool-token-0123456789abcdef';
+    await db.insert(jobs).values({ companyId: foreign!.id, subscriptionId: foreignSub!.id, agentId: foreignAgent!.id, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(foreignToken) });
+    for (const ref of [String(task.number), task.id]) {
+      for (const file of ['spec.pdf', shared.json().id as string, fullText!.id, shotId]) {
+        expect((await fetchFile(foreignToken, `task=${encodeURIComponent(ref)}&file=${encodeURIComponent(file)}`)).statusCode).toBe(404);
+      }
+      expect((await attach(foreignToken, `task=${encodeURIComponent(ref)}&name=leak.txt`, Buffer.from('no'))).statusCode).toBe(404);
+    }
+
+    /* 3. Personal assistant cannot read or write company task attachments, and employees cannot read assistant data. */
+    const [assistantPerson] = await db.insert(people).values({ companyId, name: 'Ava', status: 'active', isAgent: true, assistantOf: ceo.id, scopeKind: 'company' }).returning();
+    const [assistantAgent] = await db.insert(agents).values({ companyId, kind: 'assistant', name: 'Ava', model: '', subscriptionId: sub!.id }).returning();
+    await db.insert(assistants).values({ personId: assistantPerson!.id, companyId, program: 'avaclone', agentId: assistantAgent!.id });
+    const assistantToken = await turn(assistantAgent!);
+    for (const file of ['spec.pdf', shared.json().id as string, fullText!.id, shotId]) {
+      expect((await fetchFile(assistantToken, `task=${task.number}&file=${encodeURIComponent(file)}`)).statusCode).toBe(404);
+    }
+    expect((await attach(assistantToken, `task=${task.number}&name=from-assistant.txt`, Buffer.from('no'))).statusCode).toBe(404);
+
+    /* Assistant's own chat file and owner message picture stay inaccessible to company employees. */
+    const assistantChat = await attach(assistantToken, 'chat=1&name=private-notes.txt', Buffer.from('owner-private'));
+    expect(assistantChat.statusCode).toBe(201);
+    const [assistantMsgPic] = await db.insert(attachments).values({ companyId, agentId: assistantAgent!.id, personId: ceo.id, name: 'id-card.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const [spoofedAssistantTaskFile] = await db.insert(attachments).values({ companyId, agentId: assistantAgent!.id, taskId: task.id, name: 'assistant-secret.txt', mediaType: 'application/octet-stream', bytes: Buffer.from('secret'), size: 6 }).returning();
+    const [assistantTask] = await db.insert(tasks).values({ ...task, id: undefined, number: task.number + 50, assigneeAgentId: assistantAgent!.id, executorAgentId: assistantAgent!.id }).returning();
+    await db.insert(attachments).values({ companyId, agentId: bruno.id, taskId: assistantTask!.id, name: 'personal-plan.txt', mediaType: 'application/octet-stream', bytes: Buffer.from('plan'), size: 4 });
+    for (const readerToken of [brunoToken, samToken]) {
+      expect((await fetchFile(readerToken, `task=${task.number}&file=${assistantChat.json().id}`)).statusCode).toBe(404);
+      expect((await fetchFile(readerToken, `task=message&file=${assistantMsgPic!.id}`)).statusCode).toBe(404);
+      expect((await fetchFile(readerToken, `task=${task.number}&file=${assistantMsgPic!.id}`)).statusCode).toBe(404);
+      expect((await fetchFile(readerToken, 'task=' + String(task.number) + '&file=assistant-secret.txt')).statusCode).toBe(404);
+      expect((await fetchFile(readerToken, `task=${task.number}&file=${spoofedAssistantTaskFile!.id}`)).statusCode).toBe(404);
+      expect((await fetchFile(readerToken, `task=${assistantTask!.number}&file=personal-plan.txt`)).statusCode).toBe(404);
+    }
+    /* The assistant itself still reads only the message picture sent to it. */
+    expect((await fetchFile(assistantToken, `task=message&file=${assistantMsgPic!.id}`)).statusCode).toBe(200);
+
+    /* 4. Private message picture to another employee and Program Operator case screenshot stay refused. */
+    const [brunoMsgPic] = await db.insert(attachments).values({ companyId, agentId: bruno.id, personId: ceo.id, name: 'key.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    expect((await fetchFile(samToken, `task=message&file=${brunoMsgPic!.id}`)).statusCode).toBe(404);
+    expect((await fetchFile(samToken, `task=${task.number}&file=${brunoMsgPic!.id}`)).statusCode).toBe(404);
+
+    const [machine] = await db.insert(machines).values({ companyId, personId: ceo.id, machineKey: 'machine-1' }).returning();
+    const [node] = await db.insert(nodes).values({ companyId, machineId: machine!.id, keyHash: hashToken('node-key') }).returning();
+    const [jobRow] = await db.select().from(jobs).where(eq(jobs.agentId, bruno.id));
+    const [instance] = await db.insert(programInstances).values({ id: randomUUID(), companyId, agentId: bruno.id, nodeId: node!.id }).returning();
+    const [incident] = await db.insert(programOperatorCases).values({ companyId, agentId: bruno.id, jobId: jobRow!.id, nodeId: node!.id, instance: instance!.id, reason: 'assignment_unrecorded', evidenceKey: randomUUID(), capability: randomUUID(), deadlineAt: new Date(Date.now() + 60000) }).returning();
+    const [casePic] = await db.insert(attachments).values({ companyId, agentId: bruno.id, jobId: jobRow!.id, taskId: task.id, operatorCaseId: incident!.id, name: 'terminal.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    for (const readerToken of [brunoToken, samToken, assistantToken]) {
+      expect((await fetchFile(readerToken, `task=operator-case:${incident!.id}&file=${casePic!.id}`)).statusCode).toBe(404);
+      expect((await fetchFile(readerToken, `task=${task.number}&file=${casePic!.id}`)).statusCode).toBe(404);
+      expect((await fetchFile(readerToken, `task=${task.number}&file=terminal.png`)).statusCode).toBe(404);
+    }
   });
 });

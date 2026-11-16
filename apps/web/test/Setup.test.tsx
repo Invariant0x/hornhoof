@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Setup } from '../src/screens/Setup';
 import { mockApi, type Call, withKey } from './api-mock';
 import { decl } from './css';
+import { commandCode } from './command-code';
 
 /* The same long random name for every start, so the tests know what the Link field holds before anything is typed. */
 vi.mock('@hornhoof/protocol/link', async importOriginal => ({ ...(await importOriginal<typeof import('@hornhoof/protocol/link')>()), randomLinkName: () => 'r4nd0mr4nd0mr4nd0m' }));
@@ -36,6 +37,7 @@ async function fillFirstTwoSteps(user: ReturnType<typeof userEvent.setup>, passw
 describe('Setup', () => {
   /* The server logs the setup link, and the link carries the code. */
   beforeEach(() => window.history.replaceState(null, '', '/setup?code=LINK-CODE-123'));
+  afterEach(() => vi.useRealTimers());
 
   it('keeps Next disabled until the company has a name', async () => {
     const user = userEvent.setup();
@@ -128,7 +130,7 @@ describe('Setup', () => {
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(posted(calls)[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'codex' } });
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
-    expect(await screen.findByText(withKey(command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(command)))).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     expect(screen.getByText('Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.')).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
@@ -166,15 +168,19 @@ describe('Setup', () => {
   });
 
   it('offers a Google AI plan, which Antigravity runs, as a personal plan for the orchestrator', async () => {
+    /* The clock also runs by itself, so the screen's own waiting works beside the step the test takes. */
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, command: 'curl x' }] });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Setup onDone={() => {}} />);
+    /* The random name's check goes out before anything is typed, as it does on a slow machine. */
+    await act(() => vi.advanceTimersByTimeAsync(1000));
     await fillFirstTwoSteps(user);
     await user.click(screen.getByRole('radio', { name: 'My subscription' }));
     expect(screen.getByRole('radio', { name: 'My subscription' })).toHaveAccessibleDescription(/Google AI plan/);
     await user.click(screen.getByRole('radio', { name: 'Antigravity' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
-    expect(calls[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'antigravity' } });
+    expect(posted(calls)[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'antigravity' } });
   });
 
   it('takes the setup code from the link without asking for it', () => {
@@ -339,7 +345,7 @@ describe("the setup's command and its owner's key", () => {
     await vi.waitFor(() => expect(calls.some(call => call.method === 'PUT' && call.path === '/api/me/key')).toBe(true));
     const sent = calls.find(call => call.method === 'PUT' && call.path === '/api/me/key')!.body as { password: string; publicKey: string };
     expect(sent.password).toBe('a password typed here');
-    expect(await screen.findByText(`${command} --owner-key ${sent.publicKey}`)).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(`${command} --owner-key ${sent.publicKey}`))).toBeInTheDocument();
     /* The only password field is long gone: nothing was asked a second time. */
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });
@@ -395,7 +401,7 @@ describe('the new link on the setup screen', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(await screen.findByText(withKey(command))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(command)))).toBeInTheDocument();
   });
 
   it('goes to the map with Next when the setup made no command', async () => {

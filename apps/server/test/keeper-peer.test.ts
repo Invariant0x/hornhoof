@@ -11,6 +11,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
 import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
@@ -25,6 +26,7 @@ import { saveLink } from '../src/modules/link/link.js';
 import { linkClientId } from '../src/modules/link/client.js';
 import { Relay } from '../src/modules/link/relay.js';
 import type { SyncCatalog, SyncControllerOptions } from '../src/modules/keeper/sync.js';
+import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { fakeRelay } from './fake-relay.js';
 import { peerConfigFor, type PeerServices } from '../src/modules/link/peer-client.js';
 import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
@@ -61,8 +63,8 @@ async function company(withLink = true) {
   return { app, db, config, companyId: acme!.id, ownerId: owner!.id };
 }
 
-async function listening(app: FastifyInstance): Promise<Target> {
-  await app.listen({ host: '127.0.0.1', port: 0 });
+async function listening(app: FastifyInstance, port = 0): Promise<Target> {
+  await app.listen({ host: '127.0.0.1', port });
   return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
 }
 
@@ -540,13 +542,37 @@ describe('the peer link in the keeper', () => {
     return { proofs, did, probes };
   }
 
-  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async () => {
+  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async ({ signal }) => {
+    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const c = await company();
-    const { now, step, stepUntil } = steppedClock();
+    const clock = { wall: Date.now(), mono: 0 };
+    const now = () => ({ ...clock });
     const said = { needed: false, link: 'self' as 'self' | 'other' | 'silent', name: { state: 'held', client: OWN_CLIENT, generation: 7 } as Name };
     const p = proving(now, said);
+    /* A deferred answer, on the event loop rather than a real-time deadline. Machine load cannot age the lease. */
+    const probe = p.proofs.probe;
+    p.proofs.probe = async (nonce, link) => {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      return probe(nonce, link);
+    };
     const lease = fakeLease();
-    const { keeper, lines } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs, ...STEPPED });
+    const ports = { front: await testPort(), linkHttp: await testPort(), linkTls: await testPort(), peer: await testPort(), peerApp: await testPort() };
+    const { keeper, lines } = await keeperBeside(c, await listening(c.app, await testPort()), folder(), { lease, now, proofs: p.proofs, ports });
+    await until(() => Boolean(keeper['ownLink']()));
+    const step = async (ms = 20) => {
+      clock.wall += ms;
+      clock.mono += ms;
+      vi.setSystemTime(clock.wall);
+      await keeper['readNeeded']();
+      if (said.needed) {
+        if (keeper['holder'].standing()) await keeper['leaseProofs']!.tick();
+        else await keeper['reentry']!.tick();
+      }
+      await keeper['holder'].tick();
+      keeper['giveWord']();
+    };
+    const stepUntil = (check: () => boolean) => until(async () => { signal.throwIfAborted(); await step(); return check(); });
     const renewals = () => lease.calls.filter(call => call.method === 'renew').length;
     await stepUntil(() => keeper.mode() === 'lead' && renewals() > 3);
     /* Alone with the data it asks nobody: its lease is its own word. */
@@ -669,6 +695,33 @@ describe('the peer link in the keeper', () => {
     expect(readKeeperState(controlDir)).toMatchObject({ mode: 'lead', copies: [] });
     expect(state.pulses).toBe(0);
     expect(relay.calls.some(call => call.includes('/sync'))).toBe(false);
+  });
+
+  it('drops at its next sweep the slot of a broken-off table that a copy named to its app, and keeps the one nobody named', async () => {
+    const c = await company(false);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    const { catalog } = syncCatalog(null);
+    const [broken, other] = ['pg_16500_sync_16384_7300000000000000000', 'pg_16500_sync_16390_7300000000000000000'];
+    /* The leader's Postgres as far as the sweep asks it: two slots of tables' first copies that nobody reads. */
+    const slots = [broken, other];
+    const dropped: string[] = [];
+    const sql: Sql = {
+      query: async <R>(text: string, params: unknown[] = []) => {
+        if (text.includes('FROM pg_replication_slots')) return { rows: slots.map(name => ({ name, active: false, pid: null, copying: false })) as R[] };
+        if (text.includes('pg_drop_replication_slot')) {
+          dropped.push(String(params[0]));
+          slots.splice(slots.indexOf(String(params[0])), 1);
+        }
+        return { rows: [] as R[] };
+      },
+    };
+    const { keeper } = await keeperBeside(c, target, folder(), { lease: fakeLease(), sync: { catalog, relay: new Relay(relay.url), everyMs: 20, slots: { sql, diskFree: () => null, everyMs: 20 } } });
+    await until(() => keeper.mode() === 'lead');
+    c.app.ctx.leftSlots.say('cccccccc-0000-4000-8000-00000000000c', [broken]);
+    await until(() => dropped.length > 0);
+    expect(dropped).toEqual([broken]);
+    expect(slots).toEqual([other]);
   });
 
   it('stops its link when its lease ends with a copy listed, and starts it again to tell the relay', async () => {

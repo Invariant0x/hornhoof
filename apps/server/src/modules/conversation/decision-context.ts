@@ -5,12 +5,13 @@ import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, jobs, people, requests, tasks } from '../../db/schema.js';
+import { agentEvents, agentInbox, agents, jobs, people, requests, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
-import { activeClickGrants, answeredWords, byPerson, incomingWords, wordsForTurn } from './turn-words.js';
+import { activeClickGrants, answeredWords, byPerson, incomingWords, machineSpeaker, wordsForTurn } from './turn-words.js';
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
@@ -57,7 +58,7 @@ async function asOwner(db: Reader, turn: Words, found: Principal | null): Promis
   if (turn.job.agentKind !== 'orchestrator') return found;
   if (found && (await actingCeo(db, found.personId))) return found;
   const [owner] = await db
-    .select({ id: people.id })
+    .select(idOnly(people))
     .from(people)
     .where(and(eq(people.companyId, turn.job.companyId), eq(people.isOwner, true), eq(people.status, 'active')))
     .limit(1);
@@ -152,30 +153,44 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
   return p && (await runsDepartment(db, p, departmentId)) ? p.id : null;
 }
 
-/* For a machine that is open: the person the turn answers now, or whose click opening a machine the note that opened the
-   turn tells of, until a person writes or types into it, when that person directs commands there: the CEO or the CEO
-   delegate, who direct the orchestrator, or the machine's own owner while active. A click answers no question, so it
-   takes no decision and asks for nothing else. */
+/* Who may direct commands on a machine: the CEO or the CEO delegate, who direct the orchestrator, or the machine's own
+   owner while active. */
 async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: string): Promise<string | null> {
   if (personId !== ownerPersonId) return actingCeo(db, personId);
   const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, personId));
   return owner?.status === 'active' ? personId : null;
 }
 
-const grantMatchesMachine = (grant: { machineId: string | null }, machineId?: string): boolean =>
-  machineId === undefined || grant.machineId === null || grant.machineId === machineId;
-
-export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string, machineId?: string): Promise<string | null> {
+/* For a machine whose owner keeps its access open, the orchestrator works there in any running turn of its own: one a
+   notice, an employee's letter or a wake started, a retry and every later turn, with no new word of the CEO. Only the last
+   person whose words came into the turn can take it away: someone who may not direct commands there, as an Enter in the
+   terminal or words that may have gone in unkept do, since whose they were is not known. A notice of a person's task,
+   comment or answer, and a letter of theirs that woke an inbox turn, are their words; words of an origin Hornhoof cannot
+   name, with no person, no sender or a notice of a kind it does not know, take it away too. A turn no words came into goes
+   by whoever started it. Who the commands go for: that person, or the owner. A click answers no question, so this takes
+   no decision and asks for nothing else. */
+export async function machinePrincipal(db: Reader, jobId: string, ownerPersonId: string): Promise<string | null> {
   const turn = await turnWords(db, jobId);
   if (!turn) return null;
-  const direct = answered(turn);
-  if (direct) return activeMachinePerson(db, direct.personId, ownerPersonId);
-  for (const g of await activeClickGrants(db, turn.job, turn.said)) {
-    if (!grantMatchesMachine(g, machineId)) continue;
-    const ok = await activeMachinePerson(db, g.personId, ownerPersonId);
-    if (ok) return ok;
-  }
-  return null;
+  const said = turn.said.map(machineSpeaker).find(speaker => speaker !== undefined);
+  const spoke = said !== undefined ? said : await lettersSpeaker(db, turn.job);
+  if (spoke === null) return null;
+  const starter = turn.said.length === 0 ? turn.job.createdBy : null;
+  return activeMachinePerson(db, spoke ?? starter ?? ownerPersonId, ownerPersonId);
+}
+
+/* Who wrote the letters that woke an inbox turn, before any words came into it: a person who sent one, as a notice of what
+   they did; nobody when only employees and Hornhoof did, or a click opened a machine; not known when several people did. */
+async function lettersSpeaker(db: Reader, job: { id: string; agentId: string | null; inboxWake: boolean }): Promise<string | null | undefined> {
+  if (!job.inboxWake || !job.agentId) return undefined;
+  const letters = await db
+    .select({ personId: agentInbox.senderPersonId })
+    .from(agentInbox)
+    .where(and(eq(agentInbox.agentId, job.agentId), eq(agentInbox.jobId, job.id), eq(agentInbox.senderKind, 'person'), or(isNull(agentInbox.source), ne(agentInbox.source, 'computer_access'))));
+  const people = new Set(letters.map(letter => letter.personId));
+  if (!people.size) return undefined;
+  const [only] = people;
+  return people.size === 1 && only ? only : null;
 }
 
 /* The CEO or the CEO delegate who gave their own answer in a task's card to a question about machines, while that task is
@@ -229,7 +244,7 @@ export function deliverLive(
   ctx: Ctx,
   agentId: string,
   text: string,
-  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
   return withInputLock(ctx, agentId, () => deliverLockedInput(ctx, agentId, text, on, keep));
@@ -240,10 +255,10 @@ export async function deliverLockedInput(
   ctx: Ctx,
   agentId: string,
   text: string,
-  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
-  const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId), on.required);
+  const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId));
   const delivery = liveInputOf(on.source?.data, agentId)?.delivery;
   return into ? keepLiveInput(into, (jobId, kept) => keep(jobId, keepOperatorDelivery(kept, delivery))) : null;
 }
@@ -259,7 +274,7 @@ class TurnStopped extends Error {}
 
 /* The message and its turn check share a transaction, so Stop cannot move between the check and the write. */
 async function liveInputKept(tx: Tx, jobId: string): Promise<void> {
-  const [job] = await tx.select({ id: jobs.id }).from(jobs)
+  const [job] = await tx.select(idOnly(jobs)).from(jobs)
     .where(and(eq(jobs.id, jobId), or(isNull(jobs.error), ne(jobs.error, 'cancelled')))).for('no key update');
   if (!job) throw new TurnStopped();
   await inputKept(tx, jobId);

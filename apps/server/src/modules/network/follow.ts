@@ -2,6 +2,7 @@ import { and, eq, isNotNull, isNull, notInArray, notLike, or, sql } from 'drizzl
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { ON_NODE } from '../jobs/dispatch.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
@@ -119,10 +120,10 @@ const LEADERS = ['orchestrator', 'head'] as const;
    company's keys, or a part of a test run. Without leaders, the turns of the orchestrator and the heads count for none. */
 async function runsWork(db: Pick<Db, 'select'>, row: { id: string; networkId: string | null }, leaders = true): Promise<boolean> {
   const counted = leaders ? undefined : or(isNull(jobs.agentId), notInArray(agents.kind, [...LEADERS]));
-  const [turn] = await db.select({ id: jobs.id }).from(jobs).leftJoin(nodes, eq(nodes.id, jobs.nodeId)).leftJoin(agents, eq(agents.id, jobs.agentId))
+  const [turn] = await db.select(idOnly(jobs)).from(jobs).leftJoin(nodes, eq(nodes.id, jobs.nodeId)).leftJoin(agents, eq(agents.id, jobs.agentId))
     .where(and(row.networkId ? or(eq(nodes.machineId, row.id), eq(jobs.builtinMachine, row.networkId)) : eq(nodes.machineId, row.id), ON_NODE, counted)).limit(1);
   if (turn) return true;
-  const [part] = await db.select({ id: testParts.id }).from(testParts)
+  const [part] = await db.select(idOnly(testParts)).from(testParts)
     .where(and(row.networkId ? or(eq(testParts.machineId, row.id), eq(testParts.builtinMachine, row.networkId)) : eq(testParts.machineId, row.id), eq(testParts.status, 'running'))).limit(1);
   return part !== undefined;
 }

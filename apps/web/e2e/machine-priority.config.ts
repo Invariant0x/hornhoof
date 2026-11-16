@@ -12,7 +12,7 @@ const origin = `http://127.0.0.1:${port}`;
    and owns a Vite server in this checkout. */
 export default defineConfig({
   testDir: '.',
-  testMatch: 'machine-priority.spec.ts',
+  testMatch: 'machine-priority-*.spec.ts',
   outputDir: 'results/machine-priority',
   forbidOnly: Boolean(process.env.CI),
   workers: 1,

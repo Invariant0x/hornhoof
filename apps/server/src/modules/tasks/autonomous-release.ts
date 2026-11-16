@@ -6,6 +6,7 @@ import { accessOf } from '../../auth/access.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, autonomousReleases, departments, people, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { evidenceOf } from '../testruns/evidence.js';
 import { coversEveryPart } from '../testruns/github-status.js';
@@ -66,7 +67,7 @@ export type AutonomousReleaseEntry = {
 export async function maySetAutonomousRelease(db: Pick<Db, 'select'>, me: Person, departmentId: string): Promise<boolean> {
   if (me.status !== 'active' || Boolean(me.via) || Boolean(me.assistant)) return false;
   const [row] = await db
-    .select({ id: people.id })
+    .select(idOnly(people))
     .from(people)
     .where(and(eq(people.id, me.id), eq(people.companyId, me.companyId), eq(people.status, 'active'), eq(people.isAgent, false)));
   if (!row) return false;
@@ -83,7 +84,7 @@ export async function isAutonomousReleaseEnabled(db: Pick<QueryDb, 'select'>, de
 
 export async function hasAutonomousReleaseEntries(db: Pick<QueryDb, 'select'>, companyId: string, departmentId?: string): Promise<boolean> {
   const scope = departmentId ? and(eq(autonomousReleases.companyId, companyId), eq(autonomousReleases.departmentId, departmentId)) : eq(autonomousReleases.companyId, companyId);
-  const [row] = await db.select({ id: autonomousReleases.id }).from(autonomousReleases).where(scope).limit(1);
+  const [row] = await db.select(idOnly(autonomousReleases)).from(autonomousReleases).where(scope).limit(1);
   return Boolean(row);
 }
 
@@ -611,7 +612,7 @@ export async function confirmAutonomousMainAcceptance(
   proof: RecordedMainApproval,
 ): Promise<string | null> {
   const [existing] = await tx
-    .select({ id: autonomousReleases.id })
+    .select(idOnly(autonomousReleases))
     .from(autonomousReleases)
     .where(
       and(

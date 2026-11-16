@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -7,6 +7,7 @@ import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
@@ -14,7 +15,8 @@ import { agentCasePicture, personCasePicture, sendCasePicture } from '../program
 import { mayOpenRequest } from './decisions.js';
 import { refuse, type Task } from './engine.js';
 import { seesTask } from './sight.js';
-import { agentSeesTask, taskByRef } from './views.js';
+import { taskByRef } from './views.js';
+import { attachmentJobOf, checkAttachmentTask } from './attachment-token.js';
 
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */
 export const PICTURE_BYTES = 3 * 1024 * 1024;
@@ -60,9 +62,11 @@ export function carriesFile(text: string): boolean {
 export const encodedHint = (task?: number) =>
   `This text carries an encoded file. Put the file on ${task ? `the task with hh-attach --task ${task} FILE` : 'the task it is for with hh-attach --task <task number> FILE'} and write its name instead: anyone downloads it with hh-fetch.`;
 
-/* An agent works on a task when it runs the company, the task is its department's, or it holds, does, checks or made it. */
-export const onTask = (job: RunJob, t: Task) =>
-  job.agentKind === 'orchestrator' || (job.departmentId != null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId].includes(job.agentId);
+/* An agent works on a task when it is a company employee (never a personal assistant) and runs the company, the task is
+   its department's, or it holds, does, checks or made it. */
+export const onTask = (job: RunJob, t: Task): boolean =>
+  job.agentKind !== 'assistant' &&
+  (job.agentKind === 'orchestrator' || (job.departmentId != null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId].includes(job.agentId));
 
 /* The files on a task, the newest under each name, without their bytes. */
 export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date }[]> {
@@ -115,7 +119,7 @@ export async function dropOldFiles(db: Db, now: Date): Promise<number> {
     .where(and(or(isNotNull(attachments.personId), and(isNull(attachments.requestId), isNotNull(attachments.name))), isNull(attachments.taskId), lt(attachments.createdAt, cutoff)))
     .returning({ id: attachments.id });
   const old = db
-    .select({ id: tasks.id })
+    .select(idOnly(tasks))
     .from(tasks)
     .innerJoin(turns, eq(turns.id, tasks.turnId))
     .where(and(eq(turns.status, 'closed'), lt(turns.closedAt, cutoff)));
@@ -187,7 +191,7 @@ function sentType(found: { name: string | null; mediaType?: string }, forPerson:
 
 /* Sends a task or chat file in pieces, so the server never holds a whole one. */
 export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }, forPerson = false) {
-  const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
+  const [ordinary] = await db.select(idOnly(attachments)).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
   if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   if (savedByPerson(found, forPerson)) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
   return reply
@@ -253,6 +257,26 @@ async function chatFileForPerson(db: Db, me: Person, id: string) {
 /* A file of a task or of an agent's chat that this person may download; it throws when they may not see it. */
 const personFile = async (db: Db, me: Person, id: string) => (await taskFileForPerson(db, me, id)) ?? (await chatFileForPerson(db, me, id));
 
+/* The same visibility for the interface and a person's assistant: ordinary task/chat files, then attachments of messages
+   and requests. Program screenshots have neither a person nor a request's task; operator cases use their own route. */
+type PersonAttachment = { id: string; name: string | null; mediaType: string; length: number; picture: boolean };
+export async function attachmentForPerson(db: Db, me: Person, id: string): Promise<PersonAttachment | null> {
+  const file = await personFile(db, me, id);
+  if (file) return { ...file, picture: false };
+  const [found] = await db
+    .select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: attachments.size, personId: attachments.personId, agent: agents, task: tasks, request: requests })
+    .from(attachments)
+    .innerJoin(agents, eq(agents.id, attachments.agentId))
+    .leftJoin(requests, eq(requests.id, attachments.requestId))
+    .leftJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), isNull(attachments.operatorCaseId)));
+  if (!found || (!found.personId && !found.task)) return null;
+  if (!(found.personId ? await canViewAgent(db, me, found.agent) : await mayOpenRequest(db, me, found.request!, found.task!))) {
+    throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+  }
+  return { ...found, picture: true };
+}
+
 /* Reads an attachment's bytes for a person only when that active person is allowed to see it on its task or agent chat. */
 export async function attachmentBytesForPerson(
   db: Db,
@@ -280,9 +304,36 @@ export async function attachmentBytesForPerson(
   };
 }
 
-/* Ordinary uploaded files keep their sharing rule; automatic plain-text logs keep the task's read boundary. */
-function readsTaskFile(job: ToolJob, task: Task | null, file: { mediaType: string }): boolean {
-  return file.mediaType !== 'text/plain' || (task !== null && agentSeesTask({ id: job.agentId, kind: job.agentKind, departmentId: job.departmentId }, task));
+const PICTURE_EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
+const defaultPictureName = (id: string, mediaType: string): string => `${id}${PICTURE_EXT[mediaType] ?? ''}`;
+
+/* Working employees of the company read files of any company task, never personal assistant work. */
+async function companyTaskForAgent(ctx: Ctx, job: ToolJob, ref: string): Promise<Task | null> {
+  if (job.agentKind === 'assistant') return null;
+  const task = await taskByRef(ctx, job.companyId, ref);
+  if (!task) return null;
+  const ids = [task.assigneeAgentId, task.executorAgentId, task.createdByAgentId].filter((id): id is string => Boolean(id));
+  const [personal] = ids.length ? await ctx.db.select(idOnly(agents)).from(agents).where(and(inArray(agents.id, ids), eq(agents.kind, 'assistant'))).limit(1) : [];
+  return personal ? null : task;
+}
+
+function taskAttachmentMatch(db: Db, companyId: string, taskId: string, file: string) {
+  if (!z.uuid().safeParse(file).success) return and(eq(attachments.taskId, taskId), eq(attachments.name, file));
+  const onTaskRow = and(eq(attachments.taskId, taskId), or(eq(attachments.id, file), eq(attachments.name, file)));
+  const taskRequests = db.select(idOnly(requests)).from(requests).where(and(eq(requests.companyId, companyId), eq(requests.taskId, taskId)));
+  const onRequest = and(eq(attachments.id, file), isNull(attachments.taskId), isNull(attachments.personId), inArray(attachments.requestId, taskRequests));
+  return or(onTaskRow, onRequest);
+}
+
+async function taskAttachmentForAgent(db: Db, companyId: string, taskId: string, file: string) {
+  const [found] = await db
+    .select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
+    .from(attachments)
+    .innerJoin(agents, and(eq(agents.id, attachments.agentId), eq(agents.companyId, companyId), ne(agents.kind, 'assistant')))
+    .where(and(eq(attachments.companyId, companyId), isNull(attachments.operatorCaseId), taskAttachmentMatch(db, companyId, taskId, file)))
+    .orderBy(desc(attachments.createdAt))
+    .limit(1);
+  return found && { ...found, name: found.name ?? defaultPictureName(found.id, found.mediaType) };
 }
 
 /* A file's name, which a file for a task or the chat needs; a picture for a request goes without one. */
@@ -293,8 +344,8 @@ function uploadName(asFile: boolean, rawName: string | undefined): string | null
   return name;
 }
 
-function checkUploadSize(bytes: Buffer, asFile: boolean, toChat: boolean): void {
-  if (toChat && !bytes.length) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
+function checkUploadSize(bytes: Buffer, asFile: boolean): void {
+  if (!bytes.length) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
   if (!asFile && bytes.length > PICTURE_BYTES) {
     throw new ApiError(413, 'validation', `A picture is at most ${PICTURE_BYTES / 1024 / 1024} MB. Put a bigger file on its task.`, 'attachment_invalid');
   }
@@ -306,9 +357,9 @@ function uploadType(asFile: boolean, hasTask: boolean, pic: string | null): stri
   return !hasTask && pic ? pic : 'application/octet-stream';
 }
 
-function checkedUploadMeta(bytes: Buffer, asFile: boolean, toChat: boolean, hasTask: boolean, rawName: string | undefined) {
+function checkedUploadMeta(bytes: Buffer, asFile: boolean, hasTask: boolean, rawName: string | undefined) {
   const name = uploadName(asFile, rawName);
-  checkUploadSize(bytes, asFile, toChat);
+  checkUploadSize(bytes, asFile);
   const pic = pictureType(bytes);
   const type = uploadType(asFile, hasTask, pic);
   if (!type) throw new ApiError(400, 'validation', 'Send a PNG, JPEG or WebP picture, or name the task a file is for.', 'attachment_invalid');
@@ -328,14 +379,15 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   void app.register(async scope => {
     scope.addContentTypeParser(['application/octet-stream', 'image/png', 'image/jpeg', 'image/webp'], { parseAs: 'buffer', bodyLimit: FILE_BYTES }, (_req, body, done) => done(null, body));
     scope.post('/api/attachments', { bodyLimit: FILE_BYTES }, async (req, reply) => {
-      const job = await jobOf(ctx, req);
+      const job = await attachmentJobOf(ctx, req);
       const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
+      checkAttachmentTask(job, task, toChat);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
-      const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, toChat, ref !== undefined, raw);
-      const [sent] = await db.select({ n: count() }).from(attachments).where(eq(attachments.jobId, job.id));
+      const { name, pic, type } = checkedUploadMeta(bytes, ref !== undefined || toChat, ref !== undefined, raw);
+      const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
       await checkAttachmentSpace(ctx, job.companyId, task, toChat, bytes.length);
       const [row] = await db
@@ -356,8 +408,9 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  /* Any agent of the company downloads an ordinary task file; automatic log files require access to their task, by its name or id, with its tool token, through hh-fetch. A name
-     put on twice gives the newest. "message" in place of the task gets a picture that came with a message to this agent. */
+  /* Any working employee of the company downloads files and request pictures of a company task by name or id, with its tool
+     token, through hh-fetch. A name put on twice gives the newest. "message" in place of the task gets a picture that came
+     with a message to this agent. */
   app.get('/api/attachments/file', async (req, reply) => {
     const job = await jobOf(ctx, req);
     const { task: ref, file } = FetchQuery.parse(req.query);
@@ -367,17 +420,9 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!picture) throw new ApiError(404, 'not_found', `You have no picture or file ${file}. One goes only to the agent it was sent to.`, 'attachment_unknown');
       return sendFile(db, reply, picture);
     }
-    const task = await taskByRef(ctx, job.companyId, ref);
-    const byId = z.uuid().safeParse(file).success;
-    const [found] = task
-      ? await db
-          .select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
-          .from(attachments)
-          .where(and(eq(attachments.taskId, task.id), isNull(attachments.operatorCaseId), byId ? or(eq(attachments.id, file), eq(attachments.name, file)) : eq(attachments.name, file)))
-          .orderBy(desc(attachments.createdAt))
-          .limit(1)
-      : [];
-    if (!found || !readsTaskFile(job, task, found)) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
+    const task = await companyTaskForAgent(ctx, job, ref);
+    const found = task ? await taskAttachmentForAgent(db, job.companyId, task.id, file) : undefined;
+    if (!found) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
     return sendFile(db, reply, found);
   });
 
@@ -386,27 +431,17 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const file = await personFile(db, me, id);
-    if (file) return sendFile(db, reply, file, true);
+    const file = await attachmentForPerson(db, me, id);
+    if (file && !file.picture) return sendFile(db, reply, file, true);
     const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
-    const [found] = await db
-      .select({ name: attachments.name, mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks, request: requests })
-      .from(attachments)
-      .innerJoin(agents, eq(agents.id, attachments.agentId))
-      .leftJoin(requests, eq(requests.id, attachments.requestId))
-      .leftJoin(tasks, eq(tasks.id, requests.taskId))
-      .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), isNull(attachments.operatorCaseId)));
-    if (!found || (!found.personId && !found.task)) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
-    if (!(found.personId ? await canViewAgent(db, me, found.agent) : await mayOpenRequest(db, me, found.request!, found.task!))) {
-      throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
-    }
-    if (!found.mediaType.startsWith('image/')) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(found.name ?? 'file')}`);
+    if (!file) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+    if (!file.mediaType.startsWith('image/')) reply.header('content-disposition', `attachment; filename*=UTF-8''${headerName(file.name ?? 'file')}`);
     return reply
       .header('x-content-type-options', 'nosniff')
       .header('content-security-policy', "default-src 'none'")
       .header('cache-control', 'private, max-age=86400')
-      .type(found.mediaType)
-      .send(Buffer.from(found.bytes));
+      .type(file.mediaType)
+      .send(Readable.from(filePieces(db, file.id, file.length)));
   });
 }

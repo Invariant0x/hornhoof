@@ -37,7 +37,7 @@ function AgentChip({ agent: a, me, now }: { agent: RunningAgent; me: Me; now: nu
   const t = useT();
   const { language } = useLanguage();
   const role = a.title?.[language];
-  const chip = <Edge className={`run-chip${a.busy ? ' on' : ''}`} cut={8}>
+  const chip = <Edge className={`run-chip${a.busy ? ' on' : ''}`} cut={8} halo={a.canOpen}>
     <span className="l1"><span className={`ag${a.busy ? ' on' : ''}`}><AgentIcon /></span><b>{a.name}</b><ProviderMark provider={a.provider} /></span>
     {role && role !== a.name && <span className="l2">{role}</span>}
     <span className="l3"><AgentActivity agent={a} me={me} now={now} /></span>

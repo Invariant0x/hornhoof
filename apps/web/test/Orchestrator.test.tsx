@@ -6,6 +6,7 @@ import { AgentWindow } from '../src/screens/AgentWindow';
 import type { ComputerAccessView, EventView, Me, Org, ShownCommand } from '../src/types';
 import { accessView, CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS, withKey } from './api-mock';
 import { fakeStream } from './fake-stream';
+import { commandCode } from './command-code';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
 vi.mock('../src/ui/AgentTerminal', () => ({
@@ -323,12 +324,12 @@ describe('AgentWindow', () => {
       [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
     });
     const card = await screen.findByRole('region', { name: 'Command to add Claude to work-laptop' });
-    expect(await within(card).findByText(withKey(command))).toBeInTheDocument();
+    expect(await within(card).findByText(commandCode(withKey(command)))).toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on work-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Done' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(command)).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByText(commandCode(command))).not.toBeInTheDocument());
   });
 
   it('names each kind of machine command in Russian', async () => {

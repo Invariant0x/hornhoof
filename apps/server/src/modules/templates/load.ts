@@ -5,6 +5,7 @@ import { ROLE_EFFORTS, TEMPLATE_KEYS, type RoleEffort, type TemplateKey } from '
 import { ECHELON_STAGES, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { parse } from 'yaml';
 import { z } from 'zod';
+import type { Checker } from '../../checker.js';
 
 /* Role and skill templates: the text every employee is hired with. Roles are short, procedures live in skills. */
 
@@ -130,7 +131,7 @@ function readParts(file: string): { head: unknown; body: string } {
   return { head: parseFrontmatter(file, match[1]!), body: match[2]!.trim() };
 }
 
-function parsed<T>(schema: z.ZodType<T>, file: string, head: unknown): T {
+function parsed<T>(schema: Checker<T>, file: string, head: unknown): T {
   const res = schema.safeParse(head);
   if (!res.success) throw new Error(`${file}: ${res.error.issues.map(i => `${i.path.join('.')} ${i.message}`).join('; ')}`);
   return res.data;

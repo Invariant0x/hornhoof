@@ -1,9 +1,55 @@
 # Changelog
 
-Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD`,
-one plain summary, and short entries under `### Added`, `### Changed` and
-`### Fixed`. Include `### Before you update` only when people need to take action.
-The middle number is the turn; the last counts releases between turns.
+Newest releases come first. Each release starts with `## [X.N.P] - YYYY-MM-DD` and is one short list in English: one
+line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, with no summary and no translation. A
+step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
+number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
+
+## [Unreleased]
+
+### Fixed
+
+- The first result of a new turn is no longer refused because its `turn-N` branch was missing; the server makes it.
+- A program with no screen no longer raises false `node_silent` alarms while its turn is working.
+- An update no longer cuts short a turn that streams its work without a screen.
+- A held turn whose program is gone ends as interrupted, and the next turn goes out.
+- No more false "assignment words not recorded" cases when Claude Code starts a turn for its own notice.
+- Releasing a hold calls a program busy exactly when `program_screen` does.
+- A machine taken off the company's checks no longer lends its built-in node to test and work runs.
+- Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
+- The glow and focus ring of a card follow its cut corner, with no dark triangle there.
+- The map's zoom label, such as 115%, is no longer cut off.
+
+### Added
+
+- The orchestrator reads and marks any employee's inbox, with a reason that goes into the employee's log.
+- The CEO and the CEO's delegate mark any employee's letters with `POST /api/agents/:id/inbox/mark`.
+- `failures` shows `next` for each blocked task, taken from its holder's last report.
+- Employees download the files of any company task with `hh-fetch`, but never a personal assistant's.
+- A task's allowed paths can be globs, and test files and folders are always allowed beside them.
+- A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
+- A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
+- Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
+
+### Changed
+
+- A machine its owner opened stays open to the orchestrator in all its turns while access lasts, not just one.
+- Commands on a machine are refused when the turn's last words come from someone without rights or unknown.
+- A message to a busy or reconnecting employee waits for its next turn instead of being lost.
+- A message that cannot be delivered names a reason code, the recipient and the task.
+- Personal assistants are hidden from Operations' SQL reads and from the program operator.
+- The full release check runs in two to four parts of up to an hour each.
+- Release test profiles also reuse green results proved at commits main already holds.
+- A full machine of the company keeps its place whatever its memory, free disk or disk speed.
+- Machines always says why a machine has no place.
+- A machine's card stands in three blocks, and its connection history reads as plain lines.
+- Install commands read left to right in any language, and their flags never break.
+- Machines filters start with All and a count, with chips of at least 44 px.
+- Table headers and row buttons are 44 px in every table.
+- A field you must correct has a pink frame, and the Feedback title error clears as you type.
+- The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent the message.
+- A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
+- Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
 
 ## [0.29.3] - 2026-11-16
 

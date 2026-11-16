@@ -5,8 +5,10 @@ import { ru } from '../src/i18n/ru';
 import type { ApprovalPolicyView, WaitingRequest } from '../src/types';
 import { ApprovalPolicy } from '../src/ui/ApprovalPolicy';
 import { DecidedByNote } from '../src/ui/DecidedBy';
+import { DepartmentMessaging } from '../src/ui/OutboundSetup';
 import { Requests } from '../src/ui/Requests';
 import { mockApi } from './api-mock';
+import { decl } from './css';
 
 const t = en.dept.approvals;
 const CHANNELS = ['message', 'price', 'publication', 'commit', 'spend', 'other'] as const;
@@ -170,6 +172,48 @@ describe('ApprovalPolicy', () => {
     const before = calls.length;
     rerender(<ApprovalPolicy departmentId="d1" ownerPersonId="p2" />);
     await waitFor(() => expect(calls.length).toBe(before + 1));
+  });
+
+  it('draws each channel fieldset without a browser frame through the shared field-group rule used in outbound setup', async () => {
+    mockApi({
+      [POLICY]: [200, ceoView()],
+      'GET /api/outbound?department=d1': [
+        200,
+        {
+          channels: [{ id: 'c1', departmentId: 'd1', name: 'Mail', adapter: 'smtp', purpose: 'first_contact', audience: 'direct', status: 'new', canManage: true, policy: null, accounts: [] }],
+          messages: [], escalations: [], approvals: [], departments: [{ id: 'd1', name: 'Development', templateKey: null }],
+        },
+      ],
+      'GET /api/outbound/catalog?department=d1': [200, { entries: [] }],
+      'GET /api/outbound/setup-log?department=d1': [200, { entries: [] }],
+    });
+    const { container } = render(
+      <>
+        <ApprovalPolicy departmentId="d1" />
+        <DepartmentMessaging departmentId="d1" />
+      </>,
+    );
+    await screen.findByRole('combobox', { name: t.owner });
+    fireEvent.click(await screen.findByRole('button', { name: 'Set limits and sending' }));
+
+    const approvalGroups = [...container.querySelectorAll('.appr-rules > fieldset')];
+    const outboundGroups = [...container.querySelectorAll('.outbound-numbers')];
+    expect(approvalGroups).toHaveLength(CHANNELS.length);
+    expect(outboundGroups).toHaveLength(2);
+    for (const group of [...approvalGroups, ...outboundGroups]) {
+      expect(group).toHaveClass('field-group');
+      expect(group.querySelector(':scope > legend + .field-group-body')).not.toBeNull();
+    }
+
+    expect(decl('.field-group', 'border')).toBe('0');
+    expect(decl('.field-group', 'padding')).toBe('0');
+    expect(decl('.field-group > legend', 'float')).toBe('inline-start');
+    expect(decl('.field-group > legend', 'inline-size')).toBe('100%');
+    expect(decl('.field-group > legend', 'font-family')).toBe('var(--f-display)');
+    expect(decl('.field-group-body', 'clear')).toBe('both');
+    expect(decl('.field-group-body', 'padding-block-start')).toBe('4px');
+    expect(decl('.appr-rule', 'border')).toBeUndefined();
+    expect(decl('.outbound-numbers', 'border')).toBeUndefined();
   });
 });
 

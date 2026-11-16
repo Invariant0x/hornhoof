@@ -4,6 +4,7 @@ import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type Oper
 import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { insertTurn, limitUntil, pump, takesTurns } from '../conversation/queue.js';
@@ -119,11 +120,11 @@ async function caseForJob(ctx: Ctx, signal: Signal, jobId: string): Promise<Case
 
 /* The turn a signal is of, on an employee: a person's own assistant's program is its owner's alone, and no case opens on it. */
 async function signalSubject(ctx: Ctx, signal: Signal) {
-  const employee = ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, signal.agentKey), ne(agents.kind, 'assistant')));
+  const employee = ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, signal.agentKey), ne(agents.kind, 'assistant')));
   const [job] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, signal.jobId!), inArray(jobs.agentId, employee)));
   const [instance] = await ctx.db.select().from(programInstances).where(eq(programInstances.id, signal.instance));
   if (!job || !instance || job.error === 'cancelled' || job.error === 'stale') return;
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, signal.agentKey), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
+  const [running] = await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.agentId, signal.agentKey), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
   if (running && running.id !== job.id) return;
   return { job, instance };
 }
@@ -140,7 +141,7 @@ async function pickOperator(ctx: Ctx, companyId: string, target: string) {
     .where(and(eq(agents.companyId, companyId), eq(subscriptions.companyId, companyId), eq(departments.companyId, companyId), eq(departments.templateKey, 'operations'), eq(agents.roleKey, PROGRAM_OPERATOR_ROLE), eq(agents.kind, 'worker'), ne(agents.id, target), isNull(agents.removedAt), isNull(agents.switchedOffAt), isNull(subscriptions.removedAt), eq(subscriptions.status, 'ready'))).orderBy(asc(agents.createdAt));
   for (const { agent, sub } of candidates) {
     if (!(await planCanTakeTurn(ctx, sub)) || limitUntil(sub.limits, sub.limitsUpdatedAt)) continue;
-    const [stuck] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true)))).limit(1);
+    const [stuck] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true)))).limit(1);
     if (!stuck) return agent;
   }
   return null;
@@ -266,7 +267,7 @@ async function failedAgent(ctx: Ctx, row: Case) {
 
 /* No turn can tell the orchestrator of its own program, so people read it in its window, once for each case that speaks. */
 async function tellPeople(ctx: Ctx, row: Case, name: string): Promise<void> {
-  const [told] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->>'operatorEscalation' = ${row.id}`)).limit(1);
+  const [told] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents).where(and(eq(agentEvents.agentId, row.agentId), sql`${agentEvents.data}->>'operatorEscalation' = ${row.id}`)).limit(1);
   if (told) return;
   const reason = reasonNames[row.reason];
   const text = `${name}'s program needs a person: ${reason.en}. Recovery ended: ${row.resolution?.outcome}. No turn goes to ${name} about this, and the words it was given wait for its next turn that works. Open its terminal to see what stops it.`;
@@ -313,7 +314,7 @@ export async function expireOperatorCases(ctx: Ctx, now = new Date()): Promise<v
   const due = await ctx.db.select({ id: programOperatorCases.id, agentId: programOperatorCases.agentId }).from(programOperatorCases).where(and(eq(programOperatorCases.status, 'open'), lte(programOperatorCases.deadlineAt, now)));
   for (const entry of due) {
     await operatorTransaction(ctx, async (tx, inside) => {
-      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, entry.agentId)).for('update');
+      await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, entry.agentId)).for('update');
       const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, entry.id), eq(programOperatorCases.status, 'open'))).for('update');
       if (row && +row.deadlineAt <= +now) await escalateCase(inside, row, 'operator_timeout', now);
     });

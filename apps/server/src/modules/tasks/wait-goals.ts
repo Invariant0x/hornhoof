@@ -3,6 +3,7 @@ import type { Notification, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { people, requests, taskEvents, tasks, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { CLOSED, note, refuse, type Actor, type Request, type Task, type Tx } from './engine.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { lastOfSource, requestSourceKey, type TaskWait } from './wait-state.js';
@@ -27,7 +28,7 @@ export async function openGoal(db: Ctx['db'] | Tx, companyId: string, ref: GoalR
 }
 
 async function activeCeo(tx: Tx, companyId: string): Promise<string | null> {
-  const [ceo] = await tx.select({ id: people.id }).from(people).where(and(eq(people.companyId, companyId), eq(people.isOwner, true), eq(people.status, 'active')));
+  const [ceo] = await tx.select(idOnly(people)).from(people).where(and(eq(people.companyId, companyId), eq(people.isOwner, true), eq(people.status, 'active')));
   return ceo?.id ?? null;
 }
 
