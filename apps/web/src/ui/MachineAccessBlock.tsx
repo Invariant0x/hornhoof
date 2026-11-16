@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import { ACCESS_DURATIONS, DURATION_S, type AccessDuration, type ComputerAccessView } from '../types';
 import { cannotOpen, decidesAccess, givesLines, isOpen, machineName, useAccess, type AccessAnswer, type AccessChoice } from './access';
@@ -127,33 +127,57 @@ function Confirm({ t, language, machine, duration, onOpen, onCancel }: { t: Mess
   );
 }
 
-export function MachineAccessBlock({ view: given, onChanged }: { view: ComputerAccessView; onChanged(): void }) {
-  const t = useT();
-  const { language } = useLanguage();
-  const c = t.machines.computer;
-  const heading = useId();
-  /* What the server answered last, until the card brings a newer view. */
+const SHOWN: Step = { kind: 'shown' };
+
+/* Whether this person may open it now: theirs to open, and nothing in the way. */
+const mayOpen = (t: Messages, view: ComputerAccessView) => view.canOpen && !cannotOpen(t, view);
+
+/* What the server answered last, until the card brings a newer view. */
+function useAnswered(given: ComputerAccessView): [ComputerAccessView, (next: ComputerAccessView) => void] {
   const [answered, setAnswered] = useState<ComputerAccessView | null>(null);
   useEffect(() => setAnswered(null), [given]);
-  const view = answered ?? given;
-  /* It closes by its own time, without waiting for the server to say so. */
+  return [answered ?? given, setAnswered];
+}
+
+/* It closes by its own time, without waiting for the server to say so. */
+function useClosesOnTime(view: ComputerAccessView) {
   const [, setExpired] = useState(0);
   useEffect(() => {
     if (!isOpen(view)) return;
-    const left = Date.parse(view.until!) - Date.now();
-    const timer = setTimeout(() => setExpired(n => n + 1), left + 1);
+    const timer = setTimeout(() => setExpired(n => n + 1), Date.parse(view.until!) - Date.now() + 1);
     return () => clearTimeout(timer);
   }, [view]);
-  const [step, setStep] = useState<Step>({ kind: 'shown' });
+}
+
+/* Cancel or Escape gives the focus back to the button that opened the step. */
+function useFocusBack(step: Step) {
+  const opener = useRef<HTMLButtonElement>(null);
+  const [back, setBack] = useState(false);
+  useEffect(() => {
+    if (back && step.kind === 'shown') opener.current?.focus();
+    setBack(false);
+  }, [back, step]);
+  return { opener, back: () => setBack(true) };
+}
+
+type Flow = {
+  step: Step;
+  setStep(step: Step): void;
+  busy: AccessAnswer | null;
+  failed: Attempt | null;
+  act(action: AccessAnswer, choice?: AccessChoice): void;
+  cancel(): void;
+  opener: RefObject<HTMLButtonElement | null>;
+  prompt: ReactNode;
+};
+
+/* The step the owner is at, the change on its way, and the one that failed, kept to try again. */
+function useAccessFlow(view: ComputerAccessView, setAnswered: (next: ComputerAccessView) => void, onChanged: () => void): Flow {
+  const [step, setStep] = useState<Step>(SHOWN);
   const [busy, setBusy] = useState<AccessAnswer | null>(null);
   const [failed, setFailed] = useState<Attempt | null>(null);
-  const opener = useRef<HTMLButtonElement>(null);
-  const [backToOpener, setBackToOpener] = useState(false);
-  useEffect(() => {
-    if (backToOpener && step.kind === 'shown') opener.current?.focus();
-    setBackToOpener(false);
-  }, [backToOpener, step]);
   const attempt = useRef<Attempt | null>(null);
+  const focus = useFocusBack(step);
   const { answer, prompt } = useAccess(
     next => {
       setBusy(null);
@@ -168,87 +192,173 @@ export function MachineAccessBlock({ view: given, onChanged }: { view: ComputerA
   const act = (action: AccessAnswer, choice?: AccessChoice) => {
     attempt.current = { action, choice };
     setFailed(null);
-    setStep({ kind: 'shown' });
+    setStep(SHOWN);
     setBusy(action);
     void answer(view, action, choice).finally(() => setBusy(now => (now === action ? null : now)));
   };
   const cancel = () => {
-    setStep({ kind: 'shown' });
-    setBackToOpener(true);
+    setStep(SHOWN);
+    focus.back();
   };
+  return { step, setStep, busy, failed, act, cancel, opener: focus.opener, prompt };
+}
 
-  const machine = machineName(t, view.machine);
-  const state = stateOf(view);
+/* What the state means, under its framed word. */
+function StateLines({ t, language, view, state }: { t: Messages; language: Language; view: ComputerAccessView; state: State }) {
+  const c = t.machines.computer;
+  switch (state) {
+    case 'closed':
+      return <Line>{c.closedText}</Line>;
+    case 'offline':
+      return <Line>{c.offlineText}</Line>;
+    case 'asks':
+      return <Line>{c.asksText(view.asked!.reason)}</Line>;
+    case 'open':
+    case 'full':
+      return <OpenLines t={t} language={language} view={view} full={state === 'full'} />;
+  }
+}
+
+/* Why this person cannot open it: someone else decides, or something stands in the way. */
+function Standing({ t, view, state }: { t: Messages; view: ComputerAccessView; state: State }) {
+  if (state !== 'closed' && state !== 'asks') return null;
+  if (!view.canOpen) return <DecidedByNote by={decidesAccess(view)} />;
   const blocked = cannotOpen(t, view);
-  const mayOpen = view.canOpen && !blocked;
+  return blocked ? <Line className="muted">{blocked}</Line> : null;
+}
 
-  let actions: ReactNode = null;
-  if (busy) {
-    actions = (
+const Gives = ({ t, view }: { t: Messages; view: ComputerAccessView }) => (
+  <>
+    {givesLines(t, view).map(line => (
+      <Line key={line} className="muted">
+        {line}
+      </Line>
+    ))}
+  </>
+);
+
+/* The orchestrator's request: open it for the time chosen here, or not now. */
+function AnswerAsk({ t, view, flow }: ActionProps) {
+  const c = t.machines.computer;
+  const may = mayOpen(t, view);
+  const duration = flow.step.kind === 'choose' ? flow.step.duration : ACCESS_DURATIONS[0];
+  return (
+    <>
+      {may && <Gives t={t} view={view} />}
+      {may && <Durations t={t} duration={duration} onPick={d => flow.setStep({ kind: 'choose', duration: d })} />}
       <div className="entry-actions">
-        <button className="act" type="button" disabled>{busy === 'close' ? c.closing : c.opening}</button>
+        {may && (
+          <button className="btn" type="button" onClick={() => flow.act('open', { scope: 'orchestrator', duration })}>
+            {c.openFor[duration]}
+          </button>
+        )}
+        <button className="act" type="button" onClick={() => flow.act('decline')}>
+          {t.window.computerNotNow}
+        </button>
       </div>
-    );
-  } else if (state === 'open' || state === 'full') {
-    actions = view.canClose && (
-      <div className="entry-actions">
-        <button className="act" type="button" onClick={() => act('close')}>{t.window.computerClose}</button>
-      </div>
-    );
-  } else if (state === 'asks' && view.canOpen) {
-    const duration = step.kind === 'choose' ? step.duration : ACCESS_DURATIONS[0];
-    actions = (
-      <>
-        {mayOpen && <Durations t={t} duration={duration} onPick={d => setStep({ kind: 'choose', duration: d })} />}
-        <div className="entry-actions">
-          {mayOpen && <button className="btn" type="button" onClick={() => act('open', { scope: 'orchestrator', duration })}>{c.openFor[duration]}</button>}
-          <button className="act" type="button" onClick={() => act('decline')}>{t.window.computerNotNow}</button>
-        </div>
-      </>
-    );
-  } else if (state === 'closed' && mayOpen && step.kind === 'shown') {
-    actions = (
-      <div className="entry-actions">
-        <button ref={opener} className="btn" type="button" onClick={() => setStep({ kind: 'choose', duration: ACCESS_DURATIONS[0] })}>{c.choose}</button>
-      </div>
+    </>
+  );
+}
+
+/* A closed machine of theirs: its button, then for whom and for how long, then once more for every agent. */
+function OpenSteps({ t, language, view, flow }: ActionProps) {
+  const machine = machineName(t, view.machine);
+  const { step } = flow;
+  if (step.kind === 'choose') {
+    return (
+      <Choose
+        t={t}
+        machine={machine}
+        gives={givesLines(t, view)}
+        duration={step.duration}
+        onDuration={duration => flow.setStep({ kind: 'choose', duration })}
+        onPick={scope => (scope === 'all_agents' ? flow.setStep({ kind: 'confirm', duration: step.duration }) : flow.act('open', { scope, duration: step.duration }))}
+        onCancel={flow.cancel}
+      />
     );
   }
+  if (step.kind === 'confirm') {
+    return <Confirm t={t} language={language} machine={machine} duration={step.duration} onOpen={() => flow.act('open', { scope: 'all_agents', duration: step.duration, confirm: true })} onCancel={flow.cancel} />;
+  }
+  return (
+    <div className="entry-actions">
+      <button ref={flow.opener} className="btn" type="button" onClick={() => flow.setStep({ kind: 'choose', duration: ACCESS_DURATIONS[0] })}>
+        {t.machines.computer.choose}
+      </button>
+    </div>
+  );
+}
 
-  const asking = state === 'closed' && mayOpen;
+type ActionProps = { t: Messages; language: Language; view: ComputerAccessView; flow: Flow };
+
+/* Whoever the server lets close it closes it with one press, without a question. */
+const CloseAccess = ({ t, view, flow }: ActionProps) =>
+  view.canClose ? (
+    <div className="entry-actions">
+      <button className="act" type="button" onClick={() => flow.act('close')}>
+        {t.window.computerClose}
+      </button>
+    </div>
+  ) : null;
+
+/* What this person can do in each state. */
+const ACTIONS: Record<State, (props: ActionProps) => ReactNode> = {
+  closed: props => (mayOpen(props.t, props.view) ? <OpenSteps {...props} /> : null),
+  open: props => <CloseAccess {...props} />,
+  full: props => <CloseAccess {...props} />,
+  asks: props => (props.view.canOpen ? <AnswerAsk {...props} /> : null),
+  offline: () => null,
+};
+
+/* The change on its way, or what this person can do. */
+function Actions({ state, ...props }: ActionProps & { state: State }) {
+  const c = props.t.machines.computer;
+  if (!props.flow.busy) return ACTIONS[state](props);
+  return (
+    <div className="entry-actions">
+      <button className="act" type="button" disabled>
+        {props.flow.busy === 'close' ? c.closing : c.opening}
+      </button>
+    </div>
+  );
+}
+
+/* A change that failed stays beside its machine, with the way to try it again. */
+function Failed({ t, flow }: { t: Messages; flow: Flow }) {
+  const { failed } = flow;
+  if (!failed) return null;
+  return (
+    <div className="acc-failed" role="alert">
+      <Line>{t.machines.computer.failed}</Line>
+      <div className="entry-actions">
+        <button className="act" type="button" onClick={() => flow.act(failed.action, failed.choice)}>
+          {t.machines.computer.retry}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function MachineAccessBlock({ view: given, onChanged }: { view: ComputerAccessView; onChanged(): void }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const heading = useId();
+  const [view, setAnswered] = useAnswered(given);
+  useClosesOnTime(view);
+  const flow = useAccessFlow(view, setAnswered, onChanged);
+  const state = stateOf(view);
   return (
     <section className="part acc" aria-labelledby={heading}>
-      <h5 className="part-h" id={heading}>{t.machines.access}</h5>
+      <h5 className="part-h" id={heading}>
+        {t.machines.access}
+      </h5>
       <p>
         <span className={`status acc-${state}`}>{WORD[state](t)}</span>
       </p>
-      {state === 'closed' && <Line>{c.closedText}</Line>}
-      {state === 'offline' && <Line>{c.offlineText}</Line>}
-      {state === 'asks' && <Line>{c.asksText(view.asked!.reason)}</Line>}
-      {state === 'asks' && mayOpen && givesLines(t, view).map(line => <Line key={line} className="muted">{line}</Line>)}
-      {(state === 'open' || state === 'full') && <OpenLines t={t} language={language} view={view} full={state === 'full'} />}
-      {(state === 'closed' || state === 'asks') && view.canOpen && blocked && <Line className="muted">{blocked}</Line>}
-      {(state === 'closed' || state === 'asks') && !view.canOpen && <DecidedByNote by={decidesAccess(view)} />}
-      {asking && step.kind === 'choose' && (
-        <Choose
-          t={t}
-          machine={machine}
-          gives={givesLines(t, view)}
-          duration={step.duration}
-          onDuration={duration => setStep({ kind: 'choose', duration })}
-          onPick={scope => (scope === 'all_agents' ? setStep({ kind: 'confirm', duration: step.duration }) : act('open', { scope, duration: step.duration }))}
-          onCancel={cancel}
-        />
-      )}
-      {asking && step.kind === 'confirm' && <Confirm t={t} language={language} machine={machine} duration={step.duration} onOpen={() => act('open', { scope: 'all_agents', duration: step.duration, confirm: true })} onCancel={cancel} />}
-      {prompt ?? actions}
-      {failed && (
-        <div className="acc-failed" role="alert">
-          <Line>{c.failed}</Line>
-          <div className="entry-actions">
-            <button className="act" type="button" onClick={() => act(failed.action, failed.choice)}>{c.retry}</button>
-          </div>
-        </div>
-      )}
+      <StateLines t={t} language={language} view={view} state={state} />
+      <Standing t={t} view={view} state={state} />
+      {flow.prompt ?? <Actions t={t} language={language} view={view} state={state} flow={flow} />}
+      <Failed t={t} flow={flow} />
     </section>
   );
 }

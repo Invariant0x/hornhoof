@@ -1323,6 +1323,26 @@ describe("computer access on a machine's card", () => {
     expect(within(own).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
   });
 
+  it('opens access for every agent only after its owner says yes once more, and Escape opens nothing', async () => {
+    const calls = showLive([mac()], server(), { open: () => [200, ofServer({ until: UNTIL, scope: 'all_agents' })] });
+    const access = part(await openCard('debian'));
+    const user = userEvent.setup();
+    await user.click(within(access).getByRole('button', { name: 'Open access' }));
+    expect(within(access).getByRole('heading', { name: 'Who gets access?' })).toHaveFocus();
+    await user.click(within(access).getByRole('button', { name: 'Every company agent' }));
+    expect(within(access).getByRole('heading', { name: 'Open full access for the whole team?' })).toHaveFocus();
+    expect(within(access).getByText('Who: every company agent')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(within(access).queryByText('Open full access for the whole team?')).not.toBeInTheDocument();
+    expect(within(access).getByRole('button', { name: 'Open access' })).toHaveFocus();
+    expect(calls.some(call => call.method === 'POST')).toBe(false);
+    await user.click(within(access).getByRole('button', { name: 'Open access' }));
+    await user.click(within(access).getByRole('button', { name: 'Every company agent' }));
+    await user.click(within(access).getByRole('button', { name: 'Open full access' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'all_agents', duration: '1h', confirm: true } }));
+    expect(await within(access).findByText('Full access for the team')).toBeInTheDocument();
+  });
+
   it("answers the orchestrator's request on the card, for the time chosen there", async () => {
     const asked = { asked: { reason: 'Clean Docker images.', at: new Date().toISOString() } };
     const calls = showLive([mac()], server(asked), { open: () => [200, ofServer({ until: UNTIL, scope: 'orchestrator' })] });

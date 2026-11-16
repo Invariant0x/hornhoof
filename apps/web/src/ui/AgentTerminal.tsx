@@ -1,7 +1,7 @@
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import { BindViewResponse, decodeViewChallenge, encodeViewSignature, isTestViewReady, TestTerminalClose, TestTerminalServerFrame, ViewProof, type BindViewRequest } from '@hornhoof/protocol';
 import '@xterm/xterm/css/xterm.css';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { errorText, useT, type Messages } from '../i18n';
 import { usePictureDrop } from './MessagePictures';
 import { fitTerminal, measureGlyphsExactly, observeTerminalFit } from './terminal-fit';
@@ -672,6 +672,16 @@ function terminalNotes({ t, asleep, dropped, denied, pictureFailure, pictureStat
   return notes.filter(note => note !== false);
 }
 
+/* Hands the terminal's notes to whoever shows them, and takes them back when the terminal goes; with no one to take
+   them, they stand in a foot of its own, under the terminal. */
+function useNotesFoot(label: string, notes: WindowNote[], onNotes?: (notes: WindowNote[]) => void): ReactNode {
+  const tell = useRef(onNotes);
+  tell.current = onNotes;
+  useEffect(() => tell.current?.(notes), [notes]);
+  useEffect(() => () => tell.current?.([]), []);
+  return onNotes ? null : <WindowFoot label={label} notes={notes} />;
+}
+
 /* A live agent terminal or a proof-only standalone test view, both using the same renderer and local history. */
 export function AgentTerminal({ path, program, onGone, watching = false, testSession, onNotes }: Props) {
   const t = useT();
@@ -748,11 +758,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
     () => terminalNotes({ t, asleep: asleep ? program : null, dropped, denied, pictureFailure, pictureState }),
     [t, asleep, program, dropped, denied, pictureFailure, pictureState],
   );
-  const tell = useRef(onNotes);
-  tell.current = onNotes;
-  useEffect(() => tell.current?.(notes), [notes]);
-  /* A terminal that goes takes its notes with it. */
-  useEffect(() => () => tell.current?.([]), []);
+  const foot = useNotesFoot(t.window.notes.label, notes, onNotes);
 
   return (
     <>
@@ -767,7 +773,7 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
           </div>
         )}
       </div>
-      {!onNotes && <WindowFoot label={t.window.notes.label} notes={notes} />}
+      {foot}
     </>
   );
 }
