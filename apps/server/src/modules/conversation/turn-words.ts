@@ -2,7 +2,7 @@ import { and, desc, eq, gt, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agentInbox, jobs } from '../../db/schema.js';
-import { readMessage } from '../events/parties.js';
+import { readMessage, type MessageEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
 
 export const UNHEARD_NOTE = 'Words sent into the running turn were not taken by the program. They go with its next turn.';
@@ -34,6 +34,31 @@ const computerClick = (data: unknown): boolean => Boolean((data as { computerCli
    computer-opening click are none of those. */
 export const byPerson = (w: { personId: string | null; kind: string; data: unknown }): boolean =>
   w.personId !== null || (w.kind === 'typed' && !computerClick(w.data));
+
+/* A repeat of a turn's words names who spoke last in that turn, for a command on a machine: a person's id, or null when it
+   is not known. */
+const SPOKE = 'machineSpeaker';
+
+/* Who said these words, for a command on a machine: the person by id, null when whose words went in is not known (an
+   Enter in the terminal, or words that may have gone in without being kept), and undefined for nobody's: a notice, an
+   employee's letter or report, or Hornhoof repeating a click or a notice. A repeat goes by who spoke last in the turn
+   it repeats. */
+export function machineSpeaker(w: { personId: string | null; kind: string; data: unknown }): string | null | undefined {
+  if (w.personId) return w.personId;
+  return w.kind === 'typed' ? typedSpeaker(w.data) : undefined;
+}
+
+function typedSpeaker(data: unknown): string | null | undefined {
+  const spoke = (data as Record<string, unknown> | null)?.[SPOKE];
+  if (spoke === null || typeof spoke === 'string') return spoke;
+  return computerClick(data) ? undefined : envelopeSpeaker(readMessage(data).message);
+}
+
+/* A person's own words name them; a notice, or an agent's or Hornhoof's words, nobody; no envelope, nobody known. */
+const envelopeSpeaker = (envelope: MessageEnvelope | undefined): string | null | undefined => {
+  if (!envelope) return null;
+  return envelope.notification || envelope.from.kind !== 'person' ? undefined : envelope.from.id;
+};
 
 /* Whom a turn answers: the last person who wrote or typed into it; whoever started it when nothing came into it yet. */
 export function answeredWords<T extends { seq: number; personId: string | null; kind: string; data: unknown }>(
@@ -203,8 +228,17 @@ export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Pick<Standing, 'id
   return {
     createdBy: current.createdBy,
     answersCeo: current.answersCeo,
-    repeated: withUnheardFrom(repeatedWords(said, turnPrincipal(current, said), grants, source), unheardFrom),
+    repeated: withSpeaker(withUnheardFrom(repeatedWords(said, turnPrincipal(current, said), grants, source), unheardFrom), lastSpeaker(current, said)),
   };
+}
+
+/* Who spoke last in the turn, for a machine: unknown while words were on their way into it, which may have gone in
+   without being kept; undefined when no person did. */
+const lastSpeaker = (current: Standing, said: readonly WordEvent[]): string | null | undefined =>
+  current.decisionInputPending ? null : said.map(machineSpeaker).find(speaker => speaker !== undefined);
+
+function withSpeaker(words: TurnWords, spoke: string | null | undefined): TurnWords {
+  return spoke === undefined ? words : { ...words, data: { ...(words.data as Record<string, unknown>), [SPOKE]: spoke } };
 }
 
 /* Words repeated because the program never took them name the turn they were typed into, to go on in its session. */
