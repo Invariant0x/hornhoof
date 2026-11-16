@@ -229,12 +229,13 @@ const builtinsFirstOwn = (ctx: Ctx): string[] => {
    the row that holds its id in the network. One on no computer of the company is lent, as it always was. machineId: the
    computer, none for the server's own. */
 async function builtinHost(ctx: Ctx, companyId: string, machine: string): Promise<{ machineId: string | null; lent: boolean }> {
-  if (machine === ownMachine(ctx.config)) {
-    const host = await builtinMachine(ctx.db, ctx.config.hostId, companyId, ctx.config.machineId);
-    return { machineId: null, lent: host?.lendsTests ?? true };
+  if (machine !== ownMachine(ctx.config)) {
+    const [row] = await ctx.db.select({ id: machines.id, lent: machines.lendsTests }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+    return { machineId: row?.id ?? null, lent: row?.lent ?? true };
   }
-  const [row] = await ctx.db.select({ id: machines.id, lent: machines.lendsTests }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
-  return { machineId: row?.id ?? null, lent: row?.lent ?? true };
+  const host = await builtinMachine(ctx.db, ctx.config.hostId, companyId, ctx.config.machineId);
+  const [row] = host ? await ctx.db.select({ lent: machines.lendsTests }).from(machines).where(eq(machines.id, host.id)) : [];
+  return { machineId: null, lent: row?.lent ?? true };
 }
 
 const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
