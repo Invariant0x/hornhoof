@@ -111,6 +111,50 @@ describe('a pipeline', () => {
     await waitFor(() => expect(patches(calls)).toEqual([{ version: 3, name: 'Flow 2', why: '', stages: [{ key: 's1', id: 's1', parent: null, name: 'Build', ownerAgentId: 'b1' }] }]));
   });
 
+  it('sends the version the form opened on, and starts again from the pipeline as it is when refused, keeping what the person changed', async () => {
+    const user = userEvent.setup();
+    let refuse = true;
+    const calls = mockApi({ 'PATCH /api/pipelines/pl1': () => (refuse ? changed('pipeline_changed') : [200, { pipeline: PIPELINE }]) });
+    const form = (p: Pipeline) => ui(<PipelineForm pipeline={p} department={DEPARTMENT} onDone={() => {}} onCancel={() => {}} />);
+    const { rerender } = render(form(PIPELINE));
+    /* Someone renames the pipeline and takes its last stage out while the form is open. */
+    const theirs: Pipeline = { ...PIPELINE, name: 'Saved by someone else', version: 2, stages: [PIPELINE.stages[0]!] };
+    rerender(form(theirs));
+    await user.type(screen.getByRole('textbox', { name: 'Why' }), 'Local reason');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const build = { key: 's1', id: 's1', parent: null, name: 'Build', ownerRole: 'DEV-BE' };
+    await waitFor(() => expect(patches(calls)).toEqual([{ version: 1, name: 'Flow', why: 'Local reason', stages: [build, { key: 's2', id: 's2', parent: 's1', name: 'Check', ownerRole: 'DEV-HEAD' }] }]));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Someone changed this pipeline meanwhile. Look at it again and retry.');
+    /* What the other person saved comes in; what this person changed stays. */
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Saved by someone else');
+    expect(screen.getByRole('textbox', { name: 'Why' })).toHaveValue('Local reason');
+    expect(screen.getAllByRole('group', { name: /^Stage \d$/ })).toHaveLength(1);
+    refuse = false;
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(patches(calls)[1]).toEqual({ version: 2, name: 'Saved by someone else', why: 'Local reason', stages: [build] }));
+  });
+
+  it('keeps the stages the person changed when refused, and sends a stage taken out meanwhile as a new one', async () => {
+    const user = userEvent.setup();
+    let refuse = true;
+    const calls = mockApi({ 'PATCH /api/pipelines/pl1': () => (refuse ? changed('pipeline_changed') : [200, { pipeline: PIPELINE }]) });
+    const form = (p: Pipeline) => ui(<PipelineForm pipeline={p} department={DEPARTMENT} onDone={() => {}} onCancel={() => {}} />);
+    const { rerender } = render(form(PIPELINE));
+    rerender(form({ ...PIPELINE, version: 2, stages: [PIPELINE.stages[0]!] }));
+    const check = within(screen.getByRole('group', { name: 'Stage 2' })).getByLabelText('Name of the stage');
+    await user.clear(check);
+    await user.type(check, 'Review');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('alert');
+    expect(within(screen.getByRole('group', { name: 'Stage 2' })).getByLabelText('Name of the stage')).toHaveValue('Review');
+    refuse = false;
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(patches(calls)[1]).toEqual({
+      version: 2, name: 'Flow', why: '',
+      stages: [{ key: 's1', id: 's1', parent: null, name: 'Build', ownerRole: 'DEV-BE' }, { key: 's2', parent: 's1', name: 'Review', ownerRole: 'DEV-HEAD' }],
+    }));
+  });
+
   it('asks for the name and the one who does each stage before it saves, and drops none of them', async () => {
     const user = userEvent.setup();
     const calls = mockApi({ 'POST /api/pipelines': [201, { pipeline: PIPELINE }] });

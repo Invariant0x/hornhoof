@@ -47,7 +47,7 @@ function useSend(onDone: () => void, onRefused?: (failure: unknown) => void) {
 }
 
 /* Refused because someone changed it after the form opened. */
-const changedMeanwhile = (failure: unknown) => failure instanceof ApiFailure && (failure.reason === 'task_changed' || failure.reason === 'goal_changed');
+const changedMeanwhile = (failure: unknown) => failure instanceof ApiFailure && (failure.reason === 'task_changed' || failure.reason === 'goal_changed' || failure.reason === 'pipeline_changed');
 
 /* A form's fields over what it opened on. It compares with that and sends its version, not those of what came after, so a
    change made meanwhile is never sent back. Refused because the thing changed meanwhile, it starts again from what the
@@ -248,19 +248,56 @@ type StageDraft = { key: string; id?: string; parent: string; name: string; owne
 
 const ownerOf = (stage: PipelineStage) => (stage.ownerRole ? `role:${stage.ownerRole}` : stage.owner ? `agent:${stage.owner.id}` : '');
 
+type PipelineDraft = { name: string; why: string; stages: StageDraft[] };
+
+const pipelineDraft = (pipeline?: Pipeline): PipelineDraft => ({
+  name: pipeline?.name ?? '',
+  why: pipeline?.why ?? '',
+  stages: stagesInOrder(pipeline?.stages ?? []).map(s => ({ key: s.id, id: s.id, parent: s.parentId ?? '', name: s.name, owner: ownerOf(s) })),
+});
+
+/* The draft again over the pipeline as it is now: what the person changed stays, the rest comes as saved meanwhile. Stages
+   the person changed stay theirs; one taken out meanwhile goes as a new stage. */
+function rebased(draft: PipelineDraft, base: PipelineDraft, now: PipelineDraft): PipelineDraft {
+  const kept = (field: 'name' | 'why') => (draft[field] !== base[field] ? draft[field] : now[field]);
+  if (JSON.stringify(draft.stages) === JSON.stringify(base.stages)) return { name: kept('name'), why: kept('why'), stages: now.stages };
+  const still = new Set(now.stages.map(s => s.id));
+  return { name: kept('name'), why: kept('why'), stages: draft.stages.map(({ id, ...s }) => (id && still.has(id) ? { ...s, id } : s)) };
+}
+
+/* The pipeline form's draft over what it opened on, as useDraft keeps a task's or a goal's: it sends the version it opened
+   on, and once refused it starts again from the pipeline as it is when that comes. */
+function usePipelineDraft(pipeline?: Pipeline) {
+  const now = pipelineDraft(pipeline);
+  const version = pipeline?.version ?? 0;
+  const [base, setBase] = useState({ draft: now, version });
+  const [draft, setDraft] = useState(now);
+  const [stale, setStale] = useState(false);
+  if (stale && version !== base.version) {
+    setStale(false);
+    setBase({ draft: now, version });
+    setDraft(rebased(draft, base.draft, now));
+  }
+  return { draft, setDraft, version: base.version, refused: () => setStale(true) };
+}
+
 /* A department's pipeline, new or changed: its name, why, and its stages, each after the head or after another stage, each
    done by a role or an employee of the department. Each stage needs a name and the one who does it before it goes. Stages
    keep their ids, so the tasks on them stay. */
 export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipeline?: Pipeline; department: Department; onDone: () => void; onCancel: () => void }) {
   const t = useT();
   const words = t.tracker.form;
-  const [name, setName] = useState(pipeline?.name ?? '');
-  const [why, setWhy] = useState(pipeline?.why ?? '');
+  const { draft, setDraft, version, refused } = usePipelineDraft(pipeline);
+  const { name, why, stages } = draft;
+  const setName = (value: string) => setDraft(d => ({ ...d, name: value }));
+  const setWhy = (value: string) => setDraft(d => ({ ...d, why: value }));
+  const setStages = (change: (list: StageDraft[]) => StageDraft[]) => setDraft(d => ({ ...d, stages: change(d.stages) }));
   const made = useRef(0);
   const key = () => `n${++made.current}`;
-  const [stages, setStages] = useState<StageDraft[]>(() => stagesInOrder(pipeline?.stages ?? []).map(s => ({ key: s.id, id: s.id, parent: s.parentId ?? '', name: s.name, owner: ownerOf(s) })));
   const [tried, setTried] = useState(false);
-  const { busy, failure, send } = useSend(onDone);
+  const { busy, failure, send } = useSend(onDone, err => {
+    if (changedMeanwhile(err)) refused();
+  });
   const { language } = useLanguage();
   const roles = department.roles;
   /* The department's employees, and one who does a stage now though the department no longer lists them. */
@@ -273,7 +310,7 @@ export function PipelineForm({ pipeline, department, onDone, onCancel }: { pipel
     if (stages.some(s => !s.name.trim() || !s.owner)) return setTried(true);
     const owner = (s: StageDraft) => (s.owner.startsWith('role:') ? { ownerRole: s.owner.slice(5) } : { ownerAgentId: s.owner.slice(6) });
     const body = { name: name.trim(), why: why.trim(), stages: stages.map(s => ({ key: s.key, ...(s.id ? { id: s.id } : {}), parent: s.parent || null, name: s.name.trim(), ...owner(s) })) };
-    void send(() => (pipeline ? api.patch(`/api/pipelines/${pipeline.id}`, { version: pipeline.version, ...body }) : api.post('/api/pipelines', { department: department.id, ...body })));
+    void send(() => (pipeline ? api.patch(`/api/pipelines/${pipeline.id}`, { version, ...body }) : api.post('/api/pipelines', { department: department.id, ...body })));
   }
 
   return (
