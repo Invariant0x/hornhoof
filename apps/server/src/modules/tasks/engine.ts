@@ -640,7 +640,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   return { task: row, wakes: next.wakes };
 }
 
-type Verdict = ReviewVerdict & { comment: string; evidence?: object[] };
+type Verdict = ReviewVerdict & { comment: string };
 
 /* One current checker owns both its verdict and its fixes. */
 export async function verdict(ctx: Live, agentId: string, taskId: string, v: Verdict): Promise<Moved> {
