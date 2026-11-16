@@ -43,9 +43,12 @@ async function withOwnParsers(client: PGlite): Promise<PGlite> {
   return client;
 }
 
-/* An unmigrated database, as new PGlite() gives, from a dump of one initdb, which costs several times as much. */
+/* An unmigrated database, as new PGlite() gives, from a dump of one initdb, which costs several times as much: the run's
+   (global-initdb.ts), or under a configuration without it, one the file's first call makes. */
 let initdb: File | Blob | undefined;
 export async function freshPglite(): Promise<PGlite> {
+  const runs = inject('initdbDataDir') as string | undefined;
+  if (!initdb && runs) initdb = new Blob([readFileSync(runs)]);
   if (!initdb) {
     const first = new PGlite();
     /* A dump asked for before it is ready never comes. */

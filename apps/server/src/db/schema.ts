@@ -1426,6 +1426,8 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
   version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
+  /* The time limit of a part the run asked for, when it asked for one. */
+  minutes?: number;
   requestId: string | null; nodeId: string | null; builtin: boolean;
   /* The machine whose built-in node was asked, when one was; a request from before machines had theirs names none,
      and was this server's own. */
@@ -1611,7 +1613,7 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
-    /* Proved on the repository's main branch or the turn's, the only results a release takes. */
+    /* Proved on the repository's main branch or the turn's. A release takes these, and those proved on a commit the main branch holds now. */
     mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },

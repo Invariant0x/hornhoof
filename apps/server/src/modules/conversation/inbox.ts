@@ -1,8 +1,11 @@
+import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
 import { and, asc, count, desc, eq, inArray, isNull, lt, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentSpot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agentInbox, agents, companies, departments, jobs, type InboxMode, type LetterKind } from '../../db/schema.js';
+import type { MessageParty } from '../events/parties.js';
+import { appendEvent } from '../events/store.js';
 
 type Reader = Pick<Db, 'select'>;
 type Writer = Pick<Db, 'update' | 'insert' | 'select' | 'delete'>;
@@ -237,12 +240,59 @@ export async function readByPerson(db: Pick<Db, 'select' | 'update'>, agentId: s
   return unreadCount(db, agentId);
 }
 
-/* Marks the employee's own letters; any other id is refused whole. */
-export async function markMail(db: Pick<Db, 'select' | 'update'>, agentId: string, ids: string[], status: 'read' | 'done'): Promise<number | null> {
-  const picked = and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, ids));
-  const mine = await db.select({ id: agentInbox.id }).from(agentInbox).where(picked);
-  if (mine.length !== new Set(ids).size) return null;
+/* Which of the employee's letters a mark takes: these ids, and of them, or of all, those of this kind, from this source,
+   on this task, or that came before this moment. */
+export type LetterPick = { ids?: string[]; kind?: LetterKind; source?: string; task?: number; receivedBefore?: Date };
+
+/* Whether the pick names letters at all: an id, a kind, a source, a task or a moment. */
+export const picksLetters = (pick: LetterPick): boolean =>
+  Boolean(pick.ids?.length) || pick.kind !== undefined || pick.source !== undefined || pick.task !== undefined || pick.receivedBefore !== undefined;
+
+function pickedBy(agentId: string, pick: LetterPick): SQL {
+  return and(
+    eq(agentInbox.agentId, agentId),
+    pick.ids ? inArray(agentInbox.id, pick.ids) : undefined,
+    pick.kind ? eq(agentInbox.kind, pick.kind) : undefined,
+    pick.source !== undefined ? eq(agentInbox.source, pick.source) : undefined,
+    pick.task !== undefined ? eq(agentInbox.taskNumber, pick.task) : undefined,
+    pick.receivedBefore ? lt(agentInbox.createdAt, pick.receivedBefore) : undefined,
+  )!;
+}
+
+/* Marks the employee's letters the pick takes; read never takes back a letter that was dealt with. Any id not of its
+   inbox refuses the mark whole. How many letters it changed, or null. */
+export async function markMail(db: Pick<Db, 'select' | 'update'>, agentId: string, pick: LetterPick, status: 'read' | 'done'): Promise<number | null> {
+  if (pick.ids) {
+    const mine = await db.select({ id: agentInbox.id }).from(agentInbox).where(and(eq(agentInbox.agentId, agentId), inArray(agentInbox.id, pick.ids)));
+    if (mine.length !== new Set(pick.ids).size) return null;
+  }
+  const picked = and(pickedBy(agentId, pick), inArray(agentInbox.status, status === 'read' ? ['unread'] : ['unread', 'read']));
   await detachQueuedWake(db, agentId, picked);
-  await db.update(agentInbox).set({ status, readAt: new Date() }).where(picked);
-  return mine.length;
+  const changed = await db.update(agentInbox).set({ status, readAt: new Date() }).where(picked).returning({ id: agentInbox.id });
+  return changed.length;
+}
+
+/* Who marked another's letters and why, as the employee's log names them. */
+export type MarkedBy = { party: MessageParty & { kind: 'agent' | 'person'; id: string }; reason: string };
+
+const letters = (n: number) => `${n} ${n === 1 ? 'letter' : 'letters'}`;
+const MARKED_RU = { read: 'прочитано', done: 'разобрано' } as const;
+
+/* Letters someone else marked go in the employee's log, so it sees who took what away and why: never a word to its
+   program, a turn or a letter of its own. The reason is cleaned of secrets. */
+export async function logMarked(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, agent: { id: string; companyId: string }, by: MarkedBy, status: 'read' | 'done', count: number): Promise<void> {
+  if (count === 0) return;
+  const reason = cleanDiagnostic(by.reason);
+  const { kind, id, name } = by.party;
+  await appendEvent(ctx, {
+    companyId: agent.companyId,
+    agentId: agent.id,
+    kind: 'message',
+    data: {
+      text: `${name} marked ${letters(count)} ${status} in this inbox. Why: ${reason}`,
+      notification: { source: 'inbox_marked', tasks: [], detail: { en: `${status}: ${count}`, ru: `${MARKED_RU[status]}: ${count}` } },
+      actor: by.party,
+      inboxMarked: { by: { kind, id, name }, status, count, reason },
+    },
+  });
 }

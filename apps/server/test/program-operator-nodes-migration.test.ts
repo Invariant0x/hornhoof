@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 import { migrationsBefore } from './migrations-before.js';
+import { freshPglite } from './helpers-db.js';
 
 type Db = ReturnType<typeof drizzle>;
 const ids = async (db: Db, query: ReturnType<typeof sql>) => (await db.execute<{ id: string }>(query)).rows[0]!.id;
@@ -25,7 +25,7 @@ async function company(db: Db, name: string, singleton = true) {
 const nodeOf = async (db: Db, agent: string) => (await db.execute<{ node_id: string | null }>(sql`select node_id from agents where id = ${agent}`)).rows[0]!.node_id;
 
 async function previousRelease() {
-  const client = new PGlite();
+  const client = await freshPglite();
   onTestFinished(() => client.close());
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: await migrationsBefore('program_operator_nodes') });
@@ -71,7 +71,7 @@ it('puts each program operator of every company on the oldest live machine of it
 });
 
 it('changes nothing on a fresh database', { timeout: 120_000 }, async () => {
-  const client = new PGlite();
+  const client = await freshPglite();
   onTestFinished(() => client.close());
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: MIGRATIONS });

@@ -9,7 +9,7 @@ import { keepSnapshot } from './pipeline-report.js';
 import { recordTurnSummary } from './wait-goals.js';
 import { lastTurnNumber } from './numbers.js';
 import { recordWaitNotice } from './wait-notices.js';
-import { branchHolds, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
+import { branchHolds, ensureTurnBranch, headOf, integrationTarget, type IntegrationTarget } from './turn-integration.js';
 
 /* A turn is a release of its department. Its holder records the release before main moves: the exact commit R, the head of
    turn-<number>, main under it, the full run on R, the results R brings with the verdicts on them, and what approved R: a
@@ -19,7 +19,7 @@ import { branchHolds, headOf, integrationTarget, type IntegrationTarget } from '
 
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
-type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readTags' | 'log'>>;
+type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare' | 'readTags' | 'readBranches' | 'createBranch' | 'log'>>;
 type Repo = IntegrationTarget['repo'];
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
@@ -246,7 +246,7 @@ async function releaseOne(ctx: Reader, turn: Turn, repo: Repo): Promise<void> {
     }
     const head = await headOf(ctx, repo, `turn-${turn.number}`);
     if (!head || !(await branchHolds(ctx, repo, head, commit))) return;
-    if (await closeTurn(ctx, turn, record, name, head, before) === 'stale') await tellOfTag(ctx, turn, name, commit, 'stale');
+    if (await closeTurn(ctx, repo, turn, record, name, head, before) === 'stale') await tellOfTag(ctx, turn, name, commit, 'stale');
     return;
   }
 }
@@ -293,9 +293,10 @@ async function recordStands(tx: Tx, turn: Turn, record: Release): Promise<boolea
 }
 
 /* The tag closes the turn: it keeps the version and commit, the results of its record stay in it, and every other result of it,
-   one accepted while the repository was read too, goes into the next turn, which starts from the head of this one. Anything
-   that joined the turn after it was first read puts the close off to the next minute, so the head read holds it. */
-async function closeTurn(ctx: Reader, turn: Turn, record: Release, version: string, head: string, before: string[]): Promise<'closed' | 'later' | 'stale'> {
+   one accepted while the repository was read too, goes into the next turn, which starts from the head of this one, and its
+   branch is made there. Anything that joined the turn after it was first read puts the close off to the next minute, so the
+   head read holds it. */
+async function closeTurn(ctx: Reader, repo: Repo, turn: Turn, record: Release, version: string, head: string, before: string[]): Promise<'closed' | 'later' | 'stale'> {
   const closed = await ctx.db.transaction(async tx => {
     await lockCompany(tx, turn.companyId);
     const rows = await tx.select().from(tasks).where(eq(tasks.turnId, turn.id)).orderBy(asc(tasks.number)).for('no key update');
@@ -317,8 +318,18 @@ async function closeTurn(ctx: Reader, turn: Turn, record: Release, version: stri
   });
   if (typeof closed === 'string') return closed;
   ctx.bus.publish(turn.companyId, { type: 'org' });
-  ctx.log?.info({ companyId: turn.companyId, turn: turn.number, version, next: closed.next.number, startCommit: head }, `Turn ${turn.number} was released as ${version}; create turn-${closed.next.number} from ${head}.`);
+  ctx.log?.info({ companyId: turn.companyId, turn: turn.number, version, next: closed.next.number, startCommit: head }, `Turn ${turn.number} was released as ${version}; turn-${closed.next.number} starts from ${head}.`);
+  await makeBranchOf(ctx, repo, closed.next);
   return 'closed';
+}
+
+/* The branch of the turn just opened, from where it starts. One that could not be made now is made before the first result
+   joins the turn. */
+async function makeBranchOf(ctx: Reader, repo: Repo, turn: Turn): Promise<void> {
+  const branch = await ensureTurnBranch(ctx, repo, turn);
+  const at = { companyId: turn.companyId, turn: turn.number };
+  if ('problem' in branch) ctx.log?.warn(at, `turn-${turn.number} was not made: ${branch.problem}`);
+  else ctx.log?.info({ ...at, head: branch.head, made: branch.made }, branch.made ? `turn-${turn.number} was made from ${branch.head}.` : `turn-${turn.number} was there already, at ${branch.head}.`);
 }
 
 /* Every minute: each department that keeps a repository, on its tags. One department's trouble keeps no other from it. */

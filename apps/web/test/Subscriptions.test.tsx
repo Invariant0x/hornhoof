@@ -8,6 +8,7 @@ import { armor, Decrypter, generateX25519Identity, identityToRecipient } from 'a
 import { ME, MACHINE, mockApi, SUBS, withKey } from './api-mock';
 import { decl } from './css';
 import { fakeStream } from './fake-stream';
+import { commandCode } from './command-code';
 
 vi.mock('../src/ui/AgentTerminal', () => ({
   AgentTerminal: ({ path }: { path: string }) => <div data-testid="live-terminal" data-path={path} />,
@@ -523,7 +524,7 @@ describe('Subscriptions', () => {
     expect(screen.getByRole('checkbox', { name: 'GLM' })).not.toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Show command' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/connect', body: { providers: ['claude', 'codex'] } });
-    expect(await screen.findByText(withKey(COMMAND))).toBeInTheDocument();
+    expect(await screen.findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2);
     expect(screen.getByText(TRUST)).toBeInTheDocument();
   });
@@ -676,7 +677,7 @@ describe('Subscriptions', () => {
     await openAll();
     await user.click(await screen.findByRole('button', { name: 'New command for Kimi' }));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-kimi/command');
-    expect(await within(rowOf('Kimi')).findByText(withKey(COMMAND))).toBeInTheDocument();
+    expect(await within(rowOf('Kimi')).findByText(commandCode(withKey(COMMAND)))).toBeInTheDocument();
     expect(within(rowOf('Claude')).queryByRole('button', { name: /New command/ })).not.toBeInTheDocument();
   });
 
@@ -919,7 +920,7 @@ describe('signing in to plans', () => {
     await userEvent.click(await screen.findByRole('button', { name: signIn }));
     const card = screen.getByRole('article', { name: 'Codex, Ivan' });
     expect(await within(card).findByText(text)).toBeInTheDocument();
-    expect(within(card).getByText(update)).toBeInTheDocument();
+    expect(within(card).getByText(commandCode(update))).toBeInTheDocument();
     expect(within(card).getByText(trust)).toBeInTheDocument();
     await userEvent.click(within(card).getAllByRole('button', { name: copy })[0]!);
     expect(copied).toEqual([update]);
@@ -927,7 +928,7 @@ describe('signing in to plans', () => {
     /* The next try starts clean: the note and its command go once the sign-in starts. */
     mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }], ...only({ ...codex, status: 'ready' as const, machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'dev-laptop' }] });
     await userEvent.click(within(card).getByRole('button', { name: signIn }));
-    await vi.waitFor(() => expect(within(card).queryByText(update)).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(within(card).queryByText(commandCode(update))).not.toBeInTheDocument());
   });
 
   it('says in Russian that no machine of the plan is online to sign in on', async () => {
@@ -1090,7 +1091,7 @@ describe('the card of a plan that does not work', () => {
     const card = screen.getByRole('article', { name: 'Kimi, Maria' });
     expect(blocks(card)).toEqual(['blk blk-fix']);
     expect(card.querySelector('.blk-fix')!.firstElementChild).toHaveTextContent('Maria has not run the install command yet.');
-    expect(within(card).queryByText(withKey(COMMAND))).not.toBeInTheDocument();
+    expect(within(card).queryByText(commandCode(withKey(COMMAND)))).not.toBeInTheDocument();
     expect(buttons(card)).toEqual(['Remove']);
   });
 
@@ -1108,7 +1109,7 @@ describe('the card of a plan that does not work', () => {
     /* The machine and why, the command and the one for Windows with Copy, and Sign in and Remove under them. */
     const block = card.querySelector<HTMLElement>('.blk-fix')!;
     expect(block.firstElementChild).toHaveTextContent(OLD_TEXT);
-    expect(within(block).getByText(UPDATE)).toBeInTheDocument();
+    expect(within(block).getByText(commandCode(UPDATE))).toBeInTheDocument();
     expect(buttons(block)).toEqual(['Copy', 'Copy', 'Sign in', 'Remove']);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     /* The screen alone keeps it: opened again, the card is the working plan's. */
@@ -1117,7 +1118,7 @@ describe('the card of a plan that does not work', () => {
     await openAll();
     const again = screen.getByRole('article', { name: 'Codex, Ivan' });
     expect(blocks(again)).toEqual(THREE);
-    expect(within(again).queryByText(UPDATE)).not.toBeInTheDocument();
+    expect(within(again).queryByText(commandCode(UPDATE))).not.toBeInTheDocument();
   });
 
   it('keeps the block while Sign in is asked again, and changes it only for the answer', async () => {
@@ -1134,9 +1135,9 @@ describe('the card of a plan that does not work', () => {
     await vi.waitFor(() => expect(asked).toBe(2));
     /* While the server has not answered, the card stays as it was. */
     expect(blocks(card)).toEqual(['blk blk-fix']);
-    expect(within(card).getByText(UPDATE)).toBeInTheDocument();
+    expect(within(card).getByText(commandCode(UPDATE))).toBeInTheDocument();
     act(() => answer([409, OLD]));
-    await vi.waitFor(() => expect(within(card).getByText(UPDATE)).toBeInTheDocument());
+    await vi.waitFor(() => expect(within(card).getByText(commandCode(UPDATE))).toBeInTheDocument());
     expect(blocks(card)).toEqual(['blk blk-fix']);
   });
 

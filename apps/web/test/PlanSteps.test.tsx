@@ -7,6 +7,7 @@ import type { SubView } from '../src/types';
 import { ME, MACHINE, mockApi, SUBS, withKey } from './api-mock';
 import { decl } from './css';
 import { fakeStream } from './fake-stream';
+import { commandCode } from './command-code';
 
 vi.mock('../src/ui/AgentTerminal', () => ({
   AgentTerminal: ({ path }: { path: string }) => <div data-testid="live-terminal" data-path={path} />,
@@ -67,7 +68,7 @@ describe('the steps to connect a personal plan', () => {
     const block = await screen.findByRole('region', { name: 'Install Claude' });
     expect(read(within(block).getByRole('list', { name: EN.label })).current).toBe(0);
     /* The command comes with the key this browser made for its owner, a moment after the block. */
-    expect(await within(block).findByText(withKey(COMMAND))).toBeVisible();
+    expect(await within(block).findByText(commandCode(withKey(COMMAND)))).toBeVisible();
   });
 
   it('asks for a new command when the plan has none that still works', async () => {

@@ -1,9 +1,9 @@
-import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import { freshPglite } from './helpers-db.js';
 import { migrationsBefore } from './migrations-before.js';
 
 const tables = async (db: ReturnType<typeof drizzle>) =>
@@ -11,7 +11,7 @@ const tables = async (db: ReturnType<typeof drizzle>) =>
 
 describe('the tables of test harnesses', () => {
   it('stand on a fresh database', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -19,7 +19,7 @@ describe('the tables of test harnesses', () => {
   });
 
   it('come to the previous schema with its data intact, and go with the department they are of', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsBefore('harness') });

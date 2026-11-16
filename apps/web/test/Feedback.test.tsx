@@ -145,8 +145,39 @@ describe('writing to Hornhoof developers inside About', () => {
     expect(location.pathname).toBe('/about');
   });
 
+  it('marks an empty title invalid with its note tied to the field, keeps the draft, and clears the problem as soon as a title is typed', async () => {
+    const { user, calls } = page();
+    const box = await openFeedback(user);
+    const title = within(box).getByLabelText('Title');
+    const description = within(box).getByLabelText('What happened, or what you would like');
+    expect(title).not.toHaveAttribute('aria-invalid');
+    expect(title).not.toHaveAttribute('aria-describedby');
+
+    await user.type(description, 'The map flickers when scrolling');
+    await user.click(within(box).getByRole('button', { name: 'Next' }));
+    const note = within(box).getByText('Write a title.');
+    expect(note).toHaveClass('bad');
+    expect(note.id).not.toBe('');
+    expect(title).toHaveAttribute('aria-invalid', 'true');
+    expect(title).toHaveAttribute('aria-describedby', note.id);
+    expect(description).toHaveValue('The map flickers when scrolling');
+    expect(description).not.toHaveAttribute('aria-invalid');
+    expect(calls.filter(c => c.path === '/api/feedback/preview')).toEqual([]);
+
+    await user.type(title, '   ');
+    expect(within(box).getByText('Write a title.')).toBeInTheDocument();
+    expect(title).toHaveAttribute('aria-invalid', 'true');
+
+    await user.clear(title);
+    await user.type(title, 'A');
+    expect(within(box).queryByText('Write a title.')).not.toBeInTheDocument();
+    expect(title).not.toHaveAttribute('aria-invalid');
+    expect(title).not.toHaveAttribute('aria-describedby');
+  });
+
   it('gives the title field of the form 44 px, as every field of the reference', () => {
     expect(decl('.fb-form .field input', 'height')).toBe('44px');
+    expect(decl('.field :is(input, select, textarea)[aria-invalid="true"]', 'border-color')).toBe('var(--pink)');
   });
 
   it('keeps the focus where the person types in About when the screen behind it is drawn again', async () => {

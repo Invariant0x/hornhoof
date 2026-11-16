@@ -540,6 +540,7 @@
           "apps/server/drizzle/**",
           "apps/server/src/db/schema.ts",
           "apps/server/test/global-setup.ts",
+          "apps/server/test/global-initdb.ts",
           "apps/server/test/prepare-environment.ts",
           "apps/server/vitest*.config.ts"
         ],
@@ -581,6 +582,7 @@
         "globs": [
           "apps/web/playwright.config.ts",
           "apps/web/vite.config.ts",
+          "apps/web/linked-packages.config.ts",
           "apps/web/index.html",
           "apps/web/package.json",
           "apps/web/tsconfig.json",
@@ -638,6 +640,7 @@
           "apps/server/test/agents.test.ts",
           "apps/server/test/api-connections.test.ts",
           "apps/server/test/composable-skills.test.ts",
+          "apps/server/test/computer.test.ts",
           "apps/server/test/conversation.test.ts",
           "apps/server/test/credentials.test.ts",
           "apps/server/test/department-echelons-template.test.ts",
@@ -804,10 +807,10 @@
           "cwd": "."
         },
         {
-          "program": "npx",
+          "program": "node",
           "args": [
-            "--no-install",
-            "tsc",
+            "--max-old-space-size=4096",
+            "node_modules/typescript/bin/tsc",
             "-p",
             "packages/protocol/tsconfig.json",
             "--noEmit"
@@ -815,10 +818,10 @@
           "cwd": "."
         },
         {
-          "program": "npx",
+          "program": "node",
           "args": [
-            "--no-install",
-            "tsc",
+            "--max-old-space-size=4096",
+            "node_modules/typescript/bin/tsc",
             "-p",
             "apps/server/tsconfig.eslint.json",
             "--noEmit"
@@ -826,10 +829,10 @@
           "cwd": "."
         },
         {
-          "program": "npx",
+          "program": "node",
           "args": [
-            "--no-install",
-            "tsc",
+            "--max-old-space-size=4096",
+            "node_modules/typescript/bin/tsc",
             "-p",
             "apps/node/tsconfig.eslint.json",
             "--noEmit"
@@ -837,10 +840,10 @@
           "cwd": "."
         },
         {
-          "program": "npx",
+          "program": "node",
           "args": [
-            "--no-install",
-            "tsc",
+            "--max-old-space-size=4096",
+            "node_modules/typescript/bin/tsc",
             "-p",
             "packages/protocol/tsconfig.eslint.json",
             "--noEmit"
@@ -848,10 +851,10 @@
           "cwd": "."
         },
         {
-          "program": "npx",
+          "program": "node",
           "args": [
-            "--no-install",
-            "tsc",
+            "--max-old-space-size=4096",
+            "node_modules/typescript/bin/tsc",
             "-p",
             "apps/node/tsconfig.json",
             "--noEmit"
@@ -859,10 +862,10 @@
           "cwd": "."
         },
         {
-          "program": "npx",
+          "program": "node",
           "args": [
-            "--no-install",
-            "tsc",
+            "--max-old-space-size=4096",
+            "node_modules/typescript/bin/tsc",
             "-p",
             "apps/server/tsconfig.json",
             "--noEmit"
@@ -870,10 +873,10 @@
           "cwd": "."
         },
         {
-          "program": "npx",
+          "program": "node",
           "args": [
-            "--no-install",
-            "tsc",
+            "--max-old-space-size=4096",
+            "node_modules/typescript/bin/tsc",
             "-p",
             "apps/web/tsconfig.json",
             "--noEmit"
