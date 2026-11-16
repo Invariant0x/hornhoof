@@ -1,0 +1,17 @@
+Task 1148 verification receipt
+Checked executable candidate: d20a7c468f0ecaf9c0809dc858cf4eef7c5a1c67
+Base: 6d17d217e568fcdf7a6e6267b636ef332c205a62
+Command in apps/server: npx --no-install vitest run test/keeper-app-call.test.ts test/peer-stream-clock.test.ts test/worker-keeper.test.ts --maxWorkers=1
+PASS: 20 consecutive runs, each process exit 0; three files and 35 tests passed in each run; 700 test executions.
+worker-keeper file ms: min 7818, median 9924.5, max 137119.
+Recorded load 1m: 5.01 to 24.07; samples 2026-11-16T21:37:41.785499+00:00 to 2026-11-16T21:50:21.378472+00:00.
+Each repetition full output and load.csv are in the attached archive.
+Server build: NODE_OPTIONS=--max-old-space-size=6144 npm run build -w @hornhoof/server, exit 0.
+Author command: NODE_OPTIONS=--max-old-space-size=6144 npm run -s check:author -- --sha d20a7c468f0ecaf9c0809dc858cf4eef7c5a1c67 --base 6d17d217e568fcdf7a6e6267b636ef332c205a62
+Author result: exit 1. Lint, source/test types, crapper and dryer passed. Worst new/grown CRAP 9.648; dryer found no duplicate candidates. Formatter is unavailable in this repository.
+Author tests: 106 passed, 1 failed among 107 tests in seven named files. The unchanged keeper-peer.test.ts:556 case renews by itself until a copy finished ... failed to find the expected other-machine lease-end log.
+That test uses real performance.now accelerated 20 times and real pauses of 60 and 100 ms. Its scope needs a head decision; no pass is claimed for this stage.
+The earlier repetition failure in the fourth worker keeper case was repaired by moving the whole worker keeper file to controlled time, as the head authorized. The final 20-run series above has no failures.
+The app-call mechanism is byte-identical to f5171f05bf33c671ba5949749a57b8c508c93ede; Oracle received that commit. No branch integration or main push was performed.
+Built-in codex review could not inspect code because its sandbox could not create a namespace. Manual self-review and security inspection were performed; no independent review is claimed.
+Earlier development checks also exposed and repaired test callback typing and request overload typing; an initial 2 GB type-check heap exhaustion was resolved by running the check with 6 GB; an initial askApp CRAP increase was resolved by extracting deadline scheduling.
