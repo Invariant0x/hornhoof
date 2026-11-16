@@ -2212,6 +2212,8 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .dv-drawer.spd .spd-tabs button { height: 40px; padding: 0 8px; margin-right: 10px; border: 0; background: none; cursor: pointer; font-family: var(--f-display); font-size: 14px; font-weight: 600; color: var(--muted); box-shadow: inset 0 -2px 0 transparent; }
 .dv-drawer.spd .spd-tabs button:hover { color: var(--ink); }
 .dv-drawer.spd .spd-tabs button[aria-selected="true"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--cyan); }
+/* The frame of the Speed panel's totals; the rule after it sets their grid. */
+.sum { display: grid; gap: 4px; min-width: 0; padding: 12px 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
 .dv-drawer.spd .sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .dv-drawer.spd .sum div { display: grid; gap: 1px; padding-left: 10px; border-left: 2px solid var(--line2); }
 .dv-drawer.spd .sum div.c { border-left-color: var(--cyan); }
