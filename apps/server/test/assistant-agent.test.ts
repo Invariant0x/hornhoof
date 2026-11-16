@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { canViewAgent, maskEnvelope, viewerOf } from '../src/auth/agent-view.js';
 import { personColumns } from '../src/auth/session.js';
-import { agentEvents, agents, assistantEvents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, assistantEvents, attachments, companies, departments, jobs, nodes, people, programInstances, programOperatorCases, subscriptions } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { ASSISTANT_WITHOUT_SKILLS, instructionsOf } from '../src/modules/agents/instructions.js';
 import { putOnPlan } from '../src/modules/assistants/setup.js';
@@ -149,12 +149,49 @@ describe("an assistant's own agent", () => {
     expect((await c.app.inject({ url: `/api/agents/${agent.id}/events`, ...as(c.olgaSession) })).statusCode).toBe(403);
   });
 
-  it("works with its owner's assistant tools, not with the company's", async () => {
+  it("works with its owner's assistant tools and the company's vault, not with the rest of the company's", async () => {
     const c = await company();
     const { run } = await talking(c);
     const client = await mcp(c.app, run.toolToken!);
     const names = (await client.listTools()).tools.map(t => t.name).sort();
-    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'read_events', 'send_message', 'tell_owner', 'who_am_i']);
+    expect(names).toEqual(['answer_request', 'list_agents', 'list_requests', 'read_events', 'send_message', 'tell_owner', 'vault_entries', 'vault_entry', 'vault_save', 'who_am_i']);
+  });
+});
+
+describe('the sender of an assistant message', () => {
+  type Event = { kind: string; data: { messageId: string | null; byOwnAgent: boolean } };
+  const eventsOf = async (c: Company, key: string): Promise<Event[]> => (await c.app.inject({ url: '/api/assistant/events', ...bearer(key) })).json().events;
+
+  /* A node sample answers immediately; collection waits for the state, never for a real-time grace. */
+  async function answer(c: Company, run: Run, key: string, messageId: string) {
+    c.node.send({ type: 'job.started', jobId: run.jobId });
+    c.node.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Ready.' } });
+    c.node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 'replied', result: '', tail: '', error: null });
+    await until(async () => (await eventsOf(c, key)).some(e => e.kind === 'reply_end' && e.data.messageId === messageId));
+    return (await eventsOf(c, key)).filter(e => e.data.messageId === messageId).map(e => [e.kind, e.data.byOwnAgent]);
+  }
+
+  it('marks replies and their end when the own agent sent the message, and keeps the origin after a restart', async () => {
+    const c = await company();
+    c.app.ctx.assistants.replyGraceMs = 0;
+    const { ava, run } = await talking(c);
+    await c.db.update(agents).set({ subscriptionId: c.plan, model: '' }).where(eq(agents.id, c.orchestrator.id));
+    const client = await mcp(c.app, run.toolToken!);
+    const result = await client.callTool({ name: 'send_message', arguments: { agentId: c.orchestrator.id, text: 'Plan from my own agent.' } }) as { content: { text: string }[]; isError?: boolean };
+    expect(result.isError).toBeFalsy();
+    const sent = JSON.parse(result.content[0]!.text) as { message: { id: string } };
+    finish(c, run, 'caller');
+    const reply = await runWith(c.node, 'Plan from my own agent.');
+    await c.app.ctx.assistants.stop();
+    await c.app.ctx.assistants.start();
+    expect(await answer(c, reply, ava.key, sent.message.id)).toEqual([['reply', true], ['reply_end', true]]);
+  });
+
+  it('marks replies and their end false for a message from the program, even when its own agent answers', async () => {
+    const c = await company();
+    c.app.ctx.assistants.replyGraceMs = 0;
+    const { ava, message, run } = await talking(c);
+    expect(await answer(c, run, ava.key, message.id)).toEqual([['reply', false], ['reply_end', false]]);
   });
 });
 
@@ -457,15 +494,15 @@ describe('GET /api/assistant/attachments/:id', () => {
     }
   });
 
-  it('answers a file it may not have exactly as one that is not there: of another agent, of a person, of another company, or no id at all', async () => {
+  it('answers a file its owner may not have exactly as one that is not there: of another owner\'s assistant, another company, or no id at all', async () => {
     const c = await company();
     const { ava, agent, run } = await talking(c);
     const turnOf = async (agentId: string, companyId = c.owner.companyId, subscriptionId = c.plan) =>
       (await c.db.insert(jobs).values({ companyId, subscriptionId, agentId, kind: 'conversation', prompt: 'Hi', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 }).returning())[0]!.id;
     const file = async (values: Partial<typeof attachments.$inferInsert>) =>
       (await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, name: 'file.bin', mediaType: 'application/octet-stream', bytes: BYTES, size: BYTES.length, ...values }).returning())[0]!.id;
-    const bo = await assistantOf(c, c.ceo, c.owner.id, 'Bo');
-    expect((await pick(c, c.ceo, bo.id, c.plan)).statusCode).toBe(200);
+    const bo = await assistantOf(c, c.olgaSession, c.olga.id, 'Bo');
+    expect((await pick(c, c.olgaSession, bo.id, c.olgaPlan)).statusCode).toBe(200);
     const boAgent = await ownAgent(c, bo.id);
     const [other] = await c.db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
     const [otherPerson] = await c.db.insert(people).values({ companyId: other!.id, name: 'Other person', email: 'other@example.test', status: 'active', scopeKind: 'company' }).returning();
@@ -474,9 +511,7 @@ describe('GET /api/assistant/attachments/:id', () => {
     const refused = {
       'an id nothing has': randomUUID(),
       'no id at all': 'not-a-uuid',
-      "the orchestrator's file": await file({ agentId: c.orchestrator.id, jobId: await turnOf(c.orchestrator.id) }),
       "another assistant's agent's file": await file({ agentId: boAgent.id, jobId: await turnOf(boAgent.id) }),
-      'a picture its owner sent its agent': await file({ personId: c.owner.id, name: 'mine.png', mediaType: 'image/png' }),
       "Hornhoof's picture of its agent's program": await file({ jobId: run.jobId, name: null, mediaType: 'image/png' }),
       "another company's file": await file({ companyId: other!.id, agentId: otherAgent!.id, jobId: await turnOf(otherAgent!.id, other!.id, otherPlan!.id) }),
     };
@@ -489,6 +524,23 @@ describe('GET /api/assistant/attachments/:id', () => {
     expect(JSON.parse(unknown.body).error).toMatchObject({ code: 'not_found', reason: 'attachment_unknown' });
     for (const [what, id] of Object.entries(refused)) expect(seen(await download(c, ava.key, id)), what).toEqual(unknown);
     expect((await download(c, ava.key, await attach(c, run.toolToken!, 'own.bin', BYTES))).statusCode).toBe(200);
+  });
+
+  it('keeps operator case files closed even when they are named files of its own agent and visible to its owner', async () => {
+    const c = await company();
+    const { ava, agent, run } = await talking(c);
+    const [node] = await c.db.select().from(nodes).where(eq(nodes.subscriptionId, c.plan));
+    const instance = randomUUID();
+    await c.db.insert(programInstances).values({ id: instance, companyId: c.owner.companyId, agentId: agent.id, nodeId: node!.id });
+    const [incident] = await c.db.insert(programOperatorCases).values({ companyId: c.owner.companyId, agentId: agent.id, jobId: run.jobId, nodeId: node!.id, instance, reason: 'assignment_unrecorded', evidenceKey: 'file-test', capability: randomUUID(), deadlineAt: new Date('2099-01-01') }).returning();
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.owner.companyId, agentId: agent.id, jobId: run.jobId, operatorCaseId: incident!.id, name: 'case.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    expect((await c.app.inject({ url: `/api/attachments/${picture!.id}`, ...as(c.ceo) })).statusCode).toBe(200);
+    const got = await download(c, ava.key, picture!.id);
+    const missing = await download(c, ava.key, randomUUID());
+    expect(got.statusCode).toBe(404);
+    expect(got.body).toBe(missing.body);
+    expect(got.headers['content-type']).toBe(missing.headers['content-type']);
+    expect(got.headers['content-disposition']).toBeUndefined();
   });
 });
 
@@ -535,9 +587,9 @@ describe('tell_owner', () => {
     expect(result.isError).toBeFalsy();
     const from = { id: agent.id, name: 'Ava', kind: 'assistant' };
     const [heard] = (await waiting).json().events as Event[];
-    expect(heard).toMatchObject({ kind: 'reply', data: { messageId: null, agent: from, text: '7' } });
+    expect(heard).toMatchObject({ kind: 'reply', data: { messageId: null, agent: from, byOwnAgent: true, text: '7' } });
     expect(heard!.data.agent).toMatchObject({ id: (await me(c, ava.key)).assistant.agentId });
-    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply', { messageId: null, agent: from, text: '7' }]]);
+    expect((await eventsOf(c, ava.key)).map(e => [e.kind, e.data])).toEqual([['reply', { messageId: null, agent: from, byOwnAgent: true, text: '7' }]]);
     await until(() => address.wakes.length > 0);
     expect(JSON.parse(address.wakes[0]!)).toEqual({ type: 'wake', after: heard!.seq - 1 });
   });
@@ -641,6 +693,27 @@ describe('freshText', () => {
     const plain = await runWith(c.node, 'Third words');
     expect(plain).toMatchObject({ sessionId: 's1', prompt: 'Third words' });
     expect(plain.freshPrompt).toBeUndefined();
+  });
+
+  it('carries the files of the message for its own agent to open, in the text and in freshText alike', async () => {
+    const c = await company();
+    const { ava, agent } = await ready(c);
+    const upload = async (name: string) => {
+      const got = await c.app.inject({ method: 'POST', url: `/api/assistant/files?name=${name}`, headers: { ...bearer(ava.key).headers, 'content-type': 'audio/ogg' }, payload: Buffer.from('OggS\0\x02') });
+      expect(got.statusCode).toBe(201);
+      return got.json().file as { id: string; name: string };
+    };
+    const first = await upload('voice.ogg');
+    expect((await write(c, ava.key, { text: 'Listen to this', freshText: 'The frame', files: [first.id] })).statusCode).toBe(202);
+    const fresh = await runWith(c.node, 'The frame');
+    expect(fresh.prompt).toContain(`voice.ogg: hh-fetch message ${first.id}`);
+    finish(c, fresh, 's1');
+    await idle(c, agent.id);
+    const second = await upload('again.ogg');
+    expect((await write(c, ava.key, { text: 'And this', freshText: 'The frame again', files: [second.id] })).statusCode).toBe(202);
+    const run = await runWith(c.node, 'And this');
+    expect(run.prompt).toContain(`again.ogg: hh-fetch message ${second.id}`);
+    expect(run.freshPrompt).toContain(`again.ogg: hh-fetch message ${second.id}`);
   });
 
   it("is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session", async () => {

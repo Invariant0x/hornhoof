@@ -1,7 +1,7 @@
-import { and, eq, isNotNull, isNull, notLike, or, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, notInArray, notLike, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { jobs, machines, nodes, testParts } from '../../db/schema.js';
+import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { ON_NODE } from '../jobs/dispatch.js';
@@ -103,30 +103,91 @@ const isFollower = (own: Own, row: { role: string | null; machineKey: string; ne
 
 const within = (at: Date | null, ms: number, now: Date): boolean => at !== null && now.getTime() - at.getTime() < ms;
 
+/* Whether the machine may have its turn at this build: it downloaded it, and its last try at it is long enough ago. A grant
+   that ran out counts as a try that failed. */
+const mayTry = (row: typeof machines.$inferSelect, build: LeaderBuild, now: Date): boolean =>
+  row.updateCommit === build.commit && row.updateState === 'ready' &&
+  !(row.goCommit === build.commit && within(row.goAt, FOLLOW_RETRY_MS, now)) && !(row.failedCommit === build.commit && within(row.failedAt, FOLLOW_RETRY_MS, now));
+
+/* The machines that install or were told to, and with a build those that have it: what a grant and the next to install
+   are decided by. */
+const installRows = (db: Pick<Db, 'select'>, own: Own, build: LeaderBuild | null = null) =>
+  db.select().from(machines).where(and(isNull(machines.revokedAt), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'), build ? and(eq(machines.updateCommit, build.commit), eq(machines.updateState, 'ready')) : undefined)));
+
+const LEADERS = ['orchestrator', 'head'] as const;
+
+/* Whether work runs on the machine: a turn or a check on its nodes or on its own built-in node, which runs the work of the
+   company's keys, or a part of a test run. Without leaders, the turns of the orchestrator and the heads count for none. */
+async function runsWork(db: Pick<Db, 'select'>, row: { id: string; networkId: string | null }, leaders = true): Promise<boolean> {
+  const counted = leaders ? undefined : or(isNull(jobs.agentId), notInArray(agents.kind, [...LEADERS]));
+  const [turn] = await db.select(idOnly(jobs)).from(jobs).leftJoin(nodes, eq(nodes.id, jobs.nodeId)).leftJoin(agents, eq(agents.id, jobs.agentId))
+    .where(and(row.networkId ? or(eq(nodes.machineId, row.id), eq(jobs.builtinMachine, row.networkId)) : eq(nodes.machineId, row.id), ON_NODE, counted)).limit(1);
+  if (turn) return true;
+  const [part] = await db.select(idOnly(testParts)).from(testParts)
+    .where(and(row.networkId ? or(eq(testParts.machineId, row.id), eq(testParts.builtinMachine, row.networkId)) : eq(testParts.machineId, row.id), eq(testParts.status, 'running'))).limit(1);
+  return part !== undefined;
+}
+
 /* Tells the machine to install the build, when it may: it downloaded the build, no other worker installs now, its last
    try at this build is long enough ago, and nothing runs on it. One decision at a time for the whole company, with the
    machine's row held, so no turn and no test part starts there while it is decided. */
 export async function tryGrant(tx: Db, own: Own, machineId: string, build: LeaderBuild, now: Date): Promise<boolean> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${FOLLOW_LOCK}::bigint)`);
   const [row] = await tx.select().from(machines).where(eq(machines.id, machineId)).for('update');
-  if (!row || row.revokedAt || !isFollower(own, row)) return false;
-  if (row.updateCommit !== build.commit || row.updateState !== 'ready') return false;
-  /* A grant that ran out counts as a try that failed. */
-  if (row.goCommit === build.commit && within(row.goAt, FOLLOW_RETRY_MS, now)) return false;
-  if (row.failedCommit === build.commit && within(row.failedAt, FOLLOW_RETRY_MS, now)) return false;
-  const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
-  if (others.some(other => installs(other, now))) return false;
-  const [turn] = await tx.select(idOnly(jobs)).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), ON_NODE)).limit(1);
-  const [part] = await tx.select(idOnly(testParts)).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
-  if (turn || part) return false;
-  /* The same for what its own built-in node runs: the work of the company's keys. */
-  if (row.networkId) {
-    const [keyTurn] = await tx.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.builtinMachine, row.networkId), ON_NODE)).limit(1);
-    const [keyPart] = await tx.select(idOnly(testParts)).from(testParts).where(and(eq(testParts.builtinMachine, row.networkId), eq(testParts.status, 'running'))).limit(1);
-    if (keyTurn || keyPart) return false;
-  }
+  if (!row || row.revokedAt || !isFollower(own, row) || !mayTry(row, build, now)) return false;
+  if ((await installRows(tx, own)).some(other => installs(other, now))) return false;
+  if (await runsWork(tx, row)) return false;
   await tx.update(machines).set({ goCommit: build.commit, goAt: now }).where(eq(machines.id, machineId));
   return true;
+}
+
+export type NextToInstall = { id: string; networkId: string | null; since: number };
+const lines = new WeakMap<Ctx['config'], { machine: string; commit: string; since: number }>();
+
+/* The machine next to install the server's build, and since when it is: while none installs, of the machines that have
+   the build, said so a moment ago and may try it, the one that joined first. Only the work that runs there keeps it from
+   its turn, so new work keeps off it, one machine at a time, and the others work on meanwhile. */
+export async function nextToInstall(ctx: Ctx, now = new Date()): Promise<NextToInstall | null> {
+  const build = buildToBegin(ctx);
+  if (!build) return null;
+  const rows = await installRows(ctx.db, ctx.config, build);
+  if (rows.some(row => installs(row, now))) return null;
+  const [next] = rows.filter(row => waitsInLine(row, build, now)).sort(joinedFirst);
+  return next ? { id: next.id, networkId: next.networkId, since: nextSince(ctx, next.id, build.commit, now) } : null;
+}
+
+/* The server's build, while it lets a worker begin: only a server that leads and does not install an update itself does. */
+function buildToBegin(ctx: Ctx): LeaderBuild | null {
+  const build = leaderBuild(ctx);
+  return build && ctx.mode.current() === 'lead' && ctx.updater.status()?.state !== 'running' ? build : null;
+}
+
+/* Whether the machine waits for its turn: it runs another build, may try this one, and said so a moment ago. */
+const waitsInLine = (row: typeof machines.$inferSelect, build: LeaderBuild, now: Date): boolean =>
+  row.commit !== build.commit && mayTry(row, build, now) && within(row.reportAt, INSTALLING_SAID_MS, now);
+
+const joinedFirst = (a: typeof machines.$inferSelect, b: typeof machines.$inferSelect): number =>
+  a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1);
+
+/* From when the machine was first found next. Nothing else starts the turns of the orchestrator and the heads that waited
+   for it when their limit comes, so the queue is woken then. */
+function nextSince(ctx: Ctx, machine: string, commit: string, now: Date): number {
+  const line = lines.get(ctx.config);
+  if (line?.machine === machine && line.commit === commit) return line.since;
+  lines.set(ctx.config, { machine, commit, since: now.getTime() });
+  pumpAfter(ctx, ctx.config.nodeLeaderHoldMs);
+  return now.getTime();
+}
+
+/* Whether a new turn stays off the node, as its machine is next to install. The orchestrator's and a head's (leader) go
+   in past their limit while other work still runs there, which the machine waits for either way, as on a node that waits
+   for an update. Once only their own turns are left, theirs wait too, so they never keep the machine from its turn. */
+export async function nextToInstallHolds(ctx: Ctx, nodeId: string | null | undefined, leader: boolean, now = new Date()): Promise<boolean> {
+  const row = await machineOfNode(ctx.db, nodeId, false);
+  const next = row && (await nextToInstall(ctx, now));
+  if (!next || next.id !== row?.id) return false;
+  if (!leader || now.getTime() - next.since < ctx.config.nodeLeaderHoldMs) return true;
+  return !(await runsWork(ctx.db, next, false));
 }
 
 const goOf = (row: Granted, now: Date): Go => {
@@ -200,12 +261,28 @@ export async function machineInstalls(db: Pick<Db, 'select'>, nodeId: string | n
 
 /* The network ids of the machines that install now, for whoever picks a built-in node. */
 export async function installingBuiltins(db: Pick<Db, 'select'>, own: Own, now = new Date()): Promise<Set<string>> {
-  const rows = await db.select().from(machines).where(and(isNull(machines.revokedAt), isNotNull(machines.networkId), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
-  return new Set(rows.filter(row => installs(row, now)).map(row => row.networkId!));
+  const rows = await installRows(db, own);
+  return new Set(rows.filter(row => row.networkId !== null && installs(row, now)).map(row => row.networkId!));
 }
 
 /* The machines that install now, for whoever places work: none of it is offered to them. */
 export async function installingMachines(db: Pick<Db, 'select'>, own: Own, now = new Date()): Promise<Set<string>> {
-  const rows = await db.select().from(machines).where(and(isNull(machines.revokedAt), follows(own), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
+  const rows = await installRows(db, own);
   return new Set(rows.filter(row => installs(row, now)).map(row => row.id));
+}
+
+/* The built-in nodes that take no new work, for whoever picks one: those of the machines that install now, and of the
+   one next to install, so that what the company's keys run goes to another machine meanwhile. */
+export async function heldBuiltins(ctx: Ctx, db: Pick<Db, 'select'> = ctx.db): Promise<Set<string>> {
+  const held = await installingBuiltins(db, ctx.config);
+  const next = await nextToInstall(ctx);
+  return next?.networkId ? held.add(next.networkId) : held;
+}
+
+/* The machines that take no new work, for whoever places it: those that install now, and the one next to install, whose
+   work ends so that it has its turn. */
+export async function heldMachines(ctx: Ctx): Promise<Set<string>> {
+  const held = await installingMachines(ctx.db, ctx.config);
+  const next = await nextToInstall(ctx);
+  return next ? held.add(next.id) : held;
 }

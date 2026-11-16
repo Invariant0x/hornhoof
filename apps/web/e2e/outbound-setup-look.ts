@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 /* Design's rules for a department's outbound setup (#989), as what breaks them in the part as drawn: an empty list when
    all hold. statuses: the words of every status; danger: the names of the buttons that stop or take back, which the part
@@ -120,3 +120,24 @@ export async function edges(panel: Locator): Promise<{ left: number; right: numb
     return { left: Math.round(box.left), right: Math.round(box.right) };
   });
 }
+
+/* Nothing sideways: the page and the panel take their width, and no line or button sticks out of its card. */
+export async function fits(page: Page, panel: Locator) {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await panel.evaluate(el => [...el.querySelectorAll('.imp, .repo-actions, .imp-meta, li, h3, h4, p')].filter(n => (n as HTMLElement).scrollWidth > (n as HTMLElement).clientWidth + 1).length)).toBe(0);
+}
+
+/* Every field, list and button of the part is a touch target of 44px, as in the Settings window: what is smaller. */
+export async function small(panel: Locator) {
+  return panel.evaluate(root => [...root.querySelectorAll('input:not([type=checkbox]), select, button')].flatMap(el => {
+    const high = Math.round(el.getBoundingClientRect().height);
+    const fits = el.tagName === 'BUTTON' ? high >= 44 : high === 44;
+    return fits ? [] : [`${el.tagName} ${(el.textContent ?? '').trim()} ${high}`];
+  }));
+}
+
+/* What a person sees with this part of the panel scrolled into view, as a picture in dir. */
+export const shooter = (dir: string) => async (page: Page, what: Locator, file: string) => {
+  await what.evaluate(el => el.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${dir}/${file}.png`, animations: 'disabled' });
+};
