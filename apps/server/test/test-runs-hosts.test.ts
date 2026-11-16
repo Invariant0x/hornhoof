@@ -19,7 +19,7 @@ describe('parts on physical computers', () => {
     const { call } = await c.turn(c.bruno);
     const prepared = await c.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${first.key}` }, payload: {} });
     expect(prepared.json().ready).toBe(true);
-    const started = await call(tool, { command: 'printf checked', ...(tool === 'run_work' ? { branch: 'task-1' } : {}) });
+    const started = await call(tool, { command: 'printf checked', branch: tool === 'run_work' ? 'task-1' : 'main' });
     expect(started.error).toBe(false);
     const parts = await c.db.select().from(testParts);
     expect(parts).toHaveLength(1);
@@ -55,7 +55,7 @@ describe('parts on physical computers', () => {
     await until(() => (c.app.ctx.hub.loadOf(nodeIdentity(sibling.id))?.at ?? 0) > selectedAt);
     vi.useRealTimers();
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status }]);
     if (status === 'running') expect((await c.db.select().from(testParts))[0]!.nodeId).toBe(selected.id);
     else expect((await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json().waiting[0].why).toMatch(/Short of the 4 GB/);
@@ -67,7 +67,7 @@ describe('parts on physical computers', () => {
     await c.planless(c.ceo, 'container-one', load);
     await c.planless(c.ceo, 'container-two', load);
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running' }, { status: 'queued' }]);
   });
 
@@ -80,9 +80,9 @@ describe('parts on physical computers', () => {
     reportHost(c, two.nodeId, 'linux');
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 6 });
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(one.node, 'tests.run');
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const state = JSON.parse((await call('test_run', { run: 2 })).text);
     expect(state.parts).toMatchObject([{ status: 'running', machine: 'laptop' }]);
     expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
@@ -95,9 +95,9 @@ describe('parts on physical computers', () => {
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const first = await nextOf(one.node, 'tests.run');
-    const waits = await call('run_tests', { command: 'make test' });
+    const waits = await call('run_tests', { branch: 'main', command: 'make test' });
     expect(waits.text).toMatch(/Test run 2.*waits for a free machine/);
     expect(JSON.parse((await call('test_run', { run: 2 })).text).parts).toMatchObject([{ status: 'queued', machine: null }]);
     expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
@@ -113,11 +113,11 @@ describe('parts on physical computers', () => {
     const node = await c.builtin();
     reportHost(c, null, 'linux');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(node, 'tests.run');
     const container = await c.machine(c.ceo, 'container');
     reportHost(c, container.nodeId, 'linux');
-    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
+    expect((await call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/waits for a free machine/);
     expect(await gets(c.app.ctx, container.node, 'tests.run')).toBe(false);
   });
 
@@ -128,7 +128,7 @@ describe('parts on physical computers', () => {
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 3 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 3 });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([
       { status: 'running', machine: 'container-one' }, { status: 'running', machine: 'container-two' }, { status: 'queued', machine: null },
     ]);
@@ -139,7 +139,7 @@ describe('parts on physical computers', () => {
     const box = await c.planless(c.ceo, 'container');
     reportHost(c, box.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running' }, { status: 'queued' }]);
   });
 
@@ -156,7 +156,7 @@ describe('parts on physical computers', () => {
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 5 });
     vi.useRealTimers();
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'laptop' }]);
   });
 
@@ -167,7 +167,7 @@ describe('parts on physical computers', () => {
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running' }, { status: 'queued' }]);
   });
 
@@ -177,7 +177,7 @@ describe('parts on physical computers', () => {
     await c.planless(c.ceo, 'two');
     await c.builtin();
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 3 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 3 });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts.map((p: { status: string }) => p.status)).toEqual(['running', 'running', 'running']);
   });
 
@@ -188,7 +188,7 @@ describe('parts on physical computers', () => {
     reportHost(c, one.nodeId, 'linux', { hostLoad: 15 });
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 2 });
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'laptop' }]);
   });
 
@@ -199,11 +199,11 @@ describe('parts on physical computers', () => {
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(one.node, 'tests.run');
     one.node.close();
     await until(() => !c.app.ctx.hub.isOnline(nodeIdentity(one.nodeId)));
-    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
+    expect((await call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/waits for a free machine/);
     expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
   });
 
@@ -216,7 +216,7 @@ describe('parts on physical computers', () => {
     reportHost(c, two.nodeId, 'linux');
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 6 });
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const first = await nextOf(one.node, 'tests.run');
     one.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], tests: [], load: idle() });
     await until(async () => (await c.db.select().from(testParts)).some(p => p.id !== first.partId));
@@ -230,7 +230,7 @@ describe('parts on physical computers', () => {
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
-    await Promise.all([call('run_tests', { command: 'make test' }), call('run_tests', { command: 'make test' })]);
+    await Promise.all([call('run_tests', { branch: 'main', command: 'make test' }), call('run_tests', { branch: 'main', command: 'make test' })]);
     const parts = await c.db.select().from(testParts).orderBy(asc(testParts.createdAt));
     expect(parts.map(p => p.status).sort()).toEqual(['queued', 'running']);
   });
@@ -242,11 +242,11 @@ describe('parts on physical computers', () => {
     reportHost(c, one.nodeId, 'linux');
     reportHost(c, two.nodeId, 'linux');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(one.node, 'tests.run');
     one.node.close();
     await until(() => !c.app.ctx.hub.isOnline(nodeIdentity(one.nodeId)));
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     /* A new server context has the persisted database and the sibling's connection, without the old server's cache. */
     await pumpTests({ ...c.app.ctx });
     expect(JSON.parse((await call('test_run', { run: 2 })).text).parts).toMatchObject([{ status: 'queued', machine: null }]);
@@ -258,7 +258,7 @@ describe('parts on physical computers', () => {
     const box = await c.planless(c.ceo, 'small-container');
     reportHost(c, box.nodeId, 'linux', { memFree: 2 * GIB, hostMemFree: 12 * GIB });
     const { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
+    expect((await call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/waits for a free machine/);
     const pool = (await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json();
     expect(pool.waiting[0].why).toMatch(/Short of the 4 GB/);
   });

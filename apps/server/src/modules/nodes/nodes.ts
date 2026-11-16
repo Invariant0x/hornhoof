@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, lte, notLike, or, sql } from 
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions, SUBSCRIPTION_STATUSES, type NodeStatus } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { nodeIdentity, type NodeHub, type NodeIdentity } from './hub.js';
 
 /* A node that still has its key: its machine is connected and Hornhoof has not taken the node back. */
@@ -10,7 +11,7 @@ export const liveNode = isNotNull(nodes.keyHash);
 /* A socket authenticated with a node key may act only while its node row still holds that exact key hash. */
 export async function hasCurrentKey(ctx: { db: Db; hub: NodeHub }, id: NodeIdentity): Promise<boolean> {
   if (id.kind !== 'node' || !id.keyHash) return true;
-  const [row] = await ctx.db.select({ keyHash: nodes.keyHash }).from(nodes).where(eq(nodes.id, id.nodeId));
+  const [row] = await ctx.db.select(only(nodes, 'keyHash')).from(nodes).where(eq(nodes.id, id.nodeId));
   if (row?.keyHash === id.keyHash) return true;
   ctx.hub.close(id.nodeId, 4001, id.keyHash);
   return false;

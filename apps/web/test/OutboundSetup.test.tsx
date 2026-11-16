@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { DepartmentMessaging } from '../src/ui/OutboundSetup';
 import { mockApi } from './api-mock';
+import { decl } from './css';
 
 /* A department's own outbound setup as the people who run it meet it: channels with their accounts and limits, the
    catalog with what to publish or take back, and the log of who did what on whose word. */
@@ -47,7 +48,7 @@ const routes = (channels: object[] = [CHANNEL, BARE]) => ({
 
 const show = (language: 'en' | 'ru' = 'en') => {
   localStorage.setItem('hh-lang', language);
-  return render(<LanguageProvider><DepartmentMessaging departmentId={DEPT} title="External messaging" /></LanguageProvider>);
+  return render(<LanguageProvider><DepartmentMessaging departmentId={DEPT} /></LanguageProvider>);
 };
 
 afterEach(() => {
@@ -84,11 +85,13 @@ describe('a department\'s own outbound setup', () => {
     expect(catalog).toHaveTextContent('by Mia on the word of Mona');
     expect(within(catalog).getByText('proposed')).toHaveClass('status', 'invited');
     expect(within(catalog).getByText('published')).toHaveClass('status', 'active');
+    expect(within(catalog).queryByRole('button', { name: 'Take back' })).toBeNull();
+    await user.click(within(catalog).getByRole('button', { name: 'Show revision 1' }));
     expect(within(catalog).getByRole('button', { name: 'Publish' })).not.toHaveClass('danger');
     expect(within(catalog).getByRole('button', { name: 'Take back' })).toHaveClass('danger');
     await user.click(within(catalog).getByRole('button', { name: 'Publish' }));
     await user.click(within(catalog).getByRole('button', { name: 'Take back' }));
-    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.path)).toEqual(['/api/outbound/catalog/r2/publish', '/api/outbound/catalog/r1/revoke']));
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => [c.path, c.body])).toEqual([['/api/outbound/catalog/r2/publish', { revision: 2, newest: 2 }], ['/api/outbound/catalog/r1/revoke', { revision: 1, newest: 2 }]]));
     expect(calls.filter(c => c.path === `/api/outbound/catalog?${Q}`).length).toBeGreaterThan(1);
   });
 
@@ -138,6 +141,119 @@ describe('a department\'s own outbound setup', () => {
     await waitFor(() => expect(calls.find(c => c.method === 'POST')?.body).toEqual({ departmentId: DEPT, name: 'Letters', adapter: 'smtp', purpose: 'first_contact', audience: 'direct' }));
   });
 
+  it('adds a test address to a channel with the consent its purpose asks for, through the server\'s own consent check', async () => {
+    const calls = mockApi({ ...routes(), 'POST /api/outbound/contacts': [200, { contactId: 'k1', permissionId: 'pm1' }] });
+    const user = userEvent.setup();
+    show();
+    const spring = (await screen.findByRole('heading', { name: 'Spring letters' })).closest('.imp') as HTMLElement;
+    await user.click(within(spring).getByRole('button', { name: 'Add an address' }));
+    const form = within(spring).getByRole('form', { name: 'Add an address' });
+    await user.type(within(form).getByLabelText('Email address'), 'team.test@mkt.example');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Test address of our team');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'My own address, to try the letters');
+    const agreed = within(form).getByRole('checkbox', { name: /This person agreed to get messages of this channel/ });
+    expect(agreed.closest('label')).toHaveTextContent('Purpose: first_contact');
+    await user.click(agreed);
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => [c.path, c.body])).toEqual([
+      ['/api/outbound/contacts', { channelId: 'ch1', kind: 'email', address: 'team.test@mkt.example', source: 'Test address of our team', evidence: 'My own address, to try the letters' }],
+    ]));
+    expect(await within(spring).findByRole('status')).toHaveTextContent('team.test@mkt.example can get messages of this channel now.');
+    expect(within(spring).queryByRole('form', { name: 'Add an address' })).toBeNull();
+  });
+
+  it('keeps an address that is not one, says so at its field and puts the focus there, before and after the server', async () => {
+    const calls = mockApi({ ...routes(), 'POST /api/outbound/contacts': [400, { error: { code: 'validation', message: 'This is not one address.', reason: 'outbound_invalid' } }] });
+    const user = userEvent.setup();
+    show();
+    const spring = (await screen.findByRole('heading', { name: 'Spring letters' })).closest('.imp') as HTMLElement;
+    await user.click(within(spring).getByRole('button', { name: 'Add an address' }));
+    const form = within(spring).getByRole('form', { name: 'Add an address' });
+    const address = within(form).getByLabelText('Email address');
+    await user.type(address, 'team test');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(address).toHaveAttribute('aria-invalid', 'true');
+    expect(address).toHaveAccessibleDescription('This is not an email address. Check it and try again.');
+    expect(address).toHaveFocus();
+    expect(within(form).getByLabelText('Where they agreed')).toHaveAccessibleDescription(/Say where they agreed/);
+    expect(within(form).getByRole('checkbox')).toHaveAccessibleDescription('Tick this only once the person agreed.');
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    await user.clear(address);
+    await user.type(address, 'team@mkt.example');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Signup form');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Form entry 12');
+    await user.click(within(form).getByRole('checkbox'));
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(address).toHaveAccessibleDescription('This is not an email address. Check it and try again.'));
+    expect(address).toHaveFocus();
+    expect(calls.filter(c => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('says so when the address asked not to be written to, and takes no address for a public channel', async () => {
+    mockApi({ ...routes([CHANNEL, { ...BARE, audience: 'public' }]), 'POST /api/outbound/contacts': [409, { error: { code: 'conflict', message: 'This contact asked not to be written to.', reason: 'outbound_conflict', details: { reasonCodes: ['contact_suppressed'] } } }] });
+    const user = userEvent.setup();
+    show();
+    const news = (await screen.findByRole('heading', { name: 'News' })).closest('.imp') as HTMLElement;
+    expect(within(news).queryByRole('button', { name: 'Add an address' })).toBeNull();
+    const spring = screen.getByRole('heading', { name: 'Spring letters' }).closest('.imp') as HTMLElement;
+    await user.click(within(spring).getByRole('button', { name: 'Add an address' }));
+    const form = within(spring).getByRole('form', { name: 'Add an address' });
+    await user.type(within(form).getByLabelText('Email address'), 'gone@shop.example');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Signup form');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Form entry 13');
+    await user.click(within(form).getByRole('checkbox'));
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent('This person asked not to get messages. Their address cannot be added again.');
+  });
+
+  it('frames a field to correct in pink, with the focus ring outside it, as Design set it for fields', () => {
+    const wrong = ".outbound-setup .field :is(input, select, textarea)[aria-invalid='true']";
+    expect(decl(wrong, 'border-color')).toBe('var(--pink)');
+    expect(decl(`${wrong}:is(:focus, :focus-visible)`, 'outline')).toBe('2px solid var(--cyan-ink)');
+    expect(decl(`${wrong}:is(:focus, :focus-visible)`, 'box-shadow')).toBe('none');
+    expect(decl(".outbound-setup .check-card:has([aria-invalid='true'])", 'border-color')).toBe('var(--pink)');
+  });
+
+  it('takes an address without spaces for a webhook channel to contacts, and shows any other refusal above the buttons', async () => {
+    const hook = { ...BARE, id: 'ch3', name: 'Chat', adapter: 'webhook' };
+    const calls = mockApi({ ...routes([hook]), 'POST /api/outbound/contacts': [500, { error: { code: 'internal', message: 'The database did not answer.' } }] });
+    const user = userEvent.setup();
+    show();
+    const chat = (await screen.findByRole('heading', { name: 'Chat' })).closest('.imp') as HTMLElement;
+    await user.click(within(chat).getByRole('button', { name: 'Add an address' }));
+    const form = within(chat).getByRole('form', { name: 'Add an address' });
+    const address = within(form).getByLabelText('Address in the channel');
+    expect(address).toHaveAttribute('type', 'text');
+    await user.type(address, 'max test');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Chat of the shop');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Wrote to us first');
+    await user.click(within(form).getByRole('checkbox'));
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(address).toHaveAccessibleDescription('An address here has no spaces. Check it and try again.');
+    expect(address).toHaveFocus();
+    await user.clear(address);
+    await user.type(address, '@max_test');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent('The database did not answer.');
+    expect(calls.filter(c => c.method === 'POST').map(c => c.body)).toEqual([{ channelId: 'ch3', kind: 'direct', address: '@max_test', source: 'Chat of the shop', evidence: 'Wrote to us first' }]);
+  });
+
+  it('says so when the address was already on the channel\'s list', async () => {
+    mockApi({ ...routes(), 'POST /api/outbound/contacts': [200, { contactId: 'k1', permissionId: null }] });
+    const user = userEvent.setup();
+    show();
+    const spring = (await screen.findByRole('heading', { name: 'Spring letters' })).closest('.imp') as HTMLElement;
+    await user.click(within(spring).getByRole('button', { name: 'Add an address' }));
+    const form = within(spring).getByRole('form', { name: 'Add an address' });
+    await user.type(within(form).getByLabelText('Email address'), 'shop1@shop.example');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Signup form');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Form entry 1');
+    await user.click(within(form).getByRole('checkbox'));
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(await within(spring).findByRole('status')).toHaveTextContent('shop1@shop.example was already on the list of this channel.');
+  });
+
   it('shows the setup log with who did each step and through whom', async () => {
     mockApi(routes());
     show();
@@ -166,5 +282,82 @@ describe('a department\'s own outbound setup', () => {
     expect(await screen.findByRole('heading', { name: 'Каталог отдела' })).toBeInTheDocument();
     expect(screen.getByText(/отправляет без одобрения каждого письма/)).toBeInTheDocument();
     expect(screen.getAllByText(/решение: Mona, выполнил агент Mia/).length).toBeGreaterThan(0);
+  });
+});
+
+/* Nobody publishes blind: each revision of an entry shows what a message would say, the newest one at once, and what
+   changed from the version messages use now. What is published is the version shown. */
+describe('a catalog revision shown before it is published', () => {
+  const SALE = { kind: 'template', locale: 'en', subject: 'Spring sale', parts: [{ kind: 'text', text: 'The spring sale ends soon. ' }, { kind: 'slot', slotId: 's1', type: 'price' }] };
+  const LAST_DAYS = {
+    kind: 'template', locale: 'en', subject: 'Spring sale, last days',
+    parts: [{ kind: 'text', text: 'The spring sale ends on Sunday. ' }, { kind: 'slot', slotId: 's1', type: 'price' }, { kind: 'text', text: ' ' }, { kind: 'slot', slotId: 's2', type: 'unsubscribe' }],
+  };
+  const entry = (current: number | null, revisions: object[]) => ({ entryId: 'e1', kind: 'template', locale: 'en', productId: null, channel: { id: 'ch1', name: 'Spring letters' }, current, revisions });
+  const twoVersions = entry(1, [
+    revision('r2', 2, 'proposed', { value: LAST_DAYS, summary: 'Spring sale, last days', createdAt: '2026-03-02T09:30:00.000Z' }),
+    revision('r1', 1, 'published', { value: SALE, summary: 'Spring sale', publishedBy: { id: 'p-mona', name: 'Mona' } }),
+  ]);
+  const withCatalog = (entries: object[], extra: Record<string, [number, unknown]> = {}) => mockApi({ ...routes(), [`GET /api/outbound/catalog?${Q}`]: [200, { departmentId: DEPT, entries }], ...extra });
+  const catalogOf = async () => (await screen.findByRole('heading', { name: 'Department catalog' })).closest('section') as HTMLElement;
+
+  it('shows the subject, the words with the places a message fills in, the language, the version and who proposed it when', async () => {
+    withCatalog([twoVersions]);
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
+    expect(shown).toHaveTextContent('Spring sale, last days');
+    expect(shown).toHaveTextContent('The spring sale ends on Sunday.');
+    expect(within(shown).getAllByText('Price', { selector: '.outbound-slot' }).length).toBeGreaterThan(0);
+    expect(within(shown).getAllByText('How to stop messages', { selector: '.outbound-slot' }).length).toBeGreaterThan(0);
+    expect(shown).toHaveTextContent('English');
+    expect(shown).toHaveTextContent('Proposed by Max on 02/03/2026');
+  });
+
+  it('shows what changed from the version messages use, and publishes the version shown', async () => {
+    const calls = withCatalog([twoVersions], { 'POST /api/outbound/catalog/r2/publish': [200, { id: 'r2', status: 'published' }] });
+    const user = userEvent.setup();
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
+    const changed = within(shown).getByRole('group', { name: 'What changed from revision 1, which messages use' });
+    expect([...changed.querySelectorAll('ins')].map(e => e.textContent)).toEqual(['sale, last days', 'on Sunday. ', ' ', 'How to stop messages']);
+    expect([...changed.querySelectorAll('del')].map(e => e.textContent)).toEqual(['sale', 'soon. ']);
+    await user.click(within(shown).getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => [c.path, c.body])).toEqual([['/api/outbound/catalog/r2/publish', { revision: 2, newest: 2 }]]));
+  });
+
+  it('marks an entry nothing of which is in use yet as new', async () => {
+    withCatalog([entry(null, [revision('r1', 1, 'proposed', { value: SALE, summary: 'Spring sale' })])]);
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 1' });
+    expect(shown).toHaveTextContent('New: no version of this entry is in use yet.');
+    expect(shown.querySelector('ins, del')).toBeNull();
+  });
+
+  it('shows a price by its value', async () => {
+    const price = { kind: 'price', amount: '10.00', currency: 'USD', scale: 2, rounding: 'half_up', discountId: null, termsId: null, validFrom: '2026-01-01T00:00:00.000Z', validUntil: null };
+    withCatalog([{ ...entry(null, [revision('r1', 1, 'proposed', { value: price, summary: '10.00 USD' })]), kind: 'price', locale: null }]);
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 1' });
+    expect(shown).toHaveTextContent('10.00 USD');
+  });
+
+  it('says in plain words that the entry changed while it was shown, and reads it again', async () => {
+    const calls = withCatalog([twoVersions], { 'POST /api/outbound/catalog/r2/publish': [409, { error: { code: 'conflict', message: 'This entry changed after you looked at it.', reason: 'outbound_changed' } }] });
+    const user = userEvent.setup();
+    show();
+    const shown = within(await catalogOf()).getByRole('region', { name: 'Revision 2' });
+    await user.click(within(shown).getByRole('button', { name: 'Publish' }));
+    expect(await screen.findByText('This entry got another version while you were looking at it. Look at it again before you publish or take it back.')).toBeInTheDocument();
+    expect(calls.filter(c => c.path === `/api/outbound/catalog?${Q}`).length).toBeGreaterThan(1);
+  });
+
+  it('speaks Russian', async () => {
+    withCatalog([twoVersions]);
+    show('ru');
+    const catalog = (await screen.findByRole('heading', { name: 'Каталог отдела' })).closest('section') as HTMLElement;
+    const shown = within(catalog).getByRole('region', { name: 'Ревизия 2' });
+    expect(within(shown).getAllByText('Цена', { selector: '.outbound-slot' }).length).toBeGreaterThan(0);
+    expect(shown).toHaveTextContent('английский');
+    expect(within(shown).getByRole('group', { name: 'Что изменилось по сравнению с ревизией 1, которую используют письма' })).toBeInTheDocument();
   });
 });

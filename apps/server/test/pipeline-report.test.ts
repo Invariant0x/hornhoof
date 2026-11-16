@@ -4,6 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, taskRoutes, tasks, testParts, testRuns, turnSnapshots, turns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
 import { departmentPipeline, pipelineReport, turnFacts } from '../src/modules/tasks/pipeline-report.js';
@@ -318,7 +319,7 @@ describe('the report', () => {
     const report = await pipelineReport(c.db, c.companyId);
     expect(report.turn).toMatchObject({ number: 8, status: 'open', source: 'live', closedAt: null });
     expect(report.previous?.number).toBe(7);
-    expect(await c.db.select({ turnId: turnSnapshots.turnId }).from(turnSnapshots).where(eq(turnSnapshots.turnId, open.id))).toEqual([]);
+    expect(await c.db.select(only(turnSnapshots, 'turnId')).from(turnSnapshots).where(eq(turnSnapshots.turnId, open.id))).toEqual([]);
   });
 
   it('compares a turn with the turns of its own department only', async () => {

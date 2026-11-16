@@ -2,6 +2,7 @@ import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { eq } from 'drizzle-orm';
 import { agentChanges, agents, subscriptions, teams } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { placeOf, renderInstructions } from '../agents/instructions.js';
 import { modelOnPlan, tierIn } from '../agents/role-model.js';
@@ -23,7 +24,7 @@ async function modelByRole(tx: Tx, tier: Parameters<typeof modelOnPlan>[0], subs
 /* One employee joins a department, with its role's kind, template hashes and timer, and a record of who hired it. */
 export async function hireEmployee(ctx: Pick<Ctx, 'templates'>, tx: Tx, place: { companyId: string; departmentId: string }, asked: HireLine, by: HiredBy): Promise<Hired> {
   const role = ctx.templates.roles.get(asked.role)!;
-  const [team] = asked.team ? await tx.select({ turnkey: teams.turnkey }).from(teams).where(eq(teams.id, asked.team)) : [];
+  const [team] = asked.team ? await tx.select(only(teams, 'turnkey')).from(teams).where(eq(teams.id, asked.team)) : [];
   const line = { ...asked, model: asked.model || await modelByRole(tx, tierIn(role, team), asked.subscription) };
   const hashes = Object.fromEntries([[role.id, role.hash], ...line.skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
   const [agent] = await tx

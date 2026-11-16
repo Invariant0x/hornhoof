@@ -1,4 +1,4 @@
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
@@ -15,7 +15,7 @@ import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../u
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { builtinOf, identityOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { holdsBuiltin, holdsMachine, machineInstalls } from '../network/follow.js';
+import { holdsBuiltin, holdsMachine, machineInstalls, nextToInstallHolds } from '../network/follow.js';
 import { pickBuiltin } from '../nodes/builtin.js';
 import { cameBack } from '../nodes/connections.js';
 import { shownAway } from '../nodes/machine-away.js';
@@ -322,7 +322,7 @@ export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string
 
 /* A turn its words went into as it ran. */
 async function runsNow(ctx: Ctx, jobId: string): Promise<boolean> {
-  const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
+  const [job] = await ctx.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, jobId));
   return job?.status === 'running';
 }
 
@@ -1140,8 +1140,11 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
   /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
-     Asked here, before the turn's words are put together, and once more when the turn is taken. */
+     Asked here, before the turn's words are put together, and once more when the turn is taken. Nor does the machine
+     next to install, so the turns that run there end and it has its turn: the orchestrator's and the heads' wait up to
+     their limit. */
   if (await machineInstalls(db, place.nodeId)) return;
+  if (await nextToInstallHolds(ctx, place.nodeId, isLeader(agent))) return;
   const along: Along[] = [];
   for (const j of await goingAlong(ctx, agent, job, place.nodeId)) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
 
@@ -1232,7 +1235,7 @@ export function pump(ctx: Ctx, agentId: string): Promise<void> {
 
 /* Every agent with turns waiting, after a machine came back or a subscription changed. */
 export async function pumpWaiting(ctx: Ctx): Promise<void> {
-  const waiting = await ctx.db.selectDistinct({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
+  const waiting = await ctx.db.selectDistinct(only(jobs, 'agentId')).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
   for (const { agentId } of waiting) if (agentId) await pump(ctx, agentId);
 }
 
@@ -1274,7 +1277,7 @@ export async function reconnecting(ctx: Ctx, agentId: string): Promise<boolean> 
   const sub = await liveSubscription(ctx, agentId);
   if (!sub) return false;
   if (sub.kind === 'api_key') return comingBack(ctx, ownBuiltin(ctx.config));
-  const [agent] = await ctx.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await ctx.db.select(only(agents, 'nodeId')).from(agents).where(eq(agents.id, agentId));
   const all = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready');
   const own = all.find(n => n.id === agent?.nodeId);
   const waited = own && (await holdsWork(ctx, agentId)) ? [own] : all;
