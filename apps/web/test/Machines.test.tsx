@@ -844,32 +844,24 @@ describe('Machines', () => {
     ['en', [
       'Cannot take the server: it is a phone.',
       'Cannot take the server: Hornhoof runs here without Docker; make host-1 a full machine.',
-      'Cannot take the server: Docker here gets less than 4 GB of memory.',
       "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees one department.",
       "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees 2 departments.",
       "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees no department.",
       "Cannot take the server: the company's hidden name at hornhoof.org is not made yet; Hornhoof makes it once hornhoof.org answers.",
-      'Cannot take the server: measuring this machine.',
-      'Cannot take the server: 12 GB free; it needs 40.5 GB.',
-      'Cannot take the server: the disk saves slowly (72.4 ms); it needs under 50 ms.',
     ]],
     ['ru', [
       'Не может взять сервер: это телефон.',
       'Не может взять сервер: здесь Hornhoof работает без Docker; сделайте host-1 полной машиной.',
-      'Не может взять сервер: Docker здесь получает меньше 4 ГБ памяти.',
       'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит один отдел.',
       'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna видит 2 отдела.',
       'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna не видит ни одного отдела.',
       'Не может взять сервер: скрытое имя компании на hornhoof.org еще не создано; Hornhoof создаст его, как только hornhoof.org ответит.',
-      'Не может взять сервер: машина еще измеряется.',
-      'Не может взять сервер: свободно 12 ГБ; нужно 40,5 ГБ.',
-      'Не может взять сервер: диск сохраняет медленно (72,4 мс); нужно меньше 50 мс.',
     ]],
   ])('says why a machine cannot take the server in %s', async (language, lines) => {
     const reasons: object[] = [
-      { why: 'phone' }, { why: 'no_core' }, { why: 'memory', memory: 3.2 * GIB },
+      { why: 'phone' }, { why: 'no_core' },
       { why: 'scope', person: 'Anna', departments: 1 }, { why: 'scope', person: 'Anna', departments: 2 }, { why: 'scope', person: 'Anna', departments: 0 },
-      { why: 'no_link' }, { why: 'measuring' }, { why: 'disk', free: 12 * GIB, need: 40.5 * GIB }, { why: 'fsync', p99: 72.4 },
+      { why: 'no_link' },
     ];
     shown(language, reasons.map((unfit, n) => ({ ...MACHINES[0]!, id: `u${n}`, hostname: `host-${n}`, data: held({ unfit }) })));
     await screen.findByRole('table');
@@ -878,6 +870,27 @@ describe('Machines', () => {
       expect(within(one).getByText(line), line).toBeInTheDocument();
       expect(within(one).queryByRole('radio')).not.toBeInTheDocument();
     }
+  });
+
+  it.each([
+    ['en', "Cannot take the server: the company's data stays only on machines of people who see the whole company, and Anna sees no department.", 'Copy: up to date', 'Cannot take the server'],
+    ['ru', 'Не может взять сервер: данные компании хранятся только на машинах тех, кто видит всю компанию, а Anna не видит ни одного отдела.', 'Копия: актуальна', 'Не может взять сервер'],
+  ])('says in %s why a machine that holds an up-to-date copy has no place, in its card and beside its dash', async (language, reason, copy, cannot) => {
+    const anna = { ...MACHINES[0]!, id: 'u0', hostname: 'anna-mac', data: held({ unfit: { why: 'scope', person: 'Anna', departments: 0 }, copy: { line: 'ready' } }) };
+    const waits = { ...MACHINES[0]!, id: 'u1', hostname: 'next-mac', data: held({}) };
+    shown(language, [anna, waits]);
+    await screen.findByRole('table');
+    const cell = (hostname: string) => screen.getByRole('button', { name: new RegExp(`${hostname}$`) }).closest('tr')!.querySelector('.k-prio')!;
+    /* The dash in the list says the same reason, for whoever points at it or hears it. */
+    expect(cell('anna-mac').textContent).toBe(reason);
+    expect(cell('anna-mac').querySelector('.pdash')).toHaveAttribute('title', reason);
+    /* A machine with no reason against it, which waits for the ranking, keeps the short words. */
+    expect(cell('next-mac').textContent).toBe(cannot);
+    const part = within(card('anna-mac')).getByRole('heading', { name: language === 'en' ? 'Priority' : 'Приоритет' }).closest('section')!;
+    expect(within(part).getByText(reason)).toBeInTheDocument();
+    /* The copy's line stands in the same block, in a part of its own beside Priority (#1027). */
+    const block = within(card('anna-mac')).getByRole('region', { name: language === 'en' ? 'Server and data copy' : 'Сервер и копия данных' });
+    expect(within(block).getByText(copy).closest('section')?.querySelector('h5')?.textContent).toBe(language === 'en' ? 'Data copy' : 'Копия данных');
   });
 
   it("shows the server's machine as 1", async () => {

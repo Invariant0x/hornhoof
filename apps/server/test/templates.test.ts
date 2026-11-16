@@ -330,6 +330,17 @@ describe('templates', () => {
     expect(hornhoof).not.toMatch(/\u2014/);
   });
 
+  it("tells the orchestrator it clears any employee's inbox with a reason, and works on an open machine in any turn but one a person without the right spoke last in", () => {
+    const trouble = body('orch-trouble');
+    expect(trouble).toMatch(/Any employee's inbox is open to you[\s\S]*inbox and the employee's id in employee[\s\S]*inbox_mark[\s\S]*kind, source, task and receivedBefore[\s\S]*reason/);
+    expect(trouble).toMatch(/goes in that employee's log with your name, the reason and how many letters/);
+    expect(trouble).toMatch(/employees mark only their own letters/);
+    const resources = body('orch-resources');
+    expect(resources).toMatch(/while it stays open you work there in any turn of yours[\s\S]*with no new word of anyone, except a turn whose last words came from a person other than its owner, the CEO or the CEO delegate/);
+    expect(resources).not.toMatch(/runs only in a turn that answers/);
+    for (const id of ['orch-trouble', 'orch-resources']) expect(body(id), id).not.toMatch(/[\u2014ё]/);
+  });
+
   it('asks for reports to people and heads in ordinary words with spaces', () => {
     for (const id of ['hh-report-to-head', 'hh-hornhoof']) expect(body(id), id).toMatch(/ordinary words[^.]*with spaces/);
   });

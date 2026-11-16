@@ -46,7 +46,7 @@ const scoredOrder = (group: Fit[]): Fit[] => settle([...group.filter(numbered).s
    by hand. A scoring orders them: the machines of three days and more before the newcomers, in each group the 95%
    class first, then by points, starting from the order they had, and two close ones do not swap. Without a scoring
    they keep their order. The places pinned by hand are then put where they were pinned. */
-export function rankOf(all: Candidate[], o: { leader: string; dbSize: number; link: boolean; now: Date; rescore?: boolean }): Ranked[] {
+export function rankOf(all: Candidate[], o: { leader: string; link: boolean; now: Date; rescore?: boolean }): Ranked[] {
   const left = (m: Candidate): boolean => m.role === 'data' && !seesAll(m.owner);
   const others = all.filter(m => m.id !== o.leader && !left(m));
   const fits: Fit[] = others
@@ -150,7 +150,7 @@ export async function candidates(db: Db, now = new Date(), opts: { shares?: bool
   const shares = opts.shares === false ? null : await onlineShares(db, now);
   return rows.map(({ machine: m, ...person }) => ({
     id: m.id, kind: m.kind, networkId: m.networkId, server: m.machineKey.startsWith(SERVER_KEY), role: m.role, createdAt: m.createdAt, reportAt: m.reportAt,
-    memory: m.memory, diskFree: m.diskFree, fsyncP99Ms: m.fsyncP99Ms, owes: m.uploadState !== null,
+    memory: m.memory, fsyncP99Ms: m.fsyncP99Ms, owes: m.uploadState !== null,
     cores: m.cores, share: shares?.get(m.id) ?? null, linkRttMs: m.linkRttMs, linkMbps: m.linkMbps, internetRttMs: m.internetRttMs, internetMbps: m.internetMbps,
     pin: m.serverPin, number: m.serverOrder,
     owner: {
@@ -161,7 +161,7 @@ export async function candidates(db: Db, now = new Date(), opts: { shares?: bool
 }
 
 /* Whether a machine may take the server: it fits and was not kept out by hand. */
-const mayTake = (m: Candidate, o: { dbSize: number; link: boolean }): boolean => m.pin !== 'none' && unfit(m, o) === null;
+const mayTake = (m: Candidate, o: { link: boolean }): boolean => m.pin !== 'none' && unfit(m, o) === null;
 
 type Placed = { changed: number; scored: boolean; leave: Leaving[]; retire: { id: string; networkId: string | null; copyName: string | null } | null; top: string[] };
 
@@ -253,9 +253,8 @@ async function place(ctx: Ctx, now: Date, opts: { rescore?: boolean; ceo?: boole
     const q = queryOf(tx);
     await q('INSERT INTO net.ranking (id) VALUES (true) ON CONFLICT (id) DO NOTHING');
     const [kept] = await q<{ rescored_at: Date | string | null; handover_at: Date | string | null }>('SELECT rescored_at, handover_at FROM net.ranking FOR UPDATE');
-    const [sized] = await q<{ size: number }>('SELECT pg_database_size(current_database())::float8 AS size');
     const [link] = await tx.select({ name: publicLinks.name }).from(publicLinks).limit(1);
-    const fit = { dbSize: Number(sized?.size ?? 0), link: Boolean(link) };
+    const fit = { link: Boolean(link) };
     const all = await candidates(tx, now);
     const others = all.filter(m => m.id !== leader.id);
     /* A machine joined, left or stopped fitting, or the server moved: the order is scored whatever the day. */

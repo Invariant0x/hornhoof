@@ -18,7 +18,7 @@ import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
 import { AWAY_MS, WAIT_MS } from './runs.js';
 export { productReceipt } from './receipts.js';
-import { reuseFor, runModeOf, type ReuseDecision, type RunMode } from './reuse.js';
+import { reuseFor, runModeOf, type MainLineCommits, type ReuseDecision, type RunMode } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
 export type TestRunMode = { mode: 'manual'; command: string; parts: number } | { mode: 'product'; suite?: string; profile?: string };
@@ -55,8 +55,8 @@ export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | nu
   const node = request && requestNode(ctx, request);
   if (node && request?.requestId) ctx.hub.send(node, { type: 'tests.describe.cancel', requestId: request.requestId });
 }
-export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, baseCommit?: string): TestEnvironmentRequest {
-  return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...('profile' in mode ? { profile: mode.profile } : {}), ...(baseCommit ? { baseCommit } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
+export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, baseCommit?: string, minutes?: number): TestEnvironmentRequest {
+  return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...('profile' in mode ? { profile: mode.profile } : {}), ...(baseCommit ? { baseCommit } : {}), ...(minutes === undefined ? {} : { minutes }), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
 }
 type DescribedReady = Extract<TestsDescribed['result'], { status: 'ready' }>;
 type DescribedBase = DescribedReady['baseFingerprints'];
@@ -114,14 +114,22 @@ function planningCosts(history: PlanningHistory | null | undefined) {
   return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: history?.unknownFileMs ?? 30_000,
     ...(history?.preparationMs ? { preparationMs: history.preparationMs } : {}) };
 }
-async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
+/* The full run checks a release, and a part of it that runs into its limit sends all of it again: unless the run asked for a limit, each
+   part has an hour, and the run goes out in two to four parts that each fit in it. */
+export const FULL_RUN_MINUTES = 60;
+const FULL_RUN_PARTS = { min: 2, max: 4 };
+function partLimitMs(run: Run, mode: RunMode): number {
+  return mode?.mode === 'full' && run.environmentRequest?.minutes === undefined ? Math.max(run.timeoutMs, FULL_RUN_MINUTES * 60_000) : run.timeoutMs;
+}
+const spreadFor = (run: Run, mode: RunMode) => mode?.mode === 'full' ? { spread: { ...FULL_RUN_PARTS, ceilingMs: run.timeoutMs } } : {};
+async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision, mode: RunMode): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
   const units = requestedUnits(snapshot, requested);
   const history = await (planningPorts.get(ctx)?.history ?? measuredHistory(ctx))(run, snapshot);
   const free = await freeProductMachines(ctx, run, snapshot);
   const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: runPurpose(snapshot, requested), units, reuse,
-    ...planningCosts(history),
+    ...planningCosts(history), ...spreadFor(run, mode),
     availableMachines: free.length, machines: free.map(key => ({ key, pace: history?.paces?.get(key) ?? 1 })) });
   if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';
   return { leaves: plan.leaves, plan };
@@ -142,13 +150,14 @@ async function addParts(tx: Pick<Ctx['db'], 'insert'>, run: Run, leaves: TestEnv
   if (leaves.length) await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
 }
 async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, snapshot: EnvironmentSnapshot, leaves: TestEnvironmentSelection[], plan: ProductPlan | null, fileCache: TestRunFileCache | null): Promise<boolean> {
+  const { timeoutMs } = run;
   const description = snapshot.description;
   return ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
     if (!locked || locked.environmentRequest?.problem) return false;
     if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
     if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
-    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache }).where(eq(testRuns.id, run.id));
+    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache, timeoutMs }).where(eq(testRuns.id, run.id));
     await addParts(tx, run, leaves);
     return true;
   });
@@ -168,6 +177,19 @@ function unrunnable(snapshot: EnvironmentSnapshot): EnvironmentProblem | null {
   const detail = `The node that described this run lacks ${lacks.map(runtime => `${runtime.id} ${runtime.version}`).join(', ')}, which profile ${snapshot.profile} needs. A part runs only on runtimes of the class that described its run, so no node can run it.`;
   return { code: 'runtime_missing', detail: detail.slice(0, 2000) };
 }
+/* Which commits the main line of the run's repository holds now, asked of its host when a run needs to know; none where the
+   repository cannot be read. */
+function mainLineCommits(ctx: Ctx, run: Run, scope: RepositoryScope): MainLineCommits | undefined {
+  const read = ctx.readMerged;
+  if (!read) return undefined;
+  return async commits => {
+    const repo = (await planningSources.get(ctx)?.target(run))?.repo;
+    if (!repo || hashToken(repo.url) !== scope.repoUrlHash) return new Set();
+    const [owner] = await ctx.db.select({ branch: departments.repoBranch }).from(departments).where(eq(departments.id, scope.repositoryOwnerId));
+    const base = owner?.branch ?? 'main', address = { url: repo.url, token: repo.token };
+    return new Set((await Promise.all(commits.map(async head => (await read(address, { base, head }, 10_000)) === true ? [head] : []))).flat());
+  };
+}
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<EnvironmentProblem | null> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
@@ -177,9 +199,10 @@ async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, valu
   const problem = unrunnable(snapshot);
   if (problem) return problem;
   const reuseMode = candidateReuseMode(mode, snapshot);
-  const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints);
-  const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
-  const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
+  const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints, mainLineCommits(ctx, run, description.repositoryScope));
+  const limited = { ...run, timeoutMs: partLimitMs(run, mode) };
+  const { leaves, plan } = await plannedLeaves(ctx, limited, snapshot, reuse.decision, mode);
+  const saved = await storeDescription(ctx, limited, message, snapshot, leaves, plan, reuse.fileCache);
   if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
   return null;
 }

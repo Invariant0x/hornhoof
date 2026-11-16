@@ -16,7 +16,8 @@ import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { answerBy, answerForAssistant, answerInTelegram, FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, turnPrompt, whoIs, type Standing, type WrittenFrom } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
-import { agentState, insertTurn, onAgent, pump } from './queue.js';
+import { agentState, insertTurn, onAgent, pump, reconnecting } from './queue.js';
+import { refusedMessage } from './undelivered.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 import { STARTS_FIRST } from '../sources/requests.js';
@@ -73,16 +74,27 @@ async function standingOf(ctx: Ctx, me: Person, agent: AgentRow): Promise<Standi
   return { owner: me.isOwner, delegate: me.isCeoDelegate, department: runs };
 }
 
+const NOT_READY = 'This employee cannot answer right now. See the window for what to do.';
+
+/* An agent that cannot answer now is refused. The orchestrator's message to an employee whose machine is getting back on
+   the line waits in line for it instead, and one refused is kept where failures reads it, with its code, the employee and
+   the task. */
+async function requireTakes(ctx: Ctx, me: Person, agent: AgentRow, task: Written['task']): Promise<void> {
+  const state = await agentState(ctx, agent.id);
+  if (state.ready) return;
+  if (agent.kind === 'orchestrator') throw new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready');
+  if (!me.via) throw new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready');
+  if (state.reason === 'machine_offline' && (await reconnecting(ctx, agent.id))) return;
+  const refusal = new ApiError(409, 'conflict', NOT_READY, 'agent_not_ready', { undelivered: state.reason ?? 'cannot_run' });
+  throw await refusedMessage(ctx, { companyId: me.companyId, agentId: me.via }, { recipient: agent.id, task }, refusal);
+}
+
 /* A person's words to an agent, from its window, through its Telegram bot or by the person's assistant, under that person's
    own rights: whoever calls this has checked that they may write to the agent. Returns the turn the words went into. */
 export async function writeToAgent(ctx: Ctx, me: Person, agent: AgentRow, input: Written): Promise<string> {
   if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
   const pictures = await ownPictures(ctx, me, agent.id, input.pictures);
-  if (!(await agentState(ctx, agent.id)).ready) {
-    throw agent.kind === 'orchestrator'
-      ? new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready')
-      : new ApiError(409, 'conflict', 'This employee cannot answer right now. See the window for what to do.', 'agent_not_ready');
-  }
+  await requireTakes(ctx, me, agent, input.task);
   /* Pictures alone read as their names wherever the words of a message show. */
   const words = input.text || pictures.map(p => p.name).join(', ');
   const standing = me.via ? undefined : await standingOf(ctx, me, agent);

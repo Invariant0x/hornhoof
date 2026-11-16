@@ -673,8 +673,8 @@ function workRunValues(input: RunInput, kind: RunKind) {
   return { memoryGb: kind === 'work' ? (input.memory ?? WORK_MEMORY_GB) : null, repeatable: kind === 'work' && input.repeatable === true };
 }
 
-function runEnvironment(job: RunJob, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, binding: CandidateRun | null) {
-  return mode.mode === 'product' ? newEnvironmentRequest(repositoryScope(job.companyId, found!.department.id, found!.repo.url), mode, binding?.baseCommit) : null;
+function runEnvironment(job: RunJob, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, binding: CandidateRun | null, minutes: number | undefined) {
+  return mode.mode === 'product' ? newEnvironmentRequest(repositoryScope(job.companyId, found!.department.id, found!.repo.url), mode, binding?.baseCommit, minutes) : null;
 }
 
 /* The caller holds the company row while taking its next run number. */
@@ -701,7 +701,7 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
         kind,
         ...pin,
         command: input.command ?? '',
-        environmentRequest: runEnvironment(job, mode, found, binding),
+        environmentRequest: runEnvironment(job, mode, found, binding, input.minutes),
         files,
         ...workRunValues(input, kind),
         parts,

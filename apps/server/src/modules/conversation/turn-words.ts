@@ -2,7 +2,7 @@ import { and, desc, eq, gt, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agentInbox, jobs } from '../../db/schema.js';
-import { readMessage } from '../events/parties.js';
+import { readMessage, type MessageEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
 
 export const UNHEARD_NOTE = 'Words sent into the running turn were not taken by the program. They go with its next turn.';
@@ -34,6 +34,42 @@ const computerClick = (data: unknown): boolean => Boolean((data as { computerCli
    computer-opening click are none of those. */
 export const byPerson = (w: { personId: string | null; kind: string; data: unknown }): boolean =>
   w.personId !== null || (w.kind === 'typed' && !computerClick(w.data));
+
+/* A repeat of a turn's words names who spoke last in that turn, for a command on a machine: a person's id, or null when it
+   is not known. */
+const SPOKE = 'machineSpeaker';
+
+/* Who said these words, for a command on a machine: the person by id; undefined for nobody's, which only words of a known
+   origin are: an employee's letter or report, a notice of a kind Hornhoof knows, the note of a click that opened a machine;
+   and null for any other, as whose they were is not known: an Enter in the terminal, words that may have gone in without
+   being kept, words with no person and no sender, an employee no one can name, several people's at once. A notice of what
+   a person did or said, a task or a comment of theirs, their answer or an improvement they gave, is theirs. A repeat goes
+   by whose words it repeats. */
+export function machineSpeaker(w: { personId: string | null; kind: string; data: unknown }): string | null | undefined {
+  if (w.personId) return w.personId;
+  const spoke = w.kind === 'typed' ? (w.data as Record<string, unknown> | null)?.[SPOKE] : undefined;
+  if (spoke === null || typeof spoke === 'string') return spoke;
+  if (accessNote(w.data)) return undefined;
+  const { data, message } = readMessage(w.data);
+  return message ? envelopeSpeaker(message, data) : null;
+}
+
+const accessNote = (data: unknown): boolean => computerClick(data) || Boolean((data as { computerAccess?: unknown } | null)?.computerAccess);
+
+/* The people an envelope names as its senders: one is the speaker, and more than one is not known. With none, a named
+   employee's words or a notice Hornhoof gave are nobody's; Hornhoof's own name on words that came with no notice is only
+   how it keeps words whose sender it did not know. */
+function envelopeSpeaker(envelope: MessageEnvelope, payload: unknown): string | null | undefined {
+  const people = new Set([envelope.from, ...(envelope.senders ?? [])].filter(p => p.kind === 'person').map(p => p.id));
+  if (people.size) {
+    const [only] = people;
+    return people.size === 1 && only ? only : null;
+  }
+  return knownNobody(envelope.from, payload) ? undefined : null;
+}
+
+const knownNobody = (from: MessageEnvelope['from'], payload: unknown): boolean =>
+  from.kind === 'agent' ? Boolean(from.id) : from.kind === 'hornhoof' && (payload as { notification?: unknown } | null)?.notification !== undefined;
 
 /* Whom a turn answers: the last person who wrote or typed into it; whoever started it when nothing came into it yet. */
 export function answeredWords<T extends { seq: number; personId: string | null; kind: string; data: unknown }>(
@@ -203,8 +239,21 @@ export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Pick<Standing, 'id
   return {
     createdBy: current.createdBy,
     answersCeo: current.answersCeo,
-    repeated: withUnheardFrom(repeatedWords(said, turnPrincipal(current, said), grants, source), unheardFrom),
+    repeated: withSpeaker(withUnheardFrom(repeatedWords(said, turnPrincipal(current, said), grants, source), unheardFrom), repeatedSpeaker(current, said, source)),
   };
+}
+
+/* Who spoke the words a repeat carries, for a machine: the person whose words they are when it repeats some, else who spoke
+   last in the turn; unknown while words were on their way into it, which may have gone in without being kept, and
+   undefined when no person did. */
+function repeatedSpeaker(current: Standing, said: readonly WordEvent[], source: TurnWords | null | undefined): string | null | undefined {
+  if (current.decisionInputPending) return null;
+  const own = source ? machineSpeaker({ ...source, kind: 'typed' }) : undefined;
+  return own !== undefined ? own : said.map(machineSpeaker).find(speaker => speaker !== undefined);
+}
+
+function withSpeaker(words: TurnWords, spoke: string | null | undefined): TurnWords {
+  return spoke === undefined ? words : { ...words, data: { ...(words.data as Record<string, unknown>), [SPOKE]: spoke } };
 }
 
 /* Words repeated because the program never took them name the turn they were typed into, to go on in its session. */

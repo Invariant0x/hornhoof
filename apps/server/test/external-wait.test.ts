@@ -627,7 +627,7 @@ describe('external task wait', () => {
       arguments: { employee: c.head.id, task: task.number, text: 'Not assigned this stage yet.' },
     })) as { isError?: boolean; content: { text: string }[] };
     expect(beforeGate.isError).toBe(true);
-    expect(beforeGate.content[0]!.text).toBe(`#${task.number} is not with you.`);
+    expect(beforeGate.content[0]!.text).toBe(`#${task.number} is not with you.\nNot delivered: reason task_not_yours, recipient ${c.head.id}, task #${task.number}.`);
 
     /* While the holder waits, its own message to the head keeps its external wait intact. */
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
@@ -665,7 +665,7 @@ describe('external task wait', () => {
         arguments: { employee: to, task: task.number, text: 'Unrelated.' },
       })) as { isError?: boolean; content: { text: string }[] };
       expect(res.isError, `outsider -> ${to}`).toBe(true);
-      expect(res.content[0]!.text).toBe(`#${task.number} is not with you.`);
+      expect(res.content[0]!.text).toBe(`#${task.number} is not with you.\nNot delivered: reason task_not_yours, recipient ${to}, task #${task.number}.`);
     }
   });
 
@@ -734,7 +734,7 @@ describe('external task wait', () => {
         arguments: { employee: to, task: laidOut.number, text: 'Not mine to oversee.' },
       })) as { isError?: boolean; content: { text: string }[] };
       expect(res.isError, `${from} -> ${to}`).toBe(true);
-      expect(res.content[0]!.text).toBe(`#${laidOut.number} is not with you.`);
+      expect(res.content[0]!.text).toBe(`#${laidOut.number} is not with you.\nNot delivered: reason task_not_yours, recipient ${to}, task #${laidOut.number}.`);
     }
 
     /* A person writing through the HTTP endpoint also gains nothing on non-holders, while reaching the holder. */

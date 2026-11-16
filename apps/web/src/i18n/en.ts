@@ -840,13 +840,9 @@ export const en = {
         lead: (reason: string) => `Cannot take the server: ${reason}`,
         phone: 'it is a phone.',
         noCore: (host: string) => `Hornhoof runs here without Docker; make ${host} a full machine.`,
-        memory: 'Docker here gets less than 4 GB of memory.',
         scope: (person: string, departments: number | undefined) =>
           `the company's data stays only on machines of people who see the whole company, and ${person} ${departments === undefined ? 'does not' : departments === 0 ? 'sees no department' : departments === 1 ? 'sees one department' : `sees ${departments} departments`}.`,
         noLink: "the company's hidden name at hornhoof.org is not made yet; Hornhoof makes it once hornhoof.org answers.",
-        measuring: 'measuring this machine.',
-        disk: (free: string, need: string) => `${free} GB free; it needs ${need} GB.`,
-        fsync: (ms: string) => `the disk saves slowly (${ms} ms); it needs under 50 ms.`,
       },
       onlyCopy: (host: string) => `${host} holds the only up-to-date copy; give another machine a place first.`,
     },

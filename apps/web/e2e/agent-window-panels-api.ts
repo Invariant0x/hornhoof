@@ -2,12 +2,15 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import type { AgentCardView, NoteView } from '../src/types';
 import { CARD, serveAgentWindow, type AgentFixture } from './agent-window-api';
 import { box, chooseTerminal } from './api';
-import { CLOSED, openWindow, type Settings } from './computer-strip-api';
+import { CLOSED, openWindow, SETTINGS, type Settings } from './computer-strip-api';
 
 /* The side panels of an agent's window, for the orchestrator and for an employee who heads a department and so keeps a
    notebook too. */
 
 export type Who = 'orchestrator' | 'employee';
+export const PEOPLE: Who[] = ['orchestrator', 'employee'];
+export const WIDE = SETTINGS.filter(s => s.width === 1440);
+export const NARROW = SETTINGS.filter(s => s.width === 375);
 type Rect = { x: number; y: number; width: number; height: number };
 
 const WORDS = {
