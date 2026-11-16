@@ -1,10 +1,12 @@
 import type { NodeMessage, ProgramState } from '@hornhoof/protocol';
+import type { ProgramView } from '@hornhoof/protocol/program-operator';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, requests, subscriptions } from '../src/db/schema.js';
 import { insertTurn, pump, TURN_TIMEOUT_MS } from '../src/modules/conversation/queue.js';
 import { keyOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { BUILTIN } from './builtin.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -199,6 +201,85 @@ describe('a running turn with a live program', () => {
 });
 
 describe('a live program its queue waits behind', () => {
+  function screens(c: Awaited<ReturnType<typeof company>>, turn: string) {
+    vi.spyOn(c.ctx.hub, 'hasProgramOperator').mockReturnValue(true);
+    let view: Partial<ProgramView> = {};
+    const asked: string[] = [];
+    c.send.mockImplementation((node, msg) => {
+      if (msg.type === 'program.view_get') {
+        asked.push(keyOf(node));
+        receiveOperatorReply(c.ctx, node, {
+          type: 'program.view', agentKey: msg.agentKey, request: msg.request,
+          result: 'ok', reason: null, snapshot: 'fresh-snapshot', instance: 'program-1', jobId: turn,
+          state: 'idle', tool: null, question: null, input: 'empty', undelivered: false,
+          cols: 80, rows: 24, cells: 'completed turn and empty prompt', ...view,
+        });
+      }
+      return true;
+    });
+    return { asked, show: (next: Partial<ProgramView>) => { view = next; } };
+  }
+
+  it('closes a lost end from two independent idle screens even while rejected hooks leave work reported', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'The branch is ready.');
+    const screen = screens(c, turn);
+    const lastSign = Date.now();
+    c.later(2 * MIN);
+    await c.pulse(c.node, turn, 'thinking', lastSign, lastSign);
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    c.later(2 * MIN);
+    await c.pulse(c.node, turn, 'thinking', lastSign, lastSign);
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('done');
+    expect((await c.job(next)).status).toBe('running');
+    expect(screen.asked).toEqual([keyOf(c.node), keyOf(c.node)]);
+  });
+
+  it('closes a lost end with no waiting message and does not inherit idle time across instances or activity', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const screen = screens(c, turn);
+    c.later(2 * MIN);
+    await reconcile(c.ctx, new Date());
+    screen.show({ instance: 'program-2' });
+    c.later(2 * MIN);
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    screen.show({ instance: 'program-2', state: 'working' });
+    c.later();
+    await reconcile(c.ctx, new Date());
+    screen.show({ instance: 'program-2' });
+    c.later();
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    c.later(2 * MIN);
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('done');
+  });
+
+  it.each([
+    { jobId: 'another-turn' }, { result: 'refused' as const }, { state: 'working' as const },
+    { tool: 'Bash' }, { input: 'text' as const }, { input: 'unknown' as const },
+    { undelivered: true }, { instance: null }, { snapshot: null },
+    { question: { id: 'q', kind: 'permission' as const, text: 'Allow?', tool: 'Bash', callId: null } },
+  ])('does not close from unsafe or uncertain screen %j', async unsafe => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const screen = screens(c, turn);
+    c.later(2 * MIN);
+    await reconcile(c.ctx, new Date());
+    screen.show(unsafe);
+    c.later(2 * MIN);
+    await reconcile(c.ctx, new Date());
+    screen.show({});
+    c.later();
+    await reconcile(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
   /* The orchestrator's turn its node still runs, whose program has stood idle at its prompt since a minute after it began,
      while Ivan's message waits behind it: the end of that turn never reached Hornhoof. */
   async function idleBehind(c: Awaited<ReturnType<typeof company>>) {

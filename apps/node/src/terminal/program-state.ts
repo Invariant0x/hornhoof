@@ -1,7 +1,8 @@
 import { PROGRAM_SCREEN_MAX, type NodeMessage, type ProgramExit, type ProgramState } from '@hornhoof/protocol';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { redact } from '../redact.js';
-import { agyPrompt } from './input.js';
+import { agyPrompt, atEmptyPrompt } from './input.js';
+import { stripEscapes } from '../providers/process.js';
 import type { TermProgram } from './programs.js';
 
 type Kind = TermProgram['kind'];
@@ -26,6 +27,17 @@ export function programState(screen: string | null, pending: Pending | null, run
   if (!running) return 'idle';
   if (pending) return pending.asking || QUESTIONS.has(pending.name) ? 'asking' : 'tool';
   return retry ? 'retrying' : 'thinking';
+}
+
+/* An empty input stays visible during work. Only Claude's completed-duration line immediately above its current empty
+   prompt proves a finished response independently of hooks. Unknown layouts and other programs give no such proof. */
+export function idleScreen(kind: Kind, screen: string): boolean {
+  if (kind !== 'claude' || !atEmptyPrompt(kind, screen)) return false;
+  const plain = stripEscapes(screen);
+  const prompt = [...plain.matchAll(/^[ \t]*❯[^\n]*$/gm)].at(-1);
+  if (!prompt) return false;
+  const above = plain.slice(0, prompt.index).trimEnd().replace(/(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/, '').trimEnd();
+  return /(?:^|\n)[ \t]*[✻✽✢✳✶✹] [^\n…]+ for \d[^\n…]* · done [^\n]+$/.test(above);
 }
 
 /* The last 40 lines a gone program showed, rows left blank counted as one, cut to what Hornhoof takes of them. */

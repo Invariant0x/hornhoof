@@ -1,4 +1,5 @@
 import type { NodeMessage, ProgramState } from '@hornhoof/protocol';
+import type { ProgramView } from '@hornhoof/protocol/program-operator';
 import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
@@ -6,6 +7,7 @@ import { enqueueTurn } from '../conversation/queue.js';
 import { publishWorking } from '../events/store.js';
 import { identityOf, keyOf, ownBuiltin, type NodeIdentity } from '../nodes/hub.js';
 import { failOpenJobs, jobsOf } from '../nodes/messages.js';
+import { requestProgramView } from '../program-operator/rpc.js';
 import { agentProgramState, alreadyAlerted, screenReader } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { afterJob } from './wake.js';
@@ -72,6 +74,7 @@ export const IDLE_END_MS = 2 * 60_000;
 export const RECLOSE_MS = 30 * 60_000;
 
 const IDLE_CLOSED = 'Hornhoof closed this turn as done: its program stood idle at its prompt for 2 minutes, with no answer coming, no tool and no question, while the next messages waited, so the end of the turn was lost. They go into the same session.';
+const SCREEN_CLOSED = 'Hornhoof closed this turn as done: two independent views of the same program showed its completed response and empty prompt at least 2 minutes apart, with no tool, question or undelivered words. The end of the turn was lost. Its next messages go into the same session.';
 
 const closedAt = new WeakMap<Ctx, Map<string, number>>();
 const closesOf = (ctx: Ctx) => {
@@ -79,6 +82,45 @@ const closesOf = (ctx: Ctx) => {
   closedAt.set(ctx, map);
   return map;
 };
+type IdleView = { instance: string; cells: string; signAt: number; since: number; at: number };
+const idleViews = new WeakMap<Ctx, Map<string, IdleView>>();
+
+function emptyView(view: ProgramView): boolean {
+  return view.state === 'idle' && view.input === 'empty' && !view.tool && !view.question && !view.undelivered;
+}
+
+function continuousView(old: IdleView | undefined, current: IdleView): boolean {
+  return old !== undefined && old.instance === current.instance && old.cells === current.cells && old.signAt === current.signAt && current.at >= old.at && current.at - old.at <= PULSE_MS;
+}
+
+/* Query the running job's exact node, not the newest queued job's placement. A failed look, a new instance, work or a draft
+   breaks the observation. Fresh looks are required throughout: a disconnected node cannot accrue idle time. */
+async function idleOnScreen(ctx: Ctx, job: Job, node: NodeIdentity, now: number): Promise<boolean> {
+  const known = idleViews.get(ctx) ?? new Map<string, IdleView>();
+  idleViews.set(ctx, known);
+  const view = await requestProgramView(ctx, { agentId: job.agentId!, node });
+  if (!view || view.result !== 'ok' || view.jobId !== job.id || !view.instance || !view.snapshot || !emptyView(view)) {
+    known.delete(job.id);
+    return false;
+  }
+  const old = known.get(job.id);
+  const signAt = agentProgramState(ctx, job).program?.signAt ?? 0;
+  const current = { instance: view.instance, cells: view.cells, signAt, since: now, at: now };
+  if (continuousView(old, current)) current.since = old!.since;
+  known.set(job.id, current);
+  return now - current.since >= IDLE_END_MS;
+}
+
+async function recoverScreenTurn(ctx: Ctx, job: Job, node: NodeIdentity, now: Date): Promise<void> {
+  if (now.getTime() - (job.startedAt ?? job.createdAt).getTime() < ASK_AFTER_MS) return;
+  if (await idleOnScreen(ctx, job, node, now.getTime())) await closeIdleTurn(ctx, job, node, now, SCREEN_CLOSED);
+}
+
+function forgetIdleViews(ctx: Ctx, turns: { job: Job }[]): void {
+  const active = new Set(turns.map(t => t.job.id));
+  const known = idleViews.get(ctx);
+  if (known) for (const id of known.keys()) if (!active.has(id)) known.delete(id);
+}
 
 /* The oldest of the agent's messages that has waited behind its running turn since before the given time. */
 async function waitingBehind(ctx: Ctx, agentId: string, before: number): Promise<Job | null> {
@@ -97,12 +139,12 @@ function idleFor(ctx: Ctx, job: Job, now: number): number | null {
 
 /* The turn is over as done, and the node lets it go in the same session before the next turn comes to it, which it takes in
    that session once this one has let go: nothing starts the program again. */
-async function closeIdleTurn(ctx: Ctx, job: Job, node: NodeIdentity, now: Date): Promise<void> {
+async function closeIdleTurn(ctx: Ctx, job: Job, node: NodeIdentity, now: Date, why = IDLE_CLOSED): Promise<void> {
   const [closed] = await ctx.db.update(jobs).set({ status: 'done', result: '', finishedAt: now }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running'))).returning({ id: jobs.id });
   if (!closed) return;
   closesOf(ctx).set(job.agentId!, now.getTime());
   ctx.hub.send(node, { type: 'job.cancel', jobId: job.id });
-  await logTurnFact(ctx, job, IDLE_CLOSED, { idleClosed: true });
+  await logTurnFact(ctx, job, why, { idleClosed: true });
   await publishWorking(ctx, job.companyId);
   await afterJob(ctx, job.id);
 }
@@ -139,13 +181,23 @@ async function tellOperations(ctx: Ctx, job: Job, waiting: Job, busy: ReadonlySe
    instead, not a person. */
 export async function moveStalledQueues(ctx: Ctx, now: Date): Promise<void> {
   const turns = await runningTurns(ctx);
+  forgetIdleViews(ctx, turns);
   const busy = new Set(turns.flatMap(t => (t.job.agentId ? [t.job.agentId] : [])));
   for (const { job, plan } of turns) {
     const idle = idleFor(ctx, job, now.getTime());
     const node = identityOf({ kind: plan }, job.nodeId, job.builtinMachine, ownBuiltin(ctx.config));
-    if (!job.agentId || !node || idle === null || idle < IDLE_END_MS) continue;
+    if (!job.agentId || !node) continue;
+    if (idle === null) {
+      await recoverScreenTurn(ctx, job, node, now);
+      continue;
+    }
+    if (idle < IDLE_END_MS) continue;
     const waiting = await waitingBehind(ctx, job.agentId, now.getTime() - IDLE_END_MS);
-    if (!waiting) continue;
+    if (!waiting) {
+      await recoverScreenTurn(ctx, job, node, now);
+      continue;
+    }
+    idleViews.get(ctx)?.delete(job.id);
     const last = closesOf(ctx).get(job.agentId);
     if (last === undefined || now.getTime() - last > RECLOSE_MS) await closeIdleTurn(ctx, job, node, now);
     else await tellOperations(ctx, job, waiting, busy, now);

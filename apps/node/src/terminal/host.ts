@@ -24,7 +24,7 @@ import { eraseKeys, flat, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type
 import { sendTerminalOutput, ViewHistory } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
-import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
+import { ProgramWatch, READY, REPORT_MS, idleScreen, programState, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
@@ -486,8 +486,15 @@ export class TerminalHost {
     const a = this.agents.get(key);
     if (!a?.program || !a.instance || !(await this.opts.tmux.alive(a.name))) return null;
     this.drain(a);
-    const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
-    return { ...this.programIdentity(key, a), working: a.busy, ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    const input = inputOf(a.program.kind, screen);
+    return { ...this.programIdentity(key, a), working: a.busy && !this.screenCompleted(a, screen), ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
+  }
+
+  private screenCompleted(a: Agent, screen: string): boolean {
+    if (!a.program || !a.took || a.typing != null) return false;
+    if (a.calls.size || a.question || a.operatorQuestion || a.retry || a.restarting) return false;
+    return idleScreen(a.program.kind, screen);
   }
 
   /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
@@ -566,7 +573,8 @@ export class TerminalHost {
 
   /* The processes an agent's session starts its program in. */
   private async panes(key: string): Promise<number[]> {
-    const out = await this.opts.tmux.run(['list-panes', '-s', '-t', `=${this.agent(key).name}`, '-F', '#{pane_pid}']).catch(() => '');
+    const command = ['list-panes', '-s', '-t', `=${this.agent(key).name}`, '-F', '#{pane_pid}'];
+    const out = await this.opts.tmux.run(command).catch(() => this.opts.tmux.run(command));
     return out.split('\n').filter(line => /^\d+$/.test(line)).map(Number);
   }
 

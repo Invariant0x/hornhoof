@@ -181,7 +181,7 @@ export class Bridge {
     const hint = `${key}:${peer.pid ?? 'legacy'}`;
     let found = known.get(hint);
     if (!found) {
-      found = this.owns(key, peer).catch(() => false);
+      found = this.owns(key, peer).catch(error => { known.delete(hint); throw error; });
       known.set(hint, found);
     }
     return found;
