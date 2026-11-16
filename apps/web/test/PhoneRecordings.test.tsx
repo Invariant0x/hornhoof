@@ -6,7 +6,7 @@ import { until } from './until';
 
 it('opens recorded frames, advances on virtual time and stops at the last frame', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
-  mockApi({ 'GET /api/tasks/t1/phone-recordings': [200, { recordings: [{ id: 's1', phone: 'Pixel', agent: 'Assistant', status: 'ended', reason: 'completed', startedAt: '2026-11-16T12:00:00Z', endedAt: '2026-11-16T12:01:00Z', frames: [1, 2].map(sequence => ({ sequence, at: `2026-11-16T12:00:0${sequence}Z`, masked: true, imageUrl: `/api/phone-sessions/s1/frames/${sequence}/image` })) }] }] });
+  mockApi({ 'GET /api/tasks/t1/phone-recordings': [200, { recordings: [{ id: 's1', phone: 'Pixel', agent: 'Assistant', status: 'ended', reason: 'completed', startedAt: '2026-11-16T12:00:00Z', endedAt: '2026-11-16T12:01:00Z', frames: [1, 2].map(sequence => ({ sequence, at: `2026-11-16T12:00:0${sequence}Z`, imageUrl: `/api/phone-sessions/s1/frames/${sequence}/image` })) }] }] });
   const view = render(<PhoneRecordings taskId="t1" />);
   try {
     expect(screen.getByRole('heading', { name: 'Phone recordings' })).toBeInTheDocument();

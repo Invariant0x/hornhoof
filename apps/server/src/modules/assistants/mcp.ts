@@ -11,7 +11,6 @@ import { ApiError, refusal } from '../../errors.js';
 import { lastSeqOf } from './events.js';
 import { tellOwner } from './replies.js';
 import { callSkill, hasSkills } from './skills.js';
-import { registerVaultTools } from '../vault/tools.js';
 import { registerPhoneTools } from '../phones/tools.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, writeFor } from './routes.js';
 
@@ -114,16 +113,10 @@ export async function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: 
   const owner = () => (actor ??= assistantOfAgent(ctx.db, job.agentId));
   const server = new McpServer({ name: 'hornhoof', version: ctx.config.version });
   registerTools(server, ctx, owner, new AbortController().signal, job.agentId);
-  /* The company's vault, as for every agent of the company: the assistant's own agent, in this turn. */
-  registerVaultTools(server, ctx, async () => {
-    const [me] = await ctx.db.select({ companyId: agents.companyId, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, job.agentId));
-    if (!me) throw new ApiError(401, 'unauthorized', 'This tool token is not valid.', 'tool_token_invalid');
-    return { id: job.agentId, companyId: me.companyId, departmentId: me.departmentId, jobId: job.id };
-  });
   registerPhoneTools(server, ctx, async () => {
-    const [me] = await ctx.db.select({ companyId: agents.companyId, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, job.agentId));
+    const [me] = await ctx.db.select({ companyId: agents.companyId }).from(agents).where(eq(agents.id, job.agentId));
     if (!me) throw new ApiError(401, 'unauthorized', 'This tool token is not valid.', 'tool_token_invalid');
-    return { id: job.agentId, companyId: me.companyId, departmentId: me.departmentId, jobId: job.id };
+    return { id: job.agentId, companyId: me.companyId, jobId: job.id };
   });
   server.registerTool(
     'tell_owner',

@@ -10,7 +10,6 @@ const Operation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('tree'), serial: UsbSerial }),
   z.strictObject({ kind: z.literal('screenshot'), serial: UsbSerial }),
   z.strictObject({ kind: z.literal('act'), serial: UsbSerial, action: PhoneOperation.refine(op => op.kind !== 'capture') }),
-  z.strictObject({ kind: z.literal('type'), serial: UsbSerial, value: z.string().min(1).max(4096).regex(/^[\x20-\x7e]+$/) }),
 ]);
 export const UsbRequest = z.strictObject({ type: z.literal('request'), id: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/), grant: PhoneGrant.nullable(), operation: Operation });
 export const UsbCancel = z.strictObject({ type: z.literal('cancel'), id: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/) });
@@ -93,7 +92,6 @@ export class UsbHost {
       case 'tree': return this.deps.adb.tree(op.serial, signal);
       case 'screenshot': return (await this.deps.adb.screenshot(op.serial, signal)).toString('base64');
       case 'act': await this.deps.adb.act(op.serial, op.action, signal); return null;
-      case 'type': await this.deps.adb.type(op.serial, op.value, signal); return null;
     }
   }
 }

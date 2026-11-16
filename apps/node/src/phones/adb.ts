@@ -13,7 +13,7 @@ export const ADB_MAX_BYTES = 8 * 1024 * 1024;
 /* Remote shell arguments are quoted even though adb itself starts with shell:false. */
 export const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
-/* adb treats %s as a space. A literal percent is sent separately, so passwords containing %s are not changed. */
+/* adb treats %s as a space. A literal percent is sent separately, so a text with %s in it, a password too, goes in as written. */
 export function textScript(value: string): string {
   if (!value || value.length > 4096 || !/^[\x20-\x7e]+$/.test(value)) throw new Error('phone_text_unsupported');
   return (value.match(/%|[^%]+/g) ?? []).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}\n`).join('');
@@ -116,11 +116,6 @@ export class PhoneAdb {
     if (op.kind === 'capture') throw new Error('phone_capture_needs_mask');
     const script = await this.script(serial, op, signal);
     await this.call(serial, ['shell'], signal, script);
-  }
-
-  /* Shared SecretFills owns secret resolution. The phone adapter reveals only to this stdin sink. */
-  async type(serial: string, value: string, signal: AbortSignal): Promise<void> {
-    await this.call(serial, ['shell'], signal, textScript(value));
   }
 
   private async call(serial: string, args: string[], signal: AbortSignal, input?: string): Promise<Buffer> {

@@ -43,7 +43,7 @@ export const PhoneElement = z.strictObject({
 export type PhoneElement = z.infer<typeof PhoneElement>;
 export const PhoneCapture = z.strictObject({
   png: z.string().max(PHONE_FRAME_MAX).regex(/^[A-Za-z0-9+/]+={0,2}$/).nullable(), width: coordinate, height: coordinate,
-  elements: z.array(PhoneElement).max(5000), masked: z.boolean(),
+  elements: z.array(PhoneElement).max(5000),
 });
 export type PhoneCapture = z.infer<typeof PhoneCapture>;
 export const PhoneBinding = z.strictObject({

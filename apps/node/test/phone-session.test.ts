@@ -72,18 +72,4 @@ describe('the execution node owns one fenced session for a phone', () => {
     await expect(sessions.use(grant.sessionId, 2, async () => 'late')).rejects.toThrow('phone_session_gone');
   });
 
-  it('installs a whole-screen privacy shield before input and invalidates captures on either edge', async () => {
-    const sessions = new PhoneSessions();
-    sessions.open(grant);
-    const before = sessions.view(grant.sessionId, 1);
-    const release = sessions.shield(grant.sessionId, 1);
-    expect(before.valid()).toBe(false);
-    const during = sessions.view(grant.sessionId, 1);
-    expect(during.shielded).toBe(true);
-    release();
-    release();
-    expect(during.valid()).toBe(false);
-    expect(sessions.view(grant.sessionId, 1).shielded).toBe(false);
-    sessions.close();
-  });
 });

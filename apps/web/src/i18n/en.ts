@@ -20,7 +20,7 @@ type SkinErrorWords = Record<SkinErrorCode | 'read_failed', (key: string, value:
 
 export const en = {
   phones: {
-    heading: 'Company phones', intro: 'Let your company assistants work on your Android phone, one at a time. You sign in on the phone yourself. Stop puts it back in your hands.',
+    heading: 'Company phones', intro: 'Let your company assistants work on your Android phone, one at a time. Stop puts it back in your hands.',
     add: 'Add phone', find: 'Find phone', cancel: 'Cancel', name: 'Phone name', computer: 'Computer', chooseComputer: 'Choose a computer', connection: 'Connection', usb: 'USB cable', network: 'Wireless debugging', address: 'Phone address',
     usbHint: 'Enable USB debugging on the phone, connect it to this computer and approve the computer key on the phone.',
     networkHint: 'Keep the phone and computer on the same network. Copy the address from Wireless debugging. For a first connection, also enter the address and code from Pair using pairing code.',
@@ -31,7 +31,7 @@ export const en = {
     devices: { device: 'Ready', unauthorized: 'Approve on the phone', offline: 'Not connected', unverified: 'Could not verify this phone' },
     states: { available: 'Available to assistants', busy: 'An assistant is using it', owner: 'In your hands', offline: 'Computer is offline' },
     control: 'Screen and control', watch: 'Watch screen', hide: 'Hide screen', stop: 'Stop', resume: 'Lend to assistants', stopping: 'Stop requested. Waiting for the computer to confirm.',
-    live: 'Live screen', waitingFrame: 'Waiting for a screen. An assistant session starts the recording.', paused: 'The screen is paused. The phone is in your hands.', shielded: 'This screen is hidden or could not be read safely.', updated: (at: string) => `Screen from ${at}`, screenFor: (name: string) => `Screen of ${name}`, screenError: 'The screen did not load. Try again.',
+    live: 'Live screen', waitingFrame: 'Waiting for a screen. An assistant session starts the recording.', paused: 'The screen is paused. The phone is in your hands.', noPicture: 'This screen could not be read.', updated: (at: string) => `Screen from ${at}`, screenFor: (name: string) => `Screen of ${name}`, screenError: 'The screen did not load. Try again.',
     recordings: 'Phone recordings', noRecordings: 'No phone sessions on this task yet.', recordingError: 'Could not load the phone recordings.', play: 'Play', pause: 'Pause', previous: 'Previous frame', next: 'Next frame', replay: 'Open recording', closeReplay: 'Close recording', frameOf: (n: number, total: number) => `Frame ${n} of ${total}`,
     recordingStates: { queued: 'Waiting', starting: 'Starting', active: 'Recording', revoking: 'Stopping', ended: 'Finished', cancelled: 'Cancelled' },
   },
@@ -152,7 +152,7 @@ export const en = {
     menu: 'Settings',
     title: 'Settings',
     groupsLabel: 'Settings groups',
-    groups: { profile: 'Profile', appearance: 'Appearance & language', integrations: 'Integrations', passwords: 'Passwords', messaging: 'External messaging', company: 'Company & access' },
+    groups: { profile: 'Profile', appearance: 'Appearance & language', integrations: 'Integrations', messaging: 'External messaging', company: 'Company & access' },
     /* What a group holds, under its heading. Integrations and External messaging say it in their own words. */
     intro: {
       appearance: 'Only for you and only in this browser. Other members keep their language and theme.',
@@ -261,63 +261,6 @@ export const en = {
     intro: 'Outside tools the employees of every department work with. Each one is connected for the whole company.',
     connected: 'Connected',
     notConnected: 'Not connected',
-  },
-  /* The Passwords group: the company's saved site sign-ins, which agents use without seeing a password or a code. */
-  vault: {
-    intro: 'Sign-ins to sites that the company keeps for its employees and assistants. They sign in with them without ever seeing the password or the one-time code.',
-    none: 'No sign-ins are saved yet.',
-    add: 'Add a sign-in',
-    addTitle: 'New sign-in',
-    changeTitle: (name: string) => `Change ${name}`,
-    name: 'Name',
-    nameHint: 'Employees ask for the sign-in by this name.',
-    site: 'Site',
-    siteHint: 'The address of the sign-in page, such as https://example.com/login. The password goes only into pages of this site.',
-    login: 'Login',
-    password: 'Password',
-    passwordHint: 'Typed only here. Nobody sees it again, not in Hornhoof, not an employee.',
-    passwordKeep: 'Leave it empty to keep the saved password.',
-    code: 'One-time code key (optional)',
-    codeHint: 'The key the site gives for an authenticator app, or the otpauth:// address from its QR code. Leave it empty if the site asks for no code.',
-    codeKeep: 'Leave it empty to keep the saved key.',
-    removeCode: 'Remove the one-time code key',
-    scope: 'Who may use it',
-    scopeHint: 'Every employee and assistant of the company, unless you keep it for one department or one employee.',
-    scopeCompany: 'Everyone in the company',
-    scopeDepartment: 'One department',
-    scopeAgent: 'One employee',
-    department: 'Department',
-    agent: 'Employee',
-    choose: 'Choose',
-    needName: 'Give the sign-in a name.',
-    needSite: 'Enter the site or its address.',
-    needLogin: 'Enter the login.',
-    needPassword: (min: number) => `Enter a password of at least ${min} characters.`,
-    badCode: 'This is not a key an authenticator app takes. Copy it again from the site, or leave it empty.',
-    needDepartment: 'Choose the department.',
-    needAgent: 'Choose the employee.',
-    nameTaken: 'A sign-in with this name is already saved.',
-    loginIs: (login: string) => `Login: ${login}.`,
-    withCode: 'With a one-time code.',
-    forEveryone: 'For everyone in the company.',
-    keptForDepartment: (name: string) => `Only for the department ${name}.`,
-    keptForAgent: (name: string) => `Only for ${name}.`,
-    addedBy: (name: string, when: string) => `Added by ${name}, ${when}.`,
-    log: 'History',
-    logTitle: (name: string) => `History of ${name}`,
-    logLine: (kind: 'used' | 'created' | 'changed' | 'removed', who: string, task: number | null, target: 'browser' | 'phone' | null, status: string | null) =>
-      kind === 'used'
-        ? `${who} signed in${target === 'phone' ? ' on a phone' : target === 'browser' ? ' in the browser' : ''}${task !== null ? ` for task #${task}` : ''}: ${status ?? 'sent'}.`
-        : kind === 'created'
-          ? `${who} added it.`
-          : kind === 'changed'
-            ? `${who} changed it.`
-            : `${who} removed it.`,
-    change: 'Change',
-    remove: 'Remove',
-    removeAsk: (name: string) => `Remove ${name}? Employees can no longer sign in with it.`,
-    yesRemove: 'Remove',
-    keep: 'Keep',
   },
   googleSheets: {
     title: 'Google Sheets',
@@ -2296,10 +2239,6 @@ export const en = {
     repo_exists: 'This product already has a repository. Create the new one on the department, where it comes as a new product.',
     google_sheets_invalid: 'Paste valid Google service account or OAuth JSON credentials, and enter a valid share email address or leave it empty.',
     google_sheets_share_needed: 'A service account opens the spreadsheets it creates to no one else. Enter the email of the Google account to share them with.',
-    vault_invalid: 'Check the fields of the sign-in and try again.',
-    vault_unknown: 'This sign-in is no longer saved.',
-    vault_not_allowed: 'Only the person who added this sign-in and the CEO change or remove it.',
-    vault_name_taken: 'A sign-in with this name is already saved.',
     relay_unreachable: 'hornhoof.org does not answer now. Try again in a few minutes.',
     link_taken: 'This link is taken already. Pick another name.',
     link_reserved: 'This name is kept for Hornhoof itself. Pick another one.',

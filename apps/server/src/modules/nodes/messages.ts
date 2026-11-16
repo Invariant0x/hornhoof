@@ -36,7 +36,6 @@ import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
 import { fallBackFrom, heldUntil } from '../subscriptions/fallback.js';
 import { closeCheck, openCheck } from '../tools/outside.js';
-import { vaultNodeGone, vaultNodeMessage } from '../vault/fill.js';
 import { phoneNodeGone } from '../phones/rpc.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -339,7 +338,6 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
   if (await parkUnknown(ctx, id, msg)) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
-  if (vaultNodeMessage(ctx, id, msg)) return;
   if (await testNodeMessage(ctx, id, msg)) return;
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Terminal and live word messages have their own handlers.
@@ -504,7 +502,6 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
 export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void> {
   /* A newer connection of the same node keeps the views. */
   if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueAway(ctx, id); }
-  vaultNodeGone(ctx, id);
   phoneNodeGone(ctx, id);
   if (id.kind !== 'node') return;
   await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));

@@ -1,14 +1,11 @@
-import { PhoneCapture, PhoneServerMessage, sameSite, type PhoneFrame, type PhoneReply, type PhoneGrant, type PhoneBinding } from '@hornhoof/protocol';
-import type { FillAdapter, FillReceipt, FillValues, TargetOf } from '../secret-fill/index.js';
-import type { FillField } from '@hornhoof/protocol';
+import { PhoneCapture, PhoneServerMessage, type PhoneFrame, type PhoneReply, type PhoneGrant, type PhoneBinding } from '@hornhoof/protocol';
 import type { PhoneAdb } from './adb.js';
-import { safeCapture, parsePhoneTree } from './capture.js';
+import { phoneCapture } from './capture.js';
 import { PhoneSessions, type PhoneSessionView } from './sessions.js';
-import { holdExact } from '../redact.js';
 
-export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act' | 'type'>;
-export type PhoneExecutorDeps = { drivers: { network: PhoneDriver; usb: ((grant: PhoneGrant | null) => PhoneDriver) | null }; revokeUsb?(binding: PhoneBinding, sessionId: string, generation: number): Promise<boolean>; send(message: PhoneReply | PhoneFrame): void; hide(text: string): string };
-const hiddenFrame = (): PhoneCapture => ({ png: null, width: 0, height: 0, elements: [], masked: true });
+export type PhoneDriver = Pick<PhoneAdb, 'connect' | 'pair' | 'identity' | 'devices' | 'tree' | 'screenshot' | 'act'>;
+export type PhoneExecutorDeps = { drivers: { network: PhoneDriver; usb: ((grant: PhoneGrant | null) => PhoneDriver) | null }; revokeUsb?(binding: PhoneBinding, sessionId: string, generation: number): Promise<boolean>; send(message: PhoneReply | PhoneFrame): void };
+const noFrame = (): PhoneCapture => ({ png: null, width: 0, height: 0, elements: [] });
 const FRAME_MS = 1500;
 
 export class PhoneExecutor {
@@ -51,17 +48,6 @@ export class PhoneExecutor {
     for (const id of this.#timers.keys()) this.clearTimer(id);
   }
 
-  fillAdapter(): FillAdapter<'phone'> {
-    return {
-      kind: 'phone',
-      shield: async target => {
-        const release = this.#sessions.shield(target.phoneSessionId, target.generation);
-        return async () => { release(); };
-      },
-      fill: (target, values, fields, signal) => this.fill(target, values, fields, signal),
-    };
-  }
-
   private driver(transport: PhoneBinding['transport'], grant: PhoneGrant | null): PhoneDriver {
     if (transport === 'network') return this.deps.drivers.network;
     const driver = this.deps.drivers.usb?.(grant);
@@ -77,7 +63,6 @@ export class PhoneExecutor {
       const stop = new AbortController();
       if (m.pairing) {
         if (m.transport !== 'network') return reply('failed');
-        holdExact([m.pairing.code], Date.now() + 600_000);
         if (await driver.pair(m.pairing.endpoint, m.pairing.code, stop.signal) !== 'paired') return reply('needs_person');
       }
       if (m.endpoint && await driver.connect(m.endpoint, stop.signal) !== 'connected') return reply('needs_person');
@@ -123,13 +108,8 @@ export class PhoneExecutor {
   private async capture(state: PhoneSessionView, driver: PhoneDriver): Promise<PhoneCapture> {
     const serial = state.grant.binding.serial;
     await this.assertDevice(state, driver);
-    const before = await driver.tree(serial, state.signal);
-    const png = await driver.screenshot(serial, state.signal);
-    const after = await driver.tree(serial, state.signal);
-    await this.assertDevice(state, driver);
-    if (!state.valid()) return hiddenFrame();
-    const clean = safeCapture(after, png, state.shielded || before !== after, this.deps.hide);
-    return PhoneCapture.safeParse(clean).success ? clean : hiddenFrame();
+    const capture = phoneCapture(await driver.tree(serial, state.signal), await driver.screenshot(serial, state.signal));
+    return PhoneCapture.safeParse(capture).success ? capture : noFrame();
   }
 
   private async assertDevice(state: PhoneSessionView, driver: PhoneDriver): Promise<void> {
@@ -163,35 +143,5 @@ export class PhoneExecutor {
     const sequence = (this.#sequences.get(grant.sessionId) ?? 0) + 1;
     this.#sequences.set(grant.sessionId, sequence);
     this.deps.send({ type: 'phone.frame', sessionId: grant.sessionId, generation: grant.generation, sequence, at: new Date().toISOString(), capture });
-  }
-
-  private async fill(target: TargetOf<'phone'>, values: FillValues, fields: FillField[], signal: AbortSignal): Promise<FillReceipt> {
-    if (fields.length !== 1) return { status: 'needs_person', filled: [] };
-    try {
-      return await this.#sessions.use(target.phoneSessionId, target.generation, async state => {
-        const driver = this.driver(state.grant.binding.transport, state.grant);
-        const stop = AbortSignal.any([state.signal, signal]);
-        await this.assertDevice(state, driver);
-        const tree = parsePhoneTree(await driver.tree(state.grant.binding.serial, stop));
-        const chrome = tree.some(e => e.package === 'com.android.chrome');
-        if (chrome) {
-          const bar = tree.find(e => /:id\/(?:url_bar|location_bar)$/.test(e.resource));
-          const page = bar?.text ? (/^https?:\/\//.test(bar.text) ? bar.text : `https://${bar.text}`) : null;
-          if (!target.site || !page || !sameSite(target.site, page)) return { status: 'needs_person', filled: [] };
-        } else if (target.site) return { status: 'needs_person', filled: [] };
-        const element = target.element ? tree.find(e => e.ref === target.element) : tree.find(e => e.focused && e.editable);
-        if (!element || !element.editable) return { status: 'field_not_found', filled: [] };
-        const field = fields[0]!;
-        if ((field === 'password') !== element.password) return { status: 'wrong_field', filled: [] };
-        const value = field === 'code' ? values.code() : values[field];
-        if (!value) return { status: 'field_not_found', filled: [] };
-        if (!value.reveal(v => /^[\x20-\x7e]{1,4096}$/.test(v))) return { status: 'needs_person', filled: [] };
-        // A named reference still has to be focused. Never type into whatever another screen focused in the meantime.
-        if (!element.focused) return { status: 'wrong_field', filled: [] };
-        await this.assertDevice(state, driver);
-        await value.reveal(v => driver.type(state.grant.binding.serial, v, stop));
-        return { status: 'filled', filled: [field] };
-      });
-    } catch { return { status: 'target_gone', filled: [] }; }
   }
 }

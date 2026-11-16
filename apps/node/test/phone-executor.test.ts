@@ -1,88 +1,83 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PNG } from 'pngjs';
-import type { PhoneFrame, PhoneReply, PhoneGrant, SecretFilled } from '@hornhoof/protocol';
-import { PhoneAdb } from '../src/phones/adb.js';
-import { PhoneExecutor, type PhoneDriver } from '../src/phones/executor.js';
-import { SecretFills } from '../src/secret-fill/index.js';
-import { forgetExact, holdExact, redact } from '../src/redact.js';
+import type { PhoneFrame, PhoneGrant, PhoneReply } from '@hornhoof/protocol';
+import { PhoneAdb, type AdbCall } from '../src/phones/adb.js';
+import { PhoneExecutor } from '../src/phones/executor.js';
 
+const SERIAL = '192.168.1.80:5555';
 const SESSION = '22222222-2222-4222-8222-222222222222';
-const REQUEST = '11111111-1111-4111-8111-111111111111';
-const PASSWORD = 'PASSWORD_UNIQUE_1079_MARKER';
-const tree = (password = true, address = 'accounts.example/login') => `<hierarchy rotation="0"><node text="${address}" content-desc="" resource-id="com.android.chrome:id/url_bar" class="android.widget.TextView" package="com.android.chrome" password="false" focused="false" bounds="[0,0][3,1]"/><node text="${PASSWORD}" content-desc="${PASSWORD}" resource-id="password" class="android.widget.EditText" package="com.android.chrome" password="${String(password)}" focused="true" bounds="[0,1][3,3]"/></hierarchy>`;
+const id = (n: number) => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
+const HARDWARE = createHash('sha256').update('android:samsung:R58MIDENTITY').digest('hex');
+// A recorded screencap header and UIAutomator tree; the phone itself shows the typed password as dots.
+const PNG = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d49484452000004380000096008060000', 'hex'), Buffer.from('recorded pixels')]);
+const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node text="${clock}" content-desc="" resource-id="clock" class="android.widget.TextView" package="com.linkedin.android" password="false" focused="false" bounds="[0,0][1080,80]"/><node text="••••••••" content-desc="" resource-id="password" class="android.widget.EditText" package="com.linkedin.android" password="true" focused="true" bounds="[40,900][1040,1000]"/></hierarchy>`;
 
-function setup(options: { password?: boolean; address?: string } = {}) {
+/* A fake adb: answers from records and keeps every call our code made. */
+function phone() {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
-  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: '33333333-3333-4333-8333-333333333333', serial: '192.168.1.80:5555', endpoint: '192.168.1.80:5555', transport: 'network', hardwareKey: 'a'.repeat(64) }, expiresAt: '2026-11-16T12:00:30Z' };
-  const outputs: (PhoneFrame | PhoneReply)[] = [];
-  const fillsOut: SecretFilled[] = [];
-  const typed: string[] = [];
-  const logs: string[] = [];
-  const png = new PNG({ width: 3, height: 3 });
-  png.data.fill(255);
-  const driver: PhoneDriver = {
-    connect: async () => 'connected', pair: async () => 'paired', identity: async () => 'a'.repeat(64), devices: async () => [{ serial: grant.binding.serial, status: 'device', model: 'Pixel_8' }],
-    tree: async () => tree(options.password, options.address), screenshot: async () => PNG.sync.write(png),
-    act: async () => {}, type: async (_serial, value) => { typed.push(value); },
-  };
-  const phones = new PhoneExecutor({ drivers: { network: driver, usb: null }, send: m => outputs.push(m), hide: text => redact(text, []) });
-  const fills = new SecretFills({
-    open: async () => Buffer.from(JSON.stringify({ login: 'member@example.com', password: PASSWORD, totp: null })), hide: holdExact,
-    send: m => fillsOut.push(m), log: line => logs.push(line),
+  const calls: AdbCall[] = [];
+  let ticks = 0;
+  const adb = new PhoneAdb(async call => {
+    calls.push(call);
+    const a = call.args.join(' ');
+    if (a === `connect ${SERIAL}`) return Buffer.from(`connected to ${SERIAL}\n`);
+    if (a === 'devices -l') return Buffer.from(`List of devices attached\n${SERIAL} device model:Pixel_8 transport_id:1\n`);
+    if (a.endsWith('getprop ro.serialno')) return Buffer.from('R58MIDENTITY\n');
+    if (a.endsWith('getprop ro.product.manufacturer')) return Buffer.from('Samsung\n');
+    if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
+    if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(tree(`12:0${ticks++}`));
+    if (a.endsWith('screencap -p')) return PNG;
+    return Buffer.alloc(0);
   });
-  fills.register(phones.fillAdapter());
-  const fill = () => fills.handle({ type: 'secret.fill', requestId: REQUEST, jobId: null, entryId: '44444444-4444-4444-8444-444444444444', sealed: 'recorded-sealed-value', fields: ['password'], target: { kind: 'phone', phoneSessionId: SESSION, generation: 1, element: null, site: 'https://accounts.example' }, expiresAt: '2026-11-16T12:00:20Z' });
-  return { grant, phones, fills, outputs, fillsOut, typed, logs, fill, driver };
+  const out: (PhoneReply | PhoneFrame)[] = [];
+  const phones = new PhoneExecutor({ drivers: { network: adb, usb: null }, send: m => out.push(m) });
+  const grant: PhoneGrant = { sessionId: SESSION, generation: 1, binding: { phoneId: id(3), serial: SERIAL, endpoint: SERIAL, transport: 'network', hardwareKey: HARDWARE }, expiresAt: '2026-11-16T12:00:30Z' };
+  const act = (n: number, operation: Extract<Parameters<PhoneExecutor['handle']>[0], { type: 'phone.action' }>['operation']) =>
+    phones.handle({ type: 'phone.action', requestId: id(n), sessionId: SESSION, generation: 1, operation });
+  const reply = (n: number) => out.find((m): m is PhoneReply => m.type === 'phone.reply' && m.requestId === id(n));
+  const shells = () => calls.filter(c => c.args.join(' ') === `-s ${SERIAL} shell`).map(c => c.input);
+  return { phones, calls, grant, act, reply, shells, open: () => phones.handle({ type: 'phone.open', requestId: id(5), grant }) };
 }
 
-afterEach(() => { forgetExact(); vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); });
 
 describe('phone messages on the execution node', () => {
-  it('probes the registered network phone without opening a session or exposing adb output', async () => {
-    const outputs: (PhoneFrame | PhoneReply)[] = [];
-    const adb = new PhoneAdb(async call => Buffer.from(call.args[0] === 'connect' ? 'connected to 192.168.1.80:5555\n' : call.args[0] === 'devices' ? 'List of devices attached\n192.168.1.80:5555 device model:Pixel_8 transport_id:1\nOTHER device model:Other\n' : call.args.at(-1) === 'ro.serialno' ? 'R58MIDENTITY\n' : call.args.at(-1) === 'ro.product.manufacturer' ? 'Samsung\n' : '0\n'));
-    const phones = new PhoneExecutor({ drivers: { network: adb, usb: null }, send: message => outputs.push(message), hide: value => value });
-    await phones.handle({ type: 'phone.probe', requestId: '11111111-1111-4111-8111-111111111111', transport: 'network', endpoint: '192.168.1.80:5555' });
-    expect(outputs).toEqual([{
-      type: 'phone.reply', requestId: '11111111-1111-4111-8111-111111111111', status: 'ok',
-      devices: [{ serial: '192.168.1.80:5555', status: 'device', model: 'Pixel_8', hardwareKey: '8d29ea04a9efd53e779b8f1e97c6f99ba0df485be36e7dddb6b5bebf90a5a5df' }],
-    }]);
+  it('probes the registered network phone without opening a session', async () => {
+    const p = phone();
+    await p.phones.handle({ type: 'phone.probe', requestId: id(1), transport: 'network', endpoint: SERIAL });
+    expect(p.reply(1)).toEqual({ type: 'phone.reply', requestId: id(1), status: 'ok', devices: [{ serial: SERIAL, status: 'device', model: 'Pixel_8', hardwareKey: HARDWARE }] });
   });
 
-  it('uses the one shared fill core and keeps a unique password out of replies, frames and logs', async () => {
-    const c = setup();
-    await c.phones.handle({ type: 'phone.open', requestId: '55555555-5555-4555-8555-555555555555', grant: c.grant });
-    await c.fill();
-    expect(c.typed).toEqual([PASSWORD]);
-    expect(c.fillsOut).toEqual([{ type: 'secret.filled', requestId: REQUEST, status: 'filled', filled: ['password'] }]);
-    await c.phones.handle({ type: 'phone.action', requestId: '66666666-6666-4666-8666-666666666666', sessionId: SESSION, generation: 1, operation: { kind: 'capture' } });
-    await vi.advanceTimersByTimeAsync(1500);
-    const frame = c.outputs.find((m): m is PhoneFrame => m.type === 'phone.frame');
-    expect(frame?.capture.png).toBeTruthy();
-    expect(frame?.capture.elements[1]!.text).toBe('[hidden]');
-    expect(JSON.stringify([c.outputs, c.fillsOut, c.logs])).not.toContain(PASSWORD);
-    for (const output of c.outputs) {
-      if (output.type === 'phone.frame' || output.capture) {
-        const image = PNG.sync.read(Buffer.from(output.capture!.png!, 'base64'));
-        expect([...image.data.subarray(12, 16)]).toEqual([0, 0, 0, 255]);
-      }
-    }
-    c.phones.close();
+  it('sends the agent\'s tap and its text, a login and password too, to adb as the agent gave them', async () => {
+    const p = phone();
+    await p.open();
+    await p.act(6, { kind: 'tap', x: 540, y: 950 });
+    await p.act(7, { kind: 'text', text: 'nora@acme.test' });
+    await p.act(8, { kind: 'text', text: 'Pass word 1079!' });
+    expect(p.shells()).toEqual(['input tap 540 950\n', "input text 'nora@acme.test'\n", "input text 'Pass%sword%s1079!'\n"]);
+    expect([p.reply(6)?.status, p.reply(7)?.status, p.reply(8)?.status]).toEqual(['ok', 'ok', 'ok']);
+    p.phones.close();
   });
 
-  it('does not type a password into an ordinary field or into a different Chrome site', async () => {
-    const c = setup({ password: false });
-    await c.phones.handle({ type: 'phone.open', requestId: '55555555-5555-4555-8555-555555555555', grant: c.grant });
-    await c.fill();
-    expect(c.fillsOut[0]!.status).toBe('wrong_field');
-    expect(c.typed).toEqual([]);
-    c.phones.close();
-    const other = setup({ address: 'attacker.example/login' });
-    await other.phones.handle({ type: 'phone.open', requestId: '55555555-5555-4555-8555-555555555555', grant: other.grant });
-    await other.fill();
-    expect(other.fillsOut[0]!.status).toBe('needs_person');
-    expect(other.typed).toEqual([]);
-    other.phones.close();
+  it('shows the agent the screen as the phone shows it, also while it changes', async () => {
+    const p = phone();
+    await p.open();
+    await p.act(6, { kind: 'capture' });
+    const capture = p.reply(6)?.capture;
+    expect(capture?.png).toBe(PNG.toString('base64'));
+    expect([capture?.width, capture?.height]).toEqual([1080, 2400]);
+    expect(capture?.elements[1]).toMatchObject({ text: '••••••••', password: true, focused: true, bounds: [40, 900, 1040, 1000] });
+    p.phones.close();
+  });
+
+  it('runs nothing more on the phone after the session is revoked', async () => {
+    const p = phone();
+    await p.open();
+    await p.phones.handle({ type: 'phone.revoke', requestId: id(6), sessionId: SESSION, generation: 2, binding: p.grant.binding });
+    expect(p.reply(6)?.status).toBe('ok');
+    await p.act(7, { kind: 'tap', x: 1, y: 2 });
+    expect(p.reply(7)?.status).toBe('session_gone');
+    expect(p.shells()).toEqual([]);
   });
 });

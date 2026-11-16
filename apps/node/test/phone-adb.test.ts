@@ -36,17 +36,17 @@ describe('the phone adb boundary', () => {
     expect(calls[0]!.signal).toBe(signal);
   });
 
-  it('keeps typed values out of argv and quotes remote shell syntax', async () => {
+  it('quotes remote shell syntax in the text an agent types and keeps a literal %s', async () => {
     const calls: AdbCall[] = [];
     const adb = new PhoneAdb(async call => { calls.push(call); return Buffer.alloc(0); });
-    await adb.type('R58M123', "SECRET_%s_$(echo bad)' end", new AbortController().signal);
+    await adb.act('R58M123', { kind: 'text', text: "SECRET_%s_$(echo bad)' end" }, new AbortController().signal);
     expect(calls[0]!.args).toEqual(['-s', 'R58M123', 'shell']);
     expect(calls[0]!.input).toBe("input text 'SECRET_'\ninput text '%'\ninput text 's_$(echo%sbad)'\\''%send'\n");
   });
 
-  it('never returns another program\'s error or its echoed secret', async () => {
+  it('never returns another program\'s error or its echoed output', async () => {
     const adb = new PhoneAdb(async () => { throw new Error('adb echoed SECRET_UNIQUE_MARKER'); });
-    await expect(adb.type('R58M123', 'SECRET_UNIQUE_MARKER', new AbortController().signal)).rejects.toThrow(/^phone_adb_failed$/);
+    await expect(adb.act('R58M123', { kind: 'tap', x: 1, y: 2 }, new AbortController().signal)).rejects.toThrow(/^phone_adb_failed$/);
     await expect(adb.connect('192.168.1.80:5555', new AbortController().signal)).rejects.toThrow(/^phone_adb_failed$/);
   });
 

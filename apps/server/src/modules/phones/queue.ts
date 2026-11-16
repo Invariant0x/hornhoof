@@ -3,11 +3,13 @@ import { PHONE_LEASE_MS, type PhoneBinding, type PhoneOperation, type PhoneReply
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, companyPhones, jobs, machines, nodes, phoneSessions } from '../../db/schema.js';
-import type { VaultAgent } from '../vault/access.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { taskByRef } from '../tasks/views.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
 import { phoneById, phoneDenied, phoneGone, phoneInvalid, phoneMissing, phoneOffline, type CompanyPhone, type PhoneSession } from './store.js';
+
+/* An employee or assistant that borrows a phone, and the turn it runs. */
+export type PhoneAgent = { id: string; companyId: string; jobId: string | null };
 
 const holding = ['starting', 'active', 'revoking'] as const;
 const unfinished = ['queued', ...holding] as const;
@@ -16,7 +18,7 @@ export function phoneBinding(p: CompanyPhone): PhoneBinding {
   return { phoneId: p.id, serial: p.serial, transport: p.transport, endpoint: p.endpoint, hardwareKey: p.hardwareKey };
 }
 
-async function liveJob(ctx: Ctx, me: VaultAgent) {
+async function liveJob(ctx: Ctx, me: PhoneAgent) {
   if (!me.jobId) throw phoneGone();
   const [job] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, me.jobId), eq(jobs.companyId, me.companyId), eq(jobs.agentId, me.id), eq(jobs.status, 'running')));
   if (!job || job.error === 'cancelled') throw phoneGone();
@@ -25,7 +27,7 @@ async function liveJob(ctx: Ctx, me: VaultAgent) {
   return job;
 }
 
-export async function sessionFor(ctx: Ctx, me: VaultAgent, id: string): Promise<PhoneSession> {
+export async function sessionFor(ctx: Ctx, me: PhoneAgent, id: string): Promise<PhoneSession> {
   const [session] = await ctx.db.select().from(phoneSessions).where(eq(phoneSessions.id, id));
   if (!session) throw phoneMissing();
   if (session.companyId !== me.companyId) throw phoneDenied();
@@ -33,7 +35,7 @@ export async function sessionFor(ctx: Ctx, me: VaultAgent, id: string): Promise<
   return session;
 }
 
-export async function activeSession(ctx: Ctx, me: VaultAgent, id: string): Promise<{ phone: CompanyPhone; session: PhoneSession }> {
+export async function activeSession(ctx: Ctx, me: PhoneAgent, id: string): Promise<{ phone: CompanyPhone; session: PhoneSession }> {
   const session = await sessionFor(ctx, me, id);
   await liveJob(ctx, me);
   const phone = await phoneById(ctx, me.companyId, session.phoneId);
@@ -43,17 +45,12 @@ export async function activeSession(ctx: Ctx, me: VaultAgent, id: string): Promi
   return { phone, session };
 }
 
-export async function phoneFillTarget(ctx: Ctx, me: VaultAgent, id: string) {
-  const { phone, session } = await activeSession(ctx, me, id);
-  return { node: nodeIdentity(phone.nodeId), generation: session.generation! };
-}
-
 export async function sessionView(ctx: Ctx, session: PhoneSession) {
   const ahead = session.status === 'queued' ? await ctx.db.select({ id: phoneSessions.id }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, session.phoneId), eq(phoneSessions.status, 'queued'))).orderBy(asc(phoneSessions.order)) : [];
   return { id: session.id, phoneId: session.phoneId, taskId: session.taskId, status: session.status, position: session.status === 'queued' ? ahead.findIndex(s => s.id === session.id) + 1 : 0, reason: session.reason };
 }
 
-export async function acquirePhone(ctx: Ctx, me: VaultAgent, phoneId: string, taskRef?: string | number) {
+export async function acquirePhone(ctx: Ctx, me: PhoneAgent, phoneId: string, taskRef?: string | number) {
   const phone = await phoneById(ctx, me.companyId, phoneId);
   const job = await liveJob(ctx, me);
   const task = await taskByRef(ctx, me.companyId, job.taskId ?? taskRef ?? '');
@@ -161,7 +158,7 @@ export async function releaseJobPhones(ctx: Ctx, jobId: string, reason: PhoneSes
   await Promise.all(held.map(s => finishPhoneSession(ctx, s.id, reason)));
 }
 
-export async function phoneAction(ctx: Ctx, me: VaultAgent, id: string, operation: PhoneOperation): Promise<PhoneReply> {
+export async function phoneAction(ctx: Ctx, me: PhoneAgent, id: string, operation: PhoneOperation): Promise<PhoneReply> {
   const { phone, session } = await activeSession(ctx, me, id);
   const reply = await phoneRequest(ctx, nodeIdentity(phone.nodeId), { type: 'phone.action', requestId: randomUUID(), sessionId: id, generation: session.generation!, operation });
   await activeSession(ctx, me, id);
