@@ -26,6 +26,9 @@ export type IdentityOptions = {
   sampleMs?: number;
   /* What measures the machine's connection to the internet; none where a test gives none. */
   internet?: Internet;
+  /* What measures the machine, when its keeper made it already to go by it too; else made here with sampleMs and
+     internet. */
+  measures?: Measures;
   /* Where the machine can be dialed on its local networks, and the name of its host, to report with the measures. */
   addresses?: () => string[];
   hostname?: string | null;
@@ -66,7 +69,12 @@ export class MachineIdentity {
   private readonly stopping = new AbortController();
 
   constructor(private readonly opts: IdentityOptions) {
-    this.measures = new Measures({ dir: opts.dir, sampleMs: opts.sampleMs, internet: opts.internet });
+    this.measures = opts.measures ?? new Measures({ dir: opts.dir, sampleMs: opts.sampleMs, internet: opts.internet });
+  }
+
+  /* The fsync p99 of this machine's disk as measured so far, the same one the report carries. */
+  fsyncP99(): number | null {
+    return this.measures.fsyncP99();
   }
 
   start(): void {

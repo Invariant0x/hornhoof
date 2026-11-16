@@ -831,17 +831,19 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     const { app, db, url, ceo, builtin } = await live();
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/start', ...as(ceo) });
     const greeting = await next(builtin, 'job.run');
-    /* Hornhoof's greeting is no person's word. */
-    expect(await decisionPrincipal(db, greeting.jobId)).toBeNull();
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    /* Hornhoof's greeting is no person's word: the turn goes as the owner, with no message behind it. */
+    expect(await decisionPrincipal(db, greeting.jobId)).toEqual({ personId: owner!.id, sourceSeq: null });
     const screen = await watch(url, ceo);
     await next(builtin, 'term.open');
     screen.ws.send(JSON.stringify({ type: 'input', data: 'approve it' }));
     expect(await next(builtin, 'term.input')).toMatchObject({ data: 'approve it' });
-    expect(await decisionPrincipal(db, greeting.jobId)).toBeNull();
+    expect(await decisionPrincipal(db, greeting.jobId)).toEqual({ personId: owner!.id, sourceSeq: null });
     screen.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
     expect(await next(builtin, 'term.input')).toMatchObject({ data: '\r' });
-    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
-    expect(await decisionPrincipal(db, greeting.jobId)).toMatchObject({ personId: owner!.id });
+    /* The owner's turn stands either way, so wait for the mark itself: then the Enter is the turn's last word. */
+    await until(async () => (await events(app, ceo)).some((e: { kind: string }) => e.kind === 'typed'));
+    expect(await decisionPrincipal(db, greeting.jobId)).toMatchObject({ personId: owner!.id, sourceSeq: expect.any(Number) });
     /* One mark for the same person, however many times they press Enter. */
     screen.ws.send(JSON.stringify({ type: 'input', data: 'y\r' }));
     await next(builtin, 'term.input');
@@ -857,8 +859,8 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     ['Ctrl+J as CSI u', ['Approve the merge.\u001b[106;5u']],
     ['the keypad Enter', ['Approve the merge.\u001bOM']],
     ['Enter', ['Approve the merge.\r']],
-  ])("takes the CEO's decisions from the running turn when a person without the right submits keys with %s", async (_, frames) => {
-    const { app, db, url, ceo, builtin, zed, zedId } = await lent();
+  ])("keeps the owner's decisions in the running turn when a person without the right submits keys with %s", async (_, frames) => {
+    const { app, db, url, ceo, builtin, zed } = await lent();
     const request = await approvalAsked(app);
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(ceo) });
     const turn = await next(builtin, 'job.run');
@@ -872,9 +874,9 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     }
     const client = await mcp(app, turn.toolToken!);
     const approved = await client.callTool({ name: 'answer_request', arguments: { request: request.id, approve: true } });
-    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
-    expect(approved.isError).toBe(true);
-    expect(await decisionPrincipal(db, turn.jobId)).toMatchObject({ personId: zedId });
+    expect(approved.isError).toBeFalsy();
+    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'approved', answeredBy: owner!.id });
+    expect(await decisionPrincipal(db, turn.jobId)).toEqual({ personId: owner!.id, sourceSeq: null });
   });
 
   it('takes an Enter in a running turn into that turn only: the turn after it needs an Enter of its own', async () => {
@@ -891,18 +893,20 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null, toolToken: null });
   });
 
-  it('opens no turn for an Enter once a turn of words started after it, and that turn answers nobody when another person pressed it', async () => {
+  it('opens no turn for an Enter once a turn of words started after it, and that turn goes as the owner when another person pressed it', async () => {
     const { app, db, url, ceo, builtin, orchestratorId, zed } = await lent();
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const screen = await watch(url, zed);
     await next(builtin, 'term.open');
     screen.ws.send(JSON.stringify({ type: 'input', data: 'approve the merge\r' }));
     await next(builtin, 'term.input');
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(ceo) });
     const turn = await next(builtin, 'job.run');
-    /* Zed's words may have gone into the CEO's turn, so it takes no decision until a person writes to it again. That is
-       settled under the agent's input lock as the turn goes out: what takes the lock after it runs once that is done. */
+    /* Zed's words may have gone into the CEO's turn, so it goes as the owner with no message behind it until a person
+       writes to it again. That is settled under the agent's input lock as the turn goes out: what takes the lock after it
+       runs once that is done. */
     await withInputLock(app.ctx, orchestratorId, async () => {});
-    expect(await decisionPrincipal(db, turn.jobId)).toBeNull();
+    expect(await decisionPrincipal(db, turn.jobId)).toEqual({ personId: owner!.id, sourceSeq: null });
     builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 'sess-1', result: 'Done.', tail: '', error: null });
     await until(async () => !(await state(app, ceo)).busy);
     builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'approve the merge' });
@@ -954,7 +958,8 @@ describe('words a person typed in a running turn, which the program takes after 
     const said = (await events(at.app, at.ceo)).filter((e: { kind: string; jobId: string }) => e.kind === 'message' && e.jobId === opened.jobId);
     expect(said).toHaveLength(1);
     expect(said[0]).toMatchObject({ data: { text: 'and the limits' }, person: { id: personId } });
-    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId });
+    const [owner] = await at.db.select().from(people).where(eq(people.isOwner, true));
+    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: answersCeo ? personId : owner!.id });
     const client = await mcp(at.app, opened.toolToken!);
     expect((await client.listTools()).tools.length).toBeGreaterThan(0);
   });
@@ -990,7 +995,7 @@ describe('words a person typed in a running turn, which the program takes after 
     expect(await open(at, 'and the limits', turn.jobId)).toMatchObject({ jobId: expect.any(String) });
   });
 
-  it('go into the turn that runs by then, which answers the person who typed them', async () => {
+  it('go into the turn that runs by then, which goes as the owner when the person who typed them is not the CEO', async () => {
     const at = await lent();
     const turn = await pressedIn(at, at.zed);
     await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(at.ceo) });
@@ -999,7 +1004,7 @@ describe('words a person typed in a running turn, which the program takes after 
     const [owner] = await at.db.select().from(people).where(eq(people.isOwner, true));
     expect(await decisionPrincipal(at.db, other.jobId)).toMatchObject({ personId: owner!.id });
     expect(await open(at, 'and the limits', turn.jobId)).toMatchObject({ jobId: null, toolToken: null });
-    expect(await decisionPrincipal(at.db, other.jobId)).toMatchObject({ personId: at.zedId });
+    expect(await decisionPrincipal(at.db, other.jobId)).toEqual({ personId: owner!.id, sourceSeq: null });
     expect(await refusal(at)).toBe('busy');
   });
 
@@ -1041,7 +1046,8 @@ describe('words a person wrote into the last seconds of a turn, which the progra
     const at = await lent();
     const opened = await writtenIn(at, at.zed);
     expect(await jobOf(at.app, opened.jobId!)).toEqual({ createdBy: at.zedId, answersCeo: false });
-    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: at.zedId });
+    const [owner] = await at.db.select().from(people).where(eq(people.isOwner, true));
+    expect(await decisionPrincipal(at.db, opened.jobId!)).toEqual({ personId: owner!.id, sourceSeq: null });
   });
 });
 

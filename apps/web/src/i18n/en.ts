@@ -482,6 +482,8 @@ export const en = {
     heading: 'Subscriptions & API',
     intro: 'The plans and APIs the agents run on. A personal plan runs on its owner\'s machines and serves wherever its owner works. An API is paid by the tokens its agents use.',
     pay: { personal: 'By subscription', api_key: 'By tokens' },
+    /* How a connection is paid, in full: the name and tooltip of the sign by its name in the list and its card. */
+    kindHint: { personal: 'Personal plan, paid by subscription', api_key: 'API key, paid by tokens' },
     payFilter: 'Type',
     tokensColumn: 'Tokens, 30 days',
     tokens: {
@@ -560,6 +562,8 @@ export const en = {
     /* A plan's state on one of its several machines, after the machine's name. */
     waitsThere: { needs_login: 'waiting for the login', needs_setup: 'waiting for the first setup', offline: 'offline' },
     keyEnding: (provider: string, last4: string) => `${provider} key ending ${last4}`,
+    /* A key's name in the list and its card, where its sign says it is a key. */
+    keyShort: (provider: string, last4: string) => `${provider} ••••${last4}`,
     noMachine: 'No machine yet',
     builtin: 'Built-in node',
     states: { waiting_machine: 'Waiting for the machine', needs_login: 'Waiting for the login', needs_setup: 'Waiting for the first setup', ready: 'Ready', offline: 'Machine offline', builtin_offline: 'Built-in node offline' },
@@ -1133,7 +1137,7 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
-    memoryWait: 'The machine is low on free memory. Turns wait to start and go on by themselves once memory frees up. Nothing that already runs there is stopped.',
+    memoryWait: 'The machine is busy: it is low on free memory or its processors are loaded. Turns wait and go on by themselves, one by one, once it has room. Nothing that already runs there is stopped.',
     inputLeft: {
       kept: 'These words were left unsent in the program\'s input. Hornhoof took them out so the next assignment could go in, kept them here and did not run them. To send them, type them again.',
       by: (name: string) => `${name} typed in this terminal last.`,
@@ -1970,7 +1974,8 @@ export const en = {
     update: 'Update',
     whenIdle: 'Update when agents finish',
     later: 'Later',
-    waiting: (version: string) => `Hornhoof will update to ${version} when the agents finish.`,
+    waiting: (version: string, until: string) => `Hornhoof will update to ${version} when the agents finish. If they have not finished by ${until}, the update is called off and nothing stops.`,
+    calledOff: (version: string, at: string) => `The update to ${version} was called off at ${at}: the agents had not finished. Nothing was stopped.`,
     callOff: 'Call off',
     running: (version: string) => (version ? `Updating Hornhoof to ${version}` : 'Updating Hornhoof'),
     progress: 'Update progress',

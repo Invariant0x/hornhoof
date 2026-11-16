@@ -35,7 +35,7 @@ import { ComputerCarrier, type ComputerCarrierOptions } from './computer.js';
 import { DataLinks, type DataLinksOptions } from './data-links.js';
 import { Throughput } from './throughput.js';
 import { UploadTaker } from './uploads.js';
-import type { Internet } from './measures.js';
+import type { Internet, Measures } from './measures.js';
 import { keepSize, KEEP_SIZE_EVERY_MS, SLOTS_EVERY_MS, sweepSlots } from './slots.js';
 import { SyncController, type SyncControllerOptions } from './sync.js';
 import { KEEPER_DIR, reasonOf } from './machine-keys.js';
@@ -97,6 +97,9 @@ export type KeeperOptions = {
   hostname?: string | null;
   /* What measures this machine's connection to the internet; none where a test gives none. */
   internet?: Internet;
+  /* What measures this machine, made by whoever made the keeper's statements go by its disk too; made here
+     otherwise. */
+  measures?: Measures;
   /* What measures how fast this machine sends to the others; made here unless a test gives one. */
   throughput?: Pick<Throughput, 'start' | 'stop' | 'best'>;
   /* What a test's keeper reports as its place in place of its own. */
@@ -423,6 +426,8 @@ export class Keeper {
       sync: this.sync ?? undefined,
       onEnd: () => this.leaseEnded(),
       hold: () => this.hander?.holds() ?? false,
+      fsyncP99: () => this.identity?.fsyncP99() ?? null,
+      sole: () => this.sole(),
       proofs: this.leaseProofs && this.reentry
         ? {
             needed: () => this.neededNow,
@@ -447,6 +452,7 @@ export class Keeper {
           log: opts.log,
           reportEveryMs: opts.reportEveryMs,
           internet: opts.internet,
+          measures: opts.measures,
           /* The addresses the copies saw this machine come from count too, so a machine that moved is found again. */
           addresses: () => ownAddresses({ controlDir: opts.config.controlDir, env: opts.addresses ?? [], seen: this.links?.seen() ?? [] }),
           hostname: opts.hostname,
@@ -891,12 +897,19 @@ export class Keeper {
     return { name: settings.name, key: settings.key, client: linkClientId(settings.name, this.opts.config.machineId!), url: settings.url };
   }
 
+  /* Whether no other machine could lead now: none holds a copy that finished, as the last read found, or, where this
+     keeper reads no such thing, none holds the data at all. Not known yet counts as another could. */
+  private sole(): boolean {
+    return this.opts.proofs ? this.neededNow === false : (this.sync?.listed() ?? 0) === 0;
+  }
+
   /* A lease of this machine ended. With another machine holding the data, the link's frpc stops for a while: the
-     machine that holds the latest changes may take the company's name over meanwhile. */
+     machine that holds the latest changes may take the company's name over meanwhile. Where none could, the company
+     stays reached here while this machine takes its next term. */
   private leaseEnded(): void {
     /* Where a lease takes proofs, the link's client stops with the lease and stays stopped until the way back in. */
     this.entryTunnel = false;
-    if ((this.sync?.listed() ?? 0) > 0) this.linkPausedUntil = performance.now() + (this.opts.sync?.linkPauseMs ?? LINK_PAUSE_MS);
+    if (!this.sole() && (this.sync?.listed() ?? 0) > 0) this.linkPausedUntil = performance.now() + (this.opts.sync?.linkPauseMs ?? LINK_PAUSE_MS);
   }
 
   /* The link's settings for its frpc: none while the frpc is to stay stopped, so the tunnel keeper ends it, and the
