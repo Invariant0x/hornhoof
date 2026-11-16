@@ -68,6 +68,13 @@ moment, and parts of test runs no longer stop when a machine's connection drops 
   longer keeps the orchestrator and the heads off their node for 10 minutes: they come back past their 3-minute limit,
   and the hold ends with the 2-minute lease of a wait. Known limits: a restart the updater was told of but never began
   still holds the node up to 10 minutes; a restarting wait saved by an earlier build keeps its 10 minutes once.
+- A machine took every turn sent into a program that already ran there, however loaded it was: on 16 November seven
+  employees tested and ran browsers at once on a machine of 8 processors and 12 GB, it ran out of memory and swap, and
+  each of their turns took hours. An employee's turn now waits while its machine works past what it carries, with less
+  free memory than one more program needs or a load over the last minute above one and a half times its processors, and
+  goes on by itself once the machine has room. The turns that waited go one with each report of the machine, every 20
+  seconds, so they do not fall on it at once. Nothing that runs is stopped, a machine where no turn runs takes one all
+  the same, and the orchestrator's and the heads' turns go on. The agent's window says the machine is busy.
 
 ### Russian
 
@@ -126,6 +133,13 @@ moment, and parts of test runs no longer stop when a machine's connection drops 
   предела в 3 минуты, а ожидание снимается по 2-минутной аренде. Известные пределы: перезапуск, о котором обновлятору
   сказали, но который не начался, по-прежнему держит узел до 10 минут; ожидание restarting, сохраненное прежней сборкой,
   один раз держит свои 10 минут.
+- Машина брала каждый ход в уже запущенную на ней программу, как бы она ни была загружена: 16 ноября семь сотрудников
+  одновременно гоняли тесты и браузеры на машине с 8 процессорами и 12 ГБ, у нее кончились память и своп, и каждый их
+  ход шел часами. Теперь ход сотрудника ждет, пока машина работает сверх своих сил, то есть свободной памяти у нее
+  меньше, чем нужно еще одной программе, или нагрузка за последнюю минуту выше полутора на каждый процессор, и
+  продолжается сам, когда место освобождается. Дождавшиеся ходы идут по одному с каждым отчетом машины, раз в 20 секунд,
+  чтобы не навалиться разом. Ничего из идущего не останавливается, машина, на которой не идет ни одного хода, все равно
+  берет один, а ходы оркестратора и глав идут как раньше. Окно агента говорит, что машина загружена.
 
 ## [0.29.0] - 2026-11-15
 
