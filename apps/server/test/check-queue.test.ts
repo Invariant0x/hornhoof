@@ -79,3 +79,35 @@ describe('physical machine admission across subscription nodes', () => {
     queue.close();
   });
 });
+
+/* #1060: home-api sent its load every 20 s, but the server handled the frames late, one by one in the node's queue and
+   behind the shared pump of test runs, and ended the leases of a machine it heard all along. A lease counts from the
+   last frame that came from the machine; one that truly says nothing for 90 s still loses its leases. */
+describe('a lease counts from when the machine was last heard', () => {
+  it('keeps the lease of a machine heard while its load waits to be handled, and ends the one of a silent machine', async () => {
+    let now = 0;
+    const heard = new Map<string, number>([['home', 0], ['quiet', 0]]);
+    const sent: { node: string; reply: CheckQueueReply }[] = [];
+    const queue = new CheckCoordinator({ warmupMs: 0, now: () => now, heard: node => heard.get(node) ?? null, send: (node, reply) => { sent.push({ node, reply }); } });
+    queue.node('home', 'host-A', { cpus: 10, load: 0, at: 0 });
+    queue.node('quiet', 'host-B', { cpus: 10, load: 0, at: 0 });
+    queue.acquire('home', { type: 'check.acquire', id: a, label: 'part 4' });
+    queue.acquire('quiet', { type: 'check.acquire', id: b, label: 'part 2' });
+    await tick();
+    /* Frames come from home every 20 s and wait to be handled; quiet sends none. Another machine's load is handled. */
+    for (now = 20_000; now <= 180_000; now += 20_000) {
+      heard.set('home', now);
+      queue.node('other', 'host-C', { cpus: 10, load: 0, at: now });
+      await tick();
+    }
+    const ended = sent.filter(s => s.reply.state === 'ended').map(s => s.node);
+    expect(ended).toEqual(['quiet']);
+    /* The late load of home, measured long ago, is handled at last: what was heard since keeps its lease. */
+    queue.node('home', 'host-A', { cpus: 10, load: 0, at: 0 });
+    queue.acquire('home', { type: 'check.acquire', id: c, label: 'part 3' });
+    await tick();
+    expect(sent.filter(s => s.reply.state === 'ended').map(s => s.node)).toEqual(['quiet']);
+    expect(sent).toContainEqual({ node: 'home', reply: { type: 'check.state', id: c, state: 'running', position: 0 } });
+    queue.close();
+  });
+});
