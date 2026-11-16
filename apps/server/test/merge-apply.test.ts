@@ -42,14 +42,14 @@ async function stand() {
   const [one, two] = [await task(db, 1, 'One'), await task(db, 2, 'Two')];
   let made = 0;
   /* A merge of this fork into the leader, as the merger would run it. */
-  const merge = async (fork: Fork, over: { kept?: boolean; label?: string; onUnit?: (n: number) => void | Promise<void>; log?: (line: string) => void } = {}): Promise<{ id: string; result: MergeResult }> => {
+  const merge = async (fork: Fork, over: { kept?: boolean; label?: string; onUnit?: (n: number) => void | Promise<void>; log?: (line: string) => void; clock?: () => number } = {}): Promise<{ id: string; result: MergeResult }> => {
     made += 1;
     const kept = over.kept ?? false;
     const label = over.label ?? 'the fork';
     const [row] = await rowsOf<{ id: string }>(db, sql`INSERT INTO net.merges (source, label) VALUES (${kept ? `kept:hornhoof_before_t${made}` : `machine:${made}`}, ${label}) RETURNING id`);
     const source = await fork.source();
     try {
-      return { id: row!.id, result: await runMerge(db, { id: row!.id, label, kept, companyId: acme!.id }, source, { onUnit: over.onUnit, log: over.log ?? (() => undefined) }) };
+      return { id: row!.id, result: await runMerge(db, { id: row!.id, label, kept, companyId: acme!.id }, source, { onUnit: over.onUnit, log: over.log ?? (() => undefined), clock: over.clock }) };
     } finally {
       await source.close();
     }
@@ -95,15 +95,6 @@ describe('a merge applied', () => {
     expect(events.map(event => event.id)).toEqual([1, 2]);
     const [heard] = await s.db.select().from(agentEvents).where(eq(agentEvents.id, said!.id));
     expect([heard!.data, Number(heard!.seq) > Number(said!.seq)]).toEqual([{ text: 'there' }, true]);
-    /* In the order the source numbered them, by either way. */
-    for (const kept of [false, true]) {
-      const again = await stand();
-      const other = await again.sides.fork();
-      const told = await other.db.insert(agentEvents).values(['a', 'b', 'c', 'd', 'e'].map(text => ({ ...again.on, agentId: again.ana.id, kind: 'text' as const, data: { text } }))).returning();
-      await again.merge(other, { kept });
-      const order = await again.db.select().from(agentEvents).orderBy(agentEvents.seq);
-      expect(order.map(event => event.id)).toEqual([...told].sort((a, b) => Number(a.seq) - Number(b.seq)).map(event => event.id));
-    }
     expect(await s.db.select().from(agentChanges).where(eq(agentChanges.id, change!.id))).toHaveLength(1);
     expect(await s.conflicts(id)).toEqual([]);
     const row = await s.mergeRow(id);
@@ -111,6 +102,17 @@ describe('a merge applied', () => {
     expect([row.xact, row.applied_at, row.from_at, row.to_at].every(Boolean)).toBe(true);
     expect((await s.consumed(id)).every(entry => entry.how === 'applied')).toBe(true);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  /* A log's added rows come in the order the source numbered them, by either way. Each way stands its own company, so
+     no test of this file builds three. */
+  it.each([false, true])('adds a log in the order the source numbered it, kept %s', async kept => {
+    const again = await stand();
+    const other = await again.sides.fork();
+    const told = await other.db.insert(agentEvents).values(['a', 'b', 'c', 'd', 'e'].map(text => ({ ...again.on, agentId: again.ana.id, kind: 'text' as const, data: { text } }))).returning();
+    await again.merge(other, { kept });
+    const order = await again.db.select().from(agentEvents).orderBy(agentEvents.seq);
+    expect(order.map(event => event.id)).toEqual([...told].sort((a, b) => Number(a.seq) - Number(b.seq)).map(event => event.id));
   });
 
   it('applies a proven overwrite', async () => {
@@ -423,9 +425,10 @@ describe('a merge applied', () => {
     await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
     await s.db.insert(personAccess).values([{ ...s.on, personId: maria!.id, departmentId: s.dev.id }, { ...s.on, personId: maria!.id, departmentId: sales!.id }]);
     await s.db.execute(sql`INSERT INTO net.restores (attempt, backup, dumped_at, kept) VALUES (gen_random_uuid(), gen_random_uuid(), now(), 'hornhoof_before_t1')`);
-    /* A moment later, on a clock that may count in milliseconds, the CEO narrows her access to one department, as the
-       screen does: all of her places go, and one comes back. And a task is removed. */
-    await new Promise(resolve => setTimeout(resolve, 5));
+    /* A moment later the CEO narrows her access to one department, as the screen does: all of her places go, and one
+       comes back. And a task is removed. What came before is set a second back, so on any clock it is a moment later. */
+    await s.db.execute(sql`UPDATE net.journal SET at = at - interval '1 second'`);
+    await s.db.execute(sql`UPDATE net.restores SET at = at - interval '1 second', dumped_at = dumped_at - interval '1 second'`);
     await s.db.delete(personAccess).where(eq(personAccess.personId, maria!.id));
     const [left] = await s.db.insert(personAccess).values({ ...s.on, personId: maria!.id, departmentId: s.dev.id }).returning();
     await s.db.delete(tasks).where(eq(tasks.id, gone.id));
@@ -513,6 +516,9 @@ describe('a merge applied', () => {
     expect(written.find(row => row.tbl === 'computer_runs')).toMatchObject({ cols: ['state', 'done_at'], was: { state: 'waiting', done_at: null } });
     expect(result.counts.rewritten).toBe(6);
     expect(await s.checked(fork, id)).toEqual({ ok: true, missing: [] });
+  });
+
+  it('stops what a kept database left running, once, whichever copy of it comes later', async () => {
     /* After a restore nobody knows where it ran. */
     const again = await stand();
     const kept = await again.sides.fork();
@@ -804,11 +810,18 @@ describe('a merge applied', () => {
     let reached!: () => void;
     const atFirst = new Promise<void>(resolve => (reached = resolve));
     const lines: string[] = [];
-    const merging = s.merge(fork, { onUnit: n => (n === 1 ? (reached(), waits) : undefined), log: line => lines.push(line) });
+    /* The merge counts on this clock: 150 ms go by on it while the write waits, and nobody waits for real time. */
+    let now = 1_000;
+    const merging = s.merge(fork, { onUnit: n => (n === 1 ? (reached(), waits) : undefined), log: line => lines.push(line), clock: () => now });
     await atFirst;
-    const write = s.db.update(tasks).set({ title: 'Meanwhile' }).where(and(eq(tasks.id, s.two.id))).then(() => 'written');
-    await new Promise(resolve => setTimeout(resolve, 150));
+    const order: string[] = [];
+    const write = s.db.update(tasks).set({ title: 'Meanwhile' }).where(and(eq(tasks.id, s.two.id))).then(() => {
+      order.push('written');
+      return 'written';
+    });
+    now += 150;
     /* The merge holds the only connection a PGlite has, so what is there is asked of the merge's own result later. */
+    order.push('freed');
     free();
     const { id, result } = await merging;
     expect(await write).toBe('written');
@@ -818,7 +831,8 @@ describe('a merge applied', () => {
     const journal = await rowsOf<{ xact: string; key: { id: string } }>(s.db, sql`SELECT xact, key FROM net.journal WHERE tbl = 'tasks' AND op = 'update' ORDER BY at`);
     expect(journal.map(row => row.key.id)).toEqual([s.one.id, s.two.id]);
     expect(journal[0]!.xact).toBe((await s.mergeRow(id)).xact);
-    expect(result.heldMs).toBeGreaterThanOrEqual(150);
+    expect(order).toEqual(['freed', 'written']);
+    expect(result.heldMs).toBe(150);
     expect(lines).toEqual([`The merge ${id} held the app's writes ${result.heldMs} ms.`]);
     expect(lines.join(' ')).not.toMatch(/There|Meanwhile|One|Two/);
   });

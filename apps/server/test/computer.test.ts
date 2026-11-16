@@ -8,11 +8,12 @@ import { PglitePreparedQuery } from 'drizzle-orm/pglite';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, computerRuns, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agentInbox, agents, companies, computerRuns, departments, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
+import { ORCHESTRATOR_SKILLS } from '../src/modules/agents/instructions.js';
 import { Computers } from '../src/modules/computer/access.js';
 import { deliverLive, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
-import { onAgent, pump } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, onAgent, pump } from '../src/modules/conversation/queue.js';
 import { readMessage } from '../src/modules/events/parties.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
 import { hostIdOf } from '../src/modules/network/join.js';
@@ -28,7 +29,7 @@ const NEVER_MS = 2_147_483_647;
 const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 /* The server's own machine, with no name its keeper told yet, which the CEO owns. */
 const SERVER = 'the company server';
-const NOT_THEIRS = `Only the CEO, the CEO delegate or Ivan, who owns ${SERVER}, can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was run. Ask them first.`;
+const NOT_THEIRS = `The last words in this turn came from a person who may not direct commands on ${SERVER}: only the CEO, the CEO delegate or Ivan, who owns it, may. Nothing was run. Ask them first.`;
 const HOST_ID = hostIdOf('server-0001-abcd');
 /* The built-in node of the machine this test's server runs on. */
 const BUILTIN = builtinOf(HOST_ID);
@@ -250,7 +251,7 @@ describe('access to the computer the server runs on', () => {
     expect(note!.prompt).toContain('Free disk space.');
   });
 
-  it('refuses commands while access is closed, after its day, and in a turn that does not answer the CEO', async () => {
+  it('refuses commands while access is closed and after its day, and runs them in any turn while it is open, but not after an Enter of someone in its terminal', async () => {
     const c = await company();
     const { app, db, ceo, orchestrator, running } = c;
     const closed = await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' });
@@ -260,20 +261,66 @@ describe('access to the computer the server runs on', () => {
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().until).toBeNull();
     expect((await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' })).isError).toBe(true);
 
-    withWait(c, 50);
+    withWait(c, NEVER_MS);
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    /* A turn nobody started and no person wrote into, and one with a notice of Hornhoof in it: the access holds in both. */
     const woke = 'tool-token-woke-0123456789abcdef0123';
     await running(woke, false);
-    const refused = await call(await mcp(app, woke), 'computer', { command: 'uname -a' });
-    expect(text(refused)).toBe(NOT_THEIRS);
+    const [first] = await Promise.all([call(await mcp(app, woke), 'computer', { command: 'uname -a' }), answerAs(c, 'Linux\n')]);
+    expect(text(first)).toBe('Exit code 0.\nLinux\n');
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const [wokeJob] = await db.update(jobs).set({ createdBy: owner!.id }).where(and(eq(jobs.agentId, orchestrator.id), eq(jobs.status, 'running'))).returning();
-    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'message', data: { text: 'Hornhoof notice.' } });
-    expect(text(await call(await mcp(app, woke), 'computer', { command: 'uname -a' }))).toBe(NOT_THEIRS);
+    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'message', data: { text: 'Hornhoof notice.', notification: { source: 'wait_ended', tasks: [] } } });
+    const [second] = await Promise.all([call(await mcp(app, woke), 'computer', { command: 'uptime' }), answerAs(c, 'up 2 days\n')]);
+    expect(text(second)).toBe('Exit code 0.\nup 2 days\n');
+    /* Someone pressed Enter in its terminal: whose words went in is not known, so nothing runs. */
     await db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, wokeJob!.id));
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: wokeJob!.id, kind: 'typed', data: {}, personId: null });
     expect(text(await call(await mcp(app, woke), 'computer', { command: 'uname -a' }))).toBe(NOT_THEIRS);
+    expect(await pending(c.db)).toEqual([]);
+  });
+
+  it("keeps working on the open machine in later turns, woken by an employee's letter or by a wake, with no new word of the CEO, until access closes", async () => {
+    const c = await company();
+    const { app, db, ceo, orchestrator, builtin } = c;
+    withWait(c, NEVER_MS);
+    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean old images.' });
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
+    let note = await builtin.next();
+    while (note.type !== 'job.run') note = await builtin.next();
+    builtin.send({ type: 'job.done', jobId: note.jobId, ok: true, sessionId: 'session', result: 'Asked.', tail: '', error: null });
+    await until(async () => (await db.select().from(jobs).where(eq(jobs.id, note.jobId)))[0]!.status === 'done');
+
+    const [sub] = await db.select().from(subscriptions);
+    const [ops] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [head] = await db.insert(agents).values({ companyId: orchestrator.companyId, kind: 'head', name: 'Hana', model: 'claude-opus-5-5', roleKey: 'OPS-HEAD', departmentId: ops!.id, subscriptionId: sub!.id, skills: [] }).returning();
+    const nextTurn = async (message: { text: string; from?: 'agent'; name?: string; by?: string; notification?: { source: 'wait_ended'; tasks: [] } }) => {
+      await enqueueTurn(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, prompt: message.text, createdBy: null, message: { personId: null, ...message } });
+      let run = await builtin.next();
+      while (run.type !== 'job.run') run = await builtin.next();
+      return run;
+    };
+    /* Hana's letter wakes a turn of its own: the access her letter did not open still holds in it. */
+    const byLetter = await nextTurn({ text: 'The disk of the server is full again.', from: 'agent', name: 'Hana', by: head!.id });
+    const [onLetter] = await Promise.all([call(await mcp(app, byLetter.toolToken!), 'computer', { command: 'docker image prune -f' }), answerAs(c, 'Reclaimed 3 GB.\n')]);
+    expect(text(onLetter)).toBe('Exit code 0.\nReclaimed 3 GB.\n');
+    builtin.send({ type: 'job.done', jobId: byLetter.jobId, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null });
+    await until(async () => (await db.select().from(jobs).where(eq(jobs.id, byLetter.jobId)))[0]!.status === 'done');
+
+    /* A wake of its own timer, as a wait ends. */
+    const byWake = await nextTurn({ text: 'The wait for the disk check ended.', notification: { source: 'wait_ended', tasks: [] } });
+    const wakeClient = await mcp(app, byWake.toolToken!);
+    const [onWake] = await Promise.all([call(wakeClient, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
+    expect(text(onWake)).toBe('Exit code 0.\nPlenty.\n');
+    /* It decides nothing else for the CEO in such a turn. */
+    expect(text(await call(wakeClient, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
+
+    expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) })).statusCode).toBe(200);
+    const shut = await call(wakeClient, 'computer', { command: 'df -h' });
+    expect(shut.isError).toBe(true);
+    expect(text(shut)).toContain('ask_computer_access');
     expect(await pending(c.db)).toEqual([]);
   });
 
@@ -333,7 +380,10 @@ describe('access to the computer the server runs on', () => {
       builtin.send({ type: 'agent.said', ref: msg.ref, ok: true });
       expect((await taking).statusCode).toBe(200);
     }
-    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Checks finished.', from: 'agent', name: 'Hana' } });
+    const [sub] = await db.select().from(subscriptions);
+    const [ops] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [hana] = await db.insert(agents).values({ companyId: orchestrator.companyId, kind: 'head', name: 'Hana', model: 'claude-opus-5-5', roleKey: 'OPS-HEAD', departmentId: ops!.id, subscriptionId: sub!.id, skills: [] }).returning();
+    await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Checks finished.', from: 'agent', name: 'Hana', by: hana!.id } });
     const events = await db.select().from(agentEvents).where(and(eq(agentEvents.jobId, note.jobId), eq(agentEvents.kind, 'message')));
     expect(events.length).toBe(6);
 
@@ -347,7 +397,7 @@ describe('access to the computer the server runs on', () => {
     expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
   });
 
-  it('keeps the computer-opening click through retries without granting decision rights, while a plain notice retry grants neither', async () => {
+  it('keeps the computer-opening click through retries without granting decision rights, while a plain notice retry works on the open machine and grants no decision either', async () => {
     const c = await company();
     const { app, db, ceo, orchestrator, builtin } = c;
     withWait(c, NEVER_MS);
@@ -390,7 +440,9 @@ describe('access to the computer the server runs on', () => {
     while (plain.type !== 'job.run') plain = await builtin.next();
     const plainRetry = await retryRun(plain.jobId);
     const plainClient = await mcp(app, plainRetry.toolToken!);
-    expect(text(await call(plainClient, 'computer', { command: 'df -h' }))).toBe(NOT_THEIRS);
+    /* The machine is open, and no person wrote into the notice's turn: its retry works there, and decides nothing else. */
+    const [plainRan] = await Promise.all([call(plainClient, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
+    expect(text(plainRan)).toBe('Exit code 0.\nPlenty.\n');
     expect((await call(plainClient, 'answer_request', { request: request.id, approve: true })).isError).toBe(true);
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
     expect(text(await call(plainClient, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
@@ -554,5 +606,45 @@ describe('access to the computer the server runs on', () => {
     const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Look at the disk.' });
     expect(asked.isError).toBe(true);
     expect(text(asked)).toContain('cannot reach');
+  });
+});
+
+describe('a new installation', () => {
+  it("lets the orchestrator clear another employee's inbox and work on the opened machine in a later turn, with nothing set up for it", async () => {
+    const c = await company();
+    const { app, db, ceo, orchestrator, builtin } = c;
+    withWait(c, NEVER_MS);
+    const [sub] = await db.select().from(subscriptions);
+    const [ops] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [hana] = await db.insert(agents).values({ companyId: orchestrator.companyId, kind: 'head', name: 'Hana', model: 'claude-opus-5-5', roleKey: 'OPS-HEAD', departmentId: ops!.id, subscriptionId: sub!.id, skills: [] }).returning();
+    await db.insert(agentInbox).values(['Bruno', 'Rita', 'Sara'].map(name => ({ companyId: orchestrator.companyId, agentId: hana!.id, senderKind: 'hornhoof' as const, senderName: 'Hornhoof', kind: 'notification' as const, source: 'program_alarm', text: `${name} has given no sign of life for 20 minutes.`, createdAt: new Date() })));
+
+    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
+    let note = await builtin.next();
+    while (note.type !== 'job.run') note = await builtin.next();
+    builtin.send({ type: 'job.done', jobId: note.jobId, ok: true, sessionId: 'session', result: 'Asked.', tail: '', error: null });
+    await until(async () => (await db.select().from(jobs).where(eq(jobs.id, note.jobId)))[0]!.status === 'done');
+
+    /* A later turn a wake started, with no word of the CEO in it. */
+    await enqueueTurn(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, prompt: 'The wait for the alarms ended.', createdBy: null, message: { personId: null, text: 'The wait for the alarms ended.', notification: { source: 'wait_ended', tasks: [] } } });
+    let wake = await builtin.next();
+    while (wake.type !== 'job.run') wake = await builtin.next();
+    const client = await mcp(app, wake.toolToken!);
+    const letters = JSON.parse(text(await call(client, 'inbox', { employee: hana!.id }))) as { letters: { text: string }[] };
+    expect(letters.letters.map(l => l.text)).toEqual(['Bruno has given no sign of life for 20 minutes.', 'Rita has given no sign of life for 20 minutes.', 'Sara has given no sign of life for 20 minutes.']);
+    const marked = await call(client, 'inbox_mark', { employee: hana!.id, status: 'done', source: 'program_alarm', receivedBefore: new Date(Date.now() + 1000).toISOString(), reason: 'Stale alarms after the outage.' });
+    expect(text(marked)).toBe("Marked 3 letters done in Hana's inbox.");
+    const [logged] = (await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, hana!.id), eq(agentEvents.kind, 'message')))).map(e => e.data as { text: string });
+    expect(logged!.text).toBe('Orchestrator marked 3 letters done in this inbox. Why: Stale alarms after the outage.');
+    const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
+    expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
+
+    /* Every new company's orchestrator is told so in its skills. */
+    for (const [id, rule] of [['orch-trouble', /Any employee's inbox is open to you/], ['orch-resources', /work there in any turn of yours/]] as const) {
+      expect(ORCHESTRATOR_SKILLS as readonly string[]).toContain(id);
+      expect(app.ctx.templates.skills.get(id)!.body, id).toMatch(rule);
+    }
   });
 });

@@ -1,9 +1,9 @@
-import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import { freshPglite } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 const columnOf = async (db: ReturnType<typeof drizzle>) =>
@@ -11,7 +11,7 @@ const columnOf = async (db: ReturnType<typeof drizzle>) =>
 
 describe("the repository's full test command", () => {
   it('is an optional column of departments on a fresh database', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -20,7 +20,7 @@ describe("the repository's full test command", () => {
 
   /* No repository is taken to have declared anything, so no run marks a commit until a person says which command is full. */
   it('comes to the previous schema with none declared on the repositories already there, and every other value intact', async () => {
-    const client = new PGlite();
+    const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsBefore('repo_full_test_command') });

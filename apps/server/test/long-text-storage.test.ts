@@ -225,20 +225,28 @@ it('retains the person author after a closed task has no remaining agent recipie
   expect(downloaded.rawPayload.equals(Buffer.from(WORDS))).toBe(true);
 });
 
-it('keeps automatic private log files out of another department while preserving ordinary file sharing', async () => {
+it('lets working employees of another department read full-text task files while refusing personal assistants', async () => {
   const c = await fixture();
   await comment(c.app.ctx, { agentId: c.worker.id }, c.task.id, WORDS);
   const [file] = await c.files();
   const [sales] = await c.db.insert(departments).values({ companyId: c.company.id, templateKey: 'sales', roleCode: 'SAL' }).returning();
-  const [outsider] = await c.db.insert(agents).values({ companyId: c.company.id, departmentId: sales!.id, name: 'Sam', kind: 'worker', roleKey: 'SAL-AE', model: '' }).returning();
+  const [colleague] = await c.db.insert(agents).values({ companyId: c.company.id, departmentId: sales!.id, name: 'Sam', kind: 'worker', roleKey: 'SAL-AE', model: '' }).returning();
+  const [assistant] = await c.db.insert(agents).values({ companyId: c.company.id, name: 'Ava', kind: 'assistant', model: '' }).returning();
   const [sub] = await c.db.select().from(subscriptions);
   const token = 'another-department-full-text-fixture';
-  await c.db.insert(jobs).values({ companyId: c.company.id, subscriptionId: sub!.id, agentId: outsider!.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
+  const assistantToken = 'assistant-full-text-fixture';
+  await c.db.insert(jobs).values([
+    { companyId: c.company.id, subscriptionId: sub!.id, agentId: colleague!.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) },
+    { companyId: c.company.id, subscriptionId: sub!.id, agentId: assistant!.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(assistantToken) },
+  ]);
   const fetched = await c.app.inject({ url: `/api/attachments/file?task=${c.task.number}&file=${file!.id}`, headers: { authorization: `Bearer ${token}` } });
-  expect(fetched.statusCode).toBe(404);
+  expect(fetched.statusCode).toBe(200);
+  expect(fetched.rawPayload.equals(Buffer.from(WORDS))).toBe(true);
+  expect((await c.app.inject({ url: `/api/attachments/file?task=${c.task.number}&file=${file!.id}`, headers: { authorization: `Bearer ${assistantToken}` } })).statusCode).toBe(404);
   const shared = await c.app.inject({ method: 'POST', url: `/api/attachments?task=${c.task.number}&name=shared.txt`, headers: { authorization: `Bearer ${c.token}`, 'content-type': 'application/octet-stream' }, payload: Buffer.from('An ordinary shared file.') });
   expect(shared.statusCode).toBe(201);
   const ordinary = await c.app.inject({ url: `/api/attachments/file?task=${c.task.number}&file=shared.txt`, headers: { authorization: `Bearer ${token}` } });
   expect(ordinary.statusCode).toBe(200);
   expect(ordinary.body).toBe('An ordinary shared file.');
+  expect((await c.app.inject({ url: `/api/attachments/file?task=${c.task.number}&file=shared.txt`, headers: { authorization: `Bearer ${assistantToken}` } })).statusCode).toBe(404);
 });
