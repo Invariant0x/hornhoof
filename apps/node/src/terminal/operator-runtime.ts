@@ -255,13 +255,15 @@ export class OperatorRuntime {
     if (target) this.updateCase(target, frame);
   }
 
-  /* What the node sees of an agent's program right now, whichever program that is by now. */
+  /* What the node sees of an agent's program right now, whichever program that is by now. It is busy exactly when the
+     program works on a turn, as program_screen shows it: what it did since the words is no work it is on, and a program
+     done with its turn is free for whoever releases its hold after a look at it. */
   private async recoveryState({ agentKey, jobId, instance, request }: Extract<OperatorServerMessage, { type: 'program.recovery_state_get' }>): Promise<OperatorRecoveryState> {
     const reply = { type: 'program.recovery_state' as const, agentKey, jobId, instance, request };
     const target = this.targets.get(agentKey);
     const shown = target?.physical ? await this.source.recovery(agentKey) : null;
     if (!target || !shown?.alive) return { ...reply, ...NO_PROGRAM };
-    return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: inputShown(shown.input, shown.own), ...programAt(this.source.current(agentKey)), busy: shown.busy || target.sinceWords };
+    return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: inputShown(shown.input, shown.own), ...programAt(this.source.current(agentKey)), busy: shown.busy };
   }
 
   private updateCase(target: Target, frame: Extract<OperatorServerMessage, { type: 'program.operator_case' }>): void {
