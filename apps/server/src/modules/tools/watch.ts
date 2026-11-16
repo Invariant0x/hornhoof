@@ -15,7 +15,7 @@ import type { WithEvent } from '../events/store.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { programRestartStatus, restartProgram } from '../tasks/program-restarts.js';
-import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
+import { sendTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { cleanDiagnostic } from '@hornhoof/protocol/redaction';
@@ -559,14 +559,15 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       if (unable) return refused(ctx, job, unable, employee, ref);
       if (!(await counted(me.id))) return refused(ctx, job, { reason: 'send_limit', text: `One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.` }, employee, ref);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
-      return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
+      return sendTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
           companyId: job.companyId,
           agentId: target.id,
           prompt: `${wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text)}\n\n${answerBy(me)}`,
           createdBy: null,
-          message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+          message: { personId: null, text, from: 'agent', name: me.name, by: me.id, byTurn: job.id },
           withMessage: back.withMessage,
-        }).then(async id => {
+        }).then(async ({ id, repeated }) => {
+        if (repeated) return say(`Sent to ${target.name} already in this turn, so this repeat was not sent again.`);
         back.told();
         /* The map runs it between the two departments, or the card between the two agents of one. */
         if (me.departmentId && target.kind === 'orchestrator') ctx.bus.publish(job.companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
