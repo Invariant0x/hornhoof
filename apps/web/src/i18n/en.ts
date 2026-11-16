@@ -31,7 +31,7 @@ export const en = {
     states: { available: 'Available to assistants', busy: 'An assistant is using it', owner: 'In your hands', offline: 'Computer is offline' },
     control: 'Screen and control', watch: 'Watch screen', hide: 'Hide screen', stop: 'Stop', resume: 'Lend to assistants', stopping: 'Stop requested. Waiting for the computer to confirm.',
     live: 'Live screen', waitingFrame: 'Waiting for a screen. An assistant session starts the recording.', paused: 'The screen is paused. The phone is in your hands.', noPicture: 'This screen could not be read.', updated: (at: string) => `Screen from ${at}`, screenFor: (name: string) => `Screen of ${name}`, screenError: 'The screen did not load. Try again.',
-    recordings: 'Phone recordings', noRecordings: 'No phone sessions on this task yet.', recordingError: 'Could not load the phone recordings.', play: 'Play', pause: 'Pause', previous: 'Previous frame', next: 'Next frame', replay: 'Open recording', closeReplay: 'Close recording', frameOf: (n: number, total: number) => `Frame ${n} of ${total}`,
+    recordings: 'Phone recordings', noRecordings: 'No phone sessions on this task yet.', play: 'Play', pause: 'Pause', previous: 'Previous frame', next: 'Next frame', replay: 'Open recording', closeReplay: 'Close recording', frameOf: (n: number, total: number) => `Frame ${n} of ${total}`,
     recordingStates: { queued: 'Waiting', starting: 'Starting', active: 'Recording', revoking: 'Stopping', ended: 'Finished', cancelled: 'Cancelled' },
   },
   routes: {

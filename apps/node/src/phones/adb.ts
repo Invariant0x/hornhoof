@@ -113,7 +113,7 @@ export class PhoneAdb {
 
   async act(serial: string, input: unknown, signal: AbortSignal): Promise<void> {
     const op = PhoneOperation.parse(input);
-    if (op.kind === 'capture') throw new Error('phone_capture_needs_mask');
+    if (op.kind === 'capture') throw new Error('phone_capture_is_not_an_action');
     const script = await this.script(serial, op, signal);
     await this.call(serial, ['shell'], signal, script);
   }

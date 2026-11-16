@@ -14,7 +14,7 @@ export const ru: Messages = {
     states: { available: 'Доступен ассистентам', busy: 'Работает ассистент', owner: 'В ваших руках', offline: 'Компьютер не в сети' },
     control: 'Экран и управление', watch: 'Смотреть экран', hide: 'Скрыть экран', stop: 'Стоп', resume: 'Передать ассистентам', stopping: 'Стоп запрошен. Ждем подтверждения компьютера.',
     live: 'Живой экран', waitingFrame: 'Ждем экран. Запись начнется с сеансом ассистента.', paused: 'Экран на паузе. Телефон в ваших руках.', noPicture: 'Этот экран не удалось прочитать.', updated: (at: string) => `Экран от ${at}`, screenFor: (name: string) => `Экран телефона ${name}`, screenError: 'Экран не загрузился. Попробуйте снова.',
-    recordings: 'Записи с телефона', noRecordings: 'На этой задаче еще не было сеансов с телефоном.', recordingError: 'Не удалось загрузить записи с телефона.', play: 'Смотреть', pause: 'Пауза', previous: 'Предыдущий кадр', next: 'Следующий кадр', replay: 'Открыть запись', closeReplay: 'Закрыть запись', frameOf: (n: number, total: number) => `Кадр ${n} из ${total}`,
+    recordings: 'Записи с телефона', noRecordings: 'На этой задаче еще не было сеансов с телефоном.', play: 'Смотреть', pause: 'Пауза', previous: 'Предыдущий кадр', next: 'Следующий кадр', replay: 'Открыть запись', closeReplay: 'Закрыть запись', frameOf: (n: number, total: number) => `Кадр ${n} из ${total}`,
     recordingStates: { queued: 'В очереди', starting: 'Запускается', active: 'Идет запись', revoking: 'Останавливается', ended: 'Завершен', cancelled: 'Отменен' },
   },
   routes: {
