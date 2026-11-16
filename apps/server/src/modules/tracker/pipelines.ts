@@ -7,7 +7,6 @@ import { published, refuse, type Actor, type Task, type Tx } from '../tasks/engi
 import { spotOf } from './responsible.js';
 
 type Pipeline = typeof pipelines.$inferSelect;
-type StageRow = typeof pipelineStages.$inferSelect;
 /* A stage as it is written: key names it in the list, its id when it is there already; parent: the key of the stage above
    it, none for the first ones after the head. One owner: a role of the department, or one of its employees. */
 type StageInput = { key: string; id?: string; parent: string | null; name: string; ownerRole?: string; ownerAgentId?: string };
