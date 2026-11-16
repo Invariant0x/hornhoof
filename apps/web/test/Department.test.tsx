@@ -153,6 +153,41 @@ describe('Department view', () => {
     expect(within(people).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Sasha', 'Oleg']);
   });
 
+  it('opens the department\'s own External messaging from its screen for a person given several departments, and About leads to the same panel', async () => {
+    const user = userEvent.setup();
+    const max = { id: 'p7', name: 'Max', email: 'max@acme.com', title: 'CMO', status: 'active' as const, isOwner: false, deputy: true, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }, { id: 'd8', name: 'Sales' }], teams: [] } };
+    const channel = { id: 'ch1', departmentId: 'd2', name: 'B2C Email Outreach', adapter: 'smtp', purpose: 'newsletter', audience: 'direct', status: 'active', canManage: true, policy: null, accounts: [] };
+    const overview = { channels: [channel], messages: [], escalations: [], approvals: [], departments: [{ id: 'd2', name: 'Development', templateKey: null }] };
+    const calls = shell({
+      'GET /api/outbound?department=d2': [200, overview],
+      'GET /api/outbound/catalog?department=d2': [200, { departmentId: 'd2', entries: [] }],
+      'GET /api/outbound/setup-log?department=d2': [200, { departmentId: 'd2', entries: [] }],
+    }, { ...DEV_ORG, people: [...DEV_ORG.people, max] }, listed('p7', 'Max'));
+    await flyIn(user);
+    await user.click(await screen.findByRole('button', { name: 'External messaging' }));
+    const panel = screen.getByRole('complementary', { name: 'External messaging' });
+    expect(await within(panel).findByRole('heading', { name: 'B2C Email Outreach' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Add an address' })).toBeInTheDocument();
+
+    await drawer(user, 'About the department');
+    const about = screen.getByRole('complementary', { name: 'About the department' });
+    const pointer = within(about).getByRole('region', { name: 'External messaging' });
+    expect(within(pointer).queryByRole('heading', { name: 'B2C Email Outreach' })).toBeNull();
+    expect(calls.filter(c => c.path === '/api/outbound/catalog?department=d2')).toHaveLength(1);
+    await user.click(within(pointer).getByRole('button', { name: 'Open External messaging' }));
+    expect(await within(screen.getByRole('complementary', { name: 'External messaging' })).findByRole('heading', { name: 'B2C Email Outreach' })).toBeInTheDocument();
+  });
+
+  it('shows no External messaging to a person the server does not let run the department\'s messages', async () => {
+    const user = userEvent.setup();
+    const calls = shell({ 'GET /api/outbound?department=d2': [200, { channels: [], messages: [], escalations: [], approvals: [], departments: [] }] });
+    await flyIn(user);
+    await waitFor(() => expect(calls.some(c => c.path === '/api/outbound?department=d2')).toBe(true));
+    expect(screen.queryByRole('button', { name: 'External messaging' })).toBeNull();
+    await drawer(user, 'About the department');
+    expect(within(screen.getByRole('complementary', { name: 'About the department' })).queryByRole('region', { name: 'External messaging' })).toBeNull();
+  });
+
   it("opens a person's decisions from their card in the department, which shows the same count as the map", async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;

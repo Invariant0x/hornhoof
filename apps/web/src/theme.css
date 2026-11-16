@@ -455,6 +455,13 @@ select:disabled { opacity: .55; }
 .outbound-setup .form-foot { margin-block-start: 8px; }
 /* Its fields and lists are touch targets of 44px, as everywhere in the Settings window; buttons are by their group. */
 .outbound-setup .field :is(input, select) { height: 44px; }
+/* A field the person has to correct says so in its frame too: a pink frame, with the focus ring outside it when focused,
+   as Design set it for fields; so does the tick of consent, whose words stand under it. */
+.outbound-setup .field :is(input, select, textarea)[aria-invalid='true'] { border-color: var(--pink); }
+.outbound-setup .field :is(input, select, textarea)[aria-invalid='true']:is(:focus, :focus-visible) { border-color: var(--pink); outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: none; }
+.outbound-setup .check-card:has([aria-invalid='true']) { border-color: var(--pink); }
+.outbound-setup .repo-form > .bad { margin: 0; font-size: 12px; color: var(--pink-ink); overflow-wrap: break-word; }
+.outbound-added { margin: 0; overflow-wrap: anywhere; }
 /* The groups of the limits form: no frame of the browser, their heading a line of its own, their fields on the form's edge.
    What follows the heading is a block of its own under it, as every browser lays out a legend in its own way. */
 .outbound-numbers { display: block; min-inline-size: 0; margin: 0; margin-block-start: 8px; padding: 0; border: 0; }

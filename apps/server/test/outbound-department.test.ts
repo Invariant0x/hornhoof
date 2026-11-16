@@ -33,7 +33,7 @@ const refused = (r: Res) => {
 const SMTP = { host: 'smtp.mkt.example', port: 465, security: 'tls', username: 'letters@mkt.example', password: PASSWORD, from: 'letters@mkt.example' };
 const AUTO: OutboundPolicyValue = { ...QUIET, accountDailyLimit: 2, autoSend: true };
 const LETTERS = { name: 'Letters', adapter: 'smtp', purpose: 'first_contact', audience: 'direct' };
-const WHERE = 'in Settings under External messaging, or on the department\'s screen under About the department';
+const WHERE = 'in Settings under External messaging, or on the department\'s screen under External messaging';
 
 /* The company of department-owner-fixture.ts with Marketing beside it: Mia its head, Max its writer on a task, and Mona,
    given Marketing alone and named its owner. Development has a working channel of its own, with a secret. */
