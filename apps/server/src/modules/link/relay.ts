@@ -1,5 +1,6 @@
 import { isLinkName } from '@hornhoof/protocol/link';
 import { z } from 'zod';
+import type { Checker } from '../../checker.js';
 import { ApiError } from '../../errors.js';
 
 /* How long one call to the relay may take before Hornhoof says it does not answer. */
@@ -153,7 +154,7 @@ export class Relay {
     return (await this.secretFrom(`/links/${encodeURIComponent(name)}/visitor-key`, key, VisitorKeyAnswer)).visitorKey;
   }
 
-  private async secretFrom<T>(path: string, key: string, answer: z.ZodType<T>, body?: object): Promise<T> {
+  private async secretFrom<T>(path: string, key: string, answer: Checker<T>, body?: object): Promise<T> {
     const res = await this.call('POST', path, { key, body });
     if (res.status === 429) throw busy();
     const parsed = res.ok ? answer.safeParse(await res.json().catch(() => null)) : null;

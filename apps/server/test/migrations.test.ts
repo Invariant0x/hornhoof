@@ -349,9 +349,9 @@ describe('migration 0086 composable skills', () => {
       (${C}, 'worker', 'Other role', 'DEV-BE', '', null, '["dev-tdd"]', '{}', '{}', null),
       (${C}, 'worker', 'No role', null, '', null, '["retired-kept"]', '{"base":"Roleless assignment."}', '{}', null)`);
     /* Later migrations add the machine of an employee's built-in node and each card's own inbox mode, empty on every row,
-       and 0125 the address and protocol of an API connection, empty on every plan. */
+       0125 the address and protocol of an API connection, empty on every plan, and 0131 each plan's fallbacks, none yet. */
     const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key' - 'builtin_machine' - 'inbox_mode')::text as data from agents a order by name`)).rows;
-    const plans = async () => (await db.execute<{ data: string }>(sql`select (to_jsonb(s) - 'base_url' - 'api_protocol')::text as data from subscriptions s order by id`)).rows;
+    const plans = async () => (await db.execute<{ data: string }>(sql`select (to_jsonb(s) - 'base_url' - 'api_protocol' - 'fallbacks')::text as data from subscriptions s order by id`)).rows;
     const before = { cards: await cards(), plans: await plans() };
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -972,5 +972,31 @@ describe('migration 0119, the tables of takeovers, parked job results and the hi
     const [check] = (await db.execute<{ def: string }>(sql`select pg_get_constraintdef(c.oid) as def from pg_constraint c join pg_class t on t.oid = c.conrelid where t.relname = 'machines' and c.conname = 'machines_copy_state'`)).rows;
     for (const state of ['making', 'remaking', 'ready', 'stopped', 'saving']) expect(check?.def, state).toContain(`'${state}'`);
     expect(check?.def).not.toContain('other');
+  });
+});
+
+describe('migration 0131, the fallbacks of a plan', () => {
+  it('gives every plan an empty list of fallbacks, keeps the plans and cards as they were, and puts nobody on a fallback', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0129_builtin_node_connections') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const owner = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true) returning id`)).rows[0]!.id;
+    const plan = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status, budget) values (${company}, 'antigravity', 'personal', 'Plan', ${owner}, 'ready', 70) returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${company}, 'codex', 'personal', 'Spare', ${owner}, 'ready')`);
+    const dept = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'development', 'DEV') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into agents (company_id, kind, name, department_id, model, effort, subscription_id) values (${company}, 'worker', 'Bruno', ${dept}, 'gemini-4-argon', 'high', ${plan})`);
+    const plans = async () => (await db.execute(sql`select to_jsonb(s) - 'fallbacks' as data from subscriptions s order by id`)).rows;
+    const cards = async () => (await db.execute(sql`select to_jsonb(a) as data from agents a order by id`)).rows;
+    const before = { plans: await plans(), cards: await cards() };
+
+    const target = await migrationsUpTo('0131_plan_fallbacks');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+
+    expect({ plans: await plans(), cards: await cards() }).toEqual(before);
+    expect((await db.execute(sql`select fallbacks from subscriptions order by id`)).rows).toEqual([{ fallbacks: [] }, { fallbacks: [] }]);
+    expect((await db.execute(sql`select count(*)::int as n from agent_fallbacks`)).rows).toEqual([{ n: 0 }]);
   });
 });

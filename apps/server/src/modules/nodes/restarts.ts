@@ -2,6 +2,7 @@ import type { Boot, NodeExit } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, type RestartCause } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ownMachine } from './hub.js';
 import { builtinMachine } from './nodes.js';
 import { restartDetails, type Hello, type NodeBoot, type RestartCut } from './restart-evidence.js';
@@ -47,7 +48,7 @@ export function interruptionOf(ctx: Ctx, node: { id: string | null; builtin?: st
 
 /* machine: the machine whose built-in node said hello, by its network id. */
 export async function builtinInterruption(ctx: Ctx, machine: string, now: Hello, at: Date): Promise<RestartCut> {
-  const [company] = await ctx.db.select({ id: companies.id }).from(companies).where(eq(companies.singleton, true));
+  const [company] = await ctx.db.select(idOnly(companies)).from(companies).where(eq(companies.singleton, true));
   const own = machine === ownMachine(ctx.config);
   const row = !company ? null : own ? await builtinMachine(ctx.db, ctx.config.hostId, company.id, ctx.config.machineId) : await builtinMachine(ctx.db, null, company.id, machine);
   return interruptionOf(ctx, { id: null, builtin: machine, name: BUILTIN_NAME, said: null, machine: { id: row?.id ?? null, name: row?.hostname ?? null } }, now, at);

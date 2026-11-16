@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { agentParty } from '../events/parties.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
@@ -42,8 +43,8 @@ export async function ofOperations(db: Db, agent: Agent, department: typeof depa
 
 /* Operations on duty, the program operator before the head of Operations. */
 export async function operationsStaff(ctx: Ctx, companyId: string): Promise<Agent[]> {
-  const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
-  const below = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), inArray(departments.parentId, ops)));
+  const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
+  const below = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), inArray(departments.parentId, ops)));
   const staff = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), or(inArray(agents.departmentId, ops), inArray(agents.departmentId, below)), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
   return [PROGRAM_OPERATOR_ROLE, 'OPS-HEAD'].flatMap(role => staff.filter(agent => agent.roleKey === role && OPERATIONS_ROLES[role] === agent.kind));
 }
@@ -126,7 +127,7 @@ const outcomeOf = (action: string, reply: ProgramInputResult | null): Outcome =>
 /* The program operator's look at the case it was given is the picture its report carries. */
 async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, png: Buffer): Promise<void> {
   await operatorTransaction(ctx, async tx => {
-    await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, program.agentId)).for('update');
+    await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, program.agentId)).for('update');
     const [row] = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, caller.companyId), eq(programOperatorCases.operatorJobId, caller.id), eq(programOperatorCases.status, 'open')));
     if (row) await storeCasePicture(tx, row, png);
   });
@@ -152,7 +153,7 @@ async function turnOf(ctx: Ctx, { program, reply }: Entry): Promise<Job> {
 
 /* The case this operator turn was given on the employee: a denial it reports rests on this record. */
 async function caseOf(ctx: Ctx, { me, caller, program }: Entry): Promise<string | null> {
-  const [held] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases)
+  const [held] = await ctx.db.select(idOnly(programOperatorCases)).from(programOperatorCases)
     .where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, me.companyId), eq(programOperatorCases.operatorJobId, caller.id))).orderBy(desc(programOperatorCases.openedAt)).limit(1);
   return held?.id ?? null;
 }

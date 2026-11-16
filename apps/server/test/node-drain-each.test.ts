@@ -6,6 +6,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { agentState, enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
 import { nodeDrain, nodeHeldLong } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, nextOf, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
@@ -30,7 +31,7 @@ async function computer(env: NodeJS.ProcessEnv = {}) {
   const ceo = await setUpCompany(app);
   const url = await listen(app);
   const [company] = await db.select().from(companies);
-  const [person] = await db.select({ id: people.id }).from(people);
+  const [person] = await db.select(idOnly(people)).from(people);
   const [apiKey] = await db.select().from(subscriptions);
   const [host] = await db.insert(machines).values({ companyId: company!.id, personId: person!.id, machineKey: HOST_KEY, hostname: 'host-a' }).returning();
   const [dept] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();

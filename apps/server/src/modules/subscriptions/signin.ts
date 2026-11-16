@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { updateCommand } from '../nodes/command.js';
@@ -76,7 +77,7 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/subscriptions/:id/signin/stop', async (req, reply) => {
     const { sub } = await ownPlan(req);
     const { nodeId } = StopBody.parse(req.body ?? {});
-    const [node] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.subscriptionId, sub.id), liveNode));
+    const [node] = await db.select(idOnly(nodes)).from(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.subscriptionId, sub.id), liveNode));
     if (node) hub.send(nodeIdentity(node.id), { type: 'login.stop' });
     return reply.code(204).send();
   });
@@ -89,7 +90,7 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
       preValidation: async req => {
         const { me, sub } = await ownPlan(req);
         const q = TerminalQuery.parse(req.query ?? {});
-        const [node] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.id, q.nodeId), eq(nodes.subscriptionId, sub.id), liveNode));
+        const [node] = await db.select(idOnly(nodes)).from(nodes).where(and(eq(nodes.id, q.nodeId), eq(nodes.subscriptionId, sub.id), liveNode));
         if (!node) throw noNode();
         found.set(req, { personId: me.id, companyId: me.companyId, node: nodeIdentity(node.id), cols: q.cols, rows: q.rows });
       },

@@ -8,6 +8,7 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { agentChanges, agents, ASSISTANT_PROGRAMS, assistants, people, subscriptions } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { afterPlanMove } from '../agents/routes.js';
@@ -77,7 +78,7 @@ export async function putOnPlan(ctx: Ctx, me: Person, assistant: Pick<Person, 'i
   if (planId) {
     if (assistant.status === 'disabled') throw new ApiError(409, 'conflict', "A switched off assistant's agent takes no plan: switch the assistant on first.", 'assistant_switched_off');
     const [plan] = await db
-      .select({ id: subscriptions.id })
+      .select(idOnly(subscriptions))
       .from(subscriptions)
       .where(and(eq(subscriptions.id, planId), eq(subscriptions.companyId, me.companyId), eq(subscriptions.kind, 'personal'), eq(subscriptions.ownerPersonId, me.id), isNull(subscriptions.removedAt)));
     if (!plan) throw new ApiError(409, 'conflict', "An assistant's agent thinks only on a personal plan of its owner.", 'assistant_plan_invalid');
