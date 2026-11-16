@@ -161,18 +161,18 @@ describe('files an assistant sends', () => {
       expect(got.json().error).toMatchObject({ reason, message: words });
     };
     await refused(await upload(c, ava.key, { name: 'empty.heic', type: 'image/heic', bytes: Buffer.alloc(0) }, c.head.id, 'ru-RU,ru;q=0.9'), 400, 'file_empty',
-      'Файл пустой, поэтому он не дошел. Пришлите файл, в котором что-то есть.');
+      'файл пустой.');
     await refused(await upload(c, ava.key, { name: 'film.mov', type: 'video/quicktime', bytes: Buffer.alloc(FILE_BYTES + 1) }, c.head.id, 'ru'), 413, 'file_too_big',
-      'Файл больше 50 МБ, поэтому он не дошел. Пришлите его по частям или ссылкой.');
+      'файл больше 50 МБ.');
     await refused(await upload(c, ava.key, { name: 'film.mov', type: 'video/quicktime', bytes: Buffer.alloc(FILE_BYTES + 1) }, c.head.id), 413, 'file_too_big',
-      'The file is bigger than 50 MB, so it did not come through. Send it in parts or as a link.');
+      'the file is bigger than 50 MB.');
     c.app.ctx.config.taskFilesBytes = 4;
     await refused(await upload(c, ava.key, FILES[1]!, c.head.id, 'ru'), 413, 'attachment_invalid',
-      'Файл не дошел: в Hornhoof закончилось место для файлов компании. Спросите об этом владельца компании.');
+      'в Hornhoof закончилось место для файлов компании.');
     expect(await c.db.select().from(attachments)).toEqual([]);
     await refused(await writeWith(c, ava.key, { agentId: c.head.id, text: 'See the file', files: [randomUUID()] }, 'ru'), 404, 'attachment_unknown',
-      'Такого файла в Hornhoof нет, или вам его там не открыть.');
+      'такого файла в Hornhoof нет, или вам его там не открыть.');
     await refused(await upload(c, ava.key, FILES[0]!, randomUUID(), 'ru'), 404, 'agent_unknown',
-      'В Hornhoof нет такого сотрудника, или его убрали, поэтому ничего не ушло.');
+      'в Hornhoof нет такого сотрудника, или его убрали.');
   });
 });

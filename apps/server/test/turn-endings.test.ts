@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
 import { REPORT_WINDOW_MS } from '../src/modules/conversation/report-notices.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
@@ -151,7 +152,7 @@ describe("a turn whose program ended without the work done", () => {
     const current = await c.taskNow();
     expect(current.status).not.toBe('done');
     expect(routeSnapshot(await routeOf(c.db, current), current.assigneeAgentId).stage).toBe('tests');
-    const shown = await c.db.select({ kind: agentEvents.kind }).from(agentEvents).where(eq(agentEvents.jobId, check.jobId));
+    const shown = await c.db.select(only(agentEvents, 'kind')).from(agentEvents).where(eq(agentEvents.jobId, check.jobId));
     expect(shown.map(e => e.kind)).not.toContain('failed');
   });
 

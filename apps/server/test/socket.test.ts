@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, departments, jobs, nodes, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { NODE_STALE_MS, expireStaleNodes } from '../src/modules/nodes/nodes.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
@@ -187,7 +188,7 @@ describe('node socket', () => {
 
   it('fails jobs the node no longer knows after a restart', async () => {
     const { db, url, subId, nodeId, key } = await liveCompany();
-    const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
+    const [company] = await db.select(only(subscriptions, 'companyId')).from(subscriptions).where(eq(subscriptions.id, subId));
     const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, nodeId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
     const node = await connectNode(url, key);
     node.send(hello([]));
@@ -198,7 +199,7 @@ describe('node socket', () => {
 
   it('confirms each finished job it hears of, again when the node sends it again, and takes only the first', async () => {
     const { db, url, subId, nodeId, key } = await liveCompany();
-    const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
+    const [company] = await db.select(only(subscriptions, 'companyId')).from(subscriptions).where(eq(subscriptions.id, subId));
     const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, nodeId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
     const node = await connectNode(url, key);
     node.send(hello([job!.id]));
@@ -236,7 +237,7 @@ describe('node socket', () => {
 
   it('closes the socket with 4001 when the machine is disconnected in Hornhoof', async () => {
     const { app, db, url, ceo, machineId, subId, nodeId, key } = await liveCompany();
-    const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
+    const [company] = await db.select(only(subscriptions, 'companyId')).from(subscriptions).where(eq(subscriptions.id, subId));
     const node = await connectNode(url, key);
     node.send(hello([]));
     await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
@@ -249,7 +250,7 @@ describe('node socket', () => {
 
   it("sends no agent's next turn to a machine while it is being disconnected", async () => {
     const { app, db, url, ceo, machineId, subId, nodeId, key } = await liveCompany();
-    const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
+    const [company] = await db.select(only(subscriptions, 'companyId')).from(subscriptions).where(eq(subscriptions.id, subId));
     const companyId = company!.companyId;
     const [dept] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
     const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: subId, nodeId }).returning();

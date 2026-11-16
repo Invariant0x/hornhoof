@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
 import { agents, companies, COPY_ERRORS, COPY_STATES, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole, type UploadState } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { REPORT_MAX } from '../backups/types.js';
 import { logName, onMachine, type AccessMachine } from '../computer/access.js';
@@ -174,7 +174,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      visitor in at the relay goes with it, for a machine that reaches other data machines there; it is asked of the
      relay only once there is another such machine. */
   async function linkOf(machine: Holder | null, visit: boolean) {
-    const [link] = machine ? await db.select({ name: publicLinks.name }).from(publicLinks).limit(1) : [];
+    const [link] = machine ? await db.select(only(publicLinks, 'name')).from(publicLinks).limit(1) : [];
     if (!machine || !link) return null;
     const appSecret = await peerSecret(db, config, 'app', leading());
     const dataSecret = await peerSecret(db, config, 'data', leading());

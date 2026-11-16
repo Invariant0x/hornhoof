@@ -8,7 +8,7 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { agentChanges, agents, ASSISTANT_PROGRAMS, assistants, people, subscriptions } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { afterPlanMove } from '../agents/routes.js';
@@ -85,7 +85,7 @@ export async function putOnPlan(ctx: Ctx, me: Person, assistant: Pick<Person, 'i
   }
   /* The assistant's row stays locked while its agent is made, so a pick at the same moment finds that agent. */
   const found = await db.transaction(async tx => {
-    const [row] = await tx.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistant.id)).for('update');
+    const [row] = await tx.select(only(assistants, 'agentId')).from(assistants).where(eq(assistants.personId, assistant.id)).for('update');
     if (row?.agentId || !planId) return row?.agentId ?? null;
     const [agent] = await tx.insert(agents).values({ companyId: me.companyId, kind: 'assistant', name: assistant.name, model: '', subscriptionId: planId, createdBy: me.id }).returning({ id: agents.id });
     await tx.update(assistants).set({ agentId: agent!.id }).where(eq(assistants.personId, assistant.id));
@@ -110,7 +110,7 @@ export async function putOnPlan(ctx: Ctx, me: Person, assistant: Pick<Person, 'i
    nothing of it runs on the owner's sign-in until the assistant is on again and its owner picks a plan once more. */
 export async function releaseAssistantAgent(ctx: Ctx, assistantId: string, by: Person): Promise<void> {
   const { db } = ctx;
-  const [row] = await db.select({ agentId: assistants.agentId }).from(assistants).where(eq(assistants.personId, assistantId));
+  const [row] = await db.select(only(assistants, 'agentId')).from(assistants).where(eq(assistants.personId, assistantId));
   if (!row?.agentId) return;
   const id = row.agentId;
   const left = await onAgent(ctx, id, async () => {

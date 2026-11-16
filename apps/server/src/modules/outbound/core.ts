@@ -4,7 +4,7 @@ import { and, desc, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundReviewReceipts, outboundSamplingCounters, supportClassifications, tasks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { isOn } from '../model-checks/lifecycle.js';
@@ -214,7 +214,7 @@ async function nextNumber(tx: Tx, channel: Channel, scope: 'channel' | 'segment'
 /* Whether the last chosen message of this author went away before it passed. */
 async function reviewOwed(tx: Tx, channelId: string, agentId: string): Promise<boolean> {
   const [last] = await tx
-    .select({ status: outboundMessages.status })
+    .select(only(outboundMessages, 'status'))
     .from(outboundMessages)
     .where(and(eq(outboundMessages.channelId, channelId), eq(outboundMessages.authorAgentId, agentId), sql`${outboundMessages.samplingOrdinals} ->> 'review' = '1'`))
     .orderBy(desc(sql`(${outboundMessages.samplingOrdinals} ->> 'channel')::int`))
@@ -363,7 +363,7 @@ const classificationOf = (target: Target): string | null => (target.kind === 'ti
 /* A class of ticket that wants a person wants one for this very reply. A classifier that has not said so yes or no counts. */
 async function wantsPerson(tx: Tx, companyId: string, classificationId: string | null): Promise<boolean> {
   if (!classificationId) return false;
-  const [classified] = await tx.select({ requiresHuman: supportClassifications.requiresHuman }).from(supportClassifications).where(and(eq(supportClassifications.id, classificationId), eq(supportClassifications.companyId, companyId)));
+  const [classified] = await tx.select(only(supportClassifications, 'requiresHuman')).from(supportClassifications).where(and(eq(supportClassifications.id, classificationId), eq(supportClassifications.companyId, companyId)));
   return classified?.requiresHuman !== false;
 }
 
@@ -398,7 +398,7 @@ async function askOrCancel(ctx: Ctx, messageId: string, ask: ReturnType<typeof a
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
     await ctx.db.transaction(async tx => {
-      const [message] = await tx.select({ channelId: outboundMessages.channelId }).from(outboundMessages).where(eq(outboundMessages.id, messageId));
+      const [message] = await tx.select(only(outboundMessages, 'channelId')).from(outboundMessages).where(eq(outboundMessages.id, messageId));
       await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, message!.channelId)).for('update');
       await tx.update(outboundMessages).set({ status: 'cancelled', reasonCodes: ['stale_binding'], updatedAt: new Date() }).where(and(eq(outboundMessages.id, messageId), inArray(outboundMessages.status, [...RESERVABLE])));
     });
@@ -453,7 +453,7 @@ function openSeal(ctx: Ctx, m: Message, revision: Revision, channel: Channel): S
    that ended well is no reason: its work was accepted. */
 async function authorStands(tx: Tx, m: Message): Promise<boolean> {
   const [task] = await tx.select({ status: tasks.status, executor: tasks.executorAgentId, assignee: tasks.assigneeAgentId }).from(tasks).where(eq(tasks.id, m.taskId));
-  const [author] = await tx.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, m.authorAgentId));
+  const [author] = await tx.select(only(agents, 'removedAt')).from(agents).where(eq(agents.id, m.authorAgentId));
   return task?.status !== 'cancelled' && (task?.executor ?? task?.assignee) === m.authorAgentId && author?.removedAt === null;
 }
 
@@ -685,7 +685,7 @@ const settled = (attempt: Attempt, outcome: Outcome): boolean => !['sending', 'u
 export const settleAttempt: (...args: [...Parameters<SettleAttempt>, now?: Date]) => Promise<void> = async (ctx, attemptId, outcome, now = new Date()) => {
   const [seen] = await ctx.db.select().from(outboundAttempts).where(eq(outboundAttempts.id, attemptId));
   if (!seen) return;
-  const [owner] = await ctx.db.select({ channelId: outboundMessages.channelId }).from(outboundMessages).where(eq(outboundMessages.id, seen.messageId));
+  const [owner] = await ctx.db.select(only(outboundMessages, 'channelId')).from(outboundMessages).where(eq(outboundMessages.id, seen.messageId));
   await ctx.db.transaction(async tx => {
     await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, owner!.channelId)).for('update');
     await lockBuckets(tx, [seen]);
