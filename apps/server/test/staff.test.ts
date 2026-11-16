@@ -269,6 +269,7 @@ describe('staffing', () => {
     expect(staff.map(a => [a.roleKey, a.kind, a.model, a.subscriptionId])).toEqual([
       ['MKT-EDIT', 'worker', 'claude-opus-5-5', c.orchestrator.subscriptionId],
       ['MKT-HEAD', 'head', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
+      ['MKT-PM', 'worker', 'claude-haiku-5-5', c.orchestrator.subscriptionId],
       ['MKT-SEO', 'worker', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
       ['MKT-SOCIAL', 'worker', 'claude-haiku-5-5', c.orchestrator.subscriptionId],
       ['MKT-WRITE', 'worker', 'claude-sonnet-5-5', c.orchestrator.subscriptionId],
@@ -292,7 +293,7 @@ describe('staffing', () => {
     /* The same role outside the team keeps the strength the role asks for. */
     const [writer] = await c.db.select().from(agents).where(and(eq(agents.departmentId, marketing!.id), eq(agents.roleKey, 'MKT-WRITE'), isNull(agents.teamId)));
     expect(writer!.model).toBe('claude-sonnet-5-5');
-    expect(built.json().hired).toHaveLength(6);
+    expect(built.json().hired).toHaveLength(7);
   });
 
   it('numbers the members of a team that has several of one role', async () => {
@@ -312,7 +313,7 @@ describe('staffing', () => {
     expect(built.statusCode).toBe(201);
     const [finance] = await c.db.select().from(departments).where(eq(departments.templateKey, 'finance'));
     const staff = await c.db.select().from(agents).where(eq(agents.departmentId, finance!.id)).orderBy(asc(agents.roleKey));
-    expect(staff.map(a => [a.roleKey, a.model, a.subscriptionId])).toEqual([['FIN-AUDIT', '', null], ['FIN-BOOK', '', null], ['FIN-FPA', '', null], ['FIN-FPA', '', null], ['FIN-HEAD', '', null]]);
+    expect(staff.map(a => [a.roleKey, a.model, a.subscriptionId])).toEqual([['FIN-AUDIT', '', null], ['FIN-BOOK', '', null], ['FIN-FPA', '', null], ['FIN-FPA', '', null], ['FIN-HEAD', '', null], ['FIN-PM', '', null]]);
   });
 
   it('tells the orchestrator who came with a new department, and to staff only the ones that came without people', async () => {

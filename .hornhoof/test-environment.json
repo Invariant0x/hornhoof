@@ -683,6 +683,7 @@
           "apps/server/test/tasks-wake.test.ts",
           "apps/server/test/templates-once.test.ts",
           "apps/server/test/templates-pipeline.test.ts",
+          "apps/server/test/templates-tracker.test.ts",
           "apps/server/test/templates-watch-idle.test.ts",
           "apps/server/test/templates.test.ts",
           "apps/server/test/test-environment-templates.test.ts",
