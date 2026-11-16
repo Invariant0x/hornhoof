@@ -4,13 +4,12 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 
-export const NODE_KEY = 'v'.repeat(40);
-
 /* A company with two departments, an employee in each, an assistant, a person of each department and a person of another
    company, for the vault's people API and its tools. */
 export async function vaultCompany(logger?: Parameters<typeof testApp>[1]) {
-  const { app, db, config } = await testApp({ NODE_KEY }, logger);
-  const wsUrl = await listen(app);
+  const { app, db, config } = await testApp({}, logger);
+  /* The tools are reached over MCP, which needs the server listening. */
+  await listen(app);
   const ceoSession = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
@@ -58,5 +57,5 @@ export async function vaultCompany(logger?: Parameters<typeof testApp>[1]) {
   const add = async (session: string, body: Record<string, unknown>) =>
     app.inject({ method: 'POST', url: '/api/vault', payload: { scope: { kind: 'company' }, ...body }, ...as(session) });
 
-  return { app, db, config, wsUrl, companyId, ceo: ceo!, ceoSession, clara: clara!, claraSession, samSession, olaf: olaf!, olafSession, other: other!, otherAgent: otherAgent!, mkt: mkt!, sales: sales!, nora: nora!, sammy: sammy!, aide: aide!, task, startTurn, add };
+  return { app, db, config, companyId, ceo: ceo!, ceoSession, clara: clara!, claraSession, samSession, olaf: olaf!, olafSession, other: other!, otherAgent: otherAgent!, mkt: mkt!, sales: sales!, nora: nora!, sammy: sammy!, aide: aide!, task, startTurn, add };
 }

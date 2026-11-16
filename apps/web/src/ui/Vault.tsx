@@ -12,7 +12,7 @@ import { TickBox } from './TickBox';
 type Who = { id: string; name: string } | null;
 type Scope = { kind: 'company' } | { kind: 'department'; departmentId: string; departmentName: string } | { kind: 'agent'; agentId: string; agentName: string };
 export type VaultEntry = { id: string; name: string; site: string; login: string; hasCode: boolean; scope: Scope; createdBy: Who; createdAt: string; updatedBy: Who; updatedAt: string };
-type LogLine = { id: string; kind: 'used' | 'created' | 'changed' | 'removed'; person: Who; agent: Who; task: { id: string; number: number | null } | null; target: 'browser' | 'phone' | null; status: string | null; at: string };
+type LogLine = { id: string; kind: 'taken' | 'created' | 'changed' | 'removed'; person: Who; agent: Who; task: { id: string; number: number | null } | null; at: string };
 
 type Mode = { kind: 'list' } | { kind: 'add' } | { kind: 'edit'; entry: VaultEntry } | { kind: 'remove'; entry: VaultEntry } | { kind: 'log'; entry: VaultEntry; lines: LogLine[] | null };
 type FieldName = 'name' | 'site' | 'login' | 'password' | 'code' | 'scopeTarget';
@@ -20,7 +20,6 @@ type Draft = { name: string; site: string; login: string; password: string; code
 
 /* What the window asks the server for: a server that keeps no vault shows no Passwords group. */
 export const VAULT_PATH = '/api/vault';
-const PASSWORD_MIN = 4;
 const CODE = /^(otpauth:\/\/totp\/\S+|[A-Z2-7]{16,128})$/;
 const codeOf = (text: string) => (/^otpauth:/i.test(text.trim()) ? text.trim() : text.replace(/[\s-]+/g, '').replace(/=+$/, '').toUpperCase());
 
@@ -61,7 +60,7 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
     if (!draft.name.trim()) found.name = v.needName;
     if (!draft.site.trim()) found.site = v.needSite;
     if (!draft.login.trim()) found.login = v.needLogin;
-    if ((!entry && !draft.password) || (draft.password && draft.password.length < PASSWORD_MIN)) found.password = v.needPassword(PASSWORD_MIN);
+    if (!entry && !draft.password) found.password = v.needPassword;
     if (draft.code.trim() && !CODE.test(codeOf(draft.code))) found.code = v.badCode;
     if (draft.scopeKind !== 'company' && !draft.scopeTarget) found.scopeTarget = draft.scopeKind === 'department' ? v.needDepartment : v.needAgent;
     return found;
@@ -156,10 +155,6 @@ function EntryForm({ entry, onSaved, onCancel }: { entry: VaultEntry | null; onS
 const scopeText = (v: ReturnType<typeof useT>['vault'], scope: Scope) =>
   scope.kind === 'department' ? v.keptForDepartment(scope.departmentName) : scope.kind === 'agent' ? v.keptForAgent(scope.agentName) : v.forEveryone;
 
-/* A use's end in words: a status this window does not know yet reads as not working, never as its code. */
-const endedText = (v: ReturnType<typeof useT>['vault'], status: string | null): string =>
-  status === null ? v.ended.sent : Object.hasOwn(v.ended, status) ? v.ended[status as keyof typeof v.ended] : v.ended.failed;
-
 function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine[] | null; onClose(): void }) {
   const t = useT();
   const v = t.vault;
@@ -173,7 +168,7 @@ function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine
         <ul className="outbound-list outbound-entries">
           {lines.map(line => (
             <li key={line.id} className="outbound-entry">
-              <span>{v.logLine(line.kind, line.person?.name ?? line.agent?.name ?? '', line.task?.number ?? null, line.target, endedText(v, line.status))}</span>
+              <span>{v.logLine(line.kind, line.person?.name ?? line.agent?.name ?? '', line.task?.number ?? null)}</span>
               <small>{when(line.at)}</small>
             </li>
           ))}

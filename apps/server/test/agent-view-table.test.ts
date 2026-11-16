@@ -65,11 +65,11 @@ const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
   return { method: 'GET', url: `/api/attachments/${picture!.id}` };
 };
 
-/* The company's saved sign-in this agent used for its task: the log names the agent and the task's number. */
+/* The company's saved sign-in this agent took for its task: the log names the agent and the task's number. */
 let vaultUses = 0;
 const aVaultUse = async (c: AclCompany, agent: Crew): Promise<Call> => {
   const [entry] = await c.db.insert(vaultEntries).values({ companyId: c.companyId, name: `Sign-in ${++vaultUses} of ${String(agent)}`, site: 'https://partner.example', login: 'team', passwordEnc: 'x', createdBy: c.ids.ceo, updatedBy: c.ids.ceo }).returning();
-  await c.db.insert(vaultLog).values({ companyId: c.companyId, entryId: entry!.id, entryName: entry!.name, site: entry!.site, kind: 'used', agentId: c.crew[agent].id, target: 'browser', fields: ['password'], status: 'signed_in' });
+  await c.db.insert(vaultLog).values({ companyId: c.companyId, entryId: entry!.id, entryName: entry!.name, site: entry!.site, kind: 'taken', agentId: c.crew[agent].id });
   return { method: 'GET', url: `/api/vault/${entry!.id}/log` };
 };
 
@@ -95,7 +95,7 @@ const POINTED: Pointed[] = [
   { route: 'DELETE /api/agents/:id/telegram', of: anAgent('DELETE', '/telegram'), companyOnly: true, ownerToo: true },
   { route: 'GET /api/tasks/:id', of: aTask('GET', ''), company: true },
   { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits'), company: true },
-  /* Who used a sign-in of the vault is the company's work; another person's own assistant stays out of it. */
+  /* Who took a sign-in of the vault is the company's work; another person's own assistant stays out of it. */
   { route: 'GET /api/vault/:id/log', of: aVaultUse, company: true },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
   { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },

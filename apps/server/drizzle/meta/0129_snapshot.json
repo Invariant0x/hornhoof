@@ -1,5 +1,5 @@
 {
-  "id": "20027849-3655-4fc0-8348-c47ebbe46c0e",
+  "id": "70e18f48-19e3-4623-b017-928d092f67d8",
   "prevId": "0b990079-9105-47e6-80f5-b19196c7db3e",
   "version": "7",
   "dialect": "postgresql",
@@ -17062,33 +17062,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "job_id": {
-          "name": "job_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "task_id": {
           "name": "task_id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fields": {
-          "name": "fields",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -17098,12 +17074,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -17201,19 +17171,6 @@
             "id"
           ],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "vault_log_job_id_jobs_id_fk": {
-          "name": "vault_log_job_id_jobs_id_fk",
-          "tableFrom": "vault_log",
-          "tableTo": "jobs",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "vault_log_task_id_tasks_id_fk": {

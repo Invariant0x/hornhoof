@@ -4,19 +4,15 @@ import type { Ctx } from '../../app.js';
 import { viewerOf } from '../../auth/agent-view.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
-import { changeEntry, companyEntries, createEntry, entryById, entryLog, entryViews, EntryChange, NewEntry, notAllowed, parseBody, removeEntry, unknownEntry, type Entry } from './store.js';
+import { changeEntry, companyEntries, createEntry, entryById, entryLog, entryViews, EntryChange, NewEntry, notAllowed, parseBody, removeEntry, unknownEntry, type Entry, type Writer } from './store.js';
 
-/* The vault for people: any person of the company sees what entries there are and adds one; the person who added an entry
-   and the CEO change and remove it. A password or code secret comes in only from a person at the form, never from an
-   agent acting as one, and never goes back out. */
+/* The vault for people: any person of the company sees what entries there are and adds one, at the form or by the
+   orchestrator acting for them; the person who added an entry and the CEO change and remove it. A password or code secret
+   never goes back out to a person. */
 
 const IdParams = z.strictObject({ id: z.string() });
 
-/* A person at the form, not an agent acting for one. */
-function typing(me: Person): Person {
-  if (me.via) throw notAllowed('Only a person types a password into the vault, at its form in Hornhoof.');
-  return me;
-}
+const writerOf = (me: Person): Writer => ({ personId: me.id, agentId: me.via ?? null });
 
 /* The entry, when it is of this person's company; an entry of another company is refused, never told apart from ours. */
 async function entryOf(ctx: Ctx, me: Person, id: string): Promise<Entry> {
@@ -37,26 +33,26 @@ export function vaultRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.post('/api/vault', async (req, reply) => {
-    const me = typing(await requirePerson(req, ctx.db));
+    const me = await requirePerson(req, ctx.db);
     const input = parseBody(NewEntry, req.body);
-    const [view] = await entryViews(ctx, [await createEntry(ctx, me.companyId, me.id, input)]);
+    const [view] = await entryViews(ctx, [await createEntry(ctx, me.companyId, writerOf(me), input)]);
     return reply.code(201).send(view);
   });
 
   app.patch('/api/vault/:id', async req => {
-    const me = typing(await requirePerson(req, ctx.db));
+    const me = await requirePerson(req, ctx.db);
     const entry = await entryOf(ctx, me, IdParams.parse(req.params).id);
     requireOwnOrCeo(me, entry);
     const input = parseBody(EntryChange, req.body);
-    const [view] = await entryViews(ctx, [await changeEntry(ctx, entry, me.id, input)]);
+    const [view] = await entryViews(ctx, [await changeEntry(ctx, entry, writerOf(me), input)]);
     return view;
   });
 
   app.delete('/api/vault/:id', async (req, reply) => {
-    const me = typing(await requirePerson(req, ctx.db));
+    const me = await requirePerson(req, ctx.db);
     const entry = await entryOf(ctx, me, IdParams.parse(req.params).id);
     requireOwnOrCeo(me, entry);
-    await removeEntry(ctx, entry, me.id);
+    await removeEntry(ctx, entry, writerOf(me));
     return reply.code(204).send();
   });
 

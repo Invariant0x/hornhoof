@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
 import { Settings } from '../src/screens/Settings';
 import type { VaultEntry } from '../src/ui/Vault';
 import { ME, mockApi, ORG_WITH_TEAMS } from './api-mock';
@@ -53,11 +54,10 @@ describe('the Passwords group of the settings', () => {
     await user.type(name, 'Partner site');
     await user.type(screen.getByLabelText('Site'), 'https://partner.example/login');
     await user.type(screen.getByLabelText('Login'), 'team@acme.test');
-    await user.type(screen.getByLabelText('Password'), 'abc');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     const password = screen.getByLabelText('Password');
     await waitFor(() => expect(password).toHaveFocus());
-    expect(password).toHaveAccessibleDescription('Enter a password of at least 4 characters.');
+    expect(password).toHaveAccessibleDescription('Enter the password.');
     expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid');
   });
 
@@ -128,20 +128,39 @@ describe('the Passwords group of the settings', () => {
     await waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/vault/v1')).toBe(true));
   });
 
-  it('shows the history of a sign-in with who used it and for which task', async () => {
-    mockApi({
-      'GET /api/vault': [200, { entries: [ENTRY] }],
-      'GET /api/vault/v1/log': [200, { log: [
-        { id: 'l1', kind: 'used', person: null, agent: { id: 'a2', name: 'Nora' }, task: { id: 't', number: 42 }, target: 'browser', status: 'signed_in', at: '2030-01-01T10:00:00.000Z' },
-        { id: 'l2', kind: 'used', person: null, agent: { id: 'a2', name: 'Nora' }, task: null, target: 'phone', status: 'node_offline', at: '2030-01-01T09:30:00.000Z' },
-      ] }],
-    });
+  /* Who took a sign-in for which task, and who added or changed it, in words of each language, never a raw kind. */
+  const HISTORY = { log: [
+    { id: 'l1', kind: 'taken', person: null, agent: { id: 'a2', name: 'Nora' }, task: { id: 't', number: 42 }, at: '2030-01-01T10:00:00.000Z' },
+    { id: 'l2', kind: 'taken', person: null, agent: { id: 'a3', name: 'Aide' }, task: null, at: '2030-01-01T09:45:00.000Z' },
+    { id: 'l3', kind: 'changed', person: { id: 'p2', name: 'Maria' }, agent: null, task: null, at: '2030-01-01T09:30:00.000Z' },
+    { id: 'l4', kind: 'created', person: { id: 'p2', name: 'Maria' }, agent: { id: 'o1', name: 'Orchestrator' }, task: null, at: '2030-01-01T09:00:00.000Z' },
+  ] };
+
+  it('shows the history of a sign-in with who took it for which task', async () => {
+    mockApi({ 'GET /api/vault': [200, { entries: [ENTRY] }], 'GET /api/vault/v1/log': [200, HISTORY] });
     const user = userEvent.setup();
     open();
     await user.click(await screen.findByRole('button', { name: 'History' }));
-    /* How each use ended, in words, and no word of signing in where it did not. */
-    expect(await screen.findByText('Nora used it in the browser for task #42. Signed in.')).toBeInTheDocument();
-    expect(screen.getByText('Nora used it on a phone. The machine was offline.')).toBeInTheDocument();
-    expect(screen.queryByText(/signed_in|node_offline/)).toBeNull();
+    expect(await screen.findByText('Nora took it to sign in for task #42.')).toBeInTheDocument();
+    expect(screen.getByText('Aide took it to sign in.')).toBeInTheDocument();
+    expect(screen.getByText('Maria changed it.')).toBeInTheDocument();
+    expect(screen.getByText('Maria added it.')).toBeInTheDocument();
+    expect(screen.queryByText(/\b(taken|created)\b/)).toBeNull();
+  });
+
+  it('shows the history in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi({ 'GET /api/vault': [200, { entries: [ENTRY] }], 'GET /api/vault/v1/log': [200, HISTORY] });
+    const user = userEvent.setup();
+    render(
+      <LanguageProvider>
+        <Settings me={ME} group="passwords" onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    await user.click(await screen.findByRole('button', { name: 'История' }));
+    expect(await screen.findByText('Nora: взято для задачи #42.')).toBeInTheDocument();
+    expect(screen.getByText('Aide: взято.')).toBeInTheDocument();
+    expect(screen.getByText('Maria: изменено.')).toBeInTheDocument();
+    expect(screen.getByText('Maria: добавлено.')).toBeInTheDocument();
   });
 });

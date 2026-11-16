@@ -1,30 +1,9 @@
 export const HIDDEN = '[hidden]';
 export const MIN_LENGTH = 8;
-/* The shortest value held exactly: a vault password is at least this long, and shorter would hide single letters. */
-const EXACT_MIN_LENGTH = 4;
 
-/* Values shorter than a secret usually is that the node typed into a sign-in form, a password or a one-time code, each
-   hidden wherever the node's output goes until its time is over, whatever its length. */
-const exact = new Map<string, number>();
-
-export function holdExact(values: string[], untilMs: number): void {
-  for (const value of values) if (value.length >= EXACT_MIN_LENGTH && (exact.get(value) ?? -Infinity) < untilMs) exact.set(value, untilMs);
-}
-
-export function forgetExact(): void {
-  exact.clear();
-}
-
-function heldNow(): string[] {
-  const now = Date.now();
-  for (const [value, until] of exact) if (until <= now) exact.delete(value);
-  return [...exact.keys()];
-}
-
-/* Every form a secret may show in, plain or base64, longest first. Short values are left out, they would hide ordinary
-   words, except the ones held exactly. */
+/* Every form a secret may show in, plain or base64, longest first. Short values are left out, they would hide ordinary words. */
 export function secretForms(secrets: string[]): string[] {
-  const values = new Set<string>(heldNow());
+  const values = new Set<string>();
   for (const secret of secrets) {
     if (!secret || secret.length < MIN_LENGTH) continue;
     const b64 = Buffer.from(secret).toString('base64');

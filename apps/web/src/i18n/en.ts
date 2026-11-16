@@ -246,9 +246,9 @@ export const en = {
     connected: 'Connected',
     notConnected: 'Not connected',
   },
-  /* The Passwords group: the company's saved site sign-ins, which agents use without seeing a password or a code. */
+  /* The Passwords group: the company's saved site sign-ins, which employees and assistants take to sign in themselves. */
   vault: {
-    intro: 'Sign-ins to sites that the company keeps for its employees and assistants. They sign in with them without ever seeing the password or the one-time code.',
+    intro: 'Sign-ins to sites that the company keeps for its employees and assistants. One who may use a sign-in gets its login, password and current one-time code and signs in itself.',
     none: 'No sign-ins are saved yet.',
     add: 'Add a sign-in',
     addTitle: 'New sign-in',
@@ -256,10 +256,10 @@ export const en = {
     name: 'Name',
     nameHint: 'Employees ask for the sign-in by this name.',
     site: 'Site',
-    siteHint: 'The address of the sign-in page, such as https://example.com/login. The password goes only into pages of this site.',
+    siteHint: 'The address of the sign-in page, such as https://example.com/login.',
     login: 'Login',
     password: 'Password',
-    passwordHint: 'Typed only here. Nobody sees it again, not in Hornhoof, not an employee.',
+    passwordHint: 'The screen never shows it again. Employees and assistants who may use this sign-in get it to sign in.',
     passwordKeep: 'Leave it empty to keep the saved password.',
     code: 'One-time code key (optional)',
     codeHint: 'The key the site gives for an authenticator app, or the otpauth:// address from its QR code. Leave it empty if the site asks for no code.',
@@ -276,7 +276,7 @@ export const en = {
     needName: 'Give the sign-in a name.',
     needSite: 'Enter the site or its address.',
     needLogin: 'Enter the login.',
-    needPassword: (min: number) => `Enter a password of at least ${min} characters.`,
+    needPassword: 'Enter the password.',
     badCode: 'This is not a key an authenticator app takes. Copy it again from the site, or leave it empty.',
     needDepartment: 'Choose the department.',
     needAgent: 'Choose the employee.',
@@ -289,32 +289,14 @@ export const en = {
     addedBy: (name: string, when: string) => `Added by ${name}, ${when}.`,
     log: 'History',
     logTitle: (name: string) => `History of ${name}`,
-    logLine: (kind: 'used' | 'created' | 'changed' | 'removed', who: string, task: number | null, target: 'browser' | 'phone' | null, ended: string) =>
-      kind === 'used'
-        ? `${who} used it${target === 'phone' ? ' on a phone' : target === 'browser' ? ' in the browser' : ''}${task !== null ? ` for task #${task}` : ''}. ${ended}`
+    logLine: (kind: 'taken' | 'created' | 'changed' | 'removed', who: string, task: number | null) =>
+      kind === 'taken'
+        ? `${who} took it to sign in${task !== null ? ` for task #${task}` : ''}.`
         : kind === 'created'
           ? `${who} added it.`
           : kind === 'changed'
             ? `${who} changed it.`
             : `${who} removed it.`,
-    /* How a use ended, by the status Hornhoof keeps for it. */
-    ended: {
-      sent: 'Still typing.',
-      filled: 'Typed in.',
-      signed_in: 'Signed in.',
-      field_not_found: 'No sign-in field was found.',
-      wrong_field: 'The field was not one for a password, so nothing was typed.',
-      rejected: 'The site did not take the login or password.',
-      needs_person: 'A person has to go on from here.',
-      robot_check: 'The site asked to prove it is not a robot.',
-      browser_refused: 'The site does not let this browser in.',
-      target_gone: 'The page or the phone session was already closed.',
-      expired: 'It came too late, so nothing was typed.',
-      unsupported: 'That machine cannot type it there.',
-      failed: 'It did not work.',
-      node_offline: 'The machine was offline.',
-      no_answer: 'The machine did not answer in time.',
-    },
     change: 'Change',
     remove: 'Remove',
     removeAsk: (name: string) => `Remove ${name}? Employees can no longer sign in with it.`,

@@ -25,13 +25,8 @@ CREATE TABLE "vault_log" (
 	"kind" text NOT NULL,
 	"person_id" uuid,
 	"agent_id" uuid,
-	"job_id" uuid,
 	"task_id" uuid,
-	"target" text,
-	"fields" jsonb,
-	"status" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"ended_at" timestamp with time zone
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "vault_entries" ADD CONSTRAINT "vault_entries_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -43,7 +38,6 @@ ALTER TABLE "vault_log" ADD CONSTRAINT "vault_log_company_id_companies_id_fk" FO
 ALTER TABLE "vault_log" ADD CONSTRAINT "vault_log_entry_id_vault_entries_id_fk" FOREIGN KEY ("entry_id") REFERENCES "public"."vault_entries"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "vault_log" ADD CONSTRAINT "vault_log_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "vault_log" ADD CONSTRAINT "vault_log_agent_id_agents_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "vault_log" ADD CONSTRAINT "vault_log_job_id_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "vault_log" ADD CONSTRAINT "vault_log_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "vault_entries_company_name" ON "vault_entries" USING btree ("company_id",lower("name"));--> statement-breakpoint
 CREATE INDEX "vault_log_entry_at" ON "vault_log" USING btree ("entry_id","created_at");--> statement-breakpoint

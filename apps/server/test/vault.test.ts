@@ -42,11 +42,9 @@ describe('the company vault for people', () => {
     expect(noCode.json().hasCode).toBe(false);
   });
 
-  it('refuses a short password, a broken code and a taken name without saying what was typed', async () => {
+  it('refuses an empty password, a broken code and a taken name without saying what was typed', async () => {
     const c = await vaultCompany();
-    const short = await c.add(c.ceoSession, entry({ password: 'pw7' }));
-    expect(short.statusCode).toBe(400);
-    expect(short.body).not.toContain('pw7');
+    expect((await c.add(c.ceoSession, entry({ password: '' }))).statusCode).toBe(400);
     const broken = await c.add(c.ceoSession, entry({ code: 'not-a-code-91x' }));
     expect(broken.statusCode).toBe(400);
     expect(broken.body).not.toContain('not-a-code-91x');
@@ -54,12 +52,16 @@ describe('the company vault for people', () => {
     expect((await c.add(c.ceoSession, entry({ name: 'partner SITE' }))).statusCode).toBe(409);
   });
 
-  it('takes values only from a person, never from an agent acting as one', async () => {
+  it('takes an entry from the orchestrator acting for a person, as that person, and logs both', async () => {
     const c = await vaultCompany();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const res = await c.app.inject({ method: 'POST', url: '/api/vault', payload: { ...entry(), scope: { kind: 'company' } }, headers: orchestratorHeaders(c.ceo.id, orchestrator!.id) });
-    expect(res.statusCode).toBe(403);
-    expect(await c.db.select().from(vaultEntries)).toEqual([]);
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ name: 'Partner site', createdBy: { id: c.ceo.id } });
+    expect(res.body).not.toContain(PASSWORD);
+    const [row] = await c.db.select().from(vaultEntries);
+    expect(decryptSecret(row!.passwordEnc, Buffer.from(c.config.secret))).toBe(PASSWORD);
+    expect(await c.db.select({ kind: vaultLog.kind, personId: vaultLog.personId, agentId: vaultLog.agentId }).from(vaultLog)).toEqual([{ kind: 'created', personId: c.ceo.id, agentId: orchestrator!.id }]);
   });
 
   it('narrows an entry to a department or an agent of this company only', async () => {
@@ -117,7 +119,7 @@ describe('the company vault for people', () => {
     /* Aide is Clara's own assistant. */
     const [aidePerson] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Aide', status: 'active', isAgent: true, assistantOf: c.clara.id, scopeKind: 'listed' }).returning();
     await c.db.insert(assistants).values({ personId: aidePerson!.id, companyId: c.companyId, program: 'avaclone', agentId: c.aide.id });
-    const used = { companyId: c.companyId, entryId: id, entryName: 'Partner site', site: 'https://partner.example/login', kind: 'used' as const, taskId: c.task.id, target: 'browser' as const, fields: ['login' as const, 'password' as const], status: 'signed_in' };
+    const used = { companyId: c.companyId, entryId: id, entryName: 'Partner site', site: 'https://partner.example/login', kind: 'taken' as const, taskId: c.task.id };
     await c.db.insert(vaultLog).values([{ ...used, agentId: c.aide.id }, { ...used, agentId: c.nora.id }]);
 
     const users = async (session: string) => {
