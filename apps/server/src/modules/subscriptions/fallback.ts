@@ -216,12 +216,18 @@ type Where = { agent: Agent; kept: Fallback | null; home: Plan };
    or where its own plan is gone. */
 async function whereItIs(ctx: Ctx, agentId: string): Promise<Where | null> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
-  if (!agent?.subscriptionId || agent.kind === 'assistant' || agent.switchedOffAt) return null;
-  const [kept] = await ctx.db.select().from(agentFallbacks).where(eq(agentFallbacks.agentId, agentId));
-  const home = await planOf(ctx, kept?.homeSubscriptionId ?? agent.subscriptionId);
-  if (kept && (kept.subscriptionId !== agent.subscriptionId || !home)) return endFallback(ctx, agentId).then(() => null);
-  return home && { agent, kept: kept ?? null, home };
+  if (!movable(agent)) return null;
+  const kept = (await ctx.db.select().from(agentFallbacks).where(eq(agentFallbacks.agentId, agentId)))[0] ?? null;
+  const home = await planOf(ctx, kept ? kept.homeSubscriptionId : agent.subscriptionId);
+  if (kept && !stillAway(kept, agent, home)) return endFallback(ctx, agentId).then(() => null);
+  return home && { agent, kept, home };
 }
+
+/* Hornhoof moves employees that work on a plan, are on and are no one's assistant. */
+const movable = (agent: Agent | undefined): agent is Agent & { subscriptionId: string } => Boolean(agent?.subscriptionId) && agent!.kind !== 'assistant' && !agent!.switchedOffAt;
+
+/* Still on the fallback Hornhoof put it on, with its own plan there to go back to. */
+const stillAway = (kept: Fallback, agent: Agent, home: Plan | null): boolean => kept.subscriptionId === agent.subscriptionId && home !== null;
 
 async function comeHome(ctx: Ctx, agent: Agent, home: Plan, kept: Fallback): Promise<boolean> {
   return (await hasRoom(ctx, agent, home)) && goHome(ctx, agent, kept);
