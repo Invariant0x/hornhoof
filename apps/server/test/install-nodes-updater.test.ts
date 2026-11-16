@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { testApp } from './helpers.js';
-import { isNodeRun, SCRIPT, SERVER, install } from './install-script-helpers.js';
+import { SCRIPT, SERVER, install } from './install-script-helpers.js';
 
 const COMMIT = 'c'.repeat(40);
 const NODE_DIGEST = `sha256:${'d'.repeat(64)}`;
@@ -41,7 +41,7 @@ describe('install.sh and the updater of the nodes on a computer that is not the 
     const r = install({ script: served(), env: { HORNHOOF_HOME: machine() } });
     expect(r.code).toBe(0);
     expect(starts(r.calls)).toEqual([START]);
-    const nodes = r.calls.map((c, i) => (isNodeRun(c) ? i : -1)).filter(i => i >= 0);
+    const nodes = r.calls.map((c, i) => (c.startsWith('docker run -d') ? i : -1)).filter(i => i >= 0);
     expect(nodes).toHaveLength(2);
     expect(r.calls.indexOf(START)).toBeGreaterThan(Math.max(...nodes));
     expect(r.out).toContain('Starting the updater of these nodes');

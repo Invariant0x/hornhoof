@@ -4,11 +4,9 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { companyPhones } from '../../db/schema.js';
-import { addPhone, NewPhone, ProbePhone, phoneById, phoneInvalid, phoneView, probePhone } from './store.js';
-import { phoneOwner } from './store.js';
+import { addPhone, NewPhone, ProbePhone, phoneById, phoneInvalid, phoneOwner, phoneView, probePhone } from './store.js';
 import { reconcilePhone, stopPhone } from './queue.js';
 import { imageBytes, livePhone, recordingImage, taskRecordings } from './recording.js';
-import { phoneBridgeRoutes } from './bridge.js';
 
 const Id = z.strictObject({ id: z.uuid() });
 
@@ -19,7 +17,6 @@ function body<T>(schema: z.ZodType<T>, input: unknown): T {
 }
 
 export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
-  phoneBridgeRoutes(app, ctx);
   app.get('/api/phones', async req => {
     const me = await requirePerson(req, ctx.db);
     const phones = await ctx.db.select().from(companyPhones).where(and(eq(companyPhones.companyId, me.companyId), isNull(companyPhones.removedAt))).orderBy(asc(companyPhones.createdAt), asc(companyPhones.id));

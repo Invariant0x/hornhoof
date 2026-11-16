@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-. "$STUB_SRC/_log.sh"
-if [ "${STUB_PHONE_LAUNCH:-ok}" = fail ]; then exit 1; fi
-exit 0

@@ -1,5 +1,5 @@
 {
-  "id": "34829a63-82a8-46f5-9edd-eb994adde281",
+  "id": "52e75cba-50d6-4c7b-b9f9-a1872f1b4df2",
   "prevId": "3c28bc6c-017a-4bb7-a39a-d71f7e6d3da9",
   "version": "7",
   "dialect": "postgresql",
@@ -2782,23 +2782,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "transport": {
-          "name": "transport",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "endpoint": {
-          "name": "endpoint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "hardware_key": {
           "name": "hardware_key",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "name": {
           "name": "name",

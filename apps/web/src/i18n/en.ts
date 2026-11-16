@@ -21,8 +21,7 @@ type SkinErrorWords = Record<SkinErrorCode | 'read_failed', (key: string, value:
 export const en = {
   phones: {
     heading: 'Company phones', intro: 'Let your company assistants work on your Android phone, one at a time. Stop puts it back in your hands.',
-    add: 'Add phone', find: 'Find phone', cancel: 'Cancel', name: 'Phone name', computer: 'Computer', chooseComputer: 'Choose a computer', connection: 'Connection', usb: 'USB cable', network: 'Wireless debugging', address: 'Phone address',
-    usbHint: 'Enable USB debugging on the phone, connect it to this computer and approve the computer key on the phone.',
+    add: 'Add phone', find: 'Find phone', cancel: 'Cancel', name: 'Phone name', computer: 'Computer', chooseComputer: 'Choose a computer', address: 'Phone address',
     networkHint: 'Keep the phone and computer on the same network. Copy the address from Wireless debugging. For a first connection, also enter the address and code from Pair using pairing code.',
     pairingAddress: 'Pairing address, if needed', pairingCode: 'Pairing code, if needed', pairingHint: 'This code is used once and is not saved.',
     nameProblem: 'Give the phone a name.', computerProblem: 'Choose an online computer.', addressProblem: 'Enter the address and port shown on the phone.', codeProblem: 'Enter the six digits and the pairing address shown on the phone.',
@@ -2047,7 +2046,7 @@ export const en = {
     nodeWaitsFor: (work: string) => `Waits for: ${work}`,
   },
   errors: {
-    phone_invalid: 'Check the phone name, computer and connection.',
+    phone_invalid: 'Check the phone name, computer and address.',
     phone_unknown: 'This phone or recording is not available.',
     phone_not_allowed: 'You do not have access to this phone or recording.',
     phone_unavailable: 'The phone does not answer. Check its connection and the approval on its screen.',

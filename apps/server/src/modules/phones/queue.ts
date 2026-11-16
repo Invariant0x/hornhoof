@@ -13,10 +13,7 @@ export type PhoneAgent = { id: string; companyId: string; jobId: string | null }
 
 const holding = ['starting', 'active', 'revoking'] as const;
 const unfinished = ['queued', ...holding] as const;
-export function phoneBinding(p: CompanyPhone): PhoneBinding {
-  if (!p.hardwareKey) throw phoneInvalid();
-  return { phoneId: p.id, serial: p.serial, transport: p.transport, endpoint: p.endpoint, hardwareKey: p.hardwareKey };
-}
+export const phoneBinding = (p: CompanyPhone): PhoneBinding => ({ phoneId: p.id, serial: p.serial, hardwareKey: p.hardwareKey });
 
 async function liveJob(ctx: Ctx, me: PhoneAgent) {
   if (!me.jobId) throw phoneGone();

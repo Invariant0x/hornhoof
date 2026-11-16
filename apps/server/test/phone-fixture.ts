@@ -50,13 +50,13 @@ export async function phoneCompany() {
       calls.push(m);
       if (m.type === 'phone.revoke' && holdRevoke) { revokes.push(m.requestId); return; }
       const answer: PhoneReply = { type: 'phone.reply', requestId: m.requestId, status: 'ok' };
-      if (m.type === 'phone.probe') answer.devices = [{ serial: m.endpoint ?? 'R58MIDENTITY', status: 'device', model: 'Pixel_8', hardwareKey: 'a'.repeat(64) }];
+      if (m.type === 'phone.probe') answer.devices = [{ serial: m.endpoint, status: 'device', model: 'Pixel_8', hardwareKey: 'a'.repeat(64) }];
       node.send(answer);
     }
   });
   node.send({ type: 'hello', version: '0.31.0', loggedIn: true, running: [], phones: true });
   await until(async () => Boolean((await db.select().from(nodes).where(eq(nodes.id, executor!.id)))[0]?.lastSeenAt));
-  const addPhone = (session = claraSession) => app.inject({ method: 'POST', url: '/api/phones', ...as(session), payload: { machineId: machine!.id, serial: '192.168.1.80:5555', transport: 'network', endpoint: '192.168.1.80:5555', name: 'Clara phone' } });
+  const addPhone = (session = claraSession) => app.inject({ method: 'POST', url: '/api/phones', ...as(session), payload: { machineId: machine!.id, endpoint: '192.168.1.80:5555', name: 'Clara phone' } });
   return {
     app, db, companyId, ceoSession, clara: clara!, claraSession, samSession, olafSession, other: other!, otherAgent: otherAgent!, mkt: mkt!, nora: nora!, sammy: sammy!, task, startTurn,
     machine: machine!, executor: executor!, node, calls, addPhone,

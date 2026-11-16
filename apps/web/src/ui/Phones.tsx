@@ -9,8 +9,7 @@ import { PhoneScreen } from './PhoneScreen';
 
 export type PhoneView = {
   id: string; name: string; owner: { id: string; name: string }; machineId: string; lending: boolean; online: boolean;
-  state: 'owner' | 'busy' | 'available'; queued: number; verified: boolean; stopping: boolean;
-  serial?: string; transport?: 'usb' | 'network'; endpoint?: string | null;
+  state: 'owner' | 'busy' | 'available'; queued: number; stopping: boolean; endpoint?: string;
 };
 export type PhoneMachines = Pick<MachineView, 'id' | 'hostname' | 'online'>[];
 
@@ -49,15 +48,14 @@ export function Phones({ me, machines }: { me: Me; machines: PhoneMachines }) {
   </section>;
 }
 
-type Draft = { name: string; machineId: string; transport: 'usb' | 'network'; endpoint: string; pairingAddress: string; code: string };
+type Draft = { name: string; machineId: string; endpoint: string; pairingAddress: string; code: string };
 type Problems = Partial<Record<keyof Draft, string>>;
 
 function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; onCancel: () => void; onAdded: (p: PhoneView) => void }) {
   const t = useT();
-  const [draft, setDraft] = useState<Draft>({ name: '', machineId: machines.find(m => m.online)?.id ?? '', transport: 'usb', endpoint: '', pairingAddress: '', code: '' });
+  const [draft, setDraft] = useState<Draft>({ name: '', machineId: machines.find(m => m.online)?.id ?? '', endpoint: '', pairingAddress: '', code: '' });
   const [problems, setProblems] = useState<Problems>({});
   const [devices, setDevices] = useState<PhoneDevice[] | null>(null);
-  const [serial, setSerial] = useState('');
   const [busy, setBusy] = useState<'find' | 'save' | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -65,35 +63,36 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
   function edit<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft(d => ({ ...d, [key]: value }));
     setProblems(p => ({ ...p, [key]: undefined }));
-    if (key !== 'name') { setDevices(null); setSerial(''); }
+    if (key !== 'name') setDevices(null);
   }
   function valid(): boolean {
     const p: Problems = {};
     if (!draft.name.trim()) p.name = t.phones.nameProblem;
     if (!machines.some(m => m.id === draft.machineId && m.online)) p.machineId = t.phones.computerProblem;
-    if (draft.transport === 'network' && !PhoneEndpoint.safeParse(draft.endpoint.trim()).success) p.endpoint = t.phones.addressProblem;
-    if (draft.transport === 'network' && (draft.code || draft.pairingAddress) && (!/^\d{6}$/.test(draft.code) || !PhoneEndpoint.safeParse(draft.pairingAddress.trim()).success)) p.code = t.phones.codeProblem;
+    if (!PhoneEndpoint.safeParse(draft.endpoint.trim()).success) p.endpoint = t.phones.addressProblem;
+    if ((draft.code || draft.pairingAddress) && (!/^\d{6}$/.test(draft.code) || !PhoneEndpoint.safeParse(draft.pairingAddress.trim()).success)) p.code = t.phones.codeProblem;
     setProblems(p);
     const first = Object.keys(p)[0];
     if (first) form.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();
     return !first;
   }
-  const connection = () => ({ machineId: draft.machineId, transport: draft.transport, endpoint: draft.transport === 'network' ? draft.endpoint.trim() : null });
+  const connection = () => ({ machineId: draft.machineId, endpoint: draft.endpoint.trim() });
+  const ready = devices?.some(d => d.status === 'device' && d.hardwareKey) ?? false;
   async function find() {
     if (finding.current || !valid()) return;
     finding.current = true; setBusy('find'); setFailure(null); setDevices(null);
     try {
-      const reply = await api.post<{ devices: PhoneDevice[] }>('/api/phones/probe', { ...connection(), ...(draft.transport === 'network' && draft.code ? { pairing: { endpoint: draft.pairingAddress.trim(), code: draft.code } } : {}) });
-      setDevices(reply.devices); setSerial(reply.devices.find(d => d.status === 'device' && d.hardwareKey)?.serial ?? '');
+      const reply = await api.post<{ devices: PhoneDevice[] }>('/api/phones/probe', { ...connection(), ...(draft.code ? { pairing: { endpoint: draft.pairingAddress.trim(), code: draft.code } } : {}) });
+      setDevices(reply.devices);
       setDraft(d => ({ ...d, pairingAddress: '', code: '' }));
     } catch (error) { setFailure(error); }
     finally { finding.current = false; setBusy(null); }
   }
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (finding.current || !valid() || !serial) return;
+    if (finding.current || !valid() || !ready) return;
     finding.current = true; setBusy('save'); setFailure(null);
-    try { onAdded(await api.post<PhoneView>('/api/phones', { ...connection(), name: draft.name.trim(), serial })); }
+    try { onAdded(await api.post<PhoneView>('/api/phones', { ...connection(), name: draft.name.trim() })); }
     catch (error) { setFailure(error); }
     finally { finding.current = false; setBusy(null); }
   }
@@ -102,17 +101,14 @@ function AddPhone({ machines, onCancel, onAdded }: { machines: PhoneMachines; on
       <legend>{t.phones.add}</legend>
       <Field label={t.phones.name} problem={problems.name}>{props => <input {...props} name="name" autoComplete="off" maxLength={100} value={draft.name} onChange={e => edit('name', e.target.value)} />}</Field>
       <Field label={t.phones.computer} problem={problems.machineId} hint={machines.length === 0 ? t.phones.noComputers : undefined}>{props => <select {...props} name="machineId" value={draft.machineId} onChange={e => edit('machineId', e.target.value)}><option value="">{t.phones.chooseComputer}</option>{machines.map(m => <option key={m.id} value={m.id} disabled={!m.online}>{m.hostname}</option>)}</select>}</Field>
-      <Field label={t.phones.connection} hint={draft.transport === 'usb' ? t.phones.usbHint : t.phones.networkHint}>{props => <select {...props} name="transport" value={draft.transport} onChange={e => edit('transport', e.target.value as Draft['transport'])}><option value="usb">{t.phones.usb}</option><option value="network">{t.phones.network}</option></select>}</Field>
-      {draft.transport === 'network' && <>
-        <Field label={t.phones.address} problem={problems.endpoint}>{props => <input {...props} name="endpoint" dir="ltr" autoComplete="off" value={draft.endpoint} onChange={e => edit('endpoint', e.target.value)} />}</Field>
-        <Field label={t.phones.pairingAddress}>{props => <input {...props} name="pairingAddress" dir="ltr" autoComplete="off" value={draft.pairingAddress} onChange={e => edit('pairingAddress', e.target.value)} />}</Field>
-        <Field label={t.phones.pairingCode} problem={problems.code} hint={t.phones.pairingHint}>{props => <input {...props} name="code" type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={draft.code} onChange={e => edit('code', e.target.value)} />}</Field>
-      </>}
+      <Field label={t.phones.address} problem={problems.endpoint} hint={t.phones.networkHint}>{props => <input {...props} name="endpoint" dir="ltr" autoComplete="off" value={draft.endpoint} onChange={e => edit('endpoint', e.target.value)} />}</Field>
+      <Field label={t.phones.pairingAddress}>{props => <input {...props} name="pairingAddress" dir="ltr" autoComplete="off" value={draft.pairingAddress} onChange={e => edit('pairingAddress', e.target.value)} />}</Field>
+      <Field label={t.phones.pairingCode} problem={problems.code} hint={t.phones.pairingHint}>{props => <input {...props} name="code" type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={draft.code} onChange={e => edit('code', e.target.value)} />}</Field>
       <div className="entry-actions"><button type="button" className="btn" onClick={() => void find()}>{busy === 'find' ? t.phones.working : t.phones.find}</button></div>
-      {devices && <fieldset className="phone-device-list"><legend>{t.phones.find}</legend>{devices.length === 0 && <p>{t.phones.noDevices}</p>}{devices.map(d => <label key={d.serial} className="phone-device"><input type="radio" name="serial" value={d.serial} checked={serial === d.serial} disabled={d.status !== 'device' || !d.hardwareKey} onChange={() => setSerial(d.serial)} /><span>{t.phones.device(d.model, d.serial)}<small>{t.phones.devices[d.status]}</small></span></label>)}</fieldset>}
+      {devices && <div role="status">{devices.length === 0 ? <p>{t.phones.noDevices}</p> : devices.map(d => <p key={d.serial} className="phone-device">{t.phones.device(d.model, d.serial)}<small>{t.phones.devices[d.status]}</small></p>)}</div>}
     </fieldset>
     {failure !== null && <p role="alert" className="bad">{errorText(t, failure)}</p>}
-    <div className="form-foot"><button type="button" className="act" onClick={onCancel} disabled={busy !== null}>{t.phones.cancel}</button>{devices && <button type="submit" className="btn" disabled={!serial || busy !== null}>{busy === 'save' ? t.phones.saving : t.phones.add}</button>}</div>
+    <div className="form-foot"><button type="button" className="act" onClick={onCancel} disabled={busy !== null}>{t.phones.cancel}</button>{devices && <button type="submit" className="btn" disabled={!ready || busy !== null}>{busy === 'save' ? t.phones.saving : t.phones.add}</button>}</div>
   </form>;
 }
 
@@ -129,10 +125,10 @@ function PhoneCard({ phone, mine, machine, onChanged }: { phone: PhoneView; mine
     finally { setBusy(false); }
   }
   return <CardFrame label={phone.name} head={<CardHead mark={null} name={phone.name} state={t.phones.states[phone.online ? phone.state : 'offline']} line={t.phones.owner(phone.owner.name)} />}>
-    <Part title={t.phones.computer}><Facts items={[[t.phones.computer, machine]]} /><p className="muted">{t.phones.waiting(phone.queued)}</p>{!phone.verified && <p className="bad">{t.phones.devices.unverified}</p>}</Part>
+    <Part title={t.phones.computer}><Facts items={[[t.phones.computer, machine]]} /><p className="muted">{t.phones.waiting(phone.queued)}</p></Part>
     {mine && <Part title={t.phones.control}>
       <div className="entry-actions"><button type="button" className="act" aria-expanded={watching} onClick={() => setWatching(v => !v)}>{watching ? t.phones.hide : t.phones.watch}</button>
-        {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping || !phone.verified} onClick={() => void control('resume')}>{t.phones.resume}</button>}
+        {phone.lending ? <button type="button" className="btn danger" disabled={busy} onClick={() => void control('stop')}>{t.phones.stop}</button> : <button type="button" className="btn" disabled={busy || phone.stopping} onClick={() => void control('resume')}>{t.phones.resume}</button>}
       </div>
       {phone.stopping && <p role="status">{t.phones.stopping}</p>}
       {failure !== null && <p className="bad" role="alert">{errorText(t, failure)}</p>}

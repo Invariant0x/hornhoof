@@ -5,7 +5,7 @@ import { ME, mockApi } from './api-mock';
 import { until } from './until';
 
 const MACHINE = { id: 'm1', hostname: 'Work computer', online: true };
-const PHONE: PhoneView = { id: 'ph1', name: 'My Pixel', owner: { id: ME.person.id, name: ME.person.name }, machineId: 'm1', online: true, lending: true, state: 'available', queued: 0, verified: true, stopping: false, serial: '192.168.1.80:5555', transport: 'network', endpoint: '192.168.1.80:5555' };
+const PHONE: PhoneView = { id: 'ph1', name: 'My Pixel', owner: { id: ME.person.id, name: ME.person.name }, machineId: 'm1', online: true, lending: true, state: 'available', queued: 0, stopping: false, endpoint: '192.168.1.80:5555' };
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
@@ -35,18 +35,17 @@ it('shows only the owner controls and hides the live picture as soon as Stop ret
 it('uses a pairing code only for the probe and removes it before saving', async () => {
   const calls = mockApi({
     'GET /api/phones': [200, { phones: [] }],
-    'POST /api/phones/probe': [200, { devices: [{ serial: PHONE.serial, model: 'Pixel 8', status: 'device', hardwareKey: 'a'.repeat(64) }] }],
+    'POST /api/phones/probe': [200, { devices: [{ serial: PHONE.endpoint, model: 'Pixel 8', status: 'device', hardwareKey: 'a'.repeat(64) }] }],
     'POST /api/phones': [201, PHONE],
   });
   render(<Phones me={ME} machines={[MACHINE]} />);
   fireEvent.click(screen.getByRole('button', { name: 'Add phone' }));
   fireEvent.change(screen.getByLabelText('Phone name'), { target: { value: PHONE.name } });
-  fireEvent.change(screen.getByLabelText('Connection'), { target: { value: 'network' } });
   fireEvent.change(screen.getByLabelText('Phone address'), { target: { value: PHONE.endpoint } });
   fireEvent.change(screen.getByLabelText('Pairing address, if needed'), { target: { value: '192.168.1.80:43111' } });
   fireEvent.change(screen.getByLabelText('Pairing code, if needed'), { target: { value: '713924' } });
   fireEvent.click(screen.getByRole('button', { name: 'Find phone' }));
-  await until(() => screen.queryByRole('radio', { name: /Pixel 8/ }));
+  await until(() => screen.queryByText(/Pixel 8/));
   expect(screen.getByLabelText('Pairing code, if needed')).toHaveValue('');
   expect(calls.find(c => c.path === '/api/phones/probe')?.body).toMatchObject({ pairing: { endpoint: '192.168.1.80:43111', code: '713924' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add phone' }));
@@ -73,7 +72,7 @@ it('keeps Stop when an older list request finishes afterwards', async () => {
 it('adds a network phone through labelled fields and returns control with Stop', async () => {
   const calls = mockApi({
     'GET /api/phones': [200, { phones: [] }],
-    'POST /api/phones/probe': [200, { devices: [{ serial: PHONE.serial, model: 'Pixel 8', status: 'device', hardwareKey: 'a'.repeat(64) }] }],
+    'POST /api/phones/probe': [200, { devices: [{ serial: PHONE.endpoint, model: 'Pixel 8', status: 'device', hardwareKey: 'a'.repeat(64) }] }],
     'POST /api/phones': [201, PHONE],
     'POST /api/phones/ph1/stop': [200, { ...PHONE, lending: false, state: 'owner' }],
   });
@@ -84,13 +83,12 @@ it('adds a network phone through labelled fields and returns control with Stop',
   expect(screen.getByLabelText('Phone name')).toHaveFocus();
   expect(screen.getByLabelText('Phone name')).toHaveAttribute('aria-invalid', 'true');
   fireEvent.change(screen.getByLabelText('Phone name'), { target: { value: PHONE.name } });
-  fireEvent.change(screen.getByLabelText('Connection'), { target: { value: 'network' } });
   fireEvent.change(screen.getByLabelText('Phone address'), { target: { value: PHONE.endpoint } });
   fireEvent.click(screen.getByRole('button', { name: 'Find phone' }));
-  await until(() => screen.queryByRole('radio', { name: /Pixel 8/ }));
+  await until(() => screen.queryByText(/Pixel 8/));
   fireEvent.click(screen.getByRole('button', { name: 'Add phone' }));
   await until(() => screen.queryByRole('article', { name: PHONE.name }));
-  expect(calls.find(c => c.method === 'POST' && c.path === '/api/phones')?.body).toEqual({ machineId: MACHINE.id, name: PHONE.name, serial: PHONE.serial, endpoint: PHONE.endpoint, transport: 'network' });
+  expect(calls.find(c => c.method === 'POST' && c.path === '/api/phones')?.body).toEqual({ machineId: MACHINE.id, name: PHONE.name, endpoint: PHONE.endpoint });
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await until(() => screen.queryByText('In your hands'));
   expect(screen.getByRole('button', { name: 'Lend to assistants' })).toBeInTheDocument();
