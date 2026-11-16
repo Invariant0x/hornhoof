@@ -728,9 +728,9 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
 
 /* A shared run of every test goes only on a release: main or the main line its repository names, a turn's branch or a release
    branch. A change is checked by its author's local tests of what it touched. */
-function notRelease(branch: string, mainLine: string): string | null {
-  if (/^(main|turn-\d+|release-.+)$/.test(branch) || branch === mainLine) return null;
-  return `${branch} is no release branch: shared test runs go only to main, a turn's branch turn-<number> or a release-<name> branch, so check your change with local tests of what it touched.`;
+function requireRelease(branch: string, mainLine: string): void {
+  if (/^(main|turn-\d+|release-.+)$/.test(branch) || branch === mainLine) return;
+  throw refuse(409, 'tests_not_release', `${branch} is no release branch: shared test runs go only to main, a turn's branch turn-<number> or a release-<name> branch, so check your change with local tests of what it touched.`);
 }
 
 /* Starts a run for a task: a test run of its branch, or any other work, on a branch or in an empty folder with the task's
@@ -741,8 +741,7 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
   refusePaused(task);
   const found = await runRepository(ctx, task, input, kind);
-  const elsewhere = kind === 'tests' ? notRelease(input.branch ?? `task-${task.number}`, found!.repo.branch) : null;
-  if (elsewhere) return elsewhere;
+  if (kind === 'tests') requireRelease(input.branch ?? `task-${task.number}`, found!.repo.branch);
   const files = await workFiles(ctx, task, input, kind);
   const parts = mode.mode === 'manual' ? mode.parts : 0;
   checkManualParts(input.command ?? '', parts);
