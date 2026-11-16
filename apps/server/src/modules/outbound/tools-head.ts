@@ -11,19 +11,16 @@ import type { ToolJob } from '../tools/job.js';
 import { catalogOf } from './catalog-view.js';
 import { channelsOfDepartment } from './views.js';
 
-/* A department runs its own messages: what a person who runs it decides, its head carries out here, with no word of the
-   orchestrator or the CEO. Each tool calls the route the department's screen calls, as the last person who wrote to the
-   head, so it allows exactly what that person may do there. Nothing of another department is reached: there a head is told
-   what it is told of nothing at all. A setting or secret of an account never passes through here: a person gives it on
-   their own screen, and these tools say where. */
+/* A head runs its department's messages in any turn with its named owner's rights, otherwise the CEO's, under department
+   rules. The screen routes enforce current rights, keep the head and principal in the log, and hide every other department.
+   Account settings and secrets stay with people on their own screen. */
 
 export const WHERE_ACCOUNTS =
   'A person who runs the department connects a mail account (SMTP) or a webhook, with its password or key, in Settings under External messaging, or on the department\'s screen under About the department, in External messaging. Never ask for a password or key in a message and never pass one on.';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
-const ASK_THEM = 'Only the people who run this department decide this, or the CEO; ask them';
-const NO_PRINCIPAL = `No person's words stand behind this: nobody wrote to you yet, or words for this turn are still on their way. Nothing was changed. ${ASK_THEM}.`;
-const NOT_THEIRS = `The last person who wrote to you may not decide this. Nothing was changed. ${ASK_THEM}.`;
+const NO_PRINCIPAL = 'No active department owner or CEO is available, or input for this turn is still being recorded. Nothing was changed.';
+const NOT_THEIRS = 'The person whose rights you use may not decide this. Nothing was changed. Check your department rules and access.';
 const REFUSED: Record<string, string> = { outbound_not_allowed: NOT_THEIRS, decision_context_missing: NO_PRINCIPAL };
 
 const Name = z.string().trim().min(1).max(200);
@@ -54,7 +51,7 @@ async function ours({ ctx, job }: Head, { kind, id }: Place): Promise<boolean> {
   return row !== undefined;
 }
 
-/* The route the department's screen calls, as the last person who wrote to the head, answered in that route's words. */
+/* The department screen's route, with the head's current department principal, answered in that route's words. */
 async function call({ ctx, app, job }: Head, url: string, payload: object, after: (body: string) => string = body => body) {
   const principal = await standingPrincipal(ctx.db, job.id);
   if (!principal) return say(NO_PRINCIPAL, true);
@@ -93,7 +90,7 @@ function registerChannelTools(server: McpServer, head: Head): void {
     'outbound_channel_create',
     {
       description:
-        'Makes a way out for your department, or a product of it, when a person who runs the department decides so, as the last person who wrote to you. It starts new: every message is reviewed, and it takes nothing until it has a policy and an account. ' +
+        'Makes a way out for your department, or a product of it, in any turn under your department rules, with its named owner\'s rights, otherwise the CEO\'s. It starts new: every message is reviewed, and it takes nothing until it has a policy and an account. ' +
         'adapter: smtp or webhook. purpose: what contacts agree to, like first_contact. audience: direct to contacts, or public.',
       inputSchema: { product: z.uuid().optional(), name: Name, adapter: z.enum(['smtp', 'webhook']), purpose: Name, audience: z.enum(['direct', 'public']) },
     },
@@ -108,7 +105,7 @@ function registerChannelTools(server: McpServer, head: Head): void {
     'outbound_policy_set',
     {
       description:
-        'Sets the next revision of a channel\'s policy, as a person who runs your department decides: its time zone, daily limits per account and per sender domain, how messages are sampled for review and when it stops itself, all their numbers with no default. ' +
+        'Sets the next revision of a channel\'s policy, under your department rules, in any turn: its time zone, daily limits per account and per sender domain, how messages are sampled for review and when it stops itself, all their numbers with no default. ' +
         'autoSend true lets a direct message go without a person\'s yes to each one; limits, consent, suppression, content checks, price rules and a check that asks for a person still hold. The department\'s log keeps who turned it on or off.',
       inputSchema: { channel: Channel, value: OutboundPolicyValue },
     },
@@ -139,7 +136,7 @@ function registerAccountTools(server: McpServer, head: Head): void {
     'outbound_account_author',
     {
       description:
-        'Says which employee of your department writes from an account of it, as a person who runs the department decides: employee null leaves it to nobody. ' +
+        'Says which employee of your department writes from an account of it, under your department rules, in any turn: employee null leaves it to nobody. ' +
         'One author per account and one account per author; what the last author queued does not move.',
       inputSchema: { account: Account, employee: z.uuid().nullable() },
     },
@@ -164,8 +161,8 @@ function registerCatalogTools(server: McpServer, head: Head): void {
     'outbound_publish',
     {
       description:
-        'Publishes a proposed revision of your department\'s catalog, so that messages may use it, as a person who runs the department decides: no one clicks for each one. ' +
-        'The department\'s log keeps that you published it and on whose word, and the people who run it see this in its catalog.',
+        'Publishes a proposed revision of your department\'s catalog, so that messages may use it, under your department rules, in any turn: no one clicks for each one. ' +
+        'The department\'s log keeps that you published it and whose rights you used, and the people who run it see this in its catalog.',
       inputSchema: { revision: Revision },
     },
     ({ revision }) => onOwn(head, { kind: 'revision', id: revision }, `/api/outbound/catalog/${revision}/publish`, {}),

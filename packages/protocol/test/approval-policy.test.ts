@@ -41,12 +41,14 @@ describe('ApprovalRule', () => {
 });
 
 describe('ruleOf', () => {
-  it('asks every time on a channel with no rule yet, as Hornhoof did before there were rules', () => {
-    expect(DEFAULT_APPROVAL_RULE).toEqual({ mode: 'every' });
-    expect(ruleOf(undefined)).toEqual({ mode: 'every' });
+  it('asks for new kinds by default, so an approved kind does not ask each time', () => {
+    expect(DEFAULT_APPROVAL_RULE).toEqual({ mode: 'new_kinds' });
+    expect(approvalNeeded(ruleOf(undefined), work({ known: false }))).toBe(true);
+    expect(approvalNeeded(ruleOf(undefined), work({ known: true }))).toBe(false);
   });
 
   it('reads what is stored, and never reads a stored mode of limits with no limit as no limit at all', () => {
+    expect(ruleOf({ mode: 'every', limitAmount: null, limitUnit: null })).toEqual({ mode: 'every' });
     expect(ruleOf({ mode: 'new_kinds', limitAmount: null, limitUnit: null })).toEqual({ mode: 'new_kinds' });
     expect(ruleOf({ mode: 'within_limits', limitAmount: 7, limitUnit: 'USD' })).toEqual({ mode: 'within_limits', limit: 7, unit: 'USD' });
     expect(ruleOf({ mode: 'within_limits', limitAmount: 7, limitUnit: null })).toEqual({ mode: 'within_limits', limit: 7 });

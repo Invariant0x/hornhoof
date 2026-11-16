@@ -69,7 +69,7 @@ async function aCheckOf(m: M) {
 
 /* The head's way out, set up by its head and Mona: channel, account, policy, author and published words. */
 async function lettersOf(m: M, policy: OutboundPolicyValue = AUTO) {
-  const mia = await m.c.tools(m.head, m.monaId);
+  const mia = await m.c.tools(m.head);
   const channelId = ok(await call(mia, 'outbound_channel_create', LETTERS)).channelId;
   const account = await m.post('/api/outbound/accounts', { channelId, label: 'Spring', config: SMTP });
   expect(account.statusCode, account.body).toBe(200);
@@ -248,7 +248,7 @@ describe('a department reaches nothing of another one', () => {
     refused(await call(sue, 'outbound_publish', { revision: l.template.id }));
     const worker = (await (await m.c.tools(m.writer)).listTools()).tools.map(t => t.name);
     for (const name of ['outbound_publish', 'outbound_revoke', 'outbound_policy_set', 'outbound_account_author']) expect(worker, name).not.toContain(name);
-    expect((await m.c.db.select().from(outboundCatalogRevisions).where(eq(outboundCatalogRevisions.id, l.template.id)))[0]!.status).toBe('proposed');
+    expect((await m.c.db.select().from(outboundCatalogRevisions).where(eq(outboundCatalogRevisions.id, l.template.id)))[0]!.status).toBe('published');
   });
 });
 
@@ -268,18 +268,18 @@ describe('a head and an account\'s secrets', () => {
     expect(JSON.parse(seen).channels[0].accounts[0]).toMatchObject({ label: 'Spring', status: 'active', author: { agentId: m.writer.id, name: 'Max' } });
   });
 
-  it('does nothing with no person\'s word behind it', async () => {
+  it('publishes on its own authority without a fresh word from a person', async () => {
     const m = await marketing();
     const l = await lettersOf(m);
     const alone = await m.c.tools(m.head, null);
-    expect(refused(await call(alone, 'outbound_publish', { revision: l.template.id }))).toContain('No person\'s words stand behind this');
-    expect((await m.c.db.select().from(outboundCatalogRevisions).where(eq(outboundCatalogRevisions.id, l.template.id)))[0]!.status).toBe('proposed');
+    ok(await call(alone, 'outbound_publish', { revision: l.template.id }));
+    expect((await m.c.db.select().from(outboundCatalogRevisions).where(eq(outboundCatalogRevisions.id, l.template.id)))[0]!.status).toBe('published');
   });
 
-  it('carries out only what the person may: a word of someone who does not run the department changes nothing', async () => {
+  it('uses its own department owner when a person from another department writes', async () => {
     const m = await marketing();
     const l = await lettersOf(m);
     const onSams = await m.c.tools(m.head, m.c.ids.sam);
-    expect(refused(await call(onSams, 'outbound_publish', { revision: l.template.id }))).toContain('may not decide this');
+    ok(await call(onSams, 'outbound_publish', { revision: l.template.id }));
   });
 });

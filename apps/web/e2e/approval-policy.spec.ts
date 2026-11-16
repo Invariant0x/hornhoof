@@ -3,12 +3,21 @@ import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
+import { LANGUAGES, type Language } from '../src/i18n';
 import type { ApprovalPolicyView, AutonomousReleaseEntry, Org } from '../src/types';
 import { ME, serveApi } from './api';
 import { around, focusRing, offences, sizes } from './owner-screens-look';
 import type { Measured } from './owner-screens-sizes';
 
-const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
+const MESSAGES: Record<Language, Messages> = { en, ru };
+
+/* Rank the actual approval words of every shipped language for the narrow and wide checks. */
+const LOCALE_LENGTHS = LANGUAGES.map(({ id }) => {
+  const a = MESSAGES[id].dept.approvals;
+  const strings = [a.title, a.owner, a.ownerCeo, a.ownerNone, a.ownerIs('Dana'), a.ownerHint, a.noCandidates, a.defaultHint, a.rulesHint, a.mode, ...Object.values(a.modes), ...Object.values(a.readModes), ...Object.values(a.channels), a.limit, a.unit, a.unitPlaceholder, a.limitIs(100, 'USD'), a.autonomousRelease, a.autonomousReleaseHint, a.autonomousReleaseWord(false)];
+  return { id, length: strings.reduce((sum, value) => sum + value.length, 0) };
+}).sort((a, b) => a.length - b.length);
+const CHECKED_LOCALES = [...new Set([LOCALE_LENGTHS[0]!.id, LOCALE_LENGTHS.at(-1)!.id, ...LANGUAGES.map(l => l.id).filter(id => /^(ar|fa|he|ur)(-|$)/.test(id))])];
 const ORG: Org = {
   company: ME.company,
   orchestrator: null,
@@ -55,7 +64,7 @@ const POLICY: ApprovalPolicyView = {
 
 /* The department's panel as a person meets it, with what the page logs. Every change is answered as the server would.
    A theme is a skin's id; dark, a name no skin has, is Cyberpunk. Right to left as a shipped RTL language would set it. */
-async function open(page: Page, lang: 'en' | 'ru', theme: string, width: number, policy = POLICY, dir: 'ltr' | 'rtl' = 'ltr') {
+async function open(page: Page, lang: Language, theme: string, width: number, policy = POLICY, dir: 'ltr' | 'rtl' = 'ltr') {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ lang, theme, dir }) => {
     localStorage.setItem('hh-lang', lang);
@@ -117,13 +126,15 @@ async function fitsTheScreen(page: Page, width: number) {
   expect(scroll.drawer, 'the panel has no sideways scroll').toBeLessThanOrEqual(scroll.inner);
 }
 
-for (const lang of ['en', 'ru'] as const) {
+for (const lang of CHECKED_LOCALES) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
       test(`the CEO reads and changes the owner and the rules, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
         const { errors, puts } = await open(page, lang, theme, width);
         const part = section(page, t);
+        await expect(part.getByText(t.dept.approvals.defaultHint, { exact: true })).toBeVisible();
+        await info.attach('shipped-locale-lengths', { body: JSON.stringify(LOCALE_LENGTHS), contentType: 'application/json' });
         await page.screenshot({ path: info.outputPath(`approvals-page-${width}-${lang}-${theme}.png`) });
         await part.screenshot({ path: info.outputPath(`approvals-ceo-${width}-${lang}-${theme}.png`) });
         await fitsTheScreen(page, width);
@@ -192,9 +203,9 @@ for (const lang of ['en', 'ru'] as const) {
 
 /* The person who runs the department, not the CEO, in both skins, both languages, at a desk and on a phone, and right to
    left: the switch says its state in a word beside it, Design's rules hold, and the panel is drawn whole for Design. */
-type Look = { lang: 'en' | 'ru'; skin: 'light' | 'cyberpunk'; width: number; dir: 'ltr' | 'rtl' };
+type Look = { lang: Language; skin: 'light' | 'cyberpunk'; width: number; dir: 'ltr' | 'rtl' };
 const OWNER_LOOKS: Look[] = [
-  ...(['en', 'ru'] as const).flatMap(lang => (['light', 'cyberpunk'] as const).flatMap(skin => [1440, 375].map(width => ({ lang, skin, width, dir: 'ltr' as const })))),
+  ...CHECKED_LOCALES.flatMap(lang => (['light', 'cyberpunk'] as const).flatMap(skin => [1440, 375].map(width => ({ lang, skin, width, dir: 'ltr' as const })))),
   { lang: 'en', skin: 'light', width: 1440, dir: 'rtl' },
   { lang: 'ru', skin: 'cyberpunk', width: 375, dir: 'rtl' },
 ];

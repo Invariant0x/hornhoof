@@ -25,6 +25,16 @@ const ceoView = (extra: Partial<ApprovalPolicyView> = {}) => view({ canSetOwner:
 const rowOf = (channel: keyof typeof t.channels) => within(screen.getByRole('group', { name: t.channels[channel] }));
 
 describe('ApprovalPolicy', () => {
+  it('explains the default while keeping the department rules supplied by the server', async () => {
+    mockApi({ [POLICY]: [200, ceoView({ rules: [{ channel: 'message', mode: 'new_kinds' }, { channel: 'price', mode: 'every' }, { channel: 'commit', mode: 'every' }] })] });
+    render(<ApprovalPolicy departmentId="d1" />);
+    await screen.findByRole('combobox', { name: t.owner });
+    expect(screen.getByText(/By default, only new kinds need approval/)).toBeInTheDocument();
+    expect(rowOf('message').getByRole('combobox', { name: t.mode })).toHaveValue('new_kinds');
+    expect(rowOf('price').getByRole('combobox', { name: t.mode })).toHaveValue('every');
+    expect(rowOf('commit').getByText(t.readModes.every)).toBeInTheDocument();
+  });
+
   it('says the CEO decides while there is no owner, and offers the CEO those who may own it', async () => {
     mockApi({ [POLICY]: [200, ceoView()] });
     render(<ApprovalPolicy departmentId="d1" />);

@@ -15,10 +15,10 @@ const answer = (c: C, id: string, approve: boolean) => c.app.inject({ method: 'P
 const ruleFor = (c: C, departmentId: string, channel: string) => c.db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, departmentId), eq(approvalPolicies.channel, channel as never)));
 
 describe('reading and changing a department\'s approval policy', () => {
-  it('asks every time on each channel while nobody set a rule, and stores nothing for that', async () => {
+  it('asks only for new kinds by default, with exact commit approval, and stores nothing for that', async () => {
     const c = await company();
     const view = (await c.policy(c.ceoToken, c.dev.id)).json();
-    expect(view.rules).toEqual(['message', 'price', 'publication', 'commit', 'spend', 'other'].map(channel => ({ channel, mode: 'every' })));
+    expect(view.rules).toEqual(['message', 'price', 'publication', 'commit', 'spend', 'other'].map(channel => ({ channel, mode: channel === 'commit' ? 'every' : 'new_kinds' })));
     expect(view).toMatchObject({ departmentId: c.dev.id, owner: null, canSetOwner: true, canChangePolicy: true });
     expect(await c.db.select().from(approvalPolicies)).toEqual([]);
   });
@@ -124,7 +124,7 @@ describe('asking for an approval under the policy', () => {
     return (over: Record<string, unknown> = {}) => call(tools, 'request_approval', asks({ task: c.task.number, ...over }));
   };
 
-  it('asks every time on a channel with no rule, and sends it to the CEO with no owner', async () => {
+  it('asks for the first kind on a channel with no rule, and sends it to the CEO with no owner', async () => {
     const c = await company();
     const ask = await bruno(c);
     const res = await ask({ amount: 1 });
@@ -178,9 +178,8 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toHaveLength(1);
   });
 
-  it('asks only for a new kind: a kind goes free once approved, however it is typed', async () => {
+  it('defaults to asking only for a new kind: a kind goes free once approved, however it is typed', async () => {
     const c = await company();
-    await c.setRule(c.ceoToken, c.dev.id, 'message', { mode: 'new_kinds' });
     const ask = await bruno(c);
     await ask({ channel: 'message', kind: 'Welcome  email' });
     const [first] = await openRequests(c);
@@ -190,6 +189,18 @@ describe('asking for an approval under the policy', () => {
     expect(await openRequests(c)).toEqual([]);
     await ask({ channel: 'message', kind: 'invoice reminder' });
     expect(await openRequests(c)).toHaveLength(1);
+  });
+
+  it('keeps an explicit every rule asking after a kind was approved', async () => {
+    const c = await company();
+    await c.setRule(c.ceoToken, c.dev.id, 'message', { mode: 'every' });
+    const ask = await bruno(c);
+    await ask({ channel: 'message', kind: 'welcome' });
+    const [first] = await openRequests(c);
+    await answer(c, first!.id, true);
+    await ask({ channel: 'message', kind: 'welcome' });
+    expect(await openRequests(c)).toHaveLength(1);
+    expect(await ruleFor(c, c.dev.id, 'message')).toMatchObject([{ mode: 'every' }]);
   });
 
   it('keeps a declined or waiting kind new: only an approval makes it known', async () => {

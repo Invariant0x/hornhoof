@@ -23,8 +23,8 @@ export const ApprovalRule = z.discriminatedUnion('mode', [
 ]);
 export type ApprovalRule = z.infer<typeof ApprovalRule>;
 
-/* A channel nobody set a rule for asks every time, as Hornhoof did before there were rules. */
-export const DEFAULT_APPROVAL_RULE: ApprovalRule = { mode: 'every' };
+/* A channel nobody set a rule for asks only for a kind nobody approved yet. */
+export const DEFAULT_APPROVAL_RULE: ApprovalRule = { mode: 'new_kinds' };
 
 /* What the database keeps of a rule. */
 export type StoredApprovalRule = { mode: ApprovalMode; limitAmount: number | null; limitUnit: string | null };
@@ -33,7 +33,7 @@ export type StoredApprovalRule = { mode: ApprovalMode; limitAmount: number | nul
 export function ruleOf(stored: StoredApprovalRule | undefined): ApprovalRule {
   if (!stored) return DEFAULT_APPROVAL_RULE;
   if (stored.mode === 'new_kinds') return { mode: 'new_kinds' };
-  if (stored.mode !== 'within_limits' || stored.limitAmount === null) return DEFAULT_APPROVAL_RULE;
+  if (stored.mode !== 'within_limits' || stored.limitAmount === null) return { mode: 'every' };
   return { mode: 'within_limits', limit: stored.limitAmount, ...(stored.limitUnit ? { unit: stored.limitUnit } : {}) };
 }
 

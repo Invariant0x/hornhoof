@@ -39,10 +39,10 @@ export async function ownDepartment(db: Pick<Db, 'select'>, companyId: string, i
   return dept;
 }
 
-/* The rule of each channel, those nobody set asking every time. */
+/* Channels with no rule ask for new kinds; commits always keep exact-commit approval. */
 export async function departmentRules(db: Pick<Db, 'select'>, departmentId: string) {
   const rows = await db.select().from(approvalPolicies).where(eq(approvalPolicies.departmentId, departmentId));
-  return APPROVAL_CHANNELS.map(channel => ({ channel, ...ruleOf(rows.find(r => r.channel === channel)) }));
+  return APPROVAL_CHANNELS.map(channel => ({ channel, ...(channel === 'commit' ? { mode: 'every' as const } : ruleOf(rows.find(r => r.channel === channel))) }));
 }
 
 /* The active person who owns the department now with their name; null means the CEO. */

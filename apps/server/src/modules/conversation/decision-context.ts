@@ -5,7 +5,7 @@ import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, jobs, people, requests, tasks } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, people, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
@@ -14,16 +14,10 @@ import { activeClickGrants, answeredWords, byPerson, incomingWords, wordsForTurn
 import { liveInputOf } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
-/* The orchestrator, and a department's head inside its own department, take a decision for a person only in a turn that
-   answers that person: the last person who wrote into the turn, or pressed Enter in its terminal, says who it is. Notices
-   Hornhoof writes and messages from agents never change whom a turn answers, and a turn without a person's words answers
-   nobody unless a person started it with none. Words on their way into the turn, or that went in without being kept, leave
-   the turn without anyone's right. Their own work of running the company or a department goes on in any turn of theirs,
-   for the last person who asked them: see standingPrincipal.
-   What is not forbidden is allowed, and the orchestrator can do everything in the company (Ivan's rule of 16 November
-   2026): in a turn that answers neither the CEO nor the CEO delegate it goes as the company's owner, so an employee's
-   message, a notice of Hornhoof or a person who runs one department moves it as the CEO would. What a company wants it
-   not to do is written in the company's notebook. Machines keep their own rule: see machinePrincipal. */
+/* The orchestrator uses the CEO or delegate its turn answers, otherwise the active company owner. A head acts in its own
+   department in any turn with its active named owner's rights, otherwise the active CEO's. Department rules and notebook
+   restrict what it decides; its tools still enforce the department boundary. No fresh human message is needed for either
+   standing authority. Pending input and stopped turns have no principal. Machine access keeps its own rule below. */
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'> | Tx;
@@ -41,7 +35,7 @@ const ANSWERS_PEOPLE: readonly (typeof agents.$inferSelect)['kind'][] = ['orches
    words are on their way into it. */
 async function turnWords(db: Reader, jobId: string) {
   const [job] = await db
-    .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, inboxWake: jobs.inboxWake, agentKind: agents.kind, companyId: agents.companyId })
+    .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, inboxWake: jobs.inboxWake, agentKind: agents.kind, companyId: agents.companyId, departmentId: agents.departmentId })
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(eq(jobs.id, jobId));
@@ -51,11 +45,24 @@ async function turnWords(db: Reader, jobId: string) {
 
 type Words = NonNullable<Awaited<ReturnType<typeof turnWords>>>;
 
-/* The orchestrator's principal: the CEO or the CEO delegate its turn answers, or else the company's owner. A head's stays
-   as it was found. */
+/* A head's current named owner, if still active in the same company with access to its own department. */
+async function headOwner(db: Reader, companyId: string, departmentId: string): Promise<Principal | null> {
+  const [dept] = await db.select({ ownerPersonId: departments.ownerPersonId }).from(departments)
+    .where(and(eq(departments.id, departmentId), eq(departments.companyId, companyId), isNull(departments.parentId)));
+  if (!dept?.ownerPersonId) return null;
+  const [owner] = await db.select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate }).from(people)
+    .where(and(eq(people.id, dept.ownerPersonId), eq(people.companyId, companyId), eq(people.status, 'active')));
+  return owner && (await runsDepartment(db, owner, departmentId)) ? { personId: owner.id, sourceSeq: null } : null;
+}
+
+/* The same standing authority for decisions and management, resolved again whenever a write rechecks its delegation. */
 async function asOwner(db: Reader, turn: Words, found: Principal | null): Promise<Principal | null> {
-  if (turn.job.agentKind !== 'orchestrator') return found;
-  if (found && (await actingCeo(db, found.personId))) return found;
+  if (turn.job.agentKind === 'head') {
+    if (!turn.job.departmentId) return null;
+    const named = await headOwner(db, turn.job.companyId, turn.job.departmentId);
+    if (named) return named;
+    found = null;
+  } else if (found && (await actingCeo(db, found.personId))) return found;
   const [owner] = await db
     .select({ id: people.id })
     .from(people)
@@ -64,7 +71,7 @@ async function asOwner(db: Reader, turn: Words, found: Principal | null): Promis
   return owner ? { personId: owner.id, sourceSeq: null } : found;
 }
 
-/* Whom the turn answers by its words alone, before the orchestrator goes as the owner: what the marks of an Enter keep. */
+/* Whom the turn answers by its words alone, before applying standing authority: what the marks of an Enter keep. */
 async function wordsPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
   const turn = await turnWords(db, jobId);
   return turn && answered(turn);
@@ -78,10 +85,8 @@ export async function decisionPrincipal(db: Reader, jobId: string): Promise<Prin
 /* How a check finds the person a call goes for: decisionPrincipal, or standingPrincipal for running the company. */
 export type FindPrincipal = (db: Reader, jobId: string) => Promise<Principal | null>;
 
-/* The person whose words the orchestrator or a head carries out in any running turn of its own, when it runs the company or
-   its department: whom the turn answers, or, when no person's words came into it, the last person who wrote or typed to
-   it in an earlier turn. A turn that ended before a check came back takes nobody's word away. Words of agents and notices
-   of Hornhoof still never stand for a person, and the routes still allow only what that person may do now. */
+/* Management uses the same standing authority as decisions. The orchestrator can retain the last CEO or delegate's words
+   from an earlier turn; a head always uses its current department owner, otherwise the active CEO. */
 export async function standingPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
   const turn = await turnWords(db, jobId);
   if (!turn) return null;
