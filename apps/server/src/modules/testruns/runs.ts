@@ -1,6 +1,6 @@
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { refusePaused } from '../tasks/pause.js';
-import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, exists, inArray, isNotNull, isNull, like, max, notExists, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -566,7 +566,8 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
       await keepLog(ctx, found.run, found.part, msg.log);
       if (ended) await keepPartResults(ctx, found.run, found.part, ended, msg);
       if (ended) await stopWithPreparation(ctx, ended);
-      if (ended) await settleRun(ctx, found.run.id);
+      /* Also when the part had ended: the end the node sends again ends the run the first one did not reach. */
+      await settleRun(ctx, found.run.id);
     }
   }
   /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
@@ -587,10 +588,22 @@ export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = [])
   await pumpTests(ctx);
 }
 
-/* Parts past their time limit whose node never said they ended, parts whose machine is away too long, and parts that
-   waited too long for a machine. */
+/* Runs left open though every part of theirs ended, as when the server stopped between the end of the last part and that of
+   its run: each ends now as its parts did. One that cannot end now does not hold back the others. */
+async function settleLeftOpen(ctx: Ctx): Promise<void> {
+  const ofRun = eq(testParts.runId, testRuns.id);
+  const left = await ctx.db
+    .select({ id: testRuns.id })
+    .from(testRuns)
+    .where(and(eq(testRuns.status, 'running'), exists(ctx.db.select({ id: testParts.id }).from(testParts).where(ofRun)), notExists(ctx.db.select({ id: testParts.id }).from(testParts).where(and(ofRun, inArray(testParts.status, ['queued', 'running']))))));
+  for (const { id } of left) await settleRun(ctx, id).catch((err: unknown) => ctx.log.error({ error: loggable(err), runId: id }, 'A test run whose parts all ended could not end.'));
+}
+
+/* Parts past their time limit whose node never said they ended, parts whose machine is away too long, parts that waited too
+   long for a machine, and runs whose parts all ended. */
 export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> {
   const { db } = ctx;
+  await settleLeftOpen(ctx);
   const open = await db
     .select({ part: testParts, run: testRuns })
     .from(testParts)
