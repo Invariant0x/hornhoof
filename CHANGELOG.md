@@ -5,6 +5,104 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [Unreleased]
+
+The Tasks tab becomes a tracker: goals that split into smaller goals, one person who answers for each task, why it
+exists and by when, the history of every status, the pipelines of the departments, and the same work as a list, a board
+and a map. Every department gets a product manager who keeps its work clear for people.
+
+### Before you update
+
+- Migration 0132 comes with this release. It adds goals with their history, pipelines with their stages, and the
+  tracker's fields of a task: its goal, the person who answers for it, why, its date, its pipeline and stage. The first
+  time the updated server leads, it names the person who answers for every open task (the one of the task above it, else
+  of its goal, else the person who decides for its department) and hires one product manager into each top-level
+  department that has none, once. Closed tasks stay without one. Nothing needs doing before or after the update.
+
+### Added
+
+- Goals. A company goal splits into department goals and smaller goals, as deep as needed. A goal has a why, the person
+  who answers for it, a date and a number to reach; its progress is that number against the target, or else how many
+  tasks under it are done, cancelled ones not counted. The CEO and the CEO's delegates set company goals; a department's
+  goals are set by whoever reaches the department, its head, its product manager and the orchestrator. A goal keeps the
+  history of its changes.
+- Each task has one person who answers for it: the one named, else the one of the task above it, else of its goal, else
+  the person who decides for its department. When that person is switched off or loses access to the department, their
+  open tasks and goals pass to the person who decides for it, with a line in the history. A task also has a short why
+  and a date.
+- Every change of a task's status writes where it came from and where it went. The card shows how long the task stands
+  in its status, how long it was worked on and whom it waits for, and since when.
+- Pipelines: a department's map of who hands work to whom, stages in a tree with forks, each owned by a role or one
+  employee. A pipeline gives out no work and moves none: a task on it stands in the stage of whoever holds it now, and
+  stays where it was when its holder owns no stage.
+- The Tasks tab opens on the person's own work: what waits for them, the tasks and goals they answer for, what is being
+  worked on now, the people who answer for departments and goals, and the departments with their employees. The same
+  work shows as a list, a board by status or by a pipeline's stages, and a map of a goal with everything under it. The
+  CEO and the CEO's delegates look at it as another person sees it with "View as", which only filters. Every task opens
+  the same card, with its goal, why, facts, the work under it, what it waits for and what waits for it, and its history
+  in plain words. Whoever acts on a task's work edits its title, short text, why, goal, the person who answers for it,
+  its date and its pipeline there, waking nobody.
+- A product manager in every department template and every company template. It keeps titles, whys, goals, the people
+  who answer for tasks, goal numbers and pipelines clear, and never gives out work or changes who does it, its status,
+  urgency, pause, waits or route. It wakes a few minutes after a task or goal of its department is made or changes
+  status, at most every 15 minutes, and on a timer every 4 hours.
+- Agents' tools: everyone reads `goals` with the department's pipelines; heads, the orchestrator and product managers
+  set goals and pipelines of their own department with `set_goal` and `set_pipeline`, and only the orchestrator sets
+  company goals; a product manager tidies a task of its own department with `tidy_task`. `create_task`, `add_tasks` and
+  `update_task` take a goal, the person who answers, why, date, pipeline and stage; a change of only these wakes nobody.
+- People's routes: `GET/POST/PATCH /api/goals`, `PUT /api/goals/:id/status`, `GET/POST/PATCH /api/pipelines` and
+  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` on the task's version, `PUT /api/tasks/:id/after`, and
+  `GET /api/tasks?responsible=`. `POST /api/tasks` takes `parent`, and work under a task goes to the head of its
+  department.
+
+### Changed
+
+- The old board of the Tasks tab, its three views and the tiles at the top are gone. A department's Tasks drawer opens
+  the tracker for that department.
+
+### Russian
+
+Вкладка "Задачи" становится трекером: цели, которые делятся на цели поменьше, один ответственный у каждой задачи,
+зачем она нужна и к какому сроку, история каждого статуса, конвейеры отделов и одна и та же работа списком, доской и
+картой. В каждом отделе появляется продакт-менеджер, который следит, чтобы работа была понятна людям.
+
+- С выпуском приходит миграция 0132. Она добавляет цели с их историей, конвейеры с этапами и новые поля задачи: цель,
+  ответственного, зачем, срок, конвейер и этап. Когда обновленный сервер впервые становится ведущим, он назначает
+  ответственного каждой открытой задаче (того же, что у задачи выше, иначе у ее цели, иначе того, кто решает за отдел) и
+  один раз нанимает продакт-менеджера в каждый отдел верхнего уровня, где его нет. У закрытых задач ответственного не
+  будет. Ничего делать до и после обновления не нужно.
+- Цели. Цель компании делится на цели отделов и цели поменьше, на любую глубину. У цели есть зачем, ответственный,
+  срок и число, к которому идем; прогресс считается по этому числу, а без него по доле готовых задач под целью,
+  отмененные не в счет. Цели компании ставят CEO и его заместители, цели отдела ставят те, у кого есть доступ к отделу,
+  его руководитель, продакт-менеджер и оркестратор. Цель хранит историю изменений.
+- У каждой задачи один ответственный: названный, иначе тот же, что у задачи выше, иначе у ее цели, иначе тот, кто решает
+  за отдел. Если ответственного выключили или он потерял доступ к отделу, его открытые задачи и цели переходят к тому,
+  кто решает за отдел, с записью в истории. У задачи есть короткое "зачем" и срок.
+- Каждая смена статуса задачи записывает, откуда и куда она перешла. Карточка показывает, сколько задача стоит в своем
+  статусе, сколько над ней работали и кого она ждет и с какого времени.
+- Конвейеры: схема отдела, кто кому передает работу, этапы деревом с развилками, у каждого этапа своя роль или один
+  сотрудник. Конвейер не раздает и не двигает работу: задача стоит на этапе того, кто ее держит сейчас, и остается на
+  месте, если у держателя нет этапа.
+- Вкладка "Задачи" открывается на своей работе человека: что ждет его, за какие задачи и цели он отвечает, над чем
+  работают прямо сейчас, кто отвечает за отделы и цели, и отделы с сотрудниками. Та же работа видна списком, доской по
+  статусам или по этапам конвейера и картой цели со всем, что под ней. CEO и его заместители смотрят на нее глазами
+  другого человека через "Смотреть как", это только фильтр. Любая задача открывает одну и ту же карточку: цель, зачем,
+  факты, работа под ней, чего она ждет и кто ждет ее, история простыми словами. Тот, кто действует по работе задачи,
+  меняет там ее название, короткий текст, зачем, цель, ответственного, срок и конвейер, никого не будя.
+- Продакт-менеджер во всех шаблонах отделов и компаний. Он следит за понятными названиями, "зачем", целями,
+  ответственными, числами целей и конвейерами и никогда не раздает работу и не меняет, кто ее делает, статус, срочность,
+  паузу, ожидания и маршрут. Он просыпается через несколько минут после того, как задача или цель его отдела появилась
+  или сменила статус, не чаще раза в 15 минут, и по таймеру раз в 4 часа.
+- Инструменты агентов: все читают `goals` вместе с конвейерами отдела; руководители, оркестратор и продакт-менеджеры
+  ставят цели и конвейеры своего отдела через `set_goal` и `set_pipeline`, а цели компании ставит только оркестратор;
+  продакт-менеджер приводит в порядок задачу своего отдела через `tidy_task`. `create_task`, `add_tasks` и
+  `update_task` принимают цель, ответственного, зачем, срок, конвейер и этап; смена только этого никого не будит.
+- Маршруты для людей: `GET/POST/PATCH /api/goals`, `PUT /api/goals/:id/status`, `GET/POST/PATCH /api/pipelines` и
+  `POST /api/pipelines/:id/archive`, `PATCH /api/tasks/:id` по версии задачи, `PUT /api/tasks/:id/after` и
+  `GET /api/tasks?responsible=`. `POST /api/tasks` принимает `parent`, и работа под задачей идет руководителю ее отдела.
+- Старой доски вкладки "Задачи", трех ее видов и плиток сверху больше нет. Ящик "Задачи" отдела открывает трекер этого
+  отдела.
+
 ## [0.31.0]
 
 The orchestrator clears any employee's inbox, and a machine its owner opened stays open to the orchestrator for as

@@ -1,6 +1,6 @@
 # Tasks and turns
 
-> In short: you write to the orchestrator, and he lays the work out as tasks, grouped in turns. Each department runs one turn at a time, and different departments run theirs side by side. Each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit, unless the CEO has turned on autonomous release.
+> In short: you write to the orchestrator, and he lays the work out as tasks under goals, each with one person who answers for it. The Tasks tab shows that work as a list, a board and a map. Each department releases its work in turns, and different departments run theirs side by side. Each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit, unless the CEO has turned on autonomous release.
 
 ![Tasks and turns](../.github/assets/tasks.gif)
 
@@ -8,47 +8,68 @@
 
 The word has two meanings in Hornhoof.
 
-- A turn is a batch of one department's work, like turn 3. Tasks come in these turns. Turn numbers count across the whole company, so the turns of one department can skip numbers.
+- A turn is one release of a department's work, like turn 3. A task joins its department's open turn when its result is accepted into the turn's branch, and the release closes the turn. Turn numbers count across the whole company, so the turns of one department can skip numbers.
 - An agent's turn is one round of an agent's work, from the moment Hornhoof wakes it until it stops. The parts about waking agents, from "When does Hornhoof wake an agent?" on, count these.
 
 ## Where do tasks come from?
 
-Work moves as tasks, and tasks come in turns. Nobody fills the tracker by hand: people write to the orchestrator or to a department's head, and they lay the work out.
+People write to the orchestrator or to a department's head, and they lay the work out as tasks. Anyone whose access lists a department can also give it a task in the tracker. Work flows: a new task goes to its department's head at once, and nothing waits for a turn.
 
-A turn has:
-
-- a short title;
-- its main point;
-- the department whose turn it is;
-- one task for each goal the CEO gave it, whole, for the department that owns it;
-- the way it runs.
-
-The people's own words it came from open on a click.
-
-A turn runs in one of two ways, chosen as it starts:
+A task runs in one of two ways:
 
 - In stages. Code work goes through the checks below: Architecture, Development, Review, Security and Tests.
-- Turnkey. One employee of a sub-unit marked "Works turnkey" does the turn's work alone from start to finish. Hornhoof refuses this way while no sub-unit works turnkey.
-
-Whoever lays out a turn, the orchestrator or the department's head, picks the way. When you put tasks from a department's off-turn list into the next turn, you pick it next to the button. A person who sees the whole company, or the department's owner, can change it on the Tasks tab while the turn is planned. Once the turn starts, its way stays.
-
-Work given outside any turn goes through no stages: whoever gets it does it alone from start to finish.
+- Turnkey. A task given to a member of a sub-unit marked "Works turnkey" goes through no stages: that member does it alone from start to finish.
 
 ## What does the Tasks tab show?
 
-From top to bottom:
+The Tasks tab is the tracker. It opens on your own work.
 
-1. What agents wait for from people: questions to answer, commits to approve, and tasks an agent got stuck on.
-2. The department you pick.
-3. "The running turn and the next ones": that department's running turn and its planned turns, in order, with their tasks. Another department's turn shows here too while it holds a task of this department. The tasks given outside turns come after them.
-4. The department's off-turn list.
-5. The finished turns, folded away.
+On the left:
 
-## What happens when I add work while a turn runs?
+- "Waits for me": what agents wait for from you, such as questions to answer, commits to approve and tasks an agent got stuck on, and the orchestrator's cards.
+- "My tasks": the open tasks and goals you answer for.
+- "Working now": the tasks employees work on at this moment.
+- "Responsible": the people who answer for departments and goals, each with how many open tasks they have.
+- "Departments": each with the person who answers for it, its goals, pipelines and employees, and what each employee does now.
+- "Turns and releases": each department's next release and the releases out already.
 
-Each department runs one turn at a time, and turns of different departments run side by side. A new turn of a department that runs none starts at once. A new turn of a department that runs one waits as planned, after that department's planned turns, with its tasks planned too.
+At the top you see where you are, a search over every task, and three ways to look at the same work:
 
-When people add to the work, a new goal gets a new turn of the department that owns it. Work for the goal of a turn that is not over joins that turn: in the running turn it goes to the department's head at once, and in a planned turn it waits for the turn to start. The orchestrator says where it went.
+- List: tasks grouped by status, with who does each, who answers for it, its goal and its date. Work under a task opens under it.
+- Board: columns by status. With a pipeline picked, the columns are its stages.
+- Graph: a map of a goal with its smaller goals, tasks and the work under them. Solid lines show what is part of what, dashed lines show what waits for what. Drag it, zoom it with the wheel or the zoom bar, and open any part of it.
+
+Filters pick tasks by status, by who does them, by who answers for them and by goal. The CEO and the CEO's delegates can look at the screen as any other person sees it with "View as". It only filters: nobody sees more than they could before.
+
+Every task, wherever you click it, opens the same card: its goal and the task above it, why it exists, who answers for it, who does it, its pipeline and stage, its date, how long it stands in its status, how long it was worked on and whom it waits for, the work under it, what it waits for and what waits for it, its files and its history in plain words.
+
+## What are goals?
+
+A goal says what the work is for, like "500 subscribers by March". A company goal splits into department goals and smaller goals, as deep as you like. Each task serves one goal; work under a task serves the goal of the task above it.
+
+A goal can have a number to reach. Its progress is that number against the target, or else how many of the tasks under it are done. Cancelled tasks do not count.
+
+The CEO and the CEO's delegates set company goals. A department's goals are set by anyone whose access lists the department, by its head, by its product manager and by the orchestrator.
+
+## Who answers for a task?
+
+Each task and goal has one person who answers for it. You can name that person when you give the task. Otherwise it is the person who answers for the task above it, or else for its goal, or else the person who decides for the department.
+
+When that person is switched off, or loses access to the department, their open tasks and goals pass to the person who decides for it, with a line in the history.
+
+Whoever acts on a task's work can change its title, short text, why, goal, the person who answers for it, its date and its pipeline. Such a change wakes nobody. Who does the work and its status come only from the work itself: nobody drags a task to another column.
+
+## What is a pipeline?
+
+A pipeline is a department's map of who hands work to whom: stages in a tree from the first one, with forks, each owned by a role or one employee. It gives out no work and moves none. A task on a pipeline stands in the stage of whoever holds it now; when its holder owns no stage, it stays where it was.
+
+A department has no pipeline until someone draws one. Its product manager drafts them from the department's roster and its work, and its people, its head and the orchestrator can change them.
+
+## What does the product manager do?
+
+Every department has a product manager. It keeps the department's work clear for people: a short human title, a why, a goal and a person who answers for each task, current numbers on the goals, and the pipelines. It wakes a few minutes after a task or goal of its department is made or changes status, at most every 15 minutes, and on a slow timer.
+
+It never gives out work or changes who does it, its status, urgency, pause, waits or route: that stays with the head.
 
 ## How does a department split its task?
 
@@ -95,7 +116,7 @@ When one of those tasks is cancelled, whoever made the waiting task is told.
 
 ## When does a turn end?
 
-Once every task of the turn is closed, the turn ends. The department's next planned turn starts by itself.
+The head records the department's release, the main branch moves to its commit, and the version tag closes the turn. What the release left out goes into the next turn.
 
 ## How do I see how a turn went?
 
@@ -184,7 +205,7 @@ The machine's own browser opens the page and waits until the page has loaded and
 
 ## Who can give a department a task?
 
-Anyone whose access lists a department can give it a task, from inside the department, with "New task". It goes to the department's head, and joins the department's running turn if one runs. A department set to "Works all the time" runs no turns, so its tasks come outside turns. Operations starts that way.
+Anyone whose access lists a department can give it a task in the tracker. It goes to the department's head at once. A department set to "Works all the time" runs no turns, so its tasks come outside turns. Operations starts that way.
 
 ## Who approves what reaches the main branch?
 
