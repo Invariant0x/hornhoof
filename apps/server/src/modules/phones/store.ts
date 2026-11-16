@@ -52,7 +52,7 @@ export async function probePhone(ctx: Ctx, me: Person, input: z.infer<typeof Pro
 
 export async function phoneView(ctx: Ctx, phone: CompanyPhone, me?: Person) {
   const [owner] = await ctx.db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, phone.personId));
-  const sessions = await ctx.db.select({ id: phoneSessions.id, state: phoneSessions.status, agentId: phoneSessions.agentId }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, phone.id), isNull(phoneSessions.endedAt))).orderBy(asc(phoneSessions.order));
+  const sessions = await ctx.db.select({ state: phoneSessions.status }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, phone.id), isNull(phoneSessions.endedAt))).orderBy(asc(phoneSessions.order));
   const active = sessions.find(s => s.state !== 'queued');
   return {
     id: phone.id, name: phone.name, owner: owner!, machineId: phone.machineId, lending: phone.lending, stopping: active?.state === 'revoking',

@@ -13,7 +13,7 @@ export default defineConfig({
   reporter: 'list', expect: { timeout: 0 },
   use: { baseURL: origin, actionTimeout: 0, navigationTimeout: 0, reducedMotion: 'reduce', timezoneId: 'UTC', trace: 'retain-on-failure' },
   projects: [
-    { name: 'phones-chromium', use: { browserName: 'chromium' } },
+    { name: 'phones-chromium', use: { browserName: 'chromium', channel: process.env.PLAYWRIGHT_CHANNEL } },
     { name: 'phones-firefox', use: { browserName: 'firefox' } },
     { name: 'phones-webkit', use: { browserName: 'webkit' } },
   ],
