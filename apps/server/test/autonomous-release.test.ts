@@ -127,6 +127,8 @@ async function releaseFixture(options: { product?: boolean } = {}) {
     const runner = opts.candidate ? tester : author;
     const branch = opts.branch ?? `task-${task.number}`;
     const chosenProfile = opts.profile ?? 'full';
+    /* A release's full run starts only once the profile it replaces passed on the same commit. */
+    if (chosenProfile === 'full' && !opts.suite && !opts.candidate) await runProductSuite({ ...(opts.commit ? { commit: opts.commit } : {}), ...(opts.branch ? { branch: opts.branch } : {}), profile: 'fast' });
     const prevBranchCommit = branchCommit;
     branchCommit = sha;
 
@@ -806,7 +808,7 @@ describe('autonomous release for exact commits to main', () => {
       comment: 'Good for turn branch.',
       reviewedCommit: FEAT_SHA,
     });
-    await inTurn.runProductSuite({ commit: FEAT_SHA, branch: `task-${featTask.number}`, profile: 'full' });
+    await expect(inTurn.runProductSuite({ commit: FEAT_SHA, branch: `task-${featTask.number}`, profile: 'full' })).rejects.toMatchObject({ reason: 'tests_not_release' });
     const { call: turnHeadCall } = await inTurn.openTools(inTurn.head);
     const turnCoord = (await inTurn.coordinating('Turn coord', featTask));
     const featAsked = await turnHeadCall('ask_person', { task: turnCoord.number, question: 'Push unmerged turn feature to main?', commit: FEAT_SHA });
@@ -933,7 +935,7 @@ describe('autonomous release for exact commits to main', () => {
     const f = await releaseFixture({ product: false });
     expect((await f.setAutonomous(f.ceoToken, true)).statusCode).toBe(200);
     const { acceptance } = await f.verifyThroughEchelons();
-    await f.runProductSuite({ commit: CANDIDATE, profile: 'full' });
+    await expect(f.runProductSuite({ commit: CANDIDATE, profile: 'full' })).rejects.toMatchObject({ reason: 'tests_not_release' });
     const coord = (
       await createTask(
         f.ctx,

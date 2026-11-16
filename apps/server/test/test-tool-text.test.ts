@@ -9,12 +9,11 @@ function descriptions(): Map<string, string> {
 }
 
 describe('test tool guidance', () => {
-  it('leads with whole suites and keeps checks of a change in the owner workspace', () => {
+  it('leads with whole suites, and says the release branches it runs on as the server refuses the rest', () => {
     const text = descriptions().get('run_tests')!;
     expect(text.split('.')[0]).toMatch(/whole test suite[\s\S]*declared profile[\s\S]*groups[\s\S]*free machines/i);
-    expect(text).toMatch(/own change[\s\S]*own workspace[\s\S]*need no run_tests/i);
-    expect(text).not.toMatch(/\bstrictly once\b/i);
-    expect(text).toMatch(/once per release candidate on the combined release branch before main/i);
+    expect(text).toMatch(/only on a release branch[^.]*main[^.]*turn-<number>[^.]*release-<name>[^.]*tests_not_release/i);
+    expect(text).not.toMatch(/contributors|intermediate gates|never call run_tests|every so many turns/i);
     for (const fact of ['fingerprint', 'main branch', 'returns at once', 'fresh folder', 'woken on the task', 'full log', '{part}', '{parts}', 'hornhoof/tests']) expect(text).toContain(fact);
   });
 
@@ -24,6 +23,7 @@ describe('test tool guidance', () => {
     expect(text).toMatch(/without profile[^.]*default profile[^.]*leave suites out/i);
     expect(text).toMatch(/check of a release[^.]*execution\.fullRun\.profile[^.]*no suite and no candidate/i);
     expect(text).toMatch(/every suite and every test file anew/i);
+    expect(text).toMatch(/only once the profile it replaces passed on the same pinned commit[^.]*full_run_early/i);
     expect(text).not.toMatch(/run a release's check on the turn's branch/i);
   });
 });

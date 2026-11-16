@@ -410,8 +410,10 @@ export const KeptFiles = z.array(z.strictObject({ suiteId: Id, files: z.array(z.
   .refine(kept => byteLength(JSON.stringify(kept)) <= KEPT_BYTES, 'Kept files exceed their limit.');
 export type KeptFiles = z.infer<typeof KeptFiles>;
 
+/* Why a product run ended before any part went out. full_run_early is the server's own: a release's full run asked before the
+   profile it replaces passed on the same commit. */
 export const EnvironmentProblem = z.strictObject({
-  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'build_failed', 'cancelled', 'timeout']),
+  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'build_failed', 'cancelled', 'timeout', 'full_run_early']),
   detail: Text.max(2000),
 });
 export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;

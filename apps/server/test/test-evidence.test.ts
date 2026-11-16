@@ -110,7 +110,7 @@ describe('the test runs a task shows', () => {
     await until(() => c.ctx.hub.loadOf(BUILTIN) !== null);
     const { call } = await c.turn(c.bruno);
     const runOn = async () => {
-      expect((await call('run_tests', { command: 'make test', branch: BRANCH })).error).toBe(false);
+      expect((await call('run_tests', { command: 'make test', branch: 'release-2' })).error).toBe(false);
       let msg = await node.next();
       while (msg.type !== 'tests.run') msg = await node.next();
       node.send({ type: 'tests.done', partId: msg.partId, ok: true, exitCode: 0, error: null, commit: msg.commitSha!, log: 'ok\n' });

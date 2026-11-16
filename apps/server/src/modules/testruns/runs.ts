@@ -23,6 +23,7 @@ import { wakeAll } from '../tasks/wake.js';
 import type { RunJob, ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
 import { markPromise, markRun, TESTS_CONTEXT, type RunMark } from './github-status.js';
+import { requireReleaseBranch } from './release.js';
 import { forRun, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
 import { checkNamedFiles } from './named-files.js';
@@ -738,6 +739,7 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   const binding = await candidateForRun(ctx.db, task, job.agentId, input, kind);
   if (binding) input = { ...input, branch: binding.branch };
   const found = await runRepository(ctx, task, input, kind);
+  if (kind === 'tests') await requireReleaseBranch(ctx.db, task, { branch: input.branch, mainLine: found!.repo.branch, candidate: binding !== null && mode.mode === 'product' });
   const files = await workFiles(ctx, task, input, kind);
   const parts = mode.mode === 'manual' ? mode.parts : 0;
   checkManualParts(input.command ?? '', parts);

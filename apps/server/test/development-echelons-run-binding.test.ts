@@ -14,7 +14,7 @@ async function fixture() {
   };
   const job = await jobFor();
   const candidate = { candidateId: f.snapshot.candidateId!, revision: f.snapshot.revision };
-  const input = { task: f.task.number, command: 'Check the changed scope', ...{ candidate } };
+  const input = { task: f.task.number, candidate };
   const runs = () => f.db.select().from(testRuns).where(eq(testRuns.taskId, f.task.id));
   return { ...f, job, jobFor, candidate, input, runs };
 }

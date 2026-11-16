@@ -16,6 +16,7 @@ import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
+import { fullRunTooEarly } from './release.js';
 import { AWAY_MS, WAIT_MS } from './runs.js';
 export { productReceipt } from './receipts.js';
 import { reuseFor, runModeOf, type MainLineCommits, type ReuseDecision, type RunMode } from './reuse.js';
@@ -199,6 +200,8 @@ async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, valu
   const problem = unrunnable(snapshot);
   if (problem) return problem;
   const reuseMode = candidateReuseMode(mode, snapshot);
+  const early = reuseMode?.mode === 'full' ? await fullRunTooEarly(ctx.db, run, snapshot) : null;
+  if (early) return early;
   const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints, mainLineCommits(ctx, run, description.repositoryScope));
   const limited = { ...run, timeoutMs: partLimitMs(run, mode) };
   const { leaves, plan } = await plannedLeaves(ctx, limited, snapshot, reuse.decision, mode);
