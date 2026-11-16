@@ -817,11 +817,8 @@ export type MachineView = {
 
 /* Why a machine holds no copy of the company's data. */
 export type Unfit =
-  | { why: 'phone' | 'no_core' | 'no_link' | 'measuring' }
-  | { why: 'scope'; person: string; departments?: number }
-  | { why: 'memory'; memory: number }
-  | { why: 'disk'; free: number; need: number }
-  | { why: 'fsync'; p99: number };
+  | { why: 'phone' | 'no_core' | 'no_link' }
+  | { why: 'scope'; person: string; departments?: number };
 
 /* How a machine's copy of the company's data does. */
 export type CopyLine =
