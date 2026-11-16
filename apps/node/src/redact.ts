@@ -1,7 +1,7 @@
 export const HIDDEN = '[hidden]';
 export const MIN_LENGTH = 8;
 /* The shortest value held exactly: a vault password is at least this long, and shorter would hide single letters. */
-export const EXACT_MIN_LENGTH = 4;
+const EXACT_MIN_LENGTH = 4;
 
 /* Values shorter than a secret usually is that the node typed into a sign-in form, a password or a one-time code, each
    hidden wherever the node's output goes until its time is over, whatever its length. */

@@ -13,7 +13,7 @@ import type { FillAdapter, FillReceipt, FillValues, TargetOf } from './index.js'
    types only on pages of the entry's site, changes nothing of what the browser shows a site, and passes no robot check:
    a site that refuses an automated browser gets a person or a phone instead. */
 
-export type FillLocator = {
+type FillLocator = {
   readonly selector: string;
   fill(value: string, options: { timeout: number }): Promise<void>;
   press(key: 'Enter', options: { timeout: number }): Promise<void>;
@@ -57,12 +57,12 @@ const MASKED = ['[data-hh-fill]', 'input[type=password]'];
 /* Words of pages that turn an automated browser away, as such sites write them. */
 const REFUSED_WORDS = ['this browser or app may not be secure', 'browser is not supported', "couldn't sign you in", 'этот браузер или приложение могут быть небезопасны', 'не удалось войти'];
 
-export type SignInMarkers = { robot: string[]; refused: string[] };
-export type SignInFacts = { login: boolean; password: boolean; code: boolean; robot: boolean; refused: boolean };
+type SignInMarkers = { robot: string[]; refused: string[] };
+type SignInFacts = { login: boolean; password: boolean; code: boolean; robot: boolean; refused: boolean };
 
 /* Runs in the page: finds the visible sign-in fields, marks them for the steps that type into them, and tells whether a
    robot check or a page that refuses the browser is shown. */
-export function signInFacts({ robot, refused }: SignInMarkers): SignInFacts {
+function signInFacts({ robot, refused }: SignInMarkers): SignInFacts {
   for (const marked of Array.from(document.querySelectorAll('[data-hh-fill]'))) marked.removeAttribute('data-hh-fill');
   const shown = (el: HTMLInputElement) => {
     const box = el.getBoundingClientRect();

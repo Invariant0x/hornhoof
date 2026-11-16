@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { viewerOf } from '../../auth/agent-view.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { changeEntry, companyEntries, createEntry, entryById, entryLog, entryViews, EntryChange, NewEntry, notAllowed, parseBody, removeEntry, unknownEntry, type Entry } from './store.js';
@@ -62,6 +63,6 @@ export function vaultRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/vault/:id/log', async req => {
     const me = await requirePerson(req, ctx.db);
     const entry = await entryOf(ctx, me, IdParams.parse(req.params).id);
-    return { log: await entryLog(ctx, entry.id) };
+    return { log: await entryLog(ctx, entry.id, await viewerOf(ctx.db, me)) };
   });
 }

@@ -22,7 +22,7 @@ export type FillAdapter<K extends FillKind = FillKind> = {
   fill(target: TargetOf<K>, values: FillValues, fields: FillField[], signal: AbortSignal): Promise<FillReceipt>;
 };
 
-export type SecretFillDeps = {
+type SecretFillDeps = {
   /* Opens the sealed part with the node's own key; throws when it is not for this node. */
   open(sealed: string): Promise<Uint8Array>;
   /* Hides values from all the node's output until the moment given. */
@@ -34,7 +34,7 @@ export type SecretFillDeps = {
 /* How long one fill may take, within the time Hornhoof's tool waits for its answer. */
 export const FILL_MAX_MS = 40_000;
 /* How long a one-time code stays hidden after it was made: far past the period a site takes it in. */
-export const CODE_HIDE_MS = 10 * 60_000;
+const CODE_HIDE_MS = 10 * 60_000;
 /* How long a request is remembered, so the same one never runs twice. */
 const SEEN_MS = 10 * 60_000;
 

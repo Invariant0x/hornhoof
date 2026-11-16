@@ -2,6 +2,7 @@ import { FILL_PASSWORD_MIN, FillTotp, type FillPlain } from '@hornhoof/protocol'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { knowsAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, people, tasks, vaultEntries, vaultLog } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -11,14 +12,13 @@ import { deptName } from '../departments/templates.js';
    password and the code secret go in through here and come out only sealed to a node; no view, log or answer holds them. */
 
 export type Entry = typeof vaultEntries.$inferSelect;
-export type LogRow = typeof vaultLog.$inferSelect;
 
 const Scope = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('company') }),
   z.strictObject({ kind: z.literal('department'), departmentId: z.uuid() }),
   z.strictObject({ kind: z.literal('agent'), agentId: z.uuid() }),
 ]);
-export type ScopeInput = z.infer<typeof Scope>;
+type ScopeInput = z.infer<typeof Scope>;
 
 const Name = z.string().trim().min(1).max(80);
 const Site = z.string().trim().min(1).max(2048);
@@ -68,7 +68,7 @@ const badCode = () => invalid('The one-time code secret is not one an authentica
 
 /* The code of a site: its secret as an authenticator app shows it, in groups and any case, or the otpauth://totp/ address
    of its QR code with its digits, period and algorithm. */
-export function parseCode(raw: string): FillTotp {
+function parseCode(raw: string): FillTotp {
   const text = raw.trim();
   let secret = text;
   let digits = 6;
@@ -232,8 +232,10 @@ export async function entryViews(ctx: Ctx, rows: Entry[]) {
   }));
 }
 
-export async function entryLog(ctx: Ctx, entryId: string, limit = 200) {
-  const rows = await ctx.db.select().from(vaultLog).where(eq(vaultLog.entryId, entryId)).orderBy(desc(vaultLog.at)).limit(limit);
+/* The log is the company's work, which every person of it reads, but for the uses of another person's own assistant,
+   which nobody else knows of. A task shows by its number only. */
+export async function entryLog(ctx: Ctx, entryId: string, viewer: Pick<AgentViewer, 'apart'>, limit = 200) {
+  const rows = (await ctx.db.select().from(vaultLog).where(eq(vaultLog.entryId, entryId)).orderBy(desc(vaultLog.at)).limit(limit)).filter(r => r.agentId === null || knowsAgentId(viewer, r.agentId));
   const names = await namesFor(ctx, {
     people: rows.flatMap(r => (r.personId ? [r.personId] : [])),
     agents: rows.flatMap(r => (r.agentId ? [r.agentId] : [])),
