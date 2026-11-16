@@ -1,4 +1,4 @@
-import { sameSite, SiteSession } from '@hornhoof/protocol';
+import { SiteSession } from '@hornhoof/protocol';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -64,16 +64,21 @@ const cookieFor = (domain: string, host: string): boolean => {
   return d.length > 0 && (host === d || host.endsWith(`.${d}`));
 };
 
-/* Whether a sign-in serves a page: one of its cookies goes to the page's host, as a browser sends it, or the page is of the
-   site it was kept under. A sign-in kept under accounts.example.com with cookies of .example.com serves www.example.com. */
+/* Whether a sign-in serves a page, as a browser would use it there: one of its cookies goes to the page's host, or its
+   stored values are of the page's own origin. A host beside or above the one it was saved on gets nothing, nor a page
+   a step down from https. */
 export function servesPage(site: string, session: SiteSession, address: string): boolean {
-  let host: string;
+  let page: URL;
+  let kept: URL;
   try {
-    host = new URL(address).hostname.toLowerCase();
+    page = new URL(address);
+    kept = new URL(site);
   } catch {
     return false;
   }
-  return sameSite(site, address) || session.cookies.some(c => cookieFor(c.domain, host));
+  if (page.protocol !== 'https:' && (page.protocol !== 'http:' || kept.protocol === 'https:')) return false;
+  const host = page.hostname.toLowerCase();
+  return session.cookies.some(c => cookieFor(c.domain, host)) || session.origins.some(o => o.origin === page.origin);
 }
 
 /* The agent's newest sign-in that serves the page at the address, opened. */
