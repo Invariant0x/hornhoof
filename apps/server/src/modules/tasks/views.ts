@@ -54,6 +54,9 @@ export type TaskLine = {
   why: string;
   dueAt: string | null;
   time: TimeFacts;
+  /* The department's pipeline it goes along and the stage it stands in. */
+  pipelineId: string | null;
+  pipelineStageId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -187,6 +190,8 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   why: t.why,
   dueAt: t.dueAt?.toISOString() ?? null,
   time: n.time(t),
+  pipelineId: t.pipelineId,
+  pipelineStageId: t.pipelineStageId,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });

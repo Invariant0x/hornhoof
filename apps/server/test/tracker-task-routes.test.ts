@@ -39,12 +39,20 @@ describe('a person makes a task with what the tracker keeps', () => {
     expect(made.json().task).toMatchObject({ goal: { id: goal!.id, number: 1, title: 'Shop' }, responsible: { id: olegId, name: 'Oleg' }, why: 'People pay online.', dueAt: '2026-12-01T00:00:00.000Z', assignee: { name: 'Hana' } });
     const [row] = await db.select().from(tasks).where(eq(tasks.title, 'Payments'));
     expect([row!.pipelineId, row!.pipelineStageId]).toEqual([pipeline.id, pipeline.stages[0].id]);
+    expect(made.json().task).toMatchObject({ pipelineId: pipeline.id, pipelineStageId: pipeline.stages[0].id });
 
     const under = await send('POST', oleg, '/api/tasks', { title: 'Card form', brief: '', body: '', parent: row!.id });
     expect(under.statusCode, under.body).toBe(201);
     expect(under.json().task).toMatchObject({ parentId: row!.id, department: { id: dev.id }, assignee: { id: head.id }, goal: { id: goal!.id }, responsible: { id: olegId } });
     const withGoal = await send('POST', oleg, '/api/tasks', { title: 'Card form', brief: '', body: '', parent: row!.id, goal: goal!.id });
     expect([withGoal.statusCode, withGoal.json().error.reason]).toEqual([400, 'goal_invalid']);
+  });
+
+  it('names who answers for each department beside the departments the tracker lists', async () => {
+    const { ceo, dev, sales, olegId, mariaId, get } = await company();
+    const listed = (await get(ceo, '/api/task-departments')).json().departments as { id: string; responsible: { id: string; name: string } | null }[];
+    expect(listed.find(d => d.id === dev.id)!.responsible).toEqual({ id: olegId, name: 'Oleg' });
+    expect(listed.find(d => d.id === sales.id)!.responsible).toEqual({ id: mariaId, name: 'Maria' });
   });
 
   it('refuses a responsible person who does not reach the department', async () => {

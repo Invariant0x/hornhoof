@@ -10,13 +10,14 @@ import { departmentsHad, runsDepartment } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, viaOrchestrator, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, turns } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, people, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, setAfter, taskSpot, type Task } from './engine.js';
 import { editTask } from '../tracker/edit.js';
+import { placeOwner } from '../tracker/responsible.js';
 import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
@@ -281,7 +282,10 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const all = await db.select().from(departments).where(and(eq(departments.companyId, me.companyId), isNull(departments.parentId))).orderBy(asc(departments.position), asc(departments.createdAt));
     const mine = new Set((await departmentsHad(db, me)).map(d => d.id));
-    return { whole: (await accessOf(db, me)).whole, departments: all.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: mine.has(d.id) })) };
+    /* Who answers for each, as the tracker names them: the person who decides for its work. */
+    const owners = await Promise.all(all.map(d => placeOwner(ctx, me.companyId, { departmentId: d.id, parentId: null })));
+    const named = owners.length ? await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, [...new Set(owners)])) : [];
+    return { whole: (await accessOf(db, me)).whole, departments: all.map((d, i) => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: mine.has(d.id), responsible: named.find(p => p.id === owners[i]) ?? null })) };
   });
 
   /* One department's tasks, or every department's, as this person sees them: any department's. The work given to the
