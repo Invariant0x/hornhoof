@@ -14,7 +14,7 @@ describe('personal assistants migration', () => {
     const client = await freshPglite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0131_plan_fallbacks') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0132_vault') });
     await client.exec(`
       insert into companies (id, name) values ('00000000-0000-4000-8000-000000000001', 'Acme');
       insert into people (id, company_id, name, email, status, scope_kind)

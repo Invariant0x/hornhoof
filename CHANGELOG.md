@@ -5,7 +5,7 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
-## [0.31.0]
+## [Unreleased]
 
 ### Fixed
 
@@ -29,6 +29,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
 - A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
 - A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
+- Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
 
 ### Changed
 
