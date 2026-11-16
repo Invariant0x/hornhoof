@@ -81,16 +81,27 @@ const rowOf = (page: Page, s: SubView) => page.locator('tr.rm').filter({ hasText
 
 const lineHeight = (el: Locator) => el.evaluate(e => parseFloat(getComputedStyle(e).lineHeight));
 
-/* The sign stands by the end of the name's first line, inside its frame, whichever way the page reads: on a line of its
-   own it would leave the name. */
+/* The sign stands right after the name's last letter, on the name's last line and inside its frame, whichever way the page
+   reads: the words of that line end by it, as a sign alone on a line or at the end of another would leave the name. */
 async function signByName(sign: Locator, name: Locator, frame: Locator, dir: 'ltr' | 'rtl') {
-  const [s, n, f] = [await box(sign), await box(name), await box(frame)];
-  const middle = s.y + s.height / 2;
-  expect(middle).toBeGreaterThanOrEqual(n.y);
-  expect(middle).toBeLessThanOrEqual(n.y + await lineHeight(name));
-  const gap = dir === 'ltr' ? s.x - (n.x + n.width) : n.x - (s.x + s.width);
+  const words = await name.evaluate(el => {
+    const sign = el.querySelector('[role="img"]')!;
+    const range = document.createRange();
+    range.setStart(el, 0);
+    range.setEndBefore(sign);
+    const rects = [...range.getClientRects()].filter(r => r.width > 0);
+    const s = sign.getBoundingClientRect();
+    const middle = (s.top + s.bottom) / 2;
+    const line = rects.filter(r => r.top <= middle && r.bottom >= middle);
+    return { last: Math.max(...rects.map(r => r.top)), lineTop: Math.min(...line.map(r => r.top)), left: Math.min(...line.map(r => r.left)), right: Math.max(...line.map(r => r.right)), count: line.length };
+  });
+  expect(words.count).toBeGreaterThan(0);
+  expect(words.lineTop).toBeGreaterThanOrEqual(words.last - 1);
+  const s = await box(sign);
+  const gap = dir === 'ltr' ? s.x - words.right : words.left - (s.x + s.width);
   expect(gap).toBeGreaterThanOrEqual(-0.5);
-  expect(gap).toBeLessThanOrEqual(8);
+  expect(gap).toBeLessThanOrEqual(10);
+  const f = await box(frame);
   expect(s.x).toBeGreaterThanOrEqual(f.x - 0.5);
   expect(s.x + s.width).toBeLessThanOrEqual(f.x + f.width + 0.5);
 }

@@ -12,7 +12,7 @@ import { ConnectPanel } from '../ui/ConnectPanel';
 import { isKeyPlan, KeyForm } from '../ui/KeyForm';
 import { resetDurationAt, useNow } from '../ui/reset';
 import { SignInPanel } from '../ui/SignInPanel';
-import { CardFrame, CardHead, Facts, MachineMark, Part } from '../ui/Cards';
+import { CardFrame, CardHead, Facts, MachineMark, NameWithSign, Part } from '../ui/Cards';
 import { PayIcon, ProviderMark } from '../ui/icons';
 import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { LimitCell, LimitMeters } from '../ui/PlanLimits';
@@ -93,7 +93,7 @@ function KindSign({ kind }: { kind: SubView['kind'] }) {
 /* The connection's short name with the sign of how it is paid, the orchestrator's role a small line under it. */
 function SubscriptionName({ sub: s }: { sub: SubView }) {
   const t = useT();
-  return <span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><span className="nm-l"><b>{shortName(t, s)}</b><KindSign kind={s.kind} /></span>{s.isOrchestrator && <small>{t.subs.orchestrator}</small>}</span></span>;
+  return <span className="nmg"><ProviderMark provider={s.provider} protocol={s.api?.protocol} /><span className="nm"><span className="nm-l"><b><NameWithSign name={shortName(t, s)} sign={<KindSign kind={s.kind} />} /></b></span>{s.isOrchestrator && <small>{t.subs.orchestrator}</small>}</span></span>;
 }
 
 /* What the connection's turns used in 30 days, or nothing from an older server. */
