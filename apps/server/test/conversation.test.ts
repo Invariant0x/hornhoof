@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_STAFFED, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pump, pumpWaiting } from '../src/modules/conversation/queue.js';
@@ -593,7 +594,7 @@ describe('the orchestrator\'s conversation', () => {
   it('takes the time a program names for its usage limit to start over, and the map hears of it', async () => {
     const { app, ceo, mac } = await onMac('0.3.0', 'codex');
     await until(async () => (await state(app, ceo)).ready);
-    const [company] = await app.ctx.db.select({ id: companies.id }).from(companies);
+    const [company] = await app.ctx.db.select(idOnly(companies)).from(companies);
     const heard: string[] = [];
     app.ctx.bus.subscribe(company!.id, m => heard.push(m.type));
     await say(app, ceo, 'First');

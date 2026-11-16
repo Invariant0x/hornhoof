@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 export const CHECK_LEASE_MS = 90_000;
 const Id = z.uuid();
-export const CheckAcquire = z.object({ type: z.literal('check.acquire'), id: Id, label: z.string().max(100), agentId: Id.optional(), jobId: Id.optional() });
+/* resume: the node claims again, after a reconnect, a lease it held; the server keeps it or answers ended, never queues it anew. */
+export const CheckAcquire = z.object({ type: z.literal('check.acquire'), id: Id, label: z.string().max(100), agentId: Id.optional(), jobId: Id.optional(), resume: z.literal(true).optional() });
 export const CheckRelease = z.object({ type: z.literal('check.release'), id: Id });
 export const CheckQueueRequest = z.discriminatedUnion('type', [CheckAcquire, CheckRelease]);
 export type CheckQueueRequest = z.infer<typeof CheckQueueRequest>;

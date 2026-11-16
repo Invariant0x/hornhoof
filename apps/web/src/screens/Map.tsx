@@ -353,7 +353,7 @@ function PersonChipCard({ org, person, w, h, cut, onOpen }: { org: Org; person: 
   const t = useT();
   return (
     <PersonButton person={person} frame={{ w, h, cut }} onOpen={() => onOpen(person.id)}>
-      <Edge cut={cut} className="chip">
+      <Edge cut={cut} className="chip" halo>
         <PersonIcon label={t.map.person} />
         <span>
           <b>{person.name}</b>
@@ -884,7 +884,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
             onFocus={() => setPointed(d.id)}
             onBlur={() => setPointed(p => (p === d.id ? null : p))}
           >
-            <Edge cut={12} corner>
+            <Edge cut={12} corner halo>
               <span className="row1">
                 <b className="dname">{deptLabel(t, d)}</b>
                 <span className="cnt" title={t.map.deptAgents}>

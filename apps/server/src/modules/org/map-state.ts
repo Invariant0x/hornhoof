@@ -2,6 +2,7 @@ import type { WorkLine } from '@hornhoof/protocol';
 import { and, asc, eq, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, companies, departments, jobs, mapReturns, requests, tasks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { GONE_ALONG } from '../conversation/queue.js';
 
 /* The lines of the company map, kept apart from the pulses of single messages: a line is blue while the one below works on
@@ -73,7 +74,7 @@ const topOf = (parents: ReadonlyMap<string, string | null>, departmentId: string
 
 async function orchestratorOf(db: Reader, companyId: string): Promise<string | null> {
   const [orchestrator] = await db
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   return orchestrator?.id ?? null;
@@ -85,7 +86,7 @@ async function headOf(db: Reader, agent: Agent): Promise<string | null> {
   const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(eq(departments.id, agent.departmentId));
   const top = dept?.parentId ?? agent.departmentId;
   const [head] = await db
-    .select({ id: agents.id })
+    .select(idOnly(agents))
     .from(agents)
     .where(and(eq(agents.companyId, agent.companyId), eq(agents.kind, 'head'), eq(agents.departmentId, top), isNull(agents.removedAt)));
   return head?.id ?? null;
@@ -159,7 +160,7 @@ export async function returnAlongLine(tx: Tx, r: { agentId: string; sourceKey: s
   const ends = { companyId: agent.companyId, upstreamAgentId: up, downstreamAgentId: agent.id };
   const line = await locked(tx, ends);
   const [turn] = await tx
-    .select({ id: jobs.id })
+    .select(idOnly(jobs))
     .from(jobs)
     .where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')))
     .limit(1);
@@ -182,7 +183,7 @@ async function factsFor(db: Reader, companyId: string, ids: string[]): Promise<F
 
 async function withDependencies(db: Reader, companyId: string, found: Map<string, TaskFacts>): Promise<Facts> {
   const firstIds = [...new Set([...found.values()].flatMap(t => t.after))];
-  const notDone = firstIds.length ? (await db.select({ id: tasks.id }).from(tasks).where(and(inArray(tasks.id, firstIds), notInArray(tasks.status, ['done'])))).map(t => t.id) : [];
+  const notDone = firstIds.length ? (await db.select(idOnly(tasks)).from(tasks).where(and(inArray(tasks.id, firstIds), notInArray(tasks.status, ['done'])))).map(t => t.id) : [];
   const ids = [...found.keys()];
   const asked = ids.length
     ? await db

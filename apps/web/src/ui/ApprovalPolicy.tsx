@@ -256,10 +256,12 @@ function ChannelFieldset({
   const t = useT().dept.approvals;
   const editable = view.canChangePolicy && rule.channel !== 'commit';
   return (
-    <fieldset className="appr-rule">
+    <fieldset className="field-group appr-rule">
       <legend>{t.channels[rule.channel]}</legend>
-      {editable ? <RuleForm path={path} rule={rule} modes={modes} onSaved={onSaved} /> : <RuleWords rule={rule} />}
-      {rule.channel === 'commit' && <AutonomousReleaseControl departmentId={departmentId} path={path} view={view} onSaved={onSaved} />}
+      <div className="field-group-body">
+        {editable ? <RuleForm path={path} rule={rule} modes={modes} onSaved={onSaved} /> : <RuleWords rule={rule} />}
+        {rule.channel === 'commit' && <AutonomousReleaseControl departmentId={departmentId} path={path} view={view} onSaved={onSaved} />}
+      </div>
     </fieldset>
   );
 }

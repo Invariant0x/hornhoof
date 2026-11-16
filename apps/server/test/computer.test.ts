@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, computerRuns, departments, improvements, jobs, machineAccess, machines, people, requests, subscriptions } from '../src/db/schema.js';
+import { idOnly } from '../src/db/selections.js';
 import { ORCHESTRATOR_SKILLS } from '../src/modules/agents/instructions.js';
 import { Computers } from '../src/modules/computer/access.js';
 import { deliverLive, withInputLock } from '../src/modules/conversation/decision-context.js';
@@ -26,7 +27,6 @@ const TOKEN = 'tool-token-0123456789abcdef0123456789';
 const DAY_MS = 24 * 60 * 60 * 1000;
 /* A wait for a command's answer that no test outlasts, for commands that are answered. */
 const NEVER_MS = 2_147_483_647;
-const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 /* The server's own machine, with no name its keeper told yet, which the CEO owns. */
 const SERVER = 'the company server';
 const NOT_THEIRS = `The last words in this turn came from a person who may not direct commands on ${SERVER}: only the CEO, the CEO delegate or Ivan, who owns it, may. Nothing was run. Ask them first.`;
@@ -72,7 +72,7 @@ function withWait(c: Pick<Company, 'app' | 'control' | 'machine'>, waitMs: numbe
 
 const accessOf = async (c: Pick<Company, 'db' | 'machine'>) => (await c.db.select().from(machineAccess).where(eq(machineAccess.machineId, c.machine)))[0];
 /* The commands that wait for the machine's keeper or are out with it. */
-const pending = (db: Company['db']) => db.select({ id: computerRuns.id }).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
+const pending = (db: Company['db']) => db.select(idOnly(computerRuns)).from(computerRuns).where(inArray(computerRuns.state, ['waiting', 'sent']));
 
 
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
@@ -314,8 +314,6 @@ describe('access to the computer the server runs on', () => {
     const wakeClient = await mcp(app, byWake.toolToken!);
     const [onWake] = await Promise.all([call(wakeClient, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(onWake)).toBe('Exit code 0.\nPlenty.\n');
-    /* It decides nothing else for the CEO in such a turn. */
-    expect(text(await call(wakeClient, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
 
     expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) })).statusCode).toBe(200);
     const shut = await call(wakeClient, 'computer', { command: 'df -h' });
@@ -324,7 +322,7 @@ describe('access to the computer the server runs on', () => {
     expect(await pending(c.db)).toEqual([]);
   });
 
-  it("lets the turn the CEO's click opens use the computer and nothing else only the CEO may, until a person without the right writes into it", async () => {
+  it("lets the turn the CEO's click opens use the computer until a person without the right writes into it, and decide as the owner as any turn does", async () => {
     const c = await company();
     const { app, db, ceo, orchestrator, builtin } = c;
     withWait(c, NEVER_MS);
@@ -338,12 +336,12 @@ describe('access to the computer the server runs on', () => {
     const client = await mcp(app, note.toolToken!);
     const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
-    /* A click answers no question: the turn takes no decision for the CEO and asks for nothing else only the CEO may. */
+    /* What only the CEO may, the orchestrator does in any turn as the owner, the click or not. */
     const request = await approvalAsked(app);
-    expect((await call(client, 'answer_request', { request: request.id, approve: true })).isError).toBe(true);
-    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
-    expect(text(await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
-    expect((await db.select().from(people).where(eq(people.name, 'Eve')))).toEqual([]);
+    expect((await call(client, 'answer_request', { request: request.id, approve: true })).isError).toBeFalsy();
+    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'approved' });
+    expect((await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } })).isError).toBeFalsy();
+    expect((await db.select().from(people).where(eq(people.name, 'Eve')))).toHaveLength(1);
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
     expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
     expect(await pending(c.db)).toEqual([]);
@@ -391,13 +389,13 @@ describe('access to the computer the server runs on', () => {
     const second = await call(client, 'computer', { command: 'journalctl -n 5' });
     expect(text(second)).toBe('Exit code 0.\nHealthy.\n');
     await answering;
-    expect(text(await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
+    expect((await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } })).isError).toBeFalsy();
 
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
     expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(NOT_THEIRS);
   });
 
-  it('keeps the computer-opening click through retries without granting decision rights, while a plain notice retry works on the open machine and grants no decision either', async () => {
+  it('keeps the computer-opening click through retries, while a plain notice retry works on the open machine', async () => {
     const c = await company();
     const { app, db, ceo, orchestrator, builtin } = c;
     withWait(c, NEVER_MS);
@@ -424,10 +422,6 @@ describe('access to the computer the server runs on', () => {
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
     await answering;
 
-    const request = await approvalAsked(app);
-    expect((await call(retryClient, 'answer_request', { request: request.id, approve: true })).isError).toBe(true);
-    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
-    expect(text(await call(retryClient, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
 
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: retried.jobId, kind: 'typed', data: {}, personId: null });
     const clearedRetry = await retryRun(retried.jobId);
@@ -440,12 +434,9 @@ describe('access to the computer the server runs on', () => {
     while (plain.type !== 'job.run') plain = await builtin.next();
     const plainRetry = await retryRun(plain.jobId);
     const plainClient = await mcp(app, plainRetry.toolToken!);
-    /* The machine is open, and no person wrote into the notice's turn: its retry works there, and decides nothing else. */
+    /* The machine is open, and no person wrote into the notice's turn: its retry works there. */
     const [plainRan] = await Promise.all([call(plainClient, 'computer', { command: 'df -h' }), answerAs(c, 'Plenty.\n')]);
     expect(text(plainRan)).toBe('Exit code 0.\nPlenty.\n');
-    expect((await call(plainClient, 'answer_request', { request: request.id, approve: true })).isError).toBe(true);
-    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
-    expect(text(await call(plainClient, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
   });
 
   it('refuses computer on a second retry after pending input was not kept on a click retry', async () => {

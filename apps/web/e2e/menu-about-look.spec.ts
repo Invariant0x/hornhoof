@@ -5,6 +5,7 @@ import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { ComputerAccessView, FeedbackShown, Improvement } from '../src/types';
 import { ME, serveApi } from './api';
+import { cutByNavigation } from './look-steps';
 
 /* The short account menu and About with writing to the developers, as Design's reference draws them (#970, findings 1 to
    7 and 10): menu rows are lines of the panel 44 px high in groups with a line between them, About is 480 px with a 44 px
@@ -43,7 +44,7 @@ async function prepare(page: Page, { lang, skin, width, person = 'whole' }: Look
     localStorage.setItem('hh-theme', skin);
   }, { lang, skin });
   const problems: string[] = [];
-  page.on('pageerror', error => { if (!error.message.endsWith('due to access control checks.')) problems.push(error.message); });
+  page.on('pageerror', error => { if (!cutByNavigation(page, error)) problems.push(error.message); });
   await serveApi(page);
   await page.route('**/api/version', route => route.fulfill({ json: { version: '0.24.1', commit: 'b3a32a3', migrations: 1 } }));
   await page.route('**/api/updates/current', route => route.fulfill({ json: { version: '0.24.1', commit: 'b3a32a3' } }));
