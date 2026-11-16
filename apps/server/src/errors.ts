@@ -28,6 +28,7 @@ export type ErrorReason =
   | 'outbound_not_allowed'
   | 'outbound_unknown'
   | 'outbound_conflict'
+  | 'outbound_changed'
   | 'outbound_unavailable'
   | 'decision_context_missing'
   | 'decision_context_changed'
