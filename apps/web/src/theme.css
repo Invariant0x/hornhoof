@@ -1052,6 +1052,41 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 .md code { color: var(--cyan-ink); }
 .t-link { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--cyan-ink); font: inherit; text-decoration: underline; cursor: pointer; }
 .t-why { flex: none; margin: 0 12px; padding: 6px 2px 0; font-family: var(--f-body); font-size: 12.5px; color: var(--amber-ink); }
+/* The foot of an agent's window (#1115, Design #1102): what holds the agent back and what its program says, under the
+   terminal and its input line and never over them. On a wide window the machine's memory stands in a column of its
+   own and the other notes one under another beside it; on a phone, one column. Each note is led by the word of its kind
+   in a frame, and its line at the start edge has the colour of that kind. */
+.t-foot { flex: none; display: grid; gap: 8px 16px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--surface); font-family: var(--f-body); font-size: 14px; line-height: 1.45; color: var(--ink); }
+.t-foot.with-memory { grid-template-columns: minmax(0, 340px) minmax(0, 1fr); }
+.t-notes { min-width: 0; display: grid; gap: 8px; align-content: start; }
+.t-note { min-width: 0; margin: 0; padding-inline-start: 10px; border-inline-start: 2px solid var(--line2); overflow-wrap: break-word; }
+.t-note-word { display: inline-block; margin-inline-end: 4px; padding: 0 6px; border: 1px solid currentColor; font-size: 12px; font-weight: 600; color: var(--muted); }
+.t-note.wait, .t-note.access { border-inline-start-color: var(--amber-ink); }
+.t-note.wait .t-note-word, .t-note.access .t-note-word, .t-note.wait .t-note-text { color: var(--amber-ink); }
+.t-note.bad { border-inline-start-color: var(--pink-ink); color: var(--pink-ink); }
+.t-note.bad .t-note-word { color: var(--pink-ink); }
+.t-note-link { color: var(--cyan-ink); }
+.t-note-link:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
+/* Computer access in a machine's card (#1115, Design #1102): its state in a framed word, then to whom it is open and
+   until when; choosing how long and for whom, and saying yes once more for every agent, stand in the card's flow. */
+.acc { display: grid; gap: 8px; min-inline-size: 0; }
+.acc p { margin: 0; overflow-wrap: break-word; }
+.acc .status.acc-open { color: var(--ok); border-color: currentColor; }
+.acc .status.acc-full, .acc .status.acc-asks { color: var(--amber-ink); border-color: currentColor; }
+.acc .status.acc-closed, .acc .status.acc-offline { color: var(--muted); }
+.acc-who { font-weight: 600; }
+.acc-step { display: grid; gap: 12px; min-inline-size: 0; max-inline-size: 560px; padding: 18px; border: 1px solid var(--cyan-ink); }
+.acc-step h5 { margin: 0; font-family: var(--f-display); font-size: 16px; overflow-wrap: break-word; }
+.acc-dur { display: grid; gap: 8px; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.acc-dur legend { padding: 0; margin-block-end: 8px; font-weight: 600; }
+.acc-pick { display: grid; gap: 8px; }
+.acc-pick > .act { justify-content: flex-start; min-block-size: 44px; padding: 8px 12px; text-align: start; overflow-wrap: break-word; }
+.acc-facts { display: grid; gap: 4px; padding: 12px; background: var(--surface2); }
+.acc-failed { display: grid; gap: 8px; color: var(--pink-ink); }
+@media (max-width: 600px) {
+  .t-foot { font-size: 16px; }
+  .t-foot.with-memory { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
 .t-in { flex: none; display: flex; align-items: flex-start; gap: 10px; margin: 4px 12px 0; padding: 9px 12px; border: 1px solid var(--line2); border-radius: 6px; }
 .t-in > span { color: var(--muted); line-height: 22px; }
 .t-in textarea { flex: 1; min-width: 0; height: 22px; max-height: 140px; padding: 0; border: 0; background: none; resize: none; outline: none; color: var(--ink); font-family: var(--f-mono); font-size: 13px; line-height: 22px; }
@@ -1124,7 +1159,7 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 /* The live terminal takes the window, wider, in its own colors; cards wait below it. */
 .orch.term { width: min(980px, calc(100vw - 32px)); }
 /* The padding sits on the terminal itself, which is what its fit leaves out when it counts rows. */
-.t-term { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; color-scheme: dark; background: #15191F; overflow: hidden; }
+.t-term { position: relative; flex: 1 1 auto; min-height: 156px; min-width: 0; color-scheme: dark; background: #15191F; overflow: hidden; }
 .t-xterm { width: 100%; height: 100%; }
 .t-term .xterm { height: 100%; padding: 6px 8px 4px 10px; }
 .t-menu { position: absolute; z-index: 20; padding: 4px; background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 8px 24px var(--shadow); }
@@ -1138,33 +1173,6 @@ pre.secret-code { margin: 0; white-space: pre-wrap; }
 @media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 /* Access to machines: a line each, no taller than one row of the window's header, however narrow the screen. */
-.t-access { flex: none; max-height: 35%; overflow: auto; border-top: 1px solid var(--line); font-family: var(--f-body); font-size: 12.5px; line-height: 1.4; }
-.t-access-line { border-left: 2px solid var(--cyan); }
-.t-access-line.asks { border-left-color: var(--amber); }
-.t-access-line + .t-access-line { box-shadow: inset 0 1px 0 var(--line); }
-.t-access-row { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 6px 0 10px; }
-.t-access-row strong, .t-access-text, .t-access-row .decided-by { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.t-access-row strong { flex: 0 1 auto; max-width: 40%; font-weight: 600; }
-.t-access-text { flex: 1 1 0; color: var(--muted); }
-.t-access-row .decided-by { flex: 0 2 auto; margin: 0; font-size: 12.5px; }
-.t-access-row .btn { flex: none; --cut: 5px; min-height: 26px; padding: 0 10px; font-size: 12.5px; }
-.t-access-row .btn:focus-visible { clip-path: none; }
-.t-access-more, .t-access-count { flex: none; height: 26px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
-.t-access-more { display: grid; place-items: center; width: 26px; }
-.t-access-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
-.t-access-count { padding: 0 6px; white-space: nowrap; color: var(--cyan-ink); font-weight: 600; }
-.t-access-count::after { content: ' \25BE'; }
-.t-access-count[aria-expanded="true"]::after { content: ' \25B4'; }
-.t-access-more:hover, .t-access-more[aria-expanded="true"] { color: var(--ink); }
-.t-access-count:hover { color: var(--ink); }
-.t-access-why { padding: 0 10px 8px; color: var(--muted); }
-.t-access-why p { margin: 0 0 4px; }
-@media (max-width: 420px) {
-  .t-access-row { gap: 4px; padding: 0 4px 0 8px; }
-  .t-access-row .btn { padding: 0 6px; font-size: 11.5px; }
-  .t-access-more { width: 24px; }
-  .t-access-count { padding: 0 2px; }
-}
 /* Earlier lines of a conversation come above the oldest one kept. */
 .chat-earlier { justify-content: center; }
 .notebook { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
@@ -2710,7 +2718,8 @@ th.k-prio .sorth { white-space: nowrap; }
 .window-controls .window-minimize { color: var(--amber-ink); }
 .window-controls .window-full { color: var(--ok); }
 .agent-workspace { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
-.agent-conversation { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* Its terminal never gets smaller than 156 px: when the notes under it need more room, the window scrolls. */
+.agent-conversation { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 /* The side panels of a window, one rule for any of them. The row ends left of the window, and its width is what the panels
    need, up to the whole screen; past that it scrolls. Only what the free space left of the window cannot hold reaches over the
    window, so the terminal keeps its place and size. --edge: how far the window stands from the screen's left side, --inset:

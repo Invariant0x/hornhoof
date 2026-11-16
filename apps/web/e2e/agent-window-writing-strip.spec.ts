@@ -5,27 +5,31 @@ import { box } from './api';
 import { checkPage, open, shot, watchErrors } from './agent-window-steps';
 import { ASKED, checkWrites, serve } from './agent-window-writing-steps';
 
-/* The strip of a machine the orchestrator asks for, and a department alone that opens no employee on another plan. */
+/* A machine the orchestrator asks for, which is now a note under the terminal that leads to Machines (#1115), and a
+   department alone that opens no employee on another plan. */
 
 for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
   const settings = { lang, theme, width };
   const t = lang === 'en' ? en : ru;
   test.describe(`writing to an agent in ${lang}, ${theme}, at ${width}px`, () => {
-    test('the strip of a machine the orchestrator asks for stands under the terminal, inside the window', async ({ page }, info) => {
+    test('a machine the orchestrator asks for is a note under the terminal, inside the window, with no buttons of access', async ({ page }, info) => {
       const errors = watchErrors(page);
       const sent = await serve(page, 'delegate', settings);
       await page.route('**/api/machines/access', route => route.fulfill({ json: { views: [ASKED] } }));
       const window = await open(page, 'orchestrator', lang);
-      const strip = window.getByRole('region', { name: t.window.computerAsks(ASKED.machine.hostname) });
-      await expect(strip).toBeVisible();
-      const below = await box(strip);
+      const note = window.getByText(t.window.notes.asksFor(ASKED.machine.hostname, ASKED.asked!.reason));
+      await expect(note).toBeVisible();
+      await expect(window.getByRole('region', { name: t.window.computerAsks(ASKED.machine.hostname) })).toHaveCount(0);
+      await expect(window.getByRole('button', { name: t.window.computerOpen, exact: true })).toHaveCount(0);
+      await expect(window.getByRole('link', { name: t.window.notes.answer, exact: true })).toBeVisible();
+      const below = await box(note);
       const terminal = await box(window.locator('.t-term'));
       const frame = await box(window);
       expect(terminal.y + terminal.height).toBeLessThanOrEqual(below.y);
       expect(below.y + below.height).toBeLessThanOrEqual(frame.y + frame.height);
       expect(terminal.height).toBeGreaterThan(200);
       await checkWrites(page, window, 'orchestrator', settings, sent);
-      await shot(page, info, 'delegate-orchestrator-strip', settings);
+      await shot(page, info, 'delegate-orchestrator-access-note', settings);
       await checkPage(page, errors);
     });
 

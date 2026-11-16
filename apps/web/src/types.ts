@@ -967,7 +967,16 @@ export type ComputerAccessView = {
   canOpen: boolean;
   canClose: boolean;
   key: 'not_needed' | 'held' | 'not_held';
+  /* Who it is open to (#1119): the orchestrator alone, or every agent of the company; null while closed. Who opened it
+     and when. Older servers omit them: what they open is the orchestrator's. */
+  scope?: AccessScope | null;
+  openedBy?: { id: string; name: string } | null;
+  openedAt?: string | null;
 };
+/* Who a machine opens to, and for how many hours its owner opens it. */
+export type AccessScope = 'orchestrator' | 'all_agents';
+export const ACCESS_HOURS = [1, 8, 24] as const;
+export type AccessHours = (typeof ACCESS_HOURS)[number];
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'core'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */

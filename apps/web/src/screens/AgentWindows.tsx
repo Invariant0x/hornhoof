@@ -34,10 +34,12 @@ type Props = {
   staff: StaffAsk | null;
   requests: WaitingRequest[];
   onRequestsChanged(): void;
+  /* Shows a machine's card in Machines, from a note of a window. */
+  onOpenMachine?(id: string): void;
 };
 
 /* Every open window, and the place at the edge where the hidden ones put their strips, in the order they were hidden. */
-export function AgentWindows({ windows, onOpen, me, org, staff, requests, onRequestsChanged }: Props) {
+export function AgentWindows({ windows, onOpen, me, org, staff, requests, onRequestsChanged, onOpenMachine }: Props) {
   const [dock, setDock] = useState<HTMLElement | null>(null);
   return (
     <>
@@ -54,6 +56,7 @@ export function AgentWindows({ windows, onOpen, me, org, staff, requests, onRequ
                 onRequestsChanged={onRequestsChanged}
                 staff={id === ORCHESTRATOR ? staff : null}
                 onClose={() => windows.close(id)}
+                onOpenMachine={onOpenMachine}
               />
             </GuardBoundary>
           </AgentAccess>

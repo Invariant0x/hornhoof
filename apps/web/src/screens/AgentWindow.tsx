@@ -14,13 +14,14 @@ import { AgentTerminal } from '../ui/AgentTerminal';
 import { useChatScroll } from '../ui/chat-scroll';
 import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
-import { ComputerStrip } from '../ui/ComputerStrip';
 import { Markdown } from '../ui/Markdown';
 import { Inbox, useInboxCount } from '../ui/Inbox';
 import { Notebook } from '../ui/Notebook';
 import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
+import { WindowFoot, type WindowNote } from '../ui/WindowNotes';
+import { isOpen, machineName } from '../ui/access';
 import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
 import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
@@ -114,7 +115,8 @@ function windowTitle(t: Messages, language: Language, org: Org, agentId: string,
 }
 
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
-type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; place?: WindowPlace; requests?: WaitingRequest[]; onRequestsChanged?(): void };
+/* onOpenMachine: shows a machine's card in Machines, where its access is opened and closed. */
+type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; place?: WindowPlace; requests?: WaitingRequest[]; onRequestsChanged?(): void; onOpenMachine?(id: string): void };
 
 type CardRight = { id: string; canAnswer: boolean };
 
@@ -288,21 +290,37 @@ function WindowAfter({ offerByHand, needsOrchestrator, failure, t, onPickByHand 
 /* An agent's window: its conversation as a chat with a line to write in, or its live terminal when its node shows one and
    the person chose it; and the orchestrator's cards. Whoever reaches this window may write: the server opens the agent's
    conversation and takes a message by the same rule. */
-/* What keeps the agent from answering now, or what happened to the last words it took. */
-function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: boolean; sub: SubView | null }) {
-  const t = useT();
-  const { language } = useLanguage();
-  return (
-    <>
-      {!ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
-      {state.turnRefused && <p className="t-why" role="status">{t.window.turnRefused[state.turnRefused]}</p>}
-      {state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
-      {state.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
-      {!state.limitUntil && state.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
-      {state.machineDrain && <p className="t-why">{t.window.machineDrain}</p>}
-      {state.memoryWait && <p className="t-why">{t.window.memoryWait}</p>}
-    </>
-  );
+/* What keeps the agent from answering now, or what happened to the last words it took. The machine's memory has a
+   column of its own. */
+function stateNotes(t: Messages, language: Language, state: OrchestratorState, ready: boolean, sub: SubView | null): WindowNote[] {
+  const w = t.window.notes;
+  const notes: (WindowNote | false | null)[] = [
+    !ready && { id: 'reason', word: w.wait, text: reasonText(t, state.reason, sub), tone: 'wait' },
+    state.turnRefused ? { id: 'refused', word: w.notSent, text: t.window.turnRefused[state.turnRefused], tone: 'bad' } : null,
+    state.browserError ? { id: 'browser', word: w.heads, text: browserWarning(t, state.browserError, sub), tone: 'wait' } : null,
+    state.limitUntil ? { id: 'limit', word: w.wait, text: t.window.limitUntil(clock(language, state.limitUntil)!), tone: 'wait' } : null,
+    !state.limitUntil && state.budgetUntil ? { id: 'budget', word: w.wait, text: t.window.budgetUntil(clock(language, state.budgetUntil)!), tone: 'wait' } : null,
+    state.machineDrain ? { id: 'drain', word: w.wait, text: t.window.machineDrain, tone: 'wait' } : null,
+  ];
+  return notes.filter((note): note is WindowNote => Boolean(note));
+}
+
+const memoryNote = (t: Messages, state: OrchestratorState): WindowNote | null =>
+  state.memoryWait ? { id: 'memory', word: t.window.notes.memory, text: t.window.memoryWait, tone: 'wait' } : null;
+
+/* Access to machines is opened and closed in Machines: here only a note of each machine the orchestrator asks for, and
+   one of the machines open to it, each with the way to that place. */
+function accessNotes(t: Messages, language: Language, views: ComputerAccessView[], open: (id: string) => void): WindowNote[] {
+  const w = t.window.notes;
+  const link = (label: string, id: string) => ({ label, href: `/machines/${id}`, onOpen: () => open(id) });
+  const asked: WindowNote[] = views.filter(view => !isOpen(view) && view.asked).map(view => ({
+    id: `asks-${view.machine.id}`, word: w.asks, text: w.asksFor(machineName(t, view.machine), view.asked!.reason), tone: 'access', link: link(w.answer, view.machine.id),
+  }));
+  const opened = views.filter(isOpen);
+  const first = opened[0];
+  if (!first) return asked;
+  const text = opened.length === 1 ? t.window.computerOpenUntil(machineName(t, first.machine), clock(language, first.until) ?? '') : w.openOn(opened.length);
+  return [...asked, { id: 'open', word: w.access, text, tone: 'access', link: link(w.manage, first.machine.id) }];
 }
 
 function applyLoadedCard(mounted: boolean, card: AgentCardView | null, save: (c: AgentCardView) => void): void {
@@ -313,7 +331,7 @@ function readyEvents<T>(mounted: boolean, res: T | null): res is T {
   return mounted && res !== null;
 }
 
-export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
+export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {}, onOpenMachine = () => {} }: Props) {
   useRenderGuard('agent-window');
   const t = useT();
   const { language } = useLanguage();
@@ -343,6 +361,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const [commands, setCommands] = useState<ShownCommand[]>([]);
   const { ownsCommands, seesComputer } = cardsFor(me, orchestrator);
   const [computer, setComputer] = useState<ComputerAccessView[]>([]);
+  /* What the terminal has to say, at the foot of the window with the other notes. */
+  const [termNotes, setTermNotes] = useState<WindowNote[]>([]);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLElement>(null);
@@ -755,7 +775,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           )}
         </div>
       )}
-      {opens && hasTerminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={program} onGone={() => setNoTerminal(true)} />}
+      {opens && hasTerminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={program} onGone={() => setNoTerminal(true)} onNotes={setTermNotes} />}
       {opens && !hasTerminal && <TerminalPlace t={t} state={state} program={program} />}
       {opens && !known && failure !== null && (
         <p className="alert" role="alert">
@@ -798,13 +818,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         </div>
       )}
       {known && (
-        <ComputerStrip
-          machines={computer}
-          onChange={next => mounted.current && setComputer(views => views.map(view => (view.machine.id === next.machine.id ? next : view)))}
-          onFailure={err => mounted.current && setFailure(err)}
+        <WindowFoot
+          label={t.window.notes.label}
+          memory={memoryNote(t, state)}
+          notes={[...(terminal ? termNotes : []), ...stateNotes(t, language, state, ready, sub), ...accessNotes(t, language, computer, onOpenMachine)]}
         />
       )}
-      {known && <StateNotes state={state} ready={ready} sub={sub} />}
       {chat && (ready || state.busy) && <ChatState state={state} onStop={stop} />}
       {dragging && (
         <div className="t-drop" role="status">

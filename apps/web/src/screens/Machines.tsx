@@ -3,7 +3,7 @@ import type { NodeLoad } from '@hornhoof/protocol';
 import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
+import type { BuiltinView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -14,7 +14,7 @@ import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { clock, planStateOnMachine, subName } from '../ui/subscription';
-import { cannotOpen, givesLines, isOpen, machineName, useAccess } from '../ui/access';
+import { MachineAccessBlock } from '../ui/MachineAccessBlock';
 import { useNow } from '../ui/reset';
 import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
@@ -605,34 +605,8 @@ function CopiesLine({ copies }: { copies: CopiesView }) {
   </>;
 }
 
-/* Computer access to the machine: that it is open, for everyone who sees the card, and the buttons for who may press
-   them. Its owner opens it for a day, with what their key signs where the machine holds that key; closed, it says
-   nothing to anyone else. */
-function MachineAccess({ view, controls }: { view: ComputerAccessView; controls: MachineControls }) {
-  const t = useT();
-  const { language } = useLanguage();
-  const { answer, prompt } = useAccess(() => void controls.refresh(), controls.fail);
-  const machine = machineName(t, view.machine);
-  if (isOpen(view)) {
-    return (
-      <Part title={t.machines.access}>
-        <p>{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
-        {view.canClose && <div className="entry-actions"><button className="act" type="button" onClick={() => void answer(view, 'close')}>{t.window.computerClose}</button></div>}
-      </Part>
-    );
-  }
-  if (!view.canOpen) return null;
-  const blocked = cannotOpen(t, view);
-  return (
-    <Part title={t.machines.access}>
-      {prompt ?? (blocked ? <p>{blocked}</p> : <div className="entry-actions"><button className="act" type="button" onClick={() => void answer(view, 'open')}>{t.window.computerOpenFor(machine)}</button></div>)}
-      {!blocked && givesLines(t, view).map(line => <p key={line}>{line}</p>)}
-    </Part>
-  );
-}
-
-/* The second block: whose machine it is and what system it runs, where the company opens on it, its agent programs
-   and who may reach the computer. */
+/* The second block: whose machine it is and what system it runs, where the company opens on it and its agent
+   programs. */
 function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: boolean; controls: MachineControls }) {
   const t = useT();
   const m = row.source;
@@ -642,7 +616,6 @@ function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: b
     <CardBlock title={t.cards.systemBlock}>
       {facts.length > 0 && <Facts items={facts} />}
       <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
-      {row.access && <MachineAccess view={row.access} controls={controls} />}
     </CardBlock>
   );
 }
@@ -680,6 +653,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
       <div className="mc-blocks">
         <ServerBlock row={row} me={me} order={order} refresh={controls.refresh} />
         <SystemBlock row={row} editable={editable} controls={controls} />
+        {row.access && <MachineAccessBlock view={row.access} onChanged={() => void controls.refresh()} />}
         {m && <OwnerBlock machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
       </div>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}

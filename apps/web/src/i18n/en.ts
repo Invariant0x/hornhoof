@@ -1,7 +1,7 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { BuiltinSkinId } from '../skins/registry';
 import type { SkinErrorCode } from '../skins/validate';
-import type { EmployeeStatus, FailureKind, LetterKind } from '../types';
+import type { AccessHours, EmployeeStatus, FailureKind, LetterKind } from '../types';
 import { plural } from './plural';
 
 const STATUS_ORDER: EmployeeStatus[] = ['working', 'waiting', 'queued', 'handed', 'idle', 'off'];
@@ -870,6 +870,45 @@ export const en = {
     runOn: (host: string) => `Run this in a terminal on ${host}. It starts the plan there and opens its sign-in link. The plan keeps running on its other machines too.`,
     openHere: 'Open here',
     access: 'Computer access',
+    /* Computer access in a machine's card (#1115, Design #1102): its state in a framed word, who it is open to, until
+       when and who opened it; the owner's choice of how long and for whom, and once more for every agent. */
+    computer: {
+      closed: 'Access closed',
+      open: 'Access open',
+      full: 'Full access for the team',
+      asks: 'Asks for access',
+      offline: 'Offline',
+      closedText: 'Access to this machine is closed.',
+      offlineText: 'The machine is not responding. Access can be opened when it is online.',
+      forOrchestrator: 'For the orchestrator',
+      forTeam: 'Every company agent',
+      openText: 'The orchestrator can run commands with full permissions.',
+      fullText: 'Every company agent can run commands with full permissions.',
+      asksText: (reason: string) => `The orchestrator asks: ${reason}`,
+      until: (at: string) => `Until ${at}`,
+      openedBy: (name: string) => `Opened by: ${name}`,
+      choose: 'Open access',
+      who: 'Who gets access?',
+      whoText: (machine: string) => `Choose who gets access to ${machine} and for how long.`,
+      duration: 'Access duration',
+      hours: { 1: '1 hour', 8: '8 hours', 24: '1 day' } as Record<AccessHours, string>,
+      openFor: { 1: 'Open for 1 hour', 8: 'Open for 8 hours', 24: 'Open for a day' } as Record<AccessHours, string>,
+      byDefault: 'Default: 1 hour.',
+      orchestrator: 'Orchestrator',
+      team: 'Every company agent',
+      cancel: 'Cancel',
+      confirm: 'Open full access for the whole team?',
+      confirmText: (machine: string) => `Every company agent will be able to run commands with full permissions on ${machine}. This allows changes to the machine's files and settings.`,
+      confirmMachine: (machine: string) => `Machine: ${machine}`,
+      confirmWho: 'Who: every company agent',
+      confirmDuration: (duration: string) => `Selected duration: ${duration}`,
+      confirmFoot: 'You can close access here at any time.',
+      fullButton: 'Open full access',
+      opening: 'Opening access…',
+      closing: 'Closing access…',
+      failed: 'Access could not be changed. Check your connection and try again.',
+      retry: 'Retry',
+    },
     refuses: (server: string, name: string) =>
       `${server} does not take connections from ${name}. If ${server} is a Mac with its firewall on, allow incoming connections there for Docker (com.docker.backend), or for ssh when it runs Colima.`,
     makeCore: (host: string) => `Make ${host} a full machine of the company`,
@@ -1223,6 +1262,22 @@ export const en = {
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
     memoryWait: 'The machine is busy: it is low on free memory or its processors are loaded. Turns wait and go on by themselves, one by one, once it has room. Nothing that already runs there is stopped.',
+    /* The notes at the foot of an agent's window, each led by a word in a frame that says what kind of note it is. */
+    notes: {
+      label: 'Notes',
+      memory: 'Memory',
+      wait: 'Waiting',
+      asleep: 'Asleep',
+      notSent: 'Not sent',
+      file: 'File',
+      heads: 'Note',
+      asks: 'Asks for access',
+      asksFor: (machine: string, reason: string) => `The orchestrator asks for access to ${machine}: ${reason}`,
+      access: 'Access',
+      openOn: (n: number) => `Access is open on ${n} ${plural('en', n, { one: 'machine', other: 'machines' })}.`,
+      answer: 'Answer in Machines',
+      manage: 'Manage access in Machines',
+    },
     inputLeft: {
       kept: 'These words were left unsent in the program\'s input. Hornhoof took them out so the next assignment could go in, kept them here and did not run them. To send them, type them again.',
       by: (name: string) => `${name} typed in this terminal last.`,
