@@ -1,11 +1,14 @@
 import type { NodeMessage, ProgramState } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
+import type { FastifyRequest } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, requests, subscriptions } from '../src/db/schema.js';
 import { insertTurn, pump, TURN_TIMEOUT_MS } from '../src/modules/conversation/queue.js';
 import { keyOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
+import { jobOf } from '../src/modules/tools/job.js';
 import { BUILTIN } from './builtin.js';
 import { setUpCompany, testApp } from './helpers.js';
 
@@ -71,7 +74,28 @@ async function company() {
   const back = () => { online = true; awayAt = null; };
   const facts = async (jobId: string) =>
     (await db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message')))).map(e => e.data as { text?: string; turnFact?: boolean }).filter(d => d.turnFact);
-  return { ctx, db, companyId, ceo: ceo!, key: key!, plan: plan!, orchestrator: orchestrator!, hana: hana!, otto: otto!, node, later, message, job, turnsOf, running, sentRun, checks, pulse, answer, away, back, facts, send };
+  /* What the turn's program streams through its node while it works with no screen: a line of its answer. */
+  let seq = 0;
+  const said = (on: NodeIdentity, jobId: string) =>
+    handleNodeMessage(ctx, on, { type: 'job.event', jobId, seq: seq++, event: { kind: 'text', text: `Step ${seq}.` } } as NodeMessage);
+  /* The turn's program calls a Hornhoof tool with the turn's token, as its MCP bridge does. */
+  const called = async (jobId: string) => {
+    const token = `token-${jobId}`;
+    await db.update(jobs).set({ toolTokenHash: hashToken(token) }).where(eq(jobs.id, jobId));
+    /* A turn that ended has no valid token any more: its call is refused, as the bridge refuses it. */
+    await jobOf(ctx, { headers: { authorization: `Bearer ${token}` } } as FastifyRequest).catch(() => undefined);
+  };
+  /* The node says which agents' programs run on it, as it does with its load each minute. */
+  const live = (on: NodeIdentity, agentIds: string[]) =>
+    handleNodeMessage(ctx, on, { type: 'load', cpus: 8, load: 0, memFree: 32 * 2 ** 30, memTotal: 64 * 2 ** 30, tests: 0, jobs: 1, live: agentIds });
+  /* A round of the watchdog, and the node's answer that it holds every turn it was asked about in it. */
+  const roundHeld = async (on: NodeIdentity) => {
+    const before = checks().length;
+    await reconcile(ctx, new Date());
+    for (const asked of checks().slice(before)) await answer(on, asked.jobIds, asked.jobIds);
+  };
+  const alarmsOf = async (agentId: string) => (await turnsOf(otto!.id)).filter(j => j.prompt.includes('turn alarm') && j.prompt.includes(agentId));
+  return { ctx, db, companyId, ceo: ceo!, key: key!, plan: plan!, orchestrator: orchestrator!, hana: hana!, otto: otto!, node, later, message, job, turnsOf, running, sentRun, checks, pulse, answer, away, back, facts, send, said, called, live, roundHeld, alarmsOf };
 }
 
 describe('a running turn that no live program holds', () => {
@@ -273,5 +297,123 @@ describe('a live program its queue waits behind', () => {
     }
     expect(await toldOtto(c)).toHaveLength(1);
     expect(await c.db.select().from(requests)).toEqual([]);
+  });
+});
+
+describe('a turn whose program runs with no screen', () => {
+  it('raises no node_silent alarm while its node streams the events of its work, however long', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    for (let i = 0; i < 24; i++) {
+      c.later(5 * MIN);
+      await c.said(c.node, turn);
+      await c.roundHeld(c.node);
+    }
+    expect(await c.alarmsOf(c.hana.id)).toEqual([]);
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
+  it('raises no node_silent alarm while it calls Hornhoof tools through its bridge', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    for (let i = 0; i < 24; i++) {
+      c.later(5 * MIN);
+      await c.called(turn);
+      await c.roundHeld(c.node);
+    }
+    expect(await c.alarmsOf(c.hana.id)).toEqual([]);
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
+  it('raises one node_silent alarm once its work has stood still as long as the quiet, counted from its last event', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    for (let i = 0; i < 6; i++) {
+      c.later(5 * MIN);
+      await c.said(c.node, turn);
+      await c.roundHeld(c.node);
+    }
+    const last = Date.now();
+    c.later(9 * MIN);
+    await c.roundHeld(c.node);
+    expect(await c.alarmsOf(c.hana.id)).toEqual([]);
+    c.later(MIN);
+    await c.roundHeld(c.node);
+    const [alarm, ...more] = await c.alarmsOf(c.hana.id);
+    expect(more).toEqual([]);
+    expect(alarm!.prompt).toContain('node_silent');
+    expect(alarm!.prompt).toContain(new Date(last).toISOString());
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
+  it('is not ended while its tools go on, even when its node no longer lists it', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'Orchestrator: one more thing.');
+    for (let i = 0; i < 4; i++) {
+      c.later();
+      await c.called(turn);
+      await reconcile(c.ctx, new Date());
+      const asked = c.checks().at(-1);
+      if (asked) await c.answer(c.node, asked.jobIds, []);
+    }
+    expect((await c.job(turn)).status).toBe('running');
+    expect((await c.job(next)).status).toBe('queued');
+  });
+});
+
+describe('a turn its node still lists whose program is gone', () => {
+  /* Hana's turn went out to the laptop, whose node reported her program gone a minute later, while Bruno's word waits behind
+     it. The node still lists the turn when asked. */
+  async function goneHeld(c: Awaited<ReturnType<typeof company>>) {
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    c.later();
+    await c.pulse(c.node, turn, 'gone');
+    const next = await c.message(c.hana.id, 'Bruno: the branch is pushed.');
+    c.later(2 * MIN);
+    return { turn, next };
+  }
+
+  it('ends as interrupted once the node names no program of hers and the turn gives no sign of work, and the queue goes on', async () => {
+    const c = await company();
+    const { turn, next } = await goneHeld(c);
+    await c.live(c.node, [c.orchestrator.id]);
+    await c.roundHeld(c.node);
+
+    expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
+    expect((await c.facts(turn)).map(f => f.text)).toEqual([expect.stringMatching(/program was gone/)]);
+    expect((await c.job(next)).status).toBe('running');
+    expect(c.sentRun(next)).toBe(true);
+    expect(await c.alarmsOf(c.hana.id)).toEqual([]);
+  });
+
+  it('goes on while the node still names her program, as after a restart of it', async () => {
+    const c = await company();
+    const { turn, next } = await goneHeld(c);
+    await c.live(c.node, [c.hana.id]);
+    await c.roundHeld(c.node);
+
+    expect((await c.job(turn)).status).toBe('running');
+    expect((await c.job(next)).status).toBe('queued');
+  });
+
+  it('goes on while the node has said nothing of its programs since the program went', async () => {
+    const c = await company();
+    await c.live(c.node, []);
+    const { turn } = await goneHeld(c);
+    await c.roundHeld(c.node);
+
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
+  it('goes on while the turn still streams its work', async () => {
+    const c = await company();
+    const { turn, next } = await goneHeld(c);
+    await c.said(c.node, turn);
+    await c.live(c.node, []);
+    await c.roundHeld(c.node);
+
+    expect((await c.job(turn)).status).toBe('running');
+    expect((await c.job(next)).status).toBe('queued');
   });
 });

@@ -257,7 +257,7 @@ describe('a program starts a turn with its queued live words', () => {
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'turn.open', agentKey: orchestrator!.id, text: addressed('Approve it.', source.message!), queuedFrom: before!.id, ref: 'queued' });
     const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== before!.id)!;
     expect(await c.jobOf(next.id)).toMatchObject({ status: 'running' });
-    expect(await decisionPrincipal(c.db, next.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, next.id)).toEqual({ personId: c.sub.ownerPersonId, sourceSeq: null });
     expect(await messageForJob(c.ctx, { id: next.id, companyId: c.companyId, agentId: orchestrator!.id })).toEqual(source.message);
   });
 
@@ -285,7 +285,7 @@ describe('a program starts a turn with its queued live words', () => {
     const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== before!.id)!;
     /* Words of the person the turn answered open a turn in their name; an agent's go on as the turn they came into. */
     expect(await c.jobOf(next.id)).toMatchObject({ createdBy: author === 'person' ? c.sub.ownerPersonId : null, answersCeo: true });
-    expect(await decisionPrincipal(c.db, next.id)).toEqual(author === 'person' ? { personId: c.sub.ownerPersonId, sourceSeq: expect.any(Number) } : null);
+    expect(await decisionPrincipal(c.db, next.id)).toEqual(author === 'person' ? { personId: c.sub.ownerPersonId, sourceSeq: expect.any(Number) } : { personId: c.sub.ownerPersonId, sourceSeq: null });
     expect(await messageForJob(c.ctx, { id: next.id, companyId: c.companyId, agentId: orchestrator!.id })).toEqual(source.message);
     const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, orchestrator!.id), eq(agentEvents.kind, 'message')));
     expect(messages.filter(e => (e.data as { text?: string }).text === 'Keep these words.')).toHaveLength(1);

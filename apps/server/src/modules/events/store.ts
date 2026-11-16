@@ -56,8 +56,9 @@ export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e:
   return event;
 }
 
-/* Serialize a stream write with Stop and completion on the same job row, before publishing it. */
-export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<void> {
+/* Serialize a stream write with Stop and completion on the same job row, before publishing it. Whether it was stored: only
+   for a turn of the node's own that runs. */
+export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<boolean> {
   const stored = await ctx.db.transaction(async tx => {
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('no key update');
@@ -66,6 +67,7 @@ export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: strin
     return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
   });
   if (stored) await publishEvent(ctx, stored.companyId, stored.agentId, stored.id);
+  return stored !== null;
 }
 
 /* Only the receiving copy carries by, which the per-turn send quota counts after a restart. */
@@ -139,14 +141,14 @@ export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { i
 }
 
 /* Agents with a job running right now, of these only when named. employees: of the company's employees alone, as the
-   screens count them; an assistant's own agent works for its owner, not for the company. */
-export async function workingCount(db: Db, companyId: string, among?: string[], employees = false): Promise<number> {
+   screens count them; an assistant's own agent works for its owner, not for the company. apart: jobs left out. */
+export async function workingCount(db: Db, companyId: string, among?: string[], employees = false, apart: string[] = []): Promise<number> {
   if (among?.length === 0) return 0;
   const assistantsOwn = db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'assistant')));
   const [row] = await db
     .select({ n: countDistinct(jobs.agentId) })
     .from(jobs)
-    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), notStep, among ? inArray(jobs.agentId, among) : undefined, employees ? notInArray(jobs.agentId, assistantsOwn) : undefined));
+    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), notStep, among ? inArray(jobs.agentId, among) : undefined, employees ? notInArray(jobs.agentId, assistantsOwn) : undefined, apart.length ? notInArray(jobs.id, apart) : undefined));
   return Number(row?.n ?? 0);
 }
 

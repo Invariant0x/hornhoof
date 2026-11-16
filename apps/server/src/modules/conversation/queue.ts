@@ -308,7 +308,7 @@ export async function goesElsewhere(ctx: Ctx, agentId: string, from: NodeIdentit
   const sub = await liveSubscription(ctx, agentId);
   if (!sub) return false;
   const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
-  const place = agent ? await placement(ctx, agent, sub) : null;
+  const place = agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
   return place !== null && !sameNode(place.node, from);
 }
 
@@ -475,9 +475,14 @@ export async function insertOrDeliverTurn(ctx: Ctx, t: Turn): Promise<string> {
   return insertTurn(ctx, t);
 }
 
+async function queuedOperatorWords(ctx: Ctx, agentId: string, jobId: string, text: string) {
+  const [own] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), ne(agents.kind, 'assistant')));
+  return own ? queuedOperatorAssignment(ctx, agentId, jobId, text) : null;
+}
+
 /* What a program may open without a person's keys: known live words it queued, or the assignment its delivery kept. */
 const queuedWords = async (ctx: Ctx, agentId: string, jobId: string, text: string) =>
-  (await queuedInput(ctx, agentId, jobId, text)) ?? queuedOperatorAssignment(ctx, agentId, jobId, text);
+  (await queuedInput(ctx, agentId, jobId, text)) ?? queuedOperatorWords(ctx, agentId, jobId, text);
 
 type QueuedTurn = NonNullable<Awaited<ReturnType<typeof queuedWords>>>;
 type OpenedQueued = QueuedTurn & { repeated: RepeatedTurn };
@@ -629,6 +634,9 @@ export async function turnRefused(ctx: Ctx, node: NodeIdentity, agentId: string,
   await appendEvent(ctx, { companyId: target.agent.companyId, agentId, kind: 'turn_refused', data: { reason } });
 }
 
+const resumesOperator = (ctx: Ctx, agent: { id: string; kind: string }, node: NodeIdentity): Promise<boolean> | false =>
+  agent.kind !== 'assistant' && node.kind === 'node' && resumeOperatorProcess(ctx, agent.id, node.nodeId);
+
 /* Someone who may type opened the window of an agent whose program does not run: a turn that types nothing starts it on
    the node, so they talk to it at once. A turn that waits or runs starts it anyway. */
 export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string): Promise<void> {
@@ -638,7 +646,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     const on = await agentOnNode(ctx, node, agentId);
     if (!on) return false;
     const { agent, sub } = on;
-    if (node.kind === 'node' && await resumeOperatorProcess(ctx, agentId, node.nodeId)) return true;
+    if (await resumesOperator(ctx, agent, node)) return true;
     /* Task turns and the inbox's turn of an agent that is switched off wait for it to be on and start nothing. */
     const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits, sub.limitsUpdatedAt) ? programStart : agent.switchedOffAt ? peopleTurns : undefined);
     const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
@@ -796,14 +804,18 @@ type PlacedAgent = { id: string; kind: AgentKind; nodeId: string | null; builtin
    assistant's own agent works for its owner alone, so it waits as a worker does. */
 const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind === 'orchestrator' || agent.kind === 'head';
 
+/* Whether a node has room for the agent's turn, only asked: the agent is not put among the turns that wait for room. */
+const lookRoom = (ctx: Ctx, agent: PlacedAgent) => (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent), true);
+
 /* Where the agent's next turn goes. A company key's to a built-in node: the one its program is on while that is ready,
    else the server's own, else another machine's, which is a move as a plan's agent on another node is; it waits while
    the one picked waits for an update or has no room. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
-   node can take it. A turn that would start a new program goes only to a machine with free memory for it; roomy: whether
-   a node has, which the agent's state also asks as if every node had. */
-async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id)): Promise<Placement | null> {
+   node can take it. A turn that would start a new program goes only to a machine with free memory for it, and an
+   employee's turn goes to none that works past what it carries; roomy: whether a node has room, which the agent's state
+   also asks as if every node had. */
+async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id, isLeader(agent))): Promise<Placement | null> {
   if (sub.kind === 'api_key') {
     const machine = await pickBuiltin(ctx, ctx.db, agent.builtinMachine);
     if (!machine) return null;
@@ -1069,15 +1081,42 @@ async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffA
   return null;
 }
 
+const heldByOperator = (ctx: Ctx, agent: { id: string; kind: string }): Promise<boolean> | false =>
+  agent.kind !== 'assistant' && operatorRecoveryHolds(ctx, agent.id);
+
+async function turnOperatorDeliveries(
+  ctx: Ctx,
+  agent: { id: string; kind: string },
+  job: { id: string; companyId: string },
+  node: NodeIdentity,
+  prompt: string,
+): Promise<{ operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery }> {
+  if (agent.kind === 'assistant') return {};
+  const operatorDelivery =
+    prompt && node.kind === 'node' && ctx.hub.hasProgramOperator(node)
+      ? await reserveDelivery(ctx.db, {
+          companyId: job.companyId,
+          agentId: agent.id,
+          jobId: job.id,
+          nodeId: node.nodeId,
+          kind: 'assignment',
+          words: prompt,
+          reference: `job:${job.id}`,
+          sourceDeliveryId: await sourceDeliveryForJob(ctx.db, agent.id, job.id),
+        })
+      : undefined;
+  return { operatorDelivery, operatorSourceDelivery: await sourceDeliveryMetadataForJob(ctx.db, agent.id, job.id) };
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
-  if (await operatorRecoveryHolds(ctx, agentId)) return;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running || await waitsForWords(ctx, agentId)) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || !(await placement(ctx, agent, sub))) return;
+  if (await heldByOperator(ctx, agent)) return;
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
   if (await waitsForRetry(ctx, agentId)) return;
@@ -1137,9 +1176,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* The agent stays on this machine from now on. */
   if (place.moves) await db.update(agents).set({ nodeId: place.nodeId, builtinMachine: place.builtinMachine }).where(eq(agents.id, agentId));
   let sent = false;
-  let operatorDelivery: OperatorDelivery | undefined;
+  let deliveries: { operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery } = {};
   try {
-    if (prompt && place.node.kind === 'node' && ctx.hub.hasProgramOperator(place.node)) operatorDelivery = await reserveDelivery(db, { companyId: job.companyId, agentId, jobId: job.id, nodeId: place.node.nodeId, kind: 'assignment', words: prompt, reference: `job:${job.id}`, sourceDeliveryId: await sourceDeliveryForJob(db, agentId, job.id) });
+    deliveries = await turnOperatorDeliveries(ctx, agent, job, place.node, prompt);
     await publishWorking(ctx, job.companyId);
     sent = await dispatchJob(ctx, {
       id: job.id,
@@ -1157,8 +1196,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       timeoutMs: job.timeoutMs,
       instructions: instructions.text,
       toolToken: token,
-      ...(operatorDelivery ? { operatorDelivery } : {}),
-      operatorSourceDelivery: await sourceDeliveryMetadataForJob(db, agentId, job.id),
+      ...deliveries,
       context: job.prompt ? null : catchUp,
       /* Each agent keeps one folder on the node, with its repository's clone inside, which gets the dependencies the
          company's machines built for its commit. */
@@ -1177,7 +1215,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     if (agent.kind === 'assistant') await forgetFresh(ctx, job.id);
     return wentOut(ctx, job, along, taken.lines);
   }
-  if (operatorDelivery) await cancelUnsentDelivery(db, operatorDelivery);
+  if (deliveries.operatorDelivery) await cancelUnsentDelivery(db, deliveries.operatorDelivery);
   await db.update(jobs).set({ status: 'queued', startedAt: null, nodeId: null, prompt: job.prompt, sessionId: job.sessionId, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
   await publishWorking(ctx, job.companyId);
 }
@@ -1286,14 +1324,14 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const sub = await liveSubscription(ctx, agentId);
   const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, builtinMachine: agents.builtinMachine, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
-  const place = sub && agent ? await placement(ctx, agent, sub) : null;
+  const place = sub && agent ? await placement(ctx, agent, sub, CONVERSATION_NODE, lookRoom(ctx, agent)) : null;
   const shown = await shownNode(ctx, agentId, place);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   return {
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
-    memoryWait: !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, CONVERSATION_NODE, () => true))),
+    memoryWait: !running && !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, CONVERSATION_NODE, () => true))),
     ...await planState(ctx, agent, sub),
     reason,
     browserError,

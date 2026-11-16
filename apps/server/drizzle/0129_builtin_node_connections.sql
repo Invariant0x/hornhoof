@@ -1,0 +1,1 @@
+ALTER TABLE "node_connections" ALTER COLUMN "node_id" DROP NOT NULL;

@@ -20,9 +20,10 @@ export function connectionRoutes(app: FastifyInstance, ctx: Ctx): void {
       .from(machines)
       .where(and(eq(machines.id, id), eq(machines.companyId, me.companyId), isNull(machines.revokedAt), me.scopeKind === 'company' ? undefined : eq(machines.personId, me.id)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
+    /* The drops of the machine's nodes: those of its built-in node, which has none of its own, stay in the table. */
     const rows = await db
       .select({
-        nodeId: nodeConnections.nodeId,
+        nodeId: nodes.id,
         subscriptionId: nodes.subscriptionId,
         connectedAt: nodeConnections.connectedAt,
         disconnectedAt: nodeConnections.disconnectedAt,
