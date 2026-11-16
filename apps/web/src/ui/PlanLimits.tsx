@@ -3,15 +3,23 @@ import type { Limits, SubView } from '../types';
 import { Bar, percent, Share } from './Bar';
 import { Gauge } from './Cards';
 import { ResetTime, resetDurationAt } from './reset';
-import { currentPlanLimits, limitState, MAIN_WINDOWS, unknownLimitData, windowName, windowUsage } from './subscription';
+import { currentPlanLimits, limitState, MAIN_WINDOWS, unknownLimitData, windowParts, windowUsage } from './subscription';
+
+/* A window's name with its number and unit in one piece that reads left to right, and the words after it outside, so they
+   stand mirrored on a page laid out right to left. */
+function WindowName({ name }: { name: string }) {
+  const t = useT();
+  const [piece, words] = windowParts(t, name);
+  return <>{piece && <bdi dir="ltr">{piece}</bdi>}{words}</>;
+}
 
 function LimitGauge({ sub, name, limits, now }: { sub: SubView; name: string; limits: Limits | null; now: number }) {
   const t = useT();
   const { language } = useLanguage();
   const w = limits?.windows.find(w => w.name === name);
   const used = windowUsage(sub, name, now);
-  const figure = used === null ? (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)) : <Share>{`${percent(used)}%`}</Share>;
-  return <Gauge label={windowName(t, name)} figure={figure} unit={used === null ? undefined : t.cards.used} empty={used === null} used={used} sub={w && <ResetTime at={w.resetsAt} now={now} />} />;
+  const figure = used === null ? (limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)) : <bdi dir="ltr"><Share>{`${percent(used)}%`}</Share></bdi>;
+  return <Gauge label={<WindowName name={name} />} figure={figure} unit={used === null ? undefined : t.cards.used} empty={used === null} used={used} sub={w && <ResetTime at={w.resetsAt} now={now} />} />;
 }
 
 export function LimitMeters({ sub, now }: { sub: SubView; now: number }) {
@@ -31,5 +39,5 @@ export function LimitCell({ sub, name, now }: { sub: SubView; name: string; now:
   const w = limits?.windows.find(w => w.name === name);
   const used = windowUsage(sub, name, now);
   if (used === null) return <span className="cell-na">{limits?.complete && !w ? t.subs.notOnPlan : unknownLimitData(t, language, sub)}</span>;
-  return <span className="cell-lim"><Bar used={used} /><span><b>{percent(used)}%</b>, <ResetTime at={w?.resetsAt ?? null} now={now} /></span></span>;
+  return <span className="cell-lim"><Bar used={used} /><span><b><bdi dir="ltr">{percent(used)}%</bdi></b>, <ResetTime at={w?.resetsAt ?? null} now={now} /></span></span>;
 }

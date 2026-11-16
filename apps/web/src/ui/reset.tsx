@@ -33,8 +33,15 @@ export function useNow(): number {
   return now;
 }
 
+/* A character no words hold, to find where the words put the time in their sentence. */
+const SLOT = '\u0000';
+
+/* The words of a reset with its time in one piece that reads left to right, wherever the words of a language put it, so
+   the words around it stand mirrored on a page laid out right to left. */
 export function ResetTime({ at, now }: { at: string | null; now: number }) {
   const t = useT();
   const duration = resetDurationAt(t, at, now);
-  return <span>{duration ? t.subs.resetsIn(duration) : t.subs.resetUnknown}</span>;
+  if (!duration) return <span>{t.subs.resetUnknown}</span>;
+  const [before, after] = t.subs.resetsIn(SLOT).split(SLOT);
+  return <span>{before}<bdi dir="ltr">{duration}</bdi>{after}</span>;
 }

@@ -110,10 +110,14 @@ function TokensCell({ sub: s }: { sub: SubView }) {
   return s.tokens ? <span className="num">{tokenCount(language, s.tokens.month.total)}</span> : null;
 }
 
+/* A limit's column name holds its number with its unit in one piece read left to right, between the marks that isolate it
+   as a bdi dir="ltr" does on a page: a narrow table shows the name from an attribute, where no element can stand. */
+const ltrPiece = (text: string) => `\u2066${text}\u2069`;
+
 /* A limit's column. An API has no plan limits: it says so once across both limit columns, under the name of both. */
 function limitColumn(t: Messages, now: number, key: string): TableColumn<SubView> {
   const span = key === 'five_hour' ? (s: SubView) => (s.kind === 'api_key' ? { columns: 2, label: t.subs.limits } : null) : undefined;
-  return { key, label: windowName(t, key), direction: -1, value: s => windowUsage(s, key, now), cell: s => <LimitCell sub={s} name={key} now={now} />, span };
+  return { key, label: ltrPiece(windowName(t, key)), direction: -1, value: s => windowUsage(s, key, now), cell: s => <LimitCell sub={s} name={key} now={now} />, span };
 }
 
 function subscriptionColumns(t: Messages, now: number): TableColumn<SubView>[] {

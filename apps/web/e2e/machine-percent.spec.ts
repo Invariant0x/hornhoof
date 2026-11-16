@@ -10,7 +10,8 @@ import { ME, serveApi } from './api';
    text font of the skin (--f-body) at the size and weight of the figures beside it, which keep the display font, in
    every shipped language, left to right and right to left, at desktop and phone width, and so is the sign of the used
    share of a plan's limit on the Subscriptions screen. The small unit beside the figure of a meter, a machine's memory,
-   disk and processor and a plan's limit, keeps its own size, colour and font. */
+   disk and processor and a plan's limit, keeps its own size, colour and font. Each number of a plan's limits stands with
+   its unit in one piece that reads left to right, and the words by it stand mirrored right to left. */
 test.describe.configure({ timeout: 180_000 });
 
 const GIB = 1024 ** 3;
@@ -36,8 +37,14 @@ const PLAN: SubView = {
   limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: '2026-11-15T15:00:00.000Z' }], complete: true },
   limitsUpdatedAt: '2026-11-15T11:58:00.000Z', budget: null, isOrchestrator: false, accounts: [], accountsDiffer: false, signedInOnce: true, leaseMachine: null, agents: [],
 };
+/* The same plan with both windows used and the time to each reset in whole hours and days, half a minute to spare. */
+const at = (ms: number) => new Date(NOW + ms + 30_000).toISOString();
+const PLAN_BOTH: SubView = {
+  ...PLAN,
+  limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: at(3 * 3600_000) }, { name: 'seven_day', utilization: 0.7, resetsAt: at(3 * 24 * 3600_000) }], complete: true },
+};
 
-async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions') {
+async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, width: number, height: number, tab: 'machines' | 'subscriptions', plans: SubView[] = [PLAN]) {
   await page.setViewportSize({ width, height });
   await page.clock.install({ time: NOW });
   await serveApi(page);
@@ -48,7 +55,7 @@ async function openScreen(page: Page, language: Language, skin: BuiltinSkinId, w
   const org: Org = { company: ME.company, orchestrator: null, agents: { total: 0, working: 0 }, people: [], departments: [] };
   await page.route('**/api/org', route => route.fulfill({ json: org }));
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: MACHINES, builtin: null, priority: false, move: null, canMove: false, copies: null } }));
-  await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: tab === 'subscriptions' ? [PLAN] : [] } }));
+  await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: tab === 'subscriptions' ? plans : [] } }));
   await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/machines/access', route => route.fulfill({ json: { views: [] } }));
   await page.goto('/');
@@ -158,6 +165,43 @@ async function expectUnitAsBefore(meter: Locator, text: string) {
   expect(seen.weight).toBe(seen.lineWeight);
 }
 
+/* Where a piece of an element's text stands against another on screen: before it is to its left. Each is found by its
+   text, the second after the first when both stand in the text in that order, else anywhere. */
+async function place(el: Locator, first: string, second: string): Promise<'left' | 'right' | 'mixed'> {
+  return el.evaluate((root, [first, second]) => {
+    const nodes: { node: Text; from: number }[] = [];
+    let text = '';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      nodes.push({ node: node as Text, from: text.length });
+      text += node.textContent ?? '';
+    }
+    const box = (start: number, length: number) => {
+      const at = (i: number) => {
+        const hit = nodes.findLast(n => n.from <= i)!;
+        return [hit.node, i - hit.from] as const;
+      };
+      const range = document.createRange();
+      range.setStart(...at(start));
+      range.setEnd(...at(start + length - 1));
+      range.setEnd(range.endContainer, range.endOffset + 1);
+      return range.getBoundingClientRect();
+    };
+    const a = text.indexOf(first);
+    const b = text.indexOf(second, a + first.length) >= 0 ? text.indexOf(second, a + first.length) : text.indexOf(second);
+    if (a < 0 || b < 0) throw new Error(`"${first}" or "${second}" is not in "${text}"`);
+    const [x, y] = [box(a, first.length), box(b, second.length)];
+    if (!x.width || !y.width) throw new Error(`"${first}" or "${second}" in "${text}" is not on screen`);
+    return x.right <= y.left + 1 ? 'left' : y.right <= x.left + 1 ? 'right' : 'mixed';
+  }, [first, second] as const);
+}
+
+/* A number with its unit, as «3 дня»: the number stands to the left of its unit in either direction. */
+async function expectWhole(el: Locator, piece: string) {
+  const [number, unit] = [piece.slice(0, piece.indexOf(' ')), piece.slice(piece.indexOf(' ') + 1)];
+  expect(`${piece}: ${await place(el, number, unit)}`).toBe(`${piece}: left`);
+}
+
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
 for (const skin of SKINS) for (const language of LANGS) for (const [width, height] of WIDTHS) {
@@ -236,6 +280,48 @@ for (const skin of SKINS) for (const language of LANGS) for (const [width, heigh
         return heights;
       });
       expect(Math.abs(shared! - plain!)).toBeLessThan(0.01);
+      expect(await noSideScroll(page)).toBe(true);
+    }
+  });
+
+  test(`keeps each number of a plan's limits with its unit in one piece and the words by it mirrored, ${skin} ${language} ${width}`, async ({ page }, info) => {
+    const t = WORDS[language];
+    await openScreen(page, language, skin, width, height, 'subscriptions', [PLAN_BOTH]);
+    const [five, seven, soon, later, resets] = [t.subs.hours(5), t.subs.days(7), t.cards.hours(3), t.subs.days(3), t.subs.resetsIn('').trim()];
+    const row = page.locator('tr.rm').filter({ hasText: 'Max' });
+    const cells = row.locator('.cell-lim');
+    await expect(cells).toHaveCount(2);
+    /* Pictures first, both ways, so a look that fails still leaves them. */
+    for (const dir of ['ltr', 'rtl'] as const) {
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+      await page.locator('.tbl').screenshot({ path: info.outputPath(`limits-list-${skin}-${language}-${width}-${dir}.png`) });
+    }
+    await page.evaluate(() => { document.documentElement.dir = 'ltr'; });
+    await row.locator('button.rowbtn').click();
+    const meters = page.getByRole('article').locator('.gauge').filter({ has: page.locator('.g-f > span', { hasText: t.cards.used }) });
+    await expect(meters).toHaveCount(2);
+    for (const dir of ['ltr', 'rtl'] as const) {
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+      await page.getByRole('article').locator('.gauges').filter({ has: page.locator('.g-f > span', { hasText: t.cards.used }) }).screenshot({ path: info.outputPath(`limits-card-${skin}-${language}-${width}-${dir}.png`) });
+    }
+    for (const dir of ['ltr', 'rtl'] as const) {
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+      /* The words by a piece stand before it in the line's direction: to its left left to right, to its right right to left. */
+      const before = dir === 'ltr' ? 'left' : 'right';
+      /* A wide table names its columns in its head; one shown as entries names them on its sort buttons and by each entry. */
+      const heads = page.locator('th .sorth:visible, .sortbar .sortb:visible');
+      for (const name of [five, seven]) await expectWhole(heads.filter({ hasText: name }), name);
+      for (const [cell, share, time] of [[cells.nth(0), '40%', soon], [cells.nth(1), '70%', later]] as const) {
+        await expectWhole(cell, time);
+        expect(await place(cell, share.slice(0, -1), '%')).toBe('left');
+        expect(await place(cell, share, resets)).toBe(before);
+        expect(await place(cell, resets, time)).toBe(before);
+      }
+      for (const [meter, name, time] of [[meters.nth(0), five, soon], [meters.nth(1), seven, later]] as const) {
+        await expectWhole(meter.locator('.g-l'), name);
+        await expectWhole(meter.locator('.g-s'), time);
+        expect(await place(meter.locator('.g-s'), resets, time)).toBe(before);
+      }
       expect(await noSideScroll(page)).toBe(true);
     }
   });
