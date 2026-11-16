@@ -1,7 +1,7 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { humanStatus, type Asks, type HumanStatus } from '../task-board';
-import { boardColumns, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
+import { boardColumns, doerOf, layoutTree, listGroups, NODE, type BoardColumn, type Crumb, type GraphNode, type ListGroup, type Placed, type TaskTree } from '../tracker';
 import type { Pipeline, TaskLine } from '../types';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from './canvas';
 import { Fold } from './TaskBoard';
@@ -49,7 +49,7 @@ function ListRow({ tree, rows, sub = false }: { tree: TaskTree; rows: Rows; sub?
           {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
           {waits && <small className="tr-wait">{waits}</small>}
         </span>
-        <Cell name={words.executor}>{task.assignee?.name ?? t.tracker.nobody}</Cell>
+        <Cell name={words.executor}>{doerOf(task)?.name ?? t.tracker.nobody}</Cell>
         <Cell name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Cell>
         <Cell name={words.goal}>{task.goal?.title ?? t.tracker.noGoal}</Cell>
         <Cell name={words.due}>{due ? <span className={due.late ? 'tp-late' : undefined}>{due.text}</span> : ''}</Cell>
@@ -96,10 +96,11 @@ export function TrackerFound({ tasks, rows }: { tasks: TaskLine[]; rows: Rows })
   );
 }
 
-/* The list: the tasks at the top grouped by their state in words, newest first, their subtasks folded under them. */
-export function TrackerList({ tasks, rows, empty }: { tasks: TaskLine[]; rows: Rows; empty: string }) {
+/* The list: the tasks at the top grouped by their state in words, newest first, their subtasks folded under them and
+   counted over all the work. */
+export function TrackerList({ tasks, all, rows, empty }: { tasks: TaskLine[]; all: TaskLine[]; rows: Rows; empty: string }) {
   const t = useT();
-  const groups = listGroups(tasks, rows.asksYou);
+  const groups = listGroups(tasks, rows.asksYou, all);
   return (
     <section className="tr-list" aria-label={t.tracker.views.list}>
       {groups.length ? groups.map(group => <Group key={group.status} group={group} rows={rows} />) : <p className="muted">{empty}</p>}
@@ -121,7 +122,7 @@ function BoardCard({ tree, rows, stage }: { tree: TaskTree; rows: Rows; stage: b
       <h3 className="tr-card-title"><button className="linkish" type="button" onClick={() => rows.onOpenTask(task.id)}>{task.title}</button></h3>
       {(stage || status === 'waitingYou' || status === 'paused' || status === 'stopped') && <StateWord status={status} />}
       <ul className="tr-card-facts">
-        <li>{words.executor(task.assignee?.name ?? t.tracker.nobody)}</li>
+        <li>{words.executor(doerOf(task)?.name ?? t.tracker.nobody)}</li>
         <li>{words.responsible(task.responsible?.name ?? t.tracker.nobody)}</li>
         {due && <li className={due.late ? 'tp-late' : undefined}>{words.due(due.text)}</li>}
         {tree.total > 0 && <li>{words.subtasks(tree.done, tree.total)}</li>}
@@ -144,10 +145,10 @@ function Column({ column, rows }: { column: BoardColumn; rows: Rows }) {
 }
 
 /* The board: a column per state, or per stage of a chosen pipeline, as many side by side as the width holds, one under
-   another where it is narrow. The engine moves the cards; nobody drags them. */
-export function TrackerBoard({ tasks, pipeline, cancelled, rows }: { tasks: TaskLine[]; pipeline: Pipeline | null; cancelled: boolean; rows: Rows }) {
+   another where it is narrow, each card's subtasks counted over all the work. The engine moves the cards; nobody drags them. */
+export function TrackerBoard({ tasks, all, pipeline, cancelled, rows }: { tasks: TaskLine[]; all: TaskLine[]; pipeline: Pipeline | null; cancelled: boolean; rows: Rows }) {
   const t = useT();
-  const columns = boardColumns(tasks, pipeline, { cancelled }, rows.asksYou);
+  const columns = boardColumns(tasks, pipeline, { cancelled, all }, rows.asksYou);
   return (
     <section className="tr-board" aria-label={t.tracker.views.board}>
       <div className="tr-columns">{columns.map(column => <Column key={column.id} column={column} rows={rows} />)}</div>

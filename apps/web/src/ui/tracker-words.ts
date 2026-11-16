@@ -14,16 +14,18 @@ export function spanText(t: Messages, seconds: number): string {
 
 export const sinceSeconds = (at: string, now = Date.now()) => Math.max(0, (now - new Date(at).getTime()) / 1000);
 
-export const dayText = (language: Language, at: string) => new Date(at).toLocaleDateString(localeOf(language), { day: 'numeric', month: 'short' });
 export const momentText = (language: Language, at: string) => new Date(at).toLocaleString(localeOf(language), { dateStyle: 'short', timeStyle: 'short' });
 
 const closed = (task: Pick<TaskLine, 'status'>) => task.status === 'done' || task.status === 'cancelled';
 
-/* By when it is due, and that it is late once the day is past and it is not over. */
+const DAY = 24 * 60 * 60 * 1000;
+
+/* By when it is due, and that it is late once the whole day is past and it is not over. A due date is a day of the
+   calendar kept as its midnight in UTC, so it reads as that day wherever the person is. */
 export function dueText(t: Messages, language: Language, task: Pick<TaskLine, 'dueAt' | 'status'>, now = Date.now()): { text: string; late: boolean } | null {
   if (!task.dueAt) return null;
-  const late = !closed(task) && new Date(task.dueAt).getTime() < now;
-  const day = dayText(language, task.dueAt);
+  const late = !closed(task) && now >= new Date(task.dueAt).getTime() + DAY;
+  const day = new Date(task.dueAt).toLocaleDateString(localeOf(language), { day: 'numeric', month: 'short', timeZone: 'UTC' });
   return { text: late ? t.tracker.late(day) : day, late };
 }
 

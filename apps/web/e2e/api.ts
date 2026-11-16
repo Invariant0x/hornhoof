@@ -92,7 +92,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/link': { link: null, domain: 'hornhoof.org' },
   '/api/backups': { last: null, recovery: null, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [] } satisfies BackupsView,
   '/api/turns': { turns: [TURN] },
-  '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null, mine: true, responsible: null }] },
+  '/api/task-departments': { whole: true, mayPlanCompany: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null, mine: true, mayPlan: true, responsible: null }] },
   /* The tracker's goals and pipelines: none set yet. */
   '/api/goals': { goals: [] },
   '/api/pipelines': { pipelines: [] },

@@ -38,7 +38,7 @@ export const TURNS: TurnView[] = [
 const WORK = ['Take card payments', 'Refunds on request', 'Receipts by email', 'Gift cards', 'Pay in parts', 'Delivery dates'];
 
 const goal = (id: string, number: number, title: string, over: Partial<GoalView>): GoalView => ({
-  id, number, title, why: '', department: DEV, parentId: 'g1', responsible: IVAN, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: 0, done: 0, total: 0, version: 1, ...over,
+  id, number, title, why: '', department: DEV, parentId: 'g1', responsible: IVAN, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: 0, done: 0, total: 0, version: 1, mayEdit: true, ...over,
 });
 export const GOALS: GoalView[] = [
   goal('g1', 1, '500 shops pay by card', { why: 'Shops that take cards sell twice as much.', department: null, parentId: null, target: 500, current: 212, unit: 'shops', progress: 0.424 }),
@@ -47,7 +47,7 @@ export const GOALS: GoalView[] = [
 ];
 const SERVES = (g: GoalView) => ({ id: g.id, number: g.number, title: g.title });
 export const PIPELINE: Pipeline = {
-  id: 'pl1', department: DEV, name: 'Payments way', why: 'Every payment change is built, then checked.', archived: false, version: 1,
+  id: 'pl1', department: DEV, name: 'Payments way', why: 'Every payment change is built, then checked.', archived: false, version: 1, mayEdit: true,
   stages: [{ id: 's1', parentId: null, name: 'Build', ownerRole: null, owner: null, position: 0 }, { id: 's2', parentId: 's1', name: 'Check', ownerRole: null, owner: null, position: 0 }],
 };
 
@@ -105,7 +105,9 @@ const item = (id: string, title: string, text: string): BacklogItem => ({ id, de
 
 /* Serves the screen to the CEO: every department, Development of their own. reads: the task lists the page asked for. */
 export async function serveTasksBoard(page: Page, me: Me = ME) {
-  const places: TaskDepartments = { whole: me.person.scopeKind === 'company', departments: [{ ...DEV, templateKey: null, mine: true, responsible: IVAN }, { ...SALES, templateKey: null, mine: false, responsible: MARIA }] };
+  /* The CEO plans everywhere; anyone else in their own department only. */
+  const ceo = !!(me.person.isOwner || me.person.isCeoDelegate);
+  const places: TaskDepartments = { whole: me.person.scopeKind === 'company', mayPlanCompany: ceo, departments: [{ ...DEV, templateKey: null, mine: true, mayPlan: true, responsible: IVAN }, { ...SALES, templateKey: null, mine: false, mayPlan: ceo, responsible: MARIA }] };
   const reads: string[] = [];
   await serveApi(page);
   await page.route('**/api/**', route => {

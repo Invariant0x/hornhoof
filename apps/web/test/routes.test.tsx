@@ -29,6 +29,7 @@ describe('workspace addresses', () => {
     ['/tasks?goal=g1&root=t12&view=graph', { kind: 'tasks', goal: 'g1', root: 't12', view: 'graph' }],
     ['/tasks?show=waits&person=p2', { kind: 'tasks', show: 'waits', personId: 'p2' }],
     ['/tasks?show=turns', { kind: 'tasks', show: 'turns' }],
+    ['/tasks?show=company&view=graph', { kind: 'tasks', show: 'company', view: 'graph' }],
     ['/tasks?department=none&responsible=p3&view=list', { kind: 'tasks', department: 'none', responsible: 'p3', view: 'list' }],
   ] as const)('opens and shares %s', (path, route) => {
     expect(parseRoute(path)).toEqual(route);

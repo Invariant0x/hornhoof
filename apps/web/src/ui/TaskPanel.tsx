@@ -365,7 +365,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
           {mayEdit && !editing && <button className="btn ghost" type="button" onClick={() => setEditing(true)}>{t.tracker.card.edit}</button>}
         </div>
       )}
-      {mayEdit && editing && <TaskEdit task={{ ...task, version }} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} />}
+      {mayEdit && editing && <TaskEdit task={{ ...task, version }} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} onReload={onChanged} />}
       <TaskWorkflow workflow={task.echelons} task={task} org={org} />
       <TaskFindings findings={task.echelonFindings} workflow={task.echelons} />
       <TaskRelatedSection heading={t.tracker.card.waitsFor} items={task.after} onOpen={onOpen} />

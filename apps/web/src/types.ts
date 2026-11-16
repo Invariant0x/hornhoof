@@ -472,6 +472,8 @@ export type TaskLine = {
   department: TaskPlace;
   product: TaskPlace;
   assignee: AgentRef | null;
+  /* The employee who writes it, when one does; the assignee holds it now, a reviewer at a gate among them. */
+  executor?: AgentRef | null;
   turn: number | null;
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
@@ -709,8 +711,9 @@ export type TurnView = {
 };
 
 /* The departments whose tasks a person reads, and whether they have the whole company. mine: a department of the person's
-   own, whose work and list for later turns they change. */
-export type TaskDepartments = { whole: boolean; departments: { id: string; name: string | null; templateKey: TemplateKey | null; mine: boolean; responsible?: PersonRef | null }[] };
+   own, whose work and list for later turns they change. mayPlan: the person gives the department work and sets its goals
+   and pipelines; mayPlanCompany: the company's goals. The server decides both; none said is no. */
+export type TaskDepartments = { whole: boolean; mayPlanCompany?: boolean; departments: { id: string; name: string | null; templateKey: TemplateKey | null; mine: boolean; mayPlan?: boolean; responsible?: PersonRef | null }[] };
 
 /* A goal: of the company with no department, or of one; it may be part of a bigger one. progress from 0 to 1: the number
    target when there is one, else the share of its tasks done; none while there is nothing to count. */
@@ -732,12 +735,15 @@ export type GoalView = {
   done: number;
   total: number;
   version: number;
+  /* The reader may change it, reach it or drop it, as the server decides; none said is no. */
+  mayEdit?: boolean;
 };
 
 /* A department's pipeline: who hands work to whom, as a tree of stages in tree order. A stage's owner is a role of the
    department, or one of its employees. */
 export type PipelineStage = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: PersonRef | null; position: number };
-export type Pipeline = { id: string; department: PersonRef; name: string; why: string; archived: boolean; version: number; stages: PipelineStage[] };
+/* mayEdit: the reader may change it, as the server decides; none said is no. */
+export type Pipeline = { id: string; department: PersonRef; name: string; why: string; archived: boolean; version: number; mayEdit?: boolean; stages: PipelineStage[] };
 
 /* What people of a department keep for a later turn: not work yet, until it goes into a turn. */
 export type BacklogItem = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };

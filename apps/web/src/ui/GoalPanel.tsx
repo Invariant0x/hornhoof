@@ -3,20 +3,13 @@ import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
-import { useGoal, useGoals, useTaskDepartments, useTasks } from '../tasks';
-import type { GoalView, Me, TaskDepartments, TaskLogLine } from '../types';
+import { useGoal, useGoals, useTasks } from '../tasks';
+import type { GoalView, TaskLogLine } from '../types';
 import { PanelFrame } from './SidePanels';
 import { Progress } from './TaskBoard';
 import { CardPath, Fact, goalChain, useEscapeCloses } from './TaskPanel';
 import { GoalForm } from './TrackerForms';
 import { dueText, momentText, trackerLine } from './tracker-words';
-
-/* The company's goals are set by the CEO and the CEO delegate; a department's, by whoever reaches the department. */
-export function maySetGoals(me: Me, places: TaskDepartments | undefined, department: string | null): boolean {
-  if (me.person.isOwner || me.person.isCeoDelegate) return true;
-  if (department === null) return false;
-  return !!places && (places.whole || places.departments.some(d => d.id === department && d.mine));
-}
 
 /* How far a goal is: its number against its target, or else its tasks done. */
 function GoalProgress({ goal }: { goal: GoalView }) {
@@ -96,7 +89,6 @@ function GoalStatusActions({ goal, onChanged }: { goal: GoalView; onChanged: () 
 
 type Props = {
   goalId: string;
-  me: Me;
   kind?: string;
   active?: boolean;
   onClose: () => void;
@@ -106,15 +98,15 @@ type Props = {
   onGraph?: (root: { goal: string }) => void;
 };
 
-function GoalBody({ goal, log, me, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Props, 'goalId' | 'kind' | 'active' | 'onClose' | 'onHome'> & { goal: GoalView; log: TaskLogLine[]; onChanged: () => void }) {
+function GoalBody({ goal, log, onOpen, onOpenGoal, onGraph, onChanged }: Omit<Props, 'goalId' | 'kind' | 'active' | 'onClose' | 'onHome'> & { goal: GoalView; log: TaskLogLine[]; onChanged: () => void }) {
   const t = useT();
   const { language } = useLanguage();
   const { goals } = useGoals();
   const { tasks } = useTasks({ status: 'all' });
-  const { taskDepartments } = useTaskDepartments();
   const [editing, setEditing] = useState(false);
   const words = t.tracker.card;
-  const mayEdit = maySetGoals(me, taskDepartments, goal.department?.id ?? null);
+  /* Who sets a goal is the server's word. */
+  const mayEdit = !!goal.mayEdit;
   const smaller = (goals ?? []).filter(g => g.parentId === goal.id && g.status !== 'dropped').sort((a, b) => a.number - b.number);
   const ids = new Set((tasks ?? []).map(task => task.id));
   const serving = (tasks ?? []).filter(task => task.goal?.id === goal.id && (!task.parentId || !ids.has(task.parentId)) && task.status !== 'cancelled').sort((a, b) => a.number - b.number);
@@ -144,7 +136,7 @@ function GoalBody({ goal, log, me, onOpen, onOpenGoal, onGraph, onChanged }: Omi
           {mayEdit && !editing && <button className="btn ghost" type="button" onClick={() => setEditing(true)}>{words.edit}</button>}
         </div>
       )}
-      {mayEdit && editing && <GoalForm goal={goal} department={goal.department} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} />}
+      {mayEdit && editing && <GoalForm goal={goal} department={goal.department} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChanged(); }} onReload={onChanged} />}
       {smaller.length > 0 && (
         <section aria-label={words.smallerGoals}>
           <h4>{words.smallerGoals}</h4>

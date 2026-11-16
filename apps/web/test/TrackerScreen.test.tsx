@@ -15,7 +15,7 @@ const DEV = { id: 'd2', name: 'Development' };
 const IVAN = { id: 'p1', name: 'Ivan' };
 const MARIA = { id: 'p2', name: 'Maria' };
 const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: null };
-const COMPANY_GOAL: GoalView = { id: 'g1', number: 1, title: '500 subscribers', why: 'People pay for the shop.', department: null, parentId: null, responsible: IVAN, target: 500, current: 212, unit: 'subscribers', dueAt: null, status: 'active', progress: 0.424, done: 0, total: 0, version: 2 };
+const COMPANY_GOAL: GoalView = { id: 'g1', number: 1, title: '500 subscribers', why: 'People pay for the shop.', department: null, parentId: null, responsible: IVAN, target: 500, current: 212, unit: 'subscribers', dueAt: null, status: 'active', progress: 0.424, done: 0, total: 0, version: 2, mayEdit: true };
 const DEPT_GOAL: GoalView = { ...COMPANY_GOAL, id: 'g2', number: 2, title: 'Card payments', why: 'Shops take cards.', department: DEV, parentId: 'g1', responsible: MARIA, target: null, current: null, unit: '', progress: 0.5, done: 1, total: 2, version: 0 };
 const SERVES = { id: 'g2', number: 2, title: 'Card payments' };
 const line = (over: Partial<TaskLine> & { id: string; number: number; title: string }): TaskLine => ({
@@ -28,7 +28,7 @@ const FORM = line({ id: 't22', number: 22, title: 'Card form', status: 'open', p
 const REFUND = line({ id: 't23', number: 23, title: 'Refund button', status: 'review', goal: SERVES, waitsFor: [21] });
 const LOGIN = line({ id: 't24', number: 24, title: 'Fix the login page', status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ who: { kind: 'person', ...IVAN }, since: '2026-11-13T08:00:00.000Z' }] } });
 const TASKS = [LOGIN, REFUND, FORM, PAY];
-const PIPELINE: Pipeline = { id: 'pl1', department: DEV, name: 'Payments way', why: '', archived: false, version: 3, stages: [{ id: 's1', parentId: null, name: 'Build', ownerRole: 'DEV-BE', owner: null, position: 0 }, { id: 's2', parentId: 's1', name: 'Check', ownerRole: 'DEV-HEAD', owner: null, position: 0 }] };
+const PIPELINE: Pipeline = { id: 'pl1', department: DEV, name: 'Payments way', why: '', archived: false, version: 3, mayEdit: true, stages: [{ id: 's1', parentId: null, name: 'Build', ownerRole: 'DEV-BE', owner: null, position: 0 }, { id: 's2', parentId: 's1', name: 'Check', ownerRole: 'DEV-HEAD', owner: null, position: 0 }] };
 const detail = (task: TaskLine, over: Partial<TaskDetail> = {}): TaskDetail => ({
   ...TASK_DETAIL, ...task, body: '', parent: null, after: [], neededFor: [], executor: BRUNO, createdBy: null, subtasks: [], log: [], requests: [], files: [], mayEdit: true, version: 4, ...over,
 });
@@ -43,7 +43,7 @@ function shell(path = '/tasks', routes: Record<string, unknown> = {}, me: Me = M
     'GET /api/tasks?status=all': [200, { tasks: TASKS }],
     'GET /api/goals': [200, { goals: [COMPANY_GOAL, DEPT_GOAL] }],
     'GET /api/pipelines': [200, { pipelines: [PIPELINE] }],
-    'GET /api/task-departments': [200, { whole: true, departments: [{ id: 'd2', name: null, templateKey: 'development', mine: true, responsible: MARIA }] }],
+    'GET /api/task-departments': [200, { whole: true, mayPlanCompany: true, departments: [{ id: 'd2', name: null, templateKey: 'development', mine: true, mayPlan: true, responsible: MARIA }] }],
     'GET /api/tasks/t21': [200, { task: detail(PAY, { subtasks: [FORM], neededFor: [{ id: 't23', number: 23, title: 'Refund button', status: 'review' }] }) }],
     'GET /api/tasks/t22': [200, { task: detail(FORM, { parent: { id: 't21', number: 21, title: 'Take card payments' } }) }],
     'GET /api/tasks/t23': [200, { task: detail(REFUND, { after: [{ id: 't21', number: 21, title: 'Take card payments', status: 'working' }] }) }],
@@ -158,7 +158,38 @@ describe('the views and the card', () => {
     expect(location.search).toBe('?goal=g2&view=graph');
     await waitFor(() => expect(within(graph).getByRole('button', { name: /#23 Refund button/ })).toBeInTheDocument());
     await user.click(within(crumbs).getByRole('button', { name: 'All goals' }));
-    expect(location.search).toBe('?view=graph');
+    /* Every goal of the company, not the person's own tasks. */
+    expect(location.search).toBe('?show=company&view=graph');
+    expect(await screen.findByRole('heading', { level: 1, name: 'All goals and tasks' })).toBeInTheDocument();
+    await waitFor(() => expect(within(graph).getByRole('button', { name: /500 subscribers/ })).toBeInTheDocument());
+    expect(within(graph).getByRole('button', { name: /#24 Fix the login page/ })).toBeInTheDocument();
+  });
+
+  it('names the one who does a task alike in the list, on the board and in the filter, as its card does', async () => {
+    const user = userEvent.setup();
+    const RITA = { id: 'b2', name: 'Rita', kind: 'worker' as const, role: null };
+    /* Bruno wrote the refund button; Rita, who checks it, holds it now. */
+    const checked = { ...REFUND, executor: BRUNO, assignee: RITA };
+    shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [LOGIN, checked, FORM, { ...PAY, assignee: RITA, executor: null }] }] });
+    const list = await main();
+    const row = await waitFor(() => rowOf(list, '#23 Refund button'));
+    expect(row).toHaveTextContent('Bruno');
+    expect(row).not.toHaveTextContent('Rita');
+    const executor = within(screen.getByRole('group', { name: 'Filters' })).getByLabelText('Executor');
+    expect(within(executor).getAllByRole('option').map(o => o.textContent)).toEqual(['Any', 'Bruno', 'Rita']);
+    await user.selectOptions(executor, 'Bruno');
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#24 Fix the login page', '#23 Refund button', '#22 Card form']));
+    await user.click(screen.getByRole('radio', { name: 'Board' }));
+    const board = await main();
+    expect(within(board).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('Does it: Bruno');
+  });
+
+  it("counts a task's subtasks over all the work under it, those done and those others answer for too", async () => {
+    const mail = line({ id: 't26', number: 26, title: 'Refund mail', status: 'done', parentId: 't23', goal: SERVES });
+    const form = line({ id: 't27', number: 27, title: 'Refund form', parentId: 't23', goal: SERVES, responsible: MARIA });
+    shell('/tasks?view=board', { 'GET /api/tasks?status=all': [200, { tasks: [...TASKS, mail, form] }] });
+    const board = await main();
+    await waitFor(() => expect(within(board).getByRole('article', { name: '#23 Refund button' })).toHaveTextContent('subtasks: 1 of 2'));
   });
 
   it('sends an edit with the version it read, and says in words why it was refused', async () => {
@@ -246,7 +277,7 @@ describe('the list', () => {
 });
 
 describe('making work in a department', () => {
-  const places = (mine: boolean) => ({ 'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: null, templateKey: 'development', mine, responsible: MARIA }] }] });
+  const places = (mayPlan: boolean) => ({ 'GET /api/task-departments': [200, { whole: false, mayPlanCompany: false, departments: [{ id: 'd2', name: null, templateKey: 'development', mine: true, mayPlan, responsible: MARIA }] }] });
 
   it('gives the department a task through its head, and opens its card', async () => {
     const user = userEvent.setup();
@@ -278,15 +309,43 @@ describe('making work in a department', () => {
     expect(screen.queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
   });
 
-  it('lets a person who has the department give it tasks and goals, and nobody else', async () => {
+  it('lets a person give the department tasks, goals and pipelines where the server says they plan, and nowhere else', async () => {
     shell('/tasks?department=d2', places(true), listed('p6', 'Lena'));
     expect(await screen.findByRole('button', { name: 'New task' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'New goal' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New pipeline' })).toBeInTheDocument();
     cleanup();
+    /* Kira has only a product of the department: she reads its work and gives it none. */
     shell('/tasks?department=d2', places(false), listed('p7', 'Kira'));
     await main();
     expect(screen.queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New goal' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New pipeline' })).not.toBeInTheDocument();
+  });
+
+  it("offers a company goal only to a person the server lets set the company's goals", async () => {
+    shell('/tasks', { 'GET /api/task-departments': [200, { whole: true, mayPlanCompany: false, departments: [] }] });
+    await main();
+    expect(screen.queryByRole('button', { name: 'New goal' })).not.toBeInTheDocument();
+    cleanup();
+    shell('/tasks');
+    expect(await screen.findByRole('button', { name: 'New goal' })).toBeInTheDocument();
+  });
+
+  it('offers to change a goal or a pipeline only when the server says the person may', async () => {
+    shell('/tasks/g1?card=goal', { 'GET /api/goals/g1': [200, { goal: { ...COMPANY_GOAL, mayEdit: false }, log: [] }] });
+    const goal = await card('500 subscribers');
+    for (const name of ['Edit', 'Mark as reached', 'Drop the goal']) expect(within(goal).queryByRole('button', { name })).not.toBeInTheDocument();
+    cleanup();
+    /* Kira has the Mascot product only, and sets its goals. */
+    const mascot = { ...DEPT_GOAL, id: 'g5', title: 'Mascot shop', department: { id: 'pd1', name: 'Mascot' }, mayEdit: true };
+    shell('/tasks/g5?card=goal', { ...places(false), 'GET /api/goals/g5': [200, { goal: mascot, log: [] }] }, listed('p7', 'Kira'));
+    const own = await card('Mascot shop');
+    for (const name of ['Edit', 'Mark as reached', 'Drop the goal']) expect(within(own).getByRole('button', { name })).toBeInTheDocument();
+    cleanup();
+    shell('/tasks?department=d2&pipeline=pl1', { 'GET /api/pipelines': [200, { pipelines: [{ ...PIPELINE, mayEdit: false }] }] });
+    expect(await screen.findByRole('button', { name: 'New pipeline' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Change the pipeline' })).not.toBeInTheDocument();
   });
 
   it('drafts a pipeline of the department with its stages and the roles that do them', async () => {
@@ -300,13 +359,14 @@ describe('making work in a department', () => {
     await user.click(within(form).getByRole('button', { name: 'Add a stage' }));
     const [first, second] = within(form).getAllByRole('group', { name: /^Stage \d$/ });
     await user.type(within(first!).getByLabelText('Name of the stage'), 'Build');
-    await user.selectOptions(within(first!).getByLabelText('Done by the role'), 'DEV-BE');
+    await user.selectOptions(within(first!).getByLabelText('Who does it'), 'Backend engineer');
     await user.type(within(second!).getByLabelText('Name of the stage'), 'Check');
+    await user.selectOptions(within(second!).getByLabelText('Who does it'), 'Dana');
     expect(within(second!).getByLabelText('Comes after')).toHaveDisplayValue('Build');
     await user.click(within(form).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === '/api/pipelines')?.body).toEqual({
       department: 'd2', name: 'Refunds', why: '',
-      stages: [{ key: 'n1', parent: null, name: 'Build', ownerRole: 'DEV-BE' }, { key: 'n2', parent: 'n1', name: 'Check' }],
+      stages: [{ key: 'n1', parent: null, name: 'Build', ownerRole: 'DEV-BE' }, { key: 'n2', parent: 'n1', name: 'Check', ownerAgentId: 'b0' }],
     }));
   });
 });

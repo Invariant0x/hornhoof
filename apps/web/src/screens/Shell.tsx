@@ -461,7 +461,6 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <GoalPanel
           key={`goal:${taskId}`}
           goalId={taskId}
-          me={currentMe}
           kind={tab === 'tasks' ? 'at-end' : undefined}
           active={!accountDialog && !menu}
           onClose={() => navigate(pageRoute)}

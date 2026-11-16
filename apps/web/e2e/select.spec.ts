@@ -167,7 +167,7 @@ async function serveSelectScreens(page: Page) {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ whole: true, departments: [{ id: LONG_DEPT.id, name: LONG_DEPT.name, templateKey: null }] }),
+      body: JSON.stringify({ whole: true, mayPlanCompany: true, departments: [{ id: LONG_DEPT.id, name: LONG_DEPT.name, templateKey: null, mine: true, mayPlan: true }] }),
     }),
   );
   await page.route('**/api/departments/*/backlog', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) }));

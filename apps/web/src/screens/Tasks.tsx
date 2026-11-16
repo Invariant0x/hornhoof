@@ -5,12 +5,11 @@ import { mapPeople, useOrg } from '../org';
 import type { TrackerPlace } from '../routes';
 import { searchTasks } from '../task-search';
 import { placeName, useGoals, usePipelines, useTaskDepartments, useTasks, useWaitCards } from '../tasks';
-import { filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
+import { doerOf, filterTasks, graphPath, graphTree, mine, pipelineTree, pruneGoals, TRACKER_VIEWS, waitingOn, workingNow, BOARD_STATUSES, type Crumb, type GraphNode, type WorkFilter } from '../tracker';
 import type { ComputerAccessDecision, Decisions, GoalView, MachineAwayCard, Me, MergeDecision, Org, Pipeline, ProposalDecision, TaskDepartments, TaskLine } from '../types';
 import { ComputerCard } from '../ui/ComputerCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { Field } from '../ui/Field';
-import { maySetGoals } from '../ui/GoalPanel';
 import { MachineAway } from '../ui/MachineAway';
 import { MergeCard } from '../ui/MergeCard';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -199,11 +198,11 @@ const countOf = (s: Shown, tasks: TaskLine[]) => s.requests.length + s.proposals
 
 /* Which part of the tracker a place is: what waits for a person, the turns, or work to look at as a list, a board or a graph. */
 type Section =
-  | { kind: 'waits' | 'turns' | 'mine' | 'working' }
+  | { kind: 'waits' | 'turns' | 'mine' | 'working' | 'company' }
   | { kind: 'department' | 'responsible' | 'goal' | 'root'; id: string };
 
 function sectionOf(place: TrackerPlace): Section {
-  if (place.show) return { kind: place.show === 'waits' ? 'waits' : place.show === 'turns' ? 'turns' : 'working' };
+  if (place.show) return { kind: place.show };
   if (place.department) return { kind: 'department', id: place.department };
   if (place.responsible) return { kind: 'responsible', id: place.responsible };
   if (place.root) return { kind: 'root', id: place.root };
@@ -237,7 +236,7 @@ function FilterChips({ chips, onChange, tasks, goals }: { chips: Chips; onChange
   return (
     <div className="tr-chips" role="group" aria-label={words.label}>
       {chip('status', words.status, BOARD_STATUSES.map(s => ({ id: s, name: t.tracker.statuses[s] })))}
-      {chip('executor', words.executor, unique(tasks.map(task => task.assignee)))}
+      {chip('executor', words.executor, unique(tasks.map(doerOf)))}
       {chip('responsible', words.responsible, unique(tasks.map(task => task.responsible)))}
       {chip('goal', words.goal, goals.filter(g => g.status !== 'dropped').map(g => ({ id: g.id, name: g.title })))}
     </div>
@@ -284,15 +283,15 @@ function OwnGoals({ goals, label, onOpenGoal }: { goals: GoalView[]; label: stri
 type Making = 'task' | 'goal' | 'pipeline' | 'editPipeline' | null;
 
 /* What a person may make where they are: a task for the department, a goal of the department or of the company, and the
-   department's pipelines. */
-function MakeHere({ me, places, org, department, pipeline, making, setMaking, onOpenTask }: {
-  me: Me; places: TaskDepartments | undefined; org: Org | null; department: string | null; pipeline: Pipeline | null; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
+   department's pipelines, where the server says they plan. */
+function MakeHere({ places, org, department, pipeline, making, setMaking, onOpenTask }: {
+  places: TaskDepartments | undefined; org: Org | null; department: string | null; pipeline: Pipeline | null; making: Making; setMaking: (m: Making) => void; onOpenTask: (id: string) => void;
 }) {
   const t = useT();
   const words = t.tracker.actions;
   const known = department ? org?.departments.find(d => d.id === department) : undefined;
-  const reaches = department === null ? me.person.isOwner || !!me.person.isCeoDelegate : maySetGoals(me, places, department);
-  if (department === 'none' || !reaches || (department && !known)) return null;
+  const plans = department === null ? !!places?.mayPlanCompany : !!places?.departments.find(d => d.id === department)?.mayPlan;
+  if (department === 'none' || !plans || (department && !known)) return null;
   const close = () => setMaking(null);
   const named = known ? { id: known.id, name: deptLabel(t, known) } : null;
   const head = known?.employees.some(e => e.kind === 'head');
@@ -304,7 +303,7 @@ function MakeHere({ me, places, org, department, pipeline, making, setMaking, on
           {known && head && <button className="btn small ghost" type="button" onClick={() => setMaking('task')}>{words.newTask}</button>}
           <button className="btn small ghost" type="button" onClick={() => setMaking('goal')}>{words.newGoal}</button>
           {known && <button className="btn small ghost" type="button" onClick={() => setMaking('pipeline')}>{words.newPipeline}</button>}
-          {known && pipeline && <button className="btn small ghost" type="button" onClick={() => setMaking('editPipeline')}>{words.editPipeline}</button>}
+          {known && pipeline?.mayEdit && <button className="btn small ghost" type="button" onClick={() => setMaking('editPipeline')}>{words.editPipeline}</button>}
         </div>
       )}
       {making === 'task' && known && <TrackerNewTask department={known} onCancel={close} onCreated={task => { close(); onOpenTask(task.id); }} />}
@@ -369,6 +368,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     : section.kind === 'responsible' ? { tasks: all, filter: { responsible: section.id } }
     : section.kind === 'goal' ? { tasks: all, filter: { goal: section.id } }
     : section.kind === 'root' ? { tasks: treeOf(section.id, all), filter: {} }
+    : section.kind === 'company' ? { tasks: all, filter: {} }
     : { tasks: [], filter: {} };
   const set = Object.fromEntries(Object.entries(chips).filter(([, v]) => v));
   const work = filterTasks(base.tasks, { ...base.filter, ...set } as WorkFilter, goals, asksYou);
@@ -381,9 +381,13 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
     if (place.root) return { forest: graphTree({ task: place.root }, goals, work), crumbs: graphPath({ task: place.root }, goals, all) };
     if (place.goal) return { forest: graphTree({ goal: place.goal }, goals, work), crumbs: graphPath({ goal: place.goal }, goals, all) };
     if (section.kind === 'department') return { forest: pruneGoals(graphTree({ department: section.id }, goals, work), g => g.department?.id === section.id), crumbs: [] };
+    if (section.kind === 'company') return { forest: graphTree({}, goals, work), crumbs: [] };
     return { forest: pruneGoals(graphTree({}, goals, work), g => section.kind === 'mine' && g.status === 'active' && g.responsible.id === who), crumbs: [] };
   };
-  const toCrumb = (c: Crumb | null) => onPlace({ department: place.department, product: place.product, ...(c ? (c.kind === 'goal' ? { goal: c.id } : { root: c.id }) : {}), view: 'graph' });
+  /* Up to a goal or a task above, or to the top: the department's goals, else every goal of the company. */
+  const toCrumb = (c: Crumb | null) => onPlace(c
+    ? { department: place.department, product: place.product, ...(c.kind === 'goal' ? { goal: c.id } : { root: c.id }), view: 'graph' }
+    : place.department ? { department: place.department, product: place.product, view: 'graph' } : { show: 'company', view: 'graph' });
 
   const where = (() => {
     const goal = goals.find(g => g.id === place.goal);
@@ -393,6 +397,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       case 'waits': return { title: other ? t.tracker.where.waitsFor(whoName) : t.tracker.where.waits, about: '' };
       case 'working': return { title: t.tracker.where.working, about: t.tracker.where.workingAbout };
       case 'turns': return { title: t.tracker.where.turns, about: '' };
+      case 'company': return { title: t.tracker.where.company, about: '' };
       case 'responsible': return { title: t.tracker.where.responsible(people.find(p => p.id === section.id)?.name ?? t.tasks.someone), about: '' };
       case 'root': {
         const task = all.find(x => x.id === section.id);
@@ -482,8 +487,8 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
           : section.kind === 'turns' ? <TurnsAndReleases tasks={tasks} places={places} rows={{ selected, onOpenTask, asksYou, place: task => [task.department ? place_(task.department) : t.tracker.side.orchestrator, task.product?.name].filter(Boolean).join(' / ') }} />
           : (
             <>
-              {(section.kind === 'mine' || section.kind === 'department') && (
-                <MakeHere me={me} places={places} org={org} department={section.kind === 'department' ? section.id : other ? 'none' : null} pipeline={pipeline} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />
+              {(section.kind === 'mine' || section.kind === 'department' || section.kind === 'company') && (
+                <MakeHere places={places} org={org} department={section.kind === 'department' ? section.id : other ? 'none' : null} pipeline={pipeline} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />
               )}
               {section.kind === 'mine' && <OwnGoals goals={own.goals} label={other ? t.tracker.goalsOf(whoName) : t.tracker.yourGoals} onOpenGoal={onOpenGoal} />}
               <div className="tr-bar">
@@ -491,8 +496,8 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
                 <FilterChips chips={chips} onChange={setChips} tasks={chipTasks} goals={goals} />
               </div>
               {tasks && (
-                view === 'list' ? <TrackerList tasks={work} rows={rows} empty={empty} />
-                : view === 'board' ? <TrackerBoard tasks={work} pipeline={pipeline} cancelled={chips.status === 'cancelled'} rows={rows} />
+                view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} />
+                : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={chips.status === 'cancelled'} rows={rows} />
                 : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStages } : undefined} />
               )}
               {section.kind === 'mine' && waiting}

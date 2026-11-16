@@ -56,6 +56,16 @@ describe('the list', () => {
     expect([find!.done, find!.total]).toEqual([1, 2]);
   });
 
+  it('counts the subtasks of a task over all the work under it, whatever the list shows', () => {
+    /* Max's own open tasks leave out the subtask done and Luisa's; a status filter leaves out what does not match. */
+    const [own] = listGroups(mine(TASKS, GOALS, 'p2').tasks, undefined, TASKS).find(g => g.status === 'working')!.trees;
+    expect([own!.task.id, own!.done, own!.total]).toEqual(['t412', 1, 2]);
+    const [working] = listGroups(filterTasks(TASKS, { status: 'working' }, GOALS), undefined, TASKS)[0]!.trees;
+    expect([working!.task.id, working!.done, working!.total]).toEqual(['t412', 1, 2]);
+    const card = boardColumns(mine(TASKS, GOALS, 'p2').tasks, null, { all: TASKS }).find(c => c.id === 'working')!.cards[0];
+    expect(card).toMatchObject({ done: 1, total: 2 });
+  });
+
   it('shows cancelled work only when the status filter asks for it', () => {
     expect(listGroups(filterTasks(TASKS, {}, GOALS)).some(g => g.status === 'cancelled')).toBe(false);
     expect(listGroups(filterTasks(TASKS, { status: 'cancelled' }, GOALS)).map(g => g.status)).toEqual(['cancelled']);
@@ -87,6 +97,10 @@ describe('the board', () => {
 describe('the filters', () => {
   it('keeps the tasks of an executor, of a responsible person and of a goal with its smaller goals', () => {
     expect(ids(filterTasks(TASKS, { executor: 'b2' }, GOALS))).toEqual(['s2t']);
+    /* Who does a task is the one who writes it, else the one who holds it now, as its card says. */
+    const checked = task({ id: 't9', number: 9, assignee: BRUNO, executor: RITA });
+    expect(ids(filterTasks([checked], { executor: 'b2' }, GOALS))).toEqual(['t9']);
+    expect(ids(filterTasks([checked], { executor: 'b1' }, GOALS))).toEqual([]);
     expect(ids(filterTasks(TASKS, { responsible: 'p3' }, GOALS))).toEqual(['s2t']);
     expect(ids(filterTasks(TASKS, { goal: 'g1' }, GOALS))).toEqual(['t412', 's1t', 's2t', 't419', 't502']);
     expect(ids(filterTasks(TASKS, { status: 'waits' }, GOALS))).toEqual(['s2t']);
@@ -141,6 +155,13 @@ describe('the left panel', () => {
 describe('the graph', () => {
   it('grows from every goal: a goal, its smaller goals, their tasks and subtasks, and the tasks with no goal apart', () => {
     expect(titles(graphTree({}, GOALS, TASKS))).toEqual([['g1', [['g2', [['t412', [['s1t'], ['s2t']]], ['t419'], ['t502']]]]], ['loose', [['t500'], ['t501']]]]);
+  });
+
+  it("puts a task whose goal is not drawn with the tasks outside the goals, so no task of the place goes missing", () => {
+    const company = task({ id: 't600', number: 600, goal: { id: 'g1', number: 1, title: '500 subscribers' } });
+    const dropped = task({ id: 't601', number: 601, goal: { id: 'g3', number: 3, title: 'Accounts' } });
+    expect(titles(graphTree({ department: 'd2' }, GOALS, [T412, company, dropped]))).toEqual([['g2', [['t412']]], ['loose', [['t600'], ['t601']]]]);
+    expect(titles(graphTree({}, GOALS, [company, dropped]))).toEqual([['g1', [['g2'], ['t600']]], ['loose', [['t601']]]]);
   });
 
   it("grows from one goal, from a department's goals, and from one task", () => {
