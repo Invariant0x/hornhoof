@@ -62,10 +62,10 @@ An error answers with a status and this body:
 
 `code` is one of `validation` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict` (409), `too_many` (429), `unavailable` (503). `reason`, where there is one, is stable and meant for programs; `message` is for people and may change. A program decides by status and `reason`.
 
-Where there is a `reason`, `message` speaks to the owner as a person would, says what did not happen and why, and may be shown to them as it is: in Russian when the call's `Accept-Language` starts with `ru`, and in English otherwise. For example, with `Accept-Language: ru`:
+Where there is a `reason`, `message` says to the owner why, in one neutral phrase that reads after what did not go, such as "<file name> did not come: " (in Russian "<file name> не дошел: "): in Russian when the call's `Accept-Language` starts with `ru`, and in English otherwise. For example, with `Accept-Language: ru`, the owner reads "Отчет.pdf не дошел: такого файла в Hornhoof нет, или вам его там не открыть." from:
 
 ```json
-{ "error": { "code": "not_found", "message": "Такого файла в Hornhoof нет, или вам его там не открыть.", "reason": "attachment_unknown" } }
+{ "error": { "code": "not_found", "message": "такого файла в Hornhoof нет, или вам его там не открыть.", "reason": "attachment_unknown" } }
 ```
 
 | Status | `reason` | When |
@@ -169,7 +169,7 @@ Content-Type: image/heic
 ```
 
 * Refusals, each with words for the owner in `message`: `400 file_empty` for no bytes, `413 file_too_big` for more than 50 MB, `413 attachment_invalid` when Hornhoof has no room left for the company's files, and for the agent the same as for a message (`404 agent_unknown`, `403 assistant_agent_refused`, `409 agent_not_ready`).
-* When a file is refused, tell the owner the words of `message`. When the program still sends the rest of the message, add a line to `text` naming the file that did not come and why, so the agent knows of it too.
+* When a file is refused, tell the owner "<file name> did not come: " and the words of `message`. When the program still sends the rest of the message, add a line to `text` naming the file that did not come and why, so the agent knows of it too.
 * Hornhoof keeps a file 30 days after it was sent, as every file of a message.
 
 ### GET /api/assistant/events?after=&lt;seq&gt;&amp;wait=&lt;seconds&gt;

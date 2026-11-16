@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { appendEvent, publishEvent } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
@@ -44,7 +45,7 @@ describe('GET /api/stream', () => {
     const event = await appendEvent(app.ctx, { companyId, agentId: orchestrator.id, kind: 'tool_result', data: { text: `Run: ${command}`, nested: [{ line: command }] } });
     const hidden = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join [hidden]';
     expect(event.data).toEqual({ text: `Run: ${hidden}`, nested: [{ line: hidden }] });
-    expect(JSON.stringify((await db.select({ data: agentEvents.data }).from(agentEvents)).map(r => r.data))).not.toContain('Ab3_x-9Zq');
+    expect(JSON.stringify((await db.select(only(agentEvents, 'data')).from(agentEvents)).map(r => r.data))).not.toContain('Ab3_x-9Zq');
   });
 
   it("keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream", async () => {

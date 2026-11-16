@@ -47,9 +47,32 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Machines filters start with All and a count, with chips of at least 44 px.
 - Table headers and row buttons are 44 px in every table.
 - A field you must correct has a pink frame, and the Feedback title error clears as you type.
+- `run_tests` runs only on `main`, `turn-N` or `release-` branches; any other branch gets `tests_not_release` and a sentence why.
+- A release's first run runs every test, its later runs only what failed or changed; Tests and reviewers check locally and name no runs.
 - The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent the message.
 - A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
 - Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
+
+## [0.29.3] - 2026-11-16
+
+A department's messaging is found on its screen, and a busy machine gets its turn to install the server's build.
+
+### Added
+
+- Each channel of a department to its contacts takes an address, with the person's consent to the channel's purpose.
+
+### Changed
+
+- The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
+
+### Fixed
+
+- External messaging is a button on the department screen, so whoever runs a department's messaging finds its channels.
+- The machine next to install the server's build takes no new work, so what runs there ends and it installs.
+- The orchestrator and the heads get onto a node whose updater went away before stopping it, within their 3 minutes.
+- program_screen shows a busy employee's program from its running turn, without a false no_program.
+- Four tests of the keeper's lease move fake clocks instead of waiting in real time.
+- The assignment card's browser check loads the page once per test and fits its time on a busy machine.
 
 ## [0.29.2] - 2026-11-16
 

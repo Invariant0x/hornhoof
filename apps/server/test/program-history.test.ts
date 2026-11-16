@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, jobs } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { readTurnHistory } from '../src/modules/tasks/tree-history.js';
 import { withPrograms } from '../src/modules/tasks/tree-programs.js';
 import { checkSilentTurns, recordJobProgram } from '../src/modules/tasks/silent.js';
@@ -14,7 +15,7 @@ async function running() {
   const [job] = await db.insert(jobs).values({ companyId: agent!.companyId, subscriptionId: agent!.subscriptionId!, agentId: agent!.id,
     kind: 'conversation', prompt: 'Work on checkout.', timeoutMs: 3_600_000, status: 'running', startedAt: start }).returning();
   const at = (minutes: number) => new Date(start.getTime() + minutes * 60_000);
-  const history = () => db.select({ data: agentEvents.data }).from(agentEvents)
+  const history = () => db.select(only(agentEvents, 'data')).from(agentEvents)
     .where(and(eq(agentEvents.jobId, job!.id), eq(agentEvents.kind, 'program'))).orderBy(asc(agentEvents.seq));
   return { app, db, job: job!, at, history };
 }

@@ -37,7 +37,7 @@ async function started() {
   for (const machine of machines) machine.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: RUNTIMES });
   await until(() => machines.every(machine => testCapabilities(c.app.ctx, nodeIdentity(machine.nodeId)).testEnvironmentVersion === 1));
   const { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const [run] = await c.db.select().from(testRuns);
   const describer = machines.find(machine => machine.nodeId === run!.environmentRequest!.nodeId)!;
   describer.node.send(await described(await nextOf(describer.node, 'tests.describe')));

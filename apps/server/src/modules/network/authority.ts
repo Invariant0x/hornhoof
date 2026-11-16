@@ -37,7 +37,7 @@ function commonName(value: string): x509.JsonName {
   return [{ CN: [value] }];
 }
 
-async function authorityExtensions(publicKey: CryptoKey): Promise<x509.Extension[]> {
+async function authorityExtensions(publicKey: webcrypto.CryptoKey): Promise<x509.Extension[]> {
   return [
     new x509.BasicConstraintsExtension(true, 0, true),
     new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
@@ -47,7 +47,7 @@ async function authorityExtensions(publicKey: CryptoKey): Promise<x509.Extension
 
 export async function makeAuthority(companyId: string, now: Date = new Date()): Promise<Authority> {
   const notBefore = new Date(now.getTime() - SKEW_MS);
-  const keys = (await webcrypto.subtle.generateKey(ED25519, true, ['sign', 'verify'])) as CryptoKeyPair;
+  const keys = (await webcrypto.subtle.generateKey(ED25519, true, ['sign', 'verify'])) as webcrypto.CryptoKeyPair;
   const cert = await x509.X509CertificateGenerator.createSelfSigned({
     name: commonName(`Hornhoof company ${companyId}`),
     notBefore,
@@ -69,13 +69,13 @@ function readSpki(signKey: string): KeyObject | null {
   }
 }
 
-function ed25519PublicKey(signKey: string): CryptoKey {
+function ed25519PublicKey(signKey: string): webcrypto.CryptoKey {
   const key = readSpki(signKey);
   if (key?.asymmetricKeyType !== 'ed25519') throw new Error(NOT_ED25519);
   return key.toCryptoKey(ED25519, true, ['verify']);
 }
 
-function signingKeyOf(authority: Authority): CryptoKey {
+function signingKeyOf(authority: Authority): webcrypto.CryptoKey {
   return createPrivateKey(authority.keyPem).toCryptoKey(ED25519, false, ['sign']);
 }
 

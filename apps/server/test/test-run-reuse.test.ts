@@ -1,43 +1,13 @@
-import type { TestEnvironmentV1, TestUnit } from '@hornhoof/protocol';
+import type { TestUnit } from '@hornhoof/protocol';
 import { PREPARATION_UNIT } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { chooseRunMode, decideReuse, partFileResults, reuseLines } from '../src/modules/testruns/reuse.js';
+import { decideReuse, partFileResults, reuseLines } from '../src/modules/testruns/reuse.js';
 
 describe('what a result came to', () => {
   it('stays with the green file and is shown with the run', () => {
     const snapshot = {} as never, batch = { kind: 'suite', suiteId: 'a', files: ['a/1.ts'] } as never;
     expect(partFileResults(snapshot, batch, true, [{ suiteId: 'a', file: 'a/1.ts', status: 'passed', note: '2 killed, 7 survived' }]).green).toEqual([{ suiteId: 'a', file: 'a/1.ts', note: '2 killed, 7 survived' }]);
-    expect(reuseLines({ mode: 'cached', turn: 1, mainLine: true, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [{ file: 'a/1.ts', note: '2 killed, 7 survived' }, { file: 'a/2.ts', note: 'all killed' }] }, [])).toEqual(['Notes on test files: a/1.ts: 2 killed, 7 survived; a/2.ts: all killed.']);
-  });
-});
-
-const fullRun = { replaces: 'final', profile: 'full' };
-const manifest = (full?: object) => ({ defaultProfile: 'fast', execution: { version: 2, ...(full ? { fullRun: full } : {}) } }) as unknown as TestEnvironmentV1;
-
-/* No turn makes a run the full run: only asking for the full profile by name does, as every release needs one on its commit. */
-describe('how a run chooses', () => {
-  it('keeps to itself where the manifest declares no full run: nothing is reused without one', () => {
-    expect(chooseRunMode(manifest(), {}, true)).toBeNull();
-    expect(chooseRunMode({ defaultProfile: 'fast' } as unknown as TestEnvironmentV1, {}, true)).toBeNull();
-  });
-
-  it('reuses nothing when asked for the full profile by name, with fingerprints or without', () => {
-    expect(chooseRunMode(manifest(fullRun), { profile: 'full' }, true)).toEqual({ mode: 'full', profile: 'full' });
-    expect(chooseRunMode(manifest(fullRun), { profile: 'full' }, false)).toEqual({ mode: 'full', profile: 'full' });
-  });
-
-  it('keeps the profile the full run covers a run of its own, which reuses what it may', () => {
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, true)).toEqual({ mode: 'cached', profile: 'final' });
-  });
-
-  it('stays cached for other profiles and for one suite, even under the full profile', () => {
-    expect(chooseRunMode(manifest(fullRun), {}, true)).toEqual({ mode: 'cached', profile: 'fast' });
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final', suite: 'unit' }, true)).toEqual({ mode: 'cached', profile: 'final' });
-    expect(chooseRunMode(manifest(fullRun), { profile: 'full', suite: 'unit' }, true)).toEqual({ mode: 'cached', profile: 'full' });
-  });
-
-  it('turns off without fingerprints', () => {
-    expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, false)).toEqual({ mode: 'off', profile: 'final' });
+    expect(reuseLines({ mode: 'cached', release: 'turn-1', fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [{ file: 'a/1.ts', note: '2 killed, 7 survived' }, { file: 'a/2.ts', note: 'all killed' }] }, [])).toEqual(['Notes on test files: a/1.ts: 2 killed, 7 survived; a/2.ts: all killed.']);
   });
 });
 
@@ -120,7 +90,7 @@ describe('what a part leaves', () => {
 });
 
 describe('what the result says', () => {
-  const cache = (over: object) => ({ mode: 'cached', turn: 3, mainLine: true, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [], ...over }) as never;
+  const cache = (over: object) => ({ mode: 'cached', release: 'turn-3', fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [], ...over }) as never;
   const part = (failedFiles: object[] | null = null) => ({ failedFiles }) as never;
 
   it('nothing for a run without reuse', () => {
@@ -133,10 +103,9 @@ describe('what the result says', () => {
     expect(reuseLines(cache({ reused: 0 }), [part()])).toEqual([]);
   });
 
-  it('that it was the full run', () => {
-    expect(reuseLines(cache({ mode: 'full', turn: 5 }), [part()])).toEqual(['This was the full run of turn 5: nothing was reused.']);
-    expect(reuseLines(cache({ mode: 'full', turn: null }), [part()])).toEqual(['This was a full run: nothing was reused.']);
-    expect(reuseLines(cache({ mode: 'full', turn: 5, mainLine: false }), [part()])).toEqual(['This was a full run: nothing was reused.']);
+  it('that it was the first run of its release, or a full run from before releases were kept', () => {
+    expect(reuseLines(cache({ mode: 'full', release: 'turn-5' }), [part()])).toEqual(['This was the first run of release turn-5: every test file ran, nothing was reused.']);
+    expect(reuseLines(cache({ mode: 'full', release: undefined }), [part()])).toEqual(['This was a full run: nothing was reused.']);
   });
 
   it('why nothing was reused', () => {
@@ -144,7 +113,7 @@ describe('what the result says', () => {
   });
 
   it('what failed by name, and what the cache called green', () => {
-    const lines = reuseLines(cache({ mode: 'full', turn: 5, mismatches: [{ suiteId: 'a', file: 'a/1.ts' }] }), [part([{ suiteId: 'a', file: 'a/1.ts' }, { suiteId: 'a', file: 'a/2.ts' }])]);
+    const lines = reuseLines(cache({ mode: 'full', release: 'turn-5', mismatches: [{ suiteId: 'a', file: 'a/1.ts' }] }), [part([{ suiteId: 'a', file: 'a/1.ts' }, { suiteId: 'a', file: 'a/2.ts' }])]);
     expect(lines).toContain('Failed test files: a/1.ts, a/2.ts.');
     expect(lines).toContain('Mismatch with the kept results: a/1.ts was green at this same fingerprint and failed now. Either it depends on something its fingerprint does not see, or it is flaky.');
   });

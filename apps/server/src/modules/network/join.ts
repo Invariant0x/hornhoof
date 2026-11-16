@@ -8,7 +8,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { certificates, machineOnline, machines, machineTickets, nodeCodes, peerSecrets, people, publicLinks, type MachineRole } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { dropAccess } from '../computer/access.js';
 import { holdsData } from '../copies/holds.js';
@@ -215,7 +215,7 @@ export async function countOnline(tx: Db, machineId: string, prevReportAt: Date 
    a minute old. The window begins inside a day, and that day's seconds count by the part of it inside the window, out of
    the part of it the machine was there at all. */
 export async function onlineShare(db: Db, machineId: string, now = new Date()): Promise<number | null> {
-  const [row] = await db.select({ createdAt: machines.createdAt }).from(machines).where(eq(machines.id, machineId));
+  const [row] = await db.select(only(machines, 'createdAt')).from(machines).where(eq(machines.id, machineId));
   if (!row) return null;
   const days = await db.select().from(machineOnline).where(and(eq(machineOnline.machineId, machineId), gte(machineOnline.day, dayOf(new Date(now.getTime() - SHARE_DAYS * DAY_MS))), lte(machineOnline.day, dayOf(now))));
   return shareOf(row.createdAt, days, now);
@@ -258,12 +258,12 @@ export async function redeemTicket(ctx: Ctx, ask: JoinAsk): Promise<Certified> {
   const join = ctx.db.transaction(async tx => {
     /* The machine's row first and the ticket after it, as Disconnect takes them: the other way round the two would wait
        on each other. */
-    const [named] = await tx.select({ machineId: machineTickets.machineId }).from(machineTickets).where(eq(machineTickets.ticketHash, hash));
+    const [named] = await tx.select(only(machineTickets, 'machineId')).from(machineTickets).where(eq(machineTickets.ticketHash, hash));
     const row = named ? await lockLiveMachine(tx, named.machineId) : null;
     const [ticket] = row ? await tx.select().from(machineTickets).where(eq(machineTickets.ticketHash, hash)).for('update') : [];
     if (!row || !ticket || ticket.expiresAt <= now) throw ticketUsed();
     if (ticket.usedAt && row.signKey !== ask.signKey) throw ticketUsed();
-    const [person] = await tx.select({ status: people.status }).from(people).where(eq(people.id, row.personId));
+    const [person] = await tx.select(only(people, 'status')).from(people).where(eq(people.id, row.personId));
     if (person?.status !== 'active') throw ticketUsed();
     if (ask.networkId !== hostIdOf(row.machineKey)) throw machineTaken();
     /* A disconnected row that still names this computer gives it up. A live one keeps it: its row is not locked here,
@@ -320,7 +320,7 @@ export async function signedRenewal(ctx: Ctx, ask: RenewAsk & { signature: strin
   const taken = await ctx.db.transaction(async tx => {
     const row = await lockLiveMachine(tx, ask.machine);
     if (!row) {
-      const [gone] = await tx.select({ signKey: machines.signKey }).from(machines).where(and(eq(machines.id, ask.machine), isNotNull(machines.revokedAt)));
+      const [gone] = await tx.select(only(machines, 'signKey')).from(machines).where(and(eq(machines.id, ask.machine), isNotNull(machines.revokedAt)));
       if (gone?.signKey && signedByMachine(gone.signKey, ask)) return null;
       throw notAMachine();
     }
