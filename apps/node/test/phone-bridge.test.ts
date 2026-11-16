@@ -20,19 +20,17 @@ function fixture(allow = true) {
   return { host, calls, authorization, replies };
 }
 
-it('accepts only a bound allowlisted USB operation and sends secrets to adb stdin only', async () => {
+it('accepts only a bound allowlisted USB operation and passes the agent\'s text to adb', async () => {
   const f = fixture();
-  await f.host.receive({ type: 'request', id: 'request-1', grant: grant(), operation: { kind: 'type', serial: SERIAL, value: 'BridgeOnlyMarker1079' } });
-  expect(f.calls.find(c => c.input)?.input).toContain('BridgeOnlyMarker1079');
-  expect(JSON.stringify(f.calls.map(c => c.args))).not.toContain('BridgeOnlyMarker1079');
-  expect(JSON.stringify(f.authorization)).not.toContain('BridgeOnlyMarker1079');
+  await f.host.receive({ type: 'request', id: 'request-1', grant: grant(), operation: { kind: 'act', serial: SERIAL, action: { kind: 'text', text: 'BridgeMarker1079' } } });
+  expect(f.calls.find(c => c.input)?.input).toBe("input text 'BridgeMarker1079'\n");
   expect(f.replies).toEqual([{ type: 'reply', id: 'request-1', status: 'ok', value: null }]);
   f.host.close();
 });
 
 it('rejects arbitrary shell, foreign serial, missing grant and server refusal before starting adb', async () => {
   const f = fixture();
-  for (const operation of [{ kind: 'shell', command: 'id' }, { kind: 'type', serial: 'OTHER', value: 'SecretMarker' }, { kind: 'tap', serial: SERIAL, x: 1, y: 1 }]) {
+  for (const operation of [{ kind: 'shell', command: 'id' }, { kind: 'act', serial: 'OTHER', action: { kind: 'tap', x: 1, y: 1 } }, { kind: 'tap', serial: SERIAL, x: 1, y: 1 }]) {
     await f.host.receive({ type: 'request', id: 'invalid', grant: grant(), operation });
   }
   await f.host.receive({ type: 'request', id: 'missing-grant', grant: null, operation: { kind: 'act', serial: SERIAL, action: { kind: 'tap', x: 1, y: 1 } } });
@@ -56,7 +54,7 @@ it('acknowledges cancel and a Stop barrier only after the old input has drained'
     if (call.input) { inputSignal = call.signal; started(); await drained; return Buffer.alloc(0); }
     return Buffer.from(call.args.at(-1) === 'ro.serialno' ? `${SERIAL}\n` : call.args.at(-1) === 'ro.product.manufacturer' ? 'Samsung\n' : '0\n');
   }), authorize: async () => true, send: reply => replies.push(reply) });
-  const work = host.receive({ type: 'request', id: 'input', grant: grant(), operation: { kind: 'type', serial: SERIAL, value: 'PrivateMarker1079' } });
+  const work = host.receive({ type: 'request', id: 'input', grant: grant(), operation: { kind: 'act', serial: SERIAL, action: { kind: 'text', text: 'Marker1079' } } });
   await running;
   const cancel = host.receive({ type: 'cancel', id: 'input' });
   const barrier = host.receive({ type: 'request', id: 'stop', grant: { ...grant(), generation: 4 }, operation: { kind: 'drain', serial: SERIAL } });

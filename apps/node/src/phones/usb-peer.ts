@@ -48,7 +48,6 @@ export class UsbPeer {
         if (!parsed.success || parsed.data.kind === 'capture') throw unavailable();
         await ask({ kind: 'act', serial, action: parsed.data }, z.null(), signal);
       },
-      type: async (serial, value, signal) => { await ask({ kind: 'type', serial, value }, z.null(), signal); },
     };
   }
 

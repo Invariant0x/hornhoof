@@ -37,9 +37,7 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
         const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/png' }).returning({ id: attachments.id });
         attachmentId = attachment!.id;
       }
-      const { width, height, elements, masked } = frame.capture;
-      const capture = { width, height, elements, masked };
-      await tx.insert(phoneFrames).values({ companyId: phone.companyId, sessionId: frame.sessionId, sequence: frame.sequence, at: new Date(frame.at), attachmentId, capture });
+      await tx.insert(phoneFrames).values({ companyId: phone.companyId, sessionId: frame.sessionId, sequence: frame.sequence, at: new Date(frame.at), attachmentId });
       expiresAt = new Date(ctx.clock() + PHONE_LEASE_MS);
       await tx.update(phoneSessions).set({ leaseUntil: expiresAt }).where(eq(phoneSessions.id, frame.sessionId));
     });
@@ -62,7 +60,7 @@ export async function livePhone(ctx: Ctx, me: Person, id: string) {
   const phone = await phoneById(ctx, me.companyId, id);
   phoneOwner(me, phone);
   const [latest] = await ctx.db.select({ frame: phoneFrames, status: phoneSessions.status }).from(phoneFrames).innerJoin(phoneSessions, eq(phoneSessions.id, phoneFrames.sessionId)).where(eq(phoneSessions.phoneId, id)).orderBy(desc(phoneSessions.order), desc(phoneFrames.sequence)).limit(1);
-  return { phone, frame: latest ? { sequence: latest.frame.sequence, at: latest.frame.at.toISOString(), masked: latest.frame.capture.masked, width: latest.frame.capture.width, height: latest.frame.capture.height, imageUrl: latest.frame.attachmentId ? `/api/phones/${id}/live/image?v=${latest.frame.sequence}` : null, status: latest.status } : null, attachmentId: latest?.frame.attachmentId ?? null };
+  return { phone, frame: latest ? { sequence: latest.frame.sequence, at: latest.frame.at.toISOString(), imageUrl: latest.frame.attachmentId ? `/api/phones/${id}/live/image?v=${latest.frame.sequence}` : null, status: latest.status } : null, attachmentId: latest?.frame.attachmentId ?? null };
 }
 
 export async function taskRecordings(ctx: Ctx, me: Person, taskId: string) {
@@ -75,7 +73,7 @@ export async function taskRecordings(ctx: Ctx, me: Person, taskId: string) {
     if (!await canViewAgent(ctx.db, me, agent)) continue;
     const frames = await ctx.db.select().from(phoneFrames).where(eq(phoneFrames.sessionId, session.id)).orderBy(asc(phoneFrames.sequence));
     recordings.push({ id: session.id, phone, agent: agent.name, status: session.status, reason: session.reason, startedAt: session.startedAt?.toISOString() ?? null, endedAt: session.endedAt?.toISOString() ?? null,
-      frames: frames.map(f => ({ sequence: f.sequence, at: f.at.toISOString(), masked: f.capture.masked, imageUrl: f.attachmentId ? `/api/phone-sessions/${session.id}/frames/${f.sequence}/image` : null })),
+      frames: frames.map(f => ({ sequence: f.sequence, at: f.at.toISOString(), imageUrl: f.attachmentId ? `/api/phone-sessions/${session.id}/frames/${f.sequence}/image` : null })),
     });
   }
   return { recordings };

@@ -5,8 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { companyPhones } from '../../db/schema.js';
 import { refusal } from '../../errors.js';
-import type { VaultAgent } from '../vault/access.js';
-import { acquirePhone, finishPhoneSession, phoneAction, reconcilePhone, sessionFor, sessionView } from './queue.js';
+import { acquirePhone, finishPhoneSession, phoneAction, reconcilePhone, sessionFor, sessionView, type PhoneAgent } from './queue.js';
 import { phoneView } from './store.js';
 
 type ToolAnswer = { value: unknown; png?: string | null };
@@ -24,8 +23,8 @@ async function answer(work: () => Promise<ToolAnswer>) {
   }
 }
 
-export function registerPhoneTools(server: McpServer, ctx: Ctx, actor: () => Promise<VaultAgent>): void {
-  server.registerTool('phones', { description: 'The company Android phones you may borrow, their owners, whether each is busy and how many agents wait. For a robot check ask the phone owner; never bypass it.' }, () => answer(async () => {
+export function registerPhoneTools(server: McpServer, ctx: Ctx, actor: () => Promise<PhoneAgent>): void {
+  server.registerTool('phones', { description: 'The company Android phones you may borrow, their owners, whether each is busy and how many agents wait.' }, () => answer(async () => {
     const me = await actor();
     const phones = await ctx.db.select().from(companyPhones).where(and(eq(companyPhones.companyId, me.companyId), isNull(companyPhones.removedAt))).orderBy(asc(companyPhones.createdAt), asc(companyPhones.id));
     return { value: { phones: await Promise.all(phones.map(p => phoneView(ctx, p))) } };
@@ -47,7 +46,7 @@ export function registerPhoneTools(server: McpServer, ctx: Ctx, actor: () => Pro
     return { value: await sessionView(ctx, await sessionFor(ctx, me, input.session)) };
   }));
   server.registerTool('phone_action', {
-    description: 'Observe or operate the real Android phone you hold, on the company account its owner signed in. Use one screen and one app or site at a time, never bulk messages. A robot check needs the phone owner; never bypass it. capture gives a sanitized PNG and element tree; tap and swipe use screen coordinates; url opens ordinary Chrome. Text accepts printable ASCII; ask the owner for other scripts. Never pass a password or code here: use vault_fill for the focused phone field. A lost reply has an unknown outcome: inspect before another action.',
+    description: 'Work on the real Android phone you hold as a person would, one screen and one app or site at a time, never bulk messages. capture gives the screen as PNG and its element tree; tap and swipe use screen coordinates; text types into the focused field, a login and password you hold too, printable ASCII only; app opens an installed app; url opens a page in Chrome. If a site\'s robot check stops you, do not bypass it: stop and write in the task what did not pass. A lost reply has an unknown outcome: capture before the next action.',
     inputSchema: { session: z.uuid(), operation: PhoneOperation },
   }, input => answer(async () => {
     const reply = await phoneAction(ctx, await actor(), input.session, input.operation);

@@ -29,7 +29,7 @@ async function setup(page: Page, language: Language, skin: string) {
   await page.route('**/api/phones/probe', route => route.fulfill({ json: { devices: [{ serial: '192.168.1.80:5555', model: 'Pixel 8', status: 'device', hardwareKey: 'a'.repeat(64) }] } }));
   await page.route('**/api/phones/ph1/stop', route => { registered = { ...phone, lending: false, state: 'owner' }; return route.fulfill({ json: registered }); });
   await page.route('**/api/phones/ph1/resume', route => { registered = phone; return route.fulfill({ json: registered }); });
-  await page.route('**/api/phones/ph1/live', route => route.fulfill({ json: { lending: true, frame: { sequence: 1, at: new Date(NOW).toISOString(), masked: true, imageUrl: null } } }));
+  await page.route('**/api/phones/ph1/live', route => route.fulfill({ json: { lending: true, frame: { sequence: 1, at: new Date(NOW).toISOString(), imageUrl: null } } }));
   await page.addInitScript(({ language, skin }) => { localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', skin); }, { language, skin });
   await page.goto('/machines', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: t.phones.heading })).toBeVisible();
@@ -71,7 +71,7 @@ for (const width of [375, 1440]) {
       const card = section.getByRole('article', { name: phone.name });
       await expect(card).toBeVisible();
       await card.getByRole('button', { name: t.phones.watch }).click();
-      await expect(card.getByText(t.phones.shielded).first()).toBeVisible();
+      await expect(card.getByText(t.phones.noPicture).first()).toBeVisible();
       await fits(card);
       await card.getByRole('button', { name: t.phones.stop, exact: true }).click();
       await expect(card.getByText(t.phones.paused, { exact: true })).toBeVisible();
@@ -90,7 +90,7 @@ for (const width of [375, 1440]) {
 
 test('task recording opens and advances with virtual time', async ({ page }) => {
   const t = await setup(page, 'en', 'cyberpunk');
-  await page.route('**/api/tasks/t1/phone-recordings', route => route.fulfill({ json: { recordings: [{ id: 's1', phone: 'Pixel', agent: 'Assistant', status: 'ended', reason: 'completed', startedAt: new Date(NOW).toISOString(), endedAt: new Date(NOW).toISOString(), frames: [1, 2].map(sequence => ({ sequence, at: new Date(NOW + sequence * 1000).toISOString(), masked: true, imageUrl: null })) }] } }));
+  await page.route('**/api/tasks/t1/phone-recordings', route => route.fulfill({ json: { recordings: [{ id: 's1', phone: 'Pixel', agent: 'Assistant', status: 'ended', reason: 'completed', startedAt: new Date(NOW).toISOString(), endedAt: new Date(NOW).toISOString(), frames: [1, 2].map(sequence => ({ sequence, at: new Date(NOW + sequence * 1000).toISOString(), imageUrl: null })) }] } }));
   await page.getByRole('navigation').getByRole('button', { name: t.shell.tabs.tasks, exact: true }).click();
   await openTaskCard(page, 1);
   const recording = page.getByRole('region', { name: t.phones.recordings });

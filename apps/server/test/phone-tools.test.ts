@@ -14,7 +14,7 @@ const value = (reply: Reply): Record<string, unknown> => {
 it('gives one agent the phone and queues the next until the first session ends', async () => {
   const c = await phoneCompany();
   const phone = (await c.addPhone()).json();
-  await expect(acquirePhone(c.app.ctx, { id: c.otherAgent.id, companyId: c.other.id, departmentId: null, jobId: null }, phone.id)).rejects.toMatchObject({ status: 403 });
+  await expect(acquirePhone(c.app.ctx, { id: c.otherAgent.id, companyId: c.other.id, jobId: null }, phone.id)).rejects.toMatchObject({ status: 403 });
   const first = await c.startTurn(c.nora.id, c.task.id);
   const second = await c.startTurn(c.sammy.id, c.task.id);
   const firstTools = await mcp(c.app, first.token);
@@ -33,4 +33,17 @@ it('gives one agent the phone and queues the next until the first session ends',
   const refused = value(await secondTools.callTool({ name: 'phone_action', arguments: { session: queued.id, operation: { kind: 'tap', x: 1, y: 2 } } }) as Reply);
   expect(refused.status).toBe('failed');
   expect(c.calls.filter(m => m.type === 'phone.action')).toEqual([]);
+});
+
+it('lets the agent type a login and password it holds as text, with no tool that signs in for it', async () => {
+  const c = await phoneCompany();
+  const phone = (await c.addPhone()).json();
+  const turn = await c.startTurn(c.nora.id, c.task.id);
+  const tools = await mcp(c.app, turn.token);
+  const listed = (await tools.listTools()).tools;
+  expect(listed.map(t => t.name).filter(name => /vault|fill|sign_?in|login|password/i.test(name))).toEqual([]);
+  expect(listed.find(t => t.name === 'phone_action')!.description).not.toMatch(/vault|never pass a password/i);
+  const session = value(await tools.callTool({ name: 'phone_acquire', arguments: { phone: phone.id } }) as Reply);
+  for (const text of ['nora@acme.test', 'Pass word%s 1079!']) await tools.callTool({ name: 'phone_action', arguments: { session: session.id, operation: { kind: 'text', text } } });
+  expect(c.calls.flatMap(m => m.type === 'phone.action' ? [m.operation] : [])).toEqual([{ kind: 'text', text: 'nora@acme.test' }, { kind: 'text', text: 'Pass word%s 1079!' }]);
 });

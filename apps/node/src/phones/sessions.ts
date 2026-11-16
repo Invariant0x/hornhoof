@@ -1,7 +1,7 @@
 import { PHONE_LEASE_MS, PhoneGrant } from '@hornhoof/protocol';
 
-type Held = { grant: PhoneGrant; stop: AbortController; timer: ReturnType<typeof setTimeout>; chain: Promise<unknown>; count: number; shields: number; epoch: number };
-export type PhoneSessionView = { grant: PhoneGrant; signal: AbortSignal; shielded: boolean; valid(): boolean };
+type Held = { grant: PhoneGrant; stop: AbortController; timer: ReturnType<typeof setTimeout>; chain: Promise<unknown>; count: number };
+export type PhoneSessionView = { grant: PhoneGrant; signal: AbortSignal; valid(): boolean };
 
 const gone = () => new Error('phone_session_gone');
 
@@ -24,7 +24,7 @@ export class PhoneSessions {
       return;
     }
     if (grant.generation <= (this.#fences.get(grant.binding.serial) ?? -1)) throw gone();
-    const held: Held = { grant, stop: new AbortController(), timer: setTimeout(() => this.revoke(grant.sessionId, grant.generation), until - Date.now()), chain: Promise.resolve(), count: 0, shields: 0, epoch: 0 };
+    const held: Held = { grant, stop: new AbortController(), timer: setTimeout(() => this.revoke(grant.sessionId, grant.generation), until - Date.now()), chain: Promise.resolve(), count: 0 };
     held.timer.unref();
     this.#held.set(grant.sessionId, held);
     this.#serials.set(grant.binding.serial, held);
@@ -45,8 +45,7 @@ export class PhoneSessions {
   view(id: string, generation: number): PhoneSessionView {
     const held = this.#held.get(id);
     if (!held || held.stop.signal.aborted || held.grant.generation !== generation || Date.parse(held.grant.expiresAt) <= Date.now()) throw gone();
-    const epoch = held.epoch;
-    return { grant: held.grant, signal: held.stop.signal, shielded: held.shields > 0, valid: () => !held.stop.signal.aborted && held.epoch === epoch && Date.parse(held.grant.expiresAt) > Date.now() };
+    return { grant: held.grant, signal: held.stop.signal, valid: () => !held.stop.signal.aborted && Date.parse(held.grant.expiresAt) > Date.now() };
   }
 
   async use<T>(id: string, generation: number, work: (state: PhoneSessionView) => Promise<T>): Promise<T> {
@@ -70,7 +69,6 @@ export class PhoneSessions {
   revoke(id: string, generation: number): void {
     const held = this.#held.get(id);
     if (!held || generation < held.grant.generation) return;
-    held.epoch++;
     held.stop.abort();
     clearTimeout(held.timer);
     if (!held.count) this.forget(held);
@@ -84,20 +82,6 @@ export class PhoneSessions {
 
   async drained(id: string): Promise<void> {
     await this.#held.get(id)?.chain;
-  }
-
-  shield(id: string, generation: number): () => void {
-    this.view(id, generation);
-    const held = this.#held.get(id)!;
-    held.shields++;
-    held.epoch++;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      held.shields--;
-      held.epoch++;
-    };
   }
 
   close(): void {

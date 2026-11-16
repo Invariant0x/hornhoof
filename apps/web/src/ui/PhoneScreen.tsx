@@ -3,15 +3,15 @@ import { api } from '../api';
 import { useT } from '../i18n';
 import type { PhoneView } from './Phones';
 
-export type PhoneFrameView = { sequence: number; at: string; masked: boolean; imageUrl: string | null };
+export type PhoneFrameView = { sequence: number; at: string; imageUrl: string | null };
 
 export function PhoneFrame({ frame, name }: { frame: PhoneFrameView; name: string }) {
   const t = useT();
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [frame.imageUrl]);
   return <figure className="phone-screen">
-    {frame.imageUrl && !failed ? <img src={frame.imageUrl} alt={t.phones.screenFor(name)} onError={() => setFailed(true)} /> : <p>{failed ? t.phones.screenError : t.phones.shielded}</p>}
-    <figcaption><time dateTime={frame.at}>{t.phones.updated(new Date(frame.at).toLocaleString())}</time>{frame.masked && <p>{t.phones.shielded}</p>}</figcaption>
+    {frame.imageUrl && !failed ? <img src={frame.imageUrl} alt={t.phones.screenFor(name)} onError={() => setFailed(true)} /> : <p>{failed ? t.phones.screenError : t.phones.noPicture}</p>}
+    <figcaption><time dateTime={frame.at}>{t.phones.updated(new Date(frame.at).toLocaleString())}</time></figcaption>
   </figure>;
 }
 

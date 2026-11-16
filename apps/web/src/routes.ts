@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 /* The parts of the Settings window that have an address of their own, /settings/<group>: Profile, then the groups after
    Appearance & language, which opens at /settings. */
-export const SETTINGS_GROUPS = ['profile', 'integrations', 'passwords', 'messaging', 'company'] as const;
+export const SETTINGS_GROUPS = ['profile', 'integrations', 'messaging', 'company'] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 export type Route =

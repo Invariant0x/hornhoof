@@ -10,13 +10,13 @@ const PHONE: PhoneView = { id: 'ph1', name: 'My Pixel', owner: { id: ME.person.i
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
-  onTestFinished(() => vi.useRealTimers());
+  onTestFinished(() => { vi.useRealTimers(); });
 });
 
 it('shows only the owner controls and hides the live picture as soon as Stop returns', async () => {
   mockApi({
     'GET /api/phones': [200, { phones: [PHONE, { ...PHONE, id: 'ph2', name: 'Other phone', owner: { id: 'p2', name: 'Clara' } }] }],
-    'GET /api/phones/ph1/live': [200, { lending: true, frame: { sequence: 1, at: '2026-11-16T12:00:00Z', masked: true, imageUrl: '/api/phones/ph1/live/image?s=s1&v=1' } }],
+    'GET /api/phones/ph1/live': [200, { lending: true, frame: { sequence: 1, at: '2026-11-16T12:00:00Z', imageUrl: '/api/phones/ph1/live/image?s=s1&v=1' } }],
     'POST /api/phones/ph1/stop': [200, { ...PHONE, lending: false, state: 'owner', stopping: true }],
   });
   render(<Phones me={ME} machines={[MACHINE]} />);
