@@ -98,7 +98,7 @@ async function entryFor(ctx: Ctx, agent: VaultAgent, ref: string): Promise<Entry
   return entry;
 }
 
-/* The node the agent's turn runs on: the node of its browser. */
+/* The node the agent's turn runs on, the node of its browser, and the task of the turn. */
 async function nodeOfJob(ctx: Ctx, jobId: string): Promise<{ node: NodeIdentity | null; taskId: string | null }> {
   const [row] = await ctx.db
     .select({ nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine, taskId: jobs.taskId, kind: subscriptions.kind })
@@ -118,14 +118,13 @@ function fieldsFor(entry: Entry, asked: FillField[] | undefined, target: FillKin
   return entry.totpEnc ? ['login', 'password', 'code'] : ['login', 'password'];
 }
 
-async function targetFor(ctx: Ctx, state: State, agent: VaultAgent, entry: Entry, req: FillRequest): Promise<{ node: NodeIdentity | null; target: FillTarget }> {
+async function targetFor(ctx: Ctx, state: State, agent: VaultAgent, entry: Entry, req: FillRequest, jobNode: NodeIdentity | null): Promise<{ node: NodeIdentity | null; target: FillTarget }> {
   if (req.target === 'browser') {
     if (!webAddress(entry.site)) throw invalid("This entry's site is not a web address, so the browser does not know where it may sign in. A person sets the address in the vault.");
     const address = req.address ?? entry.site;
     /* The values go only into a page of the entry's own site, wherever an agent asks. */
     if (!ofEntrySite(entry.site, address)) throw notAllowed("This address is not of the entry's site.");
-    const { node } = agent.jobId ? await nodeOfJob(ctx, agent.jobId) : { node: null };
-    return { node, target: { kind: 'browser', address } };
+    return { node: jobNode, target: { kind: 'browser', address } };
   }
   if (!req.phoneSession) throw invalid('Name the phone session you hold.');
   const site = webAddress(entry.site) ? entry.site : null;
@@ -144,11 +143,11 @@ export async function fillEntry(ctx: Ctx, agent: VaultAgent, req: FillRequest): 
   const state = stateOf(ctx);
   const entry = await entryFor(ctx, agent, req.entry);
   const fields = fieldsFor(entry, req.fields, req.target);
-  const { node, target } = await targetFor(ctx, state, agent, entry, req);
-  const taskId = agent.jobId ? (await nodeOfJob(ctx, agent.jobId)).taskId : null;
+  const job = agent.jobId ? await nodeOfJob(ctx, agent.jobId) : { node: null, taskId: null };
+  const { node, target } = await targetFor(ctx, state, agent, entry, req, job.node);
   const [use] = await ctx.db
     .insert(vaultLog)
-    .values({ companyId: entry.companyId, entryId: entry.id, entryName: entry.name, site: entry.site, kind: 'used', agentId: agent.id, jobId: agent.jobId, taskId, target: req.target, fields, status: 'sent' })
+    .values({ companyId: entry.companyId, entryId: entry.id, entryName: entry.name, site: entry.site, kind: 'used', agentId: agent.id, jobId: agent.jobId, taskId: job.taskId, target: req.target, fields, status: 'sent' })
     .returning({ id: vaultLog.id });
   const end = async (status: FillAnswerStatus, extra: Partial<FillAnswer> = {}): Promise<FillAnswer> => {
     await ctx.db.update(vaultLog).set({ status, endedAt: new Date() }).where(eq(vaultLog.id, use!.id));
