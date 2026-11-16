@@ -1,10 +1,10 @@
 import { createHash, generateKeyPairSync, sign, webcrypto } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { companies, computerRuns, machines, people, personKeys } from '../src/db/schema.js';
 import { bundleRows } from '../src/modules/backups/records.js';
@@ -24,34 +24,13 @@ import { refreshBuild } from '../src/modules/network/follow.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { authorityOf } from '../src/modules/network/store.js';
-import { as, SETUP, TEST_SECRET, testApp, until } from './helpers.js';
+import { as, SETUP, TEST_SECRET, testApp } from './helpers.js';
 
 import { type Company, DAY_MS, HOST_ID, MAC, SLEEPER, ask, company, folder, hasLeader, heldIn, hostIdOf, worker, workerOn } from './worker-keeper-fixture.js';
 
-/* Recurring work is stepped explicitly. Request deadlines and the wall clock stay still while sockets and the
-   database answer, however busy the machine is. Native AbortSignal timers need the same virtual scheduler. */
-function controlledTime(): void {
-  vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
-  const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), ms).unref();
-    return controller.signal;
-  });
-  onTestFinished(() => { timeout.mockRestore(); vi.useRealTimers(); });
-}
+import { appAt, controlledTime, registerStep, until } from './worker-keeper-time.js';
 
-/* The join still runs the real app route. An injected fetch keeps the HTTP client's own native deadlines out of a
-   test of our keeper; serving the joined machine's front door still goes over its actual peer link. */
-function joinAt(c: Company): typeof fetch {
-  return async (input, init) => {
-    expect(init?.method).toBe('POST');
-    if (typeof init?.body !== 'string') throw new Error('The keeper did not send JSON.');
-    const url = new URL(String(input));
-    expect(url.origin).toBe(`http://127.0.0.1:${c.appPort}`);
-    const res = await c.app.inject({ method: 'POST', url: url.pathname, headers: Object.fromEntries(new Headers(init.headers)), payload: init.body });
-    return new Response(res.body, { status: res.statusCode });
-  };
-}
+beforeEach(controlledTime);
 
 /* A certificate of the company's authority for the worker's key, issued so long ago that it has ended. */
 async function expire(c: Company, w: { machine: string; config: WorkerConfig }): Promise<HeldCertificate> {
@@ -67,9 +46,8 @@ async function expire(c: Company, w: { machine: string; config: WorkerConfig }):
    of both: on a loaded runner that takes longer than the limit of a plain test. */
 describe("a worker's keeper", { timeout: 60_000 }, () => {
   it('joins with its ticket and serves the company on its front door', async () => {
-    controlledTime();
     const c = await company({}, {}, {}, undefined, true);
-    const w = await worker(c, { fetch: joinAt(c) });
+    const w = await worker(c);
     await until(() => hasLeader(w.status()));
     const server = await c.serverRow();
     expect(w.status()).toEqual({ role: 'worker', commit: 'w0rker', machine: w.machine, certificate: true, leader: { machine: server!.id, hostname: null, path: 'direct' }, disconnected: false });
@@ -216,8 +194,8 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
       }
     };
     if (!manual) {
-      const timer = setInterval(step, 10);
-      onTestFinished(() => clearInterval(timer));
+      const remove = registerStep(step);
+      onTestFinished(remove);
     }
     return step;
   }
@@ -264,6 +242,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const control = folder();
     const fresh = await testApp({ HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: hostIdOf('new-server-0001') });
     await fresh.app.listen({ host: '127.0.0.1', port: c.appPort });
+    appAt(c.appPort, fresh.app);
     const code = setupCode(fresh.config.secret);
     const begun = await fresh.app.inject({ method: 'POST', url: '/api/recovery', payload: { code, file: held.recoveryFile } });
     expect(begun.statusCode).toBe(200);
@@ -275,13 +254,12 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     expect(createHash('sha256').update(sent).digest('hex')).toBe(held.sha256);
     expect(w.lines.filter(line => line.startsWith('survivor:') && line.endsWith('answered'))).toHaveLength(1);
     /* The CEO can restore it there, with no database to check it against. */
-    writeFileSync(join(control, 'alive'), '');
+    updaterAlive(control);
     const restore = await fresh.app.inject({ method: 'POST', url: '/api/recovery/restore', payload: { code, id: held.id } });
     expect(restore.statusCode).toBe(202);
   });
 
   it('keeps its bundles behind an older leader, and goes on reporting to it', async () => {
-    controlledTime();
     /* A leader an update took back to the build before: it knows nothing of backups. */
     let older = false;
     const seen: { via: string; words: boolean }[] = [];
@@ -293,7 +271,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
       seen.push({ via, words });
       return words ? 400 : null;
     }, true);
-    const w = await worker(c, { holderEveryMs: 30, fetch: joinAt(c) });
+    const w = await worker(c, { holderEveryMs: 30 });
     await until(() => hasLeader(w.status()) && c.keeper['backups'] !== null && w.keeper['ageRecipient'] !== null);
     await w.keeper['report']();
     const saved = await c.app.inject({ method: 'POST', url: '/api/backups/recovery', ...as(c.ceo) });
@@ -383,6 +361,8 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     await w.stop();
     await c.stop();
     const again = await workerOn(c, w.config);
+    vi.setSystemTime(Date.now() + 50);
+    again.keeper['look']();
     expect(again.status()).toMatchObject({ certificate: true, machine: w.machine, leader: null, disconnected: false });
     const page = await ask(again.front, { path: '/tasks', headers: { accept: 'text/html' } });
     expect(page.status).toBe(503);
@@ -584,7 +564,11 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
       return null;
     }
   };
-  const updaterAlive = (control: string) => writeFileSync(join(control, 'alive'), '');
+  const updaterAlive = (control: string) => {
+    const file = join(control, 'alive');
+    writeFileSync(file, '');
+    utimesSync(file, new Date(), new Date());
+  };
   async function command(c: Company, machine: string, text: string): Promise<string> {
     const [acme] = await c.db.select().from(companies);
     const [run] = await c.db.insert(computerRuns).values({ companyId: acme!.id, machineId: machine, command: text, timeoutS: 30 }).returning();
@@ -642,7 +626,6 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
   });
 
   it('carries computer access over the peer link, opened only by what its owner signed', async () => {
-    controlledTime();
     const c = await company({}, {}, {}, undefined, true);
     const { subtle } = webcrypto;
     const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
@@ -653,7 +636,7 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const { machine, ticket } = await c.joined();
     const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey, hostOs: 'darwin', survivorMs: 600_000 };
     updaterAlive(config.controlDir);
-    const w = await workerOn(c, config, { fetch: joinAt(c) });
+    const w = await workerOn(c, config);
     await until(() => hasLeader(w.status()));
     await w.keeper['report']();
     expect((await c.rowOf(machine)).ownerPin).toBe(keyPrint(ownerKey));
