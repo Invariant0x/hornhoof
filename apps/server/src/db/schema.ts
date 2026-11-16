@@ -197,6 +197,7 @@ export const assistantReplies = pgTable(
     assistantId: uuid('assistant_id').notNull().references(() => people.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     messageId: uuid('message_id').notNull(),
+    byOwnAgent: boolean('by_own_agent').notNull().default(false),
     jobId: uuid('job_id').notNull().references(() => jobs.id),
     afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
     answered: boolean('answered').notNull().default(false),
@@ -2818,3 +2819,36 @@ export const autonomousReleases = pgTable('autonomous_releases', {
   check('autonomous_releases_commit_sha', sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
   check('autonomous_releases_base_commit_sha', sql`${t.baseCommitSha} ~ '^[0-9a-f]{40}$'`),
 ]);
+
+/* The company's vault of site sign-ins. A person types them into Hornhoof's form, or gives them to an agent that saves
+   them; the password and the code secret are kept encrypted with the server's key, and every agent of the company takes
+   them as text to sign in. Who added an entry is a person or an agent. */
+export const vaultEntries = pgTable('vault_entries', {
+  id: id(),
+  companyId: companyId(),
+  name: text('name').notNull(),
+  site: text('site').notNull(),
+  login: text('login').notNull(),
+  passwordEnc: text('password_enc').notNull(),
+  /* The one-time code's secret, digits, period and algorithm, as JSON; none when the site asks for no code. */
+  totpEnc: text('totp_enc'),
+  createdBy: uuid('created_by').references(() => people.id),
+  createdByAgent: uuid('created_by_agent').references(() => agents.id),
+  createdAt: createdAt(),
+}, t => [uniqueIndex('vault_entries_company_name').on(t.companyId, sql`lower(${t.name})`)]);
+
+/* Who added, changed, removed or took which entry, when, and for which task; never a value. The name and site stay as they
+   were, so the log still reads after the entry is gone. */
+const VAULT_LOG_KINDS = ['created', 'changed', 'removed', 'taken'] as const;
+export const vaultLog = pgTable('vault_log', {
+  id: id(),
+  companyId: companyId(),
+  entryId: uuid('entry_id').references(() => vaultEntries.id, { onDelete: 'set null' }),
+  entryName: text('entry_name').notNull(),
+  site: text('site').notNull(),
+  kind: text('kind', { enum: VAULT_LOG_KINDS }).notNull(),
+  personId: uuid('person_id').references(() => people.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+  at: createdAt(),
+}, t => [index('vault_log_entry_at').on(t.entryId, t.at), index('vault_log_company_at').on(t.companyId, t.at)]);

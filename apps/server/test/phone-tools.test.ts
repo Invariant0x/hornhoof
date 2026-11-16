@@ -41,8 +41,9 @@ it('lets the agent type a login and password it holds as text, with no tool that
   const turn = await c.startTurn(c.nora.id, c.task.id);
   const tools = await mcp(c.app, turn.token);
   const listed = (await tools.listTools()).tools;
-  expect(listed.map(t => t.name).filter(name => /vault|fill|sign_?in|login|password/i.test(name))).toEqual([]);
-  expect(listed.find(t => t.name === 'phone_action')!.description).not.toMatch(/vault|never pass a password/i);
+  /* The vault gives a sign-in as text; no tool puts one into a form for the agent. */
+  expect(listed.map(t => t.name).filter(name => /fill|sign_?in|login|password/i.test(name))).toEqual([]);
+  expect(listed.find(t => t.name === 'phone_action')!.description).not.toMatch(/fill|never pass a password/i);
   const session = value(await tools.callTool({ name: 'phone_acquire', arguments: { phone: phone.id } }) as Reply);
   for (const text of ['nora@acme.test', 'Pass word%s 1079!']) await tools.callTool({ name: 'phone_action', arguments: { session: session.id, operation: { kind: 'text', text } } });
   expect(c.calls.flatMap(m => m.type === 'phone.action' ? [m.operation] : [])).toEqual([{ kind: 'text', text: 'nora@acme.test' }, { kind: 'text', text: 'Pass word%s 1079!' }]);

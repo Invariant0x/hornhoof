@@ -27,6 +27,7 @@ import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
 import { registerTelegramTools } from '../telegram/tools.js';
 import { registerGoogleSheetsTools } from '../google/tools.js';
+import { registerVaultTools } from '../vault/tools.js';
 import { registerPhoneTools } from '../phones/tools.js';
 import { registerTestTools } from '../testruns/tools.js';
 import { registerInboxTools } from './inbox.js';
@@ -76,7 +77,8 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: stri
   registerInboxTools(server, ctx, job);
   registerTelegramTools(server, ctx, job);
   registerGoogleSheetsTools(server, ctx, job);
-  registerPhoneTools(server, ctx, async () => ({ id: job.agentId, companyId: job.companyId, jobId: job.id }));
+  registerVaultTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
+  registerPhoneTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   registerApprovalTools(server, ctx, job);
   registerOutboundTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
