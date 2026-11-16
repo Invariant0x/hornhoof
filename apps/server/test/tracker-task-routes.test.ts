@@ -76,6 +76,8 @@ describe('a person edits what the tracker keeps of a task', () => {
 
     const stale = await send('PATCH', oleg, `/api/tasks/${task.id}`, { title: 'Again', version: task.version });
     expect([stale.statusCode, stale.json().error.reason]).toEqual([409, 'task_changed']);
+    expect((await get(oleg, `/api/tasks/${task.id}`)).json().task.mayEdit).toBe(true);
+    expect((await get(maria, `/api/tasks/${task.id}`)).json().task.mayEdit).toBe(false);
     const other = await send('PATCH', maria, `/api/tasks/${task.id}`, { title: 'Mine', version: task.version + 1 });
     expect([other.statusCode, other.json().error.reason]).toEqual([403, 'task_not_yours']);
     const executor = await send('PATCH', oleg, `/api/tasks/${task.id}`, { executor: 'someone', version: task.version + 1 });
