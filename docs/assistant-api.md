@@ -71,7 +71,7 @@ An error answers with a status and this body:
 | 403 | `decision_not_allowed` | The owner does not take this decision. |
 | 404 | `agent_unknown` | There is no such agent in the company, or it was removed. |
 | 404 | `request_unknown` | There is no such request in the company. |
-| 404 | `attachment_unknown` | There is no such file of the assistant's own agent: see "GET /api/assistant/attachments/:id". |
+| 404 | `attachment_unknown` | There is no such file visible to the owner: see "GET /api/assistant/attachments/:id". |
 | 409 | `orchestrator_not_ready`, `agent_not_ready` | The agent cannot answer right now, for example while it has no plan to run on, or the message has no `agentId` and the assistant has no agent of its own yet. Try again later. |
 | 409 | `request_closed` | The request is answered already. |
 | 400 | `task_invalid` | The answer does not fit the request: see "Answer a request". |
@@ -239,14 +239,14 @@ No other field is allowed. Answers `200`:
 
 ### GET /api/assistant/attachments/:id
 
-Downloads a file the assistant's own agent put in Hornhoof, by the id its agent got for it: see "Skills" for how the id comes to the program. The call carries the key as every call does.
+Downloads a file its owner may download in Hornhoof now, by its attachment id. This includes files on tasks, in agent chats and in messages or requests, and files the assistant's own agent put there: see "Skills" for how that id comes to the program. The call carries the key as every call does.
 
 ```
 GET /api/assistant/attachments/3f0c9a6e-…
 Authorization: Bearer hha_…
 ```
 
-Answers `200` with the file's bytes exactly as the agent sent them, and these headers:
+Answers `200` with the file's bytes exactly as they were kept, and these headers:
 
 ```
 HTTP/1.1 200 OK
@@ -257,10 +257,10 @@ X-Content-Type-Options: nosniff
 Content-Security-Policy: default-src 'none'
 ```
 
-* `Content-Type` is the type Hornhoof kept the file with: `image/png`, `image/jpeg` or `image/webp` for a picture, `application/octet-stream` for any other file.
+* `Content-Type` is the type Hornhoof kept the file with. A file uploaded by `hh-attach` is kept as `image/png`, `image/jpeg` or `image/webp` for a chat picture, and `application/octet-stream` for any other file.
 * `Content-Disposition` carries the file's name twice. `filename*` is the whole name in UTF-8, percent-encoded (RFC 5987); take it. `filename` is the same name in plain ASCII for a program that does not read `filename*`: a letter with marks goes without them, and any other letter, a quote, a backslash or a line break goes as `_`.
-* The same file downloads as often as the program asks for it, with the same bytes. Downloading it removes nothing; Hornhoof keeps it 30 days after the agent put it.
-* Only a file the assistant's own agent put there itself with `hh-attach` downloads, by this assistant's key. A file of any other agent of the company, another assistant's own agent among them, a picture or file a person sent, a file of another company, an id nothing has and something that is no id at all all answer the same `404 attachment_unknown`, with the same body and headers, so the answer never tells whether such a file exists.
+* The same file downloads as often as the program asks for it while its owner still has access. Downloading it removes nothing. Ordinary task and chat retention rules apply.
+* Each download uses the same visibility rule as the owner's interface, with the owner's current rights. An unavailable file, a file of another company, an id nothing has and something that is no id at all all answer the same `404 attachment_unknown`, with the same body and headers, so the answer never tells whether such a file exists. Hornhoof's screenshots of agent programs and operator case files remain unavailable through this route, even when the owner may see the case in the interface.
 * No key, a key in another form, a replaced or revoked key, or an assistant that is switched off answer `401 assistant_key_invalid`, as for every call, before the id is looked at; an owner who is switched off or gone `403 assistant_owner_inactive`.
 
 ## MCP
@@ -312,7 +312,7 @@ X-Hornhoof-Signature: sha256=<64 hex characters>
 { "ok": true, "text": "Two meetings today: 11:00 with Oleg, 15:30 with the bank.", "data": { "meetings": 2 } }
 ```
 
-* The agent reads `text`, followed by `data` as JSON when there is `data`. With `ok` false, it reads `text` as a failure of the skill.
+* The agent reads `text`, followed by `data` as JSON when there is `data`. With `ok` false, it reads these as a failure of the skill, with an explicit instruction not to report success, to explain the reason, and for a refused file delivery to tell the owner the file did not arrive.
 * Any other status, a redirect, no answer within 120 seconds, a bigger answer or a body without `ok` and `text` is a failure the agent reads in words. Hornhoof does not try a call again; the agent decides.
 * The skills address is an `http` or `https` address of at most 500 characters. Use `https` unless the program runs on the same machine or network as Hornhoof.
 
@@ -323,6 +323,8 @@ A skill may take a file the agent makes or has, for example a report to send in 
 1. In its turn, the agent puts the file in Hornhoof with `hh-attach --chat FILE` (any file up to 50 MB), which prints the file's name and its id. Its instructions tell it to.
 2. The agent calls `persona_call` with that id in the skill's arguments, under the name the program's message gives for it, for example `{"name":"send_file","arguments":{"attachmentId":"3f0c9a6e-…"}}`.
 3. The program downloads the file with `GET /api/assistant/attachments/3f0c9a6e-…` and its key, takes the name from `Content-Disposition`, and answers the skill's call.
+
+Hornhoof serves the bytes; the assistant program performs the external delivery. A successful download is no proof that a file reached Telegram or another destination. The program returns `ok: false` and a reason when it refuses delivery, for example `file_unknown`; the agent receives that refusal through `persona_call` as an error, with instructions to tell the owner the file did not arrive. Hornhoof cannot detect a delivery failure the program does not report.
 
 The program may download the file again, for example when it tries again. Hornhoof keeps the file 30 days after the agent put it, as every file of an agent's chat.
 
