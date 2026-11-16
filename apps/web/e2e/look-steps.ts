@@ -21,10 +21,20 @@ export async function messagesFor(locale: Language): Promise<Messages> {
   return dictionary[locale]!;
 }
 
+/* What WebKit says of a request to the app's API that a navigation of the page cut off, the page having caught it or
+   not: "Fetch API cannot load <origin>/api/... due to access control checks." That is the engine's word, and no error
+   of the page (#1090), and it is all that is let go: a rejection nobody caught still comes as "TypeError: Load failed",
+   and a request cut off anywhere but the API counts. Read from the first line of the stack, which keeps the address. */
+export function cutByNavigation(page: Page, error: Error): boolean {
+  if (page.context().browser()?.browserType().name() !== 'webkit') return false;
+  const origin = new URL(page.url()).origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^Fetch API cannot load ${origin}/api/\\S* due to access control checks\\.$`).test(error.stack?.split('\n', 1)[0] ?? '');
+}
+
 /* Errors of the page, and any file of the app it could not load. */
 export function watchProblems(page: Page): string[] {
   const problems: string[] = [];
-  page.on('pageerror', error => problems.push(error.message));
+  page.on('pageerror', error => { if (!cutByNavigation(page, error)) problems.push(error.message); });
   page.on('response', response => { if (!new URL(response.url()).pathname.startsWith('/api/') && response.status() >= 400) problems.push(`${response.status()} ${response.url()}`); });
   return problems;
 }

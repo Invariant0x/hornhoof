@@ -1,7 +1,7 @@
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { countOnly, idOnly } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
-import { and, asc, eq, inArray, isNotNull, isNull, like, max, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, like, max, notExists, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -225,18 +225,26 @@ const builtinsFirstOwn = (ctx: Ctx): string[] => {
   return ctx.hub.builtins().sort((a, b) => Number(b === own) - Number(a === own) || (a < b ? -1 : 1));
 };
 
-/* The company's computer a built-in node runs on, and whether that computer lends itself to runs: taken back, it lends
-   none of its nodes. The server's own runs on the computer whose key install.sh named as its host, another machine's on
-   the row that holds its id in the network. One on no computer of the company is lent, as it always was. machineId: the
-   computer, none for the server's own. */
+/* The company's computer a built-in node runs on: the server's own runs on the computer whose key install.sh named as its
+   host, another machine's on the row that holds its id in the network. None when it runs on no computer of the company. */
+async function builtinComputer(ctx: Ctx, companyId: string, machine: string): Promise<string | null> {
+  if (machine === ownMachine(ctx.config)) return (await builtinMachine(ctx.db, ctx.config.hostId, companyId, ctx.config.machineId))?.id ?? null;
+  const [row] = await ctx.db.select(idOnly(machines)).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
+  return row?.id ?? null;
+}
+
+/* Whether a built-in node is lent, as a condition its write checks: taken back, the computer it runs on lends none of
+   its nodes. One on no computer of the company is lent, as it always was. */
+export async function builtinLent(ctx: Ctx, companyId: string, machine: string): Promise<SQL> {
+  const computer = await builtinComputer(ctx, companyId, machine);
+  return computer ? notExists(ctx.db.select(idOnly(machines)).from(machines).where(and(eq(machines.id, computer), eq(machines.lendsTests, false)))) : sql`true`;
+}
+
+/* The computer a built-in node runs on, none for the server's own, and whether it lends itself to runs. */
 async function builtinHost(ctx: Ctx, companyId: string, machine: string): Promise<{ machineId: string | null; lent: boolean }> {
-  if (machine !== ownMachine(ctx.config)) {
-    const [row] = await ctx.db.select({ id: machines.id, lent: machines.lendsTests }).from(machines).where(and(eq(machines.networkId, machine), isNull(machines.revokedAt)));
-    return { machineId: row?.id ?? null, lent: row?.lent ?? true };
-  }
-  const host = await builtinMachine(ctx.db, ctx.config.hostId, companyId, ctx.config.machineId);
-  const [row] = host ? await ctx.db.select({ lent: machines.lendsTests }).from(machines).where(eq(machines.id, host.id)) : [];
-  return { machineId: null, lent: row?.lent ?? true };
+  const computer = await builtinComputer(ctx, companyId, machine);
+  const [row] = computer ? await ctx.db.select({ lent: machines.lendsTests }).from(machines).where(eq(machines.id, computer)) : [];
+  return { machineId: machine === ownMachine(ctx.config) ? null : computer, lent: row?.lent ?? true };
 }
 
 const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
