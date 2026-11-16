@@ -297,7 +297,9 @@ export function TrackerGraph({ forest, crumbs, top, onCrumb, rows, onOpenGoal, s
           ))}
         </fieldset>
       )}
-      <Canvas key={stages?.on ? 'stages' : 'work'} forest={forest} rows={rows} onOpenGoal={onOpenGoal} />
+      {/* A canvas of its own for each place, root and mode drawn: one moved by hand never hides the next root off the screen,
+          while new work on the same tree keeps it where the person put it. */}
+      <Canvas key={JSON.stringify([stages?.on ? 'stages' : 'work', top, crumbs.map(c => c.id)])} forest={forest} rows={rows} onOpenGoal={onOpenGoal} />
     </section>
   );
 }
