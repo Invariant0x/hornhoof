@@ -12,7 +12,6 @@ import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { builtinOf, nodeIdentity, ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { builtinMachine, liveNode, shownMachine } from '../nodes/nodes.js';
-import { bindCandidateRun, candidateForRun, type CandidateRun, type EchelonRun } from '../tasks/echelons-run.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
@@ -23,7 +22,6 @@ import { wakeAll } from '../tasks/wake.js';
 import type { RunJob, ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
 import { markPromise, markRun, TESTS_CONTEXT, type RunMark } from './github-status.js';
-import { requireReleaseBranch } from './release.js';
 import { forRun, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
 import { checkNamedFiles } from './named-files.js';
@@ -159,9 +157,9 @@ const markLine = (kind: RunKind, found: { department: { repoFullTestCommand: str
 function scopeLines(run: Run): string[] {
   const snapshot = run.environmentSnapshot, suite = run.environmentRequest?.suite;
   if (run.kind !== 'tests' || run.command !== '' || !snapshot) return [];
-  const scope = runScope(scopeSource(snapshot), suite, 0), whole = [...new Set(['final', scope.fullProfile ?? 'final'])].join(' or ');
-  const left = scope.leftOut.length || scope.since ? [`It ran profile ${scope.profile}${scopeWords(scope)}`] : [];
-  return runPurpose(snapshot, suite) === 'final' ? left : [...left, `It leaves no ${TESTS_CONTEXT} on its commit: only a run of the whole product, with no one suite, of profile ${whole}, does.`];
+  const scope = runScope(scopeSource(snapshot), suite, 0);
+  const left = scope.leftOut.length ? [`It ran profile ${scope.profile}${scopeWords(scope)}`] : [];
+  return runPurpose(snapshot, suite) === 'final' ? left : [...left, `It leaves no ${TESTS_CONTEXT} on its commit: only a run of the whole product, with no one suite, does.`];
 }
 
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
@@ -615,7 +613,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 }
 
 /* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs; repeatable: it may run twice. */
-export type RunInput = { candidate?: EchelonRun; task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
+export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
 export async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
@@ -636,9 +634,9 @@ const taskDepartment = async (ctx: Ctx, task: Pick<Task, 'productId' | 'departme
 
 /* What a run's parts check. A test run reads the exact commit from its repository here, before any part goes out, so a
    push after this moment changes nothing about what the run proves. A run of work clones its branch as it finds it. */
-async function pinCommit(ctx: Ctx, task: Pick<Task, 'number'>, kind: RunKind, branch: string | undefined, found: { repo: Repo } | null): Promise<{ branch: string | null; commitSha: string | null }> {
-  if (kind !== 'tests' || !found) return { branch: branch ?? null, commitSha: null };
-  const at = await ctx.readCommit(found.repo, branch ? { branch } : { task: task.number });
+async function pinCommit(ctx: Ctx, kind: RunKind, branch: string | undefined, found: { repo: Repo } | null): Promise<{ branch: string | null; commitSha: string | null }> {
+  if (kind !== 'tests' || !found || !branch) return { branch: branch ?? null, commitSha: null };
+  const at = await ctx.readCommit(found.repo, { branch });
   if ('problem' in at) throw refuse(409, 'repo_invalid', at.problem);
   return at;
 }
@@ -678,7 +676,7 @@ async function prepareRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, ki
   const department = found?.department ?? await taskDepartment(ctx, task, kind);
   const heldReason = await browserHeldRun(ctx, job.companyId, await placesOf(ctx, job.companyId), { kind }, department);
   if (heldReason) throw refuse(409, 'browser_failed', heldReason);
-  const pin = await pinCommit(ctx, task, kind, input.branch, found);
+  const pin = await pinCommit(ctx, kind, input.branch, found);
   checkProductPin(mode.mode, pin.commitSha);
   return { department, pin };
 }
@@ -687,8 +685,8 @@ function workRunValues(input: RunInput, kind: RunKind) {
   return { memoryGb: kind === 'work' ? (input.memory ?? WORK_MEMORY_GB) : null, repeatable: kind === 'work' && input.repeatable === true };
 }
 
-function runEnvironment(job: RunJob, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, binding: CandidateRun | null, minutes: number | undefined) {
-  return mode.mode === 'product' ? newEnvironmentRequest(repositoryScope(job.companyId, found!.department.id, found!.repo.url), mode, binding?.baseCommit, minutes) : null;
+function runEnvironment(job: RunJob, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, minutes: number | undefined) {
+  return mode.mode === 'product' ? newEnvironmentRequest(repositoryScope(job.companyId, found!.department.id, found!.repo.url), mode, minutes) : null;
 }
 
 /* The caller holds the company row while taking its next run number. */
@@ -697,7 +695,7 @@ async function nextRunNumber(tx: Tx, companyId: string): Promise<number> {
   return (last?.n ?? 0) + 1;
 }
 
-async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kind: RunKind, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, setup: RunSetup, files: string[], parts: number, binding: CandidateRun | null): Promise<Run> {
+async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kind: RunKind, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, setup: RunSetup, files: string[], parts: number): Promise<Run> {
   const { department, pin } = setup;
   return ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
@@ -715,18 +713,24 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
         kind,
         ...pin,
         command: input.command ?? '',
-        environmentRequest: runEnvironment(job, mode, found, binding, input.minutes),
+        environmentRequest: runEnvironment(job, mode, found, input.minutes),
         files,
         ...workRunValues(input, kind),
         parts,
         timeoutMs: (input.minutes ?? TEST_MINUTES) * 60_000,
       })
       .returning();
-    if (binding) await bindCandidateRun(tx, task, binding, row!);
     if (parts) await tx.insert(testParts).values(Array.from({ length: parts }, (_, i) => ({ companyId: job.companyId, runId: row!.id, part: i + 1 })));
     await recordRunWait(tx, row!, mode.mode === 'product' ? 'prepare' : 'queue', new Date());
     return row!;
   });
+}
+
+/* A shared run of every test goes only on a release: main or the main line its repository names, a turn's branch or a release
+   branch. A change is checked by its author's local tests of what it touched. */
+function notRelease(branch: string, mainLine: string): string | null {
+  if (/^(main|turn-\d+|release-.+)$/.test(branch) || branch === mainLine) return null;
+  return `${branch} is no release branch: shared test runs go only to main, a turn's branch turn-<number> or a release-<name> branch, so check your change with local tests of what it touched.`;
 }
 
 /* Starts a run for a task: a test run of its branch, or any other work, on a branch or in an empty folder with the task's
@@ -736,18 +740,16 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   const task = await taskFor(ctx, job, input.task, kind);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
   refusePaused(task);
-  const binding = await candidateForRun(ctx.db, task, job.agentId, input, kind);
-  if (binding) input = { ...input, branch: binding.branch };
   const found = await runRepository(ctx, task, input, kind);
-  if (kind === 'tests') await requireReleaseBranch(ctx.db, task, { branch: input.branch, mainLine: found!.repo.branch, candidate: binding !== null && mode.mode === 'product' });
+  const elsewhere = kind === 'tests' ? notRelease(input.branch ?? `task-${task.number}`, found!.repo.branch) : null;
+  if (elsewhere) return elsewhere;
   const files = await workFiles(ctx, task, input, kind);
   const parts = mode.mode === 'manual' ? mode.parts : 0;
   checkManualParts(input.command ?? '', parts);
   await checkRunCapacity(ctx, job);
   const setup = await prepareRun(ctx, job, task, input, kind, mode, found);
-  if (binding && setup.pin.commitSha !== binding.commit) throw refuse(409, 'task_changed', 'Tests must pin the exact current candidate commit.');
   const unchecked = await checkNamedFiles(ctx, found, mode, setup.pin);
-  const run = await createRun(ctx, job, task, input, kind, mode, found, setup, files, parts, binding);
+  const run = await createRun(ctx, job, task, input, kind, mode, found, setup, files, parts);
   await pumpTests(ctx);
   if (mode.mode === 'product') return `${named(run)} of #${task.number} waits for its pinned product environment description.${pinLine(run)} test_run ${run.number} shows the environment and parts; you are woken with its result.`;
   return (await startedRunSummary(ctx, run, task, found, setup.department)) + unchecked;

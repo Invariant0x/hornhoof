@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, mapReturns, subscriptions, taskEvents, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, mapReturns, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
 import { mapLines, recordMapReturn, returnAlongLine, workStarts, type MapLine } from '../src/modules/org/map-state.js';
 import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
@@ -522,22 +522,15 @@ async function drawn(db: Db, companyId: string, up: { id: string }, down: { id: 
 describe('results a checking stage gives back to the head', () => {
   it('turn the Tests owner\'s line yellow once it hands the verified candidate to the head', async () => {
     const f = await testsFixture();
-    const run = await f.run();
     expect(await drawn(f.db, f.task.companyId, f.head, f.tester)).toBe('quiet');
-    await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id]));
+    await report(f.ctx, f.tester.id, f.task.id, f.verified());
     expect(await drawn(f.db, f.task.companyId, f.head, f.tester)).toBe('yellow');
   });
 
-  it.each([
-    ['failed', 'yellow'],
-    ['no_machine', 'quiet'],
-  ] as const)('give a failed check back to the head only when the candidate failed it: %s', async (error, state) => {
+  it('give a failed check back to the head', async () => {
     const f = await testsFixture();
-    const run = await f.run();
-    await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, run.id));
-    await f.db.update(testParts).set({ status: 'failed', exitCode: error === 'failed' ? 1 : null, error, commit: error === 'failed' ? f.finalCommit : null, finishedAt: new Date() }).where(eq(testParts.runId, run.id));
-    await report(f.ctx, f.tester.id, f.task.id, { ...f.verified([run.id]), done: false });
-    expect(await drawn(f.db, f.task.companyId, f.head, f.tester)).toBe(state);
+    await report(f.ctx, f.tester.id, f.task.id, { ...f.verified(), done: false });
+    expect(await drawn(f.db, f.task.companyId, f.head, f.tester)).toBe('yellow');
   });
 
   it("turn a reviewer's line yellow when it sends a wrong goal back to the head", async () => {

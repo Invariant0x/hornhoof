@@ -90,13 +90,3 @@ export async function taskEvidence(ctx: Reader, task: Task): Promise<RunEvidence
     }),
   );
 }
-
-/* What the log of a verdict keeps of the runs it stood on. */
-export const keptEvidence = (runs: RunEvidence[]) => runs.map(({ run, status, branch, commitSha, head, freshness, proves }) => ({ run, status, branch, commitSha, head, freshness, proves }));
-
-/* What a reviewer hears who passes the work when the run that passed proves nothing about what the branch holds now. */
-export function noProofNote(runs: RunEvidence[], pass: boolean): string {
-  const passed = runs.find(r => r.status === 'passed');
-  if (!pass || !passed || runs.some(r => r.proves)) return '';
-  return ` Test run ${passed.run} passed on ${passed.commitSha ?? 'no pinned commit'}, but it proves nothing about what you reviewed: ${passed.why}`;
-}

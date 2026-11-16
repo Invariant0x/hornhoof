@@ -67,9 +67,9 @@ export const TestMutation = z.discriminatedUnion('status', [
 ]);
 const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, commands: z.array(Command).max(1000) })
   .refine(value => value.suiteIds.length + value.commands.length > 0, 'An explicit preparation must contain work.');
-/* The full run every release runs on its exact commit: profile runs every suite of the profile it replaces, and more, and
-   reuses nothing. No turn makes a run of replaces a full run: only asking for profile by name does. everyTurns is what a
-   server or node before 0.24.0 requires, so a repository keeps it for them: it is read and nothing runs by it. */
+/* The profile every release runs: profile runs every suite of the profile it replaces, and more. The first run of a release
+   runs it whole; a later run of that release runs only what failed or changed. everyTurns is what a server or node before
+   0.24.0 requires, so a repository keeps it for them: it is read and nothing runs by it. */
 const FullRun = z.strictObject({ everyTurns: z.number().int().min(1).max(1000).optional(), replaces: Id, profile: Id });
 const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional(), fullRun: FullRun.optional() });
 /* Who reads a file the import graph cannot follow: the named suites whole, or with tests only those of their test files. */
@@ -292,39 +292,6 @@ export const EnvironmentSnapshot = z.strictObject({ description: EnvironmentDesc
   .superRefine((value, ctx) => boundMutation(value.candidate?.mutation, value.description, value.candidate?.baseCommit, ctx)).superRefine(descriptionSize);
 export type EnvironmentSnapshot = z.infer<typeof EnvironmentSnapshot>;
 
-const fingerprintKey = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => `${unit.suiteId}\0${unit.file}`;
-function fingerprintIndex(prints: UnitFingerprint[]): Map<string, string> {
-  const index = new Map(prints.map(print => [fingerprintKey(print), print.fingerprint]));
-  if (index.size !== prints.length) throw new Error('Candidate fingerprints must name each test unit once.');
-  return index;
-}
-
-function requireCanonicalPrints(head: Map<string, string>, inventory: TestUnit[]): void {
-  const canonical = new Set(inventory.map(fingerprintKey));
-  const extra = [...head.keys()].some(key => !canonical.has(key) && key !== fingerprintKey(PREPARATION_UNIT));
-  if (extra || inventory.some(unit => !head.has(fingerprintKey(unit)))) throw new Error('The final fingerprints must cover the canonical test inventory exactly.');
-}
-
-function candidateMutationSources(snapshot: EnvironmentSnapshot, scope: NonNullable<EnvironmentSnapshot['candidate']>): { declared: Set<string>; selected: Set<string> } {
-  const { mutation } = snapshot.description.manifest;
-  if (mutation.status === 'supported' && (!scope.mutation || scope.mutation.selection.status !== 'ready')) throw new Error('Candidate mutation applicability is missing or blocked.');
-  return { declared: new Set(mutation.status === 'supported' ? mutation.sourcePaths : []), selected: new Set(scope.mutation?.selection.selected.map(fn => fn.file) ?? []) };
-}
-
-/* The same influencing identity at the original base needs no new check; indivisible groups stay together. */
-export function candidateTestUnits(snapshot: EnvironmentSnapshot): TestUnit[] {
-  const scope = snapshot.candidate;
-  if (!scope) throw new Error('Candidate test selection needs its pinned base and final fingerprints.');
-  const base = fingerprintIndex(scope.baseFingerprints), head = fingerprintIndex(scope.fingerprints);
-  const inventory = snapshot.description.inventory;
-  requireCanonicalPrints(head, inventory);
-  const required = snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)?.requiredSuiteIds;
-  if (!required) throw new Error('Candidate test selection needs a known profile.');
-  const mutation = candidateMutationSources(snapshot, scope);
-  const eligible = inventory.filter(unit => required.includes(unit.suiteId) && (!mutation.declared.has(unit.file) || mutation.selected.has(unit.file)));
-  const changed = new Set(eligible.filter(unit => head.get(fingerprintKey(unit)) !== base.get(fingerprintKey(unit))).map(unit => `${unit.suiteId}\0${unit.selectionUnit}`));
-  return eligible.filter(unit => changed.has(`${unit.suiteId}\0${unit.selectionUnit}`));
-}
 const LegacySelection = z.strictObject({ kind: z.enum(['suite', 'final']), suiteId: Id, files: Inputs });
 const Shard = z.strictObject({ index: z.number().int().min(1).max(10), count: z.number().int().min(1).max(10) })
   .refine(value => value.index <= value.count, 'A shard index cannot exceed its count.');
@@ -410,10 +377,8 @@ export const KeptFiles = z.array(z.strictObject({ suiteId: Id, files: z.array(z.
   .refine(kept => byteLength(JSON.stringify(kept)) <= KEPT_BYTES, 'Kept files exceed their limit.');
 export type KeptFiles = z.infer<typeof KeptFiles>;
 
-/* Why a product run ended before any part went out. full_run_early is the server's own: a release's full run asked before the
-   profile it replaces passed on the same commit. */
 export const EnvironmentProblem = z.strictObject({
-  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'build_failed', 'cancelled', 'timeout', 'full_run_early']),
+  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'build_failed', 'cancelled', 'timeout']),
   detail: Text.max(2000),
 });
 export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;

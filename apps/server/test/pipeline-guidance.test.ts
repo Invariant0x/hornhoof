@@ -14,14 +14,13 @@ describe('pipeline guidance', () => {
     expect(body('dev-release-improvements')).toMatch(/assigned|assignment/i);
   });
 
-  it('checks a change in the author\'s own workspace before the submit, which starts no run, and hands review its run evidence', () => {
+  it('checks a change in the author\'s own workspace before the submit, which starts no run, and review reruns only what it doubts', () => {
     expect(body('dev-implement')).toMatch(/author check[\s\S]*own workspace[\s\S]*before you submit/i);
     expect(body('dev-implement')).toMatch(/submitting starts no test run/i);
     expect(body('dev-implement')).not.toMatch(/selector plan|automatic author checks/i);
-    expect(body('dev-review-verdict')).toMatch(/run ID and number/);
     for (const id of ['dev-review-diff', 'dev-review-verdict']) {
       expect(body(id), id).toMatch(/commit/);
-      expect(body(id), id).toMatch(/instead of rerunning|without rerunning/);
+      expect(body(id), id).toMatch(/rerun what you doubt in your own workspace/);
     }
   });
 

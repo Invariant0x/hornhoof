@@ -1426,7 +1426,7 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
-  version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
+  version: 1; repositoryScope: RepositoryScope; suite?: string;
   /* The time limit of a part the run asked for, when it asked for one. */
   minutes?: number;
   requestId: string | null; nodeId: string | null; builtin: boolean;
@@ -1440,10 +1440,9 @@ export type TestEnvironmentSelection = { selection: TestExecution['selection']; 
 export type TestFileKey = { suiteId: string; file: string };
 /* How a run reused green results. mode: cached reuses what kept its fingerprint, full runs everything, off had no fingerprints
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
-export type ReusedTestUnit = UnitFingerprint & { runId: string; commitSha: string };
 export type TestRunFileCache = {
-  mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
-  reusedUnits?: ReusedTestUnit[];
+  /* release: the release the run checks, whose results it may take; none on a run from before releases were kept. */
+  mode: 'cached' | 'full' | 'off'; release?: string; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
   verifiedFingerprints?: UnitFingerprint[];
   /* How many green results the run kept for later, once it ended. */
   kept?: number;
@@ -1614,7 +1613,7 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
-    /* Proved on the repository's main branch or the turn's. A release takes these, and those proved on a commit the main branch holds now. */
+    /* No longer read: every shared run checks a release now. It stays until a migration drops it. */
     mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },

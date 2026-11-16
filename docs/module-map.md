@@ -99,8 +99,6 @@ Checked by searching for importers outside tests.
 - `tasks/staging-*.ts` (8 files), `db/workspace-store.ts`, `db/workspace-repository-url.ts`, node `staging-git.ts`: no
   importer. Their 12 tables are never written.
 - Five external recovery tables and `computer_access_intents`: no code at all.
-- `recordAuthorCheck` (`tasks/review-quality.ts`): no caller, so the author's quality in a review is always
-  "unavailable".
 - `planningHistory` (`testruns/plan-history.ts`), `test-impact-replay*.ts`, `independentView`, the wake cause
   `changes`, `gateCounts`, `encodeNativeDecision`: only tests use them.
 - The skill `hh-questions` was given to nobody; since 2026-11-10 every employee carries it.
