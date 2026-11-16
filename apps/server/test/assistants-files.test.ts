@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agents, assistants, attachments, companies, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { callSkill } from '../src/modules/assistants/skills.js';
+import { WORDS } from '../src/modules/assistants/words.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 import { as } from './helpers.js';
 
@@ -105,9 +106,9 @@ describe('files an assistant downloads for its owner', () => {
     const ava = await assistant(c);
     const hidden = await file(c, { taskId: (await c.work('Other report', c.crew.other)).id, agentId: c.crew.other.id });
     const said = {
-      'ru-RU,ru;q=0.9,en;q=0.8': 'Такого файла в Hornhoof нет, или вам его там не открыть.',
-      'en-GB': 'There is no such file in Hornhoof, or you cannot open it there.',
-      '': 'There is no such file in Hornhoof, or you cannot open it there.',
+      'ru-RU,ru;q=0.9,en;q=0.8': 'такого файла в Hornhoof нет, или вам его там не открыть.',
+      'en-GB': 'there is no such file in Hornhoof, or you cannot open it there.',
+      '': 'there is no such file in Hornhoof, or you cannot open it there.',
     };
     for (const [lang, message] of Object.entries(said)) {
       for (const id of [hidden.id, randomUUID(), 'not-a-uuid']) {
@@ -117,6 +118,15 @@ describe('files an assistant downloads for its owner', () => {
       }
     }
   });
+});
+
+it('words every refusal as one neutral reason that reads after "<file name> did not come: ", in both languages', () => {
+  const said = Object.values(WORDS).flatMap(words => [words!.en, words!.ru]);
+  expect(said).toHaveLength(28);
+  for (const words of said) {
+    expect(words).toMatch(/^(?:\p{Ll}|Hornhoof )/u);
+    expect(words).not.toMatch(/[\u2013\u2014\u0401\u0451]|did not come|did not go|не дошел|не ушло|(?<!\p{L})(?:I|me|my|я|мне|меня|мой)(?!\p{L})/u);
+  }
 });
 
 it('makes a refused file delivery explicit to the agent, with its reason and no success claim', async () => {

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
-import { testedEvidence } from './echelons-tests.js';
+import { requireTestsReport } from './echelons-tests.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { acceptedDocument } from './echelons-document.js';
 import type { Ctx } from '../../app.js';
@@ -11,7 +11,8 @@ import { requiredStagesComplete } from './echelons-accept.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { giver, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 
-const Acceptance = z.object({ candidateId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/), routeRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/) })) });
+/* Acceptances and aggregates made before checks went local also name test runs, which are left out. */
+const Acceptance = z.object({ candidateId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/), routeRevision: z.number().int().positive() });
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 
@@ -32,9 +33,9 @@ export async function architectureReport(ctx: Reader, task: Task, route: Route, 
   return { task: row, wakes };
 }
 
-type AcceptedChild = { taskId: string; candidateId: string; commit: string; evidence: { runId: string; commit: string }[] } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true } | { taskId: string; candidateId: string; digest: string };
+type AcceptedChild = { taskId: string; candidateId: string; commit: string } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true } | { taskId: string; candidateId: string; digest: string };
 const ChildReference: z.ZodType<AcceptedChild> = z.lazy(() => z.union([
-  z.object({ taskId: z.uuid(), candidateId: z.uuid(), commit: z.string(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string() })) }),
+  z.object({ taskId: z.uuid(), candidateId: z.uuid(), commit: z.string() }),
   z.object({ taskId: z.uuid(), children: z.array(ChildReference) }),
   z.object({ taskId: z.uuid(), turnkey: z.literal(true) }),
   z.object({ taskId: z.uuid(), candidateId: z.uuid(), digest: z.string() }),
@@ -73,16 +74,15 @@ async function acceptedAggregate(tx: Tx, child: Task, route: Route, report: Repo
 }
 
 function acceptedIdentity(acceptance: z.infer<typeof Acceptance>, route: Route, candidate: Awaited<ReturnType<typeof currentCandidate>>): boolean {
-  return acceptance.candidateId === candidate.id && acceptance.commit === candidate.commit && acceptance.routeRevision === route.revision && acceptance.evidence.every(proof => proof.commit === candidate.commit);
+  return acceptance.candidateId === candidate.id && acceptance.commit === candidate.commit && acceptance.routeRevision === route.revision;
 }
 
 async function acceptedCode(tx: Tx, child: Task, route: Route, report: ReportData): Promise<AcceptedChild> {
   const candidate = await currentCandidate(tx, child, route);
   const acceptance = Acceptance.safeParse(report?.acceptedCandidate);
   if (!requiredStagesComplete(route) || !acceptance.success || !acceptedIdentity(acceptance.data, route, candidate)) throw refuse(409, 'task_invalid', 'A child candidate is unreviewed, unaccepted or stale.');
-  const evidence = (await testedEvidence(tx, child, route, candidate, route.revision - 1)).sort((a, b) => a.runId.localeCompare(b.runId));
-  if (evidence.length !== acceptance.data.evidence.length || acceptance.data.evidence.some(proof => !evidence.some(run => run.runId === proof.runId && run.commit === proof.commit))) throw refuse(409, 'task_changed', 'The accepted evidence differs from its Tests report.');
-  return { taskId: child.id, candidateId: candidate.id, commit: candidate.commit, evidence };
+  await requireTestsReport(tx, child, route, candidate, route.revision - 1);
+  return { taskId: child.id, candidateId: candidate.id, commit: candidate.commit };
 }
 
 /* Where the department keeps code, a worker's own report would hand in work no Review saw: a worker closes a coordination task

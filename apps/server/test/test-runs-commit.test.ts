@@ -9,7 +9,7 @@ import { company, done, gets, idle, nextOf } from './test-runs-company.js';
 
 const MOVED = 'b'.repeat(40);
 
-const atCommit = (commitSha: string, branch = 'task-1-checkout') => () => Promise.resolve({ branch, commitSha });
+const atCommit = (commitSha: string, branch = 'release-checkout') => () => Promise.resolve({ branch, commitSha });
 
 describe('one commit for a whole run', () => {
   it('pins the commit before any part goes out, so a branch that moves between parts changes nothing', async () => {
@@ -18,21 +18,21 @@ describe('one commit for a whole run', () => {
     const asked: unknown[] = [];
     c.app.ctx.readCommit = async (repo, want) => {
       asked.push({ url: repo.url, token: repo.token, want });
-      return { branch: 'task-1-checkout', commitSha: TEST_COMMIT };
+      return { branch: 'release-checkout', commitSha: TEST_COMMIT };
     };
     const { call } = await c.turn(c.bruno);
-    const started = await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    const started = await call('run_tests', { branch: 'release-checkout', command: 'make test -- {part}', parts: 2 });
     expect(started.error).toBe(false);
     expect(started.text).toContain(TEST_COMMIT);
-    expect(started.text).toContain('task-1-checkout');
-    expect(asked).toEqual([{ url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789', want: { task: c.task.number } }]);
+    expect(started.text).toContain('release-checkout');
+    expect(asked).toEqual([{ url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789', want: { branch: 'release-checkout' } }]);
     const first = await nextOf(ivan.node, 'tests.run');
-    expect(first).toMatchObject({ branch: 'task-1-checkout', commitSha: TEST_COMMIT });
+    expect(first).toMatchObject({ branch: 'release-checkout', commitSha: TEST_COMMIT });
 
     c.app.ctx.readCommit = atCommit(MOVED);
     ivan.node.send(done(first));
     const second = await nextOf(ivan.node, 'tests.run');
-    expect(second).toMatchObject({ part: 2, branch: 'task-1-checkout', commitSha: TEST_COMMIT });
+    expect(second).toMatchObject({ part: 2, branch: 'release-checkout', commitSha: TEST_COMMIT });
     ivan.node.send(done(second));
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
 
@@ -40,7 +40,7 @@ describe('one commit for a whole run', () => {
     expect(prompt).toContain('Test run 1 passed');
     expect(prompt).toContain(TEST_COMMIT);
     expect(prompt).not.toContain(MOVED);
-    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ status: 'passed', branch: 'task-1-checkout', commitSha: TEST_COMMIT, parts: [{ commit: TEST_COMMIT }, { commit: TEST_COMMIT }] });
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ status: 'passed', branch: 'release-checkout', commitSha: TEST_COMMIT, parts: [{ commit: TEST_COMMIT }, { commit: TEST_COMMIT }] });
     expect((await c.db.select(only(testRuns, 'commitSha')).from(testRuns))).toEqual([{ commitSha: TEST_COMMIT }]);
   });
 
@@ -49,11 +49,11 @@ describe('one commit for a whole run', () => {
     const asked: unknown[] = [];
     c.app.ctx.readCommit = async (_repo, want) => {
       asked.push(want);
-      return { branch: 'task-1-other', commitSha: TEST_COMMIT };
+      return { branch: 'release-other', commitSha: TEST_COMMIT };
     };
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test', branch: 'task-1-other' });
-    expect(asked).toEqual([{ branch: 'task-1-other' }]);
+    await call('run_tests', { command: 'make test', branch: 'release-other' });
+    expect(asked).toEqual([{ branch: 'release-other' }]);
   });
 
   it('fails the whole run when one part checked another commit, and names both', async () => {
@@ -61,7 +61,7 @@ describe('one commit for a whole run', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
     const one = await nextOf(ann.node, 'tests.run');
     const two = await nextOf(ivan.node, 'tests.run');
     ann.node.send(done(one));
@@ -82,7 +82,7 @@ describe('one commit for a whole run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     ivan.node.send(done(await nextOf(ivan.node, 'tests.run'), { commit: null }));
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*did not say which commit it checked/);
@@ -99,7 +99,7 @@ describe('one commit for a whole run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     ivan.node.send(done(await nextOf(ivan.node, 'tests.run'), end));
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
     const state = JSON.parse((await call('test_run', { run: 1 })).text);
@@ -112,10 +112,10 @@ describe('one commit for a whole run', () => {
   it('starts nothing and says why when the repository cannot say where the branch is', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
-    c.app.ctx.readCommit = async () => ({ problem: 'The repository has no branch task-1 or task-1-...' });
+    c.app.ctx.readCommit = async () => ({ problem: 'The repository has no branch main.' });
     const { call } = await c.turn(c.bruno);
-    const refused = await call('run_tests', { command: 'make test' });
-    expect(refused).toEqual({ error: true, text: 'The repository has no branch task-1 or task-1-...' });
+    const refused = await call('run_tests', { branch: 'main', command: 'make test' });
+    expect(refused).toEqual({ error: true, text: 'The repository has no branch main.' });
     expect(await c.db.select().from(testRuns)).toEqual([]);
     expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
   });
@@ -125,10 +125,10 @@ describe('one commit for a whole run', () => {
     const asked: unknown[] = [];
     c.app.ctx.readCommit = async (_repo, want) => {
       asked.push(want);
-      return { branch: 'task-1', commitSha: TEST_COMMIT };
+      return { branch: 'main', commitSha: TEST_COMMIT };
     };
     const { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { command: 'make test', parts: 2 })).error).toBe(true);
+    expect((await call('run_tests', { branch: 'main', command: 'make test', parts: 2 })).error).toBe(true);
     expect(asked).toEqual([]);
   });
 
@@ -136,7 +136,7 @@ describe('one commit for a whole run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const lost = await nextOf(ivan.node, 'tests.run');
     c.app.ctx.readCommit = atCommit(MOVED);
     ivan.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
@@ -151,7 +151,7 @@ describe('one commit for a whole run', () => {
     const asked: unknown[] = [];
     c.app.ctx.readCommit = async (_repo, want) => {
       asked.push(want);
-      return { branch: 'task-1', commitSha: TEST_COMMIT };
+      return { branch: 'main', commitSha: TEST_COMMIT };
     };
     const { call } = await c.turn(c.bruno);
     await call('run_work', { command: 'make build', branch: 'main' });
@@ -181,7 +181,7 @@ describe('one commit for a whole run', () => {
     const c = await company();
     await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
     expect(pool.machines[0].parts).toEqual([expect.objectContaining({ part: 1, commit: TEST_COMMIT })]);
@@ -203,7 +203,7 @@ describe('whether a run still proves its branch', () => {
   /* A run of the company's first task through run_tests, as its row stands. */
   const pinnedRun = async (c: Awaited<ReturnType<typeof company>>) => {
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test', branch: 'task-1-checkout' });
+    await call('run_tests', { command: 'make test', branch: 'release-checkout' });
     return (await c.db.select().from(testRuns))[0]!;
   };
 
@@ -214,17 +214,17 @@ describe('whether a run still proves its branch', () => {
     const asked: unknown[] = [];
     c.app.ctx.readCommit = async (repo, want) => {
       asked.push({ url: repo.url, want });
-      return { branch: 'task-1-checkout', commitSha: MOVED };
+      return { branch: 'release-checkout', commitSha: MOVED };
     };
     expect(await evidenceOf(c.app.ctx, run)).toEqual({ commitSha: TEST_COMMIT, head: MOVED, freshness: 'stale', why: `The branch is at ${MOVED} now, not at the ${TEST_COMMIT} this run checked.` });
-    expect(asked).toEqual([{ url: 'https://github.com/acme/shop.git', want: { branch: 'task-1-checkout' } }]);
+    expect(asked).toEqual([{ url: 'https://github.com/acme/shop.git', want: { branch: 'release-checkout' } }]);
   });
 
   it('cannot tell, and says why, when the branch cannot be read', async () => {
     const c = await company();
     const run = await pinnedRun(c);
-    c.app.ctx.readCommit = async () => ({ problem: 'The repository has no branch task-1-checkout.' });
-    expect(await evidenceOf(c.app.ctx, run)).toEqual({ commitSha: TEST_COMMIT, head: null, freshness: 'unknown', why: 'The repository has no branch task-1-checkout.' });
+    c.app.ctx.readCommit = async () => ({ problem: 'The repository has no branch release-checkout.' });
+    expect(await evidenceOf(c.app.ctx, run)).toEqual({ commitSha: TEST_COMMIT, head: null, freshness: 'unknown', why: 'The repository has no branch release-checkout.' });
   });
 
   it('cannot tell when the repository is gone', async () => {

@@ -100,7 +100,7 @@ async function world() {
   const repo = await repository(root), runtimes = await trustedTestRuntimes(await running(root));
   await c.db.update(departments).set({ repoUrl: repo.url, repoTokenEnc: null }).where(eq(departments.id, c.dev.id));
   let head = repo.first;
-  c.app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: 'branch' in want && want.branch.startsWith('at-') ? want.branch.slice(3) : head });
+  c.app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: 'branch' in want && want.branch.startsWith('release-at-') ? want.branch.slice(11) : head });
   const stops: (() => void)[] = [];
   /* A machine: the real node code behind a connection to the real server, with a folder of its own. */
   const machine = async (token: string, name: string, connect = c.machine) => {
@@ -171,7 +171,7 @@ describe('one harness for a product, across all its machines', () => {
     }
 
     await c.repo.clearBuilds();
-    const run = await c.runOn(`at-${c.repo.first}`);
+    const run = await c.runOn(`release-at-${c.repo.first}`);
     expect(run.status).toBe('passed');
     expect(run.parts[0]!.environmentReceipt).toMatchObject({ dependencies: { hit: true }, environments: [{ unitId: 'schema', hit: true }] });
     expect(await c.repo.builds()).toEqual([]);
@@ -194,7 +194,7 @@ describe('one harness for a product, across all its machines', () => {
     expect(await c.repo.builds()).toEqual(['schema']);
 
     await c.repo.clearBuilds();
-    const after = await c.runOn(`at-${migrated}`);
+    const after = await c.runOn(`release-at-${migrated}`);
     expect(after.status).toBe('passed');
     expect(after.parts[0]!.environmentReceipt).toMatchObject({ dependencies: { hit: true }, environments: [{ hit: true }] });
     expect(await c.repo.builds()).toEqual([]);
@@ -230,9 +230,9 @@ describe('one harness for a product, across all its machines', () => {
     expect(told).toHaveLength(1);
     expect(told[0]).toContain('The last version that worked stays in use');
 
-    const good = await c.runOn(`at-${c.repo.first}`);
+    const good = await c.runOn(`release-at-${c.repo.first}`);
     expect(good.status).toBe('passed');
-    const bad = await c.runOn(`at-${broken}`);
+    const bad = await c.runOn(`release-at-${broken}`);
     expect(bad.status).toBe('failed');
     expect(bad.parts[0]!.tail).toContain('this version does not exist');
     c.stop();

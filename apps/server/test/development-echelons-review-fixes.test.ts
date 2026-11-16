@@ -2,7 +2,6 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, subscriptions } from '../src/db/schema.js';
-import { candidateForRun } from '../src/modules/tasks/echelons-run.js';
 import { agentIdentity, checkerFor } from '../src/modules/tasks/echelons-assign.js';
 import { answer, ask, createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
@@ -139,7 +138,7 @@ describe('the accepted review fixes', () => {
     const wake = moved.wakes.find(each => each.agentId === f.tester.id)!;
     expect(wake).toMatchObject({ taskId: f.task.id, why: 'assigned' });
     const prompt = wakePrompt(f.tester, await loadTask(f.db, f.task.id), wake);
-    expect(prompt).toContain('verify local affected checks in Tests without calling run_tests on non-main task branches');
+    expect(prompt).toContain('in Tests check what the change touched with local tests, as the full run happens once at release, and report the exact candidate');
     expect(prompt).not.toContain('report verified final-candidate runs in Tests');
     expect(prompt).not.toContain('The tests you ran');
   });
@@ -176,15 +175,11 @@ describe('the accepted review fixes', () => {
     expect(prompt).toMatch(/report/i);
   });
 
-  it('revokes Tests run binding and report after the public card disables its required ability', async () => {
+  it('revokes the Tests report after the public card disables its required ability', async () => {
     const f = await testsFixture();
-    const run = await f.run();
     const response = await f.app.inject({ method: 'PATCH', url: `/api/agents/${f.tester.id}`, payload: { skills: { 'dev-test-environment': false } }, ...as(f.ceoToken) });
     expect(response.statusCode).toBe(200);
-    const task = await loadTask(f.db, f.task.id);
-    const binding = await candidateForRun(f.db, task, f.tester.id, { candidate: { candidateId: f.snapshot.candidateId!, revision: f.snapshot.revision } }, 'tests').then(() => 'accepted', (error: { status: number }) => error.status);
-    const certification = await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => 'accepted', (error: { status: number }) => error.status);
-    expect({ binding, certification }).toEqual({ binding: 409, certification: 409 });
+    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified()).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await f.detail()).echelons.phase).toBe('active');
   });
 });
