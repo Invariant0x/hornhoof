@@ -16,19 +16,33 @@ export function askApp(app: Target, method: 'GET' | 'POST', path: string, body?:
     if (stop?.aborted) return reject(new Error(STOPPED));
     const text = body === undefined ? undefined : JSON.stringify(body);
     const headers = { [VIA]: OWN_VIA, ...(text === undefined ? {} : { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(text)) }) };
-    const out = http.request({ host: app.host, port: app.port, method, path, headers, agent: false, timeout: ASK_MS }, res => {
+    let timer: NodeJS.Timeout | undefined;
+    const waiting = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => out.destroy(new Error('the app did not answer in ten seconds')), ASK_MS);
+      timer.unref();
+    };
+    const out = http.request({ host: app.host, port: app.port, method, path, headers, agent: false }, res => {
+      waiting();
       const chunks: Buffer[] = [];
-      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('data', (chunk: Buffer) => { waiting(); chunks.push(chunk); });
       res.on('error', reject);
       res.on('end', () => {
+        clearTimeout(timer);
         const status = res.statusCode ?? 0;
         resolve({ status, ok: status >= 200 && status < 300, json: () => JSON.parse(Buffer.concat(chunks).toString()) as unknown });
       });
     });
-    out.on('timeout', () => out.destroy(new Error('the app did not answer in ten seconds')));
+    out.once('socket', socket => {
+      if (socket.connecting) socket.once('connect', waiting);
+      else waiting();
+    });
     const gone = () => out.destroy(new Error(STOPPED));
     stop?.addEventListener('abort', gone, { once: true });
-    out.on('close', () => stop?.removeEventListener('abort', gone));
+    out.on('close', () => {
+      clearTimeout(timer);
+      stop?.removeEventListener('abort', gone);
+    });
     out.on('error', reject);
     out.end(text);
   });
