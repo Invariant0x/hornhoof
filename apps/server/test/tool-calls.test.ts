@@ -122,16 +122,14 @@ describe('a tool call with an invocation id', () => {
     expect(await c.notes()).toHaveLength(0);
   });
 
-  it('takes an invocation id from the keeper alone', async () => {
-    for (const env of [{ TUNNEL_HOST: 'keeper.invalid' }, {}]) {
-      const c = await company(env);
-      const id = randomUUID();
-      await c.call('remember', { text: 'Twice.' }, id);
-      await c.call('remember', { text: 'Twice.' }, id);
-      expect(await c.notes()).toHaveLength(2);
-      expect(await c.calls()).toHaveLength(0);
-      expect(await listed(c.db, `tool:${id}`)).toBeNull();
-    }
+  it.each([{ TUNNEL_HOST: 'keeper.invalid' }, {}])('takes an invocation id from the keeper alone with %j', async env => {
+    const c = await company(env);
+    const id = randomUUID();
+    await c.call('remember', { text: 'Twice.' }, id);
+    await c.call('remember', { text: 'Twice.' }, id);
+    expect(await c.notes()).toHaveLength(2);
+    expect(await c.calls()).toHaveLength(0);
+    expect(await listed(c.db, `tool:${id}`)).toBeNull();
   });
 
   it('takes no id that is not a uuid', async () => {
@@ -176,13 +174,17 @@ describe('a guarded tool', () => {
     let finish!: (answer: Answer) => void;
     const working = new Promise<Answer>(done => (finish = done));
     let seen: unknown;
+    let began!: () => void;
+    const started = new Promise<void>(resolve => { began = resolve; });
     const run = guarded(c.ctx, c.job.id, 'run_tests', async () => {
       seen = await c.calls();
       expect(currentInvocation()).toBe(id);
+      began();
       return working;
     });
     const first = run(id);
-    await expect.poll(() => seen).toMatchObject([{ id, jobId: c.job.id, answer: null }]);
+    await started;
+    expect(seen).toMatchObject([{ id, jobId: c.job.id, answer: null }]);
     const startedAt = (await c.calls())[0]!.at;
     const retry = await run(id);
     expect(retry).toEqual(say(PENDING(startedAt), true));

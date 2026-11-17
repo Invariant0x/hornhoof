@@ -40,6 +40,9 @@ it('keeps phone execution private after a vault value, while ordinary replay and
   await recordPhoneFrame(c.app.ctx, { kind: 'node', nodeId: c.executor.id }, frame(1));
   expect((await c.db.select().from(attachments)).map(file => Buffer.from(file.bytes))).toEqual([Buffer.from(PNG, 'base64')]);
   await call(c, turn.token, 'vault_entry', { entry: 'Partner' });
+  const urlId = randomUUID();
+  await call(c, turn.token, 'phone_action', { session: session.id, operation: { kind: 'url', url: `https://example.test/?value=${PASSWORD}` } }, urlId);
+  expect((await c.db.select().from(toolCalls)).some(row => row.id === urlId)).toBe(false);
   const typedId = randomUUID();
   const typed = await call(c, turn.token, 'phone_action', { session: session.id, operation: { kind: 'text', text: PASSWORD }, secretExecution: false }, typedId);
   expect(c.calls.flatMap(message => message.type === 'phone.action' && message.operation.kind === 'text' ? [message.operation] : [])).toEqual([{ kind: 'text', text: PASSWORD }]);
