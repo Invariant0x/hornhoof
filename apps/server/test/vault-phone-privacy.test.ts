@@ -12,7 +12,7 @@ await prepareSharedDatabase();
 vi.mock('node:dns/promises', () => ({ lookup: async () => [{ address: '127.0.0.1', family: 4 }] }));
 
 const PASSWORD = 'private-phone-password-1178';
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII=';
+const JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSgBBwcHCggKEwoKEygaFhooKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKP/AABEIAAEAAQMBEQACEQEDEQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/AOAr54/YT//Z';
 type Answer = { content: { type: string; text?: string }[]; isError?: boolean };
 async function call(c: Awaited<ReturnType<typeof phoneCompany>>, token: string, name: string, args: Record<string, unknown>, invocation = randomUUID()) {
   c.app.ctx.config.tunnelHost = 'localhost';
@@ -36,9 +36,9 @@ it('keeps phone execution private after a vault value, while ordinary replay and
   expect(c.calls.filter(message => message.type === 'phone.action')).toHaveLength(1);
   const open = c.calls.find(message => message.type === 'phone.open');
   if (open?.type !== 'phone.open') throw new Error('The phone received no session.');
-  const frame = (sequence: number) => ({ type: 'phone.frame' as const, sessionId: session.id, generation: open.grant.generation, sequence, at: '2026-11-16T12:00:00Z', capture: { png: PNG, width: 1, height: 1, elements: [] } });
+  const frame = (sequence: number) => ({ type: 'phone.frame' as const, sessionId: session.id, generation: open.grant.generation, sequence, at: '2026-11-16T12:00:00Z', capture: { jpeg: JPEG, width: 1, height: 1, elements: [] } });
   await recordPhoneFrame(c.app.ctx, { kind: 'node', nodeId: c.executor.id }, frame(1));
-  expect((await c.db.select().from(attachments)).map(file => Buffer.from(file.bytes))).toEqual([Buffer.from(PNG, 'base64')]);
+  expect((await c.db.select().from(attachments)).map(file => Buffer.from(file.bytes))).toEqual([Buffer.from(JPEG, 'base64')]);
   await call(c, turn.token, 'vault_entry', { entry: 'Partner' });
   const urlId = randomUUID();
   await call(c, turn.token, 'phone_action', { session: session.id, operation: { kind: 'url', url: `https://example.test/?value=${PASSWORD}` } }, urlId);

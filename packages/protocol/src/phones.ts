@@ -12,13 +12,16 @@ export const networkEndpoint = (value: string): boolean => {
   const octets = match.slice(1, 5).map(Number);
   return octets.every(n => n <= 255) && octets[0] !== 0 && octets[0] !== 127;
 };
-export const PhoneEndpoint = z.string().max(260).refine(networkEndpoint);
+/* The serial number of a phone plugged by cable into the node's machine, as adb lists it; adb connects nowhere for it. */
+export const usbSerial = (value: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(value);
+export const PhoneEndpoint = z.string().max(260).refine(value => networkEndpoint(value) || usbSerial(value));
 const coordinate = z.number().int().min(0).max(32767);
 export const PhoneOperation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('capture') }),
   z.strictObject({ kind: z.literal('tap'), x: coordinate, y: coordinate }),
   z.strictObject({ kind: z.literal('swipe'), x: coordinate, y: coordinate, toX: coordinate, toY: coordinate, ms: z.number().int().min(1).max(1000) }),
-  z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(4096).regex(/^[\x20-\x7e]+$/) }),
+  z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(4096) }),
+  z.strictObject({ kind: z.literal('key'), key: z.enum(['back', 'home']) }),
   z.strictObject({ kind: z.literal('app'), package: z.string().max(200).regex(/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/) }),
   z.strictObject({ kind: z.literal('url'), url: z.string().max(2048).refine(value => {
     try {
@@ -30,7 +33,7 @@ export const PhoneOperation = z.discriminatedUnion('kind', [
 export type PhoneOperation = z.infer<typeof PhoneOperation>;
 
 export const PhoneHardwareKey = z.string().regex(/^[0-9a-f]{64}$/);
-export const PhonePairing = z.strictObject({ endpoint: PhoneEndpoint, code: z.string().regex(/^[0-9]{6}$/) });
+export const PhonePairing = z.strictObject({ endpoint: z.string().max(260).refine(networkEndpoint), code: z.string().regex(/^[0-9]{6}$/) });
 export const PhoneDevice = z.strictObject({ serial: PhoneSerial, status: z.enum(['device', 'offline', 'unauthorized', 'unverified']), model: z.string().max(100).nullable(), hardwareKey: PhoneHardwareKey.optional() });
 export type PhoneDevice = z.infer<typeof PhoneDevice>;
 export const PhoneElement = z.strictObject({
@@ -40,11 +43,11 @@ export const PhoneElement = z.strictObject({
 });
 export type PhoneElement = z.infer<typeof PhoneElement>;
 export const PhoneCapture = z.strictObject({
-  png: z.string().max(PHONE_FRAME_MAX).regex(/^[A-Za-z0-9+/]+={0,2}$/).nullable(), width: coordinate, height: coordinate,
+  jpeg: z.string().max(PHONE_FRAME_MAX).regex(/^[A-Za-z0-9+/]+={0,2}$/).nullable(), width: coordinate, height: coordinate,
   elements: z.array(PhoneElement).max(5000),
 });
 export type PhoneCapture = z.infer<typeof PhoneCapture>;
-/* serial is the phone's address on the network, host and port, as adb names a phone it reaches by wireless debugging. */
+/* serial is how adb names the phone: its address on the network, host and port, by wireless debugging, or its serial number on a cable. */
 export const PhoneBinding = z.strictObject({ phoneId: z.uuid(), serial: PhoneEndpoint, hardwareKey: PhoneHardwareKey });
 export type PhoneBinding = z.infer<typeof PhoneBinding>;
 export const PhoneGrant = z.strictObject({

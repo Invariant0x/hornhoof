@@ -53,6 +53,20 @@ async function flyIn(user: ReturnType<typeof userEvent.setup>) {
 const drawer = (user: ReturnType<typeof userEvent.setup>, name: 'Department tasks' | 'About the department') => user.click(screen.getByRole('button', { name }));
 
 describe('Department view', () => {
+  /* On a right to left page the dot of "No head yet." and of the map's hint stays at the end of the words (Design #1186). */
+  it('keeps the words of a department with no head and no employees in their own direction', () => {
+    mockApi({});
+    const { container } = render(<LanguageProvider><DepartmentView me={ME} department={{ ...DEV_ORG.departments[0]!, employees: [] }} deputies={[]} selected={null} selectedTask={null}
+      panel="task" onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    const head = container.querySelector<HTMLElement>('.shead.empty')!;
+    expect(head).toHaveTextContent('No head yet.');
+    const hint = screen.getByText('No employees yet. Hire them through the orchestrator.');
+    expect([...unisolated(head), ...unisolated(hint)]).toEqual([]);
+    /* Its count of agents and roles is one phrase in its own direction, the numbers inside it (Design #1201). */
+    const counts = within(head).getByText(/^0 of 0 agents working, \d+ roles?$/);
+    expect(counts).toHaveAttribute('dir', 'auto');
+  });
+
   it.each(['task', 'window'] as const)('fits the schema clear of the %s panel on its own side', panel => {
     mockApi({});
     render(<LanguageProvider><DepartmentView me={ME} department={DEV_ORG.departments[0]!} deputies={[]} selected={null} selectedTask={null}

@@ -31,14 +31,13 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
       if (duplicate) return;
       const [amount] = await tx.select({ count: sql<string>`count(*)` }).from(phoneFrames).where(eq(phoneFrames.sessionId, frame.sessionId));
       if (Number(amount!.count) >= MAX_SESSION_FRAMES) { full = true; return; }
-      /* The lease and frame order still advance. A vault-using turn keeps only that metadata, never a screen that may
-         show the value it typed, including when an old node sends an unmasked frame. */
-      const bytes = await frameBytes(tx, held.session.jobId, frame.capture.png);
-      if (bytes && pictureType(bytes) !== 'image/png') return;
+      /* Keep frame order and lease metadata, but never retain the private screen. */
+      const bytes = await frameBytes(tx, held.session.jobId, frame.capture.jpeg);
+      if (bytes && pictureType(bytes) !== 'image/jpeg') return;
       let attachmentId: string | null = null;
       if (bytes) {
         await checkRoom({ db: tx, config: ctx.config }, phone.companyId, held.task, bytes.length);
-        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/png' }).returning({ id: attachments.id });
+        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/jpeg' }).returning({ id: attachments.id });
         attachmentId = attachment!.id;
       }
       await tx.insert(phoneFrames).values({ companyId: phone.companyId, sessionId: frame.sessionId, sequence: frame.sequence, at: new Date(frame.at), attachmentId });
@@ -97,6 +96,6 @@ export async function imageBytes(ctx: Ctx, companyId: string, id: string | null)
   return Buffer.from(file.bytes);
 }
 
-async function frameBytes(db: Parameters<typeof sensitiveTurn>[0], jobId: string, png: string | null): Promise<Buffer | null> {
-  return await sensitiveTurn(db, jobId, true) || !png ? null : Buffer.from(png, 'base64');
+async function frameBytes(db: Parameters<typeof sensitiveTurn>[0], jobId: string, image: string | null): Promise<Buffer | null> {
+  return await sensitiveTurn(db, jobId, true) || !image ? null : Buffer.from(image, 'base64');
 }

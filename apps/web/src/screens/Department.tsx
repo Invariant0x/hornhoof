@@ -103,8 +103,8 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
             <AgentIcon />
             <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
           </span>
-          <span className="hn">{t.dept.noHead}</span>
-          <span className="meta">{stats}</span>
+          <span className="hn" dir="auto">{t.dept.noHead}</span>
+          <span className="meta" dir="auto">{stats}</span>
         </Edge>
       </div>
     );
@@ -120,7 +120,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
           </span>
           <span className="hn">{head.name}</span>
           <span className="meta">{[role && role !== head.name ? role : null, modelLine(t, head)].filter(Boolean).join(', ')}</span>
-          <span className="meta">{stats}</span>
+          <span className="meta" dir="auto">{stats}</span>
           <span className="hx">
             <span className="st">{t.dept.status[head.status]}</span>
             <AgentState agent={agentWorking(head)} serverNow={serverNow} />
@@ -589,7 +589,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           ))}
 
         </div>
-        {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass">{t.dept.noMembers}</p>}
+        {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass" dir="auto">{t.dept.noMembers}</p>}
       </div>
 
       )}
