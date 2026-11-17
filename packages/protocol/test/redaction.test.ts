@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CREDENTIALS, cleanDiagnostic, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS } from '../src/redaction.js';
+import mixed from './fixtures/redaction-mixed.json' with { type: 'json' };
 
 describe('stored prose, masked as it is written', () => {
   it('hides labelled passwords and credentials of a known format', () => {
@@ -101,6 +102,10 @@ describe('stored prose, masked as it is written', () => {
 });
 
 describe('a diagnostic cleaned for a reader who may not read where it comes from', () => {
+  it.each(mixed)('hides an auth token and a labelled secret beside URL credentials: $name', ({ text, diagnosticExpected }) => {
+    expect(cleanDiagnostic(text)).toBe(diagnosticExpected);
+  });
+
   it('hides labelled Russian passwords and keeps ordinary prose and identifiers', () => {
     expect(hiddenBy('пароль: "two words"; password = test123!\nПароль qwerty123!', CREDENTIALS)).toBe('пароль: [hidden]; password = [hidden]\nПароль [hidden]');
     for (const plain of ['Change the password tomorrow', 'Сменить пароль завтра', 'Reset password', 'task #267', 'd44ecb8c7d3d0b6d7ce690e01c25046f0404b212', 'e5cd054b-2620-421c-b07b-546bfbcdbedf']) {

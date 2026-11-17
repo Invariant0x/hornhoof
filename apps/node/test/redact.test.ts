@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { hideKeyLike, redact } from '../src/redact.js';
+import { nodeLog } from '../src/node-log.js';
+import mixed from '../../../packages/protocol/test/fixtures/redaction-mixed.json' with { type: 'json' };
 
 describe('redact', () => {
   it('hides a token, its base64 form and every copy', () => {
@@ -11,6 +13,11 @@ describe('redact', () => {
 
   it('leaves short values alone', () => {
     expect(redact('the word true stays', ['true', ''])).toBe('the word true stays');
+  });
+
+  it.each(mixed)('hides a known token and an arbitrary secret together in a line and URL: $name', ({ text, knownSecrets, literalExpected, diagnosticExpected }) => {
+    expect(redact(text, knownSecrets)).toBe(literalExpected);
+    expect(nodeLog(text, knownSecrets.slice(0, 1))).toBe(diagnosticExpected);
   });
 });
 
