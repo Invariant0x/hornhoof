@@ -1524,7 +1524,9 @@ body:has(.form-foot) .version-mark { display: none; }
 /* A page has no strip at the bottom: there a card, task or window lies over it down to the bottom of the window, and the page
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
-.ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; }
+/* The body scrolls with the same 18 px of room at its end for a scrollbar in every browser, so its words are as wide in each:
+   --sb is what this browser's scrollbar takes of it (style book section 9). */
+.ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding: 16px 18px 20px; padding-inline-end: calc(18px + max(0px, 18px - var(--sb, 0px))); }
 .ac-body > * { min-width: 0; }
 .ac-body :where(p, h3, h4, dd, li, pre, code) { overflow-wrap: anywhere; }
 .ac-head { display: grid; gap: 4px; justify-items: start; min-width: 0; }
@@ -1768,8 +1770,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 }
 [dir="rtl"] .tr-chip select { background-position: 10px 50%, 15px 50%; }
 .tr-chip select:is(:focus, :focus-visible) { outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: none; }
-/* In the light skin a cyan line on white is too faint for a border, and cyan words over the glow too faint for words. */
-:root[data-scheme="light"] :is(.tr-chip.on, .tr-node.goal) { border-color: var(--cyan-ink); }
+/* In the light skin a cyan line on white is too faint for a border, and cyan words over the glow too faint for words: a
+   chosen chip, card or node, a goal's node and a node under the pointer draw their border in the ink of the accent. */
+:root[data-scheme="light"] :is(.tr-chip.on, .tr-node.goal, .tr-node.on, button.tr-node:hover, .tr-card.on) { border-color: var(--cyan-ink); }
 :root[data-scheme="light"] .tr-views label.on { color: var(--ink); }
 .tr-goals { display: grid; gap: 8px; min-width: 0; }
 .tr-goals > h2, .tr-found > h2 { margin: 0; font-size: 15px; }
@@ -1841,9 +1844,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-crumbs li, .tp-path li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
 .tr-crumbs li + li::before, .tp-path li + li::before { content: '/'; color: var(--muted); }
 .tr-crumbs .linkish, .tp-path .linkish { overflow-wrap: anywhere; }
-/* A link that stands alone takes a finger: at least 44 px high, its words in the middle as before. Links inside a line of
-   words keep the line's height. */
-:is(.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-block-size: 44px; }
+/* A link that stands alone takes a finger: at least 44 px high and 44 px wide, even of two letters, its words at its start
+   and in the middle of its height as before. Links inside a line of words keep the line's height. */
+:is(.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish) { display: inline-flex; align-items: center; min-inline-size: 44px; min-block-size: 44px; }
 .tr-crumbs [aria-current] { font-weight: 600; }
 .tr-modes { max-width: 420px; }
 .tr-modes label { min-height: 44px; padding: 6px 8px; text-align: center; overflow-wrap: anywhere; }

@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- The tracker in the light skin draws a chosen card, a chosen node and a node under the pointer with a border people can see; a due day reads day before month right to left; a side panel gives its words the same width in Chromium, Firefox and Safari; and a link of two letters is 44 px wide to press.
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed

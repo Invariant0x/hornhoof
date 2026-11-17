@@ -21,12 +21,13 @@ export function StateWord({ status }: { status: HumanStatus }) {
   return <span className={`tstate ${STATE_CLASS[status]}`}>{t.tracker.groups[status]}</span>;
 }
 
-/* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. */
+/* A value of a row with its name, which shows beside it only where the row is too narrow for the names above the list. The
+   value keeps its own direction, so the parts of a date and the dot of a name stay in place right to left. */
 function Cell({ name, children }: { name: string; children: ReactNode }) {
   return (
     <span className="tr-cell">
       <span className="tr-k">{name}</span>
-      <span className="tr-v">{children}</span>
+      <span className="tr-v" dir="auto">{children}</span>
     </span>
   );
 }
