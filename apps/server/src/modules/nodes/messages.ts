@@ -1,4 +1,4 @@
-import { lastBytes, PRIVATE_TOOL_NOTE, privateToolEvent, type Limits, type NodeMessage } from '@hornhoof/protocol';
+import { lastBytes, PRIVATE_TOOL_NOTE, privateToolEvent, type Limits, type NodeMessage, type PrivateValues } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -338,18 +338,30 @@ async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: 
 function privateTurnMessage(ctx: Pick<Ctx, 'db'>, msg: NodeMessage, sensitive: boolean): NodeMessage {
   if (msg.type !== 'job.event' && msg.type !== 'job.done') return msg;
   const values = privateTurn(ctx.db, msg.jobId)?.values;
-  if (msg.type === 'job.event') {
-    /* Only MCP marks an issued value. A node can ask for more masking, never grant secret execution or invent issuance. */
-    const event = privateToolEvent(msg.event.kind === 'tool' ? { kind: 'tool', name: msg.event.name, input: msg.event.input, ...(msg.event.sensitive ? { sensitive: true as const } : {}) } : msg.event, sensitive, !values);
-    return { ...msg, event: values?.hide(event) ?? event };
-  }
-  if (sensitive) return { ...msg, result: values?.text(msg.result) ?? PRIVATE_TOOL_NOTE, tail: PRIVATE_TOOL_NOTE, ...(msg.failure ? { failure: { ...msg.failure, text: values?.text(msg.failure.text) ?? PRIVATE_TOOL_NOTE } } : {}) };
+  if (msg.type === 'job.event') return privateEvent(msg, sensitive, values);
+  if (sensitive) return privateCompletion(msg, values);
   return msg;
+}
+
+function privateEvent(msg: Extract<NodeMessage, { type: 'job.event' }>, sensitive: boolean, values?: PrivateValues): NodeMessage {
+  /* Only MCP marks an issued value. A node can ask for masking, never invent issuance. */
+  const incoming = msg.event.kind === 'tool' ? { kind: 'tool' as const, name: msg.event.name, input: msg.event.input, ...(msg.event.sensitive ? { sensitive: true as const } : {}) } : msg.event;
+  const event = privateToolEvent(incoming, sensitive, !values);
+  return { ...msg, event: values?.hide(event) ?? event };
+}
+
+function privateCompletion(msg: Extract<NodeMessage, { type: 'job.done' }>, values?: PrivateValues): NodeMessage {
+  return { ...msg, result: values?.text(msg.result) ?? PRIVATE_TOOL_NOTE, tail: PRIVATE_TOOL_NOTE, ...(msg.failure ? { failure: { ...msg.failure, text: values?.text(msg.failure.text) ?? PRIVATE_TOOL_NOTE } } : {}) };
+}
+
+async function privateIncoming(ctx: Pick<Ctx, 'db'>, msg: NodeMessage): Promise<NodeMessage> {
+  if (msg.type !== 'job.event' && msg.type !== 'job.done') return msg;
+  return privateTurnMessage(ctx, msg, await sensitiveTurn(ctx.db, msg.jobId));
 }
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
-  if (msg.type === 'job.event' || msg.type === 'job.done') msg = privateTurnMessage(ctx, msg, await sensitiveTurn(ctx.db, msg.jobId));
+  msg = await privateIncoming(ctx, msg);
   if (await parkUnknown(ctx, id, msg)) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
