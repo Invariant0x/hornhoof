@@ -1,0 +1,34 @@
+{
+  "candidate": "b0b972aa75fbfa31a6f0b0decf500858ea68278a",
+  "eventCount": 42,
+  "verifiedRunExits": [
+    0,
+    0,
+    143,
+    0,
+    0
+  ],
+  "reconstructedStateDifferences": {
+    "core": [
+      "apps/web/e2e/agent-history.config.ts",
+      "apps/web/e2e/agent-history.spec.ts",
+      "apps/web/src/ui/AgentCard.tsx",
+      "docs/tasks/task-1220-plan.md"
+    ],
+    "callers": [
+      "apps/web/e2e/agent-history.spec.ts",
+      "docs/tasks/task-1220-plan.md"
+    ],
+    "card-before-changeAuthor": [
+      "apps/server/test/agent-changes-migration.test.ts",
+      "apps/server/test/head-department-control.test.ts",
+      "apps/web/e2e/agent-history.config.ts",
+      "apps/web/e2e/agent-history.spec.ts",
+      "apps/web/src/ui/AgentCard.tsx",
+      "docs/tasks/task-1220-plan.md"
+    ],
+    "browser-all-parts": []
+  },
+  "cardRefactorTerminalExit": "NOT_RETAINED",
+  "limit": "Source states reconstructed retrospectively from the producer's selected write records; no launch-time filesystem snapshot or new independent product execution."
+}

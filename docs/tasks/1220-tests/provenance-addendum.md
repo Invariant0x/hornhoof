@@ -1,0 +1,18 @@
+# Late evidence for task 1220
+
+This supplements the completed Tests report for `b0b972aa75fbfa31a6f0b0decf500858ea68278a`. It changes no product code, candidate, gate decision or integration permission. The original DONE_WITH_CONCERNS remains. The Head has assigned the timing repair to task 1238 and the existing SQL history-forgery risk to task 1237.
+
+The producer supplied `task-1220-provenance-f33491c30.zip`, attachment d4c6d383-bc11-4ebb-a4ec-521cedbdae59, SHA256 `9c89d2428bdf5c84502ec7ec1c31f6892e43c9b8f478643d1d2a60e8c9ac27d9`. Its seven files match the evidence-only commit `f33491c30c6ba5c59f0f712c1c5b6866af6899ee`, task-1220-provenance. It contains 42 selected original tool-call/output records, five detailed run records, and retrospective patches and hashes of four working states. The original logs were not modified to add headers.
+
+Executed `python3 docs/tasks/1220-tests/verify-provenance.py`, exit 0. Verified the archive hash, command/cwd links to original tool inputs, the five completion receipts against the original tool outputs, their original raw-log hashes, and 96 reconstructed file hashes. Each reconstruction applied to a private temporary copy of the 24 candidate paths; it did not modify the product checkout. Reconstruction differences match the producer's declared inventories:
+
+- Core: four differing web/plan paths, no server difference. The server's 41 passed and real exit 0 apply to source-equivalent server inputs, despite HEAD still being dd4b7b628 with working changes.
+- Callers: only browser scenario and plan differ, no server difference. Its 124 passed and real exit 0 likewise apply to source-equivalent server inputs.
+- Browser: no difference in the 24 paths. The first process started before the commit but after the final recorded writes; committing changed no source bytes. Its exit 143 remains NOT_PASS for the whole process, with 12 individually completed cases. The following two processes started on b0b972aa and exited 0 with 8 and 4 passed. The already checked case inventory is 24 distinct completed cases, not a successful uninterrupted 24-case process.
+- Earlier full card run: six differing paths, including AgentCard before changeAuthor extraction. It is not post-refactor proof. The final full web coverage run and independent Review's 64-test file remain the applicable evidence.
+
+The producer corrected one old manifest field: card-refactor.log contains one passed case and 63 filtered cases, but the actual terminal completion receipt was not retained. Its old inferred exit 0 is excluded as direct evidence. The main Tests result did not rely on it. The earlier head-migration-green.log remains failed, exit 1 with three failed and nine passed; it is not GREEN.
+
+Assessment: the late records supply the missing commands, sessions and observed exits. The ordered write record supports source equivalence for the earlier server and browser checks, subject to its completeness. It is a retrospective reconstruction by the original producer, with no filesystem snapshot taken at launch and no new independent execution. Those limits are retained, rather than upgrading the reconstruction to an independent receipt. There is no reason from this evidence to change the original mandatory-check PASS or the 424 server / 64 card Review totals, and overlapping author counts are not added to them.
+
+The other limitations remain: timing stability, matrix/pixel themes, missing earlier Chromium screenshots, future migration rebinding after 0138, real PostgreSQL and release-wide validation. No tests were rerun, no run_tests was called, and no integration occurred.

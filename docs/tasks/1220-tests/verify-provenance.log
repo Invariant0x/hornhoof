@@ -1,0 +1,6 @@
+Command: python3 docs/tasks/1220-tests/verify-provenance.py
+Candidate: b0b972aa75fbfa31a6f0b0decf500858ea68278a
+PASS: archive hash, 42 source records, 5 command/cwd/exit receipts and original log hashes, 96 reconstructed file hashes; filtered card exit excluded
+LIMIT: reconstructed source equivalence assumes complete producer write records; first browser exit 143 is not a whole-run PASS
+Exit: 0
+PASS: all 7 archive files match producer commit f33491c30
