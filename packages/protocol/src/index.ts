@@ -692,7 +692,13 @@ export const Repo = z.object({
 });
 /* repositoryScope: the repository as the company's registry of what is built knows it, so the agent's worktree can take the
    dependencies a machine built for its commit. */
-const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional() });
+/* tasks: the company's task numbers still open and the last number it gave, so the node takes away the agent's worktrees of
+   closed tasks: one on a task-<n> branch of a number up to that one and not open, once nothing in it is lost. A server from
+   before sends none, and a company with more open tasks than a message carries too: then every worktree stays. */
+export const MAX_OPEN_TASKS = 10_000;
+export const TaskStates = z.object({ open: z.array(z.number().int().positive()).max(MAX_OPEN_TASKS), upTo: z.number().int().min(0) });
+export type TaskStates = z.infer<typeof TaskStates>;
+const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional(), tasks: TaskStates.optional() });
 /* As many skills as an agent can have on, each a folder named after it with its SKILL.md. */
 export const MAX_SKILLS = 200;
 const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1).max(1000), body: z.string().max(200_000) });

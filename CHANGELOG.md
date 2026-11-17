@@ -53,6 +53,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The program operator is called to a thinking program whose screen stood still for three minutes, and passes the program's own windows, such as a poll, a folder's trust, an update, a full context or a sign-in from the vault, as the agent's owner would.
 - On a Linux machine, an agent's TypeScript, Vitest, ESLint, Jest and Playwright runs wait their turn for the machine's check slot and then run in the agent's own shell; with no slot to be had they run at once.
 - Machines shows "Checks paused" with the reason while a stopped check's processes do not end, and new checks wait until they are gone.
+- Before an agent's turn, its machine removes the agent's git worktrees of done or cancelled tasks, so their dependencies no longer fill the disk. A worktree stays while it has changes that are not committed or commits that are not on the remote, and the machine's log says why.
 
 ### Changed
 

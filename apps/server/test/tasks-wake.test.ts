@@ -748,7 +748,7 @@ describe('waking agents for their tasks', () => {
 });
 
 const NODE_KEY = 'k'.repeat(40);
-type Run = { type: 'job.run'; jobId: string; prompt: string; workspace?: { key: string; repo: { url: string; branch: string; token: string; author: { name: string; email: string } | null } | null; repositoryScope?: { companyId: string; repositoryOwnerId: string; repoUrlHash: string } } | null };
+type Run = { type: 'job.run'; jobId: string; prompt: string; workspace?: { key: string; repo: { url: string; branch: string; token: string; author: { name: string; email: string } | null } | null; repositoryScope?: { companyId: string; repositoryOwnerId: string; repoUrlHash: string }; tasks?: { open: number[]; upTo: number } } | null };
 
 /* The node's mark comes back after everything the server sent it before, as one socket keeps their order. */
 async function marked(node: FakeNode): Promise<void> {
@@ -935,13 +935,13 @@ describe("working in the product's repository", () => {
     const first = await nextRun(builtin);
     /* The repository as the company's registry of what is built knows it, so the agent's worktree gets its dependencies from there. */
     const scope = (ownerId: string, url: string) => ({ companyId, repositoryOwnerId: ownerId, repoUrlHash: hashToken(url) });
-    expect(first.workspace).toEqual({ key: bruno.id, repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null }, repositoryScope: scope(shop.id, 'https://github.com/acme/shop.git') });
+    expect(first.workspace).toEqual({ key: bruno.id, repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null }, repositoryScope: scope(shop.id, 'https://github.com/acme/shop.git'), tasks: { open: [1], upTo: 1 } });
     /* Where it is and how it is worked in the agent reads with its briefing tool: the message is the message alone. */
     expect(first.prompt).not.toContain('https://github.com/acme/shop.git');
     expect(first.prompt).not.toContain('./shop');
     expect(first.prompt).not.toContain('ghp_');
     await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
-    expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111', author: null }, repositoryScope: scope(dev.id, 'https://github.com/acme/platform.git') });
+    expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111', author: null }, repositoryScope: scope(dev.id, 'https://github.com/acme/platform.git'), tasks: { open: [1, 2], upTo: 2 } });
   });
 
   it("clones the repository of the task's product for an agent of the whole department, and its own for its window", async () => {
@@ -956,6 +956,7 @@ describe("working in the product's repository", () => {
       key: pia.id,
       repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null },
       repositoryScope: { companyId, repositoryOwnerId: shop.id, repoUrlHash: hashToken('https://github.com/acme/shop.git') },
+      tasks: { open: [task.number], upTo: task.number },
     });
     builtin.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 's1', result: '', tail: '', error: null });
     await until(() => builtin.acks.includes(run.jobId));
@@ -992,6 +993,17 @@ describe("working in the product's repository", () => {
     expect(prompt).toContain('#7 "Checkout API"');
     expect(prompt).not.toContain('task.echelons');
     expect(prompt).toMatch(/If you (still )?cannot go on, use blocked/);
+  });
+
+  it("tells the node which of the company's tasks are still open, so it takes away the worktrees of closed ones", async () => {
+    const { ctx, db, builtin, dev, hire, repository, task } = await withRepositories();
+    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
+    const pia = await hire('Pia', null);
+    const [done, cancelled, open] = [await task(pia.id), await task(pia.id), await task(pia.id)];
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, done.id));
+    await db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, cancelled.id));
+    await wakeAll(ctx, [{ agentId: pia.id, taskId: open.id, why: 'assigned' }]);
+    expect((await nextRun(builtin)).workspace?.tasks).toEqual({ open: [open.number], upTo: open.number });
   });
 
   it('sends a turn without a repository with the agent folder alone', async () => {
