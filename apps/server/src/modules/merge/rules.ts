@@ -55,6 +55,8 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   wait_notices: skip('work'),
   harness_builds: skip('machines'),
   harness_products: skip('machines'),
+  /* An update that waited in a database set aside is not handed over later, out of its time. */
+  update_waits: skip('machines'),
   ...each(['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals'], skip('work')),
   /* An answer a bot still owed when its database was set aside is not sent later, out of its time. */
   telegram_replies: skip('work'),

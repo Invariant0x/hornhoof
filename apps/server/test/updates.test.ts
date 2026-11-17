@@ -9,7 +9,8 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { publishWorking } from '../src/modules/events/store.js';
-import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
+import { appOn, as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
+import { openTestDb } from './helpers-db.js';
 import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
 import { recordJobProgram, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
@@ -157,6 +158,35 @@ async function leadingCompany(registry: { base: string }) {
     await app.ctx.mode.check();
   };
   return { app, db, ceo, control, acme: acme!, job: job!, say, stepDown };
+}
+
+/* A company whose server can restart on the same database and control folder, with its worker Zed at work, as the
+   restart finds it. first is the server before the restart; restart stops it and starts the next one. */
+async function restartingCompany() {
+  const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+  const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
+  const env = { HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof', REGISTRY_URL: registry.base, HORNHOOF_VERSION: '0.4.0', HORNHOOF_COMMIT: 'aaa', HORNHOOF_CONTROL_DIR: control };
+  const { client } = await openTestDb();
+  onTestFinished(() => client.close());
+  const { app: first, db } = await appOn(client, env);
+  const ceo = await setUpCompany(first);
+  updaterAlive(control);
+  const [acme] = await db.select().from(companies);
+  const [sub] = await db.select().from(subscriptions);
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [zed] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Zed', model: '' }).returning();
+  const [job] = await db
+    .insert(jobs)
+    .values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: zed!.id, prompt: 'x', kind: 'conversation', status: 'running', startedAt: new Date(), timeoutMs: 1000 })
+    .returning();
+  /* Ready, as a server that listens is: it leads from then on. */
+  const restart = async () => {
+    await first.close();
+    const next = await appOn(client, env);
+    await next.app.ready();
+    return next;
+  };
+  return { first, restart, ceo, control, registry, db, acme: acme!, orchestrator: orchestrator!, job: job! };
 }
 
 /* The updater is alive when it touched alive in the last 30 seconds. A touch an hour ahead of the clock stays that fresh
@@ -599,18 +629,19 @@ describe('updates', () => {
     expect(turnsHeld(app.ctx, acme!.id)).toBe(false);
   });
 
-  it('calls off an update that waits for the agents', async () => {
-    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
-    const { app, db, ceo, control } = await company(registry);
-    updaterAlive(control);
-    const [acme] = await db.select().from(companies);
-    const [sub] = await db.select().from(subscriptions);
-    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
-    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+  it('calls off an update that waits for the agents, and says so with the turns that ran and until when it waited', async () => {
+    const { app, db, ceo, control, acme, orchestrator, job } = await companyAtWork();
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
     expect((await app.inject({ method: 'DELETE', url: '/api/updates', ...as(ceo) })).statusCode).toBe(204);
-    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
-    await publishWorking(app.ctx, acme!.id);
+    const updater = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    expect(updater.waiting).toBeNull();
+    expect(updater.calledOff).toEqual({ version: '0.4.1', commit: SHA, at: expect.any(String), until: res.json().waiting.until, reason: 'cancelled', turns: [{ agent: 'Zed', task: null }] });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    await publishWorking(app.ctx, acme.id);
+    await settled();
     expect(request(control)).toBeNull();
+    /* Whoever called it off knows it already. */
+    expect(await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).toEqual([]);
   });
 
   it('does not hand over an update called off while the agents were counted', async () => {
@@ -658,18 +689,47 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
-  it('stops waiting when the app leaves lead, and starts no updater on a machine that no longer leads', async () => {
+  /* 17.11: the keeper went silent for a moment, the app left lead and the waiting update was gone, neither handed over
+     nor called off. */
+  it('keeps an update waiting through a step-down: a machine that does not lead holds and hands over nothing, and the next lead picks the wait up again', async () => {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
-    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
-    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    const { app, db, ceo, control, acme, job, say, stepDown } = await leadingCompany(registry);
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
     expect(turnsHeld(app.ctx, acme.id)).toBe(true);
     await stepDown();
     expect(turnsHeld(app.ctx, acme.id)).toBe(false);
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+    const away = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    expect(away.waiting).toEqual(WAITS);
+    expect(away.calledOff).toBeNull();
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
     await publishWorking(app.ctx, acme.id);
     await settled();
     expect(request(control)).toBeNull();
+
+    say('lead');
+    await app.ctx.mode.check();
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
+    const back = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    expect(back.waiting).toBeNull();
+    expect(back.calledOff).toBeNull();
+    /* Held for the restart, as after any hand-over. */
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+  });
+
+  it('picks a waiting update up again after the server restarts, and hands it over once the agents finish', async () => {
+    const { first, restart, ceo, control, registry, acme, job } = await restartingCompany();
+    const res = await first.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    const { app, db } = await restart();
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ ...WAITS, turns: [{ agent: 'Zed', task: null }] });
+    await until(() => turnsHeld(app.ctx, acme.id));
+    expect(request(control)).toBeNull();
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    await publishWorking(app.ctx, acme.id);
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater).toMatchObject({ waiting: null, calledOff: null });
   });
 
   it('hands over nothing when the app leaves lead while the agents are counted', async () => {
@@ -807,7 +867,7 @@ describe('updates', () => {
     expect(request(control)).toBeNull();
     const updater = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
     expect(updater.waiting).toBeNull();
-    expect(updater.calledOff).toEqual({ version: '0.4.1', commit: SHA, at: expect.any(String), reason: 'deadline', turns: [{ agent: 'Zed', task: null }] });
+    expect(updater.calledOff).toEqual({ version: '0.4.1', commit: SHA, at: expect.any(String), until: deadline, reason: 'deadline', turns: [{ agent: 'Zed', task: null }] });
     expect((await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, job.id)))[0]!.status).toBe('running');
     const told = async () => (await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
     await until(async () => (await told()).length > 0);
@@ -825,6 +885,73 @@ describe('updates', () => {
     await settled();
     expect(turnsHeld(app.ctx, acme.id)).toBe(true);
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.calledOff).toBeNull();
+  });
+
+  it('calls an update off when the server comes back after its deadline and the agents still work: it says why and tells the orchestrator', async () => {
+    const { first, restart, ceo, control, acme, orchestrator, job } = await restartingCompany();
+    /* Asked ten minutes ago for five minutes, by the clock of the server before the restart. */
+    const askedAt = Date.now() - 10 * 60_000;
+    first.ctx.clock = () => askedAt;
+    expect((await first.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true, idleWaitMinutes: 5 }, ...as(ceo) })).statusCode).toBe(202);
+    const { app, db } = await restart();
+    const told = async () => (await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
+    await until(async () => (await told()).length > 0);
+    expect((await told())[0]).toMatch(/^Hornhoof called off the update to 0\.4\.1: the agents did not finish within 5 minutes\. No running work was stopped/);
+    const updater = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    expect(updater.waiting).toBeNull();
+    expect(updater.calledOff).toEqual({ version: '0.4.1', commit: SHA, at: expect.any(String), until: new Date(askedAt + 5 * 60_000).toISOString(), reason: 'deadline', turns: [{ agent: 'Zed', task: null }] });
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+    expect(request(control)).toBeNull();
+    expect((await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, job.id)))[0]!.status).toBe('running');
+  });
+
+  it('calls an update off as failed when the updater cannot be told by its deadline, and says why', async () => {
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    onTestFinished(() => timeouts.mockRestore());
+    const { app, db, ceo, control, acme, orchestrator, job } = await companyAtWork();
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true, idleWaitMinutes: 5 }, ...as(ceo) });
+    /* A folder where the request file goes makes writing it fail. */
+    mkdirSync(join(control, 'request.json.new'));
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
+    const at = timeouts.mock.calls.findIndex(([, ms]) => ms === 5 * 60_000);
+    expect(at).toBeGreaterThanOrEqual(0);
+    (timeouts.mock.calls[at]![0] as () => void)();
+    await until(() => !turnsHeld(app.ctx, acme.id));
+    const updater = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    expect(updater.waiting).toBeNull();
+    expect(updater.calledOff).toEqual({ version: '0.4.1', commit: SHA, at: expect.any(String), until: res.json().waiting.until, reason: 'failed', turns: [], error: expect.stringContaining('request.json.new') });
+    const told = async () => (await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
+    await until(async () => (await told()).length > 0);
+    expect((await told())[0]).toMatch(/^Hornhoof called off the update to 0\.4\.1: Hornhoof could not go on with it: .*request\.json\.new/);
+  });
+
+  it('takes a waiting update for handed over when the updater got it before the restart wrote that down', async () => {
+    const { first, restart, ceo, control, registry, acme, orchestrator } = await restartingCompany();
+    const res = await first.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    /* The request went out as the server stopped, before the wait was written down as handed over. */
+    writeFileSync(join(control, 'request.json'), JSON.stringify(asked(registry, res.json().id)));
+    const { app, db } = await restart();
+    const view = async () => (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    await until(async () => (await view()).waiting === null);
+    expect((await view()).calledOff).toBeNull();
+    expect(request(control)).toEqual(asked(registry, res.json().id));
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+    expect(await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).toEqual([]);
+  });
+
+  it('calls a waiting update off as failed when another update holds the updater after the restart, and says why', async () => {
+    const { first, restart, ceo, control, orchestrator } = await restartingCompany();
+    const res = await first.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    writeFileSync(join(control, 'status.json'), JSON.stringify({ id: 'another', version: '0.4.2', state: 'running', step: 'pull', log: '', at: new Date().toISOString() }));
+    const { app, db } = await restart();
+    const told = async () => (await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
+    await until(async () => (await told()).length > 0);
+    expect((await told())[0]).toMatch(/^Hornhoof called off the update to 0\.4\.1: Hornhoof could not go on with it: the updater cannot take it, as another update runs\./);
+    const updater = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    expect(updater.waiting).toBeNull();
+    expect(updater.calledOff).toEqual({
+      version: '0.4.1', commit: SHA, at: expect.any(String), until: res.json().waiting.until, reason: 'failed', turns: [{ agent: 'Zed', task: null }], error: 'the updater cannot take it, as another update runs.',
+    });
   });
 
   it('refuses an update whose reading of the registry crossed a step-down', async () => {

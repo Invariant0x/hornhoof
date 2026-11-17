@@ -1,10 +1,11 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, tasks } from '../../db/schema.js';
+import { agents, jobs, tasks, updateWaits } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { enqueueTurn, pumpWaiting } from '../conversation/queue.js';
 import { workingCount } from '../events/store.js';
+import { reasonOf } from '../keeper/machine-keys.js';
 import { lostTurn } from '../tasks/silent.js';
 import { lastTurnSigns } from '../tasks/turn-signs.js';
 import { notStep } from '../tools/steps.js';
@@ -19,8 +20,12 @@ const HELD_AFTER_MS = 10 * 60_000;
 export const IDLE_WAIT_MINUTES = 30;
 const HAND_OVER_FAILED = 'Could not hand the waiting update to the updater.';
 
-type Waiting = { companyId: string; request: UpdateRequest; since: number; minutes: number; stop: () => void };
-type CalledOff = UpdateCalledOff & { companyId: string };
+type WaitRow = typeof updateWaits.$inferSelect;
+type Wait = Pick<WaitRow, 'id' | 'companyId' | 'request' | 'since' | 'until'>;
+/* The wait this app watches while it leads, and what stops the watching. */
+type Armed = { wait: Wait; stop: () => void };
+type CallingOff = { reason: UpdateCalledOff['reason']; turns: NamedTurn[]; error?: string };
+type Ending = { outcome: 'handed_over' | 'replaced' } | ({ outcome: 'called_off' } & CallingOff);
 type RunningTurn = NamedTurn & { id: string; lost: boolean };
 
 /* From here the request file and then the updater's own status say that an update is out, so its claim is let go. */
@@ -47,9 +52,13 @@ async function runningTurns(ctx: Ctx, companyId: string, nowMs: number): Promise
 const named = (turns: RunningTurn[], lost: boolean): NamedTurn[] => turns.filter(turn => turn.lost === lost).map(({ agent, task }) => ({ agent, task }));
 const turnList = (turns: NamedTurn[]): string => turns.map(turn => (turn.task ? `${turn.agent} (#${turn.task})` : turn.agent)).join(', ') || 'none';
 
-function calledOffText(called: CalledOff, minutes: number): string {
+function calledOffText(called: UpdateCalledOff, wait: Wait): string {
+  const why =
+    called.reason === 'failed'
+      ? `Hornhoof could not go on with it: ${called.error ?? 'no reason was given.'}`
+      : `the agents did not finish within ${Math.round((wait.until.getTime() - wait.since.getTime()) / 60_000)} minutes.`;
   return (
-    `Hornhoof called off the update to ${called.version}: the agents did not finish within ${minutes} minutes. No running work was stopped, and new turns start again. ` +
+    `Hornhoof called off the update to ${called.version}: ${why} No running work was stopped, and new turns start again. ` +
     `Still running: ${turnList(called.turns)}. Ask for it again later, or, once the CEO agrees to cut those turns short, with whenIdle false.`
   );
 }
@@ -62,113 +71,247 @@ async function tellOrchestrator(ctx: Ctx, companyId: string, text: string): Prom
   await enqueueTurn(ctx, { companyId, agentId: orchestrator.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'service', tasks: [], detail } } });
 }
 
-/* The update that waits for a company's agents to finish, and the company's turns held meanwhile and for a while after. */
+/* The update that waits for a company's agents to finish, and the company's turns held meanwhile and for a while after.
+   The wait lives in update_waits: this app only watches it while it leads, and every way it ends is written there, as
+   handed over, replaced by a later request or called off with its reason. A step-down or a restart leaves it as it was,
+   and the next lead takes it up again. */
 export class UpdateWait {
-  private waiting: Waiting | null = null;
-  private calledOff: CalledOff | null = null;
+  private armed: Armed | null = null;
+  /* What looks at the wait this often while the app leads, and takes up one nobody watches. */
+  private ticker: NodeJS.Timeout | null = null;
   /* What ends the hold on a company's turns once its update went to the updater. */
   private readonly heldAfterHandOver = new Map<string, NodeJS.Timeout>();
+  /* Taking a wait up, starting, replacing and calling one off go one after another. */
+  private chain: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly ctx: Ctx) {}
 
   /* The turns are named only to the company whose update waits for them. */
   async shown(companyId: string): Promise<UpdateWaiting | null> {
-    const waiting = this.waiting;
-    if (!waiting) return null;
-    const turns = waiting.companyId === companyId ? await runningTurns(this.ctx, companyId, Date.now()) : [];
-    const { version, commit } = waiting.request;
-    const until = new Date(waiting.since + waiting.minutes * 60_000).toISOString();
-    return { version, commit, since: new Date(waiting.since).toISOString(), until, turns: named(turns, false), lost: named(turns, true) };
+    const wait = await this.open();
+    if (!wait) return null;
+    const turns = wait.companyId === companyId ? await runningTurns(this.ctx, companyId, this.now()) : [];
+    const { version, commit } = wait.request;
+    return { version, commit, since: wait.since.toISOString(), until: wait.until.toISOString(), turns: named(turns, false), lost: named(turns, true) };
   }
 
-  shownCalledOff(companyId: string): UpdateCalledOff | null {
-    if (this.calledOff?.companyId !== companyId) return null;
-    const { version, commit, at, reason, turns } = this.calledOff;
-    return { version, commit, at, reason, turns };
+  /* The last update asked for, when it went to nobody; a later request, handed over or waiting, takes its place. */
+  async shownCalledOff(companyId: string): Promise<UpdateCalledOff | null> {
+    const [last] = await this.ctx.db.select().from(updateWaits).orderBy(desc(updateWaits.since)).limit(1);
+    if (last?.companyId !== companyId || last.outcome !== 'called_off' || !last.endedAt || !last.reason) return null;
+    const { version, commit } = last.request;
+    return { version, commit, at: last.endedAt.toISOString(), until: last.until.toISOString(), reason: last.reason, turns: last.turns ?? [], ...(last.error ? { error: last.error } : {}) };
   }
 
-  /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
-  callOff(release = true): void {
-    this.calledOff = null;
-    this.waiting?.stop();
-    if (this.waiting) this.ctx.updater.free(this.waiting.request.id);
-    if (this.waiting && release) this.letTurnsGo(this.waiting.companyId);
-    this.waiting = null;
+  /* The app leads: it takes up the wait the last lead or a restart left, and looks at it from now on. */
+  lead(): void {
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = setInterval(() => void this.tick(), IDLE_CHECK_MS);
+    this.ticker.unref();
+    void this.tick();
   }
 
-  /* The update that waits holds the updater, also after a request that would have taken its place failed. */
-  keepClaim(): void {
-    if (this.waiting) this.ctx.updater.claim('update', this.waiting.request.id);
-  }
-
-  /* A machine that stopped leading waits for no agents and holds no turns. Nothing is started here, as only a leader
-     starts turns: its minute round picks up what waits. */
+  /* A machine that stopped leading watches no wait and holds no turns, and changes nothing of the wait either: the next
+     lead takes it up. Nothing is started here, as only a leader starts turns: its minute round picks up what waits. */
   standDown(): void {
-    const companies = this.waiting ? [this.waiting.companyId, ...this.heldAfterHandOver.keys()] : [...this.heldAfterHandOver.keys()];
-    this.callOff(false);
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
+    const companies = [...(this.armed ? [this.armed.wait.companyId] : []), ...this.heldAfterHandOver.keys()];
+    this.disarm(false);
     this.heldAfterHandOver.forEach(timeout => clearTimeout(timeout));
     this.heldAfterHandOver.clear();
     for (const companyId of companies) holdTurns(this.ctx, companyId, false);
   }
 
-  /* A request that could not be written is tried again on the next check, and the failure goes to the log instead of
-     taking the server down. The wait has a deadline, so turns that do not end never hold the company. */
+  /* The update that waits holds the updater, also after a request that would have taken its place failed. */
+  keepClaim(): void {
+    if (this.armed) this.ctx.updater.claim('update', this.armed.wait.request.id);
+  }
+
+  /* A person or the orchestrator calls off the update that waits: it is written down with the turns that ran, and they
+     go on and new ones start. */
+  async cancel(): Promise<void> {
+    await this.exclusive(async () => {
+      const wait = await this.open();
+      if (!wait) return;
+      const turns = named(await runningTurns(this.ctx, wait.companyId, this.now()), false);
+      await this.callOff(wait, { reason: 'cancelled', turns });
+    });
+  }
+
+  /* An update that goes at once takes the place of one that waits, and is written down as handed over. The updater has
+     it already, so a record that cannot be written costs a log line, not the update. */
+  async handedOver(companyId: string, request: UpdateRequest): Promise<void> {
+    await this.exclusive(async () => {
+      const at = new Date(this.now());
+      await this.ctx.db
+        .transaction(async tx => {
+          await tx.insert(updateWaits).values({ id: request.id, companyId, request, since: at, until: at, endedAt: at, outcome: 'handed_over' });
+          await tx.update(updateWaits).set({ endedAt: at, outcome: 'replaced' }).where(and(isNull(updateWaits.endedAt), ne(updateWaits.id, request.id)));
+        })
+        .catch(this.logged('Could not record the update handed over at once.'));
+      this.disarm(true);
+    });
+  }
+
+  /* The wait is written before it starts, together with the end of the one it replaces, so a failure leaves the earlier
+     one waiting as it was. The wait has a deadline, so turns that do not end never hold the company. */
   async sendWhenIdle(companyId: string, request: UpdateRequest, minutes = IDLE_WAIT_MINUTES): Promise<void> {
-    const tryCheck = () => this.handOverIfIdle(companyId, request).catch(this.logged(HAND_OVER_FAILED));
-    const unsubscribe = this.ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
-    const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
-    timer.unref();
-    const deadline = setTimeout(() => void this.giveUp(request).catch(this.logged('Could not call off the waiting update.')), minutes * 60_000);
-    deadline.unref();
-    this.waiting = { companyId, request, since: Date.now(), minutes, stop: () => (unsubscribe(), clearInterval(timer), clearTimeout(deadline)) };
-    /* No new turn starts meanwhile, so the running ones can end. */
-    holdTurns(this.ctx, companyId, true);
-    await tryCheck();
+    await this.exclusive(async () => {
+      const since = this.now();
+      const wait: Wait = { id: request.id, companyId, request, since: new Date(since), until: new Date(since + minutes * 60_000) };
+      await this.ctx.db.transaction(async tx => {
+        await tx.insert(updateWaits).values(wait);
+        await tx.update(updateWaits).set({ endedAt: wait.since, outcome: 'replaced' }).where(and(isNull(updateWaits.endedAt), ne(updateWaits.id, request.id)));
+      });
+      this.disarm(true);
+      this.arm(wait, since);
+    });
+    await this.check(request).catch(this.logged(HAND_OVER_FAILED));
+  }
+
+  private now(): number {
+    return this.ctx.clock();
   }
 
   private logged(message: string): (err: unknown) => void {
     return err => this.ctx.log.error({ error: loggable(err) }, message);
   }
 
+  private exclusive<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.chain.then(work, work);
+    this.chain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async open(): Promise<WaitRow | undefined> {
+    const [wait] = await this.ctx.db.select().from(updateWaits).where(isNull(updateWaits.endedAt)).orderBy(desc(updateWaits.since)).limit(1);
+    return wait;
+  }
+
+  /* Ends the wait once: false when it had ended already. */
+  private async end(id: string, ending: Ending, at = new Date(this.now())): Promise<boolean> {
+    const ended = await this.ctx.db
+      .update(updateWaits)
+      .set({ endedAt: at, ...ending })
+      .where(and(eq(updateWaits.id, id), isNull(updateWaits.endedAt)))
+      .returning({ id: updateWaits.id });
+    return ended.length > 0;
+  }
+
   private wanted(request: UpdateRequest): boolean {
-    return this.waiting?.request.id === request.id;
+    return this.armed?.wait.request.id === request.id;
+  }
+
+  /* No new turn starts meanwhile, so the running ones can end. */
+  private arm(wait: Wait, now: number): void {
+    const { companyId, request } = wait;
+    const tryCheck = () => this.check(request).catch(this.logged(HAND_OVER_FAILED));
+    const unsubscribe = this.ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
+    const deadline = setTimeout(() => void (this.wanted(request) && this.giveUp(wait).catch(this.logged('Could not call off the waiting update.'))), Math.max(0, wait.until.getTime() - now));
+    deadline.unref();
+    this.armed = { wait, stop: () => (unsubscribe(), clearTimeout(deadline)) };
+    holdTurns(this.ctx, companyId, true);
+  }
+
+  /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
+  private disarm(release: boolean, id?: string): void {
+    const armed = this.armed;
+    if (!armed || (id !== undefined && armed.wait.id !== id)) return;
+    this.armed = null;
+    armed.stop();
+    this.ctx.updater.free(armed.wait.request.id);
+    if (release) this.letTurnsGo(armed.wait.companyId);
+  }
+
+  private async tick(): Promise<void> {
+    if (this.armed) await this.check(this.armed.wait.request).catch(this.logged(HAND_OVER_FAILED));
+    else await this.resume().catch(this.logged('Could not take up the waiting update.'));
+  }
+
+  /* The wait a step-down or a restart left. One the updater took before its end was written is over; one the updater
+     cannot take, as a restore or another update holds it, goes to nobody. Any other waits on, and a deadline that passed
+     meanwhile ends it at the first check. */
+  private async resume(): Promise<void> {
+    const request = await this.exclusive(async () => {
+      if (this.armed) return null;
+      const wait = await this.open();
+      if (!wait) return null;
+      if (this.ctx.updater.status()?.id === wait.id || this.ctx.updater.requested() === wait.id) {
+        await this.end(wait.id, { outcome: 'handed_over' });
+        return null;
+      }
+      const holder = this.ctx.updater.claim('update', wait.id);
+      if (holder) {
+        const error = holder === 'restore' ? 'a restore runs.' : 'another update runs.';
+        await this.callOff(wait, { reason: 'failed', turns: named(await runningTurns(this.ctx, wait.companyId, this.now()), false), error: `the updater cannot take it, as ${error}` });
+        return null;
+      }
+      this.arm(wait, this.now());
+      return wait.request;
+    });
+    if (request) await this.check(request);
+  }
+
+  /* An update goes once its deadline passed only if the agents finished meanwhile; before it, as soon as they finish. */
+  private async check(request: UpdateRequest): Promise<void> {
+    const armed = this.armed;
+    if (armed?.wait.request.id !== request.id) return;
+    if (this.now() >= armed.wait.until.getTime()) return this.giveUp(armed.wait);
+    await this.handOverIfIdle(request);
   }
 
   /* Idle once no turn runs but those it does not wait for. */
   private async idle(companyId: string): Promise<boolean> {
-    const lost = (await runningTurns(this.ctx, companyId, Date.now())).filter(turn => turn.lost).map(turn => turn.id);
+    const lost = (await runningTurns(this.ctx, companyId, this.now())).filter(turn => turn.lost).map(turn => turn.id);
     return (await workingCount(this.ctx.db, companyId, undefined, false, lost)) === 0;
   }
 
   /* The request is still the one waiting after the count, since a person may call it off, ask for another or the app may
      stop leading meanwhile. It stops waiting only once the updater has it. */
-  private async handOverIfIdle(companyId: string, request: UpdateRequest): Promise<void> {
-    if (!this.wanted(request) || !(await this.idle(companyId)) || !this.wanted(request)) return;
+  private async handOverIfIdle(request: UpdateRequest): Promise<void> {
+    const companyId = this.armed?.wait.companyId;
+    if (!companyId || !this.wanted(request) || !(await this.idle(companyId)) || !this.wanted(request)) return;
     sendToUpdater(this.ctx, request);
-    this.callOff(false);
+    this.disarm(false);
     this.holdAfterHandOver(companyId);
+    await this.end(request.id, { outcome: 'handed_over' }).catch(this.logged('Could not record the update handed over.'));
   }
 
   /* At its deadline an update goes only if the agents finished. Otherwise it is called off and nothing that runs stops: an
-     update now would cut turns short that nobody agreed to cut, while a later update loses nothing. */
-  private async giveUp(request: UpdateRequest): Promise<void> {
-    const waiting = this.waiting;
-    if (waiting?.request.id !== request.id) return;
-    await this.handOverIfIdle(waiting.companyId, request).catch(this.logged(HAND_OVER_FAILED));
-    const turns = this.wanted(request) ? await runningTurns(this.ctx, waiting.companyId, Date.now()) : [];
-    if (!this.wanted(request)) return;
-    this.callOff();
-    const called: CalledOff = { companyId: waiting.companyId, version: request.version, commit: request.commit, at: new Date().toISOString(), reason: 'deadline', turns: named(turns, false) };
-    this.calledOff = called;
-    this.ctx.log.warn({ version: request.version, turns: called.turns }, 'Called off the update that waited for the agents past its deadline.');
-    await tellOrchestrator(this.ctx, waiting.companyId, calledOffText(called, waiting.minutes));
+     update now would cut turns short that nobody agreed to cut, while a later update loses nothing. A failure to read
+     the turns or to write it down leaves it waiting, and the next check tries again. */
+  private async giveUp(wait: Wait): Promise<void> {
+    let failure: string | undefined;
+    await this.handOverIfIdle(wait.request).catch((err: unknown) => {
+      this.logged(HAND_OVER_FAILED)(err);
+      failure = reasonOf(err);
+    });
+    if (!this.wanted(wait.request)) return;
+    const turns = named(await runningTurns(this.ctx, wait.companyId, this.now()), false);
+    if (!this.wanted(wait.request)) return;
+    /* With no turn left to wait for, it was the hand-over that failed. */
+    const calling: CallingOff = failure && turns.length === 0 ? { reason: 'failed', turns, error: failure } : { reason: 'deadline', turns };
+    await this.exclusive(() => this.callOff(wait, calling));
+  }
+
+  /* Written down first, so a wait that cannot be written down stays as it was. Its turns go, and the orchestrator hears
+     of it unless a person or the orchestrator called it off themselves. */
+  private async callOff(wait: Wait, calling: CallingOff): Promise<void> {
+    const at = new Date(this.now());
+    if (!(await this.end(wait.id, { outcome: 'called_off', ...calling }, at))) return;
+    this.disarm(true, wait.id);
+    const { version, commit } = wait.request;
+    const called: UpdateCalledOff = { version, commit, at: at.toISOString(), until: wait.until.toISOString(), ...calling };
+    this.ctx.log.warn({ version, reason: calling.reason, turns: calling.turns, error: calling.error }, 'Called off the update that waited for the agents.');
+    if (calling.reason !== 'cancelled') await tellOrchestrator(this.ctx, wait.companyId, calledOffText(called, wait));
   }
 
   private holdAfterHandOver(companyId: string): void {
     clearTimeout(this.heldAfterHandOver.get(companyId));
     const timeout = setTimeout(() => {
       this.heldAfterHandOver.delete(companyId);
-      if (this.waiting?.companyId !== companyId) this.letTurnsGo(companyId);
+      if (this.armed?.wait.companyId !== companyId) this.letTurnsGo(companyId);
     }, HELD_AFTER_MS);
     timeout.unref();
     this.heldAfterHandOver.set(companyId, timeout);

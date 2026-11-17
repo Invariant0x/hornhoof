@@ -31,8 +31,10 @@ export type NamedTurn = { agent: string; task: number | null };
 /* An update that waits for the agents: until is when it is called off unless they finished. lost: the turns it does not
    wait for, as their node said nothing of their program for ten minutes. */
 export type UpdateWaiting = { version: string; commit?: string; since: string; until: string; turns: NamedTurn[]; lost: NamedTurn[] };
-/* An update called off as the agents had not finished by its deadline, with the turns that still ran. */
-export type UpdateCalledOff = { version: string; commit?: string; at: string; reason: 'deadline'; turns: NamedTurn[] };
+/* An update that went to nobody, with the turns that still ran and until when it waited. deadline: the agents had not
+   finished by then. cancelled: a person or the orchestrator called it off. failed: Hornhoof could not go on with it,
+   error says why. */
+export type UpdateCalledOff = { version: string; commit?: string; at: string; until: string; reason: 'deadline' | 'cancelled' | 'failed'; turns: NamedTurn[]; error?: string };
 export type UpdaterView = { present: boolean; status: UpdaterStatus | null; waiting: UpdateWaiting | null; calledOff: UpdateCalledOff | null };
 
 /* What the app asks the updater for: the image tag to install, the digest of the exact build the app read for it, the
@@ -110,6 +112,11 @@ export class UpdaterControl {
 
   status(): UpdaterStatus | null {
     return statusWithBuild(this.dir);
+  }
+
+  /* The id of the request the updater was given last, taken or not. */
+  requested(): string | null {
+    return controlJson<UpdateRequest>(this.dir, 'request.json')?.id ?? null;
   }
 
   /* A request is taken back by its id, so one that came after it stays. An updater that waits with it sees that it is
