@@ -14,7 +14,11 @@ import { turnkeyWork } from './turnkey.js';
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 type Verdict = ReviewVerdict & { comment: string };
 
+/* Tests checks with its report: its owner hands a repair in with submit, as Review and Security do after their verdict. */
 function requireCheckingOwner(task: Task, route: Route, agentId: string): void {
+  if (task.assigneeAgentId === agentId && route.state.phase === 'active' && route.state.stage === 'tests') {
+    throw refuse(409, 'task_invalid', 'Tests gives no verdict. Hand a repair in with submit on the candidate\'s branch, naming its base as review.baseCommit, then report done true with the candidateId and revision task.echelons gives; a failed check you do not repair is reported with done false.');
+  }
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active' || !['review', 'security', 'cleanup'].includes(route.state.stage ?? '')) {
     throw refuse(403, 'task_not_yours', 'This task is not at your checking stage.');
   }

@@ -3,15 +3,16 @@ import type { Ctx } from '../../app.js';
 import { repoAt } from '../departments/repository.js';
 import type { RepoAddress } from '../testruns/refs.js';
 import { checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
-import { currentCandidate, producedCandidate } from './echelons-candidates.js';
+import { currentCandidate, producedCandidate, requireRepairHistory } from './echelons-candidates.js';
 import type { Submission, submissionOperation } from './echelons-operations.js';
 import { sameChecker } from './echelons-policy.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { move, refuse, type Moved, type Task } from './engine.js';
 import { captureReview, exactComparison } from './review-context.js';
 
-/* Nothing goes back to an earlier stage. A candidate whose own change passed and that only needs the main line stays at
-   Tests: its owner merges the main line into the candidate's branch, hands the merge in here and checks it again. */
+/* Nothing goes back to an earlier stage. The Tests owner hands in one of two commits on the candidate's branch, and the
+   candidate stays at Tests to be checked again: its own repair on the candidate's base, as Review and Security repair
+   what they check, or, when the candidate's own change passed and it only needs the main line, the main line merged in. */
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 type Repository = { readCompare: NonNullable<Reader['readCompare']>; readCommit: NonNullable<Reader['readCommit']>; repo: RepoAddress & { branch: string } };
@@ -41,25 +42,32 @@ async function repository(ctx: Reader, task: Task): Promise<Repository> {
 
 /* The merge keeps the branch and the candidate it replaces, its base moves along the main line, and it changes nothing the
    main line did not bring: a base off the main line would hide the candidate's own change from the checks. */
-async function requireMainTaken(ctx: Reader, task: Task, parent: EchelonCandidate, candidate: EchelonCandidate): Promise<void> {
+async function takeMainAtTests(ctx: Reader, task: Task, parent: EchelonCandidate, candidate: EchelonCandidate) {
   if (candidate.branch !== parent.branch) throw refuse(409, 'task_changed', 'Taking the main line in keeps the candidate branch.');
-  if (candidate.baseCommit === parent.baseCommit) throw refuse(409, 'task_invalid', 'Name the newer main commit you took in as review.baseCommit.');
   const at = await repository(ctx, task);
   const brought = new Set(await changedPaths(at, parent.baseCommit, candidate.baseCommit));
   await changedPaths(at, candidate.baseCommit, await mainHead(at));
   const beyond = (await changedPaths(at, parent.commit, candidate.commit)).filter(path => !brought.has(path));
-  if (beyond.length) throw refuse(409, 'task_invalid', `The merge changes what the main line did not bring: ${beyond.join(', ')}. Take in only the main line; a failed check of the candidate's own change is reported with done false.`);
+  if (beyond.length) throw refuse(409, 'task_invalid', `The merge changes what the main line did not bring: ${beyond.join(', ')}. Take in only the main line, or hand a repair in on the candidate's base ${parent.baseCommit}; a failed check you do not repair is reported with done false.`);
+  return { tookMain: { from: parent.baseCommit, to: candidate.baseCommit } };
 }
 
-export async function takeMainAtTests(ctx: Reader, agentId: string, task: Task, route: Route, input: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
+/* A repair keeps the branch and base and holds the candidate it received, with something of its own on top. */
+async function repairAtTests(ctx: Reader, task: Task, parent: EchelonCandidate, candidate: EchelonCandidate) {
+  if (candidate.commit === parent.commit) throw refuse(409, 'task_invalid', `The branch ${candidate.branch} is still at the candidate you received, ${parent.commit}. Push the repair first, or report the candidate as it is.`);
+  await requireRepairHistory(ctx, task, parent, candidate);
+  return { repaired: { from: parent.commit, to: candidate.commit } };
+}
+
+export async function handInAtTests(ctx: Reader, agentId: string, task: Task, route: Route, input: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const parent = await currentCandidate(ctx.db, task, route);
   const identity = await checkingIdentity(ctx, task, route, parent);
   const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, input.review, parent.branch);
   const candidate = producedCandidate(route, identity, review);
-  await requireMainTaken(ctx, task, parent, candidate);
+  const change = candidate.baseCommit === parent.baseCommit ? await repairAtTests(ctx, task, parent, candidate) : await takeMainAtTests(ctx, task, parent, candidate);
   const row = await move(ctx, task, { silent: 0 }, {
     kind: 'submitted', actor: { agentId }, text: input.summary,
-    data: { evidence: input.evidence, candidate, tookMain: { from: parent.baseCommit, to: candidate.baseCommit }, ...(operation ? { operation } : {}), routeRevision: route.revision, review },
+    data: { evidence: input.evidence, candidate, ...change, ...(operation ? { operation } : {}), routeRevision: route.revision, review },
   }, async tx => {
     if (!sameChecker(await heldCheckingIdentity(tx, task, route, parent), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.');
     await changeRoute(tx, route, { ...route.state, candidateId: candidate.id });
