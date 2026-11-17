@@ -271,7 +271,12 @@ describe('a department\'s own outbound setup', () => {
     show();
     const spring = (await screen.findByRole('heading', { name: 'Spring letters' })).closest('.imp') as HTMLElement;
     const news = screen.getByRole('heading', { name: 'News' }).closest('.imp') as HTMLElement;
-    const listed = within(spring).getByRole('list', { name: 'Addresses on this channel' });
+    /* The addresses are a block of their own after the channel's buttons, under a heading that counts them (Design #1193). */
+    const heading = within(spring).getByRole('heading', { name: 'Addresses with consent: 2' });
+    const listed = within(spring).getByRole('list', { name: 'Addresses with consent: 2' });
+    const channelButtons = within(spring).getByRole('button', { name: 'Stop the channel' }).parentElement!;
+    expect(channelButtons.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(listed).toHaveClass('outbound-entries');
     const [agreed, takenBack] = within(listed).getAllByRole('listitem');
     expect(within(agreed!).getByText('team.test@mkt.example')).toBeInTheDocument();
     expect(agreed).toHaveTextContent('agreed');
@@ -279,7 +284,9 @@ describe('a department\'s own outbound setup', () => {
     expect(within(takenBack!).getByText('old.list@shop.example')).toBeInTheDocument();
     expect(takenBack).toHaveTextContent('consent taken back');
     expect(within(takenBack!).queryByRole('button')).toBeNull();
-    expect(within(news).getByText('No address was added to this channel yet.')).toBeInTheDocument();
+    expect(within(news).getByRole('heading', { name: 'Addresses with consent: 0' })).toBeInTheDocument();
+    expect(within(news).getByText('No addresses yet')).toBeInTheDocument();
+    expect(within(news).queryByRole('list', { name: /Addresses/ })).toBeNull();
 
     await user.click(within(agreed!).getByRole('button', { name: 'Take back consent' }));
     await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => [c.path, c.body])).toEqual([['/api/outbound/permissions/pm1/revoke', {}]]));
@@ -287,8 +294,14 @@ describe('a department\'s own outbound setup', () => {
     expect(calls.filter(c => c.path === `/api/outbound/setup-log?${Q}`)).toHaveLength(2);
   });
 
-  it('reads the list again once an address is added', async () => {
-    const calls = mockApi({ ...routes(), 'POST /api/outbound/contacts': [200, { contactId: 'k1', permissionId: 'pm2' }] });
+  it('reads the list again once an address is added, and says so right under its entry', async () => {
+    const added = { ...CONTACTS.contacts[0]!, permissionId: 'pm2', address: 'max.test@mkt.example', grantedAt: '2026-01-03T10:00:00.000Z' };
+    let reads = 0;
+    const calls = mockApi({
+      ...routes(),
+      [`GET /api/outbound/contacts?${Q}`]: () => [200, { ...CONTACTS, contacts: reads++ ? [added, ...CONTACTS.contacts] : CONTACTS.contacts }],
+      'POST /api/outbound/contacts': [200, { contactId: 'k1', permissionId: 'pm2' }],
+    });
     const user = userEvent.setup();
     show();
     const spring = (await screen.findByRole('heading', { name: 'Spring letters' })).closest('.imp') as HTMLElement;
@@ -300,7 +313,27 @@ describe('a department\'s own outbound setup', () => {
     await user.click(within(form).getByRole('checkbox'));
     await user.click(within(form).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(calls.filter(c => c.path === `/api/outbound/contacts?${Q}`)).toHaveLength(2));
-    expect(await within(spring).findByRole('status')).toHaveTextContent('max.test@mkt.example can get messages of this channel now.');
+    const listed = await within(spring).findByRole('list', { name: 'Addresses with consent: 3' });
+    const [first] = within(listed).getAllByRole('listitem');
+    expect(within(first!).getByRole('status')).toHaveTextContent('max.test@mkt.example can get messages of this channel now.');
+    expect(within(spring).getAllByRole('status')).toHaveLength(1);
+  });
+
+  it('says an address was already there right under its entry, however it was typed', async () => {
+    mockApi({ ...routes(), 'POST /api/outbound/contacts': [200, { contactId: 'k1', permissionId: null }] });
+    const user = userEvent.setup();
+    show();
+    const spring = (await screen.findByRole('heading', { name: 'Spring letters' })).closest('.imp') as HTMLElement;
+    await user.click(within(spring).getByRole('button', { name: 'Add an address' }));
+    const form = within(spring).getByRole('form', { name: 'Add an address' });
+    await user.type(within(form).getByLabelText('Email address'), ' Team.Test@MKT.example');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Test address of our team');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'My own address');
+    await user.click(within(form).getByRole('checkbox'));
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    const known = within(spring).getByRole('list', { name: 'Addresses with consent: 2' });
+    const line = within(known).getByText('team.test@mkt.example').closest('li')!;
+    expect(await within(line).findByRole('status')).toHaveTextContent('Team.Test@MKT.example was already on the list of this channel.');
   });
 
   it('names adding an address and taking back its consent in the setup log', async () => {
@@ -340,7 +373,8 @@ describe('a department\'s own outbound setup', () => {
     mockApi(routes());
     show('ru');
     expect(await screen.findByRole('heading', { name: 'Каталог отдела' })).toBeInTheDocument();
-    const listed = screen.getByRole('list', { name: 'Адреса этого канала' });
+    const listed = screen.getByRole('list', { name: 'Адреса с согласием: 2' });
+    expect(screen.getByText('Адресов пока нет')).toBeInTheDocument();
     expect(within(listed).getAllByRole('listitem')[0]).toHaveTextContent('согласие есть');
     expect(within(listed).getByRole('button', { name: 'Отозвать согласие' })).toBeInTheDocument();
     expect(screen.getByText(/отправляет без одобрения каждого письма/)).toBeInTheDocument();

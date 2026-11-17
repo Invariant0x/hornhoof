@@ -24,10 +24,11 @@ const openedNote = (by: Person, until: string, reason: string, machine: string) 
 
 /* Computer access to each machine of the company that has its core. Its owner's own screen opens it for a day, closes it,
    or says no to the orchestrator's request; the CEO and the CEO delegate close any. People who see the whole company see
-   every machine's access, and everyone sees their own machines'. Never the orchestrator acting for anyone. */
+   every machine's access, and everyone sees their own machines'. The orchestrator sees and changes them all; never a head
+   acting for anyone. */
 export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function seen(me: Person): Promise<AccessView[]> {
-    if (me.via) throw new ApiError(403, 'forbidden', "Only a person's own screen sees and changes computer access.", 'company_scope_only');
+    if (me.viaHead) throw new ApiError(403, 'forbidden', "Only a person's own screen sees and changes computer access, or the orchestrator.", 'company_scope_only');
     return seenAccess(ctx, me);
   }
 

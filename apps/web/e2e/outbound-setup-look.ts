@@ -109,6 +109,10 @@ export async function offences(panel: Locator, words: Words): Promise<string[]> 
     const addresses = root.querySelectorAll('bdi');
     if (root.querySelector('li') && !addresses.length) out.push('12: no address stands apart');
     for (const bdi of addresses) if (css(bdi).overflowWrap !== 'anywhere') out.push(`12: ${name(bdi)} breaks ${css(bdi).overflowWrap}`);
+
+    /* 13. A phrase isolated in its own direction lines up with the side of its block, not with its own start: on a right
+       to left page an English description stands right like its heading (Design #1186). */
+    if (rtl) for (const el of root.querySelectorAll('[dir="auto"]')) if (css(el).display === 'block' && ['left', 'start'].includes(css(el).textAlign)) out.push(`13: ${name(el)} stands ${css(el).textAlign} in ${css(el.parentElement!).direction} ${css(el.parentElement!).textAlign}`);
     return out;
   }, words);
 }
