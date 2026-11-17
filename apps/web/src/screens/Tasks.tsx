@@ -382,6 +382,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const rows: Rows = {
     selected, onOpenTask, onOpenGoal, asksYou, placeName: place_,
     departmentTemplate: id => places?.departments.find(d => d.id === id)?.templateKey ?? org?.departments.find(d => d.id === id)?.templateKey,
+    turnkeyOf: id => employees.get(id)?.turnkey,
     programOf: id => {
       const employee = employees.get(id);
       if (employee?.provider) return programOf(employee.provider, employee.apiProtocol);

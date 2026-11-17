@@ -2,6 +2,7 @@ import { useT } from '../i18n';
 import { priorityOf } from '../tracker';
 import type { AgentRef, PersonRef, TaskLine } from '../types';
 import { PriorityArrow, type Program } from './icons';
+import { employeeKind, WorkerMark } from './WorkerMark';
 
 const PALETTE = ['accent', 'warning', 'attention', 'success', 'blue', 'violet'] as const;
 type Tone = (typeof PALETTE)[number];
@@ -36,10 +37,17 @@ export function PersonMark({ person, decorative = false }: { person: PersonRef; 
   );
 }
 
-export function ExecutorMark({ agent, program }: { agent: AgentRef; program?: Program | null }) {
+export function ExecutorMark({ agent, program, turnkey }: { agent: AgentRef; program?: Program | null; turnkey?: boolean }) {
+  const words = useT().workers;
+  const kind = agent.kind === 'worker' || agent.kind === 'head' ? employeeKind(turnkey) : undefined;
+  const detail = kind && words[kind];
   return (
     <>
-      <span className="tr-mark tr-executor" data-program={program ?? 'other'} role="img" aria-label={agent.name} title={agent.name}>{initials(agent.name, 2)}</span>
+      <span className="tr-mark tr-executor" data-program={program ?? 'other'} data-worker-kind={kind}
+        role="img" aria-label={agent.name} aria-description={detail} title={detail ? `${agent.name}. ${detail}` : agent.name}>
+        {initials(agent.name, 2)}
+        {kind === 'generalist' && <WorkerMark kind={kind} decorative />}
+      </span>
       <span className="tr-id-name" aria-hidden="true" dir="auto">{agent.name}</span>
     </>
   );

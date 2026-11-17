@@ -8,6 +8,7 @@ import { taskText } from './Chip';
 import { Fold } from './TaskBoard';
 import { TrackerIcon } from './icons';
 import { DepartmentMark, PersonMark } from './TrackerMarks';
+import { employeeKind, WorkerMark } from './WorkerMark';
 
 /* How many employees of a department stay in sight before the rest fold under "N more". */
 const EMPLOYEES_SHOWN = 3;
@@ -80,7 +81,7 @@ function DepartmentItem({ d, org, place, go, onOpenTask, pipelines }: { d: Dept;
               <ul className="tr-people">
                 {[...shown, ...(all ? more : [])].map(e => (
                   <li key={e.id}>
-                    <span className="tr-person"><b>{e.name}</b> <span className={`tstate ${e.status === 'working' ? 'working' : e.status === 'waiting' ? 'waiting' : ''}`}>{t.dept.status[e.status]}</span></span>
+                    <span className="tr-person"><span className="worker-name"><WorkerMark kind={employeeKind(e.turnkey)} /><b dir="auto">{e.name}</b></span> <span className={`tstate ${e.status === 'working' ? 'working' : e.status === 'waiting' ? 'waiting' : ''}`}>{t.dept.status[e.status]}</span></span>
                     {e.task && <button className="linkish" type="button" onClick={() => onOpenTask(e.task!.id)}>{taskText(e, t)}</button>}
                   </li>
                 ))}

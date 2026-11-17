@@ -26,6 +26,19 @@ function list(tasks: TaskLine[], onAddTask = vi.fn()) {
   return rows;
 }
 
+it('keeps the executor name and program color alongside a generalist mark and marks a one-shot stage', () => {
+  const oneShot = { review: { fanOut: 2, judge: null } };
+  const example = task({ echelons: { ...taskRoute(), stage: 'review', phase: 'active', oneShot } });
+  const rows = { selected: null, onOpenTask: vi.fn(), programOf: () => 'claude' as const, turnkeyOf: (id: string) => id === executor.id };
+  render(<LanguageProvider><TrackerList tasks={[example]} all={[example]} rows={rows} empty="Empty" /></LanguageProvider>);
+  const row = screen.getByRole('listitem', { name: '#267 Plan the mailing' });
+  const mark = within(row).getByRole('img', { name: executor.name });
+  expect(mark).toHaveAttribute('data-program', 'claude');
+  expect(mark).toHaveAttribute('data-worker-kind', 'generalist');
+  expect(mark).toHaveAccessibleDescription('Generalist: does a task whole');
+  expect(within(row).getByRole('img', { name: 'Ghost: a one-shot call, appears for one task and is gone' })).toHaveAttribute('data-worker-kind', 'ghost');
+});
+
 it('reads each task across one line, opens its goal and shows a late date', async () => {
   const user = userEvent.setup();
   const rows = list([task({ dueAt: '2020-01-01T00:00:00.000Z' })]);

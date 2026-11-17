@@ -8,9 +8,10 @@ import { dueText, sinceSeconds, spanText, taskWaits, waitLabel, waitText } from 
 import { routePath } from '../routes';
 import { TrackerIcon, type Program } from './icons';
 import { DepartmentMark, ExecutorMark, PersonMark, PriorityWord } from './TrackerMarks';
+import { WorkerMark } from './WorkerMark';
 
 /* How a view opens a task's card and marks the open one. asksYou: an open question on a task is the person's to answer. */
-export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null };
+export type Rows = { selected: string | null; onOpenTask: (id: string) => void; asksYou?: Asks; onOpenGoal?: (id: string) => void; placeName?: (place: TaskLine['department']) => string; departmentTemplate?: (id: string) => string | null | undefined; programOf?: (id: string) => Program | null; turnkeyOf?: (id: string) => boolean | undefined };
 
 /* The look of a state on the strip of a node or a card: the task lists' own classes, the person's answer in the colour of
    attention. The words always go with it. */
@@ -64,6 +65,8 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
   const details = waits.filter(wait => wait.kind !== 'after' || !wait.reason);
   const goal = task.goal;
   const executor = doerOf(task);
+  const route = task.echelons;
+  const ghostStage = route.phase === 'active' && route.stage && route.oneShot?.[route.stage];
   return (
     <li className="tr-row" aria-label={`#${task.number} ${task.title}`}>
       <div className={`tr-cells tr-row-line${rows.selected === task.id ? ' on' : ''}`}>
@@ -95,7 +98,10 @@ function ListRow({ tree, rows, relations, depth = 0, showSubtasks = true }: { tr
             return <small className="tr-relation" key={other.id}><DepartmentMark id={department.id} name={name} template={rows.departmentTemplate?.(department.id)} /><span>{words.neededFor(other.number, name)}</span></small>;
           })}
         </div>
-        <Cell name={words.executor}>{executor ? <ExecutorMark agent={executor} program={rows.programOf?.(executor.id)} /> : t.tracker.nobody}</Cell>
+        <Cell name={words.executor}>
+          {executor ? <ExecutorMark agent={executor} program={rows.programOf?.(executor.id)} turnkey={rows.turnkeyOf?.(executor.id)} /> : t.tracker.nobody}
+          {ghostStage && <WorkerMark kind="ghost" className="tr-stage-ghost" />}
+        </Cell>
         <Cell name={words.responsible}>{task.responsible ? <PersonMark person={task.responsible} /> : t.tracker.nobody}</Cell>
         <Cell name={t.tracker.priority.label}><PriorityWord task={task} /></Cell>
         <Cell name={words.goal}>
