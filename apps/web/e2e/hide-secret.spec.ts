@@ -42,36 +42,43 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
     const input = panel.getByLabel(words.value);
     await expect(input).toHaveValue(marker);
     const form = panel.getByRole('form', { name: words.action });
-    for (const direction of ['ltr', 'rtl']) {
-      await form.evaluate((element, direction) => { element.setAttribute('dir', direction); }, direction);
-      const punctuation = await form.getByText(words.hint, { exact: true }).evaluate(element => {
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        let node: Node | null;
-        let last: Node | null = null;
-        while ((node = walker.nextNode())) last = node;
-        const range = document.createRange();
-        const length = last!.textContent!.length;
-        range.setStart(last!, length - 1);
-        range.setEnd(last!, length);
-        const period = range.getBoundingClientRect().x;
-        range.setStart(last!, length - 2);
-        range.setEnd(last!, length - 1);
-        return period - range.getBoundingClientRect().x;
-      });
-      expect(punctuation, 'The final period follows the English or Russian hint, including in an RTL form.').toBeGreaterThan(0);
-      const geometry = await form.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth, controls: [...element.querySelectorAll('button')].map(button => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })) }));
-      expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
-      for (const control of geometry.controls) {
+    const layouts = await form.evaluate((element, hint) => ['ltr', 'rtl'].map(direction => {
+      element.setAttribute('dir', direction);
+      const text = [...element.querySelectorAll('p')].find(p => p.textContent === hint);
+      if (!text) throw new Error('The secret hint is missing.');
+      const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      let last: Node | null = null;
+      while ((node = walker.nextNode())) last = node;
+      const range = document.createRange();
+      const length = last!.textContent!.length;
+      range.setStart(last!, length - 1);
+      range.setEnd(last!, length);
+      const period = range.getBoundingClientRect().x;
+      range.setStart(last!, length - 2);
+      range.setEnd(last!, length - 1);
+      return {
+        direction, punctuation: period - range.getBoundingClientRect().x,
+        width: element.clientWidth, scroll: element.scrollWidth,
+        controls: [...element.querySelectorAll('button')].map(button => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })),
+      };
+    }), words.hint);
+    for (const layout of layouts) {
+      expect(layout.punctuation, `The final period follows the hint in ${layout.direction}.`).toBeGreaterThan(0);
+      expect(layout.scroll).toBeLessThanOrEqual(layout.width + 1);
+      for (const control of layout.controls) {
         expect(control.width).toBeGreaterThanOrEqual(44);
         expect(control.height).toBeGreaterThanOrEqual(44);
       }
     }
     if (info.project.name === 'chromium' && width === 375) await page.screenshot({ path: `../../docs/tasks/1077-${language}-${skin.id}.png` });
     await form.getByRole('button', { name: words.confirm }).click();
-    await expect(input).toHaveCount(0);
-    await expect(panel.getByText(marker, { exact: true })).toHaveCount(0);
-    await expect(panel.getByText('[hidden]', { exact: true })).toBeVisible();
-    await expect(panel.getByRole('link', { name: words.vault, exact: true })).toHaveAttribute('href', '/settings/passwords');
+    await Promise.all([
+      expect(input).toHaveCount(0),
+      expect(panel.getByText(marker, { exact: true })).toHaveCount(0),
+      expect(panel.getByText('[hidden]', { exact: true })).toBeVisible(),
+      expect(panel.getByRole('link', { name: words.vault, exact: true })).toHaveAttribute('href', '/settings/passwords'),
+    ]);
     expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     expect(failures).toEqual([]);
   });

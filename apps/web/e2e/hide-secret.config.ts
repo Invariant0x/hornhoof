@@ -10,8 +10,8 @@ export default defineConfig({
   testDir: '.',
   testMatch: 'hide-secret.spec.ts',
   outputDir: 'results/hide-secret',
-  /* Build the current sources before the scenario starts; its runner limit covers the interaction. */
-  webServer: { ...webServer, command: `npm run build && vite preview --port ${new URL(webServer.url).port} --strictPort`, cwd: fileURLToPath(new URL('..', import.meta.url)) },
+  /* Run npm run build on the checked candidate first; the browser serves that build without compiling during a scenario. */
+  webServer: { ...webServer, command: `vite preview --port ${new URL(webServer.url).port} --strictPort`, cwd: fileURLToPath(new URL('..', import.meta.url)) },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
