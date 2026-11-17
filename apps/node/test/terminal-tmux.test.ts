@@ -44,6 +44,13 @@ afterEach(() => {
 });
 
 describe('starting a program in tmux', () => {
+  it('clears the private marker when an explicitly removed session was already gone', async () => {
+    const { tmux } = recorded(args => ['kill-session', 'has-session'].includes(args[0]!) ? new Error('no session') : '');
+    await tmux.protectOutput('a-private');
+    await tmux.kill('a-private');
+    expect(tmux.outputPrivate('a-private')).toBe(false);
+  });
+
   it('removes raw output even when its privacy marker cannot be written', async () => {
     const { tmux, home } = recorded();
     const recording = tmux['recordings'].create('a-private', home);
