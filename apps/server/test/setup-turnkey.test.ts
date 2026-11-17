@@ -47,6 +47,31 @@ describe('POST /api/setup staffs the template', () => {
     expect(offer.json()).toEqual({ offers: [...expected[template ?? 'empty'], 'telegram', 'assistant'] });
   });
 
+  it.each([...COMPANY_TEMPLATE_KEYS, undefined])('starts %s with one default pipeline for each department', async template => {
+    const { app, db } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template });
+    const all = (await app.inject({ url: '/api/pipelines', ...as(ceo) })).json().pipelines;
+    const top = await db.select().from(departments).where(isNull(departments.parentId));
+    expect(all).toHaveLength(top.length);
+    for (const dept of top) {
+      const catalog = app.ctx.templates.catalogs.get(dept.templateKey!)!;
+      const stock = catalog.pipelines.find(p => p.key === catalog.default)!;
+      expect(all).toContainEqual(expect.objectContaining({
+        department: expect.objectContaining({ id: dept.id }), catalogKey: stock.key, isDefault: true,
+        name: stock.name, stages: stock.stages.map(stage => expect.objectContaining({ name: stage.name, ownerRole: stage.ownerRole })),
+      }));
+    }
+  });
+
+  it('gives a department built after setup its default pipeline even without staff', async () => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, LATER);
+    const built = await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'design', staff: false }] }, ...as(ceo) });
+    expect(built.statusCode, built.body).toBe(201);
+    const list = (await app.inject({ url: '/api/pipelines', ...as(ceo) })).json().pipelines;
+    expect(list).toContainEqual(expect.objectContaining({ catalogKey: 'design-requests', isDefault: true }));
+  });
+
   it('shows ordinary staff, turnkey members and declared one-shot stages before a template company has plans', async () => {
     const templates = mkdtempSync(join(tmpdir(), 'hornhoof-worker-kinds-'));
     onTestFinished(() => rmSync(templates, { recursive: true, force: true }));

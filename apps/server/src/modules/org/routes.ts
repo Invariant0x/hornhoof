@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { WHOLE } from '../../auth/access.js';
 import { knowsAgentId, seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, people, personAccess, subscriptions, teams, turns } from '../../db/schema.js';
+import { agents, companies, departments, people, personAccess, pipelines, subscriptions, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { agentWork } from '../agents/work.js';
 import { limitUntil, planHeld, planHoldView, programNode } from '../conversation/queue.js';
@@ -25,6 +25,7 @@ import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
 import { keyEndFor, onlineIn, subView } from '../subscriptions/views.js';
+import { catalogRoute } from '../templates/load.js';
 import { runningCalls } from '../calls/calls.js';
 
 /* Show the level sent to the program, or its own default when Hornhoof knows it. */
@@ -84,6 +85,8 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).where(eq(departments.companyId, me.companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
+    const defaults = new Map((await db.select({ department: pipelines.departmentId, key: pipelines.catalogKey }).from(pipelines)
+      .where(and(eq(pipelines.companyId, me.companyId), eq(pipelines.isDefault, true)))).map(p => [p.department, p.key]));
     /* What each department works on now: its newest open task without an executor (the head's), else its newest open one. */
     const reach = viewer.access;
     const { openTasks, running, busy, doing } = await agentWork(db, me.companyId);
@@ -265,7 +268,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),
-          oneShotStages: templates.stagesOf(d.templateKey).stages.flatMap(({ stage, oneShot }) =>
+          oneShotStages: catalogRoute(templates, d.templateKey, defaults.get(d.id) ?? null).stages.flatMap(({ stage, oneShot }) =>
             oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
           ),
           calls: callsOf(d.id),

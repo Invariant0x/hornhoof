@@ -1352,6 +1352,8 @@ export const pipelines = pgTable(
     companyId: companyId(),
     departmentId: uuid('department_id').notNull().references(() => departments.id),
     name: text('name').notNull(),
+    catalogKey: text('catalog_key'),
+    isDefault: boolean('is_default').notNull().default(false),
     why: text('why').notNull().default(''),
     position: integer('position').notNull().default(0),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1361,7 +1363,11 @@ export const pipelines = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     version: integer('version').notNull().default(0),
   },
-  t => [index('pipelines_department_id').on(t.departmentId)],
+  t => [
+    index('pipelines_department_id').on(t.departmentId),
+    uniqueIndex('pipelines_department_catalog').on(t.departmentId, t.catalogKey),
+    uniqueIndex('pipelines_department_default').on(t.departmentId).where(sql`${t.isDefault}`),
+  ],
 );
 
 /* A stage of a pipeline: none above it for the first ones after the head, owned by a role or by one employee. */

@@ -1,4 +1,4 @@
-import { TASK_PRIORITIES, type TaskPriority } from '@hornhoof/protocol';
+import { TASK_PRIORITIES, TEMPLATE_KEYS, type TaskPriority } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
@@ -8,11 +8,11 @@ import { ApiError } from '../../errors.js';
 import { refuse, taskSpot, type Task } from '../tasks/engine.js';
 import { seesTask } from '../tasks/sight.js';
 import { taskByRef } from '../tasks/views.js';
-import type { Grant } from '../templates/load.js';
+import { catalogRoute, type Grant } from '../templates/load.js';
 import type { ToolJob } from '../tools/job.js';
 import { editTask, seenOf, type TaskEdit } from './edit.js';
 import { createGoal, editGoal, goalViews, setGoalStatus, type GoalGuard } from './goals.js';
-import { createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';
+import { applyCatalogPipeline, createPipeline, editPipeline, MAX_STAGES, pipelineViews, type PipelineGuard } from './pipelines.js';
 import { placeOwner, spotOf } from './responsible.js';
 import { goalServed } from './task-view.js';
 
@@ -27,12 +27,12 @@ export const TrackerFields = {
   responsible: z.uuid().optional().describe("The person who answers for the result, as company lists people. Without one: the parent's, else the goal's, else the person who decides for the department."),
   why: z.string().trim().max(300).optional().describe('Why the work matters, in a short sentence people read.'),
   due: z.iso.datetime({ offset: true }).optional().describe('When it is due, if anyone set a date.'),
-  pipeline: z.uuid().optional().describe("The department's pipeline it goes along, from goals. Its stage follows whoever holds it."),
+  pipeline: z.uuid().nullable().optional().describe("The pipeline from goals. Leave it out to use the default, or pass null for work outside a pipeline."),
   stage: z.uuid().optional().describe('The stage of that pipeline it stands in, when not where its holder stands.'),
 };
-type TrackerArgs = { priority?: TaskPriority | null; goal?: number; responsible?: string; why?: string; due?: string; pipeline?: string; stage?: string };
+type TrackerArgs = { priority?: TaskPriority | null; goal?: number; responsible?: string; why?: string; due?: string; pipeline?: string | null; stage?: string };
 /* The same in the engine's names; it fits both a new task and an edit. */
-type TrackerGiven = { priority?: TaskPriority | null; goalId?: string; responsiblePersonId?: string; why?: string; dueAt?: Date; pipelineId?: string; pipelineStageId?: string };
+type TrackerGiven = { priority?: TaskPriority | null; goalId?: string; responsiblePersonId?: string; why?: string; dueAt?: Date; pipelineId?: string | null; pipelineStageId?: string };
 
 /* The goal of the company with this number. */
 async function goalIdOf(ctx: Pick<Ctx, 'db'>, companyId: string, number: number): Promise<string> {
@@ -99,6 +99,24 @@ export function registerTrackerTools(server: McpServer, ctx: Ctx, job: ToolJob, 
     { description: "The company's goals with their progress, and the pipelines of your department (every department's for the orchestrator), each with its stages." },
     async () => told(async () => JSON.stringify({ goals: await goalsSeen(), pipelines: await pipelineViews(ctx, job.companyId, job.agentKind === 'orchestrator' ? undefined : (job.departmentId ?? undefined)) })),
   );
+  if (job.agentKind === 'orchestrator') {
+    server.registerTool('pipeline_catalog', {
+      description: 'Ready pipelines by department kind, with when to use them, their stages and role owners.',
+      inputSchema: { kind: z.enum(TEMPLATE_KEYS).optional() },
+    }, async ({ kind }) => told(async () => JSON.stringify([...ctx.templates.catalogs.values()].filter(catalog => !kind || catalog.department === kind).map(catalog => ({
+      ...catalog, pipelines: catalog.pipelines.map(pipeline => {
+        const route = catalogRoute(ctx.templates, catalog.department, pipeline.key);
+        return { ...pipeline, stages: pipeline.stages.map(stage => ({ ...stage, oneShot: route.stages.find(step => step.stage === stage.echelon)?.oneShot })) };
+      }),
+    })))));
+    server.registerTool('apply_pipeline', {
+      description: "Set up a ready pipeline in one step. Add it alongside existing work or make it the department's default for new work. Read pipeline_catalog for the pipeline key and company for the department id.",
+      inputSchema: { department: z.uuid(), pipeline: z.string().trim().min(1), mode: z.enum(['add', 'set_default']) },
+    }, async ({ department, pipeline, mode }) => told(async () => {
+      const made = await applyCatalogPipeline(ctx, job.companyId, actor, department, pipeline, mode === 'set_default');
+      return JSON.stringify((await pipelineViews(ctx, job.companyId, department)).find(p => p.id === made.id));
+    }));
+  }
   if (job.agentKind !== 'head' && job.agentKind !== 'orchestrator' && !keeper) return;
   const guard = agentGuard(job);
   /* A head and the orchestrator name anyone who reaches the goal's place; a keeper of the tracker only the person who

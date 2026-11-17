@@ -61,7 +61,7 @@ const NewTaskBody = z.object({
   responsible: z.uuid().optional(),
   why: z.string().trim().max(300).optional(),
   due: z.iso.datetime({ offset: true }).optional(),
-  pipeline: z.uuid().optional(),
+  pipeline: z.uuid().nullable().optional(),
   stage: z.uuid().optional(),
 });
 /* What a person changes of a task beside its work, on the task as they saw it. */

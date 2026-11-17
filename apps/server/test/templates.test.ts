@@ -453,7 +453,7 @@ describe('templates', () => {
 
   it('gives the orchestrator his own skills', () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
-      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
+      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-pipelines', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working',
     ]);
     const steady = orchestratorSteady(templates);
@@ -461,7 +461,7 @@ describe('templates', () => {
     for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
-    expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working']);
+    expect(steady.skills.map(f => f.name)).toEqual(['orch-pipelines', 'orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
     for (const r of roles) expect(r.skills.map(s => s.id).some(id => id.startsWith('orch-')), r.id).toBe(false);
@@ -1964,7 +1964,7 @@ describe('identity, defaults and shared instruction delivery', () => {
       const rendered = render(role, selected);
       for (const id of selected) expect(rendered.parts.some(part => part.kind === 'skill' && part.id === id), `${role.id} ${id}`).toBe(true);
     }
-    expect(ORCHESTRATOR_SKILLS).toEqual(expect.arrayContaining(['orch-company', 'orch-staff', 'orch-people', 'orch-resources']));
+    expect(ORCHESTRATOR_SKILLS).toEqual(expect.arrayContaining(['orch-company', 'orch-pipelines', 'orch-staff', 'orch-people', 'orch-resources']));
   });
 
   it('keeps the orchestrator identity to one sentence and its workflow in selected abilities', () => {
