@@ -2,21 +2,25 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { assistants, attachments, agents, companies, departments, jobs, machines, nodes, people, programInstances, programOperatorCases, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { ask, comment, createTask } from '../src/modules/tasks/engine.js';
-import { dropOldFiles, FILE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
+import { dropOldFiles, FILE_BYTES, PICTURE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
+import { rememberPrivateTurn } from '../src/modules/tools/private-turns.js';
 import { setUpCompany, testApp } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
 
 await prepareSharedDatabase();
 
-async function company(env: NodeJS.ProcessEnv = {}) {
+async function company(env: NodeJS.ProcessEnv = {}, beforeReady?: (app: FastifyInstance) => void) {
   const { app, db } = await testApp(env);
+  beforeReady?.(app);
   await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
@@ -108,6 +112,85 @@ describe('a task file', () => {
     const got = await fetchFile(token, `task=${task.number}&file=big.bin`);
     expect(got.headers['content-length']).toBe(String(bytes.length));
     expect(Buffer.compare(got.rawPayload, bytes)).toBe(0);
+  });
+});
+
+/* Replace only the HTTP transport: each iterator step is a chunk requested by the upload handler. */
+function countedUpload(chunks: Buffer[]) {
+  let issued = 0;
+  const body = Object.assign(new Readable({ read() {} }), {
+    async *[Symbol.asyncIterator]() {
+      try { for (const chunk of chunks) { issued += chunk.length; yield chunk; } }
+      finally { body.destroy(); }
+    },
+  });
+  return {
+    install: (app: FastifyInstance) => app.addHook('preParsing', async (req, _reply, payload) => req.url.split('?')[0] === '/api/attachments' ? body : payload),
+    issued: () => issued,
+  };
+}
+
+describe('chunked task files', () => {
+  it.each(['company', 'task', 'chat', 'private'] as const)('stops at the first chunk past the remaining %s room', async kind => {
+    const input = countedUpload(Array.from({ length: 8 }, () => Buffer.alloc(4, 1)));
+    const c = await company({}, input.install);
+    const dir = mkdtempSync(join(tmpdir(), 'hh-quota-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    c.app.ctx.config.filesDir = dir;
+    if (kind === 'task') await c.counted(c.task.id, TASK_FILES_BYTES - 8);
+    else c.app.ctx.config.taskFilesBytes = 8;
+    const before = await c.db.select(idOnly(attachments)).from(attachments);
+    const token = await c.turn(c.bruno);
+    if (kind === 'private') {
+      const [job] = await c.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.toolTokenHash, hashToken(token)));
+      rememberPrivateTurn(c.db, job!.id).values.remember('quota-test-private-value');
+    }
+    const query = kind === 'chat' ? 'chat=1&name=stream.bin' : `task=${c.task.number}&name=stream.bin`;
+    const declared = await c.attach(token, query, Buffer.alloc(9));
+    const sent = await c.app.inject({ method: 'POST', url: `/api/attachments?${query}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+    expect(sent.statusCode).toBe(413);
+    expect(sent.json()).toEqual(declared.json());
+    expect(input.issued()).toBe(12);
+    expect(readdirSync(dir)).toEqual([]);
+    expect(await c.db.select(idOnly(attachments)).from(attachments)).toEqual(before);
+  });
+
+  it.each([['file', FILE_BYTES], ['picture', PICTURE_BYTES]] as const)('also stops at the single %s limit', async (kind, limit) => {
+    const input = countedUpload([Buffer.alloc(limit), Buffer.alloc(4), Buffer.alloc(4)]);
+    const c = await company({}, input.install);
+    const token = await c.turn(c.bruno);
+    const query = kind === 'file' ? `task=${c.task.number}&name=large.bin` : '';
+    const sent = await c.app.inject({ method: 'POST', url: `/api/attachments?${query}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+    expect(sent.statusCode).toBe(413);
+    expect(sent.json().error.reason).toBe(kind === 'file' ? 'file_too_big' : 'attachment_invalid');
+    expect(input.issued()).toBe(limit + 4);
+    expect(await c.db.select(idOnly(attachments)).from(attachments)).toEqual([]);
+  });
+
+  it('accepts exactly eight bytes when eight bytes remain', async () => {
+    const input = countedUpload([Buffer.from('1234'), Buffer.from('5678')]);
+    const c = await company({}, input.install);
+    c.app.ctx.config.taskFilesBytes = 8;
+    const token = await c.turn(c.bruno);
+    const sent = await c.app.inject({ method: 'POST', url: `/api/attachments?task=${c.task.number}&name=exact.txt`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+    expect(sent.statusCode).toBe(201);
+    expect(input.issued()).toBe(8);
+    expect((await c.fetchFile(token, `task=${c.task.number}&file=exact.txt`)).payload).toBe('12345678');
+  });
+
+  it('removes the partial disk file without asking for the tail', async () => {
+    const input = countedUpload([Buffer.alloc(FILE_BYTES + 1), Buffer.alloc(4), Buffer.alloc(4)]);
+    const c = await company({}, input.install);
+    const dir = mkdtempSync(join(tmpdir(), 'hh-quota-disk-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    c.app.ctx.config.filesDir = dir;
+    c.app.ctx.config.taskFilesBytes = FILE_BYTES + 1;
+    const token = await c.turn(c.bruno);
+    const sent = await c.app.inject({ method: 'POST', url: `/api/attachments?task=${c.task.number}&name=large.bin`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+    expect(sent.statusCode).toBe(413);
+    expect(input.issued()).toBe(FILE_BYTES + 5);
+    expect(readdirSync(dir)).toEqual([]);
+    expect(await c.db.select(idOnly(attachments)).from(attachments)).toEqual([]);
   });
 });
 
