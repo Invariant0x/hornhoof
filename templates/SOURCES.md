@@ -192,7 +192,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/mkt-copywriting.md` | Written for Hornhoof | coreyhaines31/marketingskills; anthropics/knowledge-work-plugins marketing/skills/content-creation/SKILL.md | Hornhoof |
 | `skills/mkt-crosspost.md` | Written for Hornhoof | affaan-m/ECC skills/crosspost/SKILL.md | Hornhoof |
 | `skills/mkt-product-context.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/product-marketing/SKILL.md | Hornhoof |
-| `skills/mkt-publish-approval.md` | Written for Hornhoof | affaan-m/ECC skills/operator-approval-loop/SKILL.md | Hornhoof |
+| `skills/mkt-publish-approval.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/mkt-russian-copy.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/mkt-schema-markup.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/schema/SKILL.md | Hornhoof |
 | `skills/mkt-seo-audit.md` | Written for Hornhoof | coreyhaines31/marketingskills; anthropics/knowledge-work-plugins | Hornhoof |

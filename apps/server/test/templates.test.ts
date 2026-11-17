@@ -1057,7 +1057,8 @@ describe('templates', () => {
       expect(templates.skills.get('ops-api-connector')!.body).toContain('Never retry a payment or a send without first checking it did not already happen.');
       expect(templates.skills.get('dev-worktrees')!.body).toContain('Never force-push a shared branch');
       expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('change permissions');
-      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('Anything irreversible or public waits for the approval');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('An irreversible deletion waits for the CEO\'s yes');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).not.toMatch(/irreversible or public waits/);
       expect(templates.skills.get('dev-ci-release')!.body).toMatch(/never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i);
       expect(templates.skills.get('dev-testing-policy')!.body).toMatch(/do not retry or quarantine/i);
       expect(templates.skills.get('ops-task-watch')!.body).toContain('Never retry it unchanged.');
@@ -1571,38 +1572,95 @@ const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
 ];
 
-describe('outbound and support gateway templates', () => {
-  it('routes sales, marketing and support skills through the server-checked outbound gateway and department owner', () => {
-    const sal = templates.skills.get('sal-outbound-approval')?.body ?? '';
-    const mkt = templates.skills.get('mkt-publish-approval')?.body ?? '';
-    const sup = templates.skills.get('sup-support-policy')?.body ?? '';
+/* Ivan's rule for every company: a person is asked only for an irreversible deletion (the CEO's yes) or for what only they
+   know, and nothing that goes out of the company waits for a person's yes by default. Household skills keep a person's
+   word on physical actions and payments in a home, and a shared operations change keeps its own approval. */
+const STILL_ASK = new Set(['home-bills', 'home-network', 'home-shopping', 'home-smart-control', 'ops-change-request']);
+const OUTBOUND_CONFIRMATIONS = [
+  /\b(?:each|every) (?:exact )?public (?:item|post|variant|reply|change)\b[^.!?]*\b(?:requires?|needs?|retains?)\b[^.!?]*\bapproval\b/i,
+  /\bpublic (?:items?|content|changes|use|proposals|publishing|russian content)\b[^.!?]*\b(?:requires?|retains?|needs?|waits? for(?! nobody| no one))\b[^.!?]*\bapproval\b/i,
+  /\bper-item approval\b/i,
+  /\bexplicit (?:human )?approval of\b/i,
+  /\bexact (?:human )?approval\b/i,
+  /\bapplicable (?:exact )?approval\b/i,
+  /\bexact (?:item or approach|message) approval\b/i,
+  /\b(?:Creating accounts|New accounts)[^.!?]*\bCEO's approval\b/i,
+];
 
-    for (const [id, body] of [
-      ['sal-outbound-approval', sal],
-      ['mkt-publish-approval', mkt],
-      ['sup-support-policy', sup],
-    ] as const) {
+describe('only an irreversible deletion needs the CEO, and what goes out needs nobody', () => {
+  it('tells every head and the orchestrator to help at once, ask the CEO only before an irreversible deletion, and send no confirmation cards', () => {
+    const lead = templates.skills.get('hh-lead-tasks')!.body;
+    expect(ORCHESTRATOR_SKILLS).toContain('hh-lead-tasks');
+    expect(HEAD_SKILLS).toContain('hh-lead-tasks');
+    expect(lead).toMatch(/Ask the CEO first only for an irreversible deletion[^.!?]*(?:wip|backups|repository)/);
+    expect(lead).toMatch(/what only they know[^.!?]*password[^.!?]*taste[^.!?]*choice between directions/);
+    expect(lead).toMatch(/Never send a person a card to do or confirm what the company can do itself/);
+    expect(lead).toMatch(/goes out of the company[\s\S]*nothing of it waits for a person's yes unless the department itself set an approval rule/);
+    expect(lead).toMatch(/Hornhoof sends nothing for the company[^.!?]*sign-in is in the vault[^.!?]*company's phones/);
+    expect(lead).toMatch(/every action at once in a record in the department's git, in whatever format suits the work/);
+    expect(lead).toMatch(/asked not to be written to[^.!?]*never written to again/);
+  });
+
+  it('tells every employee the same, in the skill each one has', () => {
+    expect(CORE_SKILLS).toEqual(expect.arrayContaining(['hh-questions', 'hh-stay-in-scope']));
+    const questions = templates.skills.get('hh-questions')!.body;
+    expect(questions).toMatch(/`human_only_action` \([^)]*irreversible deletion[^)]*CEO/);
+    expect(questions).toMatch(/Nothing that goes out of the company[^.!?]*is a human_only_action/);
+    expect(questions).toMatch(/Never send a person a card to do or confirm what the company can do itself/);
+  });
+
+  it('leaves no skill that makes what goes out wait for a person by default', () => {
+    for (const skill of skills.filter(s => !STILL_ASK.has(s.id))) {
+      for (const rule of OUTBOUND_CONFIRMATIONS) expect(skill.body, `${skill.id} ${rule}`).not.toMatch(rule);
+    }
+    for (const role of templates.roles.values()) {
+      for (const rule of OUTBOUND_CONFIRMATIONS) expect(role.body, `${role.id} ${rule}`).not.toMatch(rule);
+    }
+  });
+
+  it('lets no skill ask for an account sign-up that costs nothing', () => {
+    expect(templates.skills.get('ops-intake')!.body).toMatch(/Paid plans wait for a person to pay[^.!?]*own account/);
+    expect(templates.skills.get('ops-intake')!.body).toMatch(/free account[^.!?]*signs up[^.!?]*itself/i);
+    const signup = templates.skills.get('ops-account-signup')!;
+    expect(signup.body).toMatch(/A free account needs nobody's yes/);
+    expect(signup.body).toMatch(/paid plan waits for a person to pay from their own account/);
+    expect(`${signup.description.en} ${signup.body}`).not.toMatch(/\bCEO's approval\b|approval and help/);
+    expect(signup.body).toMatch(/The CEO enters payment details/);
+  });
+});
+
+/* Hornhoof sends nothing for a company: an agent writes and publishes like a person and keeps every record of it in its
+   department's git, in whatever format suits the work. */
+const GONE_GATEWAY = /\boutbound_[a-z_]+\b|\bsupport_(?:submit|classify)\b|\b(?:outbound|publication) gateway\b|\bserver gateway\b|model-check-set:/i;
+
+describe('writing to people outside', () => {
+  it('names no tool or gateway that sent for the company in any skill or role', () => {
+    for (const skill of skills) expect(skill.body, skill.id).not.toMatch(GONE_GATEWAY);
+    for (const role of templates.roles.values()) expect(role.body, role.id).not.toMatch(GONE_GATEWAY);
+  });
+
+  it('has sales write and marketing publish themselves, marking each step in the department git', () => {
+    const sal = templates.skills.get('sal-outbound-approval')!.body;
+    const mkt = templates.skills.get('mkt-publish-approval')!.body;
+    for (const [id, body] of [['sal-outbound-approval', sal], ['mkt-publish-approval', mkt]] as const) {
       expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
       expect(body, id).not.toMatch(INCIDENT_ATTRIBUTION_RE);
       expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
-      expect(body, id).toMatch(/\bserver\b/i);
-      expect(body, id).toMatch(/published (?:catalog|template)[\s\S]*revisions/i);
-      expect(body, id).toMatch(/\bdepartment owner\b[\s\S]*\bCEO\b/i);
-      expect(body, id).toMatch(/\b(?:credentials?|keys?|passwords?)\b[^.!?]*\b(?:stay|remain|kept)\b[^.!?]*\bserver\b/i);
+      expect(body, id).toMatch(/No program (?:sends|publishes) for you/);
+      expect(body, id).toMatch(/department's repository, in whatever format suits the work/);
+      expect(body, id).toMatch(/Mark each [^.!?]*at once and commit/);
+      expect(body, id).toMatch(/sign-ins are only in the vault/);
+      expect(body, id).toMatch(/phone queue/);
+      expect(body, id).toMatch(/waits for no one unless the department itself set an approval rule/);
     }
-
-    expect(sal).toMatch(/"outbound_submit"/);
-    expect(sal).toMatch(/"outbound_status"/);
-    expect(sal).toMatch(/\bunknown\b[^.!?]*\b(?:receiver|receiving|resend)\b/i);
-    expect(mkt).toMatch(/"outbound_submit"/);
-    expect(mkt).toMatch(/\bevery public item\b[^.!?]*\bexplicit approval of its exact rendered content\b/i);
-    expect(sup).toMatch(/"support_classify"/);
-    expect(sup).toMatch(/"support_submit"/);
-    expect(sup).toMatch(/\buntrusted data\b/i);
-    expect(sup).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refund|price|legal|contract|delivery[- ]date)\b/i);
+    expect(sal).toMatch(/asked not to be written to[^.!?]*skipped from then on/);
+    expect(sal).toMatch(/30 or 300/);
+    expect(sal).toMatch(/unclear who comes next, ask a person/);
+    expect(sal).toMatch(/a human signs contracts/);
+    expect(mkt).toMatch(/deleting a public record for good is irreversible and needs the CEO's yes/);
   });
 
-  it("delivers separate classification, catalog replies and owner escalation through each support role's abilities", () => {
+  it("keeps support's own safeguards in each support role's abilities", () => {
     expect(templates.roles.get('SUP-T2')?.effort).toBe('high');
     for (const id of ['SUP-HEAD', 'SUP-KB', 'SUP-T1', 'SUP-T2'] as const) {
       const role = templates.roles.get(id)!;
@@ -1610,13 +1668,12 @@ describe('outbound and support gateway templates', () => {
       expect(role.body.length, id).toBeLessThanOrEqual(180);
       const rendered = renderInstructions(templates, { id: 'a', companyId: 'c', kind: role.kind === 'head' ? 'head' : 'worker', name: 'Ari', roleKey: id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Support', product: null });
       const abilities = [rendered.text, ...rendered.skills.map(file => file.body)].join('\n');
+      expect(abilities, id).not.toMatch(GONE_GATEWAY);
+      expect(abilities, id).toMatch(/department's (?:git|repository)/);
       if (id !== 'SUP-KB') {
-        expect(abilities, id).toContain('support_classify');
-        expect(abilities, id).toContain('support_submit');
-        expect(abilities, id).toMatch(/department owner[\s\S]*CEO/);
-      } else {
-        expect(abilities).toMatch(/catalog[\s\S]*knowledge|knowledge[\s\S]*catalog/);
-        expect(abilities).toMatch(/publication[\s\S]*approv|approv[\s\S]*publication/i);
+        expect(abilities, id).toMatch(/vault/);
+        expect(abilities, id).toMatch(/department(?:'s)? owner[\s\S]*CEO/);
+        expect(abilities, id).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refunds?|prices?|legal|contract|delivery[- ]dates?)\b/i);
       }
       expect(abilities, id).toMatch(/untrusted data/);
       expect(abilities, id).toMatch(/secret|personal data/);

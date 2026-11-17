@@ -161,7 +161,7 @@ describe('Shell', () => {
   it.each([
     ['who sees the whole company', ME, ['Settings', 'Improvements', 'Versions', 'About', 'Log out']],
     ['who sees only some departments', { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } }, ['Settings', 'About', 'Log out']],
-  ])('keeps the account menu short for a person %s: no themes, language, feedback or outbound', async (_who, me, items) => {
+  ])('keeps the account menu short for a person %s: no themes, language or feedback', async (_who, me, items) => {
     mockApi({ 'GET /api/org': [200, ORG] });
     const user = userEvent.setup();
     render(<LanguageProvider><Shell me={me} onSignOut={() => {}} /></LanguageProvider>);
@@ -169,7 +169,7 @@ describe('Shell', () => {
     await user.click(screen.getByRole('button', { name: 'Account' }));
     const menu = document.querySelector<HTMLElement>('.account-menu')!;
     expect(within(menu).getAllByRole('button').map(button => button.textContent)).toEqual(items);
-    for (const gone of [/theme/i, /^English$/, /^Русский$/, /feedback/i, /outbound/i, /^Company settings$/]) expect(within(menu).queryByRole('button', { name: gone })).not.toBeInTheDocument();
+    for (const gone of [/theme/i, /^English$/, /^Русский$/, /feedback/i, /^Company settings$/]) expect(within(menu).queryByRole('button', { name: gone })).not.toBeInTheDocument();
     expect(within(menu).queryByRole('group')).not.toBeInTheDocument();
   });
 

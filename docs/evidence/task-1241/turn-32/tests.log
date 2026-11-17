@@ -1,0 +1,117 @@
+Commit: d91cd873ba13a60974cd12138e6f46833c73d232
+Base: 82d62a6bebb3ffde6c21ae89274d85ece89b5685
+Command: cd apps/server && npx --no-install vitest run test/message-count.test.ts test/watch-tools.test.ts test/message-routing.test.ts test/task-messages.test.ts test/migration-metadata.test.ts --maxWorkers=1
+Exit: 0
+
+
+ RUN  v5.0.5 /data/work/agents/84ccb405-1ced-4b12-a94e-f3b44d5ba1e4/hornhoof-1241/apps/server
+
+ ✓ test/task-messages.test.ts (46 tests) 24628ms
+   ✓ task messages reach their recipient (46)
+     ✓ delivers the head message and the reply in the running turns: {"team":false,"review":false} 4719ms
+     ✓ delivers the head message and the reply in the running turns: {"team":false,"review":true} 643ms
+     ✓ lets an employee answer the orchestrator on the task it asked about, though the task is not with the employee 345ms
+     ✓ a message that waits in line for the next turn (25)
+       ✓ keeps a message for a busy employee whose running turn did not take it, for its next turn: {"bound":true} 552ms
+       ✓ keeps a message for a busy employee whose running turn did not take it, for its next turn: {"bound":false} 353ms
+       ✓ keeps a message for an employee whose machine is getting back on the line, and sends it once the machine says hello: {"bound":true} 481ms
+       ✓ keeps a message for an employee whose machine is getting back on the line, and sends it once the machine says hello: {"bound":false} 379ms
+       ✓ keeps the orchestrator's message for an employee whose machine is getting back on the line, and refuses one with its code once the line is closed 302ms
+       ✓ keeps a message for a busy employee on a node without live terminals: {"bound":true} 424ms
+       ✓ keeps a message for an Antigravity employee at work for its next turn, as Antigravity takes typed words as a turn of its own: {"bound":true} 331ms
+       ✓ keeps a message for an Antigravity employee at work for its next turn, as Antigravity takes typed words as a turn of its own: {"bound":false} 398ms
+       ✓ keeps a message for an idle employee whose window did not take its turn, and sends it on the next try: {"bound":false} 440ms
+       ✓ keeps a message whose turn did not go out though only later turns wait behind it 699ms
+       ✓ keeps a message for an idle employee whose window still gives back the words of its last turn, and sends it once they are in 715ms
+       ✓ sends a message once when its sender repeats it in the same turn: {"bound":true} 2646ms
+       ✓ sends a message once when its sender repeats it in the same turn: {"bound":false} 1955ms
+       ✓ sends a message once when its sender lost the answer of a call that went through, and repeats it 696ms
+       ✓ says nothing of a line when the message went into the running turn 413ms
+     ✓ delivers a person task message into the running turn through the same path 1197ms
+     ✓ retains a system notice for the next turn when live input is refused 512ms
+     ✓ a message meeting a pending decision (1)
+       ✓ keeps the input lock before the agent line when a message meets a pending decision 332ms
+     ✓ ends the external wait with a message whose turn did not go out yet, as the message waits in line for the holder 342ms
+     ✓ keeps the external wait when the message is refused 402ms
+     ✓ returns an error when the new turn fails before dispatch 479ms
+ ✓ test/watch-tools.test.ts (35 tests) 21394ms
+   ✓ tools a skill grants (35)
+     ✓ exposes node restart evidence to the failure collector separately from agent output 8138ms
+     ✓ are not there for an employee without such a skill 599ms
+     ✓ let any employee write to the people of its own department, and only to them 1100ms
+     ✓ let an employee answer the one who wrote to it last, in another department or the orchestrator, with one message 793ms
+     ✓ let a watchdog see every agent with what it holds, and nudge one in its window 356ms
+     ✓ distinguishes a person question from work that can be handed out, even beside an open prerequisite 313ms
+     ✓ keeps an external wait separate from department work: legacy 661ms
+     ✓ keeps an external wait separate from department work: time 332ms
+     ✓ keeps an external wait separate from department work: ceo 450ms
+     ✓ are turned on only by people who see the whole company, since they show all of it 404ms
+     ✓ send at most ten messages in one turn 823ms
+     ✓ shares the ten-message quota between employee messages and reports to the orchestrator 1207ms
+     ✓ keep to ten messages when a turn sends several at once 1115ms
+     ✓ count what a turn sent before Hornhoof restarted 559ms
+     ✓ keeps credentials and private paths of another department's task out of its stops, stumbles, title and node log 447ms
+ ✓ test/message-routing.test.ts (10 tests) 3273ms
+   ✓ message participants (10)
+     ✓ keeps the person and role, and the actual recipient, in every agent window after a round trip 2165ms
+stdout | test/message-count.test.ts > the persisted message quota > uses the sender and time index, stops at the quota and refuses the next message
+Message quota EXPLAIN: {
+  "Node Type": "Aggregate",
+  "Strategy": "Plain",
+  "Partial Mode": "Simple",
+  "Parallel Aware": false,
+  "Async Capable": false,
+  "Startup Cost": 8.32,
+  "Total Cost": 8.33,
+  "Plan Rows": 1,
+  "Plan Width": 8,
+  "Disabled": false,
+  "Plans": [
+    {
+      "Node Type": "Limit",
+      "Parent Relationship": "Outer",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 0.29,
+      "Total Cost": 8.31,
+      "Plan Rows": 1,
+      "Plan Width": 4,
+      "Disabled": false,
+      "Plans": [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "agent_events_message_sender_window",
+          "Relation Name": "agent_events",
+          "Alias": "agent_events",
+          "Startup Cost": 0.29,
+          "Total Cost": 8.31,
+          "Plan Rows": 1,
+          "Plan Width": 4,
+          "Disabled": false,
+          "Index Cond": "((company_id = 'ef1e2031-60dc-4deb-b2cf-3cdd8d3eda00'::uuid) AND ((data ->> 'by'::text) = 'd8bc50c3-7d01-4a8c-8e85-8813bbffaa1a'::text) AND (created_at >= '2030-01-01 11:59:30+00'::timestamp with time zone))"
+        }
+      ]
+    }
+  ]
+}
+
+ ✓ test/message-count.test.ts (5 tests) 4645ms
+   ✓ the persisted message quota (3)
+     ✓ uses the sender and time index, stops at the quota and refuses the next message 2021ms
+     ✓ counts the inclusive turn window, excluding older messages, other senders, companies and kinds 890ms
+     ✓ uses creation time before a turn starts and saturates its recovered count at the same quota 802ms
+   ✓ the message sender index migration (2)
+     ✓ is present on a fresh installation 373ms
+     ✓ upgrades 0136 twice without changing its stored messages 538ms
+ ✓ test/migration-metadata.test.ts (4 tests) 1900ms
+   ✓ merged migration metadata (4)
+     ✓ describes the columns and regular indexes of a freshly migrated database 1620ms
+
+ Test Files  5 passed (5)
+      Tests  100 passed (100)
+   Start at  11:35:50
+   Duration  148.51s (tests 77%, import 18%, transform 5%)

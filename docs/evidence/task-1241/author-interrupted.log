@@ -1,0 +1,1557 @@
+Commit: 8797456d19be31f7385c8e5c25f0b7c34dbd6bc9
+Command: HH_VITEST_MAX_WORKERS=2 npm run -s check:author -- --sha 8797456d19be31f7385c8e5c25f0b7c34dbd6bc9 --base 11aa5777c4a5f74a550c0e53570ec35ebae39f53
+Outer exit: 1; selected-test process exit: 130. Interrupted by owner after 63 completed file summaries and two failing cases. Not a completed or passed author check. Coverage did not finish; automated CRAP pass has no valid coverage proof.
+
+TEST_SELECTION {"version":1,"commit":"8797456d19be31f7385c8e5c25f0b7c34dbd6bc9","baseCommit":"11aa5777c4a5f74a550c0e53570ec35ebae39f53","status":"selected","sourcePaths":["apps/server/drizzle/0137_message_sender_window.sql","apps/server/drizzle/meta/0137_snapshot.json","apps/server/drizzle/meta/_journal.json","apps/server/src/db/schema.ts","apps/server/src/modules/tools/watch.ts","apps/server/test/message-count.test.ts"],"packages":[{"packageId":"server","mode":"related","units":[{"suiteId":"server","file":"apps/server/test/about-version.test.ts","selectionUnit":"apps/server/test/about-version.test.ts"},{"suiteId":"server","file":"apps/server/test/access.test.ts","selectionUnit":"apps/server/test/access.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-current-task.test.ts","selectionUnit":"apps/server/test/agent-current-task.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-plan-release.test.ts","selectionUnit":"apps/server/test/agent-plan-release.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-switch.test.ts","selectionUnit":"apps/server/test/agent-switch.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-view-lists.test.ts","selectionUnit":"apps/server/test/agent-view-lists.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-view-stream.test.ts","selectionUnit":"apps/server/test/agent-view-stream.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-view-table.test.ts","selectionUnit":"apps/server/test/agent-view-table.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-view-waits.test.ts","selectionUnit":"apps/server/test/agent-view-waits.test.ts"},{"suiteId":"server","file":"apps/server/test/agent-view.test.ts","selectionUnit":"apps/server/test/agent-view.test.ts"},{"suiteId":"server","file":"apps/server/test/agents.test.ts","selectionUnit":"apps/server/test/agents.test.ts"},{"suiteId":"server","file":"apps/server/test/api-connections.test.ts","selectionUnit":"apps/server/test/api-connections.test.ts"},{"suiteId":"server","file":"apps/server/test/api-key-secrets.test.ts","selectionUnit":"apps/server/test/api-key-secrets.test.ts"},{"suiteId":"server","file":"apps/server/test/app-mode.test.ts","selectionUnit":"apps/server/test/app-mode.test.ts"},{"suiteId":"server","file":"apps/server/test/approval-policy.test.ts","selectionUnit":"apps/server/test/approval-policy.test.ts"},{"suiteId":"server","file":"apps/server/test/assistant-agent.test.ts","selectionUnit":"apps/server/test/assistant-agent.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-events.test.ts","selectionUnit":"apps/server/test/assistants-events.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-files.test.ts","selectionUnit":"apps/server/test/assistants-files.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-isolation-views.test.ts","selectionUnit":"apps/server/test/assistants-isolation-views.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-isolation.test.ts","selectionUnit":"apps/server/test/assistants-isolation.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-mcp.test.ts","selectionUnit":"apps/server/test/assistants-mcp.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-messages.test.ts","selectionUnit":"apps/server/test/assistants-messages.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-orchestrator.test.ts","selectionUnit":"apps/server/test/assistants-orchestrator.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-people.test.ts","selectionUnit":"apps/server/test/assistants-people.test.ts"},{"suiteId":"server","file":"apps/server/test/assistants-rights.test.ts","selectionUnit":"apps/server/test/assistants-rights.test.ts"},{"suiteId":"server","file":"apps/server/test/attachment-token.test.ts","selectionUnit":"apps/server/test/attachment-token.test.ts"},{"suiteId":"server","file":"apps/server/test/auth.test.ts","selectionUnit":"apps/server/test/auth.test.ts"},{"suiteId":"server","file":"apps/server/test/authority.test.ts","selectionUnit":"apps/server/test/authority.test.ts"},{"suiteId":"server","file":"apps/server/test/autonomous-release.test.ts","selectionUnit":"apps/server/test/autonomous-release.test.ts"},{"suiteId":"server","file":"apps/server/test/backlog.test.ts","selectionUnit":"apps/server/test/backlog.test.ts"},{"suiteId":"server","file":"apps/server/test/backups-routes.test.ts","selectionUnit":"apps/server/test/backups-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/before-sign-in.test.ts","selectionUnit":"apps/server/test/before-sign-in.test.ts"},{"suiteId":"server","file":"apps/server/test/briefings.test.ts","selectionUnit":"apps/server/test/briefings.test.ts"},{"suiteId":"server","file":"apps/server/test/browser-ready.test.ts","selectionUnit":"apps/server/test/browser-ready.test.ts"},{"suiteId":"server","file":"apps/server/test/builtin-nodes-apart.test.ts","selectionUnit":"apps/server/test/builtin-nodes-apart.test.ts"},{"suiteId":"server","file":"apps/server/test/builtin-work.test.ts","selectionUnit":"apps/server/test/builtin-work.test.ts"},{"suiteId":"server","file":"apps/server/test/carry.test.ts","selectionUnit":"apps/server/test/carry.test.ts"},{"suiteId":"server","file":"apps/server/test/channels.test.ts","selectionUnit":"apps/server/test/channels.test.ts"},{"suiteId":"server","file":"apps/server/test/check-queue-watchdog.test.ts","selectionUnit":"apps/server/test/check-queue-watchdog.test.ts"},{"suiteId":"server","file":"apps/server/test/computer-machines.test.ts","selectionUnit":"apps/server/test/computer-machines.test.ts"},{"suiteId":"server","file":"apps/server/test/computer.test.ts","selectionUnit":"apps/server/test/computer.test.ts"},{"suiteId":"server","file":"apps/server/test/conversation.test.ts","selectionUnit":"apps/server/test/conversation.test.ts"},{"suiteId":"server","file":"apps/server/test/copies-move.test.ts","selectionUnit":"apps/server/test/copies-move.test.ts"},{"suiteId":"server","file":"apps/server/test/copies-order.test.ts","selectionUnit":"apps/server/test/copies-order.test.ts"},{"suiteId":"server","file":"apps/server/test/copies-priority.test.ts","selectionUnit":"apps/server/test/copies-priority.test.ts"},{"suiteId":"server","file":"apps/server/test/copies-routes.test.ts","selectionUnit":"apps/server/test/copies-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/copies-scope.test.ts","selectionUnit":"apps/server/test/copies-scope.test.ts"},{"suiteId":"server","file":"apps/server/test/copies-view.test.ts","selectionUnit":"apps/server/test/copies-view.test.ts"},{"suiteId":"server","file":"apps/server/test/credentials.test.ts","selectionUnit":"apps/server/test/credentials.test.ts"},{"suiteId":"server","file":"apps/server/test/data-links.test.ts","selectionUnit":"apps/server/test/data-links.test.ts"},{"suiteId":"server","file":"apps/server/test/db.test.ts","selectionUnit":"apps/server/test/db.test.ts"},{"suiteId":"server","file":"apps/server/test/decision-context.test.ts","selectionUnit":"apps/server/test/decision-context.test.ts"},{"suiteId":"server","file":"apps/server/test/decisions-answers-fallback.test.ts","selectionUnit":"apps/server/test/decisions-answers-fallback.test.ts"},{"suiteId":"server","file":"apps/server/test/decisions.test.ts","selectionUnit":"apps/server/test/decisions.test.ts"},{"suiteId":"server","file":"apps/server/test/department-branches.test.ts","selectionUnit":"apps/server/test/department-branches.test.ts"},{"suiteId":"server","file":"apps/server/test/department-echelons.test.ts","selectionUnit":"apps/server/test/department-echelons.test.ts"},{"suiteId":"server","file":"apps/server/test/department-owner-control.test.ts","selectionUnit":"apps/server/test/department-owner-control.test.ts"},{"suiteId":"server","file":"apps/server/test/department-owner-rights.test.ts","selectionUnit":"apps/server/test/department-owner-rights.test.ts"},{"suiteId":"server","file":"apps/server/test/department-owner.test.ts","selectionUnit":"apps/server/test/department-owner.test.ts"},{"suiteId":"server","file":"apps/server/test/department-repositories.test.ts","selectionUnit":"apps/server/test/department-repositories.test.ts"},{"suiteId":"server","file":"apps/server/test/department-routes-without-checkers.test.ts","selectionUnit":"apps/server/test/department-routes-without-checkers.test.ts"},{"suiteId":"server","file":"apps/server/test/department-turn-progress.test.ts","selectionUnit":"apps/server/test/department-turn-progress.test.ts"},{"suiteId":"server","file":"apps/server/test/department-turns.test.ts","selectionUnit":"apps/server/test/department-turns.test.ts"},{"suiteId":"server","file":"apps/server/test/departments.test.ts","selectionUnit":"apps/server/test/departments.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-acceptance.test.ts","selectionUnit":"apps/server/test/development-echelons-acceptance.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-coordination.test.ts","selectionUnit":"apps/server/test/development-echelons-coordination.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-fast-route.test.ts","selectionUnit":"apps/server/test/development-echelons-fast-route.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-handoff.test.ts","selectionUnit":"apps/server/test/development-echelons-handoff.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-head.test.ts","selectionUnit":"apps/server/test/development-echelons-head.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-lineage.test.ts","selectionUnit":"apps/server/test/development-echelons-lineage.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-observers.test.ts","selectionUnit":"apps/server/test/development-echelons-observers.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-ownership.test.ts","selectionUnit":"apps/server/test/development-echelons-ownership.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-projections.test.ts","selectionUnit":"apps/server/test/development-echelons-projections.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-races.test.ts","selectionUnit":"apps/server/test/development-echelons-races.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-review-fixes.test.ts","selectionUnit":"apps/server/test/development-echelons-review-fixes.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-schema.test.ts","selectionUnit":"apps/server/test/development-echelons-schema.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-staff.test.ts","selectionUnit":"apps/server/test/development-echelons-staff.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-test-failures.test.ts","selectionUnit":"apps/server/test/development-echelons-test-failures.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-tests-1136.test.ts","selectionUnit":"apps/server/test/development-echelons-tests-1136.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-tests-main.test.ts","selectionUnit":"apps/server/test/development-echelons-tests-main.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-tests-repair.test.ts","selectionUnit":"apps/server/test/development-echelons-tests-repair.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-tools.test.ts","selectionUnit":"apps/server/test/development-echelons-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-turnkey.test.ts","selectionUnit":"apps/server/test/development-echelons-turnkey.test.ts"},{"suiteId":"server","file":"apps/server/test/development-echelons-waits.test.ts","selectionUnit":"apps/server/test/development-echelons-waits.test.ts"},{"suiteId":"server","file":"apps/server/test/employee-assignment.test.ts","selectionUnit":"apps/server/test/employee-assignment.test.ts"},{"suiteId":"server","file":"apps/server/test/encoded-text.test.ts","selectionUnit":"apps/server/test/encoded-text.test.ts"},{"suiteId":"server","file":"apps/server/test/events.test.ts","selectionUnit":"apps/server/test/events.test.ts"},{"suiteId":"server","file":"apps/server/test/external-wait.test.ts","selectionUnit":"apps/server/test/external-wait.test.ts"},{"suiteId":"server","file":"apps/server/test/failure-states.test.ts","selectionUnit":"apps/server/test/failure-states.test.ts"},{"suiteId":"server","file":"apps/server/test/failures.test.ts","selectionUnit":"apps/server/test/failures.test.ts"},{"suiteId":"server","file":"apps/server/test/feedback-inbox.test.ts","selectionUnit":"apps/server/test/feedback-inbox.test.ts"},{"suiteId":"server","file":"apps/server/test/feedback-issue.test.ts","selectionUnit":"apps/server/test/feedback-issue.test.ts"},{"suiteId":"server","file":"apps/server/test/feedback-send.test.ts","selectionUnit":"apps/server/test/feedback-send.test.ts"},{"suiteId":"server","file":"apps/server/test/first-setup.test.ts","selectionUnit":"apps/server/test/first-setup.test.ts"},{"suiteId":"server","file":"apps/server/test/fixed-clock-fixture.test.ts","selectionUnit":"apps/server/test/fixed-clock-fixture.test.ts"},{"suiteId":"server","file":"apps/server/test/follow-keeper.test.ts","selectionUnit":"apps/server/test/follow-keeper.test.ts"},{"suiteId":"server","file":"apps/server/test/follow.test.ts","selectionUnit":"apps/server/test/follow.test.ts"},{"suiteId":"server","file":"apps/server/test/fresh-model-check.test.ts","selectionUnit":"apps/server/test/fresh-model-check.test.ts"},{"suiteId":"server","file":"apps/server/test/gate.test.ts","selectionUnit":"apps/server/test/gate.test.ts"},{"suiteId":"server","file":"apps/server/test/github-test-status.test.ts","selectionUnit":"apps/server/test/github-test-status.test.ts"},{"suiteId":"server","file":"apps/server/test/handing.test.ts","selectionUnit":"apps/server/test/handing.test.ts"},{"suiteId":"server","file":"apps/server/test/harness.test.ts","selectionUnit":"apps/server/test/harness.test.ts"},{"suiteId":"server","file":"apps/server/test/head-department-control.test.ts","selectionUnit":"apps/server/test/head-department-control.test.ts"},{"suiteId":"server","file":"apps/server/test/holders.test.ts","selectionUnit":"apps/server/test/holders.test.ts"},{"suiteId":"server","file":"apps/server/test/hook-rejections.test.ts","selectionUnit":"apps/server/test/hook-rejections.test.ts"},{"suiteId":"server","file":"apps/server/test/improvements.test.ts","selectionUnit":"apps/server/test/improvements.test.ts"},{"suiteId":"server","file":"apps/server/test/inbox.test.ts","selectionUnit":"apps/server/test/inbox.test.ts"},{"suiteId":"server","file":"apps/server/test/instructions.test.ts","selectionUnit":"apps/server/test/instructions.test.ts"},{"suiteId":"server","file":"apps/server/test/jobs.test.ts","selectionUnit":"apps/server/test/jobs.test.ts"},{"suiteId":"server","file":"apps/server/test/journal.test.ts","selectionUnit":"apps/server/test/journal.test.ts"},{"suiteId":"server","file":"apps/server/test/keeper-backups.test.ts","selectionUnit":"apps/server/test/keeper-backups.test.ts"},{"suiteId":"server","file":"apps/server/test/keeper-certificate.test.ts","selectionUnit":"apps/server/test/keeper-certificate.test.ts"},{"suiteId":"server","file":"apps/server/test/keeper-identity.test.ts","selectionUnit":"apps/server/test/keeper-identity.test.ts"},{"suiteId":"server","file":"apps/server/test/keeper-link.test.ts","selectionUnit":"apps/server/test/keeper-link.test.ts"},{"suiteId":"server","file":"apps/server/test/keeper-peer.test.ts","selectionUnit":"apps/server/test/keeper-peer.test.ts"},{"suiteId":"server","file":"apps/server/test/keeper.test.ts","selectionUnit":"apps/server/test/keeper.test.ts"},{"suiteId":"server","file":"apps/server/test/lease-store.test.ts","selectionUnit":"apps/server/test/lease-store.test.ts"},{"suiteId":"server","file":"apps/server/test/left-input.test.ts","selectionUnit":"apps/server/test/left-input.test.ts"},{"suiteId":"server","file":"apps/server/test/link-tls.test.ts","selectionUnit":"apps/server/test/link-tls.test.ts"},{"suiteId":"server","file":"apps/server/test/link.test.ts","selectionUnit":"apps/server/test/link.test.ts"},{"suiteId":"server","file":"apps/server/test/live-fallback.test.ts","selectionUnit":"apps/server/test/live-fallback.test.ts"},{"suiteId":"server","file":"apps/server/test/live-session-review.test.ts","selectionUnit":"apps/server/test/live-session-review.test.ts"},{"suiteId":"server","file":"apps/server/test/live.test.ts","selectionUnit":"apps/server/test/live.test.ts"},{"suiteId":"server","file":"apps/server/test/long-text-boundaries.test.ts","selectionUnit":"apps/server/test/long-text-boundaries.test.ts"},{"suiteId":"server","file":"apps/server/test/long-text-storage.test.ts","selectionUnit":"apps/server/test/long-text-storage.test.ts"},{"suiteId":"server","file":"apps/server/test/machine-away.test.ts","selectionUnit":"apps/server/test/machine-away.test.ts"},{"suiteId":"server","file":"apps/server/test/machine-load.test.ts","selectionUnit":"apps/server/test/machine-load.test.ts"},{"suiteId":"server","file":"apps/server/test/machine-memory.test.ts","selectionUnit":"apps/server/test/machine-memory.test.ts"},{"suiteId":"server","file":"apps/server/test/map-layout.test.ts","selectionUnit":"apps/server/test/map-layout.test.ts"},{"suiteId":"server","file":"apps/server/test/map-state.test.ts","selectionUnit":"apps/server/test/map-state.test.ts"},{"suiteId":"server","file":"apps/server/test/merge-apply.test.ts","selectionUnit":"apps/server/test/merge-apply.test.ts"},{"suiteId":"server","file":"apps/server/test/merge-kept.test.ts","selectionUnit":"apps/server/test/merge-kept.test.ts"},{"suiteId":"server","file":"apps/server/test/merge-peer.test.ts","selectionUnit":"apps/server/test/merge-peer.test.ts"},{"suiteId":"server","file":"apps/server/test/merge-read.test.ts","selectionUnit":"apps/server/test/merge-read.test.ts"},{"suiteId":"server","file":"apps/server/test/merge-routes.test.ts","selectionUnit":"apps/server/test/merge-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/merge-task.test.ts","selectionUnit":"apps/server/test/merge-task.test.ts"},{"suiteId":"server","file":"apps/server/test/merge-tools.test.ts","selectionUnit":"apps/server/test/merge-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/message-count.test.ts","selectionUnit":"apps/server/test/message-count.test.ts"},{"suiteId":"server","file":"apps/server/test/message-pictures.test.ts","selectionUnit":"apps/server/test/message-pictures.test.ts"},{"suiteId":"server","file":"apps/server/test/message-routing.test.ts","selectionUnit":"apps/server/test/message-routing.test.ts"},{"suiteId":"server","file":"apps/server/test/migrations-0034-0046.test.ts","selectionUnit":"apps/server/test/migrations-0034-0046.test.ts"},{"suiteId":"server","file":"apps/server/test/model-check-department.test.ts","selectionUnit":"apps/server/test/model-check-department.test.ts"},{"suiteId":"server","file":"apps/server/test/model-check-routes.test.ts","selectionUnit":"apps/server/test/model-check-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/model-check-schema.test.ts","selectionUnit":"apps/server/test/model-check-schema.test.ts"},{"suiteId":"server","file":"apps/server/test/model-check-store.test.ts","selectionUnit":"apps/server/test/model-check-store.test.ts"},{"suiteId":"server","file":"apps/server/test/network-join.test.ts","selectionUnit":"apps/server/test/network-join.test.ts"},{"suiteId":"server","file":"apps/server/test/network-routes.test.ts","selectionUnit":"apps/server/test/network-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/network-tables.test.ts","selectionUnit":"apps/server/test/network-tables.test.ts"},{"suiteId":"server","file":"apps/server/test/node-commands.test.ts","selectionUnit":"apps/server/test/node-commands.test.ts"},{"suiteId":"server","file":"apps/server/test/node-connections.test.ts","selectionUnit":"apps/server/test/node-connections.test.ts"},{"suiteId":"server","file":"apps/server/test/node-drain-each.test.ts","selectionUnit":"apps/server/test/node-drain-each.test.ts"},{"suiteId":"server","file":"apps/server/test/node-drain-stuck.test.ts","selectionUnit":"apps/server/test/node-drain-stuck.test.ts"},{"suiteId":"server","file":"apps/server/test/node-drain.test.ts","selectionUnit":"apps/server/test/node-drain.test.ts"},{"suiteId":"server","file":"apps/server/test/node-messages.test.ts","selectionUnit":"apps/server/test/node-messages.test.ts"},{"suiteId":"server","file":"apps/server/test/node-restart-evidence.test.ts","selectionUnit":"apps/server/test/node-restart-evidence.test.ts"},{"suiteId":"server","file":"apps/server/test/node-return-backlog.test.ts","selectionUnit":"apps/server/test/node-return-backlog.test.ts"},{"suiteId":"server","file":"apps/server/test/nodes.test.ts","selectionUnit":"apps/server/test/nodes.test.ts"},{"suiteId":"server","file":"apps/server/test/notebook.test.ts","selectionUnit":"apps/server/test/notebook.test.ts"},{"suiteId":"server","file":"apps/server/test/notification-actions.test.ts","selectionUnit":"apps/server/test/notification-actions.test.ts"},{"suiteId":"server","file":"apps/server/test/notification-cause.test.ts","selectionUnit":"apps/server/test/notification-cause.test.ts"},{"suiteId":"server","file":"apps/server/test/notification-sources.test.ts","selectionUnit":"apps/server/test/notification-sources.test.ts"},{"suiteId":"server","file":"apps/server/test/numbers.test.ts","selectionUnit":"apps/server/test/numbers.test.ts"},{"suiteId":"server","file":"apps/server/test/offline-machine.test.ts","selectionUnit":"apps/server/test/offline-machine.test.ts"},{"suiteId":"server","file":"apps/server/test/operations-card.test.ts","selectionUnit":"apps/server/test/operations-card.test.ts"},{"suiteId":"server","file":"apps/server/test/operations-plan.test.ts","selectionUnit":"apps/server/test/operations-plan.test.ts"},{"suiteId":"server","file":"apps/server/test/operations-recovery.test.ts","selectionUnit":"apps/server/test/operations-recovery.test.ts"},{"suiteId":"server","file":"apps/server/test/operations-required-existing.test.ts","selectionUnit":"apps/server/test/operations-required-existing.test.ts"},{"suiteId":"server","file":"apps/server/test/operations-required.test.ts","selectionUnit":"apps/server/test/operations-required.test.ts"},{"suiteId":"server","file":"apps/server/test/orchestrator-any-tool.test.ts","selectionUnit":"apps/server/test/orchestrator-any-tool.test.ts"},{"suiteId":"server","file":"apps/server/test/orchestrator-api-boundaries.test.ts","selectionUnit":"apps/server/test/orchestrator-api-boundaries.test.ts"},{"suiteId":"server","file":"apps/server/test/orchestrator-control.test.ts","selectionUnit":"apps/server/test/orchestrator-control.test.ts"},{"suiteId":"server","file":"apps/server/test/orchestrator-self.test.ts","selectionUnit":"apps/server/test/orchestrator-self.test.ts"},{"suiteId":"server","file":"apps/server/test/org.test.ts","selectionUnit":"apps/server/test/org.test.ts"},{"suiteId":"server","file":"apps/server/test/orphan-turns.test.ts","selectionUnit":"apps/server/test/orphan-turns.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-accounts.test.ts","selectionUnit":"apps/server/test/outbound-accounts.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-admission.test.ts","selectionUnit":"apps/server/test/outbound-admission.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-approvals.test.ts","selectionUnit":"apps/server/test/outbound-approvals.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-credentials.test.ts","selectionUnit":"apps/server/test/outbound-credentials.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-department-access.test.ts","selectionUnit":"apps/server/test/outbound-department-access.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-department.test.ts","selectionUnit":"apps/server/test/outbound-department.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-dispatcher.test.ts","selectionUnit":"apps/server/test/outbound-dispatcher.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-e2e.test.ts","selectionUnit":"apps/server/test/outbound-e2e.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-evaluation-port.test.ts","selectionUnit":"apps/server/test/outbound-evaluation-port.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-live.integration.test.ts","selectionUnit":"apps/server/test/outbound-live.integration.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-model-checks.test.ts","selectionUnit":"apps/server/test/outbound-model-checks.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-restore.test.ts","selectionUnit":"apps/server/test/outbound-restore.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-routes.test.ts","selectionUnit":"apps/server/test/outbound-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-schema.test.ts","selectionUnit":"apps/server/test/outbound-schema.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-support.test.ts","selectionUnit":"apps/server/test/outbound-support.test.ts"},{"suiteId":"server","file":"apps/server/test/outbound-views.test.ts","selectionUnit":"apps/server/test/outbound-views.test.ts"},{"suiteId":"server","file":"apps/server/test/own-test-databases.test.ts","selectionUnit":"apps/server/test/own-test-databases.test.ts"},{"suiteId":"server","file":"apps/server/test/owner-keys.test.ts","selectionUnit":"apps/server/test/owner-keys.test.ts"},{"suiteId":"server","file":"apps/server/test/parked.test.ts","selectionUnit":"apps/server/test/parked.test.ts"},{"suiteId":"server","file":"apps/server/test/peer-server.test.ts","selectionUnit":"apps/server/test/peer-server.test.ts"},{"suiteId":"server","file":"apps/server/test/peer-sessions.test.ts","selectionUnit":"apps/server/test/peer-sessions.test.ts"},{"suiteId":"server","file":"apps/server/test/people.test.ts","selectionUnit":"apps/server/test/people.test.ts"},{"suiteId":"server","file":"apps/server/test/person-standing.test.ts","selectionUnit":"apps/server/test/person-standing.test.ts"},{"suiteId":"server","file":"apps/server/test/phone-lifecycle.test.ts","selectionUnit":"apps/server/test/phone-lifecycle.test.ts"},{"suiteId":"server","file":"apps/server/test/phone-tools.test.ts","selectionUnit":"apps/server/test/phone-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/phones.test.ts","selectionUnit":"apps/server/test/phones.test.ts"},{"suiteId":"server","file":"apps/server/test/pipeline-report.test.ts","selectionUnit":"apps/server/test/pipeline-report.test.ts"},{"suiteId":"server","file":"apps/server/test/placement.test.ts","selectionUnit":"apps/server/test/placement.test.ts"},{"suiteId":"server","file":"apps/server/test/plan-fallback.test.ts","selectionUnit":"apps/server/test/plan-fallback.test.ts"},{"suiteId":"server","file":"apps/server/test/program-gone.test.ts","selectionUnit":"apps/server/test/program-gone.test.ts"},{"suiteId":"server","file":"apps/server/test/program-history.test.ts","selectionUnit":"apps/server/test/program-history.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-assistant.test.ts","selectionUnit":"apps/server/test/program-operator-assistant.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-attachments.test.ts","selectionUnit":"apps/server/test/program-operator-attachments.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-cases.test.ts","selectionUnit":"apps/server/test/program-operator-cases.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-check.test.ts","selectionUnit":"apps/server/test/program-operator-check.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-deliveries.test.ts","selectionUnit":"apps/server/test/program-operator-deliveries.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-dispatch.test.ts","selectionUnit":"apps/server/test/program-operator-dispatch.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-escalations.test.ts","selectionUnit":"apps/server/test/program-operator-escalations.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-evidence.test.ts","selectionUnit":"apps/server/test/program-operator-evidence.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-failures.test.ts","selectionUnit":"apps/server/test/program-operator-failures.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-first-signal.test.ts","selectionUnit":"apps/server/test/program-operator-first-signal.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-hold.test.ts","selectionUnit":"apps/server/test/program-operator-hold.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-placement.test.ts","selectionUnit":"apps/server/test/program-operator-placement.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-recovery.test.ts","selectionUnit":"apps/server/test/program-operator-recovery.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-requeue.test.ts","selectionUnit":"apps/server/test/program-operator-requeue.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-tools.test.ts","selectionUnit":"apps/server/test/program-operator-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/program-operator-unheard.test.ts","selectionUnit":"apps/server/test/program-operator-unheard.test.ts"},{"suiteId":"server","file":"apps/server/test/program-restarts.test.ts","selectionUnit":"apps/server/test/program-restarts.test.ts"},{"suiteId":"server","file":"apps/server/test/program-signs.test.ts","selectionUnit":"apps/server/test/program-signs.test.ts"},{"suiteId":"server","file":"apps/server/test/program-updates.test.ts","selectionUnit":"apps/server/test/program-updates.test.ts"},{"suiteId":"server","file":"apps/server/test/pump-wakeups.test.ts","selectionUnit":"apps/server/test/pump-wakeups.test.ts"},{"suiteId":"server","file":"apps/server/test/question-routes.test.ts","selectionUnit":"apps/server/test/question-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/queued-live-turn.test.ts","selectionUnit":"apps/server/test/queued-live-turn.test.ts"},{"suiteId":"server","file":"apps/server/test/read-sign-in.test.ts","selectionUnit":"apps/server/test/read-sign-in.test.ts"},{"suiteId":"server","file":"apps/server/test/read-tools.test.ts","selectionUnit":"apps/server/test/read-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/recovery.test.ts","selectionUnit":"apps/server/test/recovery.test.ts"},{"suiteId":"server","file":"apps/server/test/repo-hosts.test.ts","selectionUnit":"apps/server/test/repo-hosts.test.ts"},{"suiteId":"server","file":"apps/server/test/repository-token-revision.test.ts","selectionUnit":"apps/server/test/repository-token-revision.test.ts"},{"suiteId":"server","file":"apps/server/test/request-choice-feedback.test.ts","selectionUnit":"apps/server/test/request-choice-feedback.test.ts"},{"suiteId":"server","file":"apps/server/test/request-media.test.ts","selectionUnit":"apps/server/test/request-media.test.ts"},{"suiteId":"server","file":"apps/server/test/request-sources.test.ts","selectionUnit":"apps/server/test/request-sources.test.ts"},{"suiteId":"server","file":"apps/server/test/restarts.test.ts","selectionUnit":"apps/server/test/restarts.test.ts"},{"suiteId":"server","file":"apps/server/test/restore.test.ts","selectionUnit":"apps/server/test/restore.test.ts"},{"suiteId":"server","file":"apps/server/test/review-fix-regressions.test.ts","selectionUnit":"apps/server/test/review-fix-regressions.test.ts"},{"suiteId":"server","file":"apps/server/test/review-large-files.test.ts","selectionUnit":"apps/server/test/review-large-files.test.ts"},{"suiteId":"server","file":"apps/server/test/review-provenance.test.ts","selectionUnit":"apps/server/test/review-provenance.test.ts"},{"suiteId":"server","file":"apps/server/test/running-agent-access.test.ts","selectionUnit":"apps/server/test/running-agent-access.test.ts"},{"suiteId":"server","file":"apps/server/test/seed-view.test.ts","selectionUnit":"apps/server/test/seed-view.test.ts"},{"suiteId":"server","file":"apps/server/test/selections.test.ts","selectionUnit":"apps/server/test/selections.test.ts"},{"suiteId":"server","file":"apps/server/test/setup-turnkey.test.ts","selectionUnit":"apps/server/test/setup-turnkey.test.ts"},{"suiteId":"server","file":"apps/server/test/setup.test.ts","selectionUnit":"apps/server/test/setup.test.ts"},{"suiteId":"server","file":"apps/server/test/shared-test-database.test.ts","selectionUnit":"apps/server/test/shared-test-database.test.ts"},{"suiteId":"server","file":"apps/server/test/sign-in-failures.test.ts","selectionUnit":"apps/server/test/sign-in-failures.test.ts"},{"suiteId":"server","file":"apps/server/test/socket.test.ts","selectionUnit":"apps/server/test/socket.test.ts"},{"suiteId":"server","file":"apps/server/test/sources.test.ts","selectionUnit":"apps/server/test/sources.test.ts"},{"suiteId":"server","file":"apps/server/test/spreadsheet-delivery.test.ts","selectionUnit":"apps/server/test/spreadsheet-delivery.test.ts"},{"suiteId":"server","file":"apps/server/test/staff.test.ts","selectionUnit":"apps/server/test/staff.test.ts"},{"suiteId":"server","file":"apps/server/test/stop-turn-events.test.ts","selectionUnit":"apps/server/test/stop-turn-events.test.ts"},{"suiteId":"server","file":"apps/server/test/stuck-policy.test.ts","selectionUnit":"apps/server/test/stuck-policy.test.ts"},{"suiteId":"server","file":"apps/server/test/submit-starts-no-run.test.ts","selectionUnit":"apps/server/test/submit-starts-no-run.test.ts"},{"suiteId":"server","file":"apps/server/test/subscriptions.test.ts","selectionUnit":"apps/server/test/subscriptions.test.ts"},{"suiteId":"server","file":"apps/server/test/switched.test.ts","selectionUnit":"apps/server/test/switched.test.ts"},{"suiteId":"server","file":"apps/server/test/task-comments.test.ts","selectionUnit":"apps/server/test/task-comments.test.ts"},{"suiteId":"server","file":"apps/server/test/task-completion-notices.test.ts","selectionUnit":"apps/server/test/task-completion-notices.test.ts"},{"suiteId":"server","file":"apps/server/test/task-files.test.ts","selectionUnit":"apps/server/test/task-files.test.ts"},{"suiteId":"server","file":"apps/server/test/task-messages.test.ts","selectionUnit":"apps/server/test/task-messages.test.ts"},{"suiteId":"server","file":"apps/server/test/task-urgency.test.ts","selectionUnit":"apps/server/test/task-urgency.test.ts"},{"suiteId":"server","file":"apps/server/test/task-wake-state.test.ts","selectionUnit":"apps/server/test/task-wake-state.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-after.test.ts","selectionUnit":"apps/server/test/tasks-after.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-department-access.test.ts","selectionUnit":"apps/server/test/tasks-department-access.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-engine.test.ts","selectionUnit":"apps/server/test/tasks-engine.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-history.test.ts","selectionUnit":"apps/server/test/tasks-history.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-outside-turns.test.ts","selectionUnit":"apps/server/test/tasks-outside-turns.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-pulses.test.ts","selectionUnit":"apps/server/test/tasks-pulses.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-reconcile.test.ts","selectionUnit":"apps/server/test/tasks-reconcile.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-routes.test.ts","selectionUnit":"apps/server/test/tasks-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-tools.test.ts","selectionUnit":"apps/server/test/tasks-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/tasks-wake.test.ts","selectionUnit":"apps/server/test/tasks-wake.test.ts"},{"suiteId":"server","file":"apps/server/test/telegram-files.test.ts","selectionUnit":"apps/server/test/telegram-files.test.ts"},{"suiteId":"server","file":"apps/server/test/telegram-two-people.test.ts","selectionUnit":"apps/server/test/telegram-two-people.test.ts"},{"suiteId":"server","file":"apps/server/test/telegram.test.ts","selectionUnit":"apps/server/test/telegram.test.ts"},{"suiteId":"server","file":"apps/server/test/templates-pipeline.test.ts","selectionUnit":"apps/server/test/templates-pipeline.test.ts"},{"suiteId":"server","file":"apps/server/test/terminal-access.test.ts","selectionUnit":"apps/server/test/terminal-access.test.ts"},{"suiteId":"server","file":"apps/server/test/terminal-input-rights.test.ts","selectionUnit":"apps/server/test/terminal-input-rights.test.ts"},{"suiteId":"server","file":"apps/server/test/terminals.test.ts","selectionUnit":"apps/server/test/terminals.test.ts"},{"suiteId":"server","file":"apps/server/test/test-evidence.test.ts","selectionUnit":"apps/server/test/test-evidence.test.ts"},{"suiteId":"server","file":"apps/server/test/test-run-batch-integration.test.ts","selectionUnit":"apps/server/test/test-run-batch-integration.test.ts"},{"suiteId":"server","file":"apps/server/test/test-run-file-results.test.ts","selectionUnit":"apps/server/test/test-run-file-results.test.ts"},{"suiteId":"server","file":"apps/server/test/test-run-left-open.test.ts","selectionUnit":"apps/server/test/test-run-left-open.test.ts"},{"suiteId":"server","file":"apps/server/test/test-run-machine-pace.test.ts","selectionUnit":"apps/server/test/test-run-machine-pace.test.ts"},{"suiteId":"server","file":"apps/server/test/test-run-preparation.test.ts","selectionUnit":"apps/server/test/test-run-preparation.test.ts"},{"suiteId":"server","file":"apps/server/test/test-runs-commit.test.ts","selectionUnit":"apps/server/test/test-runs-commit.test.ts"},{"suiteId":"server","file":"apps/server/test/test-runs-hosts.test.ts","selectionUnit":"apps/server/test/test-runs-hosts.test.ts"},{"suiteId":"server","file":"apps/server/test/test-runs-named-files.test.ts","selectionUnit":"apps/server/test/test-runs-named-files.test.ts"},{"suiteId":"server","file":"apps/server/test/test-runs-release-only.test.ts","selectionUnit":"apps/server/test/test-runs-release-only.test.ts"},{"suiteId":"server","file":"apps/server/test/test-runs-wait.test.ts","selectionUnit":"apps/server/test/test-runs-wait.test.ts"},{"suiteId":"server","file":"apps/server/test/test-runs-work.test.ts","selectionUnit":"apps/server/test/test-runs-work.test.ts"},{"suiteId":"server","file":"apps/server/test/test-runs.test.ts","selectionUnit":"apps/server/test/test-runs.test.ts"},{"suiteId":"server","file":"apps/server/test/test-timings.test.ts","selectionUnit":"apps/server/test/test-timings.test.ts"},{"suiteId":"server","file":"apps/server/test/timers.test.ts","selectionUnit":"apps/server/test/timers.test.ts"},{"suiteId":"server","file":"apps/server/test/tool-calls.test.ts","selectionUnit":"apps/server/test/tool-calls.test.ts"},{"suiteId":"server","file":"apps/server/test/tools-outside-turn.test.ts","selectionUnit":"apps/server/test/tools-outside-turn.test.ts"},{"suiteId":"server","file":"apps/server/test/tools.test.ts","selectionUnit":"apps/server/test/tools.test.ts"},{"suiteId":"server","file":"apps/server/test/tree-history-query.test.ts","selectionUnit":"apps/server/test/tree-history-query.test.ts"},{"suiteId":"server","file":"apps/server/test/tree-history.test.ts","selectionUnit":"apps/server/test/tree-history.test.ts"},{"suiteId":"server","file":"apps/server/test/turn-effort-dispatch.test.ts","selectionUnit":"apps/server/test/turn-effort-dispatch.test.ts"},{"suiteId":"server","file":"apps/server/test/turn-endings.test.ts","selectionUnit":"apps/server/test/turn-endings.test.ts"},{"suiteId":"server","file":"apps/server/test/turn-release-step.test.ts","selectionUnit":"apps/server/test/turn-release-step.test.ts"},{"suiteId":"server","file":"apps/server/test/turn-releases-migration.test.ts","selectionUnit":"apps/server/test/turn-releases-migration.test.ts"},{"suiteId":"server","file":"apps/server/test/turn-tag-close.test.ts","selectionUnit":"apps/server/test/turn-tag-close.test.ts"},{"suiteId":"server","file":"apps/server/test/turnkey-parent-close.test.ts","selectionUnit":"apps/server/test/turnkey-parent-close.test.ts"},{"suiteId":"server","file":"apps/server/test/turns-as-releases.test.ts","selectionUnit":"apps/server/test/turns-as-releases.test.ts"},{"suiteId":"server","file":"apps/server/test/turns.test.ts","selectionUnit":"apps/server/test/turns.test.ts"},{"suiteId":"server","file":"apps/server/test/unheard.test.ts","selectionUnit":"apps/server/test/unheard.test.ts"},{"suiteId":"server","file":"apps/server/test/updates.test.ts","selectionUnit":"apps/server/test/updates.test.ts"},{"suiteId":"server","file":"apps/server/test/vault-phone-privacy.test.ts","selectionUnit":"apps/server/test/vault-phone-privacy.test.ts"},{"suiteId":"server","file":"apps/server/test/vault-tools.test.ts","selectionUnit":"apps/server/test/vault-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/vault.test.ts","selectionUnit":"apps/server/test/vault.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-boundaries.test.ts","selectionUnit":"apps/server/test/wait-boundaries.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-dependency.test.ts","selectionUnit":"apps/server/test/wait-dependency.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-escalation.test.ts","selectionUnit":"apps/server/test/wait-escalation.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-goals.test.ts","selectionUnit":"apps/server/test/wait-goals.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-monitor.test.ts","selectionUnit":"apps/server/test/wait-monitor.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-notice-effects.test.ts","selectionUnit":"apps/server/test/wait-notice-effects.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-notices.test.ts","selectionUnit":"apps/server/test/wait-notices.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-policy-routes.test.ts","selectionUnit":"apps/server/test/wait-policy-routes.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-policy.test.ts","selectionUnit":"apps/server/test/wait-policy.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-producers.test.ts","selectionUnit":"apps/server/test/wait-producers.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-state.test.ts","selectionUnit":"apps/server/test/wait-state.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-target.test.ts","selectionUnit":"apps/server/test/wait-target.test.ts"},{"suiteId":"server","file":"apps/server/test/wait-views.test.ts","selectionUnit":"apps/server/test/wait-views.test.ts"},{"suiteId":"server","file":"apps/server/test/watch-machine-drain.test.ts","selectionUnit":"apps/server/test/watch-machine-drain.test.ts"},{"suiteId":"server","file":"apps/server/test/watch-tools.test.ts","selectionUnit":"apps/server/test/watch-tools.test.ts"},{"suiteId":"server","file":"apps/server/test/watch.test.ts","selectionUnit":"apps/server/test/watch.test.ts"},{"suiteId":"server","file":"apps/server/test/work-tree-route.test.ts","selectionUnit":"apps/server/test/work-tree-route.test.ts"},{"suiteId":"server","file":"apps/server/test/worker-keeper.test.ts","selectionUnit":"apps/server/test/worker-keeper.test.ts"}],"reasons":[{"code":"full_package_rule","path":"apps/server/drizzle/0137_message_sender_window.sql"},{"code":"full_package_rule","path":"apps/server/drizzle/meta/0137_snapshot.json"},{"code":"full_package_rule","path":"apps/server/drizzle/meta/_journal.json"},{"code":"full_package_rule","path":"apps/server/src/db/schema.ts"},{"code":"migration","path":"apps/server/drizzle/0137_message_sender_window.sql"},{"code":"migration","path":"apps/server/drizzle/meta/0137_snapshot.json"},{"code":"migration","path":"apps/server/drizzle/meta/_journal.json"},{"code":"new_test","path":"apps/server/test/message-count.test.ts"},{"code":"related","path":"apps/server/src/modules/tools/watch.ts"},{"code":"related","path":"apps/server/test/message-count.test.ts"},{"code":"schema","path":"apps/server/src/db/schema.ts"}]}],"leftToFullRun":["apps/server/test/acme-fake.test.ts","apps/server/test/addresses.test.ts","apps/server/test/age-key.test.ts","apps/server/test/agent-sql-permissions.test.ts","apps/server/test/agent-sql.test.ts","apps/server/test/agent-view-company.test.ts","apps/server/test/agent-view-rule.test.ts","apps/server/test/api-models.test.ts","apps/server/test/app-close.test.ts","apps/server/test/ari.test.ts","apps/server/test/assistants-migration.test.ts","apps/server/test/autonomous-release-migration.test.ts","apps/server/test/beats.test.ts","apps/server/test/become.test.ts","apps/server/test/builtin-node-connections-migration.test.ts","apps/server/test/bundle-store.test.ts","apps/server/test/bundle.test.ts","apps/server/test/challenges.test.ts","apps/server/test/check-queue.test.ts","apps/server/test/cli.test.ts","apps/server/test/client.test.ts","apps/server/test/closed-port.test.ts","apps/server/test/composable-skills.test.ts","apps/server/test/compose.test.ts","apps/server/test/computer-keeper.test.ts","apps/server/test/config.test.ts","apps/server/test/confirm.test.ts","apps/server/test/connection-history.test.ts","apps/server/test/copies-score.test.ts","apps/server/test/copy-maker.test.ts","apps/server/test/copy-updating.test.ts","apps/server/test/crypto.test.ts","apps/server/test/db-door.test.ts","apps/server/test/db-pool.test.ts","apps/server/test/decision-policy.test.ts","apps/server/test/decisions-answers-ceo.test.ts","apps/server/test/decisions-answers-department.test.ts","apps/server/test/department-echelons-template.test.ts","apps/server/test/department-mode-schema.test.ts","apps/server/test/department-turns-migration.test.ts","apps/server/test/development-checks-template.test.ts","apps/server/test/development-echelons-cleanup.test.ts","apps/server/test/development-echelons-controls.test.ts","apps/server/test/development-echelons-findings.test.ts","apps/server/test/development-echelons-parent.test.ts","apps/server/test/development-echelons-paths.test.ts","apps/server/test/development-echelons-route.test.ts","apps/server/test/development-echelons-submit-source.test.ts","apps/server/test/development-echelons-template.test.ts","apps/server/test/development-echelons-tests.test.ts","apps/server/test/development-echelons-wake.test.ts","apps/server/test/echelons-policy.test.ts","apps/server/test/entry.test.ts","apps/server/test/errors.test.ts","apps/server/test/fake-relay.test.ts","apps/server/test/feedback-clean.test.ts","apps/server/test/fence-lint.test.ts","apps/server/test/follow-config.test.ts","apps/server/test/following.test.ts","apps/server/test/fresh-pglite.test.ts","apps/server/test/front-calls.test.ts","apps/server/test/front.test.ts","apps/server/test/gate-compare.test.ts","apps/server/test/github-create-repository.test.ts","apps/server/test/grant.test.ts","apps/server/test/granting-skill.test.ts","apps/server/test/harness-migration.test.ts","apps/server/test/health.test.ts","apps/server/test/helpers-basic.test.ts","apps/server/test/helpers-db-metadata.test.ts","apps/server/test/holder.test.ts","apps/server/test/hub.test.ts","apps/server/test/images-workflow.test.ts","apps/server/test/install-nodes-only.test.ts","apps/server/test/install-nodes-updater.test.ts","apps/server/test/install-ps1.test.ts","apps/server/test/install-script-browser.test.ts","apps/server/test/install-script-join.test.ts","apps/server/test/install-script-served.test.ts","apps/server/test/install-script-server-check.test.ts","apps/server/test/install-script-steps.test.ts","apps/server/test/install-script.test.ts","apps/server/test/install-worker.test.ts","apps/server/test/internet.test.ts","apps/server/test/keeper-app-call.test.ts","apps/server/test/keeper-restore.test.ts","apps/server/test/keeper-role.test.ts","apps/server/test/keeper-ticker.test.ts","apps/server/test/lab/network.test.ts","apps/server/test/lab/overlap.test.ts","apps/server/test/lead-update.test.ts","apps/server/test/lease-holder.test.ts","apps/server/test/lease.test.ts","apps/server/test/leaving.test.ts","apps/server/test/led.test.ts","apps/server/test/limit.test.ts","apps/server/test/link-listener.test.ts","apps/server/test/logging.test.ts","apps/server/test/machine-keys.test.ts","apps/server/test/materials-schema.test.ts","apps/server/test/measures.test.ts","apps/server/test/merge-plan.test.ts","apps/server/test/merge-rules.test.ts","apps/server/test/message-prompt.test.ts","apps/server/test/migrate-masking.test.ts","apps/server/test/migrate.test.ts","apps/server/test/migration-history.test.ts","apps/server/test/migration-metadata.test.ts","apps/server/test/migrations-0003-0033.test.ts","apps/server/test/migrations-0047-0049.test.ts","apps/server/test/migrations-0050-0062.test.ts","apps/server/test/migrations.test.ts","apps/server/test/model-check-dataset.test.ts","apps/server/test/model-check-lifecycle.test.ts","apps/server/test/model-check-run.test.ts","apps/server/test/model-check-score.test.ts","apps/server/test/multi-company-isolation.test.ts","apps/server/test/named-test-files.test.ts","apps/server/test/naming.test.ts","apps/server/test/next-section.test.ts","apps/server/test/node-build.test.ts","apps/server/test/node-image.test.ts","apps/server/test/node-programs.test.ts","apps/server/test/notification-heading.test.ts","apps/server/test/operator-hub.test.ts","apps/server/test/orchestrator-sql-secrets.test.ts","apps/server/test/origin.test.ts","apps/server/test/outbound-checks.test.ts","apps/server/test/outbound-delivery.test.ts","apps/server/test/outbound-grants.test.ts","apps/server/test/outbound-render.test.ts","apps/server/test/outbound-setup-log.test.ts","apps/server/test/outbound-smtp.test.ts","apps/server/test/outbound-webhook.test.ts","apps/server/test/peer-client.test.ts","apps/server/test/peer-session-silence.test.ts","apps/server/test/peer-stream-clock.test.ts","apps/server/test/phone-access.test.ts","apps/server/test/phone-recording.test.ts","apps/server/test/phones-migration.test.ts","apps/server/test/pins.test.ts","apps/server/test/pipeline-echelons.test.ts","apps/server/test/pipeline-facts.test.ts","apps/server/test/pipeline-guidance.test.ts","apps/server/test/planned-vitest-sequencer.test.ts","apps/server/test/private-upload.test.ts","apps/server/test/program-operator-migration.test.ts","apps/server/test/program-operator-nodes-migration.test.ts","apps/server/test/program-operator-policy.test.ts","apps/server/test/program-operator-rpc.test.ts","apps/server/test/program-operator-screen.test.ts","apps/server/test/promote.test.ts","apps/server/test/prompt.test.ts","apps/server/test/proofs.test.ts","apps/server/test/proxy-header.test.ts","apps/server/test/proxy.test.ts","apps/server/test/question-schema.test.ts","apps/server/test/question.test.ts","apps/server/test/read-cookie.test.ts","apps/server/test/relay-client.test.ts","apps/server/test/release-benchmark.test.ts","apps/server/test/release-improvement-templates.test.ts","apps/server/test/replica.test.ts","apps/server/test/repo-full-command-migration.test.ts","apps/server/test/review-source-lines.test.ts","apps/server/test/role-levels-guide.test.ts","apps/server/test/role-model.test.ts","apps/server/test/round-trips.test.ts","apps/server/test/route-access.test.ts","apps/server/test/sign-in-limit.test.ts","apps/server/test/skill-independence.test.ts","apps/server/test/slots.test.ts","apps/server/test/sql-check.test.ts","apps/server/test/sql-parser.test.ts","apps/server/test/static.test.ts","apps/server/test/stuck-recipients-migration.test.ts","apps/server/test/stumbles.test.ts","apps/server/test/switch-step.test.ts","apps/server/test/switch-word.test.ts","apps/server/test/sync-step.test.ts","apps/server/test/sync.test.ts","apps/server/test/takeover-rows.test.ts","apps/server/test/takeover-step.test.ts","apps/server/test/taking.test.ts","apps/server/test/task-pause.test.ts","apps/server/test/templates-once.test.ts","apps/server/test/templates-watch-idle.test.ts","apps/server/test/templates.test.ts","apps/server/test/terminal-input-line.test.ts","apps/server/test/terminal-look.test.ts","apps/server/test/test-capacity.test.ts","apps/server/test/test-database-parsers.test.ts","apps/server/test/test-environment-migration.test.ts","apps/server/test/test-environment-runs.test.ts","apps/server/test/test-environment-templates.test.ts","apps/server/test/test-execution-receipt.test.ts","apps/server/test/test-pick.test.ts","apps/server/test/test-result-reuse-migration.test.ts","apps/server/test/test-run-commit-migration.test.ts","apps/server/test/test-run-environment-plan.test.ts","apps/server/test/test-run-plan.test.ts","apps/server/test/test-run-product-config.test.ts","apps/server/test/test-run-product-plan.test.ts","apps/server/test/test-run-reuse.test.ts","apps/server/test/test-run-speed-plan.test.ts","apps/server/test/test-run-suite-shards.test.ts","apps/server/test/test-tool-text.test.ts","apps/server/test/testruns-refs-create.test.ts","apps/server/test/testruns-refs.test.ts","apps/server/test/throughput.test.ts","apps/server/test/tls-checks.test.ts","apps/server/test/total-loss.test.ts","apps/server/test/tree-programs.test.ts","apps/server/test/tunnel.test.ts","apps/server/test/turn-effort.test.ts","apps/server/test/undelivered.test.ts","apps/server/test/update-steps.test.ts","apps/server/test/updater-backups.test.ts","apps/server/test/updater-computer.test.ts","apps/server/test/updater-control.test.ts","apps/server/test/updater-copies.test.ts","apps/server/test/updater-node-images.test.ts","apps/server/test/updater-nodes.test.ts","apps/server/test/updater-paths.test.ts","apps/server/test/updater-revision2.test.ts","apps/server/test/updater-stopped-nodes.test.ts","apps/server/test/updater-uploads.test.ts","apps/server/test/updater-worker.test.ts","apps/server/test/updater.test.ts","apps/server/test/vault-totp.test.ts","apps/server/test/version.test.ts","apps/server/test/visit-client.test.ts","apps/server/test/wait-graph.test.ts","apps/server/test/wait-notice-migration.test.ts","apps/server/test/web-crypto-types.test.ts","apps/server/test/work-tree.test.ts","apps/server/test/worker-keeper-fixture.test.ts","apps/server/test/worker-pages.test.ts","apps/server/test/x509.test.ts","apps/server/test/yaml-once.test.ts"],"reason":null,"fullSuiteComparator":"unavailable"}
+NOTE migration_check_unsupported
+NOTE left to the full run: 240 test files the import graph reaches, listed in the record
+STAGE format unavailable exit=null secs=0 reason=repo_has_no_formatter
+$ npx --no-install eslint apps/server/src/db/schema.ts apps/server/src/modules/tools/watch.ts apps/server/test/message-count.test.ts
+STAGE lint passed exit=0 secs=4
+$ npm run build -w @hornhoof/protocol
+$ npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit
+STAGE types passed exit=0 secs=1
+$ npx --no-install vitest run --config vitest.product.config.mjs --project=@hornhoof/server --shard=1/1 --coverage --coverage.reporter=lcov --coverage.reportsDirectory=coverage --coverage.reportOnFailure=true --coverage.include=src/db/schema.ts --coverage.include=src/modules/tools/watch.ts --reporter=default --reporter=json --outputFile.json=/tmp/hh-author-afvy6l/tests-server.json
+
+ RUN  v5.0.5 /data/work/agents/84ccb405-1ced-4b12-a94e-f3b44d5ba1e4/hornhoof-1241
+      Coverage enabled with v8
+
+ ✓ |@hornhoof/server| test/computer-machines.test.ts (31 tests) 25821ms
+   ✓ computer access to a machine of the company (18)
+     ✓ opens only for the machine's owner 2516ms
+     ✓ lets the CEO close any machine's access, and nobody else but its owner 661ms
+     ✓ asks for a named machine, and its owner opens it for a day 427ms
+     ✓ opens a machine that holds a key only with what its owner signed for it 340ms
+     ✓ is not reachable without its keeper 380ms
+     ✓ keeps each machine's commands to its own keeper, one at a time 375ms
+     ✓ keeps a command its keeper holds, and counts one it lost as lost, never sending it again 369ms
+     ✓ does not give up a command that waits behind one that still runs 477ms
+     ✓ gives up a command that waited or was out too long, and tells the keeper what to let go of 446ms
+     ✓ closes a machine whose keeper did not take what its owner signed, and says so 620ms
+     ✓ ends the commands nobody took when access closes, and gives none on a closed machine 513ms
+     ✓ closes a machine that is disconnected, with its commands 453ms
+     ✓ closes the other machines when a new build leads 487ms
+     ✓ tells where a person sits, and nothing to who is elsewhere 383ms
+     ✓ tells every person to look again, and the orchestrator acting for them nothing, while it sees every machine 1425ms
+     ✓ tells the orchestrator which machine a person writes from, when they sit at one 656ms
+     ✓ tells the screens when a person makes their key, and when a machine holds another 1549ms
+     ✓ shows each machine's access on its card 580ms
+   ✓ the orchestrator's commands on a machine (6)
+     ✓ runs a command on the machine it names, for its owner and for the CEO 1341ms
+     ✓ refuses a turn whose last person is not the CEO, the CEO delegate or the machine's owner, and runs in one no person wrote into 788ms
+     ✓ refuses a turn a task or a comment of a person without the right woke, and runs one a task of the CEO woke 942ms
+     ✓ finds machines by name or id, and says when it cannot 368ms
+     ✓ says so when a machine does not answer, and what its owner must do first 388ms
+     ✓ lists the machines with the core 419ms
+   ✓ what an app from before access was per machine left (3)
+     ✓ takes over by itself once the row is there, while the app leads 2554ms
+     ✓ carries a closed one over as closed, and leaves what a keeper wrote 1285ms
+   ✓ computer access button through inbox mode (4)
+     ✓ works in the woken inbox turn and its retry on every machine that is open and on none that is closed 1898ms
+     ✓ never lets an employee message via message_employee open a machine in inbox mode 430ms
+     ✓ works in the inbox turn after a person wrote into an earlier one, and not in one an Enter in the terminal reached 1203ms
+     ✓ works on the open machine in a wake whose computer_access letter was read before, and preserves unread letters rescued after an unsent inbox turn 1111ms
+ ✓ |@hornhoof/server| test/terminals.test.ts (75 tests) 26719ms
+   ✓ writing to an agent on the plan of someone else (17)
+     ✓ opens the turn in the name of the CEO delegate, as answering the CEO, though the delegate does not own the plan 2541ms
+     ✓ marks a running turn as answering the CEO once the delegate writes into it 454ms
+     ✓ gives a person with a department and a CEO delegate mark no answers_ceo in the window, as anyone of the department 357ms
+     ✓ turns away someone without the right to write, on every door of the window, and opens no turn 411ms
+     ✓ tells the window who types into the terminal, as the terminal itself says 340ms
+     ✓ tells the owner of the plan they type, and a person with the department on another plan that they watch and do not type 414ms
+     ✓ goes by the plan the running turn is on when the agent moved to another plan mid-turn 409ms
+   ✓ an agent's live terminal (15)
+     ✓ tells the agent's window whether its node shows a terminal 3011ms
+     ✓ ends the view when the agent moves to another subscription, so it opens again on the new node 522ms
+     ✓ shows the node its turn runs on when the agent moved to another subscription mid-turn, and moves once the turn ends 406ms
+   ✓ a turn a person typed into the terminal (3)
+     ✓ opens as that person's message, runs with a tool token and goes on in the same session after 396ms
+   ✓ starting an agent for someone who opens its window to talk (4)
+     ✓ starts the program with a turn that types nothing, and the next turn catches up in it 304ms
+   ✓ opening a terminal while the plan is at its limit (8)
+     ✓ opens saved claude history after a node restart, once, without sending waiting prompts until reset 715ms
+     ✓ opens saved codex history after a node restart, once, without sending waiting prompts until reset 687ms
+     ✓ opens saved kimi history after a node restart, once, without sending waiting prompts until reset 823ms
+     ✓ does not open a limited agent for a person from another company 422ms
+     ✓ opens a fresh program without history and preserves prompts when reset races with repeated opens 437ms
+     ✓ does not treat an empty person turn as a program start during a limit 545ms
+     ✓ does not treat an empty task turn as a program start during a limit 560ms
+     ✓ shows a startup failure to the owner and leaves real prompts waiting at the limit 483ms
+   ✓ who typed into the terminal, for the decisions of a turn (15)
+     ✓ keeps the owner's decisions in the running turn when a person without the right submits keys with a line feed 526ms
+     ✓ keeps the owner's decisions in the running turn when a person without the right submits keys with Enter as CSI u 397ms
+     ✓ keeps the owner's decisions in the running turn when a person without the right submits keys with Enter with modifyOtherKeys 309ms
+     ✓ keeps the owner's decisions in the running turn when a person without the right submits keys with Ctrl+J as CSI u 358ms
+     ✓ keeps the owner's decisions in the running turn when a person without the right submits keys with the keypad Enter 313ms
+     ✓ keeps the owner's decisions in the running turn when a person without the right submits keys with Enter 318ms
+     ✓ takes an Enter in a running turn into that turn only: the turn after it needs an Enter of its own 347ms
+   ✓ words a person typed in a running turn, which the program takes after it (8)
+     ✓ open their own turn with its tools for a person without the rights of the CEO 311ms
+   ✓ words a person wrote into the last seconds of a turn, which the program takes after it (2)
+     ✓ open a turn in the name of the CEO delegate who wrote them, with its tools 401ms
+     ✓ open a turn answering no CEO for a person without the rights of the CEO, in a turn that answered the CEO 327ms
+stdout | test/keeper-peer.test.ts
+keeper-peer database preparation: 1090 ms
+
+ ✓ |@hornhoof/server| test/tasks-wake.test.ts (103 tests) 31385ms
+   ✓ a delayed assignment wake on a closed task (2)
+     ✓ logs a skipped assignment on done without waking anyone 2185ms
+   ✓ a person who speaks to an agent directly (3)
+     ✓ does not let a person answer an internal stuck request through the agent's terminal 394ms
+     ✓ leaves what waits on a task alone for a person who cannot reach the task 300ms
+     ✓ answers the agent's question with a message in its window, and leaves a commit to approve open 371ms
+   ✓ a plan at its limit, with others of the role on other plans (5)
+     ✓ gives the work to one of them who is on, with one note in the task 311ms
+     ✓ keeps the work with Bruno once his turns worked on it, as what he did may not be pushed yet, and he goes on on a fallback plan 4020ms
+     ✓ keeps the work with Bruno, who goes on on the free plan as a fallback, when the one who could take it is in a team that takes only urgent work 309ms
+     ✓ waits for the reset when none of them could start now: signed out, its machine off or its node too old 3951ms
+   ✓ waking agents for their tasks (22)
+     ✓ reminds an agent that ended a turn without moving its task, then asks a person 322ms
+     ✓ lets an agent that told in the task how far it got go on in another turn, not counted as standing still 332ms
+     ✓ asks a person once an agent went on for many turns without handing anything in 360ms
+     ✓ blocks the task for its head once, with the error, after three turns on it in a row broke at once 318ms
+     ✓ blocks the task for its head once after five turns on it in a row failed, however long each ran 332ms
+   ✓ a head (5)
+     ✓ reminds it once of a task whose two finished parts went out in one turn 305ms
+   ✓ obsolete task turns (28)
+     ✓ preserves the reviewed notice to the head after a task closes 481ms
+     ✓ still dispatches a current assignment after the busy turn ends 489ms
+     ✓ checks the task again at take if it closes while instructions are being built 331ms
+     ✓ drops an obsolete task from a head combined turn, before preparation, and keeps the completed child notice 406ms
+     ✓ drops an obsolete task from a head combined turn, during preparation, and keeps the completed child notice 325ms
+     ✓ resumes current working tasks when the agent gets its subscription back 324ms
+ ✓ |@hornhoof/server| test/keeper-peer.test.ts (28 tests) 6650ms
+   ✓ the peer link in the keeper (28)
+     ✓ serves the peer link once its certificate is in, and names each peer to the app by its certificate 926ms
+     ✓ renews a peer's certificate through the app, for its own row and key 418ms
+     ✓ makes the company's backups, reports its key for them, and serves bundles only to their holders 316ms
+     ✓ keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes 318ms
+ ✓ |@hornhoof/server| test/autonomous-release.test.ts (18 tests) 18986ms
+   ✓ autonomous release for exact commits to main (18)
+     ✓ defaults to off and requires a human approval card when off even if all three conditions hold 1887ms
+     ✓ passes without a card and records a company journal entry when enabled by the human CEO and all three conditions hold 638ms
+     ✓ refuses main acceptance without a pre-push auto-approval row or after a non-fast-forward overwrite of main 624ms
+     ✓ refuses auto-approval without a green whole run of a release: narrow, old cached, failed or stale, on another SHA or on a task branch 2460ms
+     ✓ refuses auto-approval when there is no independent non-author PASS verdict on that commit 1337ms
+     ✓ refuses auto-approval when the commit is not a fast-forward from current origin/main 554ms
+     ✓ lets a signed-in person who runs a department turn its own autonomous release on and off, and no other department's 557ms
+     ✓ forbids heads, employee/external words, assistants, delegates and people who do not run the department from enabling or disabling autonomous release, and lets the orchestrator for the CEO 343ms
+     ✓ immediately restores human approval cards when the CEO turns autonomous release off, while preserving journal history 480ms
+     ✓ refuses auto-approval when PASS comes from a non-main branch or a turn feature task not integrating into main 2871ms
+     ✓ refuses auto-approval when the candidate moved past the reviewed SHA or an unrelated non-release task asks 1602ms
+     ✓ auto-approves a release candidate of the product on release-X.Y.Z when a coordination task of the product asks 439ms
+     ✓ C1 (a department that releases turns): never auto-approves a commit of the department itself, which reaches main only by the release of its turn 523ms
+     ✓ C1 (kinship): only the task with the verdict or a coordination task above it by its parents asks, never another coordination task of the same repository 536ms
+     ✓ C1 (PASS on another SHA): refuses auto-approval when PASS was given on an ancestor or another commit rather than the asked SHA 777ms
+     ✓ C1 (base from network-1): refuses auto-approval when review.baseCommit is not an ancestor of origin/main 842ms
+     ✓ C1 (both outside a turn): refuses auto-approval when both turnIds are null unless PASS is on the asked SHA and review.baseCommit is an ancestor of origin/main 733ms
+     ✓ M3: runs readCommit and readCompare before the transaction so CEO turn-off never waits on a network request 1642ms
+ ✓ |@hornhoof/server| test/conversation.test.ts (65 tests) 24803ms
+   ✓ the orchestrator's conversation (46)
+     ✓ sends a personal message before a report whose combining window is still open 1941ms
+     ✓ starts a typed person message with its sender, role and recipient 313ms
+     ✓ starts a head letter with its real role and department, while keeping every quoted line 304ms
+     ✓ greets a company its template staffed, so he says what is left is a subscription, not hiring 362ms
+     ✓ keeps what the agent does, in order, and streams it to the CEO 1394ms
+     ✓ gives the newest events, and as many before any of them, so a window keeps only the last ones 471ms
+     ✓ puts a turn back in line when sending it breaks, and sends it on the next try 368ms
+     ✓ queues a message while he works and sends it after, in the same session 322ms
+     ✓ goes on in the session of a turn that ran out of time or was stopped, and not of one that broke or never ran 365ms
+     ✓ sends two people's messages in the order they wrote 357ms
+     ✓ keeps turns from a machine whose Hornhoof is too old to run them, and says so 387ms
+     ✓ lets a worker compact its conversation at half a million tokens, while heads and the orchestrator keep the full window, named outright 337ms
+     ✓ fits his xhigh to a Kimi plan, and keeps a person's pick in the same session 413ms
+     ✓ runs him on a Codex plan at xhigh even when it takes more 351ms
+     ✓ tells a machine that writes no skill files every skill in the text, and one that writes them only their list 1378ms
+     ✓ keeps the next message waiting when the machine says its login ran out 357ms
+     ✓ holds turns while the plan is at its limit, says until when, and sends them once the limit starts over 541ms
+     ✓ does not hold claude turns on a stale rejection, even with a future reset 411ms
+     ✓ does not hold codex turns on a stale rejection, even with a future reset 348ms
+     ✓ does not hold kimi turns on a stale rejection, even with a future reset 513ms
+     ✓ does not hold antigravity turns on a stale rejection, even with a future reset 418ms
+     ✓ waits quietly for a limit that starts over in more than 24 days, too long for one timer 646ms
+     ✓ holds turns when the program said the plan ran out of its usage limit, though the plan itself said nothing 738ms
+     ✓ holds turns when Kimi says in its error event that the plan's quota ran out, and tries again in a quarter of an hour 523ms
+     ✓ holds turns when Kimi says in its terminal that the plan's quota ran out, and tries again in a quarter of an hour 496ms
+     ✓ takes the time a program names for its usage limit to start over, and the map hears of it 418ms
+     ✓ keeps a hold from a refused turn through readings that moved nothing since, and ends it with one that moved 456ms
+     ✓ takes a reading over a hold that is over, though it moved nothing 305ms
+     ✓ does not hold turns for an agent that only spoke about usage limits in its work 309ms
+   ✓ an employee's conversation (19)
+     ✓ starts a fresh session after the employee's instructions changed 351ms
+     ✓ keeps the head session when a new turn of the company opens 309ms
+     ✓ keeps the orchestrator session when a new turn of the company opens 348ms
+     ✓ starts a member in a clean session when a new turn of its department opens, and goes on in it during the turn 539ms
+     ✓ runs an employee on its model, and a new model starts a fresh session 384ms
+     ✓ runs an employee at its role effort and keeps a person's pick in the same session 437ms
+ ✓ |@hornhoof/server| test/peer-server.test.ts (85 tests) 1566ms
+ ✓ |@hornhoof/server| test/orchestrator-control.test.ts (53 tests) 22450ms
+   ✓ the orchestrator runs the company as the CEO can in Hornhoof (29)
+     ✓ describes the role effort in change_employee 1786ms
+     ✓ switches an employee off and on, and the card says the orchestrator did it 303ms
+     ✓ is asked to put what an employee asks a person into plain words, and its words show with the request 303ms
+     ✓ answers an employee's question as itself, for the CEO its turn answers 303ms
+     ✓ lets the orchestrator assign an eligible checker without skipping the required Review 320ms
+     ✓ creates, renames and deletes a sub-unit and moves an employee into it and back, from the screen and with its tools 448ms
+   ✓ the orchestrator and the company's public link (1)
+     ✓ takes a link, moves it to another name and removes it, as the settings do 418ms
+   ✓ the orchestrator reads and changes the database itself (17)
+     ✓ reads any table and changes a field, and the map hears of the change 944ms
+     ✓ stays out of the merge records 593ms
+     ✓ stays out of the ranking 529ms
+     ✓ stays out of the pulse 451ms
+     ✓ is refused the keys, a change of what only Hornhoof writes, and the tables themselves 755ms
+     ✓ reads every table and column but the keys 911ms
+     ✓ refuses SQL that would get past a fence 347ms
+     ✓ reads requests, cards and the logs, and is refused changing them even in a turn of the CEO 778ms
+     ✓ writes in every turn: as the owner after a person who is neither the CEO nor the delegate wrote, or nobody did 612ms
+     ✓ undoes the whole call when one of its statements fails 591ms
+     ✓ cuts a long answer 417ms
+     ✓ keeps people, their access, an employee's kind, role and skills, a head's department, turns' tokens and assistants out of its hands, and says why 1121ms
+     ✓ is the orchestrator's and the head of Operations', no one else's 1017ms
+     ✓ lets the head of Operations read, but nothing hidden or secret, and change nothing 1483ms
+   ✓ what the CEO may ask for, which the orchestrator does in any turn as the owner (6)
+     ✓ changes people in a turn an employee woke, as the owner 400ms
+     ✓ goes as the owner in a turn another person asked for, and in one with no message 385ms
+     ✓ takes no answer as a permission to change machines in a company with no owner but the CEO delegate's own one, in the card of a task still open 313ms
+     ✓ counts a turn an employee woke as the CEO's once the CEO's message goes into it 364ms
+     ✓ switches on a skill that shows the whole company, or moves itself to another subscription, in any turn, as the owner 375ms
+ ✓ |@hornhoof/server| test/watch-tools.test.ts (35 tests) 12048ms
+   ✓ tools a skill grants (35)
+     ✓ exposes node restart evidence to the failure collector separately from agent output 1756ms
+     ✓ let an employee answer the one who wrote to it last, in another department or the orchestrator, with one message 538ms
+     ✓ let a watchdog see every agent with what it holds, and nudge one in its window 302ms
+     ✓ distinguishes a person question from work that can be handed out, even beside an open prerequisite 432ms
+     ✓ are turned on only by people who see the whole company, since they show all of it 437ms
+     ✓ send at most ten messages in one turn 638ms
+     ✓ shares the ten-message quota between employee messages and reports to the orchestrator 630ms
+     ✓ keep to ten messages when a turn sends several at once 629ms
+     ✓ count what a turn sent before Hornhoof restarted 430ms
+     ✓ let a failure collector read every message an employee could not deliver, with its code, its recipient and its task, and no credential in it 344ms
+     ✓ lets a watchdog of the same department read its agent's last failure and the tasks it holds as they are 386ms
+ ✓ |@hornhoof/server| test/outbound-admission.test.ts (110 tests) 25465ms
+   ✓ a message that may go (5)
+     ✓ is frozen to exact bytes and scheduled, with nothing of its contact in the result 1897ms
+   ✓ who may submit, to whom and from where (17)
+     ✓ an account bound to someone else 389ms
+     ✓ a contact on a public channel, and an audience on a direct one 1657ms
+   ✓ unsubscribing (11)
+     ✓ cancels what waits for this contact, and gives back what it had reserved 337ms
+     ✓ does not touch what waits for another contact 314ms
+   ✓ the daily limits (9)
+     ✓ no more than the account's, however many ask at once 412ms
+     ✓ changing the time zone gives no new budget 343ms
+   ✓ sampling (19)
+     ✓ the first of a segment and the first of an author are reviewed, and then no more 1128ms
+   ✓ the last look (23)
+     ✓ a new generation of the channel, the account or the binding makes a reservation stale 1156ms
+     ✓ nothing else leaves an account while one may be on its way 350ms
+     ✓ settling twice changes nothing, and an end stays the end 301ms
+ ✓ |@hornhoof/server| test/merge-apply.test.ts (40 tests) 72716ms
+   ✓ a merge applied (40)
+     ✓ adds what the leader lacks 2269ms
+     ✓ adds a log in the order the source numbered it, kept false 1699ms
+     ✓ adds a log in the order the source numbered it, kept true 1409ms
+     ✓ applies a proven overwrite 1250ms
+     ✓ keeps the leader's value on an unproven difference 1451ms
+     ✓ keeps a value the leader changed where its journal lost it 1867ms
+     ✓ deletes only what the source alone removed 1501ms
+     ✓ never deletes through a skipped transaction 1581ms
+     ✓ skips what the leader already did from the same source 1438ms
+     ✓ closes the second open turn 1484ms
+     ✓ adds an open turn of another department open, beside the one that is open here 1284ms
+     ✓ renumbers a split number 1192ms
+     ✓ keeps two forks' task_events apart by uuid, kept false 1233ms
+     ✓ keeps two forks' task_events apart by uuid, kept true 1480ms
+     ✓ makes a second head an ordinary agent 1351ms
+     ✓ refuses a row whose parent is gone, and what hangs on it 1634ms
+     ✓ refuses a task whose after names a refused task 1901ms
+     ✓ replays instead of putting values back 1297ms
+     ✓ sends one email on both sides to the CEO 1167ms
+     ✓ sends a change this side's rows no longer take to the orchestrator 1127ms
+     ✓ lists once a row that takes some columns, lists others, and is then refused 1235ms
+     ✓ brings back nothing the company removed since the restore, and lists it 1300ms
+     ✓ reads a file by its hash, and brings its bytes only for a row it writes 1231ms
+     ✓ writes in few passes however deep what hangs on a refused row goes 1605ms
+     ✓ stops what the source left running 1424ms
+     ✓ stops what a kept database left running, once, whichever copy of it comes later 2997ms
+     ✓ leaves open what the leader holds open 1573ms
+     ✓ leaves the programs a server watched behind, and brings back a picture of one without it 1324ms
+     ✓ brings back a new machine with its access closed 4039ms
+     ✓ finds a row the carry wrote anew 2020ms
+     ✓ never reads a stale absence as a deletion or a stale value as a change 1947ms
+     ✓ compares a kept database even when its journal adds nothing 2661ms
+     ✓ never adds sessions after a restore 2837ms
+     ✓ merges a database plan 7 kept 1369ms
+     ✓ carries a conflict left open 1780ms
+     ✓ merges three sides one at a time 2134ms
+     ✓ never applies twice 1629ms
+     ✓ finishes the completion check 2376ms
+     ✓ changes nothing when it fails half way 5166ms
+     ✓ holds the app's writes while it runs 2445ms
+ ✓ |@hornhoof/server| test/updates.test.ts (40 tests) 14447ms
+   ✓ the node image install.sh names (6)
+     ✓ is the digest of the image CI built from this server's commit, not latest or another build's 2543ms
+     ✓ is the same in every command that installs or updates a node 719ms
+     ✓ is the commit's tag, never latest, while the registry lacks the image 310ms
+     ✓ is the commit's tag, never latest, when the registry fails, and the script is still served 394ms
+   ✓ updates (34)
+     ✓ says nothing is new when the latest build is the running one 377ms
+     ✓ lists published versions newest first 415ms
+     ✓ keeps the last result when the registry fails 388ms
+     ✓ is only for people with the whole company 342ms
+     ✓ asks the updater for a version, by the commit of its build 438ms
+     ✓ waits for a merge 359ms
+     ✓ one restore or update at a time 368ms
+     ✓ lets the nodes of a server go to its build without asking the registry about it 312ms
+     ✓ asks the updater for nothing when the registry cannot say which images the build has 300ms
+     ✓ refuses a version that is not published 333ms
+     ✓ lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead 355ms
+     ✓ waits for a turn whose node reports no program but streams its work, as the node_silent alarm counts it alive 336ms
+     ✓ calls the update off at its deadline: it stops no running work, lets the held turns go, says why and tells the orchestrator 452ms
+     ✓ keeps the turns held for the restart when the deadline of an update already handed over passes 348ms
+     ✓ refuses an update whose reading of the registry crossed a step-down 394ms
+ ✓ |@hornhoof/server| test/test-runs.test.ts (40 tests) 23942ms
+   ✓ a test run (24)
+     ✓ runs on a machine that joined without a plan, as on any machine of the company 2739ms
+     ✓ splits into parts across the freest machines, puts each log on the task and wakes the agent with the result 1174ms
+     ✓ runs one part at a time on a machine, and a part that finds none free waits for the first that frees up 769ms
+     ✓ waits while no machine has the free memory its repository needs 702ms
+     ✓ gives no new part to a loaded machine, and gives it one once its load drops 561ms
+     ✓ leaves out a machine its owner took back, and one whose owner does not reach the repository 851ms
+     ✓ fails a part that runs past its time, and tells its node to stop it 420ms
+     ✓ keeps a machine-queued part out of execution timeout until tests.started 702ms
+     ✓ stops on stop_tests: its parts end, their nodes stop them, and nobody is woken 636ms
+     ✓ wakes its agent when another one stopped it 725ms
+     ✓ runs a lost part again on the machine that lost it when no other machine could ever fit it 515ms
+     ✓ runs a part its machine lost in a restart again on another machine, under a new id, and says so 657ms
+     ✓ keeps a part through a 60-second disconnect and accepts its result after return 611ms
+     ✓ runs a part again once its machine is away for 3 minutes, at most twice, then fails it and says where it was lost 610ms
+     ✓ takes no end from the machine that was away once its part runs on another machine, and tells it to stop 586ms
+     ✓ does not count a turn that ended while its test run goes on as standing still 359ms
+     ✓ offers each built-in node as a place 414ms
+     ✓ gives no part to the server’s own built-in node when the computer it runs on is taken back 668ms
+     ✓ runs the parts of a machine disconnected from the company, and of a removed plan, again on another machine 660ms
+     ✓ brings its result into the turn that already waits on the task 534ms
+     ✓ is refused without a repository, without {part} in a split command, past 3 open runs, and without a task 558ms
+   ✓ pinned product environment runs (3)
+     ✓ requests metadata before parts, retains its snapshot, and runs final checks after the suite 433ms
+     ✓ ignores an answer from an unassigned node and terminates invalid metadata without a successful empty run 603ms
+     ✓ cancels a pending description and refuses a late snapshot after stop 452ms
+   ✓ refuses a successful product result with missing receipt evidence 334ms
+   ✓ refuses a successful product result with wrong-selection receipt evidence 426ms
+   ✓ refuses a successful product result with wrong-hash receipt evidence 431ms
+   ✓ selects a capable sibling volume, holds no machine to where it ran before as each has the harness, and goes on when one disappears 1090ms
+   ✓ gives a part to a node of another build and processor of the class that described its run, and the Tests report accepts its receipt, but not to another system or Node major 693ms
+   ✓ fails a run at once when the node that described it lacks a runtime its profile needs, as no part could prove it on the described runtimes 325ms
+   ✓ refuses product mode when pinning returns a non-40-character commit before creating a run 352ms
+   ✓ resends its persisted describe request after server state is recreated and ignores unknown request IDs 455ms
+   ✓ fails an unanswered description once at its queue deadline and never passes an empty product plan 414ms
+   ✓ refuses to dispatch a pinned product snapshot after its repository configuration changes 555ms
+   ✓ rechecks a persisted metadata node after revoking lending 360ms
+   ✓ rechecks a persisted metadata node after revoking access 302ms
+ ✓ |@hornhoof/server| test/inbox.test.ts (34 tests) 15206ms
+   ✓ mail from employees in inbox mode (8)
+     ✓ keeps 25 letters that come while a person talks with the head in her inbox, and gives them in one turn after it 1887ms
+     ✓ wakes a holder whose task waits with a turn on that task that has the letter whole, and ends the wait as before 538ms
+     ✓ keeps a letter on a task for a turn on that task, so its holder cannot wait past it 517ms
+     ✓ fails a letter on a task that cannot go out alone: the sender hears it, the wait goes on, and nothing of it waits unread 588ms
+     ✓ keeps a letter without a task in the inbox for an employee whose plan is at its limit, and fails no turn of it 457ms
+     ✓ takes a person's words that came by Telegram or an assistant as a person's, not as mail 387ms
+     ✓ shows each employee only its own letters, cut short, and no task text it does not see 308ms
+   ✓ Hornhoof's words on a task (3)
+     ✓ keep a comment that goes into the turn on its task in the inbox as read with that turn 341ms
+     ✓ keep each comment that joins a turn already waiting on its task in the inbox with that turn 590ms
+     ✓ keep a request the orchestrator explains in its running turn in its inbox as read with that turn 427ms
+   ✓ an employee that is switched off (2)
+     ✓ takes no turn for its inbox until it is on again, and then takes one for all its letters 352ms
+   ✓ the inbox tools (2)
+     ✓ list the unread letters by task and sender, and mark them read or dealt with 698ms
+     ✓ let letters marked in the running turn go without a turn of their own 732ms
+   ✓ another employee's inbox (3)
+     ✓ opens to the orchestrator whole, and it marks letters by kind, source, task and time, which the employee's log tells with who, why and how many 491ms
+     ✓ asks the orchestrator for a reason and a choice of letters, and refuses ids of letters that are not that inbox's whole 361ms
+     ✓ is closed to every other employee, a head too, and a person's own assistant's or a removed employee's to the orchestrator 507ms
+   ✓ the delivery mode (5)
+     ✓ is the inbox for a company from its first setup 307ms
+     ✓ sends letters as before to an employee set to direct delivery, and takes the department's and the company's mode otherwise 588ms
+     ✓ is for the CEO alone to set for the orchestrator, which has no department 361ms
+     ✓ opens an employee's inbox to the CEO and to the owner of its department only 364ms
+   ✓ the inbox a person opens (11)
+     ✓ shows each letter with who sent it, of what kind, on which task and when, and a letter the employee dealt with as read 312ms
+     ✓ gives a comment that waits in a turn of its task with that turn, not again in the turn that takes the inbox 305ms
+     ✓ leaves a letter unread when a person opens it, and marks it read only by the person's own buttons 322ms
+     ✓ lets only who may change the employee's rules mark its letters, and only its own letters 436ms
+     ✓ shows a person who opens the employee on a plan of theirs in a team they have, but does not run its department, its letters with no buttons, and refuses their marks 414ms
+     ✓ lets the CEO and the CEO delegate mark any employee's letters read or done by kind, source, task and time, with the reason in its log 467ms
+     ✓ asks for a reason and a choice of letters, refuses letters of another inbox, and opens to nobody else, a department owner and a person with the whole company too 429ms
+     ✓ names a sender that is no longer in the company "Employee", not by the name its letter kept 352ms
+ ✓ |@hornhoof/server| test/outbound-schema.test.ts (179 tests) 8307ms
+   ✓ nothing is put in the tables of the gateway by a migration (19)
+     ✓ outbound_channels comes empty 840ms
+ ✓ |@hornhoof/server| test/external-wait.test.ts (48 tests) 13459ms
+   ✓ the record of a wait_for (9)
+     ✓ keeps it for the holder with no plan, its deadline being no promise 1793ms
+     ✓ has the employee it names answer for it 390ms
+     ✓ comes back when a message on the task ends the wait, and goes on when the message does not go out 482ms
+   ✓ external task wait (39)
+     ✓ ends the previous wait when work is submitted, blocked or cancelled 413ms
+     ✓ does not count three done task turns or ask people while the task waits 359ms
+     ✓ wakes once at the deadline across repeated sweeps and a new server context, then resumes ordinary rules 322ms
+     ✓ does not take a timeout turn after its task closes or starts waiting again 416ms
+     ✓ refuses invalid task bindings on a orchestrator message without clearing another wait 423ms
+     ✓ lets a team worker doing a small subtask and its head both message each other with task 515ms
+     ✓ allows the current owner and executor to forward task messages without granting an unassigned reviewer 612ms
+     ✓ lets the orchestrator oversee any task and a department head oversee its department tasks without granting creators or others 634ms
+     ✓ delivers the executor message to another employee while the current Review owner waits externally 322ms
+ ✓ |@hornhoof/server| test/program-operator-hold.test.ts (69 tests) 20211ms
+   ✓ goes on by itself once from a program at its empty prompt, with the author and session of the original 2138ms
+   ✓ goes on by itself only once for its words, and then waits for a person or Operations 766ms
+   ✓ goes on by itself once along all the turns its words went on in, also after Operations let them through between 631ms
+   ✓ still lets an owner through who said so without the new field 321ms
+   ✓ takes the retry a node restart queued on a task for the words going on: they run once 310ms
+   ✓ leaves the retry of a cut turn to run after a late receipt: being recorded does not make it done 375ms
+   ✓ leaves the retry of a cut turn to run when its owner starts a turn of their own, linked to the hold or not 1918ms
+   ✓ does not send again the words of a turn that ended as removed 356ms
+   ✓ does not send again the words of a turn that ended as switched_off 363ms
+   ✓ keeps the hold while the agent has no plan to run the words, with the round going on, and goes on once it has one 324ms
+   ✓ calls the orchestrator when all of Operations is off, and only once 338ms
+   ✓ refuses an engineer switched off 316ms
+   ✓ keeps queue, start and deadline apart for one operator of two nodes: no action on the old case, and one delivery of the saved words on each 571ms
+ ✓ |@hornhoof/server| test/worker-keeper.test.ts (29 tests) 18193ms
+   ✓ a worker's keeper (29)
+     ✓ joins with its ticket and serves the company on its front door 2348ms
+     ✓ reports its machine, and answers its own status without passing it on 643ms
+     ✓ says the company moves when the leader is lost, by itself and to anyone 668ms
+     ✓ becomes a data machine when its row says so 1027ms
+     ✓ keeps what the leader says of this machine's copy whole: the leader it is of, and the slot to join 733ms
+     ✓ says when it could not become a data machine 509ms
+     ✓ shows its parts 432ms
+     ✓ reports its key for backups, and holds the bundles it is picked for until its owner says no 674ms
+     ✓ finds the server set up in the place of the one that was lost, and sends it the bundles it holds 1653ms
+     ✓ keeps its bundles behind an older leader, and goes on reporting to it 431ms
+     ✓ goes on telling a leader of the build before of its copy and its backups, without the measures that one refuses 383ms
+     ✓ refuses the network routes to whoever comes to the worker's web port 338ms
+     ✓ keeps the network across a restart without the server, and says where the company is 321ms
+     ✓ dials by the view's secret 344ms
+     ✓ renews by its key when its certificate has ended 356ms
+     ✓ stops at disconnect and says so 419ms
+     ✓ drops a renewal answer it cannot trust 614ms
+     ✓ waits for a computer another row holds, and takes no ticket twice 439ms
+     ✓ downloads the server's build and installs when told 417ms
+     ✓ pins its owner's key only from a ticket that let it in, and reports the pin's print 628ms
+     ✓ sends its ticket again when its owner's key could not be kept 479ms
+     ✓ carries the server's own computer access from its app to its updater 506ms
+     ✓ reports the print of the key its owner gave the server's machine, and its system 355ms
+     ✓ carries computer access over the peer link, opened only by what its owner signed 873ms
+     ✓ has a data machine's keeper report its addresses and its host's name 465ms
+     ✓ reports what its updater learned of the machine where the installer wrote neither name nor system 482ms
+     ✓ reports its round trip and the internet 456ms
+     ✓ says a machine that holds no database is wiped, and one that was wiped once its updater said so 1076ms
+ ✓ |@hornhoof/server| test/assistant-agent.test.ts (35 tests) 17226ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 898ms
+     ✓ runs only on a personal plan of its owner, which its owner alone picks, and waits with none 434ms
+     ✓ is seen and written to by its owner alone: not the CEO, not the orchestrator, not another assistant 338ms
+     ✓ works with its owner's assistant tools, the company's vault and phones, not with the rest of the company's 363ms
+   ✓ the sender of an assistant message (2)
+     ✓ marks replies and their end when the own agent sent the message, and keeps the origin after a restart 461ms
+     ✓ marks replies and their end false for a message from the program, even when its own agent answers 426ms
+   ✓ an assistant's own agent, for the company (2)
+     ✓ is changed on its assistant's card, not as an employee: its own card neither edits nor removes it 324ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 1250ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 1266ms
+     ✓ lets go of its plan when the assistant is switched off, and takes none until it is on again 332ms
+   ✓ persona_call (6)
+     ✓ is among its tools only while the assistant has a skills address, as the address is at each list, and a call by name without one says so 322ms
+     ✓ is in its instructions only while there is a skills address, and a change of that starts its program anew 417ms
+     ✓ asks the assistant's program at its skills address, signed, with the message that started the turn, and gives its answer 319ms
+   ✓ GET /api/assistant/attachments/:id (6)
+     ✓ gives a file its own agent put with hh-attach --chat, by the id hh-attach printed, its exact bytes under its type and name, as often as asked 387ms
+     ✓ names a file of any letters as UTF-8 in filename*, and in plain ASCII in filename 370ms
+     ✓ keeps a name with quotes, a backslash or line breaks inside its one header, so no other header comes of it 378ms
+     ✓ opens with the assistant's own key alone, as every assistant call: 401 with none, a wrong one, a turn's token or a revoked key 441ms
+     ✓ answers a file its owner may not have exactly as one that is not there: of another owner's assistant, another company, or no id at all 647ms
+     ✓ keeps operator case files closed even when they are named files of its own agent and visible to its owner 641ms
+   ✓ tell_owner (3)
+     ✓ passes words its owner asked for in its window to the program, as one reply with no message and no end, and wakes the program 429ms
+     ✓ wakes OpenClaw's model for them at once, as words its owner waits for 384ms
+   ✓ freshText (6)
+     ✓ takes text of 1 to 50000 characters and freshText of up to 200000 after trimming, and cuts nothing: more is refused 362ms
+     ✓ takes a body near 2 MiB, as a program that escapes every letter in its JSON sends it, and refuses a bigger one 384ms
+     ✓ goes in place of the text and of Hornhoof's catch-up when the own agent's turn starts a new session, and the window shows only the text 787ms
+     ✓ goes beside the text when the own agent goes on in its session, for the node to type only into a session begun anew 1218ms
+     ✓ carries the files of the message for its own agent to open, in the text and in freshText alike 986ms
+     ✓ is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session 552ms
+ ✓ |@hornhoof/server| test/instructions.test.ts (50 tests) 387ms
+ ✓ |@hornhoof/server| test/nodes.test.ts (32 tests) 10660ms
+   ✓ POST /api/nodes/join (9)
+     ✓ refuses an old server transport link before a valid node key can change current state 2092ms
+     ✓ refuses a used, an expired and an unknown code 1458ms
+     ✓ closes the old node socket on plan reconnect or re-join and rejects messages from a revoked key so it never receives replacement jobs or tool tokens 337ms
+   ✓ one plan on several machines (9)
+     ✓ shows the plan ready and online only when one machine of it is both, and otherwise as the machine that is online 323ms
+   ✓ node config (1)
+     ✓ refuses a short NODE_KEY and reads the ping interval 1054ms
+   ✓ each machine's place in the company's network (3)
+     ✓ shows each machine's core and the server's, and who still needs one 412ms
+     ✓ shows the order and the copies to those who see the whole company 316ms
+ ✓ |@hornhoof/server| test/credentials.test.ts (43 tests) 16515ms
+   ✓ a plan's sign-in sealed to its nodes (10)
+     ✓ keeps the key a node says hello with 1726ms
+     ✓ keeps what a node of the plan sealed and hands it to each other node of the plan that is online 312ms
+     ✓ hands a node that comes online later its sign-in at once 328ms
+     ✓ asks a node that holds the sign-in to seal it for a node of the plan that has none 333ms
+     ✓ asks a holder that comes online for nothing when every node of the plan holds the sign-in 354ms
+     ✓ has a holder seal for no node without a key, and for none that was disconnected 495ms
+     ✓ throws out what was sealed to a key a node no longer has, and has the sign-in sealed to its new one 469ms
+   ✓ signing a plan in from Hornhoof (16)
+     ✓ starts the sign-in on one of the owner's online machines, and on no machine of another person's plan 323ms
+     ✓ names the machines whose nodes are too old for it, with the command that updates them and no code in it 316ms
+     ✓ keeps one machine, its node and the plan's sign-in when the update brings an old node back, which then signs in here 390ms
+     ✓ keeps the CEO out of another person's sign-in terminal 310ms
+     ✓ passes a new size to the sign-in terminal and goes on past what is no frame 312ms
+     ✓ ends the sign-in terminal at once when its owner signs out, on the node too 322ms
+     ✓ passes no key of an owner whose session ended with nobody told, and closes 387ms
+     ✓ tells the owner how it ended, seals the new sign-in for the plan's nodes and is ready once the node says so 1357ms
+     ✓ says a failed sign-in only to the plan owner 1323ms
+   ✓ which account a plan runs on (4)
+     ✓ is kept as each node tells it, with the address for the plan's owner only 497ms
+   ✓ a Codex plan's lease (9)
+     ✓ is not handed back to its holder, who keeps the sign-in Codex renewed, and goes to a new holder that lost it 331ms
+     ✓ gives a holder that comes back signed out its envelope and whom to seal a renewal for 338ms
+ ✓ |@hornhoof/server| test/network-join.test.ts (21 tests) 9367ms
+   ✓ joining the company as a machine (21)
+     ✓ answers a new installer with the core and a ticket 1842ms
+     ✓ tells the server's own computer by its host id 1313ms
+     ✓ joins once with a ticket 366ms
+     ✓ refuses a ticket of a disabled person, of a disconnected machine and of a computer another row holds 384ms
+     ✓ renews only with the machine's key, once per moment 340ms
+     ✓ leaves the link out of a renewal over plain HTTP 351ms
+     ✓ tells a machine its role, and the way to the data only to one that holds it 448ms
+     ✓ tells a copy about its slot 468ms
+     ✓ tells a machine that left to upload, then to wipe 430ms
+     ✓ names the slot to join 307ms
+     ✓ asks the relay for a visitor key at most once a minute, and again for a link of another name 308ms
+     ✓ gives a machine connected again no place in the network until its keeper redeems a new ticket 300ms
+     ✓ leaves the secrets alone when a computer with no core is disconnected 330ms
+ ✓ |@hornhoof/server| test/copies-order.test.ts (45 tests) 5482ms
+   ✓ the ranking on the server (18)
+     ✓ writes only what changes 2700ms
+     ✓ hands a copy over, and retires the old one only once the new one is up to date 375ms
+ ✓ |@hornhoof/server| test/map-state.test.ts (43 tests) 49298ms
+   ✓ lines between a head and its employees (9)
+     ✓ reports no rework when work has not been returned, including after a hand-in 2356ms
+     ✓ reports the actual rework event time only in its department, to everyone of the company, and drops it after ten minutes 1036ms
+     ✓ does not invent a repair when the current checker leaves after a finding 803ms
+     ✓ run blue while an employee works on its task, and yellow once it hands the work in 892ms
+     ✓ count a hand-in as given back to the head even when a reviewer takes the task next 860ms
+     ✓ returns one review line while another checker works on an independent candidate 691ms
+     ✓ stay off yellow without a return: a comment, a question, a crash or a turn that keeps breaking 709ms
+     ✓ show no blue to an employee switched off, and no line to one removed 699ms
+     ✓ run to a product's employee from the head of the department that holds the product 584ms
+   ✓ lines between the orchestrator and a department (5)
+     ✓ run blue while anyone in the department works on its tasks, with its head asleep 654ms
+     ✓ turn yellow when the head reports the work done or blocked 679ms
+     ✓ keep blue while the head's turn still carries another task of the department 806ms
+     ✓ does not keep blue for work under a department task its head reported blocked 858ms
+     ✓ lights nothing for a turn with no task, on a timer or in a chat 954ms
+   ✓ lines to an employee whose turn a message started (5)
+     ✓ run blue while it acts on its open task in Development, and so does its department 915ms
+     ✓ stay quiet when it has no open task 742ms
+     ✓ stay quiet while its task waits for another one 721ms
+     ✓ keep to the task of a turn that carries one: handed in, it does not light for the employee's other task 1928ms
+     ✓ run blue for the current Review owner 1277ms
+   ✓ the cycles of a line (6)
+     ✓ put out an old return once new work starts, even when that work ends without one, also after a restart 1189ms
+     ✓ lights again with a fresh return in the new cycle 1435ms
+     ✓ keep the rest of the five minutes after a reload and a restart 1000ms
+     ✓ begin one cycle per turn, however often it is taken or its start is told 980ms
+     ✓ keep a return once and never go back to an older one 828ms
+     ✓ refuse a line that is not between an agent and the one above it 666ms
+   ✓ who sees the lines (1)
+     ✓ shows everyone of the company every line between its agents, and no task or job of them 1111ms
+   ✓ results given back in a message (5)
+     ✓ turn the department line yellow when its head writes to the orchestrator 1431ms
+     ✓ count a message to the own head as a return, and one to another employee or from the head down as none 1331ms
+     ✓ keep blue while the turn that wrote to its head runs, also about the task it works on, and turn yellow once it ends 1602ms
+     ✓ keep the department line blue while its head, at work on the department's task, writes to the orchestrator 1295ms
+     ✓ keep a task the turn handed in off the line, also once that turn writes to the one above 1054ms
+   ✓ results a checking stage gives back to the head (3)
+     ✓ turn the Tests owner's line yellow once it hands the verified candidate to the head 851ms
+     ✓ give a failed check back to the head 839ms
+     ✓ turn a reviewer's line yellow when it sends a wrong goal back to the head 621ms
+   ✓ a turn the node tells of (1)
+     ✓ begins a cycle when a turn on a task starts there, once however often it is told 933ms
+   ✓ a turn the queue takes (5)
+     ✓ begins the new cycle of a member line with the turn it takes, so a server that stops once the turn went out leaves the old return out 1045ms
+     ✓ begins the new cycle of a department line with the turn it takes, so a server that stops once the turn went out leaves the old return out 992ms
+     ✓ takes no turn when the new cycle of its member line cannot be kept, and sends it with its cycle on the next try 1166ms
+     ✓ takes no turn when the new cycle of its department line cannot be kept, and sends it with its cycle on the next try 1190ms
+     ✓ begins the cycle of a task that goes out inside a head's turn with that turn, also when its own task keeps no line on 2361ms
+   ✓ the lines of a company with a long history (3)
+     ✓ gives the same lines as with a short one 2026ms
+     ✓ reads the running turns and their tasks, not the history 2181ms
+     ✓ locks only the lines of a new turn as it starts 2994ms
+ ✓ |@hornhoof/server| test/decision-context.test.ts (33 tests) 14208ms
+   ✓ the person an orchestrator turn answers (4)
+     ✓ keeps the CEO as principal after a visible turn fact on the agent and task 2918ms
+     ✓ is the CEO or the delegate who wrote into it last, unchanged by a letter of an agent or notices of Hornhoof, and the owner otherwise 331ms
+   ✓ tools only the CEO asks for, in a turn (3)
+     ✓ go as the owner after a person without the right wrote, and say so only when the company has no owner 326ms
+     ✓ go as the CEO delegate in a turn that answers the delegate, whose own limits the routes see 305ms
+     ✓ change an employee's own subscription after a person without the right wrote, as the owner 361ms
+   ✓ answer_request in a turn (4)
+     ✓ takes a decision only the CEO takes in a turn that answers the CEO or the delegate, and keeps for whom 469ms
+     ✓ takes any decision as the owner in a turn that answers a person who is neither the CEO nor the delegate 520ms
+     ✓ goes as the owner when only an employee or Hornhoof wrote, and keeps the CEO after their notices 425ms
+     ✓ applies cards in any turn: as the delegate in a turn of theirs, as the owner in one of an employee or another person 589ms
+   ✓ a decision of the orchestrator as it is kept (3)
+     ✓ is refused with 409 when someone wrote into the turn after the orchestrator looked, and with 403 once the turn ended 438ms
+     ✓ takes the decision headers only from Hornhoof itself 328ms
+     ✓ waits for words going into the turn, and goes by them once they are kept 418ms
+   ✓ a turn's mark that it answers the CEO (4)
+     ✓ gives no right to machines by itself, set to true: they go by the last person who wrote and their own right 331ms
+     ✓ gives no right to machines by itself, set to false: they go by the last person who wrote and their own right 449ms
+   ✓ who spoke last in a turn, for a command on a machine (4)
+     ✓ names whose words a repeat carries, not who spoke last in the turn it repeats 389ms
+     ✓ counts the letters a person sent that woke an inbox turn 355ms
+   ✓ management after the turn that answered a person ended (7)
+     ✓ lets the orchestrator hire, build and set a department's resources in its next turn, for the CEO who asked 777ms
+     ✓ takes a person's decisions, people and access in a later turn too, as the owner 377ms
+     ✓ lets a head hire and change its own department in its next turn for the person who asked it, and nothing outside it 312ms
+ ✓ |@hornhoof/server| test/computer.test.ts (20 tests) 16651ms
+   ✓ access to the computer the server runs on (19)
+     ✓ keeps the access question as an outgoing message from the orchestrator to the CEO 1609ms
+     ✓ opens for a day with one click of the CEO when the orchestrator asks, and the orchestrator goes on by itself 313ms
+     ✓ runs the orchestrator's command through the updater and gives back the exit code and output 489ms
+     ✓ tells the orchestrator a long command still runs, and gives its result when asked for it 913ms
+     ✓ queues the orchestrator's note while its machine is offline, so it goes on once the machine is back 329ms
+     ✓ refuses commands while access is closed and after its day, and runs them in any turn while it is open, but not after an Enter of someone in its terminal 1145ms
+     ✓ keeps working on the open machine in later turns, woken by an employee's letter or by a wake, with no new word of the CEO, until access closes 1151ms
+     ✓ lets the turn the CEO's click opens use the computer until a person without the right writes into it, and decide as the owner as any turn does 759ms
+     ✓ keeps computer access in a running turn when Hornhoof types improvement notices or an employee writes into it 1230ms
+     ✓ keeps the computer-opening click through retries, while a plain notice retry works on the open machine 1232ms
+     ✓ refuses computer on a second retry after pending input was not kept on a click retry 1367ms
+     ✓ refuses computer when saved marked words are replayed via unheard after a non-CEO message 1394ms
+     ✓ refuses computer when saved marked words are replayed via queued after a non-CEO message 1287ms
+     ✓ refuses computer when live input lands between the unheard replay read and its store 880ms
+     ✓ refuses computer when live input lands between the queued replay read and its store 529ms
+     ✓ closes when the CEO takes it back, and the CEO can say no to a request 363ms
+   ✓ a new installation (1)
+     ✓ lets the orchestrator clear another employee's inbox and work on the opened machine in a later turn, with nothing set up for it 741ms
+ ✓ |@hornhoof/server| test/task-urgency.test.ts (55 tests) 14583ms
+   ✓ a new task (8)
+     ✓ is not urgent unless someone who may says so, whatever its title says 1726ms
+   ✓ the task route (2)
+     ✓ takes urgent only from the CEO, the CEO delegate or the department's people 347ms
+   ✓ what people and agents read (2)
+     ✓ tells of a team's urgency in the company and the map 395ms
+   ✓ a team that takes only urgent work (5)
+     ✓ is not reached through another department or company 343ms
+   ✓ the SQL roles (3)
+     ✓ read urgency and never write it: write 567ms
+     ✓ read urgency and never write it: read 660ms
+     ✓ keep the orchestrator's other rights on tasks and teams 388ms
+   ✓ the migration (1)
+     ✓ leaves old rows as they were, none of them urgent, and names no company 2838ms
+   ✓ work for someone in a team that takes only urgent work (17)
+     ✓ is refused when it is not urgent (8)
+       ✓ on the web route, with names only for someone who sees everyone 342ms
+ ✓ |@hornhoof/server| test/task-messages.test.ts (46 tests) 16116ms
+   ✓ task messages reach their recipient (46)
+     ✓ delivers the head message and the reply in the running turns: {"team":false,"review":false} 2585ms
+     ✓ delivers the head message and the reply in the running turns: {"team":false,"review":true} 803ms
+     ✓ delivers the head message and the reply in the running turns: {"team":true,"review":false} 342ms
+     ✓ delivers the head message and the reply in the running turns: {"team":true,"review":true} 587ms
+     ✓ lets the orchestrator write to the giver about a child without ending the executor wait 437ms
+     ✓ lets an employee answer the orchestrator on the task it asked about, though the task is not with the employee 385ms
+     ✓ a message that waits in line for the next turn (25)
+       ✓ keeps a message for a busy employee whose running turn did not take it, for its next turn: {"bound":true} 353ms
+       ✓ keeps a message for an idle employee whose window did not take its turn, and sends it on the next try: {"bound":true} 307ms
+       ✓ sends a message once when its sender repeats it in the same turn: {"bound":true} 427ms
+       ✓ sends a message once when its sender repeats it in the same turn: {"bound":false} 462ms
+       ✓ sends a message once when its sender lost the answer of a call that went through, and repeats it 413ms
+     ✓ starts an idle holder on its task when the bound message is dispatched 425ms
+     ✓ delivers a person task message into the running turn through the same path 1399ms
+     ✓ ends the external wait with a message whose turn did not go out yet, as the message waits in line for the holder 554ms
+     ✓ keeps the external wait when the message is refused 313ms
+ ✓ |@hornhoof/server| test/link-tls.test.ts (57 tests) 14237ms
+   ✓ ordering the certificate (8)
+     ✓ orders the link's first certificate and keeps its key encrypted 2049ms
+     ✓ does nothing without a link, or when certificates are off 1486ms
+     ✓ counts a chain that does not name the host as invalid, and reads names in any case 466ms
+     ✓ finds the account again when the CA answers that it no longer knows it 302ms
+   ✓ the tunnel's mode (16)
+     ✓ probes https again after a restart, and keeps the hour's block 346ms
+     ✓ probes on the first pass after every start, and not on the passes after it 384ms
+   ✓ running on its own (8)
+     ✓ kicks only while it runs, and every change of the link kicks it 300ms
+     ✓ moves no mode once it is stopped during a pass, at the first word of the relay or the second 1458ms
+ ✓ |@hornhoof/server| test/spreadsheet-delivery.test.ts (14 tests) 9754ms
+   ✓ 1a. task and chat .xlsx/.csv attachments and strict download boundaries (1)
+     ✓ attaches .xlsx and .csv to a task and to chat, records chat file events, serves 1-click downloads, and blocks unauthorized viewers 1944ms
+   ✓ 1b. Telegram sendDocument delivery and recipient access boundaries (3)
+     ✓ delivers chat-attached files via Telegram sendDocument only to the turn author and drops delivery if access is revoked 552ms
+     ✓ lets a Marketing worker without its own bot send a task .xlsx via send_telegram_file only to people allowed to see it 418ms
+   ✓ 1b. a file to a person who connected Telegram through another bot (2)
+     ✓ goes through the next bot the person may see when they never started the department bot 358ms
+     ✓ names the bot the person has to write to once when no bot they may see can write to them 363ms
+   ✓ 1c. Google Sheets integration and clear .xlsx fallback when Google is not connected (1)
+     ✓ saves Google Sheets credentials only for whole-company admins, hides google_sheets from agent SQL, creates sheets, and instructs .xlsx fallback when disconnected 732ms
+   ✓ 1c. a Google key whose spreadsheets a person can open (1)
+     ✓ takes a service account key only with the Google account its spreadsheets are shared with, and an OAuth key without one 628ms
+   ✓ the edges of a table delivered to a person (6)
+     ✓ refuses a Google key it cannot use, says so in plain words, and keeps none of it 492ms
+     ✓ creates a spreadsheet with an OAuth key, and on Google refusing tells the agent to attach the .xlsx 471ms
+     ✓ finds the person by their exact name and sends nothing a person may not see or cannot get 876ms
+     ✓ takes as the addressee only an active person of this company, never a Telegram number, a username or anyone else 817ms
+     ✓ gives a file over 50 MB on Telegram as its link, saying it lives 30 days on one machine, and goes on with the chat 1479ms
+     ✓ shows a picture an agent attached to its chat as a picture, and gives every other chat file to save 510ms
+ ✓ |@hornhoof/server| test/harness.test.ts (49 tests) 25587ms
+   ✓ harness access and attempt fences (14)
+     ✓ lets an old node build locally without giving it an unfenced shared claim 1916ms
+     ✓ rejects every write after revoking subscription, without publication or a head wake 764ms
+     ✓ rejects every write after revoking access, without publication or a head wake 457ms
+     ✓ rejects every write after revoking lending, without publication or a head wake 322ms
+     ✓ rejects every write after revoking machine, without publication or a head wake 325ms
+     ✓ rejects writes after lease expiry even before another builder claims it 303ms
+     ✓ renews the same attempt, and replaces it after expiry even for the same builder 303ms
+     ✓ refuses private bundles and claims from a removed subscription 347ms
+     ✓ fences a delayed write after another builder has published 534ms
+     ✓ fences a delayed rename after another builder has published 485ms
+     ✓ rechecks authorization after assembling a bundle 410ms
+     ✓ never overwrites a published archive with another delayed done from the same attempt 573ms
+     ✓ keeps an old row whose reclaimed lease is still live when pruning 460ms
+     ✓ scopes builtin bundle reads to the explicitly named company 355ms
+   ✓ one build of a harness unit for all machines (13)
+     ✓ lets the first machine build, keeps the next one waiting, and hands the bundle to it 463ms
+     ✓ says no to a machine that says it is done before anything came 318ms
+     ✓ starts from nothing when a build passes to another machine, so what the last one sent makes no part of it 462ms
+     ✓ takes a range open to the end, one running past the end and none at all, and refuses one past the end 314ms
+     ✓ gives a machine of another architecture a build of its own 330ms
+     ✓ refuses a bundle other than the one the builder said it made, and a bundle of a machine that does not hold the build 351ms
+     ✓ passes the build on when the machine that held it stopped answering 526ms
+     ✓ keeps the claim of a machine that says it still builds 625ms
+     ✓ gives a stopped build to the next machine without calling it failed 559ms
+     ✓ says why a unit failed, tells the head once, and lets it be built again only after a pause 483ms
+     ✓ builds a unit again when its bundle is gone 522ms
+     ✓ asks each machine to build for itself when the server keeps no bundles 695ms
+     ✓ removes the bundles used longest ago when they take more than they may 665ms
+   ✓ who may share a build (5)
+     ✓ refuses a machine whose owner does not reach the product, and one that lends nothing 507ms
+     ✓ refuses another repository under the name of this product, and an unknown key 648ms
+     ✓ never hands a bundle to a machine that may not take the product 581ms
+     ✓ takes no build back from the server’s own built-in node once its computer is taken off checks 563ms
+     ✓ takes no build back from another machine’s built-in node once its computer is taken off checks 546ms
+   ✓ the harness reaching every machine (16)
+     ✓ reports a local build failure when no registry attempt could report it 393ms
+     ✓ ignores a forged commit without consuming the matching active request 758ms
+     ✓ does not let a slow old ready overwrite a newer head problem 706ms
+     ✓ keeps another machine problem and one notification through a healthy reconnect until all recover 587ms
+     ✓ asks every machine that takes harnesses for the head of the branch, once, and again when it moves 424ms
+     ✓ reads no repository while no machine could take its harness 364ms
+     ✓ records what each machine has, and which commit is good 417ms
+     ✓ keeps the last good commit when an update breaks, and tells the head once however many machines report it 427ms
+     ✓ asks again later after a problem, and clears it once the commit is good 398ms
+     ✓ does not tell the head of a passing failure, and asks again 376ms
+     ✓ sends a changed lock file built on any branch to the other machines 471ms
+     ✓ sends the changed lock file of one program of several to the other machines 398ms
+     ✓ asks a machine once while it is at it, however many programs came ready 552ms
+     ✓ keeps a harness per program of a company, each on every machine that takes it 462ms
+     ✓ spreads only what is shared by all: a unit built from a branch stays where it was asked for 529ms
+     ✓ asks a machine again after it came back, as its folder may be new 413ms
+   ✓ what a person or a head sees of a harness (1)
+     ✓ shows the version, each architecture, the machines and what is wrong 864ms
+ ✓ |@hornhoof/server| test/timers.test.ts (21 tests) 10045ms
+   ✓ timers (16)
+     ✓ sends a turn that was left waiting with nothing running on the next minute round 2241ms
+     ✓ sets an employee to wake every so many minutes with an order, and the card shows it 360ms
+     ✓ wakes an employee once each interval with its order, outside any task 349ms
+     ✓ skips the round of a timer for work while nothing is open or failed since the last one, and counts from the skip 313ms
+     ✓ gives no alarm while the program thinks or runs a tool with a changing screenAt, then raises an alarm with reason program_stalled after 10 minutes without state or screen changes, tells the head of Operations and not the watchdog, calls again only each time the quiet has doubled, and keeps the turn running 1232ms
+     ✓ raises an alarm with reason node_silent after 10 minutes without a message from the node, tells the head of Operations and not the watchdog, calls again only when the quiet has doubled, and keeps the turn running 729ms
+     ✓ says the reason of an alarm first, so the head of Operations reads it in its inbox turn, where each letter is cut short 481ms
+     ✓ sends the 30-minute alarm to the head of Operations when the task watchdog's own turn is silent, or when the watchdog is busy, off, or removed, without closing the watchdog's turn 901ms
+     ✓ retries the 10-minute alarm on the next minute round when saving the alarm fails once, then deduplicates it 1326ms
+ ✓ |@hornhoof/server| test/agents.test.ts (29 tests) 15470ms
+   ✓ hiring (1)
+     ✓ hires an employee with as many skills as a hire takes, their bodies going as files 1981ms
+   ✓ the employee card (28)
+     ✓ stores an orchestrator assignment separately from its standing identity 391ms
+     ✓ moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default 599ms
+     ✓ sets how hard an employee thinks, from the levels its model takes, and keeps who changed it 631ms
+     ✓ shows the fitted role effort on the map for Kimi unless a person picks a level 627ms
+     ✓ shows a Codex employee on the map at its role effort unless set 382ms
+     ✓ refuses a model the subscription cannot run, and a subscription that cannot serve the department 319ms
+     ✓ keeps every change with who made it 301ms
+     ✓ keeps the instructions within what a turn carries, counting only what is not a skill file 378ms
+     ✓ resets template abilities while preserving the employee assignment 302ms
+     ✓ lets someone of a product who owns the plan change an employee, and only the whole company or the department's people remove them 397ms
+     ✓ lets go of a plan whose owner lost the department or was disabled 439ms
+     ✓ names the model its role asks for when an employee gets a plan and no model comes with it 412ms
+     ✓ removes an employee that is not working 334ms
+     ✓ lists the head first, then by hire, people hired together in the order of the roster 427ms
+     ✓ replaces a checker moved into a sub-unit while retaining required Review and its question (question: false) 970ms
+     ✓ replaces a checker moved into a sub-unit while retaining required Review and its question (question: true) 1657ms
+     ✓ keeps current and independent questions when a Review owner moves into a sub-unit (other question: false) 1048ms
+     ✓ keeps current and independent questions when a Review owner moves into a sub-unit (other question: true) 929ms
+     ✓ keeps an executor question when moving into a sub-unit leaves its current assignment 434ms
+ ✓ |@hornhoof/server| test/tasks-after.test.ts (29 tests) 9157ms
+   ✓ a task that comes after others (19)
+     ✓ waits without waking its executor, and goes to it by itself once the last of them is done 2577ms
+     ✓ comes after work of any turn or none, but not after cancelled work, unknown work, or itself 368ms
+     ✓ never comes after a task it is part of, however far up, as made or changed 399ms
+     ✓ lets the head change what a task comes after, starts it once nothing is left to wait for, and refuses a circle 302ms
+     ✓ drops its obsolete queued turn before dispatch while blocked and queues a fresh turn after acceptance 573ms
+     ✓ sends no turn of its holder that was left waiting on it, nor sets it to work by one 475ms
+     ✓ leaves such a turn out of the head's turn that takes in the others waiting for it 331ms
+ ✓ |@hornhoof/server| test/improvements.test.ts (33 tests) 12842ms
+   ✓ heads and the orchestrator (3)
+     ✓ let a head tell the orchestrator what came of its work, in the window people see 1721ms
+     ✓ mark every line a head writes as the head's, so none passes for the CEO's 374ms
+     ✓ leave members to tell their head, not the orchestrator 517ms
+   ✓ improvements (16)
+     ✓ are put by heads and the weak point collector where the CEO sees them, and found again instead of twice 686ms
+     ✓ are taken and linked to tasks when a person asks the orchestrator for them 429ms
+     ✓ keep task links when closed and refuse more work on a done improvement 385ms
+   ✓ findings about Hornhoof itself (3)
+     ✓ are told apart from the company's own work, with the error code Hornhoof gave, and putting one sends nothing out 355ms
+     ✓ are not taken into another company's own work: the CEO sends them to Hornhoof's developers instead 369ms
+     ✓ go into the engine's own work on Hornhoof's own installation, like any other 430ms
+   ✓ a finding about Hornhoof itself, once sent to its developers (11)
+     ✓ takes the issue from the answer only at its exact address on GitHub: another host 332ms
+     ✓ takes no number and no issue from an answer that names neither 338ms
+     ✓ counts a finding found again on the sent card instead of a new one, until a person reports the repeats, which the inbox counts as signals 1668ms
+     ✓ lets only a person who sees the whole company report the repeats, or the orchestrator for the owner, never an agent 368ms
+ ✓ |@hornhoof/server| test/node-connections.test.ts (40 tests) 9301ms
+   ✓ the history of a node connection (18)
+     ✓ writes when a node connects, on its machine, and open while it stays 1419ms
+   ✓ what a node says of a drop when it is back (7)
+     ✓ goes with the drop it comes back from, both sides seen together, and not with the new connection 407ms
+   ✓ how long the history stays (3)
+     ✓ keeps the newest two thousand of a machine that drops all day, and those that still stand, and leaves another machine alone 700ms
+   ✓ who gets the history of a machine (5)
+     ✓ is for those who see the machine: its owner and who sees the whole company 513ms
+     ✓ is for no one signed out 499ms
+     ✓ goes with the machine: none for one that was disconnected, nor for an id that is none 557ms
+     ✓ gives no one the history of another company's machine, and only its own in its answer 499ms
+     ✓ says no key of a node or a machine 322ms
+ ✓ |@hornhoof/server| test/outbound-dispatcher.test.ts (46 tests) 23116ms
+   ✓ sending what is due (16)
+     ✓ hands one transport the frozen words and the sealed settings, once, however many rounds come after 2213ms
+     ✓ sends once when two rounds run at the same time 503ms
+     ✓ counts a sure failure as one and gives its place back, and the next message goes 305ms
+     ✓ never sends an unknown one again, and keeps its place and the next message of the account back, from 2026-11-08T12:00:00.000Z 632ms
+     ✓ never sends an unknown one again, and keeps its place and the next message of the account back, from 2026-11-08T23:58:00.000Z 542ms
+     ✓ takes a transport that throws for one that may have sent 406ms
+     ✓ stops waiting for a transport that never answers, and calls that unknown 515ms
+     ✓ stops an account whose sign-in was refused until someone gives it new settings 332ms
+   ✓ the time of a round that takes long (4)
+     ✓ does not send on a template that ran out during the send before it 489ms
+     ✓ does not send on a certificate that ran out during the send before it 482ms
+     ✓ counts a send past midnight in the new day 400ms
+     ✓ counts a round from when it began, not from when its first step ended 411ms
+   ✓ what no one knows the end of (1)
+     ✓ comes round to every one of them, and sends none of them again 721ms
+   ✓ what waits for a check of its words (3)
+     ✓ asks the check again once it was certified anew, and then goes once 341ms
+   ✓ finding out how an attempt ended (9)
+     ✓ leaves one whose lease still runs, and after it calls it unknown and never sends it again 533ms
+     ✓ does not let any round end who writes from the account 464ms
+     ✓ takes the transport's word when it knows, and the account goes on 531ms
+     ✓ counts a sure word against it as failed 389ms
+     ✓ keeps it unknown when the transport has nothing yet 469ms
+     ✓ keeps it unknown when the transport says it cannot tell 458ms
+     ✓ keeps it unknown when the transport throws 815ms
+     ✓ does not ask with settings that are gone 832ms
+     ✓ believes a late answer of a worker past its lease, which neither sends again nor opens a stopped channel 374ms
+   ✓ what comes back after a message left (11)
+     ✓ stops the channel at the policy's limit and at a higher generation, so what was reserved stays 374ms
+     ✓ does not count a duplicated event twice 362ms
+     ✓ stops for too many bounces, each by its own limit 348ms
+     ✓ leaves the channel alone below the least number of messages the limits speak of 484ms
+     ✓ counts only what happened within the policy's window 1161ms
+     ✓ never stops for a delivery, nor counts one of another account's attempts 900ms
+     ✓ tells the department's head and the orchestrator of a stop once, whatever stopped it 392ms
+     ✓ takes events only when signed with the account's key, recently 761ms
+     ✓ answers the same to a key it does not have and an account that is not there 486ms
+   ✓ the server's minute (2)
+     ✓ runs the outbound round, and a broken account does not stop the rest of the minute 1498ms
+     ✓ finds out on starting up what became of what was on its way 412ms
+ ✓ |@hornhoof/server| test/outbound-support.test.ts (11 tests) 6670ms
+   ✓ a ticket of another place (4)
+     ✓ is not there for a classify from another department, which reads none of its words and spends none of its check 3391ms
+     ✓ gets no reply through a channel or an account of another place 445ms
+   ✓ outbound support classification and reply gates (7)
+     ✓ renders localized catalog replies across English, Russian, and Arabic without English fallback, while enforcing consent and suppression 702ms
+ ✓ |@hornhoof/server| test/subscriptions.test.ts (35 tests) 7633ms
+   ✓ POST /api/subscriptions/connect (9)
+     ✓ lets the CEO connect two plans with one command 1805ms
+   ✓ GET /api/subscriptions (8)
+     ✓ does not return an expired rejection as current for kimi 315ms
+ ✓ |@hornhoof/server| test/wait-state.test.ts (58 tests) 5515ms
+   ✓ syncSourceWaits (28)
+     ✓ keeps a wait with its owner, its dates, its next action and its first review 1332ms
+ ✓ |@hornhoof/server| test/tasks-tools.test.ts (30 tests) 9563ms
+   ✓ task tools (13)
+     ✓ keeps a long UTF-8 comment intact through MCP 2016ms
+     ✓ keeps a long UTF-8 submit intact through MCP 380ms
+     ✓ gives each kind of agent its task tools 318ms
+     ✓ tells the head to assign connected blocks to one developer and independent blocks at once, and the orchestrator one task per goal 328ms
+     ✓ refuses the eleventh task in one turn 598ms
+     ✓ hides other departments' tasks from an employee 306ms
+   ✓ a small task (2)
+     ✓ is set and read by the giver, never by its executor 347ms
+   ✓ a task's kind and risk class (8)
+     ✓ adds required Security and informs the current owner when the head changes the risk 503ms
+ ✓ |@hornhoof/server| test/follow-keeper.test.ts (16 tests) 29834ms
+   ✓ the keeper of a machine that keeps a copy (16)
+     ✓ waits for no copy of its own, as a database that led did 7886ms
+     ✓ opens its door to the other machines by what it kept, with no leader in reach 1606ms
+     ✓ takes no lease and runs no link 1598ms
+     ✓ opens a door to the leader's database 760ms
+     ✓ carries nobody else's connection through that door 911ms
+     ✓ reads by itself when the leader is gone 1256ms
+     ✓ reports its copy 1882ms
+     ✓ measures nothing of its disk while it makes its copy 2260ms
+     ✓ answers the machine that leads about a planned switch, and ends once it took the go 1851ms
+     ✓ beats as a copy 1071ms
+     ✓ follows the term of the machine it was made on, and promises that machine the next one 1810ms
+     ✓ takes the server over by writing that down and ending, once its watch says so 2563ms
+     ✓ waits for the update 1805ms
+     ✓ gives the leader what it holds once its owner lost the scope, and asks for its wipe only when the leader keeps it 2332ms
+ ✓ |@hornhoof/server| test/outbound-routes.test.ts (75 tests) 17915ms
+   ✓ an agent's way in (25)
+     ✓ is the same over MCP and HTTP, whichever name the task goes by 2278ms
+     ✓ refuses without a job's token, a person's cookie included, and after the job ended 386ms
+     ✓ has no way to a transport at /api/outbound/webhook 308ms
+   ✓ the catalog (23)
+     ✓ refuses a value with more fields as invalid 433ms
+     ✓ a revision takes its time limits from its price, or from what the person says 444ms
+     ✓ what a person publishes through the routes is what a message may use 525ms
+   ✓ contacts (5)
+     ✓ are added by the CEO or someone given the department for a channel, and the address never comes back 1009ms
+     ✓ a person marks do not contact, for good 371ms
+     ✓ an owner of the department marks it too 332ms
+     ✓ a permission is taken back through the department it belongs to 316ms
+   ✓ the page for stopping messages (8)
+     ✓ asks first, in two languages, and looking at it changes nothing, as mail programs look at every link 389ms
+     ✓ stops them when the person says so 332ms
+   ✓ what the orchestrator may do for a person (4)
+     ✓ what that person may, as that person 354ms
+ ✓ |@hornhoof/server| test/keeper-link.test.ts (35 tests) 13540ms
+   ✓ the link in the keeper (9)
+     ✓ runs frpc with the link's client id and the network transport, pointed at itself 1910ms
+     ✓ runs https when linkMode says so 571ms
+     ✓ starts frpc again when the link's mode changes, and only then 708ms
+     ✓ keeps frpc in https when only the certificate's read fails 949ms
+     ✓ keeps frpc and the certificate when the database does not answer 1033ms
+     ✓ uses the same client id after the keeper starts again 375ms
+     ✓ runs the link from the recovery file while the database has none 1962ms
+     ✓ runs no link without a machine id 328ms
+   ✓ the link's certificate in the keeper (6)
+     ✓ names no certificate the listener did not take 404ms
+   ✓ the link's TLS door (4)
+     ✓ takes this traffic as over the link, and counts sign-ins by the visitor 775ms
+   ✓ what the keeper reads (7)
+     ✓ readLinkMode throws on a failed read, where linkMode says http 326ms
+   ✓ KeeperServed (4)
+     ✓ throws after timeoutMs otherwise 381ms
+ ✓ |@hornhoof/server| test/agent-view-lists.test.ts (30 tests) 11582ms
+   ✓ what waits for people (10)
+     ✓ shows a request of a seen agent with its task, and none of a hidden one the person may not answer 3417ms
+     ✓ gives the owner of a department a decision of its employee on another's plan with its task and agent, as she sees them all 703ms
+     ✓ lets that person answer and read only its own picture, and nothing of the agent's own around it 1561ms
+     ✓ takes the decision away from an owner who has the department no more 476ms
+     ✓ gives an outsider nothing of it: not to see, not to answer 316ms
+     ✓ keeps the whole request for the CEO and the delegate 408ms
+     ✓ leaves the people of a department the decisions already theirs, by the same whitelist 389ms
+     ✓ keeps the orchestrator's cards and his ask for the computer from anyone who does not see him 752ms
+ ✓ |@hornhoof/server| test/test-runs-wait.test.ts (49 tests) 24672ms
+   ✓ a run that ends while the one who started it waits (47)
+     ✓ run_tests (8)
+       ✓ ends the wait and wakes the agent once with the result and where to read it, when it passes 3937ms
+       ✓ ends the wait and wakes the agent once when its tests or command fail 517ms
+       ✓ ends the wait and wakes the agent once when it runs out of time 403ms
+       ✓ ends the wait and wakes the agent once when someone else stops it 494ms
+       ✓ ends the wait and wakes the agent once when the agent stops it from another turn 416ms
+       ✓ wakes the agent once, after the last part, when it has several 422ms
+       ✓ wakes the agent once as before when it does not wait 369ms
+       ✓ wakes nobody on a task cancelled meanwhile 411ms
+     ✓ run_work (8)
+       ✓ ends the wait and wakes the agent once with the result and where to read it, when it passes 440ms
+       ✓ ends the wait and wakes the agent once when its tests or command fail 371ms
+       ✓ ends the wait and wakes the agent once when it runs out of time 831ms
+       ✓ ends the wait and wakes the agent once when someone else stops it 526ms
+       ✓ ends the wait and wakes the agent once when the agent stops it from another turn 451ms
+       ✓ wakes the agent once, after the last part, when it has several 742ms
+       ✓ wakes the agent once as before when it does not wait 1031ms
+       ✓ wakes nobody on a task cancelled meanwhile 811ms
+     ✓ wakes the agent when the machine is gone for good 613ms
+     ✓ wakes the agent when a test run was lost as often as it may be 626ms
+     ✓ tells the agent of each run that ends, also of one that ended after it waited again 756ms
+     ✓ keeps both results in the one turn that waits when two runs end before it starts 798ms
+     ✓ and its wait names which run it is for (10)
+       ✓ leaves a wait of its starter alone when it names no run, and tells it of run_tests all the same 620ms
+       ✓ leaves a wait of its starter alone when it names no run, and tells it of run_work all the same 382ms
+       ✓ lets the agent end the wait it no longer needs as it reads the result, with no wake at its deadline 706ms
+       ✓ refuses end_wait with no wait, and on the wait of another holder 321ms
+       ✓ leaves a wait for another run alone, and ends with the run it names 402ms
+       ✓ ends a wait that came back at its deadline when its run ends later, with no new wake for the wait 378ms
+       ✓ refuses a wait for a run that ended, one of another task or one that never was 421ms
+     ✓ its own wait (11)
+       ✓ gives each stage its own clock from its policy, with the time counted from that stage 372ms
+       ✓ goes to its retry clock when a machine loses a part, and back to executing 348ms
+       ✓ stands at the host slot while a machine that can take it has no room, on a clock of its own 317ms
+       ✓ ends once with its result when it passes 343ms
+       ✓ ends once with its result when it fails 301ms
+       ✓ is cancelled when the run is stopped 451ms
+       ✓ ends with its task closed meanwhile, and the run ending later changes nothing 367ms
+     ✓ leaves another holder's wait alone when run_work ends and still tells its starter 344ms
+     ✓ refuses a wait while the result of run_tests waits for the agent in a turn 301ms
+     ✓ refuses a wait while the result of run_work waits for the agent in a turn 443ms
+ ✓ |@hornhoof/server| test/wait-producers.test.ts (40 tests) 10984ms
+   ✓ a task that comes after others (15)
+     ✓ in a department with no policy keeps a wait with no dates for each open edge, its holder answering for it 1664ms
+   ✓ a candidate at its current checking stage (9)
+     ✓ creates only the named owner wait even when another provider has an eligible reviewer 406ms
+   ✓ a question to a person (8)
+     ✓ leaves an approval of a commit as it was asked: who may take it, its exact commit, and that the answer ends only its wait 562ms
+     ✓ keeps its owner with no dates in a department with no policy, and also where dates are set for others 428ms
+     ✓ takes a promise in place of a policy 366ms
+     ✓ ends the durable request wait when the internal resolver answers 305ms
+   ✓ someone leaving (1)
+     ✓ resumes the same required Review with an eligible replacement without inventing checking dates 390ms
+   ✓ a wait_for (5)
+     ✓ ends once the holder moves the work on, while a comment that resumes it leaves it standing 304ms
+ ✓ |@hornhoof/server| test/failures.test.ts (55 tests) 25188ms
+   ✓ named turn failures (40)
+     ✓ does not deliver a delayed Operations failure notice after its task closes 2941ms
+     ✓ keeps a person and their one message when a task continuation uses the shared repeat path 534ms
+     ✓ keeps the refreshed task wake with hidden repeated words and rejects it after the phase changes 498ms
+     ✓ keeps an employee message envelope and a CEO principal across conversation retries 314ms
+     ✓ checks carried tasks after network without changing the own task follow-up 321ms
+     ✓ checks carried tasks after refused without changing the own task follow-up 431ms
+     ✓ keeps rate_limited, records why and waits a minute before continuing 354ms
+     ✓ keeps tools, records why and waits a minute before continuing 343ms
+     ✓ retries at 1, 2, 5 and 10 minutes, keeps its session, blocks the line until then and never tries a fifth time 552ms
+     ✓ does not retry too_big and tells the head and Operations once 333ms
+     ✓ shows none failure after a later done turn with error null and named failure false 515ms
+     ✓ shows none failure after a later done turn with error null and named failure true 467ms
+     ✓ shows none failure after a later failed turn with error agent_failed and named failure false 413ms
+     ✓ shows latest failure after a later failed turn with error agent_failed and named failure true 352ms
+     ✓ shows first failure after a later failed turn with error cancelled and named failure false 514ms
+     ✓ shows first failure after a later failed turn with error removed and named failure false 357ms
+   ✓ a delayed retry owns the line (2)
+     ✓ holds an older turn on another task until the retry, even for a head who combines task turns 686ms
+     ✓ keeps a passing rate limit separate from a plan usage limit, even when the words match the old pattern 471ms
+   ✓ conversation recovery (2)
+     ✓ continues a crash outside any task once and tells Operations if the continuation crashes too 587ms
+     ✓ keeps the session id on a resumed running turn so a later safe restart can use it 438ms
+   ✓ a refusal without an Operations watcher (1)
+     ✓ still tells the head when Operations is switched off 575ms
+   ✓ crash counting by kind (2)
+     ✓ stops after three named quick crashes 640ms
+     ✓ does not count a passing failure as a quick crash 527ms
+   ✓ operational facts in the task log (1)
+     ✓ does not count refused restart requests as turns that continued without handing work in 1461ms
+   ✓ holds the whole line until the retry even when task turns were switched off meanwhile 1211ms
+   ✓ a retry of a retry (5)
+     ✓ says what the first try was asked, once, and a short reason without the screen alone 1108ms
+     ✓ says what the first try was asked, once, and a short reason without a reason and then the screen 942ms
+     ✓ goes back past a turn a node restart ran once more, to the work of the first try 342ms
+     ✓ says what the first try was asked once a turn a node restart ran once more fails too 539ms
+     ✓ says what a conversation outside any task was asked once, after a retry that did not go on either 440ms
+ ✓ |@hornhoof/server| test/keeper.test.ts (39 tests) 12142ms
+   ✓ the keeper (21)
+     ✓ shows maintenance during the swap of a restore 454ms
+     ✓ gets its machine's certificate from its app and reports the machine's measures while it leads 2970ms
+     ✓ holds while it hands the server over 323ms
+     ✓ takes link traffic through the keeper as over the link, and front's as local 1176ms
+     ✓ believes no forged header that did not come through its door 515ms
+     ✓ lets the updater read the new build's health through front during maintenance, while changes wait 401ms
+     ✓ finishes a request in flight when it stops, then takes no other and writes no more 372ms
+   ✓ the keeper container (2)
+     ✓ opens the front port to all and the link doors to itself, and exits 0 on SIGINT 2828ms
+     ✓ opens the front port to all and the link doors to itself, and exits 0 on SIGTERM 1554ms
+ ✓ |@hornhoof/server| test/follow.test.ts (23 tests) 20255ms
+   ✓ following the server's build (19)
+     ✓ knows its own build by its commit 2767ms
+     ✓ knows no build of its own with a commit the registry does not have 340ms
+     ✓ knows no build of its own with a build with no updater image 318ms
+     ✓ asks nobody when it was built by hand and names no commit 396ms
+     ✓ tells a worker of the build only while it runs another 3832ms
+     ✓ lets one worker install at a time, between turns 625ms
+     ✓ gives a machine that keeps a copy its turn as it gives a worker one 1019ms
+     ✓ lets the machine the company was installed on follow once the server runs elsewhere 492ms
+     ✓ never extends a grant, and remembers a failure 385ms
+     ✓ ends a turn to install at once when the machine says the install failed 456ms
+     ✓ counts the hours to the next try from the failure, not from its last mention 389ms
+     ✓ holds turns and test parts on a worker while it installs 701ms
+     ✓ answers the join of a new installer with the build first 427ms
+     ✓ asks the registry before a join command is used up, and for a moment only 2940ms
+   ✓ a busy worker that waits for its turn to install (4)
+     ✓ sends the work of the company's keys to another built-in node while this machine is next to install 599ms
+     ✓ takes no new turn while it waits, and hears its turn once the turns that run there ended 656ms
+     ✓ lets the orchestrator and a head in past their limit while other work runs there, and then holds them for the install 2022ms
+ ✓ |@hornhoof/server| test/network-routes.test.ts (21 tests) 15174ms
+   ✓ the network routes the keeper calls (21)
+     ✓ gives its own machine a data certificate, from an authority made once 4867ms
+     ✓ keeps the leader's row apart from people's machines 641ms
+     ✓ keeps the old leader's install when a copy leads 459ms
+     ✓ refuses to disable the leader's person 314ms
+     ✓ believes the via header from the keeper alone 2551ms
+     ✓ hands the peer secrets to the machine that offers them 386ms
+     ✓ lists the revoked certificates that have not expired, and signs the list while it leads 358ms
+     ✓ makes no secret and signs no list while it only reads 569ms
+     ✓ names the doors its app wants, and what reaches the copies through the relay 328ms
+     ✓ keeps the copy's report 309ms
+     ✓ hands its own keeper the leader's slots of broken-off tables that a copy named in its last report, while that report is fresh 310ms
+     ✓ names who must upload 430ms
+     ✓ forgets the copy when a machine is wiped 713ms
+     ✓ stores memory and cores 468ms
+     ✓ keeps the print of the owner's key a machine pinned 402ms
+     ✓ answers that the server has no machine id when it has none 540ms
+ ✓ |@hornhoof/server| test/people.test.ts (28 tests) 21209ms
+   ✓ invites (7)
+     ✓ lets the CEO invite a person who then signs in 7471ms
+     ✓ gives 410 for a used invite and 404 for an unknown one 1233ms
+     ✓ stops the 11th accept for one invite within 15 minutes and leaves other invites alone 644ms
+     ✓ gives 410 for an expired invite 477ms
+     ✓ refuses a duplicate email in a different case 375ms
+     ✓ only lets people with the whole company invite people 568ms
+   ✓ GET /api/people (2)
+     ✓ lists people with the names of what they reach 541ms
+     ✓ lists only people from the session company 430ms
+   ✓ PATCH /api/people/:id (10)
+     ✓ disables a person and ends their sessions 502ms
+     ✓ changes title and access 403ms
+     ✓ protects the owner and yourself 438ms
+     ✓ lets anyone trim and change only their own name, with the new name in every live view and agent signature 325ms
+     ✓ saves a name and a title together and shows the new name to the list and the map, wherever the person sits 448ms
+     ✓ tells open maps when a name changes, and nothing about access 590ms
+     ✓ lets only the CEO or an active delegate rename another person and records the actor 510ms
+     ✓ stops a disabled invitee from accepting 476ms
+   ✓ POST /api/people/:id/invite (4)
+     ✓ gives a person a new link that also resets their password 568ms
+     ✓ takes the person's own key away on a reset, and lets them make a new one 673ms
+     ✓ replaces an expired invite 432ms
+     ✓ protects the owner and yourself and needs company scope 578ms
+   ✓ PUT /api/people/:id/ceo-delegate (5)
+     ✓ lets the CEO set and take off the mark of a person with the whole company, and says so in /api/me and /api/people 494ms
+     ✓ gives no mark to a new invite, nor to a person who does not see the whole company 350ms
+     ✓ is the real CEO's alone, by himself or through the orchestrator: not a person of the whole company, not the delegate, not for the CEO 537ms
+     ✓ takes the mark off for good when the delegate is disabled, sent a new invite or loses the whole company 668ms
+     ✓ lets only the CEO change the access or status of the delegate, or send them a new invite 371ms
+ ❯ |@hornhoof/server| test/restore.test.ts (14 tests | 1 failed) 55085ms
+   ❯ a restore from a backup (14)
+     ✓ restores only a bundle its database knows 5106ms
+     ✓ tries a bundle again, and lets an order go after an hour 882ms
+     ✓ asks the holder for a bundle the leader lacks 599ms
+     ✓ hands the recovery identity to its keeper without logging it 662ms
+     ✓ keeps who may get in now 914ms
+     ✓ keeps who holds the data and the link 867ms
+     ✓ marks a command that was on its way as lost 790ms
+     × applies the carry only after a committed swap 20749ms
+     ✓ restores a fork after newer bundles 4074ms
+     ✓ remembers the CEO's choice across the swap 557ms
+     ✓ marks every restore 10822ms
+     ✓ serves nobody on a restored database before the carry is applied 656ms
+     ✓ serves nobody on a restored database that does not lead yet, and everybody on one that was not restored 6888ms
+     ✓ names what the restore undoes 1026ms
+ ✓ |@hornhoof/server| test/program-operator-cases.test.ts (38 tests) 44082ms
+   ✓ opens one case and one durable operator wake, consumes supplementary causes and preserves the original deadline 8178ms
+   ✓ resolves on the actual word receipt and revokes the node capability without cancelling working programs 1227ms
+   ✓ escalates immediately without an operator and never poisons the whole node or wakes twice after restart 939ms
+   ✓ expires once ten minutes from opening and leaves a computing target running 1183ms
+   ✓ does not call from an unproved threshold or after first own activity for hours 857ms
+   ✓ rolls back the case, wake and browser notification together if their transaction fails 667ms
+   ✓ calls once for three finalized live failures, not for queued or fourth/fifth, and taken resets the same program for another streak 1180ms
+   ✓ a later taken receipt resets older pending words; a stale third instance gets a read-only case 953ms
+   ✓ opens and revokes exactly one question capability, preserving its event identity on replay 966ms
+   ✓ restores capabilities after reconnect and escalates once if the assigned operator loses its role 620ms
+   ✓ keeps a missing escalation recipient pending and sends one notice when its plan becomes available 756ms
+   ✓ allows a current question in a new physical program without requiring a new assignment attempt 921ms
+   ✓ escalates when the assigned operator leaves Operations despite retaining the advertised role 628ms
+   ✓ keeps an assigned running operator and its target alive during a short node outage 538ms
+   ✓ escalates an unavailable assigned operator (removed) 622ms
+   ✓ escalates an unavailable assigned operator (off) 524ms
+   ✓ escalates an unavailable assigned operator (job-ended) 458ms
+   ✓ escalates an unavailable assigned operator (plan-not-ready) 1225ms
+   ✓ escalates an unavailable assigned operator (plan-removed) 647ms
+   ✓ does not assign a case to a worker outside Operations 1084ms
+   ✓ keeps a case with an operator whose machine restarts for an update: its turn waits for the machine 981ms
+   ✓ calls an operator unavailable whose machine went away for no update 1464ms
+   ✓ lets the operator answer a program on a machine that waits for an update, and the machine then goes on to it 1728ms
+   ✓ keeps a program operator off a machine that restarts for an update, and other turns off one that waits 1664ms
+   ✓ does not assign recovery to an operator that is offline 1091ms
+   ✓ does not assign recovery to an operator that is already-stuck 1215ms
+   ✓ does not assign recovery to an operator that is self 756ms
+   ✓ selects an operator with own open case and hold=false only when available=false 907ms
+   ✓ selects an operator with own escalated case and hold=false only when available=true 1320ms
+   ✓ selects an operator with own escalated case and hold=true only when available=false 789ms
+   ✓ binds a new turn question to a fresh case when the same physical program retains an old live-failure case 970ms
+   ✓ retains assignment recovery when the matching node operator timeout fails the job before server expiry 912ms
+   ✓ does not retain operator recovery for a prior another-case job failure 1268ms
+   ✓ does not retain operator recovery for a prior ordinary-failure job failure 941ms
+   ✓ does not retain operator recovery for a prior cancelled job failure 715ms
+   ✓ does not retain operator recovery for a prior stale job failure 945ms
+   ✓ keeps the running job question current when a prior job instance first reports after it 823ms
+   ✓ retains one canonical live-failure case when a late pending prefix moves the computed third receipt 793ms
+ ✓ |@hornhoof/server| test/auth.test.ts (40 tests) 32956ms
+   ✓ POST /api/auth/login (10)
+     ✓ logs in with a differently cased, padded email 5927ms
+     ✓ gives the same generic error for a wrong password and an unknown email 958ms
+     ✓ stops the 11th attempt for one email within 15 minutes and leaves other emails alone 1068ms
+     ✓ counts per email and address, so failures from elsewhere never lock the owner out 1199ms
+     ✓ takes the visitor's address from X-Forwarded-For only from the tunnel 2302ms
+     ✓ counts sign-ins through a worker as one address 1727ms
+     ✓ stops one email after 50 attempts in an hour from any addresses, and other emails go on 4065ms
+     ✓ deletes expired sessions when someone signs in 1137ms
+     ✓ gives no session to a sign-in that checked the old password while an owner link reset it 537ms
+     ✓ refuses a disabled person 375ms
+   ✓ sessions (4)
+     ✓ last 30 days, with a cookie only the browser sends back over https 599ms
+     ✓ send a cookie that also works over plain http when Hornhoof has no https address 722ms
+     ✓ send an https-only cookie to whoever came over https through the tunnel, and believe that only from the tunnel 1130ms
+     ✓ believe nobody about https while there is no tunnel 933ms
+   ✓ GET /api/me (3)
+     ✓ returns the person and the company for a valid session 313ms
+   ✓ the session cookie over the link (4)
+     ✓ reads only __Host-hh_session over the link and only hh_session elsewhere 357ms
+     ✓ signs out over the link 775ms
+     ✓ sets the link's cookie when an invite is accepted over the link 727ms
+   ✓ moving a session from before the switch to __Host-hh_session (17)
+     ✓ moves it once 565ms
+     ✓ lets a burst with the old cookie through, into one new session 393ms
+     ✓ gives each older session a new one of its own, which nobody can work out from the old one 331ms
+     ✓ leaves another person's session alone 421ms
+     ✓ does nothing when the request already carries __Host-hh_session 504ms
+     ✓ does nothing for a socket upgrade 421ms
+     ✓ delivers the new cookie on the event stream, which sends its own headers 576ms
+     ✓ a request that decides the session cookie itself (3)
+       ✓ accepts an invite with one __Host-hh_session, Maria's, and none made for the person of the older cookie 556ms
+       ✓ signs out with one expired __Host-hh_session and leaves no session of the person 315ms
+ ✓ |@hornhoof/server| test/agent-view-table.test.ts (58 tests) 60789ms
+   ✓ every real route (1)
+     ✓ has its place in the table 3833ms
+   ✓ one thing of one agent (29)
+     ✓ GET /api/agents/:id 3265ms
+     ✓ PATCH /api/agents/:id 1664ms
+     ✓ DELETE /api/agents/:id 883ms
+     ✓ GET /api/agents/:id/events 1583ms
+     ✓ POST /api/agents/:id/messages 1102ms
+     ✓ POST /api/agents/:id/pictures 1312ms
+     ✓ POST /api/agents/:id/reset 1276ms
+     ✓ POST /api/agents/:id/start 1034ms
+     ✓ POST /api/agents/:id/stop 1461ms
+     ✓ GET /api/agents/:id/terminal 541ms
+     ✓ GET /api/agents/:id/inbox 623ms
+     ✓ POST /api/agents/:id/inbox/read 569ms
+     ✓ POST /api/agents/:id/inbox/mark 792ms
+     ✓ PUT /api/agents/:id/inbox-mode 691ms
+     ✓ PUT /api/agents/:id/telegram 318ms
+     ✓ DELETE /api/agents/:id/telegram 594ms
+     ✓ GET /api/tasks/:id 1852ms
+     ✓ GET /api/tasks/:id/waits 842ms
+     ✓ GET /api/vault/:id/log 570ms
+     ✓ POST /api/tasks/:id/comments 1683ms
+     ✓ POST /api/tasks/:id/cancel 2302ms
+     ✓ GET /api/jobs/:id 541ms
+     ✓ POST /api/jobs/:id/cancel 1593ms
+     ✓ POST /api/improvements/:id/take 982ms
+     ✓ POST /api/improvements/:id/dismiss 447ms
+     ✓ POST /api/feedback/preview 475ms
+     ✓ POST /api/feedback 688ms
+     ✓ POST /api/feedback/repeats 500ms
+     ✓ GET /api/attachments/:id 1036ms
+   ✓ every list (28)
+     ✓ GET /api/org shows each person only what they may see 2292ms
+     ✓ GET /api/tasks shows each person only what they may see 1368ms
+     ✓ GET /api/requests shows each person only what they may see 1193ms
+     ✓ GET /api/wait-cards shows each person only what they may see 580ms
+     ✓ GET /api/turns shows each person only what they may see 362ms
+     ✓ GET /api/turns/current shows each person only what they may see 448ms
+     ✓ GET /api/subscriptions shows each person only what they may see 1074ms
+     ✓ GET /api/machines shows each person only what they may see 861ms
+     ✓ GET /api/phones shows each person only what they may see 400ms
+     ✓ GET /api/pool shows each person only what they may see 637ms
+     ✓ GET /api/people shows each person only what they may see 679ms
+     ✓ GET /api/me shows each person only what they may see 1430ms
+     ✓ GET /api/improvements shows each person only what they may see 1415ms
+     ✓ GET /api/notebook shows each person only what they may see 963ms
+     ✓ GET /api/computer shows each person only what they may see 533ms
+     ✓ GET /api/machines/access shows each person only what they may see 606ms
+     ✓ GET /api/machines/here shows each person only what they may see 783ms
+     ✓ GET /api/updates shows each person only what they may see 1055ms
+     ✓ GET /api/departments/:id/notebook shows each person only what they may see 2540ms
+     ✓ GET /api/departments/:id/tree shows each person only what they may see 1194ms
+     ✓ GET /api/departments/:id/pipeline shows each person only what they may see 1065ms
+     ✓ GET /api/departments/:id/roster shows each person only what they may see 456ms
+     ✓ GET /api/departments/:id/approval-policy shows each person only what they may see 450ms
+     ✓ GET /api/autonomous-releases shows each person only what they may see 664ms
+     ✓ GET /api/vault shows each person only what they may see 681ms
+     ✓ GET /api/departments/:id/wait-policy shows each person only what they may see 648ms
+     ✓ GET /api/departments/:id/model-checks shows each person only what they may see 394ms
+     ✓ GET /api/departments/:id/branches shows each person only what they may see 462ms
+ ✓ |@hornhoof/server| test/tasks-reconcile.test.ts (48 tests) 73741ms
+   ✓ turns on a machine that went away (8)
+     ✓ keeps running and queued conversations through a 60-second disconnect and accepts the result after return 4621ms
+     ✓ keeps a turn on a task whose machine is away, tells whoever gave the task once, and goes on when the machine is back 2996ms
+     ✓ ends the turn as handed on when the task went to someone else while its machine was away 819ms
+     ✓ ends a turn of someone who does not hold the task as before, and closes the note of a kept turn that ended 2143ms
+     ✓ fails a turn of no task after five minutes away, as before 1145ms
+     ✓ leaves online jobs, queued turns and test jobs alone 1109ms
+     ✓ ends a running personal-plan job without a node as lost, not as one of a machine that went away 1382ms
+     ✓ continues a failed review on another ready machine of its plan 1845ms
+   ✓ work whose move lost its wake (40)
+     ✓ does not wake a worker that moved it during its turn 854ms
+     ✓ does not wake a head that moved it during its turn 968ms
+     ✓ counts a move during its running job only if that turn covered it 573ms
+     ✓ counts a move before its job started only if that turn covered it 1377ms
+     ✓ counts a move after its job ended only if that turn covered it 1517ms
+     ✓ leaves a parent waiting for its open subtask 854ms
+     ✓ leaves a parent waiting for its working subtask 877ms
+     ✓ leaves a parent waiting for its review subtask 1009ms
+     ✓ leaves a parent waiting for its waiting subtask 979ms
+     ✓ leaves a parent waiting for its blocked subtask 1385ms
+     ✓ counts a turn on a done subtask for its parent 1294ms
+     ✓ counts a turn on a cancelled subtask for its parent 1111ms
+     ✓ recovers the assignee of an old open task once per move 2754ms
+     ✓ recovers the assignee of an old working task once per move 2318ms
+     ✓ recovers the assignee of an old review task once per move 3123ms
+     ✓ waits more than two minutes after the move and after the agent was last busy 2952ms
+     ✓ recovers only the current Review owner and its exact candidate in an open turn 1621ms
+     ✓ recovers Tests after a passed Review without waking the former checker 2312ms
+     ✓ recovers the giver of blocked work instead of its executor 1606ms
+     ✓ recovers the head for a wrong-goal escalation without returning work to its author 1995ms
+     ✓ keeps repeated ordinary findings with the checker without calling in the head or author 1422ms
+     ✓ leaves work waiting when it is off 825ms
+     ✓ leaves work waiting when it is removed 764ms
+     ✓ leaves work waiting when it is no subscription 750ms
+     ✓ leaves work waiting when it is removed subscription 672ms
+     ✓ leaves work waiting when it is not ready 922ms
+     ✓ leaves work waiting when it is busy 1311ms
+     ✓ leaves work waiting when it is queued 997ms
+     ✓ leaves work waiting when it is pending wake 1115ms
+     ✓ leaves work waiting when it is after 1964ms
+     ✓ leaves work waiting when it is request 1604ms
+     ✓ leaves work waiting when it is tests 1925ms
+     ✓ leaves work waiting when it is waiting 781ms
+     ✓ leaves work waiting when it is done 1200ms
+     ✓ leaves work waiting when it is cancelled 1095ms
+     ✓ does not treat comment as a new move after a turn ended 1066ms
+     ✓ does not treat reminded as a new move after a turn ended 1323ms
+     ✓ does not treat continued as a new move after a turn ended 1311ms
+     ✓ does not treat stuck as a new move after a turn ended 1289ms
+     ✓ recovers an old task without move history and queues it once across overlapping rounds 2654ms
+ ✓ |@hornhoof/server| test/peer-sessions.test.ts (24 tests) 6282ms
+   ✓ a worker's sessions to the company's data machines (18)
+     ✓ reaches the leader directly 652ms
+     ✓ takes the relay when direct does not answer, and says so only for an address on its own network 503ms
+     ✓ goes back to the direct path once an address answers 334ms
+     ✓ trusts only the data machine it dialed 357ms
+     ✓ streams a bundle over the leader's session 872ms
+     ✓ lets what the relay session carries end by itself when a direct one takes its place 647ms
+   ✓ the door to the leader's app (6)
+     ✓ passes a request to the leader's app under the worker's name, with its whole body 473ms
+ ✓ |@hornhoof/server| test/test-run-file-results.test.ts (30 tests) 98445ms
+   ✓ reusing green test results (28)
+     ✓ runs every test file in the first run of a release, then only what failed or changed 8066ms
+     ✓ runs every test file in each run of a release when the manifest names no full run 2153ms
+     ✓ runs everything anew in the first run of each release, of another turn as of a release branch 4148ms
+     ✓ takes on main the release whose branch checked the same commit, and makes a commit no release checked a release of its own 13448ms
+     ✓ takes only what its release proved: a file its full run did not prove runs again, though an older release proved it 2751ms
+     ✓ counts neither one suite nor a run that has not ended as its release's first run 3527ms
+     ✓ does not run a file again at the same fingerprint, and the run still ends and tells its agent 2388ms
+     ✓ runs a file again once its fingerprint changed, and its old green result cannot stand for it 2256ms
+     ✓ runs only the file whose dependency changed 1490ms
+     ✓ gives each part of the first run of a release an hour when no limit was asked and splits it in two on one machine, and keeps a limit that was asked 2290ms
+     ✓ gives no part to a node of other runtimes than its run was described on, and keeps no green result from a receipt that names others 1523ms
+     ✓ keeps what a part proved on another build and processor of the class its run was described on, and a second run of the commit described there runs no file again 4006ms
+     ✓ takes back a green result when the file then fails at the same fingerprint, as in two runs at once 3657ms
+     ✓ keeps no result of a file that failed and keeps those that passed beside it 2552ms
+     ✓ keeps nothing of a part that failed without saying which file, or that checked another commit 3488ms
+     ✓ shows a mismatch when a file green at its fingerprint fails in the full run, and stops trusting that result 4757ms
+     ✓ runs everything for a node that sends no fingerprints and keeps nothing 3688ms
+     ✓ shows what a result came to, when the file runs and when it does not run again 2696ms
+     ✓ forgets what a result came to once a passing run says nothing of the file 2381ms
+     ✓ keeps what each part of a run left, by file, whichever part ended last 2460ms
+     ✓ starts over from the last part when all that was kept no longer fits one message 2392ms
+     ✓ marks the pinned commit on GitHub once a run of the whole product passed, also when every file kept its green result 1744ms
+     ✓ marks failure when a run of the whole product failed 2759ms
+     ✓ leaves no mark for one suite: it does not stand for the whole product 1421ms
+     ✓ runs every file in the first run of a release branch, though each is green at its fingerprint, and marks its commit 2243ms
+     ✓ tells the agent of a run that stands for no whole product that it leaves no mark 1859ms
+     ✓ tells the agent on the task that GitHub now shows the mark 1915ms
+     ✓ does not reuse the green result of another repository 3428ms
+   ✓ a run with nothing left to run (2)
+     ✓ ends passed with no part and still checks its release, preparation=false 3036ms
+     ✓ ends passed with no part and still checks its release, preparation=true 2882ms
+ ✓ |@hornhoof/server| test/node-drain-each.test.ts (24 tests) 54964ms
+   ✓ each node on the server computer is replaced on its own (10)
+     ✓ names the free ones at once while one runs a long turn, and that turn goes on 13678ms
+     ✓ holds only the nodes it is told run another image, so one already replaced takes work 2904ms
+     ✓ lets go only of the nodes it names, and the node that waits keeps waiting since it began 2145ms
+     ✓ starts the orchestrator on its free node as soon as that one is back, while another node still waits 2569ms
+     ✓ ignores names it does not know, such as a node of another server on this computer, and holds nothing for them 1502ms
+     ✓ counts only nodes on this computer, so a plan on another machine is not held by a name 1270ms
+     ✓ knows only the built-in node without the id of its computer: it holds no other, and calls no other free 2131ms
+     ✓ takes names only from the built-in key on the whole server: a node key answers for itself 1504ms
+     ✓ refuses a list of names no updater sends 1904ms
+     ✓ refuses a list of names no updater sends 1266ms
+   ✓ a node that waits for an update takes no new turn (6)
+     ✓ keeps new turns off the only node of a plan however long it waits, the orchestrator's and a head's too, and sends them there once it is updated 2284ms
+     ✓ says in the node's record and on the Machines screen since when it waits, until it is back from its update 1788ms
+     ✓ sends a new turn to another ready machine of its plan, a head's too, and keeps one whose agent holds a task in progress for its own machine 4228ms
+     ✓ keeps a head off the built-in node however long it waits, when the company key runs it 1724ms
+     ✓ lets the orchestrator in once an updater that went away no longer holds the node 2801ms
+     ✓ tells the updater that comes back that the node is free, once its work ended while nobody asked 1197ms
+   ✓ the orchestrator and the heads while their node restarts (5)
+     ✓ sends a head to another machine of its plan while its node restarts, not onto that node 1788ms
+     ✓ lets the orchestrator in within the limit when an updater heard its node is free and never stopped it 1382ms
+     ✓ holds a head as before once its node began to stop, past the limit and the lease of a wait, and starts it on the node that comes back 2209ms
+     ✓ lets the orchestrator in within the limit on a restart an earlier build saved for a node that never stopped 1056ms
+   ✓ the update screen (3)
+     ✓ says of each node what it waits for and since when 1219ms
+     ✓ is empty when no node waits 948ms
+     ✓ never names a node of another company or the agents and tasks of another company 901ms
+ ✓ |@hornhoof/server| test/task-files.test.ts (20 tests) 43468ms
+   ✓ a task file (5)
+     ✓ is attached by an agent on the task and downloaded by any agent of the company by its name or id 5189ms
+     ✓ keeps the newest of two files with one name, and only the name, never a folder 2064ms
+     ✓ is refused from an agent not on the task, past 50 MB, without a name, and for a task or file that is not there 1149ms
+     ✓ still takes only pictures, up to 3 MB, without a task 911ms
+     ✓ downloads a file of several megabytes whole 11313ms
+   ✓ an employee chat file (1)
+     ✓ is readable by its sender, while another employee still cannot fetch it 795ms
+   ✓ chunked task files (8)
+     ✓ stops at the first chunk past the remaining company room 711ms
+     ✓ stops at the first chunk past the remaining task room 783ms
+     ✓ stops at the first chunk past the remaining chat room 789ms
+     ✓ stops at the first chunk past the remaining private room 749ms
+     ✓ also stops at the single file limit 827ms
+     ✓ also stops at the single picture limit 489ms
+     ✓ accepts exactly eight bytes when eight bytes remain 739ms
+     ✓ removes the partial disk file without asking for the tail 916ms
+   ✓ the room for task files (3)
+     ✓ holds 500 MB on one task and says so plainly past it 659ms
+     ✓ holds the company's setting across its tasks, 2 GB unless TASK_FILES_MB says otherwise 4834ms
+     ✓ lets go of the files of a turn closed 30 days ago, and keeps the rest 922ms
+   ✓ a task file over 50 MB (1)
+     ✓ lives on the disk of the machine that took it, for any agent to fetch, and goes after 30 days though its turn is open 4672ms
+   ✓ cross-department hh-fetch and attachment boundaries (2)
+     ✓ lets Development and Design employees read each other task files, full-text reviews and request pictures via hh-fetch 1954ms
+     ✓ refuses another company, personal assistants, private secrets, message pictures, cross-department writes and deletes, and empty uploads 2113ms
+ ❯ |@hornhoof/server| test/merge-peer.test.ts (23 tests | 1 failed) 254610ms
+   ❯ the old database of a copy on another machine (18)
+     ✓ merges a copy that never wrote by its ids 10086ms
+     ✓ merges a copy of an older schema the same way 5158ms
+     ✓ does not bring back what the leader deleted 5510ms
+     ✓ reads every row of a copy that wrote 9318ms
+     ✓ takes a handed database as one that never wrote 5814ms
+     ✓ merges a led database under its own source 5990ms
+     ✓ keeps a parked job open, and closes it with what its node said 7231ms
+     ✓ leaves a turn alone that both sides started, with nothing for anyone to settle 6472ms
+     ✓ across a restore (5)
+       ✓ compares a copy when the kept database was brought back 11699ms
+       ✓ leaves a copy out with a kept database the CEO left out, its merge removing 4560ms
+       ✓ leaves a copy out with a kept database the CEO left out, its merge done 6559ms
+       ✓ compares a copy when the kept database held no company 9031ms
+       ✓ compares a copy while the merge of the kept database still waits 13657ms
+     ✓ waits for its door 12697ms
+     ✓ is done once the machine dropped the old database 7595ms
+     ✓ ends unread when the machine left before its old copy was read 14430ms
+     × asks no old copy of a machine that left the data 24859ms
+     ✓ merges a led database whose source answers each read after 2 s while renewing the lease and letting writes through 16689ms
+   ✓ a merge that needs more of the old database than it read ahead (5)
+     ✓ reads every row of it again when the leader went through a restore meanwhile, and merges by comparing 18643ms
+     ✓ reads its journal again when what made the leader compare is gone by the time the merge locks 17977ms
+     ✓ reads its journal again from further back when the leader's horizon went back meanwhile 10402ms
+     ✓ reads the bytes of a file again when the leader's own one went meanwhile, and writes it whole 13602ms
+     ✓ stops after reading it three times more, with nothing written, while the leader goes on changing under it 16552ms
+STAGE tests failed exit=130 secs=638
+$ crapper --use-existing-coverage apps/server/src/db/schema.ts apps/server/src/modules/tools/watch.ts
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+registerWatchTools             modules.tools.watch                   60   0.0%   3660.0
+messageSent                    modules.tools.watch                    8   0.0%     72.0
+partiesOf                      modules.tools.watch                    7   0.0%     56.0
+failureReason                  modules.tools.watch                    6   0.0%     42.0
+heldWords                      modules.tools.watch                    6   0.0%     42.0
+opensTurn                      modules.tools.watch                    6   0.0%     42.0
+cannotTake                     modules.tools.watch                    5   0.0%     30.0
+cleanedAll                     modules.tools.watch                    5   0.0%     30.0
+cannotRun                      modules.tools.watch                    4   0.0%     20.0
+failedLine                     modules.tools.watch                    4   0.0%     20.0
+restartAsked                   modules.tools.watch                    4   0.0%     20.0
+turnEnd                        modules.tools.watch                    4   0.0%     20.0
+lineOf                         modules.tools.watch                    3   0.0%     12.0
+registerRoleTools              modules.tools.watch                    3   0.0%     12.0
+sentLine                       modules.tools.watch                    3   0.0%     12.0
+tally                          modules.tools.watch                    3   0.0%     12.0
+undeliveredBefore              modules.tools.watch                    3   0.0%     12.0
+undeliveredSince               modules.tools.watch                    3   0.0%     12.0
+waitsOf                        modules.tools.watch                    3   0.0%     12.0
+givingBack                     modules.tools.watch                    2   0.0%      6.0
+opensTask                      modules.tools.watch                    2   0.0%      6.0
+refused                        modules.tools.watch                    2   0.0%      6.0
+say                            modules.tools.watch                    2   0.0%      6.0
+seesPrograms                   modules.tools.watch                    2   0.0%      6.0
+shown                          modules.tools.watch                    2   0.0%      6.0
+shownAll                       modules.tools.watch                    2   0.0%      6.0
+taskMessageFailure             modules.tools.watch                    2   0.0%      6.0
+at                             db.schema                              1   0.0%      2.0
+companyId                      db.schema                              1   0.0%      2.0
+createdAt                      db.schema                              1   0.0%      2.0
+id                             db.schema                              1   0.0%      2.0
+inPlace                        db.schema                              1   0.0%      2.0
+internalResolutionColumns      db.schema                              1   0.0%      2.0
+isDigest                       db.schema                              1   0.0%      2.0
+materialHistoryBound           db.schema                              1   0.0%      2.0
+materialStamp                  db.schema                              1   0.0%      2.0
+placeColumns                   db.schema                              1   0.0%      2.0
+questionChecks                 db.schema                              1   0.0%      2.0
+questionColumns                db.schema                              1   0.0%      2.0
+questionObjectBound            db.schema                              1   0.0%      2.0
+resolutionChecks               db.schema                              1   0.0%      2.0
+safeRevision                   db.schema                              1   0.0%      2.0
+safeSequence                   db.schema                              1   0.0%      2.0
+sameCompany                    db.schema                              1   0.0%      2.0
+hoursAgo                       modules.tools.watch                    1   0.0%      2.0
+json                           modules.tools.watch                    1   0.0%      2.0
+nobody                         modules.tools.watch                    1   0.0%      2.0
+readerOf                       modules.tools.watch                    1   0.0%      2.0
+seenBy                         modules.tools.watch                    1   0.0%      2.0
+Wrote /data/work/agents/84ccb405-1ced-4b12-a94e-f3b44d5ba1e4/hornhoof-1241/.metrics/crap.edn
+TOUCHED modules.tools.watch registerWatchTools cc=60 base=kept cov=0 crap=3660
+TOUCHED modules.tools.watch messageSent cc=8 base=kept cov=0 crap=72
+TOUCHED modules.tools.watch partiesOf cc=7 base=kept cov=0 crap=56
+TOUCHED modules.tools.watch failureReason cc=6 base=kept cov=0 crap=42
+TOUCHED modules.tools.watch heldWords cc=6 base=kept cov=0 crap=42
+TOUCHED modules.tools.watch opensTurn cc=6 base=kept cov=0 crap=42
+TOUCHED modules.tools.watch cannotTake cc=5 base=kept cov=0 crap=30
+TOUCHED modules.tools.watch cleanedAll cc=5 base=kept cov=0 crap=30
+TOUCHED modules.tools.watch cannotRun cc=4 base=kept cov=0 crap=20
+TOUCHED modules.tools.watch failedLine cc=4 base=kept cov=0 crap=20
+TOUCHED modules.tools.watch restartAsked cc=4 base=kept cov=0 crap=20
+TOUCHED modules.tools.watch turnEnd cc=4 base=kept cov=0 crap=20
+TOUCHED modules.tools.watch lineOf cc=3 base=kept cov=0 crap=12
+TOUCHED modules.tools.watch registerRoleTools cc=3 base=kept cov=0 crap=12
+TOUCHED modules.tools.watch sentLine cc=3 base=kept cov=0 crap=12
+TOUCHED modules.tools.watch tally cc=3 base=kept cov=0 crap=12
+TOUCHED modules.tools.watch undeliveredBefore cc=3 base=kept cov=0 crap=12
+TOUCHED modules.tools.watch undeliveredSince cc=3 base=kept cov=0 crap=12
+TOUCHED modules.tools.watch waitsOf cc=3 base=kept cov=0 crap=12
+STAGE crapper passed exit=0 secs=2
+$ dryer apps/server/src/db/schema.ts apps/server/src/modules/tools/watch.ts apps/server/test/message-count.test.ts
+Wrote /data/work/agents/84ccb405-1ced-4b12-a94e-f3b44d5ba1e4/hornhoof-1241/.metrics/dry.edn
+No duplicate candidates found.
+STAGE dryer passed exit=0 secs=1
+AUTHOR_CHECK {"version":1,"submissionCommit":"8797456d19be31f7385c8e5c25f0b7c34dbd6bc9","checkCommit":"8797456d19be31f7385c8e5c25f0b7c34dbd6bc9","scope":{"kind":"changed","paths":["apps/server/drizzle/0137_message_sender_window.sql","apps/server/drizzle/meta/0137_snapshot.json","apps/server/drizzle/meta/_journal.json","apps/server/src/db/schema.ts","apps/server/src/modules/tools/watch.ts","apps/server/test/message-count.test.ts"],"leftToFullRun":["apps/server/test/acme-fake.test.ts","apps/server/test/addresses.test.ts","apps/server/test/age-key.test.ts","apps/server/test/agent-sql-permissions.test.ts","apps/server/test/agent-sql.test.ts","apps/server/test/agent-view-company.test.ts","apps/server/test/agent-view-rule.test.ts","apps/server/test/api-models.test.ts","apps/server/test/app-close.test.ts","apps/server/test/ari.test.ts","apps/server/test/assistants-migration.test.ts","apps/server/test/autonomous-release-migration.test.ts","apps/server/test/beats.test.ts","apps/server/test/become.test.ts","apps/server/test/builtin-node-connections-migration.test.ts","apps/server/test/bundle-store.test.ts","apps/server/test/bundle.test.ts","apps/server/test/challenges.test.ts","apps/server/test/check-queue.test.ts","apps/server/test/cli.test.ts","apps/server/test/client.test.ts","apps/server/test/closed-port.test.ts","apps/server/test/composable-skills.test.ts","apps/server/test/compose.test.ts","apps/server/test/computer-keeper.test.ts","apps/server/test/config.test.ts","apps/server/test/confirm.test.ts","apps/server/test/connection-history.test.ts","apps/server/test/copies-score.test.ts","apps/server/test/copy-maker.test.ts","apps/server/test/copy-updating.test.ts","apps/server/test/crypto.test.ts","apps/server/test/db-door.test.ts","apps/server/test/db-pool.test.ts","apps/server/test/decision-policy.test.ts","apps/server/test/decisions-answers-ceo.test.ts","apps/server/test/decisions-answers-department.test.ts","apps/server/test/department-echelons-template.test.ts","apps/server/test/department-mode-schema.test.ts","apps/server/test/department-turns-migration.test.ts","apps/server/test/development-checks-template.test.ts","apps/server/test/development-echelons-cleanup.test.ts","apps/server/test/development-echelons-controls.test.ts","apps/server/test/development-echelons-findings.test.ts","apps/server/test/development-echelons-parent.test.ts","apps/server/test/development-echelons-paths.test.ts","apps/server/test/development-echelons-route.test.ts","apps/server/test/development-echelons-submit-source.test.ts","apps/server/test/development-echelons-template.test.ts","apps/server/test/development-echelons-tests.test.ts","apps/server/test/development-echelons-wake.test.ts","apps/server/test/echelons-policy.test.ts","apps/server/test/entry.test.ts","apps/server/test/errors.test.ts","apps/server/test/fake-relay.test.ts","apps/server/test/feedback-clean.test.ts","apps/server/test/fence-lint.test.ts","apps/server/test/follow-config.test.ts","apps/server/test/following.test.ts","apps/server/test/fresh-pglite.test.ts","apps/server/test/front-calls.test.ts","apps/server/test/front.test.ts","apps/server/test/gate-compare.test.ts","apps/server/test/github-create-repository.test.ts","apps/server/test/grant.test.ts","apps/server/test/granting-skill.test.ts","apps/server/test/harness-migration.test.ts","apps/server/test/health.test.ts","apps/server/test/helpers-basic.test.ts","apps/server/test/helpers-db-metadata.test.ts","apps/server/test/holder.test.ts","apps/server/test/hub.test.ts","apps/server/test/images-workflow.test.ts","apps/server/test/install-nodes-only.test.ts","apps/server/test/install-nodes-updater.test.ts","apps/server/test/install-ps1.test.ts","apps/server/test/install-script-browser.test.ts","apps/server/test/install-script-join.test.ts","apps/server/test/install-script-served.test.ts","apps/server/test/install-script-server-check.test.ts","apps/server/test/install-script-steps.test.ts","apps/server/test/install-script.test.ts","apps/server/test/install-worker.test.ts","apps/server/test/internet.test.ts","apps/server/test/keeper-app-call.test.ts","apps/server/test/keeper-restore.test.ts","apps/server/test/keeper-role.test.ts","apps/server/test/keeper-ticker.test.ts","apps/server/test/lab/network.test.ts","apps/server/test/lab/overlap.test.ts","apps/server/test/lead-update.test.ts","apps/server/test/lease-holder.test.ts","apps/server/test/lease.test.ts","apps/server/test/leaving.test.ts","apps/server/test/led.test.ts","apps/server/test/limit.test.ts","apps/server/test/link-listener.test.ts","apps/server/test/logging.test.ts","apps/server/test/machine-keys.test.ts","apps/server/test/materials-schema.test.ts","apps/server/test/measures.test.ts","apps/server/test/merge-plan.test.ts","apps/server/test/merge-rules.test.ts","apps/server/test/message-prompt.test.ts","apps/server/test/migrate-masking.test.ts","apps/server/test/migrate.test.ts","apps/server/test/migration-history.test.ts","apps/server/test/migration-metadata.test.ts","apps/server/test/migrations-0003-0033.test.ts","apps/server/test/migrations-0047-0049.test.ts","apps/server/test/migrations-0050-0062.test.ts","apps/server/test/migrations.test.ts","apps/server/test/model-check-dataset.test.ts","apps/server/test/model-check-lifecycle.test.ts","apps/server/test/model-check-run.test.ts","apps/server/test/model-check-score.test.ts","apps/server/test/multi-company-isolation.test.ts","apps/server/test/named-test-files.test.ts","apps/server/test/naming.test.ts","apps/server/test/next-section.test.ts","apps/server/test/node-build.test.ts","apps/server/test/node-image.test.ts","apps/server/test/node-programs.test.ts","apps/server/test/notification-heading.test.ts","apps/server/test/operator-hub.test.ts","apps/server/test/orchestrator-sql-secrets.test.ts","apps/server/test/origin.test.ts","apps/server/test/outbound-checks.test.ts","apps/server/test/outbound-delivery.test.ts","apps/server/test/outbound-grants.test.ts","apps/server/test/outbound-render.test.ts","apps/server/test/outbound-setup-log.test.ts","apps/server/test/outbound-smtp.test.ts","apps/server/test/outbound-webhook.test.ts","apps/server/test/peer-client.test.ts","apps/server/test/peer-session-silence.test.ts","apps/server/test/peer-stream-clock.test.ts","apps/server/test/phone-access.test.ts","apps/server/test/phone-recording.test.ts","apps/server/test/phones-migration.test.ts","apps/server/test/pins.test.ts","apps/server/test/pipeline-echelons.test.ts","apps/server/test/pipeline-facts.test.ts","apps/server/test/pipeline-guidance.test.ts","apps/server/test/planned-vitest-sequencer.test.ts","apps/server/test/private-upload.test.ts","apps/server/test/program-operator-migration.test.ts","apps/server/test/program-operator-nodes-migration.test.ts","apps/server/test/program-operator-policy.test.ts","apps/server/test/program-operator-rpc.test.ts","apps/server/test/program-operator-screen.test.ts","apps/server/test/promote.test.ts","apps/server/test/prompt.test.ts","apps/server/test/proofs.test.ts","apps/server/test/proxy-header.test.ts","apps/server/test/proxy.test.ts","apps/server/test/question-schema.test.ts","apps/server/test/question.test.ts","apps/server/test/read-cookie.test.ts","apps/server/test/relay-client.test.ts","apps/server/test/release-benchmark.test.ts","apps/server/test/release-improvement-templates.test.ts","apps/server/test/replica.test.ts","apps/server/test/repo-full-command-migration.test.ts","apps/server/test/review-source-lines.test.ts","apps/server/test/role-levels-guide.test.ts","apps/server/test/role-model.test.ts","apps/server/test/round-trips.test.ts","apps/server/test/route-access.test.ts","apps/server/test/sign-in-limit.test.ts","apps/server/test/skill-independence.test.ts","apps/server/test/slots.test.ts","apps/server/test/sql-check.test.ts","apps/server/test/sql-parser.test.ts","apps/server/test/static.test.ts","apps/server/test/stuck-recipients-migration.test.ts","apps/server/test/stumbles.test.ts","apps/server/test/switch-step.test.ts","apps/server/test/switch-word.test.ts","apps/server/test/sync-step.test.ts","apps/server/test/sync.test.ts","apps/server/test/takeover-rows.test.ts","apps/server/test/takeover-step.test.ts","apps/server/test/taking.test.ts","apps/server/test/task-pause.test.ts","apps/server/test/templates-once.test.ts","apps/server/test/templates-watch-idle.test.ts","apps/server/test/templates.test.ts","apps/server/test/terminal-input-line.test.ts","apps/server/test/terminal-look.test.ts","apps/server/test/test-capacity.test.ts","apps/server/test/test-database-parsers.test.ts","apps/server/test/test-environment-migration.test.ts","apps/server/test/test-environment-runs.test.ts","apps/server/test/test-environment-templates.test.ts","apps/server/test/test-execution-receipt.test.ts","apps/server/test/test-pick.test.ts","apps/server/test/test-result-reuse-migration.test.ts","apps/server/test/test-run-commit-migration.test.ts","apps/server/test/test-run-environment-plan.test.ts","apps/server/test/test-run-plan.test.ts","apps/server/test/test-run-product-config.test.ts","apps/server/test/test-run-product-plan.test.ts","apps/server/test/test-run-reuse.test.ts","apps/server/test/test-run-speed-plan.test.ts","apps/server/test/test-run-suite-shards.test.ts","apps/server/test/test-tool-text.test.ts","apps/server/test/testruns-refs-create.test.ts","apps/server/test/testruns-refs.test.ts","apps/server/test/throughput.test.ts","apps/server/test/tls-checks.test.ts","apps/server/test/total-loss.test.ts","apps/server/test/tree-programs.test.ts","apps/server/test/tunnel.test.ts","apps/server/test/turn-effort.test.ts","apps/server/test/undelivered.test.ts","apps/server/test/update-steps.test.ts","apps/server/test/updater-backups.test.ts","apps/server/test/updater-computer.test.ts","apps/server/test/updater-control.test.ts","apps/server/test/updater-copies.test.ts","apps/server/test/updater-node-images.test.ts","apps/server/test/updater-nodes.test.ts","apps/server/test/updater-paths.test.ts","apps/server/test/updater-revision2.test.ts","apps/server/test/updater-stopped-nodes.test.ts","apps/server/test/updater-uploads.test.ts","apps/server/test/updater-worker.test.ts","apps/server/test/updater.test.ts","apps/server/test/vault-totp.test.ts","apps/server/test/version.test.ts","apps/server/test/visit-client.test.ts","apps/server/test/wait-graph.test.ts","apps/server/test/wait-notice-migration.test.ts","apps/server/test/web-crypto-types.test.ts","apps/server/test/work-tree.test.ts","apps/server/test/worker-keeper-fixture.test.ts","apps/server/test/worker-pages.test.ts","apps/server/test/x509.test.ts","apps/server/test/yaml-once.test.ts"]},"stages":[{"name":"format","status":"unavailable","exitCode":null,"partId":null},{"name":"lint","status":"passed","exitCode":0,"partId":null},{"name":"types","status":"passed","exitCode":0,"partId":null},{"name":"tests","status":"failed","exitCode":130,"partId":null},{"name":"crapper","status":"passed","exitCode":0,"partId":null},{"name":"dryer","status":"passed","exitCode":0,"partId":null}],"numbers":{"tests":null,"changedLines":null,"worstCrap":6,"dryerFlags":0}}

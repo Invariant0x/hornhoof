@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { checkSlotWaiting } from '../check-queue.js';
 import type { OperatorCheck, OperatorDelivery, OperatorInputLine, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorRecoveryState, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { OperatorControl, type OperatorProgram, type Pane } from './operator-control.js';
-import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
+import { OperatorObserver, type OperatorIdentity, type ProgramLook } from './operator-observer.js';
 import { ProgramAccess, type ProgramFacts } from './program-access.js';
 
 export type OperatorOptions = { dir: string; send(frame: OperatorNodeMessage): boolean; connected(): boolean; now?(): number; lookMs?: number };
@@ -69,16 +69,24 @@ export class OperatorRuntime {
     if (reuse && !target.physical) target.physical = true;
   }
 
-  private async look(key: string): Promise<OperatorCheck> {
+  private async look(key: string): Promise<ProgramLook> {
     const target = this.targets.get(key);
     if (!target) return NO_LOOK;
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<OperatorCheck>(done => { timer = setTimeout(() => done(NO_LOOK), this.options.lookMs ?? LOOK_MS); });
     try {
-      return await Promise.race([target.control.check(cells => this.source.inputLine(key, cells)), late]);
+      const check = await Promise.race([target.control.check(cells => this.source.inputLine(key, cells)), late]);
+      return { ...check, inToolCall: await this.inToolCall(key) };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /* The program runs a tool and Hornhoof's words went in: it takes them once the call ends. */
+  private async inToolCall(key: string): Promise<boolean> {
+    if (!this.source.current(key)?.runningTool) return false;
+    const facts = await this.source.facts(key).catch(() => null);
+    return facts !== null && !facts.undelivered;
   }
 
   private replaceTarget(key: string, jobId: string | null, reuse: boolean, previous: Target | undefined): Target {

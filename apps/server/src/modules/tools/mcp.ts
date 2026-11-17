@@ -36,7 +36,6 @@ import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerBriefingTool } from '../briefings/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
-import { registerOutboundControlTools, registerOutboundHeadTools, registerOutboundTools } from '../outbound/extension.js';
 import { assistantAgentTools } from '../assistants/mcp.js';
 import { registerAssignmentTools } from '../agents/assignment.js';
 import { registerProgramAccessTools } from '../program-operator/tools.js';
@@ -88,7 +87,6 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
   registerVaultTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   registerPhoneTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   registerApprovalTools(server, ctx, job);
-  registerOutboundTools(server, ctx, job);
   if (shelf) registerOrchestratorTools(server, ctx, app, job, reading);
   /* A department's own tools go for the department the orchestrator names. */
   shelf?.shelve(true);
@@ -104,7 +102,6 @@ async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation
     registerAssignmentTools(server, ctx, job);
     registerDepartmentControlTools(server, ctx, app, job);
     registerHeadPolicyTools(server, ctx, app, job);
-    registerOutboundHeadTools(server, ctx, app, job);
     shelf?.shelve();
   }
   if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
@@ -186,7 +183,6 @@ function registerOrchestratorTools(server: McpServer, ctx: Ctx, app: FastifyInst
   );
   registerControlTools(server, ctx, app, job);
   registerApprovalControlTools(server, ctx, app, job);
-  registerOutboundControlTools(server, ctx, app, job);
   registerComputerTools(server, ctx, job);
   /* The orchestrator answers for nothing standing still anywhere: it sees any employee's program, types into it and releases
      its recovery hold, as Operations do. */

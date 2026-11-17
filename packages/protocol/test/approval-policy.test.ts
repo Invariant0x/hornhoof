@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { APPROVAL_CHANNELS, ApprovalRule, approvalNeeded, DEFAULT_APPROVAL_RULE, kindKey, ruleOf } from '../src/approval-policy.js';
+import { APPROVAL_CHANNELS, ApprovalRule, approvalNeeded, defaultRule, kindKey, GOING_OUT_CHANNELS, ruleOf } from '../src/approval-policy.js';
 
 const work = (extra: { amount?: number | null; known?: boolean } = {}) => ({ amount: null, known: false, ...extra });
 
@@ -23,10 +23,16 @@ describe('approvalNeeded', () => {
   it('asks in the mode of limits when the work does not say how much, so nothing passes unmeasured', () => {
     expect(approvalNeeded({ mode: 'within_limits', limit: 100 }, work({ amount: null, known: true }))).toBe(true);
   });
+
+  it('never asks in the mode of no approval, however much and however new', () => {
+    expect(approvalNeeded({ mode: 'none' }, work({ amount: null, known: false }))).toBe(false);
+    expect(approvalNeeded({ mode: 'none' }, work({ amount: 1_000_000, known: false }))).toBe(false);
+  });
 });
 
 describe('ApprovalRule', () => {
-  it('keeps the three modes, with a limit only in the mode of limits', () => {
+  it('keeps the four modes, with a limit only in the mode of limits', () => {
+    expect(ApprovalRule.parse({ mode: 'none' })).toEqual({ mode: 'none' });
     expect(ApprovalRule.parse({ mode: 'every' })).toEqual({ mode: 'every' });
     expect(ApprovalRule.parse({ mode: 'new_kinds' })).toEqual({ mode: 'new_kinds' });
     expect(ApprovalRule.parse({ mode: 'within_limits', limit: 5, unit: ' USD ' })).toEqual({ mode: 'within_limits', limit: 5, unit: 'USD' });
@@ -36,21 +42,36 @@ describe('ApprovalRule', () => {
     expect(ApprovalRule.safeParse({ mode: 'within_limits' }).success).toBe(false);
     expect(ApprovalRule.safeParse({ mode: 'within_limits', limit: -1 }).success).toBe(false);
     expect(ApprovalRule.safeParse({ mode: 'every', limit: 5 }).success).toBe(false);
+    expect(ApprovalRule.safeParse({ mode: 'none', limit: 5 }).success).toBe(false);
     expect(ApprovalRule.safeParse({ mode: 'anything' }).success).toBe(false);
   });
 });
 
 describe('ruleOf', () => {
-  it('asks every time on a channel with no rule yet, as Hornhoof did before there were rules', () => {
-    expect(DEFAULT_APPROVAL_RULE).toEqual({ mode: 'every' });
-    expect(ruleOf(undefined)).toEqual({ mode: 'every' });
+  it('asks nothing for what goes out (messages, prices in them, publications) on a channel with no rule yet: a department that wants to approve its own sets a rule', () => {
+    expect(GOING_OUT_CHANNELS).toEqual(['message', 'price', 'publication']);
+    for (const channel of GOING_OUT_CHANNELS) {
+      expect(defaultRule(channel)).toEqual({ mode: 'none' });
+      expect(ruleOf(undefined, channel)).toEqual({ mode: 'none' });
+    }
+  });
+
+  it('asks for each commit, and only for a new kind of spend or anything else, with no rule yet', () => {
+    expect(defaultRule('commit')).toEqual({ mode: 'every' });
+    expect(ruleOf(undefined, 'commit')).toEqual({ mode: 'every' });
+    for (const channel of ['spend', 'other'] as const) {
+      expect(defaultRule(channel)).toEqual({ mode: 'new_kinds' });
+      expect(ruleOf(undefined, channel)).toEqual({ mode: 'new_kinds' });
+    }
   });
 
   it('reads what is stored, and never reads a stored mode of limits with no limit as no limit at all', () => {
-    expect(ruleOf({ mode: 'new_kinds', limitAmount: null, limitUnit: null })).toEqual({ mode: 'new_kinds' });
-    expect(ruleOf({ mode: 'within_limits', limitAmount: 7, limitUnit: 'USD' })).toEqual({ mode: 'within_limits', limit: 7, unit: 'USD' });
-    expect(ruleOf({ mode: 'within_limits', limitAmount: 7, limitUnit: null })).toEqual({ mode: 'within_limits', limit: 7 });
-    expect(ruleOf({ mode: 'within_limits', limitAmount: null, limitUnit: null })).toEqual({ mode: 'every' });
+    expect(ruleOf({ mode: 'none', limitAmount: null, limitUnit: null }, 'spend')).toEqual({ mode: 'none' });
+    expect(ruleOf({ mode: 'every', limitAmount: null, limitUnit: null }, 'message')).toEqual({ mode: 'every' });
+    expect(ruleOf({ mode: 'new_kinds', limitAmount: null, limitUnit: null }, 'message')).toEqual({ mode: 'new_kinds' });
+    expect(ruleOf({ mode: 'within_limits', limitAmount: 7, limitUnit: 'USD' }, 'price')).toEqual({ mode: 'within_limits', limit: 7, unit: 'USD' });
+    expect(ruleOf({ mode: 'within_limits', limitAmount: 7, limitUnit: null }, 'price')).toEqual({ mode: 'within_limits', limit: 7 });
+    expect(ruleOf({ mode: 'within_limits', limitAmount: null, limitUnit: null }, 'message')).toEqual({ mode: 'every' });
   });
 });
 

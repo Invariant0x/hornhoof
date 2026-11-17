@@ -103,8 +103,6 @@ const ROUTES: Record<string, unknown> = {
   /* No GitHub key is saved, so the orchestrator creates no repository. */
   '/api/repo-host': { host: null },
   '/api/google-sheets': { google: null },
-  /* What the departments send outside: nothing yet. Settings asks it to know whether to show External messaging. */
-  '/api/outbound': { channels: [], messages: [], escalations: [], approvals: [] },
   /* The company's saved sign-ins: none yet. Any person of the company reads them, and Settings asks to know whether to show
      Passwords. */
   '/api/vault': { entries: [] },
@@ -131,8 +129,6 @@ export async function serveApi(page: Page) {
     if (/^\/api\/subscriptions\/[^/]+\/tokens(\?|$)/.test(path)) return route.fulfill(json({ tokens: NO_TOKENS }));
     /* A department has no task branch outside main unless a test says otherwise. */
     if (/^\/api\/departments\/[^/]+\/branches$/.test(path)) return route.fulfill(json({ branches: [], problem: null }));
-    /* A department's screen asks what it sends outside and who runs it: nothing, and nobody here. */
-    if (/^\/api\/outbound\?department=[^&]+$/.test(path)) return route.fulfill(json({ channels: [], messages: [], escalations: [], approvals: [], departments: [] }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (task) return route.fulfill(json({ task: detail(task) }));
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));

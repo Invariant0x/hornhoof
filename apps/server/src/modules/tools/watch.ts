@@ -484,10 +484,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     /* A turn's first message reads what it sent before, which a restart of Hornhoof would otherwise forget. */
     if (!counts.has(job.id)) {
       const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
-      const [before] = await db
-        .select({ n: sql<number>`count(*)` })
+      /* Only the quota matters, even when an older turn already sent more. The literal kind also matches the partial index. */
+      const messages = db
+        .select({ one: sql`1`.as('one') })
         .from(agentEvents)
-        .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${me}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
+        .where(and(eq(agentEvents.companyId, job.companyId), sql`${agentEvents.kind} = 'message'`, sql`${agentEvents.data}->>'by' = ${me}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))))
+        .limit(TURN_NUDGES).as('sent_messages');
+      const [before] = await db.select({ n: sql<number>`count(*)` }).from(messages);
       if (!counts.has(job.id)) counts.set(job.id, Number(before?.n ?? 0));
     }
     /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */

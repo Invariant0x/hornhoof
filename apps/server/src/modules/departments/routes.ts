@@ -29,7 +29,6 @@ import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensur
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { repoHostRoutes } from './repo-hosts.js';
 import { waitPolicyRoutes } from './wait-policy-routes.js';
-import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { checkFolderFree, repoView } from './repository.js';
 import { departmentBranches } from './branches.js';
@@ -562,5 +561,4 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   approvalPolicyRoutes(app, ctx);
   repoHostRoutes(app, ctx);
   waitPolicyRoutes(app, ctx);
-  modelCheckRoutes(app, ctx);
 }

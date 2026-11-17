@@ -18,15 +18,6 @@ it('lines up every isolated phrase with its block through one shared rule and no
   expect(RULES.filter(r => r.decls['text-align'] === 'match-parent').map(r => [r.media, r.selectors])).toEqual([[null, [':where([dir="auto"])']]]);
 });
 
-/* A channel's addresses stand apart from its buttons: a block under a line, with a heading of the panel's subheadings
-   (Design #1193). */
-it('draws the addresses of a channel as a block of their own under a line, with a heading of the display face', () => {
-  expect(decl('.outbound-contacts', 'border-block-start')).toBe('1px solid var(--line)');
-  expect(decl('.outbound-contacts > h4', 'font-family')).toBe('var(--f-display)');
-  expect(decl('.outbound-contacts > h4', 'font-weight')).toBe('600');
-  expect(decl('.outbound-contacts > h4', 'font-size')).toBe('14px');
-});
-
 /* The map of a department with nobody in it, on a narrow screen and right to left (Design #1201): the hint stands above the
    buttons at the bottom, across the width, and the empty head card keeps its lines at one start edge. */
 it('puts the map hint above the bottom buttons on a narrow screen, across the width and wrapping by words', () => {

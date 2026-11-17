@@ -14,4 +14,4 @@ Use this ability to assess and draft terms for an assigned proposed deal. Inputs
 5. Flag unlimited liability, broad indemnity, exclusivity, auto-renewal, intellectual-property assignment, non-compete, cross-border data transfer, unusual law and penalties for the CEO or qualified legal adviser. For an NDA, also assess mutuality, confidentiality scope, duration, exceptions, return/destruction and hidden restrictive clauses.
 6. Recommend standard, needs changes or needs legal advice, with reasons and questions.
 
-Return the draft or comparison labeled "First read, not legal advice". Never sign, accept or promise terms. The CEO authorizes commercial commitments, a human signs every contract, and nothing reaches a partner without exact message approval and the authorized server outbound gateway.
+Return the draft or comparison labeled "First read, not legal advice". Never sign, accept or promise terms. The CEO authorizes commercial commitments and a human signs every contract; a partner message is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.
