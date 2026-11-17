@@ -1,0 +1,52 @@
+[
+  {
+    "kind": "verdict",
+    "text": "PASS на b0b972aa75fbfa31a6f0b0decf500858ea68278a (ветка task-1220, база 76c4b7d571aba37c5eefd12cac4eeee4945c01e5). Блокирующих находок нет, ремонт не нужен.\n\nЧто проверено по коду:\n- employeeChangedBy (apps/server/src/auth/session.ts:264) берет главу только из me.via при viaHead. viaHead ставит requirePerson по виду агента из проверенного внутреннего вызова, а не из тела запроса. Человек и оркестратор пишутся как раньше (actingAgentId null).\n- Все писатели agent_changes: routes агентов (patch, reset, removed), clearTeam, три вызова hireEmployee в departments/routes.ts, telegram, assistants/setup, people/routes переведены. Автоматические (operations/ensure, subscriptions/waiting и fallback, agents/assignment) и setup/routes не тронуты и пишут null.\n- Карточка: alias acting_agent плюс left join. Имя главы видно и после снятия. Это не утечка: по agent-view.ts всех сотрудников компании по имени знают все (knowsAgentId), а глава не бывает собственным агентом ассистента.\n- Миграция 0139: снимок отличается от 0136 только колонкой acting_agent_id и ее FK, prevId = id 0136. Слияние компаний берет FK из каталога (merge/facts.ts), новая колонка учтена без правил. Жестких удалений agents в src нет, поэтому ON DELETE no action безопасен.\n- Веб: changeAuthor в AgentCard.tsx, en/ru byHead («глава X (права Y)»), стили не менялись. Фраза в hh-head.md возвращена и верна.\n- Манифест автора: SHA-256 всех 24 путей совпали с кандидатом. Коммиты: Ivan Korol, Signed-off-by 3 из 3, Co-Authored-By нет. diff --check exit 0.\n\nМои прогоны на b0b972aa, по одному файлу, --maxWorkers=1 --no-file-parallelism:\n- apps/server: agent-changes-migration 2, agents 29, templates 283, network-tables 6, agent-sql-permissions 34, restore 14, merge-rules 7 — все exit 0.\n- head-department-control: первый прогон — 1 тайм-аут 20000 ms («run its own department, and no worker has them», нагрузка 27), не PASS. Повтор: 10 passed, exit 0.\n- templates-pipeline: первый прогон — 1 тайм-аут 20000 ms («reaches a head hired from the roster…»), не PASS. Повтор: 39 passed, exit 0.\n- apps/web: AgentCard.test.tsx 64 passed, exit 0.\n- tsc apps/web/tsconfig.json и apps/server/tsconfig.eslint.json под --max-old-space-size=2048 — exit 0. eslint 19 измененных TS/TSX файлов — exit 0.\n- Браузерный agent-history.spec.ts не перезапускал. По журналам автора: 12 + 8 + 4 = 24 уникальных случая PASS. Первый запуск оборван SIGTERM и автором PASS не назван.\n\nНеблокирующие заметки:\n1. 0139_snapshot.json связан с 0136, журнал idx 136. При вливании в turn-32 после #1077 и #1119 снимок и idx нужно перевязать на 0138, как глава обещал. Проверит migration-metadata.\n2. byHead показывает «unknown»/«неизвестно», если personName null. Это возможно только без строки человека, сейчас недостижимо.\n3. Security обязательна (риск access): авторство в истории теперь зависит от viaHead.",
+    "data": {
+      "pass": true,
+      "stage": "review",
+      "issues": [],
+      "checker": {
+        "model": "opus",
+        "agentId": "4cae4615-d31f-4a47-9eac-7100ce41f5bf",
+        "provider": "claude",
+        "capability": 2,
+        "subscriptionId": "3874b4e6-180f-41bc-ac2b-8808a9e9976f"
+      },
+      "candidateId": "bdf7aacd-469b-46b9-9247-6b596cbd4bab",
+      "routeRevision": 4,
+      "reviewedCommit": "b0b972aa75fbfa31a6f0b0decf500858ea68278a"
+    },
+    "by": {
+      "kind": "agent",
+      "id": "4cae4615-d31f-4a47-9eac-7100ce41f5bf",
+      "name": "Code reviewer"
+    },
+    "at": "2026-11-17T08:47:23.841Z"
+  },
+  {
+    "kind": "verdict",
+    "text": "Security PASS на b0b972aa75fbfa31a6f0b0decf500858ea68278a (ветка task-1220, база 76c4b7d571aba37c5eefd12cac4eeee4945c01e5). Блокирующих находок нет, ремонт не нужен, код не менял. Новых секретов, команд оболочки и зависимостей нет.\n\nЧто проверено по коду:\n- Кто глава, решает сервер. viaHead ставит requirePerson (apps/server/src/auth/session.ts:278) по agents.kind = 'head' для агента из внутреннего вызова; вызов принимается только с секретом процесса (auth/internal.ts:22, timingSafeEqual). employeeChangedBy (session.ts:264): actingAgentId = me.via только при viaHead, иначе null. Для человека и оркестратора запись прежняя.\n- Подмена из запроса невозможна. PATCH с actingAgentId, personId и byOrchestrator в теле дает 400 (тест на строке 121). В savePatch (agents/routes.ts:466) строка c, которая идет после employeeChangedBy, приходит из diffAgent (routes.ts:146) и содержит только field, before и after.\n- Все 11 мест, где пишется agent_changes, сверены. Человеческие пути и пути главы переведены на employeeChangedBy, найм передает его через HiredBy в hire.ts:54. Автоматические записи (operations/ensure, subscriptions/waiting и fallback, agents/assignment) не тронуты и пишут null.\n- Карточка (routes.ts:264) показывает только id и имя главы, тоже после его снятия. Права доступа к карточке не менялись. Веб выводит текст через React; dangerouslySetInnerHTML и innerHTML в диффе нет.\n- Миграция 0139 добавляет только nullable колонку и FK, старые строки не трогает. Жестких удалений agents в src нет.\n\nМои прогоны:\n- Свой workspace на b0b972aa: npm ci --offline, сборка packages/protocol. head-department-control.test.ts, --maxWorkers=1 --no-file-parallelism, NODE_OPTIONS=--max-old-space-size=2048.\n- Проба с намеренной поломкой: в session.ts поставил actingAgentId: me.via ?? null, то есть без проверки viaHead. Итог exit 1: тест «keeps the orchestrator's own department and staffing changes in its own history» упал на строке 116 (ожидался null, получен id оркестратора). Остальные 8 прошли, кроме теста ниже. Файл восстановлен, дерево чистое.\n- Без поломки: 9 passed, 1 timeout, exit 1. В тайм-аут уходит «run its own department, and no worker has them» (строка 28, кандидатом не менялся), 20191 ms при нагрузке 32.\n- Тот же тест отдельно, чередуя версии: кандидат 9099 ms и 12628 ms, база 76c4b7d5 17925 ms, все exit 0, нагрузка 20–23. Значит, тайм-аут дает нагрузка, а не кандидат. Полный файл чисто прошел у Review: 10 passed.\n- Браузерные тесты, tsc и eslint не перезапускал: Review прогнал их на этом же коммите.\n\nНеблокирующие заметки:\n1. Это было и до кандидата: SQL-роль оркестратора может вставлять и менять строки agent_changes. Таблицы нет в READ_ONLY (apps/server/src/db/agent-sql.ts:70), а общий GRANT (agent-sql.ts:177) дает права на все остальные таблицы. Поэтому SQL оркестратора может подделать историю карточки: раньше он мог написать «CEO», теперь может написать и «глава X (права Y)». person_changes по тем же причинам уже в READ_ONLY. Путь вне 24 путей задачи. Предлагаю главе отдельную задачу: внести agent_changes в READ_ONLY, тест в agent-sql-permissions.\n2. Тест head-department-control «run its own department, and no worker has them» близок к лимиту 20 s при нагрузке 25–33; у Review тоже был один тайм-аут. Это для Tests: результат зависит от нагрузки, а не от кандидата.\n3. Как заметил Review: при вливании в turn-32 снимок 0139 и idx нужно перевязать на 0138.",
+    "data": {
+      "pass": true,
+      "stage": "security",
+      "issues": [],
+      "checker": {
+        "model": "opus",
+        "agentId": "4728eaca-eddb-4da1-9242-71e29a5d4c7b",
+        "provider": "claude",
+        "capability": 2,
+        "subscriptionId": "3874b4e6-180f-41bc-ac2b-8808a9e9976f"
+      },
+      "candidateId": "bdf7aacd-469b-46b9-9247-6b596cbd4bab",
+      "routeRevision": 5,
+      "reviewedCommit": "b0b972aa75fbfa31a6f0b0decf500858ea68278a"
+    },
+    "by": {
+      "kind": "agent",
+      "id": "4728eaca-eddb-4da1-9242-71e29a5d4c7b",
+      "name": "Cypher"
+    },
+    "at": "2026-11-17T09:17:03.984Z"
+  }
+]

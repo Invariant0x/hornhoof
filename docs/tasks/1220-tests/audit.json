@@ -1,0 +1,1265 @@
+{
+  "candidate": "b0b972aa75fbfa31a6f0b0decf500858ea68278a",
+  "base": "76c4b7d571aba37c5eefd12cac4eeee4945c01e5",
+  "archiveSha256": "75072b731f299fb5902caeee26da17d410f1c95fa01cf52a6478edc9a3ad47fd",
+  "entrySha256": {
+    "author-b0b972aa7.log": "094a482368c7d00571e2d6706baca3c68e8f620c88f8f3759bc6c852e4016662",
+    "base-complexity-server.json": "c6e7bc41bb39d9e2cd66d1b8a73cdf23a5a0f3a2905bc2a57d36a9b512109fbc",
+    "base-complexity-web.json": "a3d146a5d95b028aa6fa947b2ab6d17f35c8520eb7177b87410e27f2d5a85fbd",
+    "browser-green-2.log": "a906919908024e053ff4d3b8bac5683fb3c1e76d60091c0c0addd7db3b3ac1d1",
+    "browser-green.log": "f65cb835042dd317663bf07cf836fe48a5891c7fe5ab66ca71d1d2608e6e5a46",
+    "browser-initial-probe-artifacts/results/agent-history/.last-run.json": "358726a24e5acc96a6ede2af1fe3e91a9a301e70969d12ff1b452d3cd2e2a18b",
+    "browser-initial-probe-artifacts/results/agent-history/agent-history-employee-history-in-en-light-at-375px-history-chromium/error-context.md": "c79f24f0e8e35b5d412f6b6f0d61d9ee647fa8a5aa2c8e544cbac6a121f57aa7",
+    "browser-initial-probe-artifacts/results/agent-history/agent-history-employee-history-in-en-light-at-375px-history-chromium/trace.zip": "a1430bf8c8aeafe89347417c1fa97e3d1680dbf39df8c1efbd165a97f489ec28",
+    "browser-probe.log": "12b434f5d77443dd7bffa2113802232953f9e3d22db9d71e452e9efe67092297",
+    "browser-remaining-1/.last-run.json": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-1280px-history-firefox/en-cyberpunk-1280.png": "5c79e1185496099386eb9bc05e73776accead6e4cfa7987959db1c0c80474587",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-1280px-history-firefox/sizes.json": "2c50d615e381ac57f1aa4099d85a6fac38448228638a9111ebf501c1e3837fee",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-1280px-history-webkit/en-cyberpunk-1280.png": "1b70fbeec1c64abc26504e19783a4e4ef3a55509ddcd471763186cc44eeca4ef",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-1280px-history-webkit/sizes.json": "da0ca1bda1d179f8470e1048cd1d12a3f6115c2b62b11bc1fd190b839f3e0ff8",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-375px-history-firefox/en-cyberpunk-375.png": "bf23306f9f7ab38431a2c29da24d370f8bd08e30f1fdbe56c7a685efd996c52a",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-375px-history-firefox/sizes.json": "8220300e5de1eb5cd65a81c2ca1e963165ac5b9dfc4ea27a38becd499deb2bcc",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-375px-history-webkit/en-cyberpunk-375.png": "0835433ed882691e3a1c8637e210792936eac05d988ac4e42946b045e3be3018",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-375px-history-webkit/sizes.json": "d15810cad79383a61b3c0f8f16a9f91202df266cc55db92cf2666fc2695afd32",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-1280px-history-firefox/en-light-1280.png": "cd1ecc73b3534a60e47bfc8fe57a6d97d8ea8b2c150406e2caefe702facadcd1",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-1280px-history-firefox/sizes.json": "e95d17d6cb27281222c7e047d0b21d729ca7691423d056525e5d7dec46b4809a",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-1280px-history-webkit/en-light-1280.png": "16d58cb9da5fca640b2d336bcd516e112dbba62a4bf3d7925c4f78c024b2ecc5",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-1280px-history-webkit/sizes.json": "f6553c408fce4c11ba691e4f754529ee35d7dbc5794a1ed347ec1676e8a77308",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-375px-history-firefox/en-light-375.png": "c087920428a9f8f734238e500c8a6eebc201360e24000dda65cc56816a1b8f61",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-375px-history-firefox/sizes.json": "2078e895075258614f3a3ad84c2b29dfc513da53025ac59bc2d4141942b88002",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-375px-history-webkit/en-light-375.png": "ddc4a5179f7d2cfe3d1c7db99e533a9bb591411a3c5011ec90cdd0069f59579a",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-375px-history-webkit/sizes.json": "db1315664f19af4876a796d27d8b874a6f8f4ad3eaaef24f4e27451f2f221784",
+    "browser-remaining-1.log": "9a576e8ccea5a8b8573ed64162f3f2d73b36234464f3a8ea7c6ffe88ac609f12",
+    "browser-remaining-2/.last-run.json": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903",
+    "browser-remaining-2/agent-history-employee-history-in-ru-cyberpunk-at-1280px-history-webkit/ru-cyberpunk-1280.png": "488d056e53daf764a81f372c6acef4707acc9944b0935ad5af1a800ed9f42a00",
+    "browser-remaining-2/agent-history-employee-history-in-ru-cyberpunk-at-1280px-history-webkit/sizes.json": "5517e9ba47dd7a47f30a2d6561662daff0e9d91fdfb9f908a7bc17b1c1f45d5a",
+    "browser-remaining-2/agent-history-employee-history-in-ru-cyberpunk-at-375px-history-webkit/ru-cyberpunk-375.png": "6f3a7fedd51ecc84fcd3e407d60e6485c313abf16e106e204470045d7a96585e",
+    "browser-remaining-2/agent-history-employee-history-in-ru-cyberpunk-at-375px-history-webkit/sizes.json": "2872c3c27792a8eb98d8b8399396baaea9e162335c19d75257d9b242061b82f1",
+    "browser-remaining-2/agent-history-employee-history-in-ru-light-at-1280px-history-webkit/ru-light-1280.png": "c301c9fe8874ce72a108f7c6ce3637d310782f5a97e28f9e69eb0309a9d1f4e2",
+    "browser-remaining-2/agent-history-employee-history-in-ru-light-at-1280px-history-webkit/sizes.json": "4aaca7a90a8da002f762929158809f846445e49eff08a874b1ead02a31b9b6c8",
+    "browser-remaining-2/agent-history-employee-history-in-ru-light-at-375px-history-webkit/ru-light-375.png": "6e3e19485d02b261c2b19bb3b02ab5a1c5b917e679528e45eed3e80e37318e88",
+    "browser-remaining-2/agent-history-employee-history-in-ru-light-at-375px-history-webkit/sizes.json": "0bd3c0558a0b413504c1fcc2660c9a396c51b3bc3c9ac7a185d178319014805e",
+    "browser-remaining-2.log": "04aef803e3cd86e40ebbc0974a720f726eed95732bb7f0d5ca05e71014876c32",
+    "browser-sizes.log": "4142c808f66ba1a8a973590acb25673cbe091556bba8630533b1fc94ea734672",
+    "callers-green.log": "d4d364941b856922599fd9bef4bb20d24cdbb235168cf507e2f20597dcbfee5a",
+    "candidate.patch": "12f3d7a9c8e97d767d5a65a1b0f16d281618000bf5fc1db7fe05be038a3620c1",
+    "card-green-2.log": "160b3fc668fe7acda53c0c79d03fcd80f1f94c23ee9a37e49eafbb3a629cf07e",
+    "card-green.log": "caeeee644f993b7399c8c6c394569ec724f62fd0d09ae0daec657e35e8745199",
+    "card-red.log": "df6b1f6a0077ab88a5935b3efb8778f32fea5d8a7a7ffaaa7ebd396e668a73da",
+    "card-refactor.log": "9f764014ac0ceb6401286c7bd863131c251d6cdaaf92102e61be005e04a69a61",
+    "crapper-server.edn": "d4ecc9deb53686740f8d25206b142ee5919c6215f7602b23fbede7c621d7c291",
+    "crapper-server.log": "226e2a8685271cccffc6dcd1c74fef58a30facfa2d5d87ef5f4322c32cf36dc7",
+    "crapper-web.edn": "84a4e0aaff353ac6152ec17e3ff6ee45f8b1508b328d5e0e96058bd037a0562b",
+    "crapper-web.log": "a965a335a7f9724ea4d41b3cadeeba7f2a28dd4d1464997859aab41c6e4733d1",
+    "dryer.edn": "d4096cccbc2108ff3f8dca9d20dbc6ebf313423ad28abf5b50a196ce923a91d5",
+    "dryer.log": "80065b5cfbea69047ed423cf0b8a663e34e4b4bd7e88129b316f911ac8266a65",
+    "final-check-statuses.json": "b0ec0ed713713076744238f17d9b0efe211e7b9882d5f915edf0abb11dac529c",
+    "final-checks.py": "2500fcd8735c87d6995794a5bb0ee6a62744ab83685e6697caf7bda3db6ee3be",
+    "head-migration-green.log": "11366996944dc4d801f2ca6e9cdd2cd284cda41eb88ea0a657a28b8059edb989",
+    "head-red.log": "2c937ab90845ec1d21ad447c9ca6e4cf6bca431bcae14e732ef3a2ef4e5e7b75",
+    "lint-final.log": "7c9a9de090690575854bc8e8f35c3fa853889fd8e3934e3c35b76efe17a90aee",
+    "lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "manifest.json": "44d1ccdfaf320cff269a47ba471c9f3bbc04cccddd177a3ea2951766c2f58a15",
+    "migration-generate.log": "814ae01bc07fa83070aca6d865061216d65a505b11fe8180c50ffe2f14f14099",
+    "migration-red.log": "85355e38f5e22d1cb7f65605c1c9992013c492d26afa7555bf5ca3e56bd001e1",
+    "quality-compare.mjs": "b518d6d5467967aed6d461460486b6a6a6b1cf2762764da16c15d339f8d12c58",
+    "quality-comparison.json": "ce3e378f8fb1972bc4e94053e96d2aecd74487fa340b6e1a813f2bf5f91d156f",
+    "quality-comparison.log": "e5b4f89751ae28903e3205beee40df8a5f8da1d9eceaf3e879013556083c2faa",
+    "report-ru.txt": "dbb2739f2d99b82b041c7b7e90614241108ed96902fb3483edf5f2d5cd5c4057",
+    "server-build.log": "a5ea60061f9908e3612e60fde84664d9b2645f87f60f067beac2c2143e58fb55",
+    "server-core-green-2.log": "1efae4d27352c33d3b224b3e5437bcb7e967eab8c8b55364fe2f50fecacf4edb",
+    "server-coverage/lcov-report/auth/index.html": "24f58e6425e5bbb154d5541a3b3601db2184229ef1a851ef73767e6b7c832e1e",
+    "server-coverage/lcov-report/auth/session.ts.html": "37854e032d784c96586911a592a9cda5ada1aa6293bba51d3d7a0df396adf79d",
+    "server-coverage/lcov-report/base.css": "75168965707cf3596c967ba36e82c91207d2a30eb00d798f7bce06ce9dfb59f2",
+    "server-coverage/lcov-report/block-navigation.js": "c964530b19f1fd3290fa53bbc185af53b2f55132ba1e13528e09fb67657b763c",
+    "server-coverage/lcov-report/db/index.html": "f2af4d43865104fe7ec7103a32b7a1f08fb81ca442b8d1ed08c2a46a8021bff1",
+    "server-coverage/lcov-report/db/schema.ts.html": "e9b567bd81928b74e71413e87ee586e2f0b5da88c71ea3b05ae054adb190f63c",
+    "server-coverage/lcov-report/favicon.png": "5b0cfd52dc0bfbe544f4e1a9c77aa46b8629b0e0aad6c54f95eef457b86c2a89",
+    "server-coverage/lcov-report/index.html": "afd40a478834dedd464690a65265ddd2f970f41007cc98925c2d6211dcff94b2",
+    "server-coverage/lcov-report/modules/agents/index.html": "f72e069e8f423c11a4cc8f0f9d931148f43a7a6a91fdc92aa42d41cd0e47143f",
+    "server-coverage/lcov-report/modules/agents/routes.ts.html": "f0219649fd281e2f0ec739478359d0f3ee8ee2ba3653493472a4cad26a85d7bc",
+    "server-coverage/lcov-report/modules/assistants/index.html": "d94861e33cf483c4d04be52961c942928a4654b182c204c89826fb37a37043e6",
+    "server-coverage/lcov-report/modules/assistants/setup.ts.html": "3d49b376ee929ec36041d217cd587a901e884d6d84bdb1c257da81cd4e358308",
+    "server-coverage/lcov-report/modules/departments/hire.ts.html": "dc5e1c665b1f14f0f1915f3d88eaa28167b206527e1b998c53d54b8b632ad80e",
+    "server-coverage/lcov-report/modules/departments/index.html": "7cd174a41fcf1dd6a5e90e9f3c284859072e33987de91d579fea17c35b7b4e00",
+    "server-coverage/lcov-report/modules/departments/routes.ts.html": "33aff64cce389696d32131536c860c412515c1f1012db8a5b23609d22046c069",
+    "server-coverage/lcov-report/modules/people/index.html": "df1008cd978c077d72c374262408f43d1eeac2c967baab91431fa35b69b647bd",
+    "server-coverage/lcov-report/modules/people/routes.ts.html": "3849e73f0cfa88fda56a24677d45c3ca1dda6477fc922913394ea6236337996b",
+    "server-coverage/lcov-report/modules/telegram/index.html": "8d0fbbe02587725903ff780ca94380cb655d5ae8df757856b30a8c7197dae16b",
+    "server-coverage/lcov-report/modules/telegram/routes.ts.html": "589b3a0ec27bfc5261ad22e0ff25e76b149a2e6c72256bc6f1c5d7631dd4f6d9",
+    "server-coverage/lcov-report/prettify.css": "31c66a00ede9f0a6ac6dfc0c3819a6cb925ebb771cde59d8228ec8bc8595a91b",
+    "server-coverage/lcov-report/prettify.js": "5b36332f32c5a4781348fb2c63f5f672c01497eb9508989ff1c8ac3795061386",
+    "server-coverage/lcov-report/sort-arrow-sprite.png": "42c895355f9838ede83fdfdca90127d8471aefed5ecf5342374f65ec7c3f10ab",
+    "server-coverage/lcov-report/sorter.js": "e281b0b47445030f6e26cbf7ab1187498516694b8716ed1351c875129d567c0c",
+    "server-coverage/lcov.info": "3177aceb57f9576cca1f0bca94527157748a6af752e1e6dae943f1cc48bb086e",
+    "server-coverage-single.log": "5727c5617f86b286ec9fd1839591e60eb455839149845d368e6ea783cb41f8a9",
+    "server-coverage.log": "6cc6b9074967d76de1ddaa0ebbc9879afd3e8b1ee299244e203f43e9477ef8e8",
+    "server-test-types-final.log": "2b4117d951f0edb2f3a098109d2b758213aecde12e75e847b3a1d12f11c8ace2",
+    "server-types-final.log": "737d024d9ae33fd1676f3cd025e4dbe6a9d5383b5241c9022b4bc3f852df9fbb",
+    "server-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "web-build.log": "0f846c82684aeef7f5654e79fdea500a8ccd70917f054e1101f64657a76aa459",
+    "web-coverage/lcov-report/base.css": "75168965707cf3596c967ba36e82c91207d2a30eb00d798f7bce06ce9dfb59f2",
+    "web-coverage/lcov-report/block-navigation.js": "c964530b19f1fd3290fa53bbc185af53b2f55132ba1e13528e09fb67657b763c",
+    "web-coverage/lcov-report/favicon.png": "5b0cfd52dc0bfbe544f4e1a9c77aa46b8629b0e0aad6c54f95eef457b86c2a89",
+    "web-coverage/lcov-report/index.html": "8d9f5ff74f809b18b724204bdfd8065a1858a72c5f9c2dc7bb7cdc599c875f31",
+    "web-coverage/lcov-report/prettify.css": "31c66a00ede9f0a6ac6dfc0c3819a6cb925ebb771cde59d8228ec8bc8595a91b",
+    "web-coverage/lcov-report/prettify.js": "5b36332f32c5a4781348fb2c63f5f672c01497eb9508989ff1c8ac3795061386",
+    "web-coverage/lcov-report/sort-arrow-sprite.png": "42c895355f9838ede83fdfdca90127d8471aefed5ecf5342374f65ec7c3f10ab",
+    "web-coverage/lcov-report/sorter.js": "e281b0b47445030f6e26cbf7ab1187498516694b8716ed1351c875129d567c0c",
+    "web-coverage/lcov-report/src/i18n/en.ts.html": "f1aa0e5ba6558541595f25af25da72441b9e877be10ffd098fa8c583db60c9ac",
+    "web-coverage/lcov-report/src/i18n/index.html": "958d6305cea0611c3246a494cd549a98fa0bfa972cdfc429636a94370a3ad845",
+    "web-coverage/lcov-report/src/i18n/ru.ts.html": "9ab7bf8dc7707b65a68721d4892da0e79c46336c0723fd1de5cb8f41ec23d5f4",
+    "web-coverage/lcov-report/src/index.html": "d9351b23bf0c83605d6cd8d42fcb53a479740a8e3e13f554a198bb187d3fc6a4",
+    "web-coverage/lcov-report/src/types.ts.html": "aa681a03357002134f7ade35fff74d2accb57ee0143a5c09ef94656ef4e3929e",
+    "web-coverage/lcov-report/src/ui/AgentCard.tsx.html": "ce86028c9347ec9366a91dfdf808a840e9cf6ca7e4c7f0cd26a8018ed5ed7000",
+    "web-coverage/lcov-report/src/ui/index.html": "fb6c73c240f10b5e0e32d388d7314929576a3af83e83234934c321a599bbd9aa",
+    "web-coverage/lcov.info": "f76ccc899fab88c96966fa1e5b2b64390b59d7a1189a15cf74e105dbcf5f89a6",
+    "web-coverage.log": "76581e6a6b402b67058e2db13d81e1a1e479b975f6b1b1d8063f7a3c903760ef",
+    "web-types-final.log": "fe148088cc08dbc43ca0756142f8048a5d86b6ae9c65c7984cb561d35be75bde",
+    "web-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "candidateFilesMatched": 24,
+  "exactCandidatePatchMatched": true,
+  "recordedFinalCommands": [
+    {
+      "name": "server-types-final",
+      "command": [
+        "npx",
+        "--no-install",
+        "tsc",
+        "-p",
+        "apps/server/tsconfig.json",
+        "--noEmit"
+      ],
+      "cwd": ".",
+      "exitCode": 0
+    },
+    {
+      "name": "server-test-types-final",
+      "command": [
+        "npx",
+        "--no-install",
+        "tsc",
+        "-p",
+        "apps/server/tsconfig.eslint.json",
+        "--noEmit"
+      ],
+      "cwd": ".",
+      "exitCode": 0
+    },
+    {
+      "name": "web-types-final",
+      "command": [
+        "npx",
+        "--no-install",
+        "tsc",
+        "-p",
+        "apps/web/tsconfig.json",
+        "--noEmit"
+      ],
+      "cwd": ".",
+      "exitCode": 0
+    },
+    {
+      "name": "server-build",
+      "command": [
+        "npm",
+        "run",
+        "build",
+        "-w",
+        "@hornhoof/server"
+      ],
+      "cwd": ".",
+      "exitCode": 0
+    },
+    {
+      "name": "web-build",
+      "command": [
+        "npm",
+        "run",
+        "build",
+        "-w",
+        "@hornhoof/web"
+      ],
+      "cwd": ".",
+      "exitCode": 0
+    },
+    {
+      "name": "lint-final",
+      "command": [
+        "npx",
+        "--no-install",
+        "eslint",
+        "apps/server/src/auth/session.ts",
+        "apps/server/src/db/schema.ts",
+        "apps/server/src/modules/agents/routes.ts",
+        "apps/server/src/modules/assistants/setup.ts",
+        "apps/server/src/modules/departments/hire.ts",
+        "apps/server/src/modules/departments/routes.ts",
+        "apps/server/src/modules/people/routes.ts",
+        "apps/server/src/modules/telegram/routes.ts",
+        "apps/server/test/head-department-control.test.ts",
+        "apps/server/test/agents.test.ts",
+        "apps/server/test/agent-changes-migration.test.ts",
+        "apps/web/src/types.ts",
+        "apps/web/src/ui/AgentCard.tsx",
+        "apps/web/src/i18n/en.ts",
+        "apps/web/src/i18n/ru.ts",
+        "apps/web/test/AgentCard.test.tsx",
+        "apps/web/test/api-mock.ts",
+        "apps/web/e2e/agent-history.spec.ts",
+        "apps/web/e2e/agent-history.config.ts"
+      ],
+      "cwd": ".",
+      "exitCode": 0
+    },
+    {
+      "name": "crapper-server",
+      "command": [
+        "crapper",
+        "--coverage-report",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/.task-1220-evidence/server-coverage/lcov.info",
+        "src/auth/session.ts",
+        "src/db/schema.ts",
+        "src/modules/agents/routes.ts",
+        "src/modules/assistants/setup.ts",
+        "src/modules/departments/hire.ts",
+        "src/modules/departments/routes.ts",
+        "src/modules/people/routes.ts",
+        "src/modules/telegram/routes.ts"
+      ],
+      "cwd": "apps/server",
+      "exitCode": 0
+    },
+    {
+      "name": "crapper-web",
+      "command": [
+        "crapper",
+        "--coverage-report",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/.task-1220-evidence/web-coverage/lcov.info",
+        "src/types.ts",
+        "src/ui/AgentCard.tsx",
+        "src/i18n/en.ts",
+        "src/i18n/ru.ts"
+      ],
+      "cwd": "apps/web",
+      "exitCode": 0
+    },
+    {
+      "name": "dryer",
+      "command": [
+        "dryer",
+        "--threshold",
+        "0.8",
+        "apps/server/src/auth/session.ts",
+        "apps/server/src/db/schema.ts",
+        "apps/server/src/modules/agents/routes.ts",
+        "apps/server/src/modules/assistants/setup.ts",
+        "apps/server/src/modules/departments/hire.ts",
+        "apps/server/src/modules/departments/routes.ts",
+        "apps/server/src/modules/people/routes.ts",
+        "apps/server/src/modules/telegram/routes.ts",
+        "apps/server/test/head-department-control.test.ts",
+        "apps/server/test/agents.test.ts",
+        "apps/server/test/agent-changes-migration.test.ts",
+        "apps/web/src/types.ts",
+        "apps/web/src/ui/AgentCard.tsx",
+        "apps/web/src/i18n/en.ts",
+        "apps/web/src/i18n/ru.ts",
+        "apps/web/test/AgentCard.test.tsx",
+        "apps/web/test/api-mock.ts",
+        "apps/web/e2e/agent-history.spec.ts",
+        "apps/web/e2e/agent-history.config.ts"
+      ],
+      "cwd": ".",
+      "exitCode": 0
+    }
+  ],
+  "completedUniqueServerTests": 165,
+  "completedCardTests": 64,
+  "coverageHeadTestsOverlap": 10,
+  "browserCases": [
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "ru",
+      "theme": "light",
+      "width": 375
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "ru",
+      "theme": "light",
+      "width": 1280
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "ru",
+      "theme": "cyberpunk",
+      "width": 375
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "ru",
+      "theme": "cyberpunk",
+      "width": 1280
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "en",
+      "theme": "light",
+      "width": 375
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "en",
+      "theme": "light",
+      "width": 1280
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "en",
+      "theme": "cyberpunk",
+      "width": 375
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "chromium",
+      "locale": "en",
+      "theme": "cyberpunk",
+      "width": 1280
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "firefox",
+      "locale": "ru",
+      "theme": "light",
+      "width": 375
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "firefox",
+      "locale": "ru",
+      "theme": "light",
+      "width": 1280
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "firefox",
+      "locale": "ru",
+      "theme": "cyberpunk",
+      "width": 375
+    },
+    {
+      "log": "browser-green-2.log",
+      "browser": "firefox",
+      "locale": "ru",
+      "theme": "cyberpunk",
+      "width": 1280
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "firefox",
+      "locale": "en",
+      "theme": "light",
+      "width": 375
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "firefox",
+      "locale": "en",
+      "theme": "light",
+      "width": 1280
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "firefox",
+      "locale": "en",
+      "theme": "cyberpunk",
+      "width": 375
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "firefox",
+      "locale": "en",
+      "theme": "cyberpunk",
+      "width": 1280
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "webkit",
+      "locale": "en",
+      "theme": "light",
+      "width": 375
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "webkit",
+      "locale": "en",
+      "theme": "light",
+      "width": 1280
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "webkit",
+      "locale": "en",
+      "theme": "cyberpunk",
+      "width": 375
+    },
+    {
+      "log": "browser-remaining-1.log",
+      "browser": "webkit",
+      "locale": "en",
+      "theme": "cyberpunk",
+      "width": 1280
+    },
+    {
+      "log": "browser-remaining-2.log",
+      "browser": "webkit",
+      "locale": "ru",
+      "theme": "light",
+      "width": 375
+    },
+    {
+      "log": "browser-remaining-2.log",
+      "browser": "webkit",
+      "locale": "ru",
+      "theme": "light",
+      "width": 1280
+    },
+    {
+      "log": "browser-remaining-2.log",
+      "browser": "webkit",
+      "locale": "ru",
+      "theme": "cyberpunk",
+      "width": 375
+    },
+    {
+      "log": "browser-remaining-2.log",
+      "browser": "webkit",
+      "locale": "ru",
+      "theme": "cyberpunk",
+      "width": 1280
+    }
+  ],
+  "retainedScreenshots": [
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-1280px-history-firefox/en-cyberpunk-1280.png",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-1280px-history-webkit/en-cyberpunk-1280.png",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-375px-history-firefox/en-cyberpunk-375.png",
+    "browser-remaining-1/agent-history-employee-history-in-en-cyberpunk-at-375px-history-webkit/en-cyberpunk-375.png",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-1280px-history-firefox/en-light-1280.png",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-1280px-history-webkit/en-light-1280.png",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-375px-history-firefox/en-light-375.png",
+    "browser-remaining-1/agent-history-employee-history-in-en-light-at-375px-history-webkit/en-light-375.png",
+    "browser-remaining-2/agent-history-employee-history-in-ru-cyberpunk-at-1280px-history-webkit/ru-cyberpunk-1280.png",
+    "browser-remaining-2/agent-history-employee-history-in-ru-cyberpunk-at-375px-history-webkit/ru-cyberpunk-375.png",
+    "browser-remaining-2/agent-history-employee-history-in-ru-light-at-1280px-history-webkit/ru-light-1280.png",
+    "browser-remaining-2/agent-history-employee-history-in-ru-light-at-375px-history-webkit/ru-light-375.png"
+  ],
+  "timings": [
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "reported file test duration",
+      "ms": 28928
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "hires an employee with as many skills as a hire takes, their bodies going as files",
+      "ms": 5073
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "opens an employee's card with its skills, prompt parts and raw text",
+      "ms": 1021
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default",
+      "ms": 1384
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "shows the fitted role effort on the map for Kimi unless a person picks a level",
+      "ms": 1001
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps the instructions within what a turn carries, counting only what is not a skill file",
+      "ms": 1116
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "lets go of a plan whose owner lost the department or was disabled",
+      "ms": 1176
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "names the model its role asks for when an employee gets a plan and no model comes with it",
+      "ms": 1069
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "replaces a checker moved into a sub-unit while retaining required Review and its question (question: false)",
+      "ms": 1089
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "replaces a checker moved into a sub-unit while retaining required Review and its question (question: true)",
+      "ms": 1073
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agents.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps current and independent questions when a Review owner moves into a sub-unit (other question: true)",
+      "ms": 1195
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "reported file test duration",
+      "ms": 17742
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "run its own department, and no worker has them",
+      "ms": 5957
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "creates, renames and removes sub-units and adds and removes products of its department",
+      "ms": 1659
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "records the head and its authority person for hiring, changes, reset, team removal and firing",
+      "ms": 1913
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps the orchestrator's own department and staffing changes in its own history",
+      "ms": 1190
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "uses the active CEO when no department owner is named, whoever opened the turn",
+      "ms": 1821
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "anything outside its own department, even on the CEO's word",
+      "ms": 1586
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agent-changes-migration.test.ts",
+      "kind": "reported file test duration",
+      "ms": 5084
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agent-changes-migration.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives a fresh install a nullable acting agent linked to the employee table",
+      "ms": 2703
+    },
+    {
+      "log": "server-core-green-2.log",
+      "file": "test/agent-changes-migration.test.ts",
+      "kind": "test over 1 second",
+      "name": "upgrades without attributing old changes to an agent, and can migrate again",
+      "ms": 2325
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "reported file test duration",
+      "ms": 168274
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "leaves every department without an owner and every company without rules, with nobody given anything",
+      "ms": 2217
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps the approvals already asked as they are, and still refuses an approval that says nothing of what it approves",
+      "ms": 4413
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "refuses a stored rule that would let everything through: a mode of limits with no limit",
+      "ms": 1224
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds its tables empty, with nobody given anything and no row of an older database touched",
+      "ms": 1532
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds its tables empty, with nobody given anything and no row of two older companies touched",
+      "ms": 1485
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "leaves its guards in place when it is run again",
+      "ms": 1011
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps on every card the text that moved out of a skill it holds, and adds nothing else",
+      "ms": 1991
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives what leading and working on code took out of the common skills to every card that leads or works on code, and nothing to the others",
+      "ms": 2427
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives the speed skill every role lists to every head and member that keeps a list of its own, once, and nothing to the orchestrator",
+      "ms": 2161
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "preserves sole and mixed pending staffing cards when retiring the developer role",
+      "ms": 6848
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "retires only the saved DEV-GEN role key without changing card text, skill choices or run settings",
+      "ms": 5025
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "appends only missing split company abilities to saved selections and preserves custom bodies, hashes and list order",
+      "ms": 5681
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "marks the sessions of an older install as made before the __Host- cookie",
+      "ms": 5849
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "reads as having none, as the keeper meets it before an update migrates",
+      "ms": 3128
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds the fences, and the journal once migrated",
+      "ms": 5111
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "refuses a table it could not journal, rather than leave it out",
+      "ms": 4021
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps the base of each step, with the indexes pruning reads by",
+      "ms": 2412
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives every event of a task a name that holds across machines",
+      "ms": 3337
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "records a database call in the lease check, and nothing for a check without a call",
+      "ms": 3427
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds what a machine is in the network, and the authority's tables, journaled and closed",
+      "ms": 3527
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps one row to a network id, and only the roles and kinds there are",
+      "ms": 4981
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds its tables, journaled and closed, and what a machine says of its link and its update",
+      "ms": 4642
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "takes only the paths, update states, kinds and amounts there are",
+      "ms": 4334
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds access per machine and its commands, journaled and closed",
+      "ms": 5467
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "takes only the states and times of a command there are, and a request only whole",
+      "ms": 4972
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds each machine's age key and holdings, and the recovery keys, journaled and closed",
+      "ms": 3665
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds net.backups, fenced, with only the reasons, sizes and hashes there are",
+      "ms": 5586
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds the merge records, fenced",
+      "ms": 6273
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "takes a fork among the reasons of a backup",
+      "ms": 6913
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "takes only the merges, conflicts and rows there are",
+      "ms": 5800
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds the server order and the copy's columns",
+      "ms": 5250
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds the pulse, fenced, and the sources of a merge a machine gives",
+      "ms": 5743
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "adds the measures and the ranking's row",
+      "ms": 5079
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "holds one move",
+      "ms": 4298
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "records a handover",
+      "ms": 6118
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "names a built-in node's machine",
+      "ms": 4413
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "records the handover a state ended with",
+      "ms": 3586
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "records the kind of each handover",
+      "ms": 3459
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "parks a job's messages",
+      "ms": 3112
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps the led term of an old database, hides a link, and knows a copy that saves what it led",
+      "ms": 3445
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migrations.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives every plan an empty list of fallbacks, keeps the plans and cards as they were, and puts nobody on a fallback",
+      "ms": 3756
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "reported file test duration",
+      "ms": 33909
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "lets the CEO invite a person who then signs in",
+      "ms": 9266
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives 410 for a used invite and 404 for an unknown one",
+      "ms": 2276
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives a person a new link that also resets their password",
+      "ms": 1114
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "takes the person's own key away on a reset, and lets them make a new one",
+      "ms": 1295
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "replaces an expired invite",
+      "ms": 1154
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "protects the owner and yourself and needs company scope",
+      "ms": 1101
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "lets the CEO set and take off the mark of a person with the whole company, and says so in /api/me and /api/people",
+      "ms": 1861
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives no mark to a new invite, nor to a person who does not see the whole company",
+      "ms": 1299
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/people.test.ts",
+      "kind": "test over 1 second",
+      "name": "is the real CEO's alone, by himself or through the orchestrator: not a person of the whole company, not the delegate, not for the CEO",
+      "ms": 1506
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "reported file test duration",
+      "ms": 32358
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "is checked with Telegram, kept encrypted and shown on the card only by its name",
+      "ms": 8893
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "refuses a token Telegram does not take, and says so when Telegram cannot be reached",
+      "ms": 2316
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "takes off a webhook the bot had before, keeping what waits for it, or is not kept when that fails",
+      "ms": 1355
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "belongs to one head only, and only heads and the orchestrator have one",
+      "ms": 1437
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "is set by people with the whole company and by everyone given the head's department, by no one else",
+      "ms": 1998
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "stops listening when it is taken off, and when its head leaves the company",
+      "ms": 1803
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "is set by the person as a username or a number, and cleared",
+      "ms": 1025
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "belongs to one person, and only the CEO sets the CEO's",
+      "ms": 1185
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "reaches the orchestrator as the CEO's own words, and his answer goes back to the same chat as plain text",
+      "ms": 1823
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "finds the person by the number once known, even after the username moved on",
+      "ms": 1737
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/telegram.test.ts",
+      "kind": "test over 1 second",
+      "name": "goes on listening after Telegram was away",
+      "ms": 4162
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/departments.test.ts",
+      "kind": "reported file test duration",
+      "ms": 21060
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/departments.test.ts",
+      "kind": "test over 1 second",
+      "name": "builds the proposed departments with their products and tells the orchestrator",
+      "ms": 4314
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/departments.test.ts",
+      "kind": "test over 1 second",
+      "name": "tells the orchestrator who clicked when the owner of a department changes it, not the CEO",
+      "ms": 1048
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/departments.test.ts",
+      "kind": "test over 1 second",
+      "name": "tells the orchestrator who clicked when the owner of a department hires in it, not the CEO",
+      "ms": 1135
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/departments.test.ts",
+      "kind": "test over 1 second",
+      "name": "keeps a product with an open task, then removes it and its whole department as before",
+      "ms": 3203
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/departments.test.ts",
+      "kind": "test over 1 second",
+      "name": "reads only the tasks of the department and its products",
+      "ms": 6200
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "reported file test duration",
+      "ms": 28055
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "are added, seen, renamed and removed by the person who runs it, without the CEO",
+      "ms": 10889
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "include one the CEO placed in the department, which its person keeps as the CEO does",
+      "ms": 1341
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "are no one's elsewhere: another department, a team of it, the whole company or the orchestrator stay closed",
+      "ms": 1548
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "is never done by a head, even on the CEO's word, for a new employee or one there is",
+      "ms": 2091
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "are set in a turn that answers the person who runs the department, for it and no other",
+      "ms": 2336
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "are set in any turn with the rights of whoever runs the department, whoever wrote or nobody, but never for commits",
+      "ms": 3446
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "cancels a task given to its department by the orchestrator, and none of another department",
+      "ms": 1398
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/department-owner-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "sets the department description in any turn, whoever wrote or nobody, as the person who runs it does on the screen",
+      "ms": 1627
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migration-history.test.ts",
+      "kind": "reported file test duration",
+      "ms": 26221
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migration-history.test.ts",
+      "kind": "test over 1 second",
+      "name": "upgrades an existing main installation with all retained rows and one record per migration",
+      "ms": 14242
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migration-history.test.ts",
+      "kind": "test over 1 second",
+      "name": "upgrades an existing turn-5 installation with all retained rows and one record per migration",
+      "ms": 11959
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/assistants-people.test.ts",
+      "kind": "reported file test duration",
+      "ms": 26377
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/assistants-people.test.ts",
+      "kind": "test over 1 second",
+      "name": "is a person marked as an agent of its owner, with no email and no access of its own",
+      "ms": 12045
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/assistants-people.test.ts",
+      "kind": "test over 1 second",
+      "name": "gets a key and a signing secret shown once, kept as a hash and encrypted, replaced and revoked",
+      "ms": 2534
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/assistants-people.test.ts",
+      "kind": "test over 1 second",
+      "name": "gives OpenClaw and Hermes their settings with a new key: Hornhoof's MCP server, and the webhook when Hornhoof wakes them",
+      "ms": 4429
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/assistants-people.test.ts",
+      "kind": "test over 1 second",
+      "name": "changes its program and events address, which must be a web address",
+      "ms": 1842
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/assistants-people.test.ts",
+      "kind": "test over 1 second",
+      "name": "is set up by its owner, and by people with the whole company, but the CEO's and the delegate's only by the CEO",
+      "ms": 3758
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migration-metadata.test.ts",
+      "kind": "reported file test duration",
+      "ms": 9209
+    },
+    {
+      "log": "callers-green.log",
+      "file": "test/migration-metadata.test.ts",
+      "kind": "test over 1 second",
+      "name": "describes the columns and regular indexes of a freshly migrated database",
+      "ms": 8379
+    },
+    {
+      "log": "server-coverage-single.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "reported file test duration",
+      "ms": 8874
+    },
+    {
+      "log": "server-coverage-single.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "run its own department, and no worker has them",
+      "ms": 3403
+    },
+    {
+      "log": "server-coverage-single.log",
+      "file": "test/head-department-control.test.ts",
+      "kind": "test over 1 second",
+      "name": "records the head and its authority person for hiring, changes, reset, team removal and firing",
+      "ms": 1096
+    },
+    {
+      "log": "web-coverage.log",
+      "file": "test/AgentCard.test.tsx",
+      "kind": "reported file test duration",
+      "ms": 2436
+    }
+  ],
+  "limits": [
+    "Final manifest binds candidate sources; earlier run/source attribution also needs producer records.",
+    "First browser part exited 143 after 12 completed cases. No whole-run PASS is inferred.",
+    "Only light and cyberpunk themes were exercised, not matrix and pixel.",
+    "No fresh product test was executed by this verifier."
+  ]
+}
