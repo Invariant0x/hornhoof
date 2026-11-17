@@ -4,7 +4,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
-import { PRIVATE_TOOL_NOTE, ToolPrivacy, toolPrivacy } from '@hornhoof/protocol';
+import { PRIVATE_TOOL_NOTE, ToolPrivacy, toolPrivacy, type ToolPrivacyPolicy } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { toldPlace } from '../program-folder.js';
@@ -75,6 +75,7 @@ function exitError(output: string | null, signedOut: RegExp | null, fallback: Jo
    what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
 type Turn = {
   privacy?: ToolPrivacy;
+  privateOutput?: boolean;
   jobId: string | null;
   onEvent(e: AgentEvent): void;
   typed: boolean;
@@ -432,7 +433,7 @@ export class TerminalHost {
       capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason), unowned: (key, event) => this.unownedHook(key, event),
       refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
       outside: opts.toolsOutside, opening: key => this.openingTurn(key), checkStep: opts.checkStep,
-      sensitive: (key, name, input, answer) => this.sensitiveTool(key, name, input, answer),
+      sensitive: (key, name, input, answer, policy) => this.sensitiveTool(key, name, input, answer, policy),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     const set = { ...DEFAULTS, ...defined(opts) };
@@ -452,21 +453,21 @@ export class TerminalHost {
     this.operatorTimer = this.operatorTicks();
   }
 
-  private sensitiveTool(key: string, name: string, input: unknown, answer?: unknown): void {
+  private sensitiveTool(key: string, name: string, input: unknown, answer?: unknown, policy: ToolPrivacyPolicy | undefined = toolPrivacy(name)): void {
     const agent = this.agents.get(key);
     if (!agent) return;
     agent.privateOutput = true;
     const turn = activeTurn(agent);
     if (!turn) return;
     const privacy = (turn.privacy ??= new ToolPrivacy());
-    privacy.input(name, input);
+    privacy.input(name, input, policy);
     if (!answer || typeof answer !== 'object') return;
     const content = (answer as { result?: { content?: { text?: string }[] } }).result?.content ?? [];
     for (const block of content) {
       if (typeof block.text !== 'string') continue;
       let value: unknown = block.text;
       try { value = JSON.parse(block.text); } catch { /* Plain sensitive replies are values too. */ }
-      privacy.result(value, toolPrivacy(name));
+      privacy.result(value, policy);
     }
   }
 
@@ -711,6 +712,7 @@ export class TerminalHost {
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
     const turn = requestedTurn(job, this.requestedWords(a, job), starting !== null);
+    turn.privateOutput = a.privateOutput;
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -2257,7 +2259,7 @@ export class TerminalHost {
   private emit(a: Agent, event: AgentEvent): void {
     const turn = activeTurn(a);
     if (!turn) return;
-    event = (turn.privacy ??= new ToolPrivacy()).event(event);
+    event = (turn.privacy ??= new ToolPrivacy()).event(event, event.kind === 'tool' ? this.bridge.toolPolicy(a.key, event.name) : undefined);
     if (turn.privacy.sensitive) a.privateOutput = true;
     if (event.kind === 'text') { this.ownActivity(a); a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
@@ -2501,7 +2503,7 @@ export class TerminalHost {
     this.beginTurn(a);
     a.ends.started(id);
     a.programTurnId = id;
-    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
+    const turn: Turn = { privateOutput: a.privateOutput, jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
     turn.observed = this.observeProgram(a, null);
     a.turn = turn;
     a.busy = a.took = true;
@@ -2620,7 +2622,7 @@ export class TerminalHost {
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput, failure?: Failure, tokens: TurnTokens | null = null): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
-    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, tokens, sensitive: turn.privacy?.sensitive, privateValues: turn.privacy?.values, ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
+    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, tokens, sensitive: turn.privateOutput || turn.privacy?.sensitive, privateValues: turn.privacy?.values, ...(turn.words.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */

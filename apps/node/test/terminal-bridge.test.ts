@@ -70,6 +70,25 @@ describe("the node's bridge to Hornhoof's tools", () => {
     ]);
   });
 
+  it('uses the sensitive flag of a newly listed tool before forwarding its input or reply', async () => {
+    const policy = { sensitive: true, secretInput: ['value'], secretOutput: ['value'] };
+    const result = { tools: [{ name: 'new_private_tool', _meta: policy }], content: [{ type: 'text', text: '{"value":"private-generic-marker"}' }] };
+    const up = await upstream(result);
+    const observed: unknown[] = [];
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => observed.push({ key, name, input, answer }) });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const url = bridge.agent('agent-1').mcpUrl;
+    await (await fetch(url, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).text();
+    const request = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'new_private_tool', arguments: { value: 'private-input-marker' } } };
+    await (await fetch(url, { method: 'POST', body: JSON.stringify(request) })).text();
+    expect(observed).toEqual([
+      { key: 'agent-1', name: 'new_private_tool', input: request.params.arguments, answer: undefined },
+      { key: 'agent-1', name: 'new_private_tool', input: request.params.arguments, answer: { jsonrpc: '2.0', id: 1, result } },
+    ]);
+  });
+
   /* The bridge's pauses between tries, taken on no clock: each one is only written down. */
   async function bridgeTo(statuses: number[]) {
     const up = await outage(statuses);
