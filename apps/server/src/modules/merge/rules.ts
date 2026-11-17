@@ -108,6 +108,10 @@ export const TABLE_RULES: Readonly<Record<string, TableRule>> = {
   /* A vault entry is a way into a site's account of the company, and its log is written only by Hornhoof. */
   vault_entries: rows('access'),
   vault_log: rows('protected'),
+  company_phones: rows('protected'),
+  // Historical records follow their task. A row alone never reissues a runtime grant on the node.
+  phone_sessions: rows('protected'),
+  phone_frames: add('protected'),
 
   ...each(['subscriptions', 'nodes', 'plan_credentials', 'agent_fallbacks'], rows('plans')),
 
