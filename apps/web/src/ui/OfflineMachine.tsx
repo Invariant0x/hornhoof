@@ -12,7 +12,7 @@ export function OfflineMachine({ offline }: { offline: Offline }) {
 }
 
 /* The plans of the employee's own department it can move to in one click: online, signed in and set up, and not its own. */
-export function movesFor(card: Pick<AgentCardView, 'subscription' | 'runsOn' | 'department'>): SubView[] {
+function movesFor(card: Pick<AgentCardView, 'subscription' | 'runsOn' | 'department'>): SubView[] {
   const home = card.department?.id;
   return card.runsOn
     .map(r => r.subscription)

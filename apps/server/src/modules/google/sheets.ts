@@ -5,11 +5,11 @@ export type StoredGoogleSecret =
   | { kind: 'service_account'; clientEmail: string; privateKey: string }
   | { kind: 'oauth'; account: string; clientId: string; clientSecret: string; refreshToken: string };
 
-export type GoogleKey = StoredGoogleSecret & { shareEmail: string | null };
+type GoogleKey = StoredGoogleSecret & { shareEmail: string | null };
 
-export type SheetCell = string | number | boolean | null;
-export type SheetSpec = { name?: string; headers?: string[]; rows: SheetCell[][] };
-export type CreatedSpreadsheet = { spreadsheetId: string; url: string } | { problem: string };
+type SheetCell = string | number | boolean | null;
+type SheetSpec = { name?: string; headers?: string[]; rows: SheetCell[][] };
+type CreatedSpreadsheet = { spreadsheetId: string; url: string } | { problem: string };
 export type SpreadsheetCreator = (key: GoogleKey, input: { title: string; sheets: SheetSpec[] }) => Promise<CreatedSpreadsheet>;
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

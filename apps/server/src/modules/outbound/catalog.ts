@@ -29,7 +29,7 @@ const wordsIn = (value: CatalogValue): string[] => {
 const linkIn = (value: CatalogValue): string | null => (value.kind === 'link' ? value.url : value.kind === 'audience' ? value.destination : null);
 
 /* What a revision carries that it may not, by the code that would refuse it at the last look. */
-export function catalogReasons(value: CatalogValue): GateCode[] {
+function catalogReasons(value: CatalogValue): GateCode[] {
   const link = linkIn(value);
   return [...new Set([...wordsIn(value).flatMap(scanText), ...(link !== null && unsafeLink(link) ? (['link_unapproved'] as const) : [])])];
 }

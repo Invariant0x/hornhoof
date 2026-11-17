@@ -21,9 +21,9 @@ import type { Go, LeaderBuild } from './follow.js';
 import { renewedMessage, renewMessage, type Signed } from './renewal.js';
 import { authorityOf, certify, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials } from './store.js';
 
-export const TICKET_HOURS = 24;
-export const RENEW_WINDOW_MS = 5 * 60_000;
-export const ONLINE_STEP_S = 20;
+const TICKET_HOURS = 24;
+const RENEW_WINDOW_MS = 5 * 60_000;
+const ONLINE_STEP_S = 20;
 
 const HOUR_MS = 3_600_000;
 const DAY_S = 86_400;
@@ -70,7 +70,7 @@ type RenewAsk = { machine: string; serial: string; at: string };
 
 /* A renewal travels over plain HTTP too, so the machine takes its answer only with the signature of the authority it
    holds: a path that changes the answer only makes the renewal fail. */
-export async function signedAnswer(ctx: Ctx, ask: RenewAsk, body: object): Promise<Signed> {
+async function signedAnswer(ctx: Ctx, ask: RenewAsk, body: object): Promise<Signed> {
   const authority = await authorityOf(ctx.db, ctx.config);
   if (!authority) throw notAMachine();
   const payload = JSON.stringify(body);
@@ -242,7 +242,7 @@ function shareOf(createdAt: Date, days: { day: string; seconds: number }[], now:
   return Math.min(1, Math.max(0, (online * 1000) / length));
 }
 
-export type JoinAsk = { ticket: string; networkId: string; signKey: string };
+type JoinAsk = { ticket: string; networkId: string; signKey: string };
 type Certified = { machine: string; role: MachineRole; issued: Issued; authorityPem: string };
 
 /* A machine's keeper redeems its ticket: the ticket's machine becomes a worker of the network under the id of its
@@ -299,7 +299,7 @@ export async function claimRenewal(tx: Db, row: { id: string; renewAt: Date | nu
   return true;
 }
 
-export type RenewAnswer = { status: 200 | 410; answer: Signed };
+type RenewAnswer = { status: 200 | 410; answer: Signed };
 
 /* The view as an answer may carry it: the link's secrets go only into one that travels over TLS, so a listener on the
    local network sees none, and the machine keeps the link it has. */

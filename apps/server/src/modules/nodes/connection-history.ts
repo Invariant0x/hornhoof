@@ -19,7 +19,7 @@ export type ConnectionRow = {
 };
 
 /* One node's lost connection. offlineMs: the longer of what the server and the node measured, none until it is back. */
-export type NodeDrop = {
+type NodeDrop = {
   nodeId: string;
   subscriptionId: string | null;
   at: Date;
