@@ -1,4 +1,4 @@
-import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
+import { lastBytes, PRIVATE_TOOL_NOTE, privateToolEvent, type Limits, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -18,7 +18,7 @@ import { turnsHeld } from '../tasks/orphan-turns.js';
 import { turnSign } from '../tasks/turn-signs.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { staleOutput } from '../tasks/wake-state.js';
-import { appendTurnEvent, publishWorking } from '../events/store.js';
+import { appendTurnEvent, publishWorking, sensitiveTurn } from '../events/store.js';
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
@@ -31,6 +31,7 @@ import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueAway, routeCheckMessage } from './check-slots.js';
 import { applyParked, mergePending, park, type ParkedKind } from './parked.js';
 import { programsLive } from './program-room.js';
+import { privateTurn, forgetPrivateTurn } from '../tools/privacy.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 import { tryPlaceWaiting } from '../subscriptions/waiting.js';
@@ -285,7 +286,8 @@ async function parkUnknown(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promis
   if (!kind || !jobId || !z.uuid().safeParse(jobId).success || !(await mergePending(ctx.db))) return false;
   const [known] = await ctx.db.select(idOnly(jobs)).from(jobs).where(eq(jobs.id, jobId));
   if (known) return false;
-  await park(ctx.db, { jobId, node: id, kind, body: msg });
+  /* The unknown turn's privacy state arrives with its database later. Until then no raw program data is safe to keep. */
+  await park(ctx.db, { jobId, node: id, kind, body: privateTurnMessage(ctx, msg, true) });
   if (msg.type === 'job.done') ctx.hub.send(id, { type: 'job.ack', jobId });
   return true;
 }
@@ -332,8 +334,20 @@ async function settleListed(ctx: Ctx, id: NodeIdentity, running: string[], now: 
   if (pending) for (const job of open) if (job.status === 'queued') await jobStarted(ctx, id, job.id, now);
 }
 
+function privateTurnMessage(ctx: Pick<Ctx, 'db'>, msg: NodeMessage, sensitive: boolean): NodeMessage {
+  if (msg.type !== 'job.event' && msg.type !== 'job.done') return msg;
+  const values = privateTurn(ctx.db, msg.jobId)?.values;
+  if (msg.type === 'job.event') {
+    const event = privateToolEvent(msg.event, sensitive, !values);
+    return { ...msg, event: values?.hide(event) ?? event };
+  }
+  if (sensitive) return { ...msg, result: values?.text(msg.result) ?? PRIVATE_TOOL_NOTE, tail: PRIVATE_TOOL_NOTE, ...(msg.failure ? { failure: { ...msg.failure, text: values?.text(msg.failure.text) ?? PRIVATE_TOOL_NOTE } } : {}) };
+  return msg;
+}
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
+  if (msg.type === 'job.event' || msg.type === 'job.done') msg = privateTurnMessage(ctx, msg, await sensitiveTurn(ctx.db, msg.jobId));
   if (await parkUnknown(ctx, id, msg)) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
@@ -448,6 +462,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await fallBackIfHeld(ctx, refused);
       /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
       ctx.hub.send(id, { type: 'job.ack', jobId: msg.jobId });
+      if (finished.length) forgetPrivateTurn(ctx.db, msg.jobId);
       return;
     }
     case 'turn.open': {

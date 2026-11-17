@@ -1,4 +1,5 @@
 export * from './department-mode.js';
+export * from './tool-privacy.js';
 export * from './external-operations.js';
 export * from './request-materials.js';
 export * from './questions.js';
@@ -221,7 +222,7 @@ export const ApiConnection = z.object({ baseUrl: ApiBaseUrl, protocol: z.enum(AP
 /* What an agent is doing while a job runs, already shortened by the node for people to watch. */
 export const AgentEvent = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string().max(8000) }),
-  z.object({ kind: z.literal('tool'), name: z.string().max(100), input: z.string().max(300) }),
+  z.object({ kind: z.literal('tool'), name: z.string().max(100), input: z.string().max(300), sensitive: z.literal(true).optional(), issued: z.literal(true).optional() }),
   z.object({ kind: z.literal('tool_result'), ok: z.boolean(), summary: z.string().max(500) }),
   z.object({
     kind: z.literal('todo'),

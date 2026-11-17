@@ -10,7 +10,7 @@ const NEVER = 2_147_483_647;
 
 type Seen = { method: string; url: string; auth: string; body: string };
 
-async function upstream(): Promise<{ url: string; seen: Seen[]; server: Server }> {
+async function upstream(result: unknown = { ok: true }): Promise<{ url: string; seen: Seen[]; server: Server }> {
   const seen: Seen[] = [];
   const server = createServer((req, res) => {
     let body = '';
@@ -18,7 +18,7 @@ async function upstream(): Promise<{ url: string; seen: Seen[]; server: Server }
     req.on('end', () => {
       seen.push({ method: req.method!, url: req.url!, auth: req.headers.authorization ?? '', body });
       res.writeHead(200, { 'content-type': 'application/json', 'x-file-name': 'build.tar.gz' });
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } }));
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
     });
   });
   await listenIn(server);
@@ -51,6 +51,24 @@ const toolCall = (...names: string[]) => {
 describe("the node's bridge to Hornhoof's tools", () => {
   const closers: (() => void)[] = [];
   afterEach(() => { vi.useRealTimers(); closers.splice(0).forEach(c => c()); });
+
+  it('marks a sensitive request and learns its response before giving that response to the program', async () => {
+    const result = { content: [{ type: 'text', text: '{"password":"private-bridge-marker"}' }] };
+    const up = await upstream(result);
+    const observed: unknown[] = [];
+    const bridge = new Bridge(up.url, () => {}, null, { sensitive: (key, name, input, answer) => observed.push({ key, name, input, answer }) });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    bridge.setToken('agent-1', 'turn-token');
+    const url = bridge.agent('agent-1').mcpUrl;
+    const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_entry', arguments: { entry: 'Partner' } } };
+    const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
+    expect(await response.json()).toEqual({ jsonrpc: '2.0', id: 1, result });
+    expect(observed).toEqual([
+      { key: 'agent-1', name: 'vault_entry', input: { entry: 'Partner' }, answer: undefined },
+      { key: 'agent-1', name: 'vault_entry', input: { entry: 'Partner' }, answer: { jsonrpc: '2.0', id: 1, result } },
+    ]);
+  });
 
   /* The bridge's pauses between tries, taken on no clock: each one is only written down. */
   async function bridgeTo(statuses: number[]) {

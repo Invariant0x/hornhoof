@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage, type TurnTokens } from '@hornhoof/protocol';
+import { PRIVATE_TOOL_NOTE, ToolPrivacy, type PrivateValues } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
 import type { JobUser } from './isolation.js';
@@ -41,7 +42,7 @@ export type RunInput = {
   env?: Record<string, string>;
 };
 /* tokens: what the turn used, as its program reported it; none when it reports nothing. */
-export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null };
+export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null; sensitive?: boolean; privateValues?: PrivateValues };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
@@ -83,9 +84,9 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
   const output = program ? programEnded(text, program, program.complete) : text;
   return {
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
-    result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
+    result: res.privateValues?.text(redact(res.result, secrets)) ?? (res.sensitive ? PRIVATE_TOOL_NOTE : redact(res.result, secrets)), tail: res.sensitive ? PRIVATE_TOOL_NOTE : lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
     ...(res.wordsWaiting ? { wordsWaiting: true } : {}),
-    ...(res.failure ? { failure: { ...res.failure, text: redact(res.failure.text, secrets).slice(0, 2000) } } : {}),
+    ...(res.failure ? { failure: { ...res.failure, text: res.privateValues?.text(redact(res.failure.text, secrets)).slice(0, 2000) ?? (res.sensitive ? PRIVATE_TOOL_NOTE : redact(res.failure.text, secrets).slice(0, 2000)) } } : {}),
     ...(program ? { exit: { code: program.code, signal: signalName(program.signal) } } : {}),
   };
 }
@@ -222,7 +223,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
     case 'text':
       return { kind: 'text', text: clean(event.text, 8000) };
     case 'tool':
-      return { kind: 'tool', name: clean(event.name, 100), input: clean(event.input, 300) };
+      return { kind: 'tool', name: clean(event.name, 100), input: clean(event.input, 300), ...(event.sensitive ? { sensitive: true } : {}) };
     case 'tool_result':
       return { kind: 'tool_result', ok: event.ok, summary: clean(event.summary, 500) };
     case 'todo':
@@ -239,12 +240,13 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   const tools = msg.toolToken && toolsUrl ? { url: toolsUrl, token: msg.toolToken } : null;
   /* A live event goes out hidden against what the program holds by then, and the events keep their order. */
   const known = new Set([...before, ...given]);
+  const privacy = new ToolPrivacy();
   let live = Promise.resolve();
   const emit = (event: AgentEvent) => {
     live = live
       .then(async () => {
         for (const s of await adapter.secrets().catch(() => [])) known.add(s);
-        onEvent?.(tidy(event, [...known]));
+        onEvent?.(tidy(privacy.event(event), [...known]));
       })
       .catch(() => {});
   };
@@ -285,5 +287,5 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   /* Everything the program held at any point of the run, so a token it had only in between is hidden too. */
   for (const s of await adapter.secrets().catch(() => [])) known.add(s);
-  return jobDone(msg.jobId, { ...res, tokens: withModel(res.tokens, msg.model) }, [...known]);
+  return jobDone(msg.jobId, { ...res, sensitive: res.sensitive || privacy.sensitive, privateValues: res.privateValues ?? privacy.values, tokens: withModel(res.tokens, msg.model) }, [...known]);
 }
