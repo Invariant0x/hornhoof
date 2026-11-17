@@ -131,6 +131,21 @@ const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | nul
 };
 
 describe('parts on physical computers', () => {
+  it('finishes an existing run part before permitting the node update', async () => {
+    const c = await company({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-run-drain-')) });
+    const first = await c.machine(c.ann, 'updating');
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_work', { command: 'printf checked', branch: 'task-1' })).error).toBe(false);
+    const part = await nextOf(first.node, 'tests.run');
+    const prepare = () => c.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${first.key}` }, payload: {} });
+    expect((await prepare()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 0, partsLeft: 1 } });
+    expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'running', nodeId: first.nodeId, error: null });
+    expect(await gets(first.node, 'tests.cancel')).toBe(false);
+    first.node.send(done(part));
+    await until(async () => (await prepare()).json().ready === true);
+    expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'passed', error: null });
+  });
+
   it.each(['run_tests', 'run_work'])('sends %s parts to a free machine while another waits for an update', async tool => {
     const c = await company({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-run-drain-')) });
     const first = await c.machine(c.ann, 'updating');

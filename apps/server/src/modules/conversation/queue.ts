@@ -9,7 +9,8 @@ import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
-import { nodeDrain, nodeHeld, turnsHeld } from '../updates/drain.js';
+import { nodeDrain, nodeHeld, nodeTakesTurn, turnsHeld } from '../updates/drain.js';
+import { PROGRAM_OPERATOR_ROLE } from '../operations/required.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
@@ -479,10 +480,10 @@ type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. */
-async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeld(ctx, BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null; roleKey?: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && nodeTakesTurn(ctx, BUILTIN, agent.roleKey) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)) && !nodeHeld(ctx, nodeIdentity(n.id)));
+  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)) && nodeTakesTurn(ctx, nodeIdentity(n.id), agent.roleKey));
   const stays = all.some(n => n.id === agent.nodeId && !nodeHeld(ctx, nodeIdentity(n.id))) && (await holdsWork(ctx, agent.id));
   const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
@@ -653,7 +654,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || !(await placement(ctx, agent, sub))) return;
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
-  if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
+  if (agent.kind !== 'orchestrator' && agent.roleKey !== PROGRAM_OPERATOR_ROLE && turnsHeld(ctx, agent.companyId)) return;
   if (await waitsForRetry(ctx, agentId)) return;
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      task turns wait. */
@@ -716,6 +717,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     await publishWorking(ctx, job.companyId);
     sent = await dispatchJob(ctx, {
       id: job.id,
+      roleKey: agent.roleKey,
       subscriptionId: sub.id,
       nodeId: place.nodeId,
       prompt,

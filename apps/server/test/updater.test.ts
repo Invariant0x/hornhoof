@@ -68,6 +68,46 @@ function runOnce(s: Stand, request: object | null, env: Record<string, string> =
 const at = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));
 
 describe('updater', () => {
+  it('waits for server-host nodes before taking the backup or replacing any container', () => {
+    const s = stand('NODE_KEY=private-test-node-key\nHORNHOOF_VERSION=0.4.0\n');
+    const r = runOnce(s, ask('drain-1'));
+    expect(r.status.state).toBe('done');
+    const waiting = r.calls.findIndex(c => c.includes('wait-update --server --stdin'));
+    expect(waiting).toBeGreaterThanOrEqual(0);
+    expect(waiting).toBeLessThan(at(r.calls, 'docker exec dbcid pg_dump'));
+    expect(r.calls.join('\n') + r.out).not.toContain('private-test-node-key');
+  });
+
+  it('keeps containers and the database untouched when the waiting service fails', () => {
+    const s = stand('NODE_KEY=private-test-node-key\nHORNHOOF_VERSION=0.4.0\n');
+    const r = runOnce(s, ask('drain-failed'), { STUB_DRAIN_FAIL: '1' });
+    expect(r.status.state).toBe('failed');
+    expect(r.calls.some(c => c.startsWith('installer'))).toBe(false);
+    expect(r.calls.some(c => c.includes('pg_dump'))).toBe(false);
+  });
+
+  it.each(['urgent', 'immediate'])('keeps an explicitly authorized %s update on its immediate path', mode => {
+    const s = stand();
+    const r = runOnce(s, { ...ask(`drain-${mode}`), [mode]: true }, { STUB_DRAIN_FAIL: '1' });
+    expect(r.status.state).toBe('done');
+    expect(r.calls.some(c => c.includes('wait-update'))).toBe(false);
+  });
+
+  it('hands an old server to the app-first installer without authorizing an early node stop', () => {
+    const s = stand('NODE_KEY=private-test-node-key\nHORNHOOF_VERSION=0.6.1\n');
+    const r = runOnce(s, ask('bootstrap'), { STUB_DRAIN_OLD: '1' });
+    expect(r.status.state).toBe('done');
+    expect(r.calls.find(c => c.startsWith('installer'))).toContain('HORNHOOF_UPDATE_AUTHORIZED= ');
+  });
+
+  it('keeps the urgent mode after the updater is interrupted during the download', () => {
+    const s = stand();
+    runOnce(s, { ...ask('urgent-restart'), urgent: true }, { STUB_STOP_IN: 'pull' });
+    const r = runOnce(s, null, { STUB_DRAIN_FAIL: '1' });
+    expect(r.status.state).toBe('done');
+    expect(r.calls.some(c => c.includes('wait-update'))).toBe(false);
+  });
+
   beforeAll(() => {
     if (!JQ) throw new Error('The updater tests need jq. Install it (brew install jq on a Mac, apt install jq on Debian or Ubuntu), then run them again.');
   });

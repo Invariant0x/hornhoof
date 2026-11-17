@@ -40,6 +40,8 @@ SERVER_DIR=$BASE_DIR
 NAME=''
 PIN="${HORNHOOF_VERSION:-}"
 FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
+UPDATE_AUTHORIZED="${HORNHOOF_UPDATE_AUTHORIZED:-}"
+SECURITY_UPDATE=''
 # How long a joined node may take to get its plan's sign-in from Hornhoof, in seconds.
 SIGNIN_WAIT="${HORNHOOF_SIGNIN_WAIT:-20}"
 COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
@@ -400,6 +402,13 @@ RETRY='Run this command again.'
 # start_node <name> <id> <provider> [key]: the key goes into the node's volume through stdin, never on a command line.
 start_node() {
   local name=$1 id=$2 provider=$3 key=${4:-}
+  if [ -z "$key" ] && [ -z "$UPDATE_AUTHORIZED$SECURITY_UPDATE" ]; then
+    say "Waiting for $name to finish its current work before updating."
+    # The helper only reads the old node's key; it runs the new image so old nodes need no new command.
+    # shellcheck disable=SC2086 # node_server sets the optional two-word host mapping.
+    "${DOCKER[@]}" run --rm --user 0:0 --cap-drop ALL --security-opt no-new-privileges $LOCAL_SERVER \
+      -v "$name:/data:ro" "$IMAGE" wait-update || fail "The update was not authorized. $name keeps running."
+  fi
   if [ -n "$key" ]; then
     printf '%s %s %s %s\n' "$NODE_SERVER" "$id" "$provider" "$key" |
       "${DOCKER[@]}" run --rm -i --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-key ||
@@ -788,12 +797,42 @@ prepare_builtin_stop() {
   prepare_node_stop "$cid" hornhoof_update
 }
 
+wait_server_nodes() {
+  local app code i=0
+  [ -z "$UPDATE_AUTHORIZED$SECURITY_UPDATE" ] || return 0
+  app=$(cd "$SERVER_DIR" && "$@" ps -q app 2> /dev/null) || true
+  # A first install has no app or running node to drain.
+  [ -n "$app" ] || return 0
+  say "Waiting for the nodes on this computer to finish their current work."
+  if printf '%s\n%s\n' 'http://127.0.0.1:8080' "$(env_value NODE_KEY)" | \
+    "${DOCKER[@]}" run --rm -i --user 0:0 --cap-drop ALL --security-opt no-new-privileges --network "container:$app" \
+      "$NODE_REF" wait-update --server --stdin; then
+    UPDATE_AUTHORIZED=1
+    return 0
+  else code=$?; fi
+  [ "$code" = 3 ] || fail "The node update was not authorized. Running nodes were left alone."
+  say "This server needs its app updated first. Keeping the running nodes while the new app starts."
+  (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "The new app did not start. Running nodes were left alone."
+  until (cd "$SERVER_DIR" && "$@" exec -T app node -e 'fetch("http://127.0.0.1:8080/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))') > /dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -lt 60 ] || fail "The new app did not answer. Running nodes were left alone."
+    sleep 2
+  done
+  app=$(cd "$SERVER_DIR" && "$@" ps -q app 2> /dev/null) || true
+  [ -n "$app" ] || fail "The new app is not running. Running nodes were left alone."
+  printf '%s\n%s\n' 'http://127.0.0.1:8080' "$(env_value NODE_KEY)" | \
+    "${DOCKER[@]}" run --rm -i --user 0:0 --cap-drop ALL --security-opt no-new-privileges --network "container:$app" \
+      "$NODE_REF" wait-update --server --stdin || fail "The new app did not authorize the node update. Running nodes were left alone."
+  UPDATE_AUTHORIZED=1
+}
+
 start_server_services() {
   if [ -n "$FROM_UPDATER" ]; then
     say "Starting Hornhoof ${PIN:-latest}."
     if node_unchanged "$@"; then
       (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
     else
+      wait_server_nodes "$@"
       prepare_builtin_stop "$@"
       (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
       sweep_nodes "$@"
@@ -804,6 +843,7 @@ start_server_services() {
   if node_unchanged "$@"; then
     (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
   else
+    wait_server_nodes "$@"
     prepare_builtin_stop "$@"
     (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
   fi
@@ -936,6 +976,7 @@ while [ $# -gt 0 ]; do
     node) MODE=node ;;
     server) MODE=server ;;
     --uninstall) MODE=uninstall ;;
+    --security-update) SECURITY_UPDATE=1 ;;
     -h | --help)
       say "$USAGE"
       exit 0

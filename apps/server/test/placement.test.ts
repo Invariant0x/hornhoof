@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, nodes as nodeRows, subscriptions, tasks } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { PROGRAM_OPERATOR_ROLE } from '../src/modules/operations/required.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null };
@@ -54,6 +55,32 @@ async function nextRun(node: FakeNode): Promise<Run> {
 const finish = (node: FakeNode, run: Run, sessionId: string) => node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: 'ok', tail: '', error: null });
 
 describe('agents of one plan on several machines', () => {
+  it('lets the program operator resolve an asking turn while waiting, and blocks it during restarting', async () => {
+    const { app, db, ceo, nodes, mac, lap, bruno, vera } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-operator-drain-')) });
+    lap.close();
+    await lap.closed;
+    await db.update(agents).set({ nodeId: nodes.mac.nodeId, roleKey: PROGRAM_OPERATOR_ROLE }).where(eq(agents.id, bruno.id));
+    await db.update(agents).set({ nodeId: nodes.mac.nodeId }).where(eq(agents.id, vera.id));
+    await write(app, ceo, vera.id, 'Continue the task');
+    const work = await nextRun(mac);
+    mac.send({ type: 'job.program', jobId: work.jobId, state: 'asking', since: Date.now(), screenAt: Date.now() });
+    await until(async () => (await state(app, ceo, vera.id)).program?.state === 'asking');
+    const prepare = () => app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${nodes.mac.key}` }, payload: {} });
+    expect((await prepare()).json().drain).toMatchObject({ state: 'waiting', turnsLeft: 1 });
+    await write(app, ceo, bruno.id, 'Resolve the permission question for Vera');
+    await until(() => mac.queued() > 0);
+    const operator = await nextRun(mac);
+    expect(operator.prompt).toContain('Resolve the permission question');
+    expect((await prepare()).json().drain).toMatchObject({ state: 'waiting', turnsLeft: 2 });
+    mac.send({ type: 'job.program', jobId: work.jobId, state: 'thinking', since: Date.now(), screenAt: Date.now() });
+    finish(mac, operator, 'operator');
+    finish(mac, work, 'vera');
+    await until(async () => (await prepare()).json().ready === true);
+    expect((await db.select().from(jobs).where(eq(jobs.id, work.jobId)))[0]).toMatchObject({ status: 'done', error: null });
+    await write(app, ceo, bruno.id, 'This waits for the restart');
+    expect(mac.queued()).toBe(0);
+  });
+
   it('places new work on another node of the same plan while its current node waits for an update', async () => {
     const { app, db, ceo, nodes, mac, lap, bruno } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
     await db.update(agents).set({ nodeId: nodes.mac.nodeId }).where(eq(agents.id, bruno.id));

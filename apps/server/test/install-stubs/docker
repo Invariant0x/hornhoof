@@ -34,6 +34,8 @@ case "$1" in
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
   compose)
     case "$*" in
+      *' up -d --no-build db app tunnel') touch "$STUB_STATE/app-updated" ;;
+      *' ps -q app') [ -n "${STUB_NODE_RUNNING:-}" ] && echo appcid ;;
       *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
@@ -41,6 +43,12 @@ case "$1" in
     esac ;;
   ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
+    WORD=wait-update; if has "$@"; then
+      case " $* " in *' --stdin '*) cat > /dev/null ;; esac
+      [ "${STUB_DRAIN_OLD:-}" = 1 ] && [ ! -f "$STUB_STATE/app-updated" ] && exit 3
+      [ "${STUB_DRAIN_FAIL:-}" = 1 ] && exit 1
+      exit 0
+    fi
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
     WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
   exec)

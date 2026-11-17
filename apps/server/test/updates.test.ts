@@ -117,13 +117,14 @@ async function fakeRegistry(
   };
 }
 
-async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-'))) {
+async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-')), env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp({
     HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof',
     REGISTRY_URL: registry.base,
     HORNHOOF_VERSION: '0.4.0',
     HORNHOOF_COMMIT: commit,
     HORNHOOF_CONTROL_DIR: control,
+    ...env,
   });
   return { app, db, control, ceo: await setUpCompany(app) };
 }
@@ -415,6 +416,52 @@ describe('updates', () => {
     expect((await update(2)).statusCode).toBe(202);
     expect(request(control)).toMatchObject({ immediate: true });
     expect((await db.select().from(jobs).where(eq(jobs.status, 'running')))).toHaveLength(2);
+  });
+
+  it('postpones a waiting server update at the deadline, releases new work and retries it', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry, 'aaa', undefined, { NODE_DRAIN_MS: '60', NODE_UPDATE_RETRY_MS: '150' });
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [agent] = await db.select().from(agents);
+    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: agent!.id, kind: 'conversation', prompt: 'keep working', status: 'running', timeoutMs: 900_000 }).returning();
+    expect((await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) })).statusCode).toBe(202);
+    await until(async () => (await app.inject({ url: '/api/machines', ...as(ceo) })).json().builtin.drain?.state === 'postponed');
+    expect(turnsHeld(app.ctx, acme!.id)).toBe(false);
+    expect(request(control)).toBeNull();
+    expect((await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]).toMatchObject({ status: 'running', error: null });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+    await until(() => request(control) !== null);
+  });
+
+  it('counts again after reading images, so new turns cannot slip past an old confirmation', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [agent] = await db.select().from(agents);
+    const running = { companyId: acme!.id, subscriptionId: sub!.id, agentId: agent!.id, kind: 'conversation' as const, prompt: 'keep working', status: 'running' as const, timeoutMs: 900_000 };
+    await db.insert(jobs).values(running);
+    let release!: () => void;
+    let reached = false;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const siblings = app.ctx.updates.siblings.bind(app.ctx.updates);
+    const spy = vi.spyOn(app.ctx.updates, 'siblings').mockImplementationOnce(async tag => {
+      reached = true;
+      await held;
+      return siblings(tag);
+    });
+    onTestFinished(() => { release(); spy.mockRestore(); });
+    const updating = app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false, confirmTurns: 1 }, ...as(ceo) }).then(r => r);
+    await until(() => reached);
+    await db.insert(jobs).values(running);
+    release();
+    const response = await updating;
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.details).toEqual({ turns: 2 });
+    expect(request(control)).toBeNull();
   });
 
   it('holds new turns of the company while its update waits for the agents, and lets them go when it is called off', async () => {

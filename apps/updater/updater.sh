@@ -56,6 +56,8 @@ BACK_UPDATER=''
 TARGET=''
 BEFORE=''
 BACKUP=''
+UPDATE_IMMEDIATE=''
+UPDATE_AUTHORIZED=''
 
 say() {
   printf '%s\n' "$*"
@@ -120,10 +122,11 @@ pinned() { if [ -n "$2" ]; then printf '%s@%s' "$1" "$2"; else printf '%s:%s' "$
 note() {
   mkdir -p "$SERVER_DIR/backups"
   (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg digest "$DIGEST" --arg node "$NODE_DIGEST" \
+    --argjson immediate "${UPDATE_IMMEDIATE:-false}" --arg authorized "$UPDATE_AUTHORIZED" \
     --arg updater "$UPDATER_DIGEST" --arg previous "$PREVIOUS" --arg back_app "$BACK_APP" --arg back_node "$BACK_NODE" \
     --arg back_updater "$BACK_UPDATER" --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" \
     '{id: $id, version: $version, tag: $tag, digest: $digest, node: $node, updater: $updater, previous: $previous,
-      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup}' \
+      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup, immediate: $immediate, authorized: ($authorized == "1")}' \
     > "$SERVER_DIR/backups/update.json.new")
   mv "$SERVER_DIR/backups/update.json.new" "$SERVER_DIR/backups/update.json"
 }
@@ -144,6 +147,8 @@ recall() {
   TARGET=$(jq -r '.target' "$file")
   BEFORE=$(jq -r '.before' "$file")
   BACKUP=$(jq -r '.backup' "$file")
+  UPDATE_IMMEDIATE=$(jq -r '.immediate == true' "$file")
+  UPDATE_AUTHORIZED=$(jq -r 'if .authorized == true then "1" else "" end' "$file")
   plain_tag "$TAG" && plain_digest "$DIGEST" && digest_or_none "$NODE_DIGEST" && digest_or_none "$UPDATER_DIGEST" && plain_tag "$PREVIOUS" || return 1
   own "$IMAGE" "$BACK_APP" && own "$NODE_IMAGE" "$BACK_NODE" && own "$UPDATER_IMAGE" "$BACK_UPDATER" || return 1
   case "$BACKUP" in '' | "$SERVER_DIR"/backups/hornhoof-*.sql.gz) ;; *) return 1 ;; esac
@@ -284,7 +289,7 @@ pull_images() {
 install() {
   local tag=$1 dir="$WORK/$1"
   unpack "$tag" "$2" || return 1
-  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
+  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATE_AUTHORIZED="$UPDATE_AUTHORIZED" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
     HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
   drop_orphans
 }
@@ -377,6 +382,29 @@ update() {
   TARGET=$(commit_of "$IMAGE@$DIGEST")
   note
 
+  UPDATE_AUTHORIZED=1
+  if [ "$UPDATE_IMMEDIATE" != true ] && ! same_node; then
+    step pull "Waiting for the nodes on this computer to finish their work."
+    local app node_ref code
+    app=$(compose ps -q app 2> /dev/null || true)
+    node_ref=$(pinned "$NODE_IMAGE" "$NODE_DIGEST")
+    # The key goes through stdin only, never Docker arguments, output or the install log.
+    if [ -n "$app" ] && printf '%s\n%s\n' 'http://127.0.0.1:8080' "$(env_value NODE_KEY)" | \
+      docker run --rm -i --user 0:0 --cap-drop ALL --security-opt no-new-privileges --network "container:$app" \
+        "$node_ref" wait-update --server --stdin >> "$WORK/install.log" 2>&1; then
+      UPDATE_AUTHORIZED=1
+    else
+      code=$?
+      if [ "$code" = 3 ]; then
+        UPDATE_AUTHORIZED=''
+        say "The old server needs its app updated first. The installer will keep the nodes running until the new app authorizes their update."
+      else
+        stop_with failed "Could not prepare the node update, so all running work was left alone."
+        return 0
+      fi
+    fi
+  fi
+
   step backup "Saving the database."
   BEFORE=$(applied)
   backup || {
@@ -410,6 +438,7 @@ check_new() {
 }
 
 go_back() {
+  UPDATE_AUTHORIZED=1
   local back="Hornhoof runs the build from before the update again. The database was saved before it."
   step rollback "Going back to $PREVIOUS."
   if [ "$(applied)" != "$BEFORE" ]; then
@@ -436,6 +465,7 @@ handle_request() {
   done_id=$(jq -r '.id // empty' "$CONTROL/status.json" 2> /dev/null || true)
   [ "$id" != "$done_id" ] || return 0
   ID=$id
+  UPDATE_IMMEDIATE=$(jq -r '(.immediate == true) or (.urgent == true)' "$CONTROL/request.json")
   VERSION=$(jq -r '.version // empty' "$CONTROL/request.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
   tag=$(jq -r '.tag // empty' "$CONTROL/request.json")
   digest=$(jq -r '.digest // empty' "$CONTROL/request.json")

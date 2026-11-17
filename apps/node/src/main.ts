@@ -34,6 +34,7 @@ import { macOwner, type Command } from './terminal/mac-peer.js';
 import { ProgramUpdates, readInstalledVersion } from './program-updates.js';
 import { nodeLifecycle, stopNode } from './lifecycle.js';
 import { lifecycleCommand } from './lifecycle-command.js';
+import { updateWaitCommand } from './update-wait.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -835,6 +836,8 @@ export async function command(args: string[], io: Io): Promise<number | { stop()
       return setKey(dir, io);
     case 'prepare-browser':
       return prepareBrowserCommand(dir, args[1], io);
+    case 'wait-update':
+      return updateWaitCommand(dir, args.slice(1), io);
     default:
       io.stderr.write(USAGE + '\n');
       return 1;

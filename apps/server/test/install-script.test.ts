@@ -104,6 +104,53 @@ describe('install.sh a server serves', () => {
     expect(r.calls.join('\n')).not.toContain(':latest');
   });
 
+  it('gets permission from the running server before stopping an existing node', async () => {
+    const r = install({ script: await fromServer(DIGEST), args: [], env: ON_MACHINE });
+    expect(r.code).toBe(0);
+    const wait = r.docker.findIndex(c => c.includes('wait-update'));
+    const stop = r.docker.findIndex(c => c.includes(`stop --time 5 ${NODE}`));
+    expect(wait).toBeGreaterThanOrEqual(0);
+    expect(wait).toBeLessThan(stop);
+    expect(r.docker[wait]).toContain(`-v ${NODE}:/data`);
+    expect(r.docker[wait]).toContain(BY_DIGEST);
+  });
+
+  it('leaves the running container intact when update permission cannot be obtained', async () => {
+    const r = install({ script: await fromServer(DIGEST), args: [], env: { ...ON_MACHINE, STUB_DRAIN_FAIL: '1' } });
+    expect(r.code).not.toBe(0);
+    expect(r.docker.some(c => c.includes(`stop --time 5 ${NODE}`))).toBe(false);
+    expect(r.docker.some(c => c.includes(`rm -f ${NODE}`))).toBe(false);
+  });
+
+  it('allows an urgent security update to bypass the planned wait', async () => {
+    const r = install({ script: await fromServer(DIGEST), args: ['--security-update'], env: { ...ON_MACHINE, STUB_DRAIN_FAIL: '1' } });
+    expect(r.code).toBe(0);
+    expect(r.docker.some(c => c.includes('wait-update'))).toBe(false);
+    expect(r.docker.some(c => c.includes(`stop --time 5 ${NODE}`))).toBe(true);
+  });
+
+  it('prepares server-host nodes before a direct server install replaces the built-in node', async () => {
+    const r = install({ args: ['server'], env: { STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:older' } });
+    expect(r.code).toBe(0);
+    const wait = r.docker.findIndex(c => c.includes('wait-update --server --stdin'));
+    const stop = r.docker.findIndex(c => c.includes('prepare-stop hornhoof_update'));
+    expect(wait).toBeGreaterThanOrEqual(0);
+    expect(wait).toBeLessThan(stop);
+  });
+
+  it('moves a 0.6.1 server to 0.7.0 with the app first and the node only after the new handshake', async () => {
+    const r = install({ args: ['server'], env: { HORNHOOF_VERSION: '0.7.0', STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.6.1', STUB_DRAIN_OLD: '1' } });
+    expect(r.code).toBe(0);
+    const waits = r.docker.map((c, i) => c.includes('wait-update --server --stdin') ? i : -1).filter(i => i >= 0);
+    expect(waits).toHaveLength(2);
+    const appFirst = r.docker.findIndex(c => c.endsWith('up -d --no-build db app tunnel'));
+    const stop = r.docker.findIndex(c => c.includes('prepare-stop hornhoof_update'));
+    expect(appFirst).toBeGreaterThan(waits[0]!);
+    expect(appFirst).toBeLessThan(waits[1]!);
+    expect(stop).toBeGreaterThan(waits[1]!);
+    expect(readFileSync(join(r.dir, 'home', 'hornhoof', '.env'), 'utf8')).toContain('HORNHOOF_VERSION=0.7.0');
+  });
+
   it("goes by the commit's tag when the server has no digest yet, and starts on it once it can be downloaded", async () => {
     const r = install({ script: await fromServer('') });
     expect(r.code).toBe(0);

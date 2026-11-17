@@ -10,6 +10,7 @@ import { holdTurns } from './drain.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
+import { cancelServerDrain, pauseNodeWork, requestServerDrain, restartServerNodes } from './node-drain.js';
 
 export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional() });
 /* While an update waits for the agents, the working count is checked when it changes and this often besides. */
@@ -50,6 +51,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   function letTurnsGo(companyId: string) {
     holdTurns(ctx, companyId, false);
+    cancelServerDrain(ctx);
     void pumpWaiting(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Could not start the turns held for an update.'));
   }
 
@@ -70,6 +72,19 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.updater.request(rest, id);
   }
 
+  async function sendImmediately(request: UpdateRequest, confirmed: number): Promise<void> {
+    const targets = await serverNodes(ctx);
+    const resume = pauseNodeWork(ctx, targets);
+    try {
+      const turns = (await drainWork(ctx, targets)).turnsLeft;
+      if (turns > confirmed) throw new ApiError(409, 'conflict', 'Confirm how many running turns this update will stop.', 'turns_would_stop', { turns });
+      callOff();
+      restartServerNodes(ctx, targets);
+      try { send({ ...request, immediate: true }); }
+      catch (err) { cancelServerDrain(ctx); throw err; }
+    } finally { resume(); }
+  }
+
   /* The request is still the one waiting after the count, since a person may call it off or ask for another meanwhile.
      It stops waiting only once the updater has it: a request that could not be written is tried again on the next
      check, and the failure goes to the log instead of taking the server down. */
@@ -77,7 +92,9 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     let done = false;
     const wanted = () => !done && waiting?.request.id === request.id;
     const check = async () => {
-      if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted()) return;
+      if (!wanted()) return;
+      const drain = await requestServerDrain(ctx, companyId);
+      if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted() || drain.state !== 'restarting') return;
       send(request);
       done = true;
       callOff(false);
@@ -85,7 +102,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     const tryCheck = () => check().catch(err => app.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
     const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
-    const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
+    const timer = setInterval(() => void tryCheck(), Math.min(IDLE_CHECK_MS, ctx.config.nodeDrainMs, ctx.config.nodeUpdateRetryMs));
     timer.unref();
     waiting = { companyId, request, stop: () => (unsubscribe(), clearInterval(timer)) };
     /* No new turn starts meanwhile, so the running ones can end. */
@@ -114,11 +131,6 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/updates', async (req, reply) => {
     const me = await companyPerson(req);
     const body = UpdateBody.parse(req.body);
-    if (!body.whenIdle) {
-      const work = await Promise.all((await serverNodes(ctx)).map(node => drainWork(ctx, node)));
-      const turns = work.reduce((n, w) => n + w.turnsLeft, 0);
-      if (turns > (body.confirmTurns ?? 0)) throw new ApiError(409, 'conflict', 'Confirm how many running turns this update will stop.', 'turns_would_stop', { turns });
-    }
     if (!ctx.updater.present()) {
       throw new ApiError(503, 'unavailable', 'The updater is not running. Run install.sh server again to update.', 'updater_missing');
     }
@@ -128,10 +140,10 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     const build = body.version === 'latest' ? latest : versions.find(v => v.tag === body.version);
     if (!build) throw new ApiError(400, 'validation', `There is no published build ${body.version}.`, 'version_unknown');
     const request = await requestFor(build, randomUUID());
-    if (!body.whenIdle) request.immediate = true;
-    callOff();
-    if (body.whenIdle) await sendWhenIdle(me.companyId, request);
-    else send(request);
+    if (body.whenIdle) {
+      callOff();
+      await sendWhenIdle(me.companyId, request);
+    } else await sendImmediately(request, body.confirmTurns ?? 0);
     return reply.code(202).send({ id: request.id });
   });
 
