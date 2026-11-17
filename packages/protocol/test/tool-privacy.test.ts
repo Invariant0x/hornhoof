@@ -21,6 +21,24 @@ describe('sensitive tool telemetry', () => {
     expect(values.hide({ text: 'Ready.', nested: JSON.stringify({ password: 'a.$"\n' }) })).toEqual({ text: 'Ready.', nested: '{"password":"[hidden]"}' });
   });
 
+  it('preserves media bytes when a short password also occurs in their base64 representation', () => {
+    const values = new PrivateValues();
+    values.remember('a');
+    const image = { content: [{ type: 'image', data: 'aaaa', mimeType: 'image/png' }] };
+    expect(values.hide(image)).toEqual(image);
+  });
+
+  it('enables execution only from remembered values, then protects later captures of that executor', () => {
+    const privacy = new ToolPrivacy();
+    expect(privacy.execution('another_executor', { text: 'private-marker', secretExecution: true })).toBe(false);
+    privacy.input('vault_save', { password: 'private-marker' });
+    expect(privacy.execution('another_executor', { kind: 'capture', secretExecution: true })).toBe(false);
+    expect(privacy.execution('another_executor', { text: 'private-marker', secretExecution: false })).toBe(true);
+    expect(privacy.execution('another_executor', { kind: 'capture' })).toBe(true);
+    expect(privacy.execution('other_executor', { kind: 'capture' })).toBe(false);
+    expect(privacy.values.input({ subject: 'Use private-marker', freshText: 'Keep private-marker' })).toEqual({ subject: 'Use [hidden]', freshText: 'Keep [hidden]' });
+  });
+
   it('learns a plain value from any tool carrying the sensitive flag', () => {
     const privacy = new ToolPrivacy();
     privacy.event({ kind: 'tool', name: 'new_secret_tool', sensitive: true, input: '{}' });

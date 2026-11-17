@@ -11,6 +11,7 @@ import type { NodeIdentity } from '../nodes/hub.js';
 import { finishPhoneSession } from './queue.js';
 import { phoneById, phoneDenied, phoneMissing, phoneOwner, type PhoneSession } from './store.js';
 import { idOnly, only } from '../../db/selections.js';
+import { sensitiveTurn } from '../events/store.js';
 
 const MAX_SESSION_FRAMES = 2000;
 
@@ -30,7 +31,10 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
       if (duplicate) return;
       const [amount] = await tx.select({ count: sql<string>`count(*)` }).from(phoneFrames).where(eq(phoneFrames.sessionId, frame.sessionId));
       if (Number(amount!.count) >= MAX_SESSION_FRAMES) { full = true; return; }
-      const bytes = frame.capture.png ? Buffer.from(frame.capture.png, 'base64') : null;
+      /* The lease and frame order still advance. A vault-using turn keeps only that metadata, never a screen that may
+         show the value it typed, including when an old node sends an unmasked frame. */
+      const hidden = await sensitiveTurn(tx, held.session.jobId, true);
+      const bytes = !hidden && frame.capture.png ? Buffer.from(frame.capture.png, 'base64') : null;
       if (bytes && pictureType(bytes) !== 'image/png') return;
       let attachmentId: string | null = null;
       if (bytes) {

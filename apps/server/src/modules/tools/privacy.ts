@@ -15,6 +15,7 @@ export async function turnProtection(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string
     lost,
     input: value => privateTurn(ctx.db, jobId)?.values.input(value) ?? value,
     hide: value => privateTurn(ctx.db, jobId)?.values.hide(value) ?? value,
+    execution: (name, input) => privateTurn(ctx.db, jobId)?.execution(name, input) ?? false,
     async sensitive(name, policy, input, answer) {
       let state = privateTurn(ctx.db, jobId);
       if (!state) {
@@ -26,6 +27,7 @@ export async function turnProtection(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string
         state.input(name, input, policy);
         await markSensitiveTool(ctx, jobId, name);
       } else for (const content of answer.content) {
+        if (content.type !== 'text') continue;
         let value: unknown = content.text;
         try { value = JSON.parse(content.text); } catch { /* A sensitive tool may return plain text. */ }
         state.result(value, policy);
