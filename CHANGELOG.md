@@ -29,6 +29,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `program_screen` shows a busy employee's program from its running turn, without a false `no_program`.
 - The reason `outbound_changed` reads in plain words, in English and Russian, like the server's other reasons.
 - A test run whose parts have all ended closes after a server restart, and the minute check closes runs left open.
+- `message_employee` no longer says a message did not reach an employee whose turn could not go out at once.
+- A program's idle connection to its node's bridge lasts 72 s, so tool calls no longer break with ECONNRESET.
+- External messaging keeps each sentence in its own direction in right-to-left languages.
 
 ### Added
 
@@ -44,6 +47,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Settings, Passwords keeps the company's site sign-ins, each with its login, password and one-time code.
 - Agents take a sign-in with `vault_entry`, which gives the current one-time code, and save one with `vault_save`.
 - A catalog revision opens whole, as a message would read, with its changes from the one in use marked word by word.
+- Company phones: an owner lends an Android phone to the company's assistants through Wireless debugging.
+- An owner watches a lent phone's live screen and takes it back with Stop; a task keeps its phone recordings.
 - Each channel of a department to its contacts takes an address, with the person's consent to its purpose.
 
 ### Changed
