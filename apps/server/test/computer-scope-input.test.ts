@@ -2,28 +2,37 @@ import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, computerRuns, jobs, machineAccess, people, subscriptions } from '../src/db/schema.js';
-import { Computers } from '../src/modules/computer/access.js';
 import { decisionPrincipal, enterPressed, machinePrincipal, standingPrincipal, turnStarted, typedWentIn } from '../src/modules/conversation/decision-context.js';
 import { BUILTIN } from './builtin.js';
 import { listen, mcp, setUpCompany, testApp } from './helpers.js';
-import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
+import { companyRows, SERVER_MACHINE_ENV, serverMachine, testComputers } from './helpers-computer.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
+
+const AT = new Date('2026-11-17T12:00:00Z');
 
 async function company() {
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-11-17T12:00:00Z'));
+  vi.setSystemTime(AT);
   onTestFinished(() => { vi.useRealTimers(); });
   const { app, db } = await testApp(SERVER_MACHINE_ENV);
-  await setUpCompany(app);
+  /* The company, its worker and Other, made once for the file at the frozen time. */
+  const { worker, other } = await companyRows(app, 'computer-scope-input company', async () => {
+    await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [plan] = await db.select().from(subscriptions);
+    const [worker] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Worker', roleKey: 'DEV-BE', subscriptionId: plan!.id, model: '' }).returning();
+    const [other] = await db.insert(people).values({ companyId: company!.id, name: 'Other', email: 'other@root.example', status: 'active', scopeKind: 'company' }).returning();
+    /* Other owns this worker's plan and may see its terminal, but owns no machine. */
+    await db.update(subscriptions).set({ ownerPersonId: other!.id }).where(eq(subscriptions.id, plan!.id));
+    return { worker, other };
+  }, AT);
   await listen(app);
   const [company] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   const [plan] = await db.select().from(subscriptions);
-  const [worker] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Worker', roleKey: 'DEV-BE', subscriptionId: plan!.id, model: '' }).returning();
-  const [other] = await db.insert(people).values({ companyId: company!.id, name: 'Other', email: 'other@root.example', status: 'active', scopeKind: 'company' }).returning();
-  /* Other owns this worker's plan and may see its terminal, but owns no machine. */
-  await db.update(subscriptions).set({ ownerPersonId: other!.id }).where(eq(subscriptions.id, plan!.id));
-  app.ctx.computer = new Computers(app.ctx, { waitMs: 0 });
-  app.ctx.computer.moveLegacy(app.ctx.config.controlDir);
+  testComputers(app, { waitMs: 0 });
   const machine = await serverMachine(app);
   await db.insert(machineAccess).values({ machineId: machine, companyId: company!.id, scope: 'all_agents', until: new Date('2026-11-17T13:00:00Z') });
   let next = 0;
