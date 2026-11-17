@@ -16,7 +16,7 @@ type Turn = typeof turns.$inferSelect;
 type Source = { facts: TurnFacts; source: PipelineTurn['source'] };
 
 /* The turn the first goals are measured against, in a company that has run it. */
-export const BASELINE_TURN = 7;
+const BASELINE_TURN = 7;
 
 const FACT_TASK = {
   id: tasks.id,

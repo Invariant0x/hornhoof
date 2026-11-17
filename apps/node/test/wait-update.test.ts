@@ -11,8 +11,7 @@ import { waitUpdate } from '../src/wait-update.js';
 import { listenIn } from '../../../test-support/ports.mjs';
 
 const KEY = 'node-key-1234567890';
-const waiting = { ready: false, drain: { state: 'waiting', turnsLeft: 2, partsLeft: 1, until: '2026-11-04T18:30:00.000Z' }, pollAfterMs: 7 };
-const postponed = { ready: false, drain: { state: 'postponed', turnsLeft: 1, partsLeft: 0, retryAt: '2026-11-04T18:45:00.000Z' }, pollAfterMs: 9 };
+const waiting = { ready: false, drain: { state: 'waiting', turnsLeft: 2, partsLeft: 1, since: '2026-11-04T18:30:00.000Z' }, pollAfterMs: 7 };
 const ready = { ready: true, drain: { state: 'restarting', since: '2026-11-04T18:46:00.000Z' }, pollAfterMs: 5 };
 
 type Answer = { status: number; body?: unknown };
@@ -68,16 +67,9 @@ describe('hornhoof-node wait-update', () => {
     const t = terminal();
     await waitUpdate(nodeFolder(s.url), t.io, async () => {});
     expect(t.said().match(/2 turns and 1 test part/g)).toHaveLength(1);
-    expect(t.said()).toContain('2026-11-04T18:30:00.000Z');
+    expect(t.said()).toContain('since 2026-11-04T18:30:00.000Z');
+    expect(t.said()).toContain('It takes no new work meanwhile.');
     expect(t.said()).not.toContain(KEY);
-  });
-
-  it('keeps asking past the deadline, and says nothing was stopped and when it tries again', async () => {
-    const s = await server([{ status: 200, body: postponed }, { status: 200, body: ready }]);
-    const t = terminal();
-    expect(await waitUpdate(nodeFolder(s.url), t.io, async () => {})).toBe(0);
-    expect(t.said()).toContain('Nothing was stopped');
-    expect(t.said()).toContain('2026-11-04T18:45:00.000Z');
   });
 
   it('answers 3 for a server from before this wait, and leaves saying why to the installer', async () => {

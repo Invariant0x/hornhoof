@@ -32,7 +32,7 @@ const asking = (f: Facts, agentId: string, t: TaskFacts) => f.asked.has(`${agent
 /* An employee acts on the task while it holds it: as its producer, or as the owner of its current checking stage, Tests
    included, which holds it until it hands it on; and neither waiting for the tasks it comes after nor for a person's
    answer. */
-export function memberActs(f: Facts, agentId: string, taskId: string | null): boolean {
+function memberActs(f: Facts, agentId: string, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   if (!t || !ready(f, t) || asking(f, agentId, t)) return false;
   return t.assigneeAgentId === agentId && [...LIVE, 'review'].includes(t.status);
@@ -50,14 +50,14 @@ function rootOf(f: Facts, t: TaskFacts): TaskFacts | null {
 
 /* A head acts on the task when it is part of a department task it holds that can go on: not blocked, not over, not
    waiting for the tasks it comes after or for the head's own question. */
-export function headActs(f: Facts, headId: string, taskId: string | null): boolean {
+function headActs(f: Facts, headId: string, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   const root = t && rootOf(f, t);
   return !!root && root.assigneeAgentId === headId && LIVE.includes(root.status) && ready(f, root) && !asking(f, headId, root);
 }
 
 /* An employee's work keeps its department's line on unless the department task above it is blocked or over. */
-export function underLiveRoot(f: Facts, taskId: string | null): boolean {
+function underLiveRoot(f: Facts, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   if (!t) return false;
   const root = rootOf(f, t);
@@ -118,7 +118,7 @@ async function locked(tx: Tx, e: Ends): Promise<Line> {
 }
 
 /* New work started on the line: it begins a new cycle, once per turn however often that turn's start is told. */
-export async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }): Promise<boolean> {
+async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }): Promise<boolean> {
   const row = await locked(tx, s);
   if (row.workJobId === s.jobId) return false;
   await tx
@@ -128,7 +128,7 @@ export async function recordMapWorkStarted(tx: Tx, s: Ends & { jobId: string }):
   return true;
 }
 
-export type MapReturn = Ends & { workEpoch: number; sourceKey: string; sourceJobId: string | null; sourceTaskId: string | null; returnedAt: Date };
+type MapReturn = Ends & { workEpoch: number; sourceKey: string; sourceJobId: string | null; sourceTaskId: string | null; returnedAt: Date };
 
 /* What a return keeps off the line while its turn runs: the task it handed in. A message hands none in, so the task the
    turn handed in before it stays off. */
@@ -225,7 +225,7 @@ async function linesOfTurns(tx: Tx, companyId: string, agent: Agent, up: string,
 }
 
 /* A turn taken to go out: the agent's, with the tasks it carries, its own and those of the turns that go out inside it. */
-export type TakenTurn = { id: string; companyId: string; agentId: string | null; taskIds: readonly (string | null)[] };
+type TakenTurn = { id: string; companyId: string; agentId: string | null; taskIds: readonly (string | null)[] };
 
 /* A turn was taken to go out: a new cycle begins on each line the agent's work on its tasks keeps on, its own and, for an
    employee, its department's. It runs in the transaction that takes the turn, so the cycle is kept exactly when the turn

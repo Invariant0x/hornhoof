@@ -10,7 +10,7 @@ export const UNHEARD_NOTE = 'Words sent into the running turn were not taken by 
 /* Sent copies, visible facts and coalesced lines with a separate input receipt are no words into a turn. */
 export const incomingWords = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in') <> 'out' and coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true' and coalesce(${agentEvents.data}->>'inputShadow', 'false') <> 'true'`;
 export type TurnWords = { personId: string | null; data: unknown };
-export type ClickGrant = { personId: string; machineId: string | null; seq: number | null };
+type ClickGrant = { personId: string; machineId: string | null; seq: number | null };
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'> | Tx;
 type Standing = Pick<typeof jobs.$inferSelect, 'id' | 'agentId' | 'createdBy' | 'answersCeo' | 'inboxWake' | 'decisionInputPending'>;
@@ -80,12 +80,6 @@ export function answeredWords<T extends { seq: number; personId: string | null; 
   if (last) return last.personId ? { personId: last.personId, sourceSeq: last.seq } : null;
   return said.length === 0 && createdBy ? { personId: createdBy, sourceSeq: null } : null;
 }
-
-/* Whose click Hornhoof's note that opened the turn tells of, as their order, until a person writes or types into it. */
-export const clickWords = (
-  job: Pick<Standing, 'createdBy' | 'answersCeo'>,
-  said: readonly { personId: string | null; kind: string; data: unknown }[],
-): string | null => (!said.some(byPerson) && job.answersCeo ? job.createdBy : null);
 
 function parseGrant(raw: unknown): ClickGrant | null {
   if (!raw || typeof raw !== 'object') return null;

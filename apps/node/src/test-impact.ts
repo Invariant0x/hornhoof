@@ -1,7 +1,7 @@
 import { extname, matchesGlob, posix } from 'node:path';
 import type { Command, TestEnvironmentV1, TestUnit } from '@hornhoof/protocol';
 
-export type ImpactAdapter = 'vitest-related' | 'pytest';
+type ImpactAdapter = 'vitest-related' | 'pytest';
 export interface ImpactPackage { id: string; root: string; language?: string; suiteIds: string[] }
 export interface ImpactEnvironment {
   packages: ImpactPackage[];
@@ -11,8 +11,8 @@ export interface ImpactEnvironment {
 export interface ImpactChange { path: string; kind: 'added' | 'modified' | 'deleted' | 'renamed'; previousPath?: string }
 export interface ImpactGraph { adapter: ImpactAdapter; status: 'ready' | 'unavailable'; units: TestUnit[] }
 export interface ImpactInput { environment: ImpactEnvironment; changes: ImpactChange[]; graphs: ImpactGraph[] }
-export interface ImpactReason { code: string; path: string }
-export interface ImpactPackageSelection { packageId: string; mode: 'related' | 'whole-package'; units: TestUnit[]; reasons: ImpactReason[] }
+interface ImpactReason { code: string; path: string }
+interface ImpactPackageSelection { packageId: string; mode: 'related' | 'whole-package'; units: TestUnit[]; reasons: ImpactReason[] }
 export interface ImpactSelection {
   version: 1;
   status: 'ready' | 'blocked';
@@ -26,7 +26,7 @@ interface FullRule { code: string; globs: string[]; global?: boolean }
 type ManifestRule = TestEnvironmentV1['impact']['fullPackageGlobs'][number];
 /* Why a test runs that a rule of the manifest names, beside those the graph finds. */
 export const NAMED_TESTS = 'named_tests';
-export const DEFAULT_FULL_PACKAGE_RULES: readonly FullRule[] = [
+const DEFAULT_FULL_PACKAGE_RULES: readonly FullRule[] = [
   { code: 'migration', globs: ['**/migrations/**', '**/drizzle/**', '**/*.migration.*'] },
   { code: 'schema', globs: ['**/schema.*', '**/schema/**'] },
   { code: 'configuration', globs: ['**/*config*', '**/config/**', '**/configs/**', '**/configuration/**', '**/settings/**', '**/package.json', '**/package-lock.json', '**/npm-shrinkwrap.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/Pipfile.lock', '**/uv.lock', '**/Cargo.lock', '**/pyproject.toml', '**/pytest.ini', '**/Dockerfile', '**/.hornhoof/**', '**/.github/**'] },

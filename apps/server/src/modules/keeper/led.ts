@@ -31,7 +31,7 @@ const DATABASE = 'hornhoof';
    sealed: the bundle lies in this keeper's own store. recorded: the keeper that leads took and recorded it. failed:
    why the updater could not dump, until it is asked again. */
 const LedShape = z.object({ id: z.uuid(), term: z.number().int().min(0), asked: z.string().nullable(), sealed: z.boolean(), recorded: z.boolean(), failed: z.string().nullable(), at: z.string() });
-export type LedState = z.infer<typeof LedShape>;
+type LedState = z.infer<typeof LedShape>;
 
 /* What this keeper wrote down of saving the database that led; none when it wrote nothing, or nothing it can read. */
 export function readLed(dir: string): LedState | null {

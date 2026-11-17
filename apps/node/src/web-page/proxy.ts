@@ -12,7 +12,7 @@ import { ONLY_WEB, vetHost, type Lookup, type Vetted } from './address.js';
 export const REFUSED_HEADER = 'x-hornhoof-refused';
 export type Dial = (address: string, port: number) => Socket;
 export type Refused = { host: string; reason: string };
-export type ProxyOptions = {
+type ProxyOptions = {
   lookup: Lookup;
   maxBytes: number;
   credentials: { username: string; password: string };

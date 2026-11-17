@@ -5,7 +5,7 @@ import type { WaitingRequest } from '../types';
 import { MaterialGlyph, MaterialViewer, materialKindLabel, materialMetaLine, type MaterialGlyphKind, type ViewerAvailableMaterial } from './MaterialViewer';
 import { displayFileName, proseErrorText } from './TaskAttachments';
 
-export type MaterialState = 'available' | 'denied' | 'missing' | 'unsupported';
+type MaterialState = 'available' | 'denied' | 'missing' | 'unsupported';
 
 export type MaterialItem = {
   id: string;
@@ -33,14 +33,14 @@ const INITIAL_VISIBLE = 5;
 
 const attachmentUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
 
-export const isAvailableMaterial = (item: MaterialItem): item is ViewerAvailableMaterial => item.state === 'available';
+const isAvailableMaterial = (item: MaterialItem): item is ViewerAvailableMaterial => item.state === 'available';
 
-export function collectAvailableMaterials(manifest: MaterialManifestView): ViewerAvailableMaterial[] {
+function collectAvailableMaterials(manifest: MaterialManifestView): ViewerAvailableMaterial[] {
   const all = [...manifest.common, ...manifest.options.flatMap(o => o.materials)];
   return all.filter(isAvailableMaterial);
 }
 
-export function legacyRequestMaterials(request: WaitingRequest, t: Messages): MaterialManifestView {
+function legacyRequestMaterials(request: WaitingRequest, t: Messages): MaterialManifestView {
   const common: MaterialItem[] = request.images.map((id, i) => ({
     id: `legacy-common-img-${i}`,
     name: t.tasks.picture(i + 1),
@@ -88,7 +88,7 @@ export function readMaterialStamp(
   return stampPair(manifest) ?? stampPair(source) ?? {};
 }
 
-export function useSourceMaterials(sourceKind: 'requests' | 'proposals', sourceId: string | undefined, materialRevision: number | null) {
+function useSourceMaterials(sourceKind: 'requests' | 'proposals', sourceId: string | undefined, materialRevision: number | null) {
   const [manifest, setManifest] = useState<MaterialManifestView | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
 
@@ -112,7 +112,7 @@ export function useSourceMaterials(sourceKind: 'requests' | 'proposals', sourceI
   return { manifest, failure };
 }
 
-export function useViewerCursor() {
+function useViewerCursor() {
   const [viewer, setViewer] = useState<{ id: string; opener: HTMLElement | null } | null>(null);
   const openViewer = useCallback((id: string, opener: HTMLElement | null) => setViewer({ id, opener }), []);
   const selectViewer = useCallback((id: string) => setViewer(prev => (prev ? { ...prev, id } : null)), []);
