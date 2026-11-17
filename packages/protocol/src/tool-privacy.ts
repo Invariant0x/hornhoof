@@ -46,6 +46,13 @@ export class PrivateValues {
     return forms.length ? text.replace(new RegExp(forms.join('|'), 'g'), '[hidden]') : text;
   }
 
+  contains(value: unknown): boolean {
+    if (typeof value === 'string') return [...this.values].some(secret => value.includes(secret));
+    if (Array.isArray(value)) return value.some(item => this.contains(item));
+    if (value && typeof value === 'object') return Object.entries(value).some(([key, item]) => !IDENTITY.test(key) && this.contains(item));
+    return false;
+  }
+
   hide<T>(value: T): T {
     /* Media is an opaque payload for the authorized caller, not text to rewrite. Its tool's privacy policy decides
        whether it may be persisted. A password fragment may coincidentally occur in base64. */
@@ -97,7 +104,7 @@ export class ToolPrivacy {
   execution(name: string, input: unknown): boolean {
     if (!this.sensitive) return false;
     if (this.executions.has(name)) return true;
-    if (JSON.stringify(this.values.input(input)) === JSON.stringify(input)) return false;
+    if (!this.values.contains(input)) return false;
     this.executions.add(name);
     return true;
   }

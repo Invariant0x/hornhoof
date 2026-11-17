@@ -36,6 +36,7 @@ describe('sensitive tool telemetry', () => {
     expect(privacy.execution('another_executor', { text: 'private-marker', secretExecution: false })).toBe(true);
     expect(privacy.execution('another_executor', { kind: 'capture' })).toBe(true);
     expect(privacy.execution('other_executor', { kind: 'capture' })).toBe(false);
+    expect(privacy.execution('url_executor', { operation: { kind: 'url', url: 'https://example.test/?value=private-marker' } })).toBe(true);
     expect(privacy.values.input({ subject: 'Use private-marker', freshText: 'Keep private-marker' })).toEqual({ subject: 'Use [hidden]', freshText: 'Keep [hidden]' });
   });
 
