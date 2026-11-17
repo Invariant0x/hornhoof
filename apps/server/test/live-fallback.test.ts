@@ -29,12 +29,10 @@ describe('messages a busy program could not take live', () => {
       await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId, ok: true, sessionId: 'kept-session', result: 'Done.', tail: '', error: null });
     }
     const sends = c.sent.mock.calls.map(([, message]) => message).filter(message => message.type === 'job.run');
-    expect(sends.map(message => message.jobId)).toEqual([first, ...waiting]);
-    for (const [index, message] of sends.slice(1).entries()) {
-      expect(message.sessionId).toBe('kept-session');
-      expect(message.prompt).toContain(texts[index]);
-      for (const other of texts.filter(text => text !== texts[index])) expect(message.prompt).not.toContain(other);
-    }
+    /* The messages that waited go out together in the turn after the first, each of them once. */
+    expect(sends.map(message => message.jobId)).toEqual([first, waiting[0]]);
+    expect(sends[1]!.sessionId).toBe('kept-session');
+    for (const text of texts) expect(sends[1]!.prompt.split(text)).toHaveLength(2);
     expect((await c.turnsOf()).every(j => j.status === 'done')).toBe(true);
   });
 });

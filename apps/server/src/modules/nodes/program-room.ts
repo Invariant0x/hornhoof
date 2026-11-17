@@ -57,9 +57,11 @@ export function overloaded(load: NodeLoad): boolean {
   return availableMemory(load) < START_FREE_BYTES || busy > Math.max(1, cpus) * BUSY_PER_PROCESSOR;
 }
 
-/* What a node said of the programs that run on it. The agents whose turns waited for room on it, once there is room; of
-   them one goes with each report, so the turns that waited do not all fall on the machine at once and load it past what
-   it carries again. The others wait again when they are asked. working: the turns that run on the node now. */
+/* What a node said of the programs that run on it. The agents whose turns waited for room on it, once it does not work
+   past what it carries; of them one goes with each report, so the turns that waited do not all fall on the machine at once
+   and load it past what it carries again. Each one's own room decides: one whose program runs there goes before turns that
+   came later, while one that would start a new program still waits for the memory. The others wait again when they are
+   asked. working: the turns that run on the node now. */
 export function programsLive(ctx: Ctx, node: NodeIdentity, live: string[] | undefined, working?: number): string[] {
   const room = roomOf(ctx, node);
   room.live = live ? new Set(live) : null;
@@ -71,7 +73,7 @@ export function programsLive(ctx: Ctx, node: NodeIdentity, live: string[] | unde
     room.easing = false;
     return [];
   }
-  if ((load && overloaded(load)) || (room.live && load && !roomLeft(room, load))) return [];
+  if (load && overloaded(load)) return [];
   room.easing = true;
   const waited = [...room.waiting];
   room.waiting.clear();
