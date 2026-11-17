@@ -5,7 +5,8 @@
 // address and the turn's token into HH_ATTACH_URL and HH_ATTACH_PASS for each turn.
 'use strict';
 const { createWriteStream, statSync } = require('node:fs');
-const { basename, join } = require('node:path');
+const { mkdtemp, rename, rm } = require('node:fs/promises');
+const { basename, dirname, join } = require('node:path');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
@@ -29,8 +30,16 @@ async function main() {
   }
   const folder = where !== undefined && statSync(where, { throwIfNoEntry: false })?.isDirectory();
   const path = where === undefined ? name : folder ? join(where, name) : where;
-  /* Written as it comes, so a file of any size passes. */
-  await pipeline(res.body ? Readable.fromWeb(res.body) : Readable.from([]), createWriteStream(path));
+  /* Keep a partial download beside its destination until it is complete, so a lost response preserves the old file. */
+  const temporary = await mkdtemp(join(dirname(path), '.hh-fetch-'));
+  try {
+    const pending = join(temporary, 'file');
+    const mode = statSync(path, { throwIfNoEntry: false })?.mode ?? 0o666;
+    await pipeline(res.body ? Readable.fromWeb(res.body) : Readable.from([]), createWriteStream(pending, { mode }));
+    await rename(pending, path);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
   process.stdout.write(`${path}\n`);
 }
 
