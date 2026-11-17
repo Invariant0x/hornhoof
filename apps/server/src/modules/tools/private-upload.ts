@@ -2,6 +2,8 @@ import type { PrivateValues } from '@hornhoof/protocol';
 import { Readable } from 'node:stream';
 import { ApiError } from '../../errors.js';
 
+export const privateFilename = (values: PrivateValues | undefined, raw: string | undefined): string | undefined => values?.text(raw ?? '') || raw;
+
 /* Never yield a secret to the receiver, including across transport chunks. Keep the possible prefix in memory until
    enough bytes arrive to decide. received() removes any earlier safe bytes if the stream is refused. */
 export function privateUpload(body: unknown, values?: PrivateValues): unknown {
