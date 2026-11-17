@@ -38,6 +38,19 @@ function statusSays(dir: string, state: string, step: string): void {
 
 const wordIn = (dir: string) => readKeeperState(dir)?.mode;
 
+/* The keeper's looks and the time it writes in its word run on the test's clock from here on. */
+function looksOnTheTestsClock(): void {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  onTestFinished(() => void vi.useRealTimers());
+}
+
+/* The test's clock moves by ms, and the look that came due in it has written its word. */
+async function nextWord(dir: string, ms: number): Promise<void> {
+  const before = readKeeperState(dir)?.at;
+  await vi.advanceTimersByTimeAsync(ms);
+  await until(() => readKeeperState(dir)?.at !== before);
+}
+
 async function listening(server: http.Server): Promise<Target> {
   onTestFinished(() => {
     server.closeAllConnections();
@@ -158,33 +171,41 @@ describe('updaterBusy', () => {
 
 describe('the keeper', () => {
   it('writes its mode every second, maintenance while the updater installs', async () => {
+    looksOnTheTestsClock();
     const { keeper, dir } = await keeperOn(await echoHeaders());
     /* What the app's own reader takes, so the two sides of the file cannot drift apart. */
     expect(freshState(dir, Date.now(), 2000)).toMatchObject({ mode: 'lead', link: null });
     const first = readKeeperState(dir)?.at;
-    await until(() => readKeeperState(dir)?.at !== first);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(readKeeperState(dir)?.at).toBe(first);
+    await nextWord(dir, 1);
     statusSays(dir, 'running', 'install');
-    await until(() => wordIn(dir) === 'maintenance');
+    await nextWord(dir, 1000);
+    expect(wordIn(dir)).toBe('maintenance');
     expect(keeper.mode()).toBe('maintenance');
     expect(freshState(dir, Date.now(), 2000)?.mode).toBe('maintenance');
     statusSays(dir, 'done', 'finished');
-    await until(() => wordIn(dir) === 'lead');
+    await nextWord(dir, 1000);
+    expect(wordIn(dir)).toBe('lead');
     expect(keeper.mode()).toBe('lead');
   });
 
   it('keeps maintenance through a status file it cannot read', async () => {
+    looksOnTheTestsClock();
     const { keeper, dir } = await keeperOn(await echoHeaders(), FAST);
     statusSays(dir, 'running', 'install');
-    await until(() => wordIn(dir) === 'maintenance');
+    await nextWord(dir, FAST.everyMs);
+    expect(wordIn(dir)).toBe('maintenance');
     writeFileSync(join(dir, 'status.json'), '{');
-    const end = Date.now() + 3000;
-    while (Date.now() < end) {
+    /* As many looks as three seconds hold. */
+    for (let look = 0; look < 3000 / FAST.everyMs; look++) {
+      await nextWord(dir, FAST.everyMs);
       expect(wordIn(dir)).toBe('maintenance');
       expect(keeper.mode()).toBe('maintenance');
-      await sleep(100);
     }
     statusSays(dir, 'failed', 'install');
-    await until(() => wordIn(dir) === 'lead');
+    await nextWord(dir, FAST.everyMs);
+    expect(wordIn(dir)).toBe('lead');
   });
 
   it('takes its first word from the status file, and leads when it cannot read it', async () => {
