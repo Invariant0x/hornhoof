@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agents, departments, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as } from './helpers.js';
 import { prepareSharedDatabase } from './helpers-db.js';
@@ -139,7 +139,7 @@ describe('the release step of a turn', () => {
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('whole run') as unknown });
   });
 
-  it('refuses a commit that is not the head of the turn branch, or a main that already holds it', async () => {
+  it('refuses a commit the turn branch does not hold, or a main that already holds it', async () => {
     const f = await releasing();
     const run = await f.fullRun();
     await f.approve();
@@ -149,6 +149,31 @@ describe('the release step of a turn', () => {
     f.repo.heads.main = f.R;
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('main') as unknown });
   });
+
+  /* The turn branch never stops for a release: work goes on joining it while the whole run and the approval of R take their
+     time, and the release takes only what R holds. */
+  it('records a commit the turn branch went past, and leaves the results R does not hold to the next release', async () => {
+    const f = await releasing();
+    const run = await f.fullRun();
+    await f.approve();
+    const late = await lateResult(f, EXTRA);
+    expect(recorded((await f.recordRelease({ runId: run.id })).text)).toMatchObject({
+      commit: f.R, tasks: [expect.objectContaining({ number: f.task.number })], left: [late.number],
+    });
+  });
+});
+
+/* Turnkey work that joined the turn after R: the turn branch went on from R to commit, its integration. */
+async function lateResult(f: Awaited<ReturnType<typeof releasing>>, commit: string) {
+  const { task } = await f.create({ title: 'Late change' });
+  await f.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: f.turn.id }).where(eq(tasks.id, task.id));
+  await f.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: 'report', agentId: f.author.id, text: 'Done.', data: { done: true, integration: { branch: f.branch, commit, from: `task-${task.number}` } } });
+  f.repo.heads[f.branch] = commit;
+  f.repo.holds[commit] = [f.R, ...f.repo.holds[f.R]!];
+  return task;
+}
+
+describe('the release step while the turn branch goes on', () => {
 
   it('is asked only by the holder of the release task, while it is not paused', async () => {
     const f = await releasing();
@@ -250,6 +275,16 @@ describe('the release step with autonomous release on', () => {
     const run = await f.fullRun();
     expect(await f.recordRelease({ runId: run.id })).toMatchObject({ isError: true, text: expect.stringContaining('approv') as unknown });
     expect(await journal(f)).toEqual([]);
+  });
+
+  it('approves a checked release by itself while unchecked work that joined the turn after it waits for the next one', async () => {
+    const f = await releasing();
+    await autonomous(f);
+    const run = await f.fullRun();
+    const late = await lateResult(f, EXTRA);
+    const result = await f.recordRelease({ runId: run.id });
+    expect(result.isError).toBe(false);
+    expect(recorded(result.text)).toMatchObject({ approvalRequestId: null, autonomousReleaseId: expect.any(String), covered: true, uncovered: [], left: [late.number] });
   });
 
   it("takes a person's approval of the commit where there is one, and logs nothing", async () => {

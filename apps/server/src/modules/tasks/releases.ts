@@ -14,11 +14,12 @@ import { branchHolds, ensureTurnBranch, headOf, integrationTarget, type Integrat
 import { keptEverything, ofItsRelease } from '../testruns/reuse.js';
 import { wholeProductRun } from './autonomous-release.js';
 
-/* A turn is a release of its department. Its holder records the release before main moves: the exact commit R, the head of
-   turn-<number>, main under it, the full run on R, the results R brings with the verdicts on them, and what approved R: a
-   person's approval of it, or, with autonomous release on, the entry of the autonomous release log, for a release every
-   commit of which was checked. Main then goes to R by fast-forward and R is tagged vX.Y.Z; the minute round closes the turn
-   on that tag, and what the release left out goes into the next turn, whose branch starts from the head of this one. */
+/* A turn is a release of its department. Its holder records the release before main moves: the exact commit R of
+   turn-<number>, its head or one the branch went past while R was checked, main under it, the full run on R, the results R
+   brings with the verdicts on them, and what approved R: a person's approval of it, or, with autonomous release on, the entry
+   of the autonomous release log, for a release every commit of which was checked. Main then goes to R by fast-forward and R
+   is tagged vX.Y.Z; the minute round closes the turn on that tag, and what the release left out goes into the next turn,
+   whose branch starts from the head of this one. */
 
 type Turn = typeof turns.$inferSelect;
 type Release = typeof turnReleases.$inferSelect;
@@ -169,6 +170,14 @@ async function passingVerdicts(db: Ctx['db'], task: Task, candidate: EchelonCand
   return rows.map(row => String(row.id));
 }
 
+/* The results of the turn R holds: the turn branch goes on joining work while R is checked and approved, and what came after R
+   waits for the next release. A result with no commit of its own changed no code and goes with R. */
+async function heldBy(ctx: Reader, repo: Repo, commit: string, results: Accepted[]): Promise<Accepted[]> {
+  const held: Accepted[] = [];
+  for (const result of results) if (!result.commit || await branchHolds(ctx, repo, commit, result.commit)) held.push(result);
+  return held;
+}
+
 /* Whether every commit R brings over main is of a result of the turn whose checkers passed its exact commit: a merge made on
    the turn branch outside every candidate, a commit no accepted candidate brought, turnkey work no checker passed, a checker
    off since, or a comparison that could not be read whole, is not covered. Only a covered release may be approved by itself. */
@@ -206,7 +215,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   if (!target || !turn) throw refuse(409, 'repo_invalid', `#${task.number} is of no department that releases turns: its results go to their main line straight.`);
   if (!agent || agent.departmentId !== turn.departmentId) throw refuse(403, 'task_not_yours', 'Only the department whose turn it is records its release.');
   const head = await headOf(ctx, target.repo, target.branch);
-  if (head !== input.commit) throw refuse(409, 'task_changed', `${input.commit} is not the head of ${target.branch}${head ? `, which is at ${head}` : ', or it could not be read'}. A release is the head of the turn branch.`);
+  if (!head || !(await branchHolds(ctx, target.repo, head, input.commit))) throw refuse(409, 'task_changed', `${target.branch} does not hold ${input.commit}${head ? `: it is at ${head}` : ', or it could not be read'}. A release is a commit of the turn branch.`);
   const base = await headOf(ctx, target.repo, target.repo.branch);
   if (!base) throw refuse(409, 'repo_invalid', `${target.repo.branch} could not be read. Try again.`);
   if (base === input.commit || await branchHolds(ctx, target.repo, base, input.commit)) throw refuse(409, 'task_invalid', `${target.repo.branch} already holds ${input.commit}: a release is recorded before main moves.`);
@@ -214,8 +223,10 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
   const [owner] = await ctx.db.select(idOnly(departments)).from(departments).where(eq(departments.id, turn.departmentId!));
   await requireFullRun(ctx.db, turn, target.branch, owner!.id, input.runId, input.commit);
   const results = await acceptedResults(ctx.db, turn);
-  const uncovered = await coverage(ctx, target.repo, base, input.commit, results);
-  const released: ReleasedTask[] = results.map(r => ({ taskId: r.task.id, number: r.task.number, commit: r.commit, verdicts: r.verdicts }));
+  const held = await heldBy(ctx, target.repo, input.commit, results);
+  const uncovered = await coverage(ctx, target.repo, base, input.commit, held);
+  const released: ReleasedTask[] = held.map(r => ({ taskId: r.task.id, number: r.task.number, commit: r.commit, verdicts: r.verdicts }));
+  const left = results.filter(r => !held.includes(r)).map(r => r.task.number);
   /* A person's approval stands first; without one, autonomous release approves only what was checked whole. */
   const asked = await personApproval(ctx.db, task, input.commit);
   if (!asked) {
@@ -227,7 +238,7 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     const [open] = await tx.select(idOnly(turns)).from(turns).where(and(eq(turns.id, turn.id), eq(turns.status, 'open')));
     if (!open) throw refuse(409, 'task_changed', `Turn ${turn.number} was released meanwhile.`);
     const still = await tx.select(idOnly(tasks)).from(tasks).where(eq(tasks.turnId, turn.id));
-    if (still.length !== released.length || still.some(row => !released.some(r => r.taskId === row.id))) throw refuse(409, 'task_changed', `A result joined turn ${turn.number} meanwhile. Record the release again.`);
+    if (still.length !== results.length || still.some(row => !results.some(r => r.task.id === row.id))) throw refuse(409, 'task_changed', `A result joined turn ${turn.number} meanwhile. Record the release again.`);
     await requireFullRun(tx, turn, target.branch, owner!.id, input.runId, input.commit);
     const approvalRequestId = await personApproval(tx, task, input.commit);
     let autonomousReleaseId: string | null = null;
@@ -241,13 +252,13 @@ export async function recordRelease(ctx: Reader, agentId: string, companyId: str
     await note(tx, task, { kind: 'comment', actor: { agentId }, text: `Recorded the release of Turn ${turn.number}: main ${base} goes to ${input.commit}${by}.`, data: { release: row!.id } });
     return row!;
   });
-  return releaseView(turn, record, released);
+  return releaseView(turn, record, released, left);
 }
 
-const releaseView = (turn: Turn, record: Release, released: ReleasedTask[]) => ({
+const releaseView = (turn: Turn, record: Release, released: ReleasedTask[], left: number[]) => ({
   release: record.id, turn: turn.number, commit: record.commit, baseCommit: record.baseCommitSha, runId: record.runId, approvalRequestId: record.approvalRequestId, autonomousReleaseId: record.autonomousReleaseId,
-  tasks: released.map(({ number, commit, verdicts }) => ({ number, commit, verdicts })), covered: record.covered, uncovered: record.uncovered,
-  next: `Fast-forward main to ${record.commit} and tag it vX.Y.Z: the tag closes Turn ${turn.number}.`,
+  tasks: released.map(({ number, commit, verdicts }) => ({ number, commit, verdicts })), covered: record.covered, uncovered: record.uncovered, left,
+  next: `Fast-forward main to ${record.commit} and tag it vX.Y.Z: the tag closes Turn ${turn.number}${left.length ? `, and what it leaves out goes into the next release` : ''}.`,
 });
 
 /* One department's open turn on its repository's tags: the first look takes the newest tag as where the turn starts; a newer
