@@ -168,6 +168,45 @@ describe('silence measured by signs of life', () => {
     expect(agentProgramState(c.ctx, { id }).alarm).toEqual({ reason: 'node_silent', since: now });
   });
 
+  it('calls whoever sees the screen three minutes after a thinking program\'s screen stood still, for a window of the program may wait on it', async () => {
+    const c = await company();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
+    const signAt = Date.now(), stillSince = signAt + MIN;
+    const report = (now: number) => handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: signAt, screenAt: stillSince, signAt }, new Date(now));
+    await report(stillSince + 3 * MIN - 1);
+    await checkSilentTurns(c.ctx, new Date(stillSince + 3 * MIN - 1));
+    expect(agentProgramState(c.ctx, { id }).alarm).toBeNull();
+    await report(stillSince + 3 * MIN);
+    await checkSilentTurns(c.ctx, new Date(stillSince + 3 * MIN));
+    expect(agentProgramState(c.ctx, { id }).alarm).toEqual({ reason: 'program_stalled', since: stillSince });
+    const notices = await c.turnsOf(c.operator.id);
+    expect(notices).toHaveLength(1);
+    for (const fact of ['screen stood still for 3 minutes', 'window', `program_screen for employee ${c.agent.id}`]) expect(notices[0]!.prompt).toContain(fact);
+  });
+
+  it('tells again each time a still screen\'s quiet doubles, and nothing in between', async () => {
+    const c = await company();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
+    const signAt = Date.now();
+    const stillFor = async (minutes: number) => {
+      const now = signAt + minutes * MIN;
+      await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: signAt, screenAt: signAt, signAt }, new Date(now));
+      await checkSilentTurns(c.ctx, new Date(now));
+      return (await c.turnsOf(c.operator.id)).length;
+    };
+    expect([await stillFor(3), await stillFor(5), await stillFor(6), await stillFor(11), await stillFor(12)]).toEqual([1, 1, 2, 2, 3]);
+  });
+
+  it.each<ProgramState>(['tool', 'retrying', 'idle'])('leaves a still screen of a %s program to the quiet of its signs', async state => {
+    const c = await company();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
+    const signAt = Date.now(), now = signAt + 9 * MIN;
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state, since: signAt, screenAt: signAt, signAt, ...(state === 'tool' ? { tool: 'Bash' } : {}), ...(state === 'retrying' ? { retry: { attempt: 2, max: 5, nextAt: null } } : {}) }, new Date(now));
+    await checkSilentTurns(c.ctx, new Date(now));
+    expect(agentProgramState(c.ctx, { id }).alarm).toBeNull();
+    expect(await c.turnsOf(c.operator.id)).toEqual([]);
+  });
+
   it('keeps the older node screen rule exactly, including an asking state', async () => {
     const c = await company();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
