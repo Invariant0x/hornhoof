@@ -1,0 +1,183 @@
+{
+  "task": 1077,
+  "inputCommit": "be983c08bfe10d5f4885f7c703ee4afe1a364520",
+  "repairCommit": "8beef61d08464df2ebbee0be4e2aac0ed807a9a2",
+  "submittedCandidate": "ee776ee6bfa947f70d75bad38f94bdd8b43756c4",
+  "scope": "The nine raw receipts cited by the Security section of the candidate report and their original exit files. No reruns. Byte hashes refer to these raw files, not Markdown presentation.",
+  "presentation": "The report used data.decode().rstrip() followed by a newline inside each fence. Thus trailing whitespace was normalized. Empty raw logs are zero bytes, while their fences contain a newline.",
+  "receipts": [
+    {
+      "log": "logs/events-red.log",
+      "exitFile": "logs/events-red.exit",
+      "cwd": "apps/server",
+      "command": "npx --no-install vitest run test/events.test.ts --maxWorkers=1 --no-file-parallelism -t 'keeps no machine command'",
+      "exit": 1,
+      "sourceState": "be983c08bfe10d5f4885f7c703ee4afe1a364520",
+      "note": "Input candidate; intended regression failure; one selected case, nine not selected.",
+      "fencedSHA256": "2c908d33f39e76de61011f7eef7928d433a02b84864d21f51a6da4886782bb81",
+      "fencedBytes": 2393
+    },
+    {
+      "log": "logs/events-green.log",
+      "exitFile": "logs/events-green.exit",
+      "cwd": "apps/server",
+      "command": "npx --no-install vitest run test/events.test.ts test/left-input.test.ts test/stored-secrets.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exit": 0,
+      "sourceState": "uncommitted repair on be983c08bfe10d5f4885f7c703ee4afe1a364520",
+      "note": "Events 10 and left-input 18 match the repaired source. Stored-secrets then had 9 cases; superseded by stored-final.log with 10. The source repair was committed as 8beef61d08464df2ebbee0be4e2aac0ed807a9a2.",
+      "fencedSHA256": "ca4175c5e724302c3d90f5ec848e2aa99b3a6371f31743c704e0bc517bc2342c",
+      "fencedBytes": 1557
+    },
+    {
+      "log": "logs/stored-final.log",
+      "exitFile": "logs/stored-final.exit",
+      "cwd": "apps/server",
+      "command": "npx --no-install vitest run test/stored-secrets.test.ts --maxWorkers=1 --no-file-parallelism",
+      "exit": 0,
+      "sourceState": "working tree later committed as 8beef61d08464df2ebbee0be4e2aac0ed807a9a2",
+      "note": "Final 10-case file, including SQL calls inside the actual masking transaction.",
+      "fencedSHA256": "1f408dc002e9ca9dda5cfc79e969fb8b5af707dda979ffd75b8e475973b10e17",
+      "fencedBytes": 488
+    },
+    {
+      "log": "logs/protocol-green.log",
+      "exitFile": "logs/protocol-green.exit",
+      "cwd": "packages/protocol",
+      "command": "npx --no-install vitest run test/redaction.test.ts --maxWorkers=1",
+      "exit": 0,
+      "sourceState": "working tree later committed as 8beef61d08464df2ebbee0be4e2aac0ed807a9a2",
+      "note": "8 passed; same final protocol source.",
+      "fencedSHA256": "7db74cdd5feef88c619d296c6de4197f3d42f221bd8ccb8b5c779897a70b18b8",
+      "fencedBytes": 303
+    },
+    {
+      "log": "logs/protocol-build.log",
+      "exitFile": "logs/protocol-build.exit",
+      "cwd": "root",
+      "command": "npx --no-install tsc -p packages/protocol/tsconfig.json",
+      "exit": 0,
+      "sourceState": "working tree later committed as 8beef61d08464df2ebbee0be4e2aac0ed807a9a2",
+      "note": "No diagnostics.",
+      "fencedSHA256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "fencedBytes": 1
+    },
+    {
+      "log": "logs/server-build.log",
+      "exitFile": "logs/server-build.exit",
+      "cwd": "root",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 npm run -s build -w @hornhoof/server",
+      "exit": 0,
+      "sourceState": "working tree later committed as 8beef61d08464df2ebbee0be4e2aac0ed807a9a2",
+      "note": "Final executable server/protocol sources; no diagnostics.",
+      "fencedSHA256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "fencedBytes": 1
+    },
+    {
+      "log": "logs/server-test-types-final.log",
+      "exitFile": "logs/server-test-types-final.exit",
+      "cwd": "root",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit",
+      "exit": 0,
+      "sourceState": "working tree later committed as 8beef61d08464df2ebbee0be4e2aac0ed807a9a2",
+      "note": "Final test source, including transaction-level SQL instrumentation; no diagnostics.",
+      "fencedSHA256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "fencedBytes": 1
+    },
+    {
+      "log": "logs/lint.log",
+      "exitFile": "logs/lint.exit",
+      "cwd": "root",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 npx --no-install eslint apps/server/src/modules/events/store.ts apps/server/test/stored-secrets.test.ts packages/protocol/src/redaction.ts",
+      "exit": 0,
+      "sourceState": "uncommitted repair on be983c08bfe10d5f4885f7c703ee4afe1a364520",
+      "note": "Final executable sources; stored-secrets instrumentation was subsequently revised and checked by lint-final.log.",
+      "fencedSHA256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "fencedBytes": 1
+    },
+    {
+      "log": "logs/lint-final.log",
+      "exitFile": "logs/lint-final.exit",
+      "cwd": "root",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 npx --no-install eslint apps/server/test/stored-secrets.test.ts",
+      "exit": 0,
+      "sourceState": "working tree later committed as 8beef61d08464df2ebbee0be4e2aac0ed807a9a2",
+      "note": "Final stored-secrets file; no diagnostics.",
+      "fencedSHA256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "fencedBytes": 1
+    }
+  ],
+  "files": {
+    "logs/events-red.log": {
+      "sha256": "dd399ec336b21c8b192fa8ff6a3418d7a7fb03fa059ee354c2a4b3a494134713",
+      "bytes": 2394
+    },
+    "logs/events-red.exit": {
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "bytes": 2
+    },
+    "logs/events-green.log": {
+      "sha256": "55de3367a0095434e8b09697ad4e733b78a98bda2b01e7bfe033ea69c4302ef9",
+      "bytes": 1558
+    },
+    "logs/events-green.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "logs/stored-final.log": {
+      "sha256": "ef2357380e8d0d757cec053be742ba02d5f8b91cae2e6c6a7c4db8b66a658af4",
+      "bytes": 489
+    },
+    "logs/stored-final.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "logs/protocol-green.log": {
+      "sha256": "b696138ad55a7bf2334cc96290c47ef4d95db8b1b64d7085d2f8c00f2496b4b0",
+      "bytes": 304
+    },
+    "logs/protocol-green.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "logs/protocol-build.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "logs/protocol-build.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "logs/server-build.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "logs/server-build.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "logs/server-test-types-final.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "logs/server-test-types-final.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "logs/lint.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "logs/lint.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "logs/lint-final.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "logs/lint-final.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    }
+  }
+}

@@ -1,0 +1,1 @@
+Original Security receipt bytes for task 1077. Verify each path in manifest.json by SHA-256. The submitted candidate is unchanged. Markdown fences normalized trailing whitespace; their displayed text is not the byte artifact hashed in the report. Each receipt records its exact source-state limitation. No checks were rerun to create this archive.
