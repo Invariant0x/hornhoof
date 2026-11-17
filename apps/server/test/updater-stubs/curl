@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The new server's health, which answers with the commit of the build that runs, and what it says about the nodes on
-# this computer. STUB_NODES is that answer: ready, waiting, postponed, old for a server from before it, refused or down;
-# each for a server that says of each node whether it is free, STUB_FREE being those it names.
+# this computer. STUB_NODES is that answer: ready, waiting, old for a server from before it, lost for a 404
+# that is not a Hornhoof server's own, refused or down; each for a server that says of each node whether it is free,
+# STUB_FREE being those it names.
 printf 'curl %s\n' "$*" >> "$STUB_LOG"
 case " $* " in
   # The installer a server serves, STUB_SERVED; it does not answer with STUB_SERVED_DOWN.
@@ -17,9 +18,9 @@ case " $* " in
       down) echo "curl: (7) Failed to connect" >&2; exit 7 ;;
       each) jq -cn --arg free "${STUB_FREE:-}" '{ready: false, free: ($free | split(" ") | map(select(length > 0))), drain: null, pollAfterMs: 5000}' > "$answer"; printf 200 ;;
       old) echo '{"error":{"code":"not_found"}}' > "$answer"; printf 404 ;;
+      lost) echo '{"ok":false}' > "$answer"; printf 404 ;;
       refused) echo '{"error":{"code":"unauthorized"}}' > "$answer"; printf 401 ;;
-      waiting) echo '{"ready":false,"drain":{"state":"waiting","turnsLeft":2,"partsLeft":0,"until":"2026-11-04T18:30:00.000Z"},"pollAfterMs":5000}' > "$answer"; printf 200 ;;
-      postponed) echo '{"ready":false,"drain":{"state":"postponed","turnsLeft":1,"partsLeft":0,"retryAt":"2026-11-04T18:45:00.000Z"},"pollAfterMs":5000}' > "$answer"; printf 200 ;;
+      waiting) echo '{"ready":false,"drain":{"state":"waiting","turnsLeft":2,"partsLeft":0,"since":"2026-11-04T18:30:00.000Z"},"pollAfterMs":5000}' > "$answer"; printf 200 ;;
       ready) echo '{"ready":true,"drain":{"state":"restarting","since":"2026-11-04T18:46:00.000Z"},"pollAfterMs":5000}' > "$answer"; printf 200 ;;
     esac
     exit 0 ;;

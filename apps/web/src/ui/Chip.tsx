@@ -63,7 +63,7 @@ export const Chip = memo(function Chip({ e, x, y, on, lead = false, flash, serve
         aria-pressed={on}
         onClick={onOpen}
       >
-        <Edge cut={10}>
+        <Edge cut={10} halo>
           <span className="r1">
             <AgentIcon />
             <span className="mn">{e.name}</span>

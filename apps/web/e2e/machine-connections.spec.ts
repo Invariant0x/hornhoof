@@ -58,8 +58,8 @@ async function openCard(page: Page, language: 'en' | 'ru', theme: 'light' | 'dar
 }
 
 const TEXT = {
-  en: { heading: 'Connection to the server', summary: '5 drops in the last 24 hours, 40 s on average. Most often: the network cut the connection.', away: 'not back yet', saw: /The machine saw: ENOTFOUND, 4 tries to connect/, more: 'Show all 6', fewer: 'Show fewer', none: 'No drops so far.' },
-  ru: { heading: 'Связь с сервером', summary: 'За сутки 5 обрывов, в среднем 40 с. Чаще всего: сеть оборвала соединение.', away: 'еще не вернулась', saw: /Машина видела: ENOTFOUND, попыток подключиться: 4/, more: 'Показать все: 6', fewer: 'Показать меньше', none: 'Обрывов пока не было.' },
+  en: { heading: 'Connection to the server', summary: '5 drops in the last 24 hours, 40 s on average. Most often: the network cut the connection.', health: 'Offline now', away: 'Still offline', saw: /The machine saw: ENOTFOUND, 4 tries to connect/, details: 'Show technical details', more: 'Show all 6', fewer: 'Show fewer', none: 'No drops so far.' },
+  ru: { heading: 'Связь с сервером', summary: 'За сутки 5 обрывов, в среднем 40 с. Чаще всего: сеть оборвала соединение.', health: 'Сейчас нет связи', away: 'Связи пока нет', saw: /Машина видела: ENOTFOUND, попыток подключиться: 4/, details: 'Показать технические подробности', more: 'Показать все: 6', fewer: 'Показать меньше', none: 'Обрывов пока не было.' },
 };
 
 for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
@@ -74,13 +74,17 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
 
     await expect(card.getByRole('heading', { name: text.heading })).toBeVisible();
     await expect(card.getByText(text.summary)).toBeVisible();
+    await expect(card.locator('.mc-sum .status')).toHaveText(text.health);
     await expect(card.getByText(text.away)).toBeVisible();
+    /* What the machine itself saw waits behind its button (#1027). */
+    await expect(card.getByText(text.saw)).toHaveCount(0);
+    await card.getByRole('button', { name: text.details }).click();
     await expect(card.getByText(text.saw)).toBeVisible();
     await expect(card.getByRole('listitem').filter({ hasText: text.away })).toHaveClass(/away/);
-    await expect(page.locator('.conn-list > li')).toHaveCount(5);
+    await expect(page.locator('.mc-drops > li')).toHaveCount(5);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     /* A long word stays inside its line. */
-    for (const line of await page.locator('.conn-list > li').all()) {
+    for (const line of await page.locator('.mc-drops > li').all()) {
       expect(await line.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     }
     await page.locator('.blk-link').scrollIntoViewIfNeeded();
@@ -90,7 +94,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await more.focus();
     await expect(more).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.locator('.conn-list > li')).toHaveCount(6);
+    await expect(page.locator('.mc-drops > li')).toHaveCount(6);
     await expect(card.getByRole('button', { name: text.fewer })).toHaveAttribute('aria-expanded', 'true');
     await page.locator('.blk-link').screenshot({ path: info.outputPath(`history-${language}-${theme}-${width}.png`) });
     expect(errors).toEqual([]);
@@ -101,7 +105,7 @@ for (const language of ['en', 'ru'] as const) {
   test(`a machine with no drops yet ${language}`, async ({ page }, info) => {
     const card = await openCard(page, language, 'light', 1440, { status: 200, json: { summary: { drops: 0, averageMs: null, cause: null }, events: [] } });
     await expect(card.getByText(TEXT[language].none)).toBeVisible();
-    await expect(page.locator('.conn-list')).toHaveCount(0);
+    await expect(page.locator('.mc-drops')).toHaveCount(0);
     await page.locator('.blk-link').screenshot({ path: info.outputPath(`empty-${language}-light-1440.png`) });
   });
 

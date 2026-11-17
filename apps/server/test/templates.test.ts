@@ -136,7 +136,6 @@ describe('templates', () => {
     for (const id of ['dev-task-flow', 'dev-tdd', 'dev-testing-policy', 'dev-implement']) expect(body(id), id).toMatch(/(?:task|head|owner)[\s\S]*check|check assigned/i);
     const tdd = body('dev-tdd');
     for (const kind of ['Bug', 'Known behaviour', 'Unknown path', 'Legacy code']) expect(tdd, kind).toContain(kind);
-    expect(tdd).toMatch(/failing test[\s\S]*run_tests/);
     expect(tdd).toContain('A characterization test of legacy code passes immediately, and that is correct');
     expect(tdd).toContain('requirement -> test');
     expect(tdd).toContain('verification before done');
@@ -175,7 +174,7 @@ describe('templates', () => {
     expect(resources).toMatch(/any earlier version/);
     expect(resources).toMatch(/keeps none and a key is saved for it, create its first repository yourself with create_repository[\s\S]*then tell the CEO or the department's owner[\s\S]*its address/);
     expect(resources).toMatch(/no key[\s\S]*offer one to the CEO or the department's owner[\s\S]*why[\s\S]*what it takes/);
-    expect(resources).toMatch(/A second repository[\s\S]*only with their word/);
+    expect(resources).toMatch(/A second repository[\s\S]*in any turn too, unless the notebook says otherwise/);
     expect(resources).not.toMatch(/never create one without their word/i);
     expect(body('orch-company')).toMatch(/hands in a document in place of a commit only until it has one/);
     for (const id of ['hh-lead-tasks', 'hh-task-flow']) expect(body(id), id).toMatch(/letters, texts, layouts and tables/);
@@ -348,8 +347,7 @@ describe('templates', () => {
   it('releases only an exact authorized candidate with real evidence and a tested rollback', () => {
     const release = body('dev-ci-release');
     for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
-    expect(release).toMatch(/profile[^.]*full run[^.]*every suite and every test file anew[^.]*no earlier result/i);
-    expect(release).toMatch(/narrower profile, one suite or results kept from earlier runs is no release check/i);
+    expect(release).toMatch(RELEASE_RULE);
     expect(release).toMatch(/ask with commit before pushing[\s\S]*push only after the answer says no card is needed, or after the person's yes/i);
     expect(release).toMatch(/autonomous release[\s\S]*without sending a human (?:approval )?card/i);
     expect(body('dev-task-flow')).toMatch(/autonomous release[\s\S]*auto-approval/i);
@@ -358,8 +356,9 @@ describe('templates', () => {
     expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
     expect(body('dev-worktrees')).toMatch(/Never delete a workspace with uncommitted files/);
     expect(body('dev-task-flow')).toMatch(/generic wake-up[\s\S]*cannot override an explicit restriction/);
-    expect(body('orch-people')).toMatch(/CEO's explicit order[\s\S]*Never use database SQL/);
-    expect(body('orch-resources')).toMatch(/only from the CEO[\s\S]*ask_computer_access[\s\S]*actual authorization/);
+    expect(body('orch-people')).toMatch(/in any turn, as the company's owner[\s\S]*notebook[\s\S]*Never use database SQL/);
+    expect(body('orch-resources')).toMatch(/What is not forbidden is allowed[\s\S]*notebook[\s\S]*ask_computer_access[\s\S]*actual authorization/);
+    expect(body('hh-notebook')).toMatch(/What is not forbidden there or by Hornhoof itself is allowed[\s\S]*without asking anyone to confirm/);
   });
 
   it('loads every role and skill', () => {
@@ -767,11 +766,10 @@ describe('templates', () => {
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);
   });
 
-  it('allows browser installation for named workspace test files and routes whole browser suites through run_tests', () => {
+  it('allows browser installation for named workspace test files', () => {
     const check = templates.skills.get('dev-browser-check')!.body;
     expect(check).toMatch(/verify the browser opens/i);
     expect(check).toMatch(/install the browser there if needed/);
-    expect(check).toMatch(/whole browser suite across engines uses `run_tests`/);
     expect(check).not.toMatch(/hornhoof/i);
     for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(/npx playwright install/);
   });
@@ -801,7 +799,7 @@ describe('templates', () => {
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
         expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
       );
-      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-read-evidence-rerun-only-what-you-doubt');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
@@ -843,7 +841,12 @@ describe('templates', () => {
     it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', async () => {
       const root = join(DIR, '..');
       const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
-      expect(styleBook).toContain('Version 1.3, approved by the head of Design on 2026-11-13.');
+      expect(styleBook).toContain('Version 1.4, approved by the head of Design on 2026-11-16.');
+      const sizesSection = styleBook.slice(styleBook.indexOf('## 3. Spacing and sizes'), styleBook.indexOf('## 4. Components'));
+      expect(sizesSection).toContain(
+        '**RULE, all skins.** The frame, selection border and glow of an element follow its shape, cut corner included. A rectangular `box-shadow` or `outline` around a `clip-path` shape is not allowed',
+      );
+      expect(styleBook).toContain('| 1.4 | 2026-11-16 | Frame, selection and glow follow the cut corner in all skins, section 3 (#1070) | Head of Design |');
       expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
       for (const heading of [
         '## 1. Colours',
@@ -1215,16 +1218,12 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
       forbids(`${s.diff}\n${s.verdict}`, /\blow coverage(?:\s+alone)?\s+(?:blocks|counts as a finding|is a (?:blocking )?finding)\b/i),
   },
   {
-    id: 't10-verify-evidence-no-rerun',
+    id: 't10-read-evidence-rerun-only-what-you-doubt',
     holds: s =>
       /\bcompleted results for the reviewed commit\b/.test(s.diff) &&
       /\b(?:instead of rerunning|do not rerun|never rerun)\b/i.test(s.diff) &&
-      forEvery([s.verdict], text =>
-        /\btask\.review\b/.test(text) &&
-        /\btestEvidence\b/.test(text) &&
-        /\bproves\b/.test(text) &&
-        /\b(?:instead of rerunning|do not rerun|never rerun)\b/i.test(text),
-      ) && forbids(`${s.diff}\n${s.verdict}\n${s.security}`, /\b(?:re-?run\w*|re-?execut\w*)\b[^.!?;,]*\b(?:author'?s?\s+|submitted\s+|its\s+)?test(?:\s+runs?|\s+suites?|s)\b/i),
+      /author's description of the local checks they ran[^.]*rerun what you doubt in your own workspace/.test(s.verdict) &&
+      forbids(`${s.diff}\n${s.verdict}\n${s.security}`, /\b(?:re-?run\w*|re-?execut\w*)\b[^.!?;,]*\b(?:author'?s?\s+|submitted\s+|its\s+)?test(?:\s+runs?|\s+suites?|s)\b/i),
   },
 
   {
@@ -1325,20 +1324,24 @@ const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every
 
 const forbidsAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => forbids(text, re));
 
+/* Where tests run, said once in a skill that needs it, and how a release runs them. */
+const PLAIN_RULE = /Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./;
+const RELEASE_RULE = /Merge the ready work into the turn's branch \(or a release branch\): the run of every test happens there once, through run_tests; a failed release is mended, and its next run runs only what failed or changed; then main moves\./;
+
 const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] = [
   { id: 'named-test-files-local-red-green', holds: text => matchesAll(text, [/authoring or reviewing[\s\S]*own workspace/i, /one or more regular test files/i, /directory, glob, loop or variable/i]) && forbids(text, /\brun\w*\b[^.!?;,]*\ba directory\s+locally\b/i) },
   { id: 'quality-stages-in-own-workspace', holds: text => matchesAll(text, [/locally[\s\S]*builds[\s\S]*types[\s\S]*lint\/format[\s\S]*coverage[\s\S]*crapper[\s\S]*dryer[\s\S]*mutation/i, /whole suite[\s\S]*"run_tests"[\s\S]*groups[\s\S]*free compatible machines/i]) },
   { id: 'local-lockfile-installs', holds: text => /Install dependencies from the lockfile in your workspace once[\s\S]*lockfile changes/i.test(text) && !/Never install dependencies locally/i.test(text) },
   { id: 'prepared-dependencies-install-only-when-needed', holds: text => /manifest names its dependencies[^.]*already in place[^.]*install only when they are missing or after the lockfile changes/i.test(text) },
-  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*whole suite[\s\S]*"run_tests"[\s\S]*only on the release candidate/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
+  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*whole suite[\s\S]*"run_tests"/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
   { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => matchesAll(text, [/"blocked"/, /Never fall back to a local whole suite/i, /command refusal is not PASS/]) && forbidsAll(text, [/\bfall back to running the whole suite locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
-  { id: 'final-stage-full-suite-and-light-screenshot', holds: text => matchesAll(text, [/assignment identifies the check scope[\s\S]*do not start a duplicate full run/i, /lightweight single-page screenshot capture is not a browser suite/i, /browser test files[\s\S]*workspace[\s\S]*browser installation is allowed/i]) },
+  { id: 'light-screenshot-and-local-browser-files', holds: text => matchesAll(text, [/lightweight single-page screenshot capture is not a browser suite/i, /browser test files[\s\S]*workspace[\s\S]*browser installation is allowed/i]) },
   { id: 'abstract-english-no-incident-facts', holds: text => text.length > 200 && !hasIncidentOrBrandLeak(text) },
 ];
 
 const RECONCILED_SKILL_SOURCE_RULES: { id: string; holds: (s: ReconciledCheckSkills) => boolean }[] = [
-  { id: 'every-skill-that-runs-checks-references-remote-route', holds: s => forEvery(Object.values(s), text => /run_tests/.test(text)) && forEvery(Object.values(s), text => !/\bhh-run-checks\b/.test(text)) },
-  { id: 'local-change-checks-and-remote-release-suite', holds: s => !/Run the whole suite locally|Send author checks through run_tests/i.test(Object.values(s).join('\n')) && /release checks[\s\S]*run_tests/i.test(s.ciRelease) && /exact candidate[\s\S]*required checks/i.test(s.ciRelease) },
+  { id: 'no-skill-names-hh-run-checks', holds: s => forEvery(Object.values(s), text => !/\bhh-run-checks\b/.test(text)) },
+  { id: 'local-change-checks-and-remote-release-suite', holds: s => !/Run the whole suite locally|Send author checks through run_tests/i.test(Object.values(s).join('\n')) && /run of every test[^.]*run_tests/i.test(s.ciRelease) && /exact candidate[\s\S]*required checks/i.test(s.ciRelease) },
   { id: 'browser-suite-remote-light-screenshot-distinct', holds: s => matchesAll(s.browser, [/lightweight screenshot capture/i, /browser binary name alone/i]) && forbids(s.browser, /\btreat\w*\b[^.!?;,]*\bscreenshot capture as a full browser test suite/i) },
 ];
 
@@ -1621,12 +1624,11 @@ const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) =>
   {
     id: 'author-dependent-tests-in-workspace-and-new-tests-always',
     holds: s =>
-      forEvery([s.implement, s.policy], text => matchesAll(text, [/\brun_tests\b/, /\b(?:dependent|selected|affected)\s+(?:tests?|checks?)\b/i])) &&
+      forEvery([s.implement, s.policy], text => /\b(?:dependent|selected|affected)\s+(?:tests?|checks?)\b/i.test(text)) &&
       matchesAll(s.implement, [/\bexplicit selector\b/i]) &&
       matchesAll(s.policy, [
         /\bnew(?:ly\s+added)?\s+test\b[\s\S]*\balways\b|\balways\b[\s\S]*\bnew(?:ly\s+added)?\s+test\b/i,
         /\binput paths\b[\s\S]*\bselected inventory\b[\s\S]*\bfallback reason\b/i,
-        /\brun\b[\s\S]*\bparts?\b[\s\S]*\bcommit\b/i,
       ]) &&
       forbidsAll(`${s.implement}\n${s.policy}`, [
         /\bskip\w*\s+new(?:ly\s+added)?\s+tests?\s+when\s+no\s+graph\s+edge\s+reaches\s+them\b/i,
@@ -1662,7 +1664,6 @@ const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) =>
         /\bCollection is not execution\b[\s\S]*\bcompleted exact-version receipts\b/i,
         /\bunavailable rather than zero\b[^.!?]*\bcomparator\b/i,
         /\bone owner coordinates\b/i,
-        /\bNever assume run_tests selects by itself\b/i,
       ]) &&
       forbidsAll(`${s.implement}\n${s.policy}`, [
         /\brun_tests\s+automatically\s+selects\s+impact\s+tests\s+from\s+the\s+test\s+environment\b/i,
@@ -1879,24 +1880,12 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
       ]),
   },
   {
-    id: 'local-branch-checks-and-no-per-task-run-tests',
-    holds: s =>
-      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devTdd, s.devTestEnv, s.devImplement, s.briefMembers], text =>
-        matchesAll(text, [
-          /\b(?:individual|turnkey|task)\b[\s\S]*\b(?:named|affected|area)\b[\s\S]*\brun_tests\b|\brun_tests\b[\s\S]*\b(?:individual|turnkey|task)\b/i,
-        ]),
-      ) &&
-      forEvery([s.leadTasks, s.devLead, s.devTaskFlow], text =>
-        matchesAll(text, [/\bbuild\b[\s\S]*\btypes\b[\s\S]*\blint\b/i, /\bhand\w*\s+in\b[\s\S]*\bbranch\b|\bbranch\b[\s\S]*\bhand\w*\s+in\b/i]),
-      ) &&
-      matchesAll(s.devTaskFlow, [/no per-task run_tests \(unless this task itself assembles the final release to main\)/i]),
+    id: 'local-branch-checks-and-hand-in',
+    holds: s => matchesAll(s.devTaskFlow, [/\bbuild\b[\s\S]*\btypes\b[\s\S]*\blint\b/i, /\bhand\w*\s+in\b[\s\S]*\bbranch\b|\bbranch\b[\s\S]*\bhand\w*\s+in\b/i]),
   },
   {
-    id: 'single-full-run-on-combined-release-branch-before-main',
-    holds: s =>
-      forEvery([s.leadTasks, s.runChecks, s.devLead, s.devTaskFlow, s.devGates, s.devCiRelease, s.devPolicy, s.devTestEnv, s.devImplement, s.briefMembers, s.orchPlanTurn, s.orchCompany], text =>
-        matchesAll(text, [/\bonce per release candidate\b[\s\S]*\bcombined release (?:branch|candidate)\b[\s\S]*\bmain\b/i]),
-      ),
+    id: 'every-test-together-once-per-release',
+    holds: s => forEvery([s.runChecks, s.devPolicy, s.devTestEnv], text => PLAIN_RULE.test(text)) && RELEASE_RULE.test(s.devCiRelease),
   },
   {
     id: 'lead-tasks-preserves-coordination-and-hold-meaning',
@@ -1913,7 +1902,7 @@ const SINGLE_RELEASE_RUN_RULES: { id: string; holds: (s: SingleReleaseRunSkills)
   },
 ];
 
-describe('full test suite once per release candidate before release', () => {
+describe('every test together once per release', () => {
   const bundle = (): SingleReleaseRunSkills => ({
     leadTasks: templates.skills.get('hh-lead-tasks')!.body,
     runChecks: templates.skills.get('hh-run-checks')!.body,
@@ -1930,7 +1919,7 @@ describe('full test suite once per release candidate before release', () => {
     orchCompany: templates.skills.get('orch-company')!.body,
   });
 
-  it('requires local changed-area checks on task and turnkey branches and one run_tests run per release candidate on the combined release branch before main', () => {
+  it('checks a change by local tests of what it touched and runs every test together once per release', () => {
     expect(failedRuleIds(SINGLE_RELEASE_RUN_RULES, bundle())).toEqual([]);
   });
 

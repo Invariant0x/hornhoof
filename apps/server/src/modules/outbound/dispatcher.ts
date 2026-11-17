@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { outboundAccounts, outboundAttempts, outboundChannels, outboundEvents, outboundMessages } from '../../db/schema.js';
+import { countOnly, idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { departmentOwner } from '../departments/approval-policy.js';
 import { notificationMessage } from '../events/notifications.js';
@@ -120,7 +121,7 @@ async function nextUnknown(ctx: Ctx): Promise<Pick<Attempt, 'id' | 'accountId'>[
 /* A worker gone past its lease may still be sending, so it becomes unknown and nothing else. Then each unknown one is asked about,
    by the one way of knowing its transport has. Neither touches who writes from the account. */
 export async function reconcileOutbound(ctx: Ctx, now = new Date(), senders: Senders = LIVE): Promise<void> {
-  const expired = await ctx.db.select({ id: outboundAttempts.id }).from(outboundAttempts).where(and(eq(outboundAttempts.status, 'sending'), lt(outboundAttempts.leaseUntil, now))).limit(LOOKED_AT);
+  const expired = await ctx.db.select(idOnly(outboundAttempts)).from(outboundAttempts).where(and(eq(outboundAttempts.status, 'sending'), lt(outboundAttempts.leaseUntil, now))).limit(LOOKED_AT);
   await eachOf(expired, attempt => settleAttempt(ctx, attempt.id, { kind: 'unknown', safeCode: 'timeout' }, now));
   await eachOf(await nextUnknown(ctx), attempt => askAbout(ctx, attempt, senders));
 }
@@ -138,7 +139,7 @@ async function lookAtLimits(tx: Tx, channelId: string, now: Date): Promise<void>
   const { circuit } = policy.value;
   const since = new Date(now.getTime() - circuit.windowHours * 3_600_000);
   const onChannel = eq(outboundMessages.channelId, channelId);
-  const [sample] = await tx.select({ n: count() }).from(outboundAttempts).innerJoin(outboundMessages, eq(outboundMessages.id, outboundAttempts.messageId)).where(and(onChannel, eq(outboundAttempts.status, 'accepted'), gte(outboundAttempts.endedAt, since)));
+  const [sample] = await tx.select(countOnly()).from(outboundAttempts).innerJoin(outboundMessages, eq(outboundMessages.id, outboundAttempts.messageId)).where(and(onChannel, eq(outboundAttempts.status, 'accepted'), gte(outboundAttempts.endedAt, since)));
   if ((sample?.n ?? 0) < circuit.minimumSample) return;
   const rows = await tx.select({ kind: outboundEvents.kind, n: count() }).from(outboundEvents).innerJoin(outboundAttempts, eq(outboundAttempts.id, outboundEvents.attemptId)).innerJoin(outboundMessages, eq(outboundMessages.id, outboundAttempts.messageId)).where(and(onChannel, gte(outboundEvents.occurredAt, since))).groupBy(outboundEvents.kind);
   const seen = new Map(rows.map(row => [row.kind, row.n]));
@@ -151,10 +152,10 @@ type ReceiptEvent = z.infer<typeof ReceiptEvent>;
 const ReceiptBody = z.strictObject({ events: z.array(ReceiptEvent).max(100) });
 
 async function recordOne(ctx: Ctx, account: Account, event: ReceiptEvent, now: Date): Promise<'recorded' | 'repeated' | 'ignored'> {
-  const [attempt] = await ctx.db.select({ id: outboundAttempts.id }).from(outboundAttempts).where(and(eq(outboundAttempts.id, event.attemptId), eq(outboundAttempts.accountId, account.id)));
+  const [attempt] = await ctx.db.select(idOnly(outboundAttempts)).from(outboundAttempts).where(and(eq(outboundAttempts.id, event.attemptId), eq(outboundAttempts.accountId, account.id)));
   if (!attempt) return 'ignored';
   return ctx.db.transaction(async tx => {
-    await tx.select({ id: outboundChannels.id }).from(outboundChannels).where(eq(outboundChannels.id, account.channelId)).for('update');
+    await tx.select(idOnly(outboundChannels)).from(outboundChannels).where(eq(outboundChannels.id, account.channelId)).for('update');
     const values = { companyId: account.companyId, attemptId: attempt.id, kind: event.kind, source: `account:${account.id}`, providerEventId: event.providerEventId, occurredAt: new Date(event.occurredAt) };
     const inserted = await tx.insert(outboundEvents).values(values).onConflictDoNothing().returning({ id: outboundEvents.id });
     if (!inserted.length) return 'repeated';
@@ -244,7 +245,7 @@ export async function outboundReviewRound(ctx: Ctx, now: Date, ports: Pick<Model
   if (reviewRounds.has(ctx)) return;
   reviewRounds.add(ctx);
   try {
-    const waiting = await ctx.db.select({ id: outboundMessages.id }).from(outboundMessages).where(eq(outboundMessages.status, 'waiting_checks')).orderBy(outboundMessages.createdAt);
+    const waiting = await ctx.db.select(idOnly(outboundMessages)).from(outboundMessages).where(eq(outboundMessages.status, 'waiting_checks')).orderBy(outboundMessages.createdAt);
     await eachOf(waiting, ({ id }) => reviewQueuedMessage(ctx, ports, id, now));
   } finally {
     reviewRounds.delete(ctx);

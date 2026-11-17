@@ -1,3 +1,4 @@
+import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { taskWaitText } from './task-wait';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -15,6 +16,7 @@ import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
 import { HideSecret } from './HideSecret';
+import { PhoneRecordings } from './PhoneRecordings';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -237,11 +239,13 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
   const { org } = useOrg();
   const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
   const closed = task.status === 'done' || task.status === 'cancelled';
+  const masked = [task.title, task.brief, task.body, ...task.log.flatMap(entry => [entry.text, JSON.stringify(entry.data)])].some(text => text?.includes(HIDDEN));
 
   return (
     <>
       <TaskHeader task={task} org={org} />
       {task.mayHideSecret && <HideSecret taskId={task.id} onChanged={onChanged} />}
+      {masked && <p className="muted"><a href="/settings/passwords">{t.tasks.hideSecret.vault}</a></p>}
       <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
       {task.parent && (
         <p className="tp-parent">
@@ -264,6 +268,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
       )}
       <TaskRelatedSection heading={t.tasks.subtasks} items={task.subtasks} onOpen={onOpen} />
       <TaskFiles files={task.files} />
+      <PhoneRecordings key={task.id} taskId={task.id} />
       <TaskQuestionsSection requests={task.requests} />
       <section>
         <h4>{t.tasks.log}</h4>

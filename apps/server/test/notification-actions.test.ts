@@ -217,7 +217,7 @@ it('delivers an employee copy into the live turn immediately, combining the queu
   expect(saidTexts[0]).toContain('Bruno');
   expect(saidTexts[0]).toContain('via Hornhoof');
   expect((await c.notices(orchestrator.id)).filter(e => e.message!.from.kind !== 'person')).toHaveLength(1);
-  expect(await decisionPrincipal(c.db, run!.id)).toBeNull();
+  expect(await decisionPrincipal(c.db, run!.id)).toEqual({ personId: c.ceo.id, sourceSeq: null });
   vi.restoreAllMocks();
 });
 

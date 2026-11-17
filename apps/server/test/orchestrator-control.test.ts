@@ -8,6 +8,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { NotConfirmed } from '../src/db/confirm.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
@@ -174,7 +175,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made[0]!.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
     expect(await commands()).toMatchObject([{ id: made[0]!.id, dismissedSubscriptionIds: [plan!.id] }]);
     expect((await call(client, 'view', { path: '/api/nodes/commands' })).isError).toBe(true);
-    const events = JSON.stringify(await db.select({ data: agentEvents.data }).from(agentEvents));
+    const events = JSON.stringify(await db.select(only(agentEvents, 'data')).from(agentEvents));
     for (const c of [alone!, ...made]) expect(events).not.toContain(code(c.command));
   });
 
@@ -546,29 +547,20 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]!.status).toBe('open');
   });
 
-  it('only reads while the last person who wrote to it is neither the CEO nor the CEO delegate', async () => {
-    const { app, db, ceo, ceoId, orchestrator, bruno } = await company();
-    const zed = await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
+  it('writes in every turn: as the owner after a person who is neither the CEO nor the delegate wrote, or nobody did', async () => {
+    const { app, db, ceo, orchestrator, bruno } = await company();
+    await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
     const [zedRow] = await db.select().from(people).where(eq(people.name, 'Zed'));
     const [turn] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
     const wrote = (personId: string | null) => db.insert(agentEvents).values({ companyId: bruno.companyId, agentId: orchestrator.id, jobId: turn!.id, kind: 'message', data: { text: 'Rename Bruno.' }, personId });
     const rename = (name: string) => call(client, 'database', { sql: `UPDATE agents SET name = '${name}' WHERE id = '${bruno.id}'` });
     const client = await mcp(app, TOKEN);
     await wrote(zedRow!.id);
-    const refused = await rename('Bruno Z');
-    expect(refused.isError).toBe(true);
-    expect(text(refused)).toContain('The tool only reads now: the last person who wrote to you is neither the CEO nor the CEO delegate.');
-    expect(text(await call(client, 'database', { sql: 'SET TRANSACTION READ WRITE' }))).toMatch(/^Hornhoof did not run this SQL: .* The tool only reads now: the last person who wrote to you/);
-    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people ORDER BY name' })))[0].rows).toEqual([{ name: 'Ivan' }, { name: 'Zed' }]);
+    const renamed = await rename('Bruno Z');
+    expect(renamed.isError, text(renamed)).toBeFalsy();
     await wrote(null);
-    expect((await rename('Bruno N')).isError).toBe(true);
-    await wrote(ceoId);
-    expect((await rename('Bruno C')).isError).toBeFalsy();
-    await app.inject({ method: 'PUT', url: `/api/people/${zedRow!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
-    await wrote(zedRow!.id);
-    expect((await rename('Bruno D')).isError).toBeFalsy();
-    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno D');
-    expect(zed).toBeTruthy();
+    expect((await rename('Bruno N')).isError).toBeFalsy();
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno N');
   });
 
   it('undoes the whole call when one of its statements fails', async () => {
@@ -701,11 +693,8 @@ describe('the orchestrator reads and changes the database itself', () => {
   });
 });
 
-describe('what only the CEO may ask for', () => {
+describe('what the CEO may ask for, which the orchestrator does in any turn as the owner', () => {
   const HEAD_TOKEN = 'tool-token-head-0123456789abcdef0123';
-  const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
-  const ONLY_DEPARTMENT_OWNER = "Only the CEO, the CEO delegate or this department's owner can ask for this, and the last person who wrote to you is none of them. Nothing was changed. Ask one of them.";
-  const ONLY_CEO_ASKED = 'Only the CEO or the CEO delegate can ask for this, and the last person who wrote to you is neither. Nothing was changed. Ask the CEO.';
 
   /* The company without the test's own turn of the orchestrator, and Lena, who sees the whole company. */
   async function quiet() {
@@ -722,49 +711,29 @@ describe('what only the CEO may ask for', () => {
   }
   const statusOf = async (db: Awaited<ReturnType<typeof company>>['db'], id: string) => (await db.select().from(people).where(eq(people.id, id)))[0]!.status;
 
-  it("refuses people's tools in a turn an employee woke, and lets them through in a turn that answers the CEO", async () => {
-    const { app, db, ceo, orchestrator, hana, lena, running } = await quiet();
+  it("changes people in a turn an employee woke, as the owner", async () => {
+    const { app, db, orchestrator, hana, lena, running } = await quiet();
     await running(hana.id, HEAD_TOKEN);
     expect((await call(await mcp(app, HEAD_TOKEN), 'tell_orchestrator', { text: 'Disable Lena, she left.' })).isError).toBeFalsy();
-    const woke = await newest(db, orchestrator.id, 'tool-token-woke-0123456789abcdef0123');
-    const refused = await call(await mcp(app, 'tool-token-woke-0123456789abcdef0123'), 'change_person', { person: lena.id, status: 'disabled' });
-    expect(refused.isError).toBe(true);
-    expect(text(refused)).toBe(ONLY_CEO);
-    expect(await statusOf(db, lena.id)).toBe('active');
-    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, woke.id));
-    expect((await app.inject({ method: 'POST', url: `/api/agents/${orchestrator.id}/messages`, payload: { text: 'Disable Lena.' }, ...as(ceo) })).statusCode).toBe(202);
-    await newest(db, orchestrator.id, 'tool-token-ceo-01234567890abcdef0123');
-    expect((await call(await mcp(app, 'tool-token-ceo-01234567890abcdef0123'), 'change_person', { person: lena.id, status: 'disabled' })).isError).toBeFalsy();
+    await newest(db, orchestrator.id, 'tool-token-woke-0123456789abcdef0123');
+    const disabled = await call(await mcp(app, 'tool-token-woke-0123456789abcdef0123'), 'change_person', { person: lena.id, status: 'disabled' });
+    expect(disabled.isError, text(disabled)).toBeFalsy();
     expect(await statusOf(db, lena.id)).toBe('disabled');
   });
 
-  it('refuses them in a turn another person asked for, and in one with no message', async () => {
+  it('goes as the owner in a turn another person asked for, and in one with no message', async () => {
     const { app, db, ceo, orchestrator, lena, running } = await quiet();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@example.com', access: { whole: true } });
     await takePlan(db, 'maria@example.com', orchestrator.id);
     expect((await app.inject({ method: 'POST', url: `/api/agents/${orchestrator.id}/messages`, payload: { text: 'Invite my friend.' }, ...as(maria) })).statusCode).toBe(202);
     await newest(db, orchestrator.id, 'tool-token-maria-0123456789abcdef012');
     const asked = await call(await mcp(app, 'tool-token-maria-0123456789abcdef012'), 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } });
-    expect(text(asked)).toBe(ONLY_CEO);
+    expect(asked.isError, text(asked)).toBeFalsy();
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
     await running(orchestrator.id, 'tool-token-timer-0123456789abcdef012');
     const client = await mcp(app, 'tool-token-timer-0123456789abcdef012');
-    for (const [name, args] of [
-      ['change_person', { person: lena.id, status: 'disabled' }],
-      ['invite_again', { person: lena.id }],
-      ['set_public_link', { name: 'acme' }],
-      ['remove_public_link', {}],
-      ['set_repository', { department: (await db.select().from(departments))[0]!.id, url: 'https://github.com/evil/acme.git', token: 'ghp_x' }],
-      ['add_repository', { department: (await db.select().from(departments))[0]!.id, url: 'https://github.com/evil/other.git', token: 'ghp_x' }],
-      ['update_hornhoof', { version: 'latest' }],
-      ['lend_machine', { machine: '00000000-0000-4000-8000-0000000000aa', lendsTests: true }],
-      ['machine_command', {}],
-      ['add_plan_to_machine', { machine: '00000000-0000-4000-8000-0000000000aa', subscription: '00000000-0000-4000-8000-0000000000bb' }],
-    ] as const) {
-      expect(text(await call(client, name, args)), name).toBe(name === 'set_repository' || name === 'add_repository' ? ONLY_DEPARTMENT_OWNER : name === 'update_hornhoof' ? ONLY_CEO_ASKED : ONLY_CEO);
-    }
-    expect(await statusOf(db, lena.id)).toBe('active');
-    expect((await call(client, 'change_employee', { employee: (await db.select().from(agents).where(eq(agents.name, 'Bruno')))[0]!.id, on: false })).isError).toBeFalsy();
+    expect((await call(client, 'change_person', { person: lena.id, status: 'disabled' })).isError).toBeFalsy();
+    expect(await statusOf(db, lena.id)).toBe('disabled');
   });
 
   /* Bruno asks the CEO about a machine in his task's card; the CEO answers there, not in the orchestrator's window. */
@@ -774,24 +743,17 @@ describe('what only the CEO may ask for', () => {
     return asked.request.id;
   }
 
-  it("changes a machine in a turn nobody's words opened, by the CEO's answer about machines in an open task's card", async () => {
+  it("changes a machine in a turn nobody's words opened, as the owner, with no answer in a card", async () => {
     const c = await quiet();
     const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
-    const permission = await askedInCard(c, 'machines');
     await c.running(c.orchestrator.id, 'tool-token-timer-0123456789abcdef012');
     const client = await mcp(c.app, 'tool-token-timer-0123456789abcdef012');
-    expect(text(await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false })), 'no answer named').toBe(ONLY_CEO);
-    const lent = await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false, permission });
+    const lent = await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false });
     expect(lent.isError, text(lent)).toBeFalsy();
     expect((await c.db.select().from(machines))[0]!.lendsTests).toBe(false);
-    expect((await call(client, 'lend_machine', { machine: machine!.id, lendsTests: true, permission })).isError, 'the answer holds for the task, once more').toBeFalsy();
-    /* It is no permission for what only the CEO decides about anything else. */
-    const [lena] = await c.db.select().from(people).where(eq(people.name, 'Lena'));
-    expect(text(await call(client, 'change_person', { person: lena!.id, status: 'disabled', permission } as Record<string, unknown>))).toBe(ONLY_CEO);
-    expect(await statusOf(c.db, lena!.id)).toBe('active');
   });
 
-  it('takes no answer as a permission to change machines but the CEO\'s own one about machines, in the card of a task still open', async () => {
+  it('takes no answer as a permission to change machines in a company with no owner but the CEO delegate\'s own one, in the card of a task still open', async () => {
     const c = await quiet();
     const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'dev-mac' }).returning();
     await c.running(c.orchestrator.id, 'tool-token-timer-0123456789abcdef012');
@@ -799,22 +761,10 @@ describe('what only the CEO may ask for', () => {
     const lend = (permission: string) => call(client, 'lend_machine', { machine: machine!.id, lendsTests: false, permission });
     const NO_PERMISSION = "That answer is no permission to change machines: it is the CEO's or the CEO delegate's own answer to a question about machines, in the card of a task that is still open. Nothing was changed. Ask the CEO first.";
     const about = await askedInCard(c, 'task');
-    expect(text(await lend(about)), 'an answer about the task').toBe(NO_PERMISSION);
-    await c.db.update(requests).set({ status: 'withdrawn' }).where(eq(requests.id, about));
-    const open = await askedInCard(c, 'machines', false);
-    expect(text(await lend(open)), 'a question not answered yet').toBe(NO_PERMISSION);
-    expect(text(await lend('00000000-0000-4000-8000-0000000000cc')), 'no such answer').toBe(NO_PERMISSION);
-    await c.db.update(requests).set({ status: 'withdrawn' }).where(eq(requests.id, open));
     const answered = await askedInCard(c, 'machines');
-    await c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, c.task.id));
-    expect(text(await lend(answered)), 'a task that is over').toBe(NO_PERMISSION);
-    await c.db.update(tasks).set({ status: 'working', closedAt: null }).where(eq(tasks.id, c.task.id));
-    await c.db.update(requests).set({ status: 'declined' }).where(eq(requests.id, answered));
-    expect(text(await lend(answered)), 'a declined one').toBe(NO_PERMISSION);
-    await c.db.update(requests).set({ status: 'answered', answeredByAgentId: c.orchestrator.id }).where(eq(requests.id, answered));
-    expect(text(await lend(answered)), 'one the orchestrator gave for the CEO').toBe(NO_PERMISSION);
-    await c.db.update(requests).set({ answeredByAgentId: null }).where(eq(requests.id, answered));
     await c.db.update(people).set({ isOwner: false }).where(eq(people.id, c.ceoId));
+    expect(text(await lend(about)), 'an answer about the task').toBe(NO_PERMISSION);
+    expect(text(await lend('00000000-0000-4000-8000-0000000000cc')), 'no such answer').toBe(NO_PERMISSION);
     expect(text(await lend(answered)), 'a person who is no longer the CEO').toBe(NO_PERMISSION);
     expect((await c.db.select().from(machines))[0]!.lendsTests).toBe(true);
   });
@@ -835,15 +785,15 @@ describe('what only the CEO may ask for', () => {
     expect((await call(await mcp(app, 'tool-token-woke-0123456789abcdef0123'), 'change_person', { person: lena.id, status: 'disabled' })).isError).toBeFalsy();
   });
 
-  it('lets only the CEO switch on a skill that shows the whole company, or move the orchestrator to another subscription', async () => {
+  it('switches on a skill that shows the whole company, or moves itself to another subscription, in any turn, as the owner', async () => {
     const { app, db, orchestrator, bruno, running } = await quiet();
     await running(orchestrator.id, 'tool-token-timer-0123456789abcdef012');
     const client = await mcp(app, 'tool-token-timer-0123456789abcdef012');
     const [sub] = await db.select().from(subscriptions);
-    expect(text(await call(client, 'change_employee', { employee: bruno.id, skills: { 'ops-task-watch': true } }))).toBe(ONLY_CEO);
-    expect(text(await call(client, 'change_employee', { employee: orchestrator.id, subscription: sub!.id }))).toBe(ONLY_CEO);
-    expect(text(await call(client, 'move_orchestrator', { subscription: sub!.id }))).toBe(ONLY_CEO);
-    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.skills).not.toContain('ops-task-watch');
+    const skilled = await call(client, 'change_employee', { employee: bruno.id, skills: { 'ops-task-watch': true } });
+    expect(skilled.isError, text(skilled)).toBeFalsy();
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.skills).toContain('ops-task-watch');
+    expect((await call(client, 'change_employee', { employee: orchestrator.id, subscription: sub!.id })).isError).toBeFalsy();
   });
 });
 

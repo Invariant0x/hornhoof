@@ -245,8 +245,9 @@ describe('prepareBrowser', () => {
     writeFileSync(join(repo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/playwright': { version: '1.64.1' } } }));
     const started = join(dir, 'started'), stopped = join(dir, 'stopped');
     writeFileSync(join(globalPlaywrightDir, 'cli.js'), `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(started)}, String(process.pid)); process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(stopped)}, 'stopped')); setInterval(() => {}, 1000);`);
+    let lease = '';
     const client = new CheckClient(frame => {
-      if (frame.type === 'check.acquire') queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+      if (frame.type === 'check.acquire') { lease = frame.id; queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 })); }
       return true;
     });
     client.online(true); setCheckClient(client);
@@ -258,12 +259,13 @@ describe('prepareBrowser', () => {
     void pending.catch(() => {});
     onTestFinished(async () => {
       if (fixturePid) { try { process.kill(-fixturePid, 'SIGKILL'); } catch { /* Already gone. */ } }
-      await pending.catch(() => {}); client.online(false); setCheckClient(null);
+      await pending.catch(() => {}); client.stop(); setCheckClient(null);
     });
     onTestFinished(async () => { await vi.runAllTimersAsync(); vi.useRealTimers(); });
     await eventually(() => existsSync(started));
     fixturePid = Number(readFileSync(started, 'utf8'));
-    client.online(false);
+    /* Hornhoof ends the lease. */
+    client.receive({ type: 'check.state', id: lease, state: 'ended', position: 0 });
     await eventually(() => existsSync(stopped));
     expect(settled).toBe(false);
     /* The program takes no notice of TERM, so it is killed at the end of its grace of 2 s, and the slot is held through

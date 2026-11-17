@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { backlogItems, people } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 
@@ -36,7 +37,7 @@ export async function addBacklogItem(db: Db, companyId: string, departmentId: st
    moving items at once cannot lose one. */
 export async function reorderBacklog(db: Db, companyId: string, departmentId: string, ids: readonly string[]): Promise<void> {
   await db.transaction(async tx => {
-    const there = await tx.select({ id: backlogItems.id }).from(backlogItems).where(and(eq(backlogItems.companyId, companyId), eq(backlogItems.departmentId, departmentId))).for('update');
+    const there = await tx.select(idOnly(backlogItems)).from(backlogItems).where(and(eq(backlogItems.companyId, companyId), eq(backlogItems.departmentId, departmentId))).for('update');
     const known = new Set(there.map(r => r.id));
     if (new Set(ids).size !== ids.length || ids.length !== known.size || ids.some(id => !known.has(id))) throw changed();
     for (const [position, id] of ids.entries()) await tx.update(backlogItems).set({ position }).where(eq(backlogItems.id, id));

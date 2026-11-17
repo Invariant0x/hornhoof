@@ -212,6 +212,19 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(bridge.listedSince('agent-1', since)).toBe(true);
   });
 
+  /* A program keeps its connection to the bridge between two tool calls, often for longer than Node's 5 seconds, and its
+     next call on a connection the bridge just closed broke with ECONNRESET. The bridge keeps an idle connection as long as
+     Hornhoof's own front does, and tells the program so. */
+  it('keeps a program\'s idle connection as long as Hornhoof\'s front does, and says so in each answer', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const res = await fetch(bridge.agent('agent-1').mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":7,"method":"tools/call"}' });
+    await res.arrayBuffer();
+    expect([res.status, res.headers.get('connection'), res.headers.get('keep-alive')]).toEqual([200, 'keep-alive', 'timeout=72']);
+  });
+
   it('answers a tool call between turns with an error the agent can read, without asking Hornhoof', async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});

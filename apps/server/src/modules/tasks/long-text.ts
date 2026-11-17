@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, people, tasks } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { checkRoom, FILE_BYTES } from './attachments.js';
 import type { Actor, Tx } from './engine.js';
@@ -24,21 +25,21 @@ const forbidden = () => new ApiError(403, 'forbidden', 'You cannot attach text t
 async function recipient(db: Db | Tx, task: Scope): Promise<string> {
   const [row] = await db.select().from(tasks).where(and(eq(tasks.id, task.id), eq(tasks.companyId, task.companyId)));
   const ids = [row?.assigneeAgentId, row?.executorAgentId, row?.createdByAgentId].filter((id): id is string => Boolean(id));
-  const found = ids.length ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), inArray(agents.id, ids))) : [];
+  const found = ids.length ? await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, task.companyId), inArray(agents.id, ids))) : [];
   const preferred = ids.find(id => found.some(a => a.id === id));
   if (preferred) return preferred;
-  const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'))).limit(1);
+  const [orchestrator] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'))).limit(1);
   if (!orchestrator) throw forbidden();
   return orchestrator.id;
 }
 
 async function owner(db: Db | Tx, task: Scope, actor: Actor): Promise<Owner> {
   if (actor.agentId !== undefined) {
-    const [agent] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, actor.agentId), eq(agents.companyId, task.companyId)));
+    const [agent] = await db.select(idOnly(agents)).from(agents).where(and(eq(agents.id, actor.agentId), eq(agents.companyId, task.companyId)));
     if (!agent) throw forbidden();
     return { agentId: agent.id, personId: null };
   }
-  const [person] = await db.select({ id: people.id }).from(people).where(and(eq(people.id, actor.personId), eq(people.companyId, task.companyId)));
+  const [person] = await db.select(idOnly(people)).from(people).where(and(eq(people.id, actor.personId), eq(people.companyId, task.companyId)));
   if (!person) throw forbidden();
   return { agentId: await recipient(db, task), personId: person.id };
 }
@@ -51,7 +52,7 @@ async function archive(db: Db | Tx, task: Scope, author: Owner, kind: string, fi
   const name = `${kind}-${field}-${sha256}.txt`;
   const [existing] = await db.select().from(attachments).where(and(eq(attachments.companyId, task.companyId), eq(attachments.taskId, task.id), eq(attachments.agentId, author.agentId), author.personId ? eq(attachments.personId, author.personId) : isNull(attachments.personId), eq(attachments.name, name), eq(attachments.mediaType, 'text/plain'), isNull(attachments.operatorCaseId))).limit(1);
   if (existing && digest(existing.bytes) === sha256) return { field, id: existing.id, name, size: bytes.length, sha256 };
-  const [row] = await db.select({ number: tasks.number }).from(tasks).where(eq(tasks.id, task.id));
+  const [row] = await db.select(only(tasks, 'number')).from(tasks).where(eq(tasks.id, task.id));
   await checkRoom({ db, config }, task.companyId, { id: task.id, number: row!.number }, bytes.length);
   const [file] = await db.insert(attachments).values({ companyId: task.companyId, taskId: task.id, ...author, name, mediaType: 'text/plain', bytes, size: bytes.length }).returning({ id: attachments.id });
   return { field, id: file!.id, name, size: bytes.length, sha256 };

@@ -1,0 +1,1 @@
+ALTER TABLE "assistant_replies" ADD COLUMN "by_own_agent" boolean DEFAULT false NOT NULL;

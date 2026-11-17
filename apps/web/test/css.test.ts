@@ -89,6 +89,28 @@ it('draws every focus ring in the accent ink, which keeps 3:1 on every surface o
   for (const ring of rings) expect(ring.decls.outline, ring.selectors.join(', ')).toMatch(/^2px solid var\(--cyan-ink\)$/);
 });
 
+it('draws the glow and the focus ring of a framed button in the shape of its frame, with no square shadow or outline around it', () => {
+  /* The glow is a shadow of a copy of the frame's shape, cut as the frame is, in steps where the skin cuts in steps. */
+  expect(decl('.halo-glow > i', 'clip-path')).toBe(decl('.edge', 'clip-path'));
+  expect(decl(":where(:root[data-cut='steps']) .halo-glow > i", 'clip-path')).toBe(decl(":where(:root[data-cut='steps']) .edge", 'clip-path'));
+  expect(decl('.halo-glow', 'filter')).toBe('drop-shadow(0 0 calc(var(--halo-blur) / 2) color-mix(in srgb, var(--glow) 45%, transparent))');
+  expect(decl('.halo', '--halo-blur')).toBe('12px');
+  const glowing = ':is(button.dept.busy, button.dept.waits, button.chip-btn.attn) > .halo > .halo-glow';
+  expect(decl(glowing, 'animation')).toBe('dglow 2.6s ease-in-out infinite');
+  expect(decl(glowing, 'display', '(prefers-reduced-motion: reduce)')).toBe('none');
+  /* The ring is the frame's shape 2 px out and 2 px wide in the accent ink, in place of the square outline. */
+  expect(decl('.halo', '--ring')).toBe('2px');
+  expect(decl('.halo', '--ring-gap')).toBe('2px');
+  expect(decl('.halo-ring', 'inset')).toBe('calc(-1 * (var(--ring-gap) + var(--ring)))');
+  expect(decl('.halo-ring', 'background')).toBe('var(--cyan-ink)');
+  expect(decl('.halo-ring', 'background', '(forced-colors: active)')).toBe('Highlight');
+  expect(decl(':focus-visible > .halo > .halo-ring', 'display')).toBe('block');
+  expect(decl(':focus-visible:has(> .halo)', 'outline')).toBe('none');
+  /* No square shadow or outline is left on a button that shows a frame. */
+  const square = RULES.filter(r => r.selectors.some(s => /^(button\.dept|button\.chip-btn|button\.shead|button\.schip|\.run-open)\b/.test(s)) && (r.decls['box-shadow'] || r.decls.outline));
+  expect(square.map(r => r.selectors.join(', '))).toEqual([]);
+});
+
 it('frames every invalid field control in pink by one shared .field rule while keeping a visible focus ring', () => {
   const invalid = '.field :is(input, select, textarea)[aria-invalid="true"]';
   const focused = `${invalid}:is(:focus, :focus-visible)`;
@@ -100,6 +122,7 @@ it('frames every invalid field control in pink by one shared .field rule while k
   expect(RULES.filter(r => r.selectors.some(s => s.includes('aria-invalid'))).map(r => r.selectors)).toEqual([
     [invalid],
     [focused],
+    ['.check-card:has([aria-invalid="true"])'],
   ]);
 });
 

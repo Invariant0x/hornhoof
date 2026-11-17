@@ -15,4 +15,4 @@ You can pin a few important user flows with reproducible end-to-end tests.
 - Wait for conditions (an element, a response, a line of output), never for a fixed number of seconds.
 - On failure keep what shows what happened: a screenshot, the logs, the requests, the output.
 - A test that fails sometimes may be weakened or deleted quickly, without a long diagnosis. Never retry it until it turns green or replace it with a skip, and never weaken a check of our own access rights, identity or secret redaction.
-- Run named test files of your change in your own workspace when its browser is there; installing that browser is allowed. Only a whole browser suite across engines uses `run_tests`, split into groups over free machines on the exact candidate.
+- Run named test files of your change in your own workspace when its browser is there; installing that browser is allowed.

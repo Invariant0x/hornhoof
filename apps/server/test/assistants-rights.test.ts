@@ -41,7 +41,7 @@ describe("an assistant's key", () => {
         telegram: { username: null, id: null },
       },
       company: { name: 'Acme' },
-      contract: 2,
+      contract: 3,
     });
     for (const url of ['/api/people', '/api/me', '/api/subscriptions', '/api/machines', '/api/link', '/api/updates', '/api/requests', `/api/agents/${c.crew.owned.id}/events`]) {
       expect((await asAssistant(c, key, url)).statusCode, url).toBe(401);
@@ -115,6 +115,9 @@ describe('whom an assistant may write to', () => {
     expect(refused.statusCode).toBe(403);
     expect(refused.json().error.reason).toBe('assistant_agent_refused');
     expect((await asAssistant(c, key, '/api/assistant/messages', 'POST', { agentId: c.crew.far.id, text: 'Hi.' })).statusCode).toBe(403);
+    const file = await c.app.inject({ method: 'POST', url: `/api/assistant/files?name=plan.pdf&agentId=${c.orchestrator.id}`, headers: { ...bearer(key).headers, 'content-type': 'application/pdf' }, payload: Buffer.from('%PDF-1.7') });
+    expect(file.statusCode).toBe(403);
+    expect(file.json().error.reason).toBe('assistant_agent_refused');
   });
 
   it("a listed person's: the employees on their plan where they work, as their window has it", async () => {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { PglitePreparedQuery } from 'drizzle-orm/pglite';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, people, tasks, teams, turns, TASK_STATUSES } from '../src/db/schema.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
@@ -104,8 +105,10 @@ it('excludes another company even when its task references the same turn and dep
 it('propagates a failed count instead of returning an invented zero', async () => {
   const c = await fixture();
   const failure = new Error('Count database unavailable');
-  const select = vi.spyOn(c.db, 'select').mockImplementation(() => { throw failure; });
-  onTestFinished(() => select.mockRestore());
+  /* The count fails where the database answers it. A spy on db.select would type its mock from every select overload,
+     which cost the type check of this file about 30 MB. */
+  const execute = vi.spyOn(PglitePreparedQuery.prototype, 'execute').mockRejectedValue(failure);
+  onTestFinished(() => execute.mockRestore());
   const viewer = { full: true, personId: randomUUID(), access: { whole: true, departments: new Set<string>(), teams: new Set<string>() }, plans: new Set<string>(), agents: new Set<string>(), own: new Set<string>(), apart: new Set<string>() };
   await expect(turnCounts(c.db, c.turn, viewer)).rejects.toBe(failure);
 });

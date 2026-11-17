@@ -6,6 +6,7 @@ import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agentInbox, agents, jobs, people, requests, tasks } from '../../db/schema.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
@@ -19,7 +20,11 @@ import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
    Hornhoof writes and messages from agents never change whom a turn answers, and a turn without a person's words answers
    nobody unless a person started it with none. Words on their way into the turn, or that went in without being kept, leave
    the turn without anyone's right. Their own work of running the company or a department goes on in any turn of theirs,
-   for the last person who asked them: see standingPrincipal. */
+   for the last person who asked them: see standingPrincipal.
+   What is not forbidden is allowed, and the orchestrator can do everything in the company (Ivan's rule of 16 November
+   2026): in a turn that answers neither the CEO nor the CEO delegate it goes as the company's owner, so an employee's
+   message, a notice of Hornhoof or a person who runs one department moves it as the CEO would. What a company wants it
+   not to do is written in the company's notebook. Machines keep their own rule: see machinePrincipal. */
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Reader = Pick<Db, 'select'> | Tx;
@@ -37,7 +42,7 @@ const ANSWERS_PEOPLE: readonly (typeof agents.$inferSelect)['kind'][] = ['orches
    words are on their way into it. */
 async function turnWords(db: Reader, jobId: string) {
   const [job] = await db
-    .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, inboxWake: jobs.inboxWake, agentKind: agents.kind })
+    .select({ id: jobs.id, agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, inboxWake: jobs.inboxWake, agentKind: agents.kind, companyId: agents.companyId })
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(eq(jobs.id, jobId));
@@ -47,9 +52,28 @@ async function turnWords(db: Reader, jobId: string) {
 
 type Words = NonNullable<Awaited<ReturnType<typeof turnWords>>>;
 
-export async function decisionPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
+/* The orchestrator's principal: the CEO or the CEO delegate its turn answers, or else the company's owner. A head's stays
+   as it was found. */
+async function asOwner(db: Reader, turn: Words, found: Principal | null): Promise<Principal | null> {
+  if (turn.job.agentKind !== 'orchestrator') return found;
+  if (found && (await actingCeo(db, found.personId))) return found;
+  const [owner] = await db
+    .select(idOnly(people))
+    .from(people)
+    .where(and(eq(people.companyId, turn.job.companyId), eq(people.isOwner, true), eq(people.status, 'active')))
+    .limit(1);
+  return owner ? { personId: owner.id, sourceSeq: null } : found;
+}
+
+/* Whom the turn answers by its words alone, before the orchestrator goes as the owner: what the marks of an Enter keep. */
+async function wordsPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
   const turn = await turnWords(db, jobId);
   return turn && answered(turn);
+}
+
+export async function decisionPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
+  const turn = await turnWords(db, jobId);
+  return turn && asOwner(db, turn, answered(turn));
 }
 
 /* How a check finds the person a call goes for: decisionPrincipal, or standingPrincipal for running the company. */
@@ -62,8 +86,8 @@ export type FindPrincipal = (db: Reader, jobId: string) => Promise<Principal | n
 export async function standingPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
   const turn = await turnWords(db, jobId);
   if (!turn) return null;
-  if (turn.said.some(byPerson) || (turn.said.length === 0 && turn.job.createdBy)) return answered(turn);
-  return earlierPrincipal(db, turn.job.agentId!);
+  const found = turn.said.some(byPerson) || (turn.said.length === 0 && turn.job.createdBy) ? answered(turn) : await earlierPrincipal(db, turn.job.agentId!);
+  return asOwner(db, turn, found);
 }
 
 /* The last person who wrote or typed to the agent; null when nobody did, or an Enter cleared it. */
@@ -133,7 +157,7 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
    owner while active. */
 async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: string): Promise<string | null> {
   if (personId !== ownerPersonId) return actingCeo(db, personId);
-  const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, personId));
+  const [owner] = await db.select(only(people, 'status')).from(people).where(eq(people.id, personId));
   return owner?.status === 'active' ? personId : null;
 }
 
@@ -250,7 +274,7 @@ class TurnStopped extends Error {}
 
 /* The message and its turn check share a transaction, so Stop cannot move between the check and the write. */
 async function liveInputKept(tx: Tx, jobId: string): Promise<void> {
-  const [job] = await tx.select({ id: jobs.id }).from(jobs)
+  const [job] = await tx.select(idOnly(jobs)).from(jobs)
     .where(and(eq(jobs.id, jobId), or(isNull(jobs.error), ne(jobs.error, 'cancelled')))).for('no key update');
   if (!job) throw new TurnStopped();
   await inputKept(tx, jobId);
@@ -309,10 +333,11 @@ async function hasClickGrant(db: Reader, jobId: string): Promise<boolean> {
   return Boolean(turn && (await activeClickGrants(db, turn.job, turn.said)).length);
 }
 
-/* The turn of the orchestrator or a head answers this person from now on, or nobody: marked once as long as it does. */
+/* The turn of the orchestrator or a head answers this person from now on, or nobody: marked once as long as it does. The
+   mark goes by the words of the turn, not by the owner the orchestrator acts as when no CEO wrote. */
 async function answersFromNow(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, turn: Turn, personId: string | null): Promise<void> {
   if (!ANSWERS_PEOPLE.includes(turn.agentKind)) return;
-  const current = (await decisionPrincipal(ctx.db, turn.id))?.personId ?? null;
+  const current = (await wordsPrincipal(ctx.db, turn.id))?.personId ?? null;
   if (current === personId && (personId !== null || !(await hasClickGrant(ctx.db, turn.id)))) return;
   await appendEvent(ctx, { companyId: turn.companyId, agentId: turn.agentId, jobId: turn.id, kind: 'typed', data: {}, personId });
 }
@@ -352,6 +377,6 @@ export async function turnStarted(ctx: Typing, agentId: string, jobId: string): 
   await withInputLock(ctx, agentId, async () => {
     const pressed = ctx.terminals.drop(agentId);
     const turn = pressed ? await turnWithWords(ctx.db, eq(jobs.id, jobId)) : undefined;
-    if (turn && (await decisionPrincipal(ctx.db, turn.id))?.personId !== pressed) await answersFromNow(ctx, turn, null);
+    if (turn && (await wordsPrincipal(ctx.db, turn.id))?.personId !== pressed) await answersFromNow(ctx, turn, null);
   });
 }

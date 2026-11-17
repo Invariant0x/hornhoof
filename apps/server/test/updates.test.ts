@@ -6,11 +6,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodeCodes, people, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { writeKeeperState, type Mode } from '../src/modules/keeper/state.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
+import { recordJobProgram, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
 import { listenAt } from '../../../test-support/ports.mjs';
 
 /* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
@@ -167,6 +169,8 @@ const updaterAlive = (control: string, ageSeconds = -3600) => {
 const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
 const SHA = 'b'.repeat(40);
 const HELD_AFTER_MS = 10 * 60_000;
+/* An update that waits for the agents, as the screens and the orchestrator see it. */
+const WAITS = { version: '0.4.1', commit: SHA, since: expect.any(String), until: expect.any(String), turns: expect.any(Array), lost: [] };
 /* What the updater is asked for: the build the server read, by digest, and the node and updater images of its commit. */
 const asked = (registry: { digests: Record<string, string> }, id: string) => ({
   id,
@@ -343,7 +347,7 @@ describe('updates', () => {
     expect(new Set([request(control).digest, request(control).nodeDigest, request(control).updaterDigest]).size).toBe(3);
     writeFileSync(join(control, 'status.json'), JSON.stringify({ id: res.json().id, version: '0.4.1', state: 'running', step: 'pull', log: 'Downloading 0.4.1.\n', at: '2026-10-30T01:00:00Z' }));
     const view = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json();
-    expect(view.updater).toEqual({ present: true, status: expect.objectContaining({ state: 'running', step: 'pull' }), waiting: null });
+    expect(view.updater).toEqual({ present: true, status: expect.objectContaining({ state: 'running', step: 'pull' }), waiting: null, calledOff: null });
     const again = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: '0.4.1' }, ...as(ceo) });
     expect(again.statusCode).toBe(409);
     expect(again.json().error.reason).toBe('update_running');
@@ -507,7 +511,7 @@ describe('updates', () => {
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
     expect(res.statusCode).toBe(202);
     expect(request(control)).toBeNull();
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual(WAITS);
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
     /* The request is written whole and then moved into place, so once it is there it is all there. */
@@ -530,7 +534,7 @@ describe('updates', () => {
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
     expect(res.statusCode).toBe(202);
     expect(request(control)).toBeNull();
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual(WAITS);
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
     /* The request is written whole and then moved into place, so once it is there it is all there. */
@@ -644,7 +648,7 @@ describe('updates', () => {
     hold.resume();
     await settled();
     expect(request(control)).toBeNull();
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual(WAITS);
 
     rmdirSync(join(control, 'request.json.new'));
     await publishWorking(app.ctx, acme!.id);
@@ -696,7 +700,9 @@ describe('updates', () => {
     await expect.poll(() => request(control)).not.toBeNull();
     expect(turnsHeld(app.ctx, acme.id)).toBe(true);
     const at = timeouts.mock.calls.findIndex(([, ms]) => ms === HELD_AFTER_MS);
-    return { ...made, holdEnds: timeouts.mock.calls[at]![0] as () => void, holdTimeout: timeouts.mock.results[at]!.value as NodeJS.Timeout };
+    /* The deadline of the wait, which the hand-over ended. */
+    const deadline = timeouts.mock.calls.find(([, ms]) => ms === 30 * 60_000)?.[0] as (() => void) | undefined;
+    return { ...made, holdEnds: timeouts.mock.calls[at]![0] as () => void, holdTimeout: timeouts.mock.results[at]!.value as NodeJS.Timeout, deadline };
   }
 
   it('lets the turns held after a hand-over go when its timeout ends', async () => {
@@ -722,6 +728,105 @@ describe('updates', () => {
     expect(cleared).toHaveBeenCalledWith(holdTimeout);
   });
 
+  /* A company whose update may wait for its agents, with a turn of its worker Zed that runs since startedAt and, unless
+     the test says otherwise, has no report of its program yet. */
+  async function companyAtWork(startedAt = new Date()) {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const made = await company(registry);
+    updaterAlive(made.control);
+    const [acme] = await made.db.select().from(companies);
+    const [sub] = await made.db.select().from(subscriptions);
+    const [orchestrator] = await made.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [zed] = await made.db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Zed', model: '' }).returning();
+    const [job] = await made.db
+      .insert(jobs)
+      .values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: zed!.id, prompt: 'x', kind: 'conversation', status: 'running', startedAt, timeoutMs: 1000 })
+      .returning();
+    return { ...made, registry, acme: acme!, sub: sub!, orchestrator: orchestrator!, zed: zed!, job: job! };
+  }
+
+  const LOST_AFTER_MS = SILENT_TURN_MS;
+  const DEFAULT_WAIT_MS = 30 * 60_000;
+
+  it('does not wait for a turn whose node said nothing of its program for ten minutes, since nothing tells when it ends', async () => {
+    const { app, ceo, control, registry, acme } = await companyAtWork(new Date(Date.now() - LOST_AFTER_MS - 60_000));
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
+    /* Held now for the restart, as after any hand-over. */
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+  });
+
+  it('waits for a long turn whose node still reports its program, and says for which turns and until when', async () => {
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    onTestFinished(() => timeouts.mockRestore());
+    const { app, ceo, control, job } = await companyAtWork(new Date(Date.now() - 60 * 60_000));
+    await recordJobProgram(app.ctx, { type: 'job.program', jobId: job.id, state: 'thinking', since: 0, screenAt: 0 }, new Date(Date.now() - 60_000), sql`true`);
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toBeNull();
+    const waiting = { version: '0.4.1', commit: SHA, since: expect.any(String), until: expect.any(String), turns: [{ agent: 'Zed', task: null }], lost: [] };
+    expect(res.json().waiting).toEqual(waiting);
+    const shown = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting;
+    expect(shown).toEqual(waiting);
+    /* Thirty minutes unless the request says otherwise. */
+    expect(Date.parse(shown.until) - Date.parse(shown.since)).toBe(DEFAULT_WAIT_MS);
+    expect(timeouts.mock.calls.some(([, ms]) => ms === DEFAULT_WAIT_MS)).toBe(true);
+  });
+
+  it('names a lost turn apart from the turns it waits for', async () => {
+    const { app, db, ceo, acme, sub, orchestrator } = await companyAtWork(new Date(Date.now() - LOST_AFTER_MS - 60_000));
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: orchestrator.id, prompt: 'y', kind: 'conversation', status: 'running', startedAt: new Date(), timeoutMs: 1000 });
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.json().waiting).toMatchObject({ turns: [{ agent: orchestrator.name, task: null }], lost: [{ agent: 'Zed', task: null }] });
+  });
+
+  it('waits for a turn whose node reports no program but streams its work, as the node_silent alarm counts it alive', async () => {
+    const { app, db, ceo, control, acme, zed, job } = await companyAtWork(new Date(Date.now() - LOST_AFTER_MS - 60_000));
+    await db.insert(agentEvents).values({ companyId: acme.id, agentId: zed.id, jobId: job.id, kind: 'text', data: { text: 'Working.' }, createdAt: new Date(Date.now() - 60_000) });
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toBeNull();
+    expect(res.json().waiting).toMatchObject({ turns: [{ agent: 'Zed', task: null }], lost: [] });
+  });
+
+  it('calls the update off at its deadline: it stops no running work, lets the held turns go, says why and tells the orchestrator', async () => {
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    onTestFinished(() => timeouts.mockRestore());
+    const { app, db, ceo, control, acme, orchestrator, job } = await companyAtWork();
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true, idleWaitMinutes: 5 }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    const { since, until: deadline } = res.json().waiting;
+    expect(Date.parse(deadline) - Date.parse(since)).toBe(5 * 60_000);
+    const at = timeouts.mock.calls.findIndex(([, ms]) => ms === 5 * 60_000);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+
+    (timeouts.mock.calls[at]![0] as () => void)();
+    await until(() => !turnsHeld(app.ctx, acme.id));
+    expect(request(control)).toBeNull();
+    const updater = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater;
+    expect(updater.waiting).toBeNull();
+    expect(updater.calledOff).toEqual({ version: '0.4.1', commit: SHA, at: expect.any(String), reason: 'deadline', turns: [{ agent: 'Zed', task: null }] });
+    expect((await db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, job.id)))[0]!.status).toBe('running');
+    const told = async () => (await db.select(only(jobs, 'prompt')).from(jobs).where(eq(jobs.agentId, orchestrator.id))).map(j => j.prompt);
+    await until(async () => (await told()).length > 0);
+    expect((await told())[0]).toMatch(/^Hornhoof called off the update to 0\.4\.1: the agents did not finish within 5 minutes\. No running work was stopped/);
+
+    /* The next request starts afresh, and the called-off one is no longer shown. */
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.calledOff).toBeNull();
+  });
+
+  it('keeps the turns held for the restart when the deadline of an update already handed over passes', async () => {
+    const { app, ceo, acme, deadline } = await handedOver();
+    expect(deadline).toBeDefined();
+    deadline!();
+    await settled();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.calledOff).toBeNull();
+  });
+
   it('refuses an update whose reading of the registry crossed a step-down', async () => {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
     const { app, ceo, control, acme, say, stepDown } = await leadingCompany(registry);
@@ -745,7 +850,7 @@ describe('updates', () => {
   it('says when no updater runs', async () => {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
     const { app, ceo, control } = await company(registry);
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater).toEqual({ present: false, status: null, waiting: null });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater).toEqual({ present: false, status: null, waiting: null, calledOff: null });
     const missing = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
     expect(missing.statusCode).toBe(503);
     expect(missing.json().error.reason).toBe('updater_missing');

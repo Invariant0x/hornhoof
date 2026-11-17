@@ -56,6 +56,8 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
     await expect(input).toHaveCount(0);
     await expect(panel.getByText(marker, { exact: true })).toHaveCount(0);
     await expect(panel.getByText('[hidden]', { exact: true })).toBeVisible();
+    await expect(panel.getByRole('link', { name: words.vault, exact: true })).toHaveAttribute('href', '/settings/passwords');
+    expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     expect(failures).toEqual([]);
   });
 }

@@ -10,6 +10,10 @@ import { ME, mockApi, ORG } from './api-mock';
 
 const build = (version: string, commit: string, extra: Partial<Build> = {}): Build => ({ tag: version, version, commit, created: '2026-10-30T01:00:00Z', title: '', migrations: 5, ...extra });
 
+/* An update that waits for the agents, as the server says it. */
+const WAITS = { version: '0.4.1', commit: 'b'.repeat(40), since: '2026-11-16T01:00:00.000Z', until: '2026-11-16T01:30:00.000Z', turns: [{ agent: 'Zed', task: 1032 }], lost: [] };
+const hourOf = (iso: string) => new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+
 function updates(over: Partial<UpdatesView> = {}, updater: Partial<UpdatesView['updater']> = {}): UpdatesView {
   return {
     current: { version: '0.4.0', commit: 'a'.repeat(40), migrations: 5 },
@@ -19,7 +23,7 @@ function updates(over: Partial<UpdatesView> = {}, updater: Partial<UpdatesView['
     versions: [build('0.4.1', 'b'.repeat(40), { migrations: 6 }), build('0.4.0', 'a'.repeat(40)), build('0.3.0', 'c'.repeat(40), { migrations: 4, title: 'Build the company' })],
     error: null,
     ...over,
-    updater: { present: true, status: null, waiting: null, ...updater },
+    updater: { present: true, status: null, waiting: null, calledOff: null, ...updater },
   };
 }
 
@@ -85,7 +89,7 @@ describe('updates', () => {
       'GET /api/org': [200, ORG],
       'GET /api/updates': () => [200, view],
       'POST /api/updates': body => {
-        view = (body as { whenIdle?: boolean }).whenIdle ? updates({}, { waiting: { version: '0.4.1', commit: 'b'.repeat(40) } }) : updates({}, { status: status('running', 'pull') });
+        view = (body as { whenIdle?: boolean }).whenIdle ? updates({}, { waiting: WAITS }) : updates({}, { status: status('running', 'pull') });
         return [202, { id: 'u1' }];
       },
       'DELETE /api/updates': () => ((view = updates()), [204]),
@@ -94,7 +98,7 @@ describe('updates', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Update when agents finish' }));
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: 'latest', whenIdle: true });
-    expect(await screen.findByText('Hornhoof will update to 0.4.1 (bbbbbbb) when the agents finish.')).toBeInTheDocument();
+    expect(await screen.findByText(`Hornhoof will update to 0.4.1 (bbbbbbb) when the agents finish. If they have not finished by ${hourOf(WAITS.until)}, the update is called off and nothing stops.`)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Call off' }));
     expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/updates')).toBe(true);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
@@ -103,6 +107,24 @@ describe('updates', () => {
     const bar = screen.getByRole('progressbar', { name: 'Update progress' });
     expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 5: downloading');
     expect(bar).toHaveAttribute('aria-valuenow', '0');
+  });
+
+  it('says until when an update waits for the agents, and why it was called off at that time', async () => {
+    let view = updates({}, { waiting: WAITS });
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
+    const user = userEvent.setup();
+    const { unmount } = render(<Shell me={ME} onSignOut={() => {}} />);
+    const until = hourOf(WAITS.until);
+    expect(await screen.findByText(`Hornhoof will update to 0.4.1 (bbbbbbb) when the agents finish. If they have not finished by ${until}, the update is called off and nothing stops.`)).toBeInTheDocument();
+    unmount();
+
+    view = updates({}, { waiting: null, calledOff: { version: '0.4.1', commit: 'b'.repeat(40), at: WAITS.until, reason: 'deadline', turns: [{ agent: 'Zed', task: 1032 }] } });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    expect(await screen.findByText(`The update to 0.4.1 (bbbbbbb) was called off at ${until}: the agents had not finished. Nothing was stopped.`)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'OK' }));
+    /* Seen once, it is not said again; the banner goes back to the build on offer. */
+    expect(screen.queryByText(/was called off/)).not.toBeInTheDocument();
+    expect(screen.getByText('Hornhoof 0.4.1 (bbbbbbb) is out: Hire from the staff card')).toBeInTheDocument();
   });
 
   it('asks for one update however fast Update is clicked again', async () => {

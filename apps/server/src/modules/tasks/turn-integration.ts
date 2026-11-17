@@ -1,6 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, turns } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
 import { refuse, type Task, type Tx } from './engine.js';
 import { exactComparison } from './review-context.js';
@@ -15,7 +16,7 @@ type Turn = typeof turns.$inferSelect;
 type Repo = NonNullable<Awaited<ReturnType<typeof repoAt>>>['repo'];
 export type IntegrationTarget = { repo: Repo; branch: string; turn: Turn | null };
 
-const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('no key update');
+const lockCompany = (tx: Tx, companyId: string) => tx.select(idOnly(companies)).from(companies).where(eq(companies.id, companyId)).for('no key update');
 
 /* The repository the result is in and the branch it goes to: its department's open turn, opened if it has none, or its own
    main line. None where it keeps no repository. */

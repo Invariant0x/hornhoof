@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import type { Messages } from '../i18n/en';
+import { joined, RevisionView, whenOf } from './CatalogRevision';
 import { Field } from './Field';
 import { TickBox } from './TickBox';
 
@@ -39,6 +40,7 @@ type Revision = {
   revision: number;
   status: 'proposed' | 'published' | 'revoked';
   summary: string;
+  value: { kind?: string };
   createdAt: string;
   createdBy: { kind: 'person' | 'agent'; name: string | null };
   publishedBy: Named;
@@ -49,7 +51,8 @@ type LogEntry = { id: string; kind: keyof Messages['outboundSetup']['log']; chan
 
 export type RunDepartment = { id: string; name: string | null; templateKey: keyof Messages['templates'] | null };
 
-const errorOf = (t: Messages, err: unknown): string => (err instanceof ApiFailure && err.reason === 'outbound_invalid' ? t.outboundSetup.invalid : errorText(t, err));
+const reasonOf = (err: unknown): string | undefined => (err instanceof ApiFailure ? err.reason : undefined);
+const errorOf = (t: Messages, err: unknown): string => (reasonOf(err) === 'outbound_invalid' ? t.outboundSetup.invalid : errorText(t, err));
 
 /* A move that reloads what it changed, with its failure shown where it was made. */
 function useMove(onDone: () => void) {
@@ -72,7 +75,7 @@ function useMove(onDone: () => void) {
 
 function Failure({ failure }: { failure: unknown }) {
   const t = useT();
-  return failure === null ? null : <p className="alert" role="alert">{errorOf(t, failure)}</p>;
+  return failure === null ? null : <p className="alert" role="alert" dir="auto">{errorOf(t, failure)}</p>;
 }
 
 /* The buttons of an entry, and the foot of a form: each a group at the end of its line. */
@@ -90,9 +93,6 @@ const TONE: Record<string, 'active' | 'invited' | 'offline'> = { active: 'active
 function Status({ of, children }: { of: string; children: ReactNode }) {
   return <span className={`status ${TONE[of] ?? 'offline'}`}>{children}</span>;
 }
-
-/* Pieces of one line, the dot held to the piece before it, so that no line begins with it. */
-const joined = (pieces: readonly (string | null | undefined | false)[]): string => pieces.filter(Boolean).join('\u00a0· ');
 
 /* A mail account or a webhook for a channel. Its password or key leaves this form once and is forgotten here at once. */
 function AccountForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(): void; onCancel(): void }) {
@@ -197,20 +197,20 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
         <TickBox checked={v.autoSend} onChange={e => setV({ ...v, autoSend: e.target.checked })} />
         <span>
           <b>{s.autoSend}</b>
-          <small>{channel.audience === 'public' ? s.autoSendPublic : s.autoSendHint}</small>
+          <small dir="auto">{channel.audience === 'public' ? s.autoSendPublic : s.autoSendHint}</small>
         </span>
       </label>
-      <fieldset className="outbound-numbers">
+      <fieldset className="field-group outbound-numbers">
         <legend>{s.reviewTitle}</legend>
-        <div className="outbound-numbers-body">
-          <p className="hint">{s.reviewHint}</p>
+        <div className="field-group-body">
+          <p className="hint" dir="auto">{s.reviewHint}</p>
           {NUMBERS.slice(0, 4).map(([, key]) => count(key, key === 'everyNth' ? 1 : 0))}
         </div>
       </fieldset>
-      <fieldset className="outbound-numbers">
+      <fieldset className="field-group outbound-numbers">
         <legend>{s.circuitTitle}</legend>
-        <div className="outbound-numbers-body">
-          <p className="hint">{s.circuitHint}</p>
+        <div className="field-group-body">
+          <p className="hint" dir="auto">{s.circuitHint}</p>
           {NUMBERS.slice(4).map(([, key]) => count(key, key === 'windowHours' || key === 'minimumSample' ? 1 : 0))}
         </div>
       </fieldset>
@@ -236,7 +236,7 @@ function AccountLine({ account }: { account: SetupAccount }) {
         <b>{account.label}</b>
         <Status of={account.status}>{s.accountStatuses[account.status]}</Status>
       </span>
-      <small>
+      <small dir="auto">
         <bdi className="outbound-address">{account.senderDomain}</bdi>
         {`\u00a0· ${account.author ? s.writes(account.author.name) : s.nobodyWrites}`}
       </small>
@@ -244,20 +244,19 @@ function AccountLine({ account }: { account: SetupAccount }) {
   );
 }
 
-type Open = 'account' | 'policy' | null;
+type Open = 'account' | 'policy' | 'contact' | null;
 
 /* One channel: what it goes by and who sends from it, and the moves of the people who run it. */
 function ChannelCard({ channel, onChanged }: { channel: SetupChannel; onChanged(): void }) {
   const t = useT();
   const s = t.outboundSetup;
   const [open, setOpen] = useState<Open>(null);
-  const { busy, failure, run } = useMove(onChanged);
+  const [added, setAdded] = useState<string | null>(null);
   const done = () => {
     setOpen(null);
     onChanged();
   };
   const working = channel.accounts.some(a => a.status === 'active');
-  const stopOrReopen = channel.status === 'stopped' ? 'reopen' : 'stop';
   return (
     <div className="imp imp-taken">
       <header>
@@ -266,23 +265,140 @@ function ChannelCard({ channel, onChanged }: { channel: SetupChannel; onChanged(
           <Status of={channel.status}>{t.outbound.channelStatuses[channel.status]}</Status>
         </div>
         <p className="outbound-meta">
-          <span>{joined([s.adapters[channel.adapter], s.audiences[channel.audience]])}</span>
-          <span>{policyLine(s, channel.policy)}</span>
+          <span dir="auto">{joined([s.adapters[channel.adapter], s.audiences[channel.audience]])}</span>
+          <span dir="auto">{policyLine(s, channel.policy)}</span>
         </p>
       </header>
       {channel.accounts.length ? <ul className="outbound-list">{channel.accounts.map(a => <AccountLine key={a.id} account={a} />)}</ul> : null}
-      {!working && <p className="muted">{s.noAccount}</p>}
+      {!working && <p className="muted" dir="auto">{s.noAccount}</p>}
       {open === 'account' && <AccountForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'policy' && <PolicyForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
-      {open === null && (
-        <EntryActions>
-          <button className="btn ghost" type="button" onClick={() => setOpen('account')}>{channel.adapter === 'smtp' ? s.connectMail : s.connectHook}</button>
-          <button className="btn ghost" type="button" onClick={() => setOpen('policy')}>{channel.policy ? s.changePolicy : s.setPolicy}</button>
-          <button className={stopOrReopen === 'stop' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/channels/${channel.id}/${stopOrReopen}`, {}))}>{s[stopOrReopen]}</button>
-        </EntryActions>
-      )}
-      <Failure failure={failure} />
+      {open === 'contact' && <ContactForm channel={channel} onDone={said => { setOpen(null); setAdded(said); }} onCancel={() => setOpen(null)} />}
+      {added && <p className="muted outbound-added" role="status" dir="auto">{added}</p>}
+      {open === null && <ChannelActions channel={channel} onOpen={form => { setAdded(null); setOpen(form); }} onChanged={onChanged} />}
     </div>
+  );
+}
+
+/* What a channel's runner does with it: its account, its limits, an address for a channel to contacts, and its stop. */
+function ChannelActions({ channel, onOpen, onChanged }: { channel: SetupChannel; onOpen(form: Exclude<Open, null>): void; onChanged(): void }) {
+  const s = useT().outboundSetup;
+  const { busy, failure, run } = useMove(onChanged);
+  const stopOrReopen = channel.status === 'stopped' ? 'reopen' : 'stop';
+  return (
+    <>
+      <EntryActions>
+        <button className="btn ghost" type="button" onClick={() => onOpen('account')}>{channel.adapter === 'smtp' ? s.connectMail : s.connectHook}</button>
+        <button className="btn ghost" type="button" onClick={() => onOpen('policy')}>{channel.policy ? s.changePolicy : s.setPolicy}</button>
+        {channel.audience === 'direct' && <button className="btn ghost" type="button" onClick={() => onOpen('contact')}>{s.contact.add}</button>}
+        <button className={stopOrReopen === 'stop' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/channels/${channel.id}/${stopOrReopen}`, {}))}>{s[stopOrReopen]}</button>
+      </EntryActions>
+      <Failure failure={failure} />
+    </>
+  );
+}
+
+type ContactField = 'address' | 'source' | 'evidence' | 'agreed';
+type ContactDraft = Record<Exclude<ContactField, 'agreed'>, string> & { agreed: boolean };
+type ContactProblems = Partial<Record<ContactField, string>>;
+type ContactWords = Messages['outboundSetup']['contact'];
+const CONTACT_FIELDS: readonly ContactField[] = ['address', 'source', 'evidence', 'agreed'];
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/* What is wrong with the address itself, before it goes: the server reads it again by its own rule. */
+function addressProblem(c: ContactWords, email: boolean, address: string): string | undefined {
+  if (!address) return c.addressMissing;
+  if (email ? EMAIL.test(address) : !/\s/.test(address)) return undefined;
+  return email ? c.notEmail : c.notHandle;
+}
+
+function contactProblems(c: ContactWords, email: boolean, v: ContactDraft): ContactProblems {
+  const found: ContactProblems = { address: addressProblem(c, email, v.address.trim()) };
+  if (!v.source.trim()) found.source = c.sourceMissing;
+  if (!v.evidence.trim()) found.evidence = c.evidenceMissing;
+  if (!v.agreed) found.agreed = c.agreedMissing;
+  return found;
+}
+
+/* The server's refusal, where the form shows it: an address it does not take at its field, a person who said no for
+   good, or anything else, above the buttons. */
+function contactRefusal(t: Messages, email: boolean, err: unknown): { problems: ContactProblems; alert: string | null } {
+  const c = t.outboundSetup.contact;
+  if (err instanceof ApiFailure && err.reason === 'outbound_invalid') return { problems: { address: email ? c.notEmail : c.notHandle }, alert: null };
+  const codes = err instanceof ApiFailure ? err.details?.['reasonCodes'] : null;
+  return { problems: {}, alert: Array.isArray(codes) && codes.includes('contact_suppressed') ? c.suppressed : errorOf(t, err) };
+}
+
+/* The address form's state and its sending: each problem at its field with the focus on the first of them, the
+   server's refusal where it belongs, and what was added once it was. */
+function useContactForm(channel: SetupChannel, onDone: (said: string) => void) {
+  const t = useT();
+  const c = t.outboundSetup.contact;
+  const email = channel.adapter === 'smtp';
+  const [v, setV] = useState<ContactDraft>({ address: '', source: '', evidence: '', agreed: false });
+  const [problems, setProblems] = useState<ContactProblems>({});
+  const [alert, setAlert] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refs = { address: useRef<HTMLInputElement>(null), source: useRef<HTMLInputElement>(null), evidence: useRef<HTMLTextAreaElement>(null), agreed: useRef<HTMLInputElement>(null) };
+  /* The problems at their fields, and the focus on the first of them; true when there is one. */
+  const show = (found: ContactProblems): boolean => {
+    setProblems(found);
+    const first = CONTACT_FIELDS.find(f => found[f]);
+    if (first) refs[first].current?.focus();
+    return first !== undefined;
+  };
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setAlert(null);
+    if (show(contactProblems(c, email, v))) return;
+    const address = v.address.trim();
+    setBusy(true);
+    try {
+      const said = await api.post<{ permissionId: string | null }>('/api/outbound/contacts', { channelId: channel.id, kind: email ? 'email' : 'direct', address, source: v.source.trim(), evidence: v.evidence.trim() });
+      onDone(said.permissionId ? c.added(address) : c.known(address));
+    } catch (err) {
+      const refused = contactRefusal(t, email, err);
+      show(refused.problems);
+      setAlert(refused.alert);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const address = email ? { label: c.email, type: 'email', inputMode: 'email' as const } : { label: c.handle, type: 'text', inputMode: undefined };
+  return { v, setV, problems, alert, busy, refs, save, address };
+}
+
+/* An address that agreed to the channel's purpose, a test address of the team among them. It goes through the server's
+   own consent: the server keeps where they agreed and a fingerprint of the proof, under the channel's purpose, and looks
+   for that before every message. The tick is the word of the person adding it that the consent was given. */
+function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(said: string): void; onCancel(): void }) {
+  const t = useT();
+  const c = t.outboundSetup.contact;
+  const id = useId();
+  const { v, setV, problems, alert, busy, refs, save, address } = useContactForm(channel, onDone);
+  const set = (k: Exclude<ContactField, 'agreed'>) => (e: { target: { value: string } }) => setV({ ...v, [k]: e.target.value });
+  const agreedNote = problems.agreed && `${id}-agreed`;
+  return (
+    <form className="repo-form" noValidate onSubmit={e => void save(e)} aria-label={c.add}>
+      <Field label={address.label} hint={c.addressHint} problem={problems.address}>
+        {p => <input {...p} ref={refs.address} type={address.type} inputMode={address.inputMode} dir="auto" value={v.address} onChange={set('address')} maxLength={320} autoComplete="off" spellCheck={false} />}
+      </Field>
+      <Field label={c.source} hint={c.sourceHint} problem={problems.source}>{p => <input {...p} ref={refs.source} value={v.source} onChange={set('source')} maxLength={200} />}</Field>
+      <Field label={c.evidence} hint={c.evidenceHint} problem={problems.evidence}>{p => <textarea {...p} ref={refs.evidence} rows={3} value={v.evidence} onChange={set('evidence')} maxLength={2000} />}</Field>
+      <label className="check-card">
+        <TickBox ref={refs.agreed} checked={v.agreed} onChange={e => setV({ ...v, agreed: e.target.checked })} aria-invalid={agreedNote ? true : undefined} aria-describedby={agreedNote || undefined} />
+        <span>
+          <b>{c.agreed}</b>
+          <small dir="auto">{c.purpose(channel.purpose)}</small>
+        </span>
+      </label>
+      {agreedNote && <span id={agreedNote} className="bad" dir="auto">{problems.agreed}</span>}
+      <FormFoot>
+        <button className="btn" type="submit" disabled={busy}>{c.submit}</button>
+        <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
+      </FormFoot>
+      {alert && <p className="alert" role="alert" dir="auto">{alert}</p>}
+    </form>
   );
 }
 
@@ -337,23 +453,60 @@ function byWhom(s: Messages['outboundSetup'], person: Named, agent: Named): stri
   return agent ? s.byVia(person.name, agent.name) : s.by(person.name);
 }
 
-function RevisionLine({ revision, onChanged }: { revision: Revision; onChanged(): void }) {
-  const s = useT().outboundSetup;
+/* A revision with its view, the newest one open at once: what is published or taken back is the revision shown, as its
+   entry stood when it was shown, so a newer version since makes the server refuse and the catalog is read again. */
+const MOVES: Partial<Record<Revision['status'], 'publish' | 'revoke'>> = { proposed: 'publish', published: 'revoke' };
+
+/* Publishes or takes back the revision shown, with the newest one of its entry then; a newer one since reads it again. */
+function useRevisionMove(revision: Revision, newest: number, onChanged: () => void) {
   const { busy, failure, run } = useMove(onChanged);
-  const author = revision.createdBy.name ?? '';
-  const move = revision.status === 'proposed' ? 'publish' : revision.status === 'published' ? 'revoke' : null;
+  const act = (to: 'publish' | 'revoke') =>
+    run(async () => {
+      try {
+        await api.post(`/api/outbound/catalog/${revision.id}/${to}`, { revision: revision.revision, newest });
+      } catch (err) {
+        if (reasonOf(err) === 'outbound_changed') onChanged();
+        throw err;
+      }
+    });
+  return { busy, failure, act };
+}
+
+function RevisionHead({ revision }: { revision: Revision }) {
+  const s = useT().outboundSetup;
   return (
-    <li className="outbound-entry">
+    <>
       <span className="outbound-title">
         <b>{s.revision(revision.revision)}</b>
         <Status of={revision.status}>{s.statuses[revision.status]}</Status>
       </span>
       <span>{revision.summary}</span>
-      <small>{joined([s.wrote(author), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
-      {move && (
-        <EntryActions>
-          <button className={move === 'revoke' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/catalog/${revision.id}/${move}`, {}))}>{s[move]}</button>
-        </EntryActions>
+      <small dir="auto">{joined([s.wrote(revision.createdBy.name ?? ''), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
+    </>
+  );
+}
+
+function RevisionLine({ entry, revision, onChanged }: { entry: Entry; revision: Revision; onChanged(): void }) {
+  const s = useT().outboundSetup;
+  const newest = entry.revisions[0]!.revision;
+  const { busy, failure, act } = useRevisionMove(revision, newest, onChanged);
+  const [open, setOpen] = useState(revision.revision === newest);
+  const viewId = useId();
+  const move = MOVES[revision.status];
+  return (
+    <li className="outbound-entry">
+      <RevisionHead revision={revision} />
+      <EntryActions>
+        <button className="btn ghost" type="button" aria-expanded={open} aria-controls={viewId} onClick={() => setOpen(!open)}>{open ? s.hide(revision.revision) : s.show(revision.revision)}</button>
+      </EntryActions>
+      {open && (
+        <RevisionView id={viewId} entry={entry} revision={revision}>
+          {move && (
+            <EntryActions>
+              <button className={move === 'revoke' ? 'btn ghost danger' : 'btn'} type="button" disabled={busy} onClick={() => void act(move)}>{s[move]}</button>
+            </EntryActions>
+          )}
+        </RevisionView>
       )}
       <Failure failure={failure} />
     </li>
@@ -369,11 +522,11 @@ function CatalogEntry({ entry, onChanged }: { entry: Entry; onChanged(): void })
       <header>
         <h3>{`${kind}: ${entry.revisions[0]!.summary}`}</h3>
         <p className="outbound-meta">
-          {where && <span>{where}</span>}
-          <span>{entry.current === null ? s.notInUse : s.inUse(entry.current)}</span>
+          {where && <span dir="auto">{where}</span>}
+          <span dir="auto">{entry.current === null ? s.notInUse : s.inUse(entry.current)}</span>
         </p>
       </header>
-      <ul className="outbound-list outbound-entries">{entry.revisions.map(r => <RevisionLine key={r.id} revision={r} onChanged={onChanged} />)}</ul>
+      <ul className="outbound-list outbound-entries">{entry.revisions.map(r => <RevisionLine key={r.id} entry={entry} revision={r} onChanged={onChanged} />)}</ul>
     </div>
   );
 }
@@ -381,13 +534,13 @@ function CatalogEntry({ entry, onChanged }: { entry: Entry; onChanged(): void })
 function LogLine({ entry }: { entry: LogEntry }) {
   const s = useT().outboundSetup;
   const { language } = useLanguage();
-  const at = new Date(entry.at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const at = whenOf(language, entry.at);
   const what = s.log[entry.kind] ?? entry.kind;
   return (
     <li className="outbound-entry">
       <b>{what}</b>
       {entry.channel && <span>{entry.channel.name}</span>}
-      <small>{joined([at, byWhom(s, entry.person, entry.agent)])}</small>
+      <small dir="auto">{joined([at, byWhom(s, entry.person, entry.agent)])}</small>
     </li>
   );
 }
@@ -414,6 +567,21 @@ function useDepartmentMessaging(departmentId: string) {
   return { data, failure, load };
 }
 
+/* Whether the server lets this person run the department's messages, asked only of those who may: false until it says
+   so, and when it cannot be asked. */
+export function useRunsMessaging(departmentId: string, ask: boolean): boolean {
+  const [runs, setRuns] = useState(false);
+  useEffect(() => {
+    setRuns(false);
+    if (!ask) return;
+    let live = true;
+    const said = (yes: boolean) => { if (live) setRuns(yes); };
+    api.get<{ departments?: RunDepartment[] }>(`/api/outbound?department=${encodeURIComponent(departmentId)}`).then(o => said(!!o.departments?.some(d => d.id === departmentId)), () => said(false));
+    return () => { live = false; };
+  }, [departmentId, ask]);
+  return runs;
+}
+
 function Part({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();
   return (
@@ -424,39 +592,32 @@ function Part({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/* What one department sends outside and how, for the people who run it; nothing for anyone else. title: the heading
-   of its own section, where it stands alone. */
-export function DepartmentMessaging({ departmentId, title }: { departmentId: string; title?: string }) {
+/* What one department sends outside and how, for the people who run it; nothing for anyone else. Its heading is the
+   place's own: the department's panel, or a department's part of Settings. */
+export function DepartmentMessaging({ departmentId }: { departmentId: string }) {
   const t = useT();
-  const id = useId();
   const { data, failure, load } = useDepartmentMessaging(departmentId);
   if (data?.runs === false) return null;
-  const body = failure !== null ? <p className="alert" role="alert">{errorOf(t, failure)}</p> : !data ? <p className="muted" role="status">{t.common.loading}</p> : <SetupBody data={data} departmentId={departmentId} onChanged={load} />;
-  if (!title) return body;
-  return (
-    <section aria-labelledby={id}>
-      <h3 id={id}>{title}</h3>
-      {body}
-    </section>
-  );
+  if (failure !== null) return <p className="alert" role="alert" dir="auto">{errorOf(t, failure)}</p>;
+  return data ? <SetupBody data={data} departmentId={departmentId} onChanged={load} /> : <p className="muted" role="status" dir="auto">{t.common.loading}</p>;
 }
 
 function SetupBody({ data, departmentId, onChanged: load }: { data: Extract<Loaded, { runs: true }>; departmentId: string; onChanged(): void }) {
   const s = useT().outboundSetup;
   return (
     <div className="outbound-setup">
-      <p className="muted">{s.intro}</p>
+      <p className="muted" dir="auto">{s.intro}</p>
       <Part title={s.channelsTitle}>
-        {data.channels.length === 0 && <p className="muted">{s.noChannels}</p>}
+        {data.channels.length === 0 && <p className="muted" dir="auto">{s.noChannels}</p>}
         <div className="imps">{data.channels.map(c => <ChannelCard key={c.id} channel={c} onChanged={load} />)}</div>
         <NewChannel departmentId={departmentId} onChanged={load} />
       </Part>
       <Part title={s.catalogTitle}>
-        <p className="muted">{s.catalogIntro}</p>
-        {data.entries.length === 0 ? <p className="muted">{s.catalogEmpty}</p> : <div className="imps">{data.entries.map(e => <CatalogEntry key={e.entryId} entry={e} onChanged={load} />)}</div>}
+        <p className="muted" dir="auto">{s.catalogIntro}</p>
+        {data.entries.length === 0 ? <p className="muted" dir="auto">{s.catalogEmpty}</p> : <div className="imps">{data.entries.map(e => <CatalogEntry key={e.entryId} entry={e} onChanged={load} />)}</div>}
       </Part>
       <Part title={s.logTitle}>
-        {data.log.length === 0 ? <p className="muted">{s.logEmpty}</p> : <ul className="outbound-list outbound-entries">{data.log.map(e => <LogLine key={e.id} entry={e} />)}</ul>}
+        {data.log.length === 0 ? <p className="muted" dir="auto">{s.logEmpty}</p> : <ul className="outbound-list outbound-entries">{data.log.map(e => <LogLine key={e.id} entry={e} />)}</ul>}
       </Part>
     </div>
   );

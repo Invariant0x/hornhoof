@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { dialog, heights, lowestContrast, messagesFor, prepare, setLook, shoot, watchProblems, whole } from './feedback-steps';
+import { dialog, heights, messagesFor, prepare, setLook, shoot, whole } from './feedback-steps';
+import { lowestContrast, watchProblems } from './look-steps';
 
 /* A field of the feedback form with an error: its pink frame, its focus ring, and the error gone once a title is typed (#1028). */
 test.describe.configure({ timeout: 0 });

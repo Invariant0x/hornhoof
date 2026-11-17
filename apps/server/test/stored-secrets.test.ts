@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agentInbox, agents, attachments, departments, jobs, people, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agentInbox, agents, attachments, companies, departments, jobs, people, subscriptions, taskEvents, tasks, toolCalls } from '../src/db/schema.js';
 import { createTask, comment } from '../src/modules/tasks/engine.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { keepMail } from '../src/modules/conversation/inbox.js';
@@ -77,6 +77,42 @@ describe('secrets in stored prose', () => {
     expect((await hide(deputy, 'deputySecret1077!')).statusCode).toBe(200);
     expect((await hide(ceo, 'absentSecret1077!')).statusCode).toBe(400);
     expect((await db.select().from(taskEvents)).filter(e => e.data?.secretHidden)).toHaveLength(2);
+  });
+
+  it('suppresses a selection only in its company, including journal copies and cached tool answers', async () => {
+    const { app, db, agent, ceo, companyId } = await company();
+    const marker = 'companyBoundaryMarker1077!';
+    const [other] = await db.insert(companies).values({ name: 'Other', singleton: false, brief: marker }).returning();
+    const [owner] = await db.insert(people).values({ companyId: other!.id, name: 'Other owner', email: 'owner@other.test', status: 'active', isOwner: true, scopeKind: 'company' }).returning();
+    const [sub] = await db.insert(subscriptions).values({ companyId: other!.id, provider: 'claude', kind: 'personal', status: 'ready', label: 'Other plan', ownerPersonId: owner!.id }).returning();
+    const [foreign] = await db.insert(tasks).values({ companyId: other!.id, number: 1, title: 'Other task', body: marker }).returning();
+    const { task } = await createTask(app.ctx, { agentId: agent.id }, { title: 'Company task', brief: '', body: marker, departmentId: null, assigneeAgentId: agent.id });
+    await db.update(companies).set({ brief: marker }).where(eq(companies.id, companyId));
+    await db.update(tasks).set({ body: `${marker} copy` }).where(eq(tasks.id, task.id));
+    await db.update(tasks).set({ body: `${marker} copy` }).where(eq(tasks.id, foreign!.id));
+    const [mine, theirs] = await db.insert(jobs).values([
+      { companyId, subscriptionId: agent.subscriptionId!, agentId: agent.id, kind: 'conversation', prompt: marker, timeoutMs: 1000 },
+      { companyId: other!.id, subscriptionId: sub!.id, kind: 'conversation', prompt: marker, timeoutMs: 1000 },
+    ]).returning();
+    await db.insert(toolCalls).values([
+      { id: '10770000-0000-4000-8000-000000000001', jobId: mine!.id, answer: { text: marker } },
+      { id: '10770000-0000-4000-8000-000000000002', jobId: theirs!.id, answer: { text: marker } },
+    ]);
+    const response = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/hide-secret`, ...as(ceo), payload: { value: marker } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.body).not.toContain(marker);
+    const tables = await db.execute<{ name: string }>(sql`select format('%I.%I', schemaname, tablename) as name from pg_tables where schemaname in ('public', 'net') order by 1`);
+    for (const { name } of tables.rows) {
+      const rows = await db.execute<{ row: Record<string, unknown> }>(sql.raw(`select to_jsonb(t) as row from ${name} t`));
+      for (const { row } of rows.rows) if (row.company_id === companyId || row.job_id === mine!.id || (name === 'public.companies' && row.id === companyId)) expect(JSON.stringify(row), name).not.toContain(marker);
+    }
+    expect((await db.select().from(tasks).where(eq(tasks.id, foreign!.id)))[0]!.body).toBe(`${marker} copy`);
+    expect((await db.select().from(companies).where(eq(companies.id, other!.id)))[0]!.brief).toBe(marker);
+    expect((await db.select().from(toolCalls).where(eq(toolCalls.jobId, theirs!.id)))[0]!.answer).toEqual({ text: marker });
+    const foreignHistory = await db.execute(sql`select old from net.journal where tbl = 'tasks' and key->>'id' = ${foreign!.id} and op = 'update'`);
+    expect(JSON.stringify(foreignHistory.rows)).toContain(marker);
+    const mineHistory = await db.execute(sql`select old from net.journal where tbl = 'tasks' and key->>'id' = ${task.id}`);
+    expect(JSON.stringify(mineHistory.rows)).not.toContain(marker);
   });
 
   it('never changes service state when the selected secret is a common word', async () => {

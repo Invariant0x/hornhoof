@@ -9,6 +9,6 @@ it('keeps suppression records and privileged scrub functions out of agent SQL', 
   const agentSql = app.ctx.agentSql!;
   await expect(agentSql.run('select * from secret_redactions', 'read')).rejects.toMatchObject({ code: '42501' });
   await expect(agentSql.run('delete from secret_redactions', 'write')).rejects.toMatchObject({ code: '42501' });
-  await expect(agentSql.run("select net.hide_secret_text('value')", 'write')).rejects.toMatchObject({ code: '42501' });
+  await expect(agentSql.run("select net.hide_secret_text('value', '10770000-0000-4000-8000-000000000001')", 'write')).rejects.toMatchObject({ code: '42501' });
   await expect(agentSql.run("select net.hide_secret_row('{}', 'public.tasks')", 'write')).rejects.toMatchObject({ code: '42501' });
 });

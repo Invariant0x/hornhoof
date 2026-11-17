@@ -92,7 +92,7 @@ async function company({ full = FULL as string | null, env = {} as NodeJS.Proces
 async function started(c: Awaited<ReturnType<typeof company>>, command = FULL, over: object = {}) {
   await c.online();
   const call = await c.tools();
-  const went = await call('run_tests', { command, branch: 'task-1-checkout', ...over });
+  const went = await call('run_tests', { command, branch: 'release-checkout', ...over });
   expect(went.error).toBe(false);
   return call;
 }
@@ -202,7 +202,7 @@ describe('the mark a full test run leaves on the commit it checked', () => {
     const reads: unknown[] = [];
     c.ctx.readCommit = async (_repo, want) => {
       reads.push(want);
-      return { branch: 'task-1-checkout', commitSha: MOVED };
+      return { branch: 'release-checkout', commitSha: MOVED };
     };
     c.passes(part);
     await c.ended();
@@ -306,9 +306,9 @@ describe('the mark a full test run leaves on the commit it checked', () => {
     const c = await company();
     await c.online();
     const call = await c.tools();
-    const full = await call('run_tests', { command: FULL, branch: 'task-1-checkout' });
+    const full = await call('run_tests', { command: FULL, branch: 'release-checkout' });
     expect(full.text).toContain(`This is the repository's full test command: its end sets hornhoof/tests on the pinned commit.`);
-    const one = await call('run_tests', { command: 'npm test -- cart.test.ts', branch: 'task-1-checkout' });
+    const one = await call('run_tests', { command: 'npm test -- cart.test.ts', branch: 'release-checkout' });
     expect(one.text).toContain(`The repository's full test command is ${FULL}. Only a run of exactly that sets hornhoof/tests, so this one will not.`);
     const work = await call('run_work', { command: FULL, branch: 'main' });
     expect(work.text).not.toContain('hornhoof/tests');
@@ -318,7 +318,7 @@ describe('the mark a full test run leaves on the commit it checked', () => {
     const c = await company({ full: null });
     await c.online();
     const call = await c.tools();
-    expect((await call('run_tests', { command: FULL, branch: 'task-1-checkout' })).text).not.toContain('hornhoof/tests');
+    expect((await call('run_tests', { command: FULL, branch: 'release-checkout' })).text).not.toContain('hornhoof/tests');
   });
 
   it('never tells the key', async () => {
@@ -477,7 +477,7 @@ describe("the repository's full test command", () => {
     expect((await set(c, { fullTestCommand: 'x'.repeat(4001) })).statusCode).toBe(400);
   });
 
-  it('is set by the same tool as the rest of the repository, and only the CEO may ask for that', async () => {
+  it("is set by the same tool as the rest of the repository, by the orchestrator in any turn as the company's owner", async () => {
     const c = await company({ full: null });
     const [orchestrator] = await c.db.select().from(agents).where(inArray(agents.kind, ['orchestrator']));
     const token = 'tool-token-orchestrator-0123456789abcdef01';
@@ -488,8 +488,8 @@ describe("the repository's full test command", () => {
     expect(Object.keys(tool.inputSchema.properties ?? {})).toContain('fullTestCommand');
     expect(tool.description).toContain('hornhoof/tests');
     const asked = (await client.callTool({ name: 'set_repository', arguments: { department: c.dev.id, url: 'https://github.com/acme/shop.git', fullTestCommand: 'true' } })) as Res;
-    expect(asked.content[0]!.text).toMatch(/CEO/);
-    expect((await c.db.select().from(departments).where(eq(departments.id, c.dev.id)))[0]!.repoFullTestCommand).toBeNull();
+    expect(asked.isError, asked.content[0]!.text).toBeFalsy();
+    expect((await c.db.select().from(departments).where(eq(departments.id, c.dev.id)))[0]!.repoFullTestCommand).toBe('true');
   });
 
   /* Whoever may change it decides what lets a commit past GitHub's tests, so an agent's SQL may read it and no more. */

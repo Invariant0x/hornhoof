@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { agents, subscriptions, tasks } from '../../src/db/schema.js';
+import { idOnly, only } from '../../src/db/selections.js';
 import { createTask, updateTask } from '../../src/modules/tasks/engine.js';
 import { until } from '../helpers-basic.js';
 import { backendPid, privatePostgres, runFixture, type PostgresFixture } from './helpers.js';
@@ -13,7 +14,7 @@ function waitingChecker(pg: PostgresFixture) {
 }
 
 async function seedPlanners(pg: PostgresFixture, companyId: string, departmentId: string) {
-  const [sub] = await pg.db.select({ id: subscriptions.id }).from(subscriptions);
+  const [sub] = await pg.db.select(idOnly(subscriptions)).from(subscriptions);
   const [orchestrator, head] = await pg.db.insert(agents).values([
     { companyId, subscriptionId: sub!.id, kind: 'orchestrator', name: 'Orchestrator', roleKey: 'ORCH', model: '' },
     { companyId, subscriptionId: sub!.id, departmentId, kind: 'head', name: 'Head of development', roleKey: 'DEV-HEAD', model: '' },
@@ -65,7 +66,7 @@ it('numbers an independent part and a concurrent createTask without a duplicate 
 
     const results = await Promise.allSettled([created, changed]);
     expect(results.map(r => r.status)).toEqual(['fulfilled', 'fulfilled']);
-    const rows = await pg.db.select({ number: tasks.number }).from(tasks).where(eq(tasks.companyId, fixture.companyId)).orderBy(asc(tasks.number));
+    const rows = await pg.db.select(only(tasks, 'number')).from(tasks).where(eq(tasks.companyId, fixture.companyId)).orderBy(asc(tasks.number));
     expect(rows.map(r => r.number)).toEqual([1, 2, 3, 4, 5, 6, 7]);
   } finally {
     try { await barrier.query('SELECT pg_advisory_unlock_all()'); } finally {
