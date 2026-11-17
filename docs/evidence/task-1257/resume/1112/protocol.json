@@ -1,0 +1,15 @@
+{
+  "commit": "03bce94da105fb537223f14a6690d39ea1369dda",
+  "cwd": "packages/protocol",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/approval-policy.test.ts"
+  ],
+  "exit": 0,
+  "log": "protocol.log",
+  "sha256": "f276daffecf87fff80af8be6b1713b2fa5e3bb32d966e9e270fe9fe7ba280087",
+  "originalSha256": "783d37d727b344b6e7009c7e10c5781c82a8adb60c3eb665024aa67bd96dc8aa"
+}

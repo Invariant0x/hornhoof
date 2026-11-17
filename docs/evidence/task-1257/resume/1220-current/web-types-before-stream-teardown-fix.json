@@ -1,0 +1,16 @@
+{
+  "commit": "0c4c03022d025cb54f8b2d79cd91596fd0d5311a",
+  "cwd": ".",
+  "command": [
+    "npx",
+    "--no-install",
+    "tsc",
+    "-p",
+    "apps/web/tsconfig.json",
+    "--noEmit"
+  ],
+  "exit": 0,
+  "log": "web-types-before-stream-teardown-fix.log",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

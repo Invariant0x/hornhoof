@@ -1,0 +1,72 @@
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257-1220/apps/server
+
+ ✓ test/migrations.test.ts (41 tests) 17114ms
+   ✓ department owner and approval policy migration (3)
+     ✓ leaves every department without an owner and every company without rules, with nobody given anything 343ms
+     ✓ keeps the approvals already asked as they are, and still refuses an approval that says nothing of what it approves 823ms
+     ✓ refuses a stored rule that would let everything through: a mode of limits with no limit 379ms
+   ✓ outbound gateway migration (2)
+     ✓ adds its tables empty, with nobody given anything and no row of two older companies touched 392ms
+     ✓ leaves its guards in place when it is run again 326ms
+   ✓ migration 0086 composable skills (3)
+     ✓ preserves sole and mixed pending staffing cards when retiring the developer role 607ms
+     ✓ retires only the saved DEV-GEN role key without changing card text, skill choices or run settings 626ms
+     ✓ appends only missing split company abilities to saved selections and preserves custom bodies, hashes and list order 519ms
+   ✓ migration 0106, the tables of the network (1)
+     ✓ marks the sessions of an older install as made before the __Host- cookie 628ms
+   ✓ a database from before the link had a certificate (1)
+     ✓ reads as having none, as the keeper meets it before an update migrates 381ms
+   ✓ migration 0107, the fences and the journal (2)
+     ✓ adds the fences, and the journal once migrated 567ms
+     ✓ refuses a table it could not journal, rather than leave it out 435ms
+   ✓ migration 0110, the tables of the company's network (2)
+     ✓ adds what a machine is in the network, and the authority's tables, journaled and closed 326ms
+     ✓ keeps one row to a network id, and only the roles and kinds there are 422ms
+   ✓ migration 0111, what joined machines need (2)
+     ✓ adds its tables, journaled and closed, and what a machine says of its link and its update 363ms
+     ✓ takes only the paths, update states, kinds and amounts there are 327ms
+   ✓ migration 0112, computer access per machine (2)
+     ✓ adds access per machine and its commands, journaled and closed 356ms
+     ✓ takes only the states and times of a command there are, and a request only whole 333ms
+   ✓ migrations 0113 and 0114, the backups (2)
+     ✓ adds each machine's age key and holdings, and the recovery keys, journaled and closed 367ms
+     ✓ adds net.backups, fenced, with only the reasons, sizes and hashes there are 426ms
+   ✓ migration 0115, the merge records (3)
+     ✓ adds the merge records, fenced 600ms
+     ✓ takes a fork among the reasons of a backup 498ms
+     ✓ takes only the merges, conflicts and rows there are 494ms
+   ✓ migration 0116, the server order and the copies (2)
+     ✓ adds the server order and the copy's columns 461ms
+     ✓ adds the pulse, fenced, and the sources of a merge a machine gives 386ms
+   ✓ migration 0117, the measures of the server order (1)
+     ✓ adds the measures and the ranking's row 403ms
+   ✓ migration 0118, the tables of a server move (4)
+     ✓ holds one move 377ms
+     ✓ records a handover 462ms
+     ✓ names a built-in node's machine 402ms
+     ✓ records the handover a state ended with 456ms
+   ✓ migration 0119, the tables of takeovers, parked job results and the hidden link (3)
+     ✓ records the kind of each handover 522ms
+     ✓ parks a job's messages 471ms
+     ✓ keeps the led term of an old database, hides a link, and knows a copy that saves what it led 366ms
+   ✓ migration 0131, the fallbacks of a plan (1)
+     ✓ gives every plan an empty list of fallbacks, keeps the plans and cards as they were, and puts nobody on a fallback 418ms
+ ✓ test/secret-redaction-migration.test.ts (2 tests) 3349ms
+   ✓ upgrades an existing database without discarding prose, and a suppression row changes no row by itself 2270ms
+   ✓ lets frozen evidence lose a hidden value only in the named columns, from the server session itself 1077ms
+ ✓ test/migration-metadata.test.ts (4 tests) 2510ms
+   ✓ merged migration metadata (4)
+     ✓ links snapshots in execution order without a second child of the same predecessor 663ms
+     ✓ describes the columns and regular indexes of a freshly migrated database 1834ms
+ ✓ test/computer-scope-migration.test.ts (1 test) 1187ms
+   ✓ keeps existing machine access restricted to the orchestrator and accepts only the two scopes after upgrade 1186ms
+ ✓ test/agent-changes-migration.test.ts (2 tests) 780ms
+   ✓ employee change actor migration (2)
+     ✓ gives a fresh install a nullable acting agent linked to the employee table 330ms
+     ✓ upgrades without attributing old changes to an agent, and can migrate again 434ms
+
+ Test Files  5 passed (5)
+      Tests  50 passed (50)
+   Start at  15:18:22
+   Duration  43.49s (tests 70%, import 29%, transform 1%)

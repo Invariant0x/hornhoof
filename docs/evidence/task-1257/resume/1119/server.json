@@ -1,0 +1,29 @@
+{
+  "commit": "f3ef5896c81bec9fa81b5912bfdd84f377372fb7",
+  "cwd": "apps/server",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/computer-scope.test.ts",
+    "test/computer.test.ts",
+    "test/computer-machines.test.ts",
+    "test/computer-request-sources.test.ts",
+    "test/decision-context.test.ts",
+    "test/computer-scope-input.test.ts",
+    "test/orchestrator-control.test.ts",
+    "test/decisions.test.ts",
+    "test/network-tables.test.ts",
+    "test/migrations.test.ts",
+    "test/restore.test.ts",
+    "test/computer-scope-migration.test.ts",
+    "test/migration-metadata.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "exit": 0,
+  "log": "server.log",
+  "sha256": "86c655148984acfceaa026e3e9531e162c74d28fb70414df10d34be1094ef746",
+  "originalSha256": "c91f098764f002f0faa4edf72b741b483bde3e722fac08c4c4fb2e25c0970e8a"
+}
