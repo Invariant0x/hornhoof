@@ -27,6 +27,17 @@ it('draws the addresses of a channel as a block of their own under a line, with 
   expect(decl('.outbound-contacts > h4', 'font-size')).toBe('14px');
 });
 
+/* The map of a department with nobody in it, on a narrow screen and right to left (Design #1201): the hint stands above the
+   buttons at the bottom, across the width, and the empty head card keeps its lines at one start edge. */
+it('puts the map hint above the bottom buttons on a narrow screen, across the width and wrapping by words', () => {
+  const narrow = '(max-width: 760px)';
+  expect(decl('.dv-empty', 'bottom', narrow)).toBe('calc(var(--tree-bottom, 228px) + 8px)');
+  expect([decl('.dv-empty', 'left', narrow), decl('.dv-empty', 'right', narrow)]).toEqual(['16px', '16px']);
+  expect(decl('.dv-empty', 'transform', narrow)).toBe('none');
+  expect(decl('.dv-empty', 'overflow-wrap', narrow)).toBe('break-word');
+  expect(decl('.shead.empty', 'text-align')).toBe('start');
+});
+
 it('reads container rules with the same condition as media rules', () => {
   expect(parse('@container card (min-width: 700px) { .blocks { display: grid; } }', null)).toEqual([
     { media: 'card (min-width: 700px)', selectors: ['.blocks'], decls: { display: 'grid' } },

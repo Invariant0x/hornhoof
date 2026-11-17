@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
 export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '@hornhoof/protocol';
@@ -8,14 +8,16 @@ export { PhoneOperation, PhoneSerial, networkEndpoint, type PhoneDevice } from '
 export type AdbCall = { args: string[]; input?: string; signal: AbortSignal };
 export type AdbRun = (call: AdbCall) => Promise<Buffer>;
 
-export const ADB_MAX_BYTES = 8 * 1024 * 1024;
+/* The phone's own PNG of a whole screen of a photo, up to 10.4 MB at 1080x2400, comes whole before the node shrinks it. */
+export const ADB_MAX_BYTES = 16 * 1024 * 1024;
 
 /* Remote shell arguments are quoted even though adb itself starts with shell:false. */
 export const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
-/* adb treats %s as a space. A literal percent is sent separately, so a text with %s in it, a password too, goes in as written. */
-export function textScript(value: string): string {
-  if (!value || value.length > 4096 || !/^[\x20-\x7e]+$/.test(value)) throw new Error('phone_text_unsupported');
+/* adb treats %s as a space. A literal percent is sent separately, so a text with %s in it, a password too, goes in as written.
+   input text types plain Latin letters, digits and signs only; any other text gives null. */
+function textScript(value: string): string | null {
+  if (!/^[\x20-\x7e]+$/.test(value)) return null;
   return (value.match(/%|[^%]+/g) ?? []).map(part => `input text ${shellWord(part.replaceAll(' ', '%s'))}\n`).join('');
 }
 
@@ -50,7 +52,9 @@ export function privateAdbEnvironment(keyDir: string): NodeJS.ProcessEnv {
   return { ...process.env, ANDROID_USER_HOME: keyDir, ADB_SERVER_SOCKET: `localfilesystem:${socketDir}/server`, ADB_TRACE: '', ADB_VENDOR_KEYS: '' };
 }
 
-/* The adb server itself must not expose an unrestricted TCP port to the node's agent users. */
+/* The adb server itself must not expose an unrestricted TCP port to the node's agent users. On the machine a phone is
+   plugged into by cable, its administrator may put a socket to that machine's own adb server into keyDir as host.sock;
+   while it is there, the node uses that server, the only one that sees the phone. */
 export function privateAdb(executable: string, keyDir: string): AdbRun {
   const env = privateAdbEnvironment(keyDir);
   for (const directory of [keyDir, dirname(env.ADB_SERVER_SOCKET!.slice('localfilesystem:'.length))]) {
@@ -59,11 +63,18 @@ export function privateAdb(executable: string, keyDir: string): AdbRun {
     if (!stat.isDirectory() || stat.uid !== process.getuid?.()) throw new Error('phone_adb_directory_invalid');
     chmodSync(directory, 0o700);
   }
-  return adbRunner(executable, env);
+  const host = join(keyDir, 'host.sock');
+  const own = adbRunner(executable, env), shared = adbRunner(executable, { ...env, ADB_SERVER_SOCKET: `localfilesystem:${host}` });
+  return call => (existsSync(host) ? shared : own)(call);
 }
 
+/* The keyboard app that types any text adb gives it, for what Android's input text cannot type: Russian, emoji, new lines. */
+const KEYBOARD_APP = 'com.android.adbkeyboard';
+const KEYBOARD_IME = `${KEYBOARD_APP}/.AdbIME`;
+
 export class PhoneAdb {
-  constructor(private readonly run: AdbRun) {}
+  /* keyboard: the local path of the keyboard app, put on a phone the first time it types such a text. */
+  constructor(private readonly run: AdbRun, private readonly keyboard?: () => Promise<string>) {}
 
   async pair(endpoint: string, code: string, signal: AbortSignal): Promise<'paired' | 'needs_person'> {
     if (!networkEndpoint(endpoint) || !/^[0-9]{6}$/.test(code)) throw new Error('phone_pairing_invalid');
@@ -136,7 +147,8 @@ export class PhoneAdb {
     switch (op.kind) {
       case 'tap': return `input tap ${op.x} ${op.y}\n`;
       case 'swipe': return `input swipe ${op.x} ${op.y} ${op.toX} ${op.toY} ${op.ms}\n`;
-      case 'text': return textScript(op.text);
+      case 'text': return textScript(op.text) ?? this.keyboardScript(serial, op.text, signal);
+      case 'key': return `input keyevent KEYCODE_${op.key.toUpperCase()}\n`;
       case 'url': return `am start -a android.intent.action.VIEW -d ${shellWord(op.url)} -p com.android.chrome\n`;
       case 'app': {
         const out = await this.call(serial, ['shell', 'cmd', 'package', 'resolve-activity', '--brief', '-c', 'android.intent.category.LAUNCHER', op.package], signal);
@@ -145,5 +157,22 @@ export class PhoneAdb {
         return `am start -n ${shellWord(component)}\n`;
       }
     }
+  }
+
+  /* Switches to the keyboard app for one text, as a person picks another keyboard, and back to the phone's own one. */
+  private async keyboardScript(serial: string, text: string, signal: AbortSignal): Promise<string> {
+    if (!(await this.call(serial, ['shell', 'pm', 'path', KEYBOARD_APP], signal)).toString().startsWith('package:')) {
+      const apk = await this.keyboard?.();
+      if (!apk || !(await this.call(serial, ['install', '-r', apk], signal)).toString().includes('Success')) throw new Error('phone_keyboard_unavailable');
+    }
+    return [
+      'p=$(settings get secure default_input_method)',
+      `ime enable ${KEYBOARD_IME} >/dev/null`,
+      `ime set ${KEYBOARD_IME} >/dev/null`,
+      'sleep 1',
+      `am broadcast -a ADB_INPUT_B64 --es msg '${Buffer.from(text).toString('base64')}' >/dev/null`,
+      'ime set "$p" >/dev/null 2>&1 || ime reset >/dev/null',
+      '',
+    ].join('\n');
   }
 }

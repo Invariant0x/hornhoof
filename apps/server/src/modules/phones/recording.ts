@@ -11,6 +11,7 @@ import type { NodeIdentity } from '../nodes/hub.js';
 import { finishPhoneSession } from './queue.js';
 import { phoneById, phoneDenied, phoneMissing, phoneOwner, type PhoneSession } from './store.js';
 import { idOnly, only } from '../../db/selections.js';
+import { sensitiveTurn } from '../events/store.js';
 
 const MAX_SESSION_FRAMES = 2000;
 
@@ -30,12 +31,13 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
       if (duplicate) return;
       const [amount] = await tx.select({ count: sql<string>`count(*)` }).from(phoneFrames).where(eq(phoneFrames.sessionId, frame.sessionId));
       if (Number(amount!.count) >= MAX_SESSION_FRAMES) { full = true; return; }
-      const bytes = frame.capture.png ? Buffer.from(frame.capture.png, 'base64') : null;
-      if (bytes && pictureType(bytes) !== 'image/png') return;
+      /* Keep frame order and lease metadata, but never retain the private screen. */
+      const bytes = await frameBytes(tx, held.session.jobId, frame.capture.jpeg);
+      if (bytes && pictureType(bytes) !== 'image/jpeg') return;
       let attachmentId: string | null = null;
       if (bytes) {
         await checkRoom({ db: tx, config: ctx.config }, phone.companyId, held.task, bytes.length);
-        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/png' }).returning({ id: attachments.id });
+        const [attachment] = await tx.insert(attachments).values({ companyId: phone.companyId, jobId: held.session.jobId, agentId: held.session.agentId, taskId: held.session.taskId, name: null, bytes, size: bytes.length, mediaType: 'image/jpeg' }).returning({ id: attachments.id });
         attachmentId = attachment!.id;
       }
       await tx.insert(phoneFrames).values({ companyId: phone.companyId, sessionId: frame.sessionId, sequence: frame.sequence, at: new Date(frame.at), attachmentId });
@@ -92,4 +94,8 @@ export async function imageBytes(ctx: Ctx, companyId: string, id: string | null)
   const [file] = await ctx.db.select(only(attachments, 'bytes')).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, companyId), isNull(attachments.operatorCaseId)));
   if (!file) throw phoneMissing();
   return Buffer.from(file.bytes);
+}
+
+async function frameBytes(db: Parameters<typeof sensitiveTurn>[0], jobId: string, image: string | null): Promise<Buffer | null> {
+  return await sensitiveTurn(db, jobId, true) || !image ? null : Buffer.from(image, 'base64');
 }

@@ -1,0 +1,142 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+
+ ❯ test/tool-calls.test.ts (15 tests | 1 failed) 39502ms
+   ✓ a tool call with an invocation id (7)
+     ✓ answers a retried call from what it kept, and runs it once 9384ms
+     ✓ runs two calls with two ids, and a call without an id as before 2939ms
+     ✓ tells a retry that the answer was lost, and does not run it again 1939ms
+     ✓ keeps answers with their job 1565ms
+     ✓ takes an invocation id from the keeper alone 4816ms
+     ✓ takes no id that is not a uuid 1840ms
+     ✓ knows every tool that starts first 1890ms
+   ❯ a guarded tool (7)
+     × never replays or records any tool explicitly marked sensitive 1432ms
+     ✓ commits a started row before it acts, tells a retry to wait, and then gives the retry its answer 2405ms
+     ✓ keeps a may-have-run on a started row only 3165ms
+     ✓ answers a refused lease in its own words, and leaves any other failure as it was 1187ms
+     ✓ gives the agent the answer of a call that ran, even when the answer could not be kept 1107ms
+     ✓ keeps a large answer as too large, after giving it whole the first time 1145ms
+     ✓ runs as before without an id 1744ms
+   ✓ the database tool with an invocation id (1)
+     ✓ keeps its answer in the change's own commit, and answers a retry from it 2921ms
+ ❯ test/vault-tools.test.ts (8 tests | 3 failed) 40463ms
+   ❯ the vault for agents (8)
+     × keeps no secret answer in replay storage or the journal 6121ms
+     × checks the entry again when the same invocation is repeated after deletion 5968ms
+     × does not retain a secret tool input or result reported by a node 13048ms
+     ✓ lists every entry of the company to each of its agents, with no password 10404ms
+     ✓ gives the agent that asks the login, the password and the code of this moment as text, and never the code secret 925ms
+     ✓ logs who took which entry for which task, with no value 919ms
+     ✓ knows no entry of another company and none that is not saved 1009ms
+     ✓ saves the sign-in a person gave the orchestrator in chat, and changes it by its name the next time 1559ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/tool-calls.test.ts > a guarded tool > never replays or records any tool explicitly marked sensitive
+AssertionError: expected [ { …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "answer": {
++       "content": [
++         {
++           "text": "synthetic-private-marker",
++           "type": "text",
++         },
++       ],
++     },
++     "at": 2026-11-16T23:27:33.410Z,
++     "id": "8e075fae-970c-4f09-93e0-e28e0b033676",
++     "jobId": "fe4d2c45-284a-4720-8658-452e68f028ed",
++   },
++ ]
+
+ ❯ test/tool-calls.test.ts:159:29
+    157|     const id = randomUUID();
+    158|     expect(await run(id)).toEqual(say('synthetic-private-marker'));
+    159|     expect(await c.calls()).toEqual([]);
+       |                             ^
+    160|     allowed = false;
+    161|     expect(await run(id)).toEqual(say('Access removed.', true));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/vault-tools.test.ts > the vault for agents > keeps no secret answer in replay storage or the journal
+AssertionError: expected [ { …(4) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "answer": {
++       "content": [
++         {
++           "text": "{\"name\":\"Partner site\",\"site\":\"https://partner.example/login\",\"login\":\"team@acme.test\",\"password\":\"pw-marker-8f02bd\",\"code\":\"081804\",\"codeSecondsLeft\":1}",
++           "type": "text",
++         },
++       ],
++     },
++     "at": 2026-11-16T23:27:56.900Z,
++     "id": "3c4ae383-07d6-4856-bd5c-5463487fb8ff",
++     "jobId": "f2e182de-a2ad-4418-b0e7-2d1bc75daaa0",
++   },
++ ]
+
+ ❯ test/vault-tools.test.ts:43:49
+     41|     const { token } = await c.startTurn(c.nora.id);
+     42|     expect(answer(await replay(c, token, 'vault_entry', { entry: 'Part…
+     43|     expect(await c.db.select().from(toolCalls)).toEqual([]);
+       |                                                 ^
+     44|     const journal = await c.db.execute(sql`select * from net.journal`);
+     45|     for (const secret of [PASSWORD, CODE, '081804']) expect(JSON.strin…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/vault-tools.test.ts > the vault for agents > checks the entry again when the same invocation is repeated after deletion
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ test/vault-tools.test.ts:56:27
+     54|     expect((await c.app.inject({ method: 'DELETE', url: `/api/vault/${…
+     55|     const again = await replay(c, token, 'vault_entry', { entry: 'Part…
+     56|     expect(again.isError).toBe(true);
+       |                           ^
+     57|     expect(answer(again)).toMatchObject({ error: { reason: 'vault_unkn…
+     58|     expect(JSON.stringify(again)).not.toContain(PASSWORD);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/vault-tools.test.ts > the vault for agents > does not retain a secret tool input or result reported by a node
+AssertionError: expected '[{"id":"e42c851c-8999-4945-81f5-ed005…' not to contain 'pw-marker-8f02bd'
+
+Expected: "pw-marker-8f02bd"
+Received: "[{"id":"e42c851c-8999-4945-81f5-ed005507f153","companyId":"7ca87cf1-2a7a-425e-8d20-09c5fad89041","agentId":"e0362c4d-e367-4c0a-b010-e21833a55e23","jobId":"6639fdaa-31b0-4982-810f-e48066647855","seq":1,"kind":"tool","data":{"kind":"tool","name":"hornhoof.vault_save","input":"{\"password\":\"pw-marker-8f02bd\",\"code\":\"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ\"}"},"personId":null,"createdAt":"2026-11-16T23:28:15.655Z"},{"id":"b9616249-4681-4497-8951-1a91589bd417","companyId":"7ca87cf1-2a7a-425e-8d20-09c5fad89041","agentId":"e0362c4d-e367-4c0a-b010-e21833a55e23","jobId":"6639fdaa-31b0-4982-810f-e48066647855","seq":2,"kind":"tool_result","data":{"ok":true,"kind":"tool_result","summary":"{\"password\":\"pw-marker-8f02bd\",\"code\":\"081804\"}"},"personId":null,"createdAt":"2026-11-16T23:28:15.851Z"}]"
+
+ ❯ test/vault-tools.test.ts:68:89
+     66|     await appendTurnEvent(c.app.ctx, job.id, { kind: 'tool_result', ok…
+     67|     const events = await c.db.select().from(agentEvents).where(eq(agen…
+     68|     for (const secret of [PASSWORD, CODE, '081804']) expect(JSON.strin…
+       |                                                                                         ^
+     69|   });
+     70|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 19 passed (23)
+   Start at  23:25:49
+   Duration  161.77s (tests 67%, transform 24%, import 9%)
+

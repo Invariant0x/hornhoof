@@ -1,4 +1,5 @@
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { PRIVATE_TOOLS } from '@hornhoof/protocol';
 import { getParseErrorMessage, normalizeObjectSchema, safeParseAsync } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import { and, asc, eq, isNull } from 'drizzle-orm';
@@ -48,8 +49,9 @@ export class Shelf {
       async ({ query, name }) => (name ? this.load(name) : this.find(query ?? '')),
     );
     this.use = server.registerTool(
-      USE,
+      PRIVATE_TOOLS.delegate.name,
       {
+        _meta: PRIVATE_TOOLS.delegate._meta,
         description: 'Calls any tool of Hornhoof by its name with its input, as yours.',
         inputSchema: {
           name: z.string().trim().min(1).max(100),

@@ -14,6 +14,9 @@ import { UNNAMED_BUILTIN } from '../src/modules/nodes/hub.js';
 import { passing } from '../src/modules/nodes/numbered.js';
 import { FakePgClient } from './fake-pg-client.js';
 import { as, connectNode, listen, setLease, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 const NODE_KEY = 'k'.repeat(40);
 
