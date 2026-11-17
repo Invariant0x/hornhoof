@@ -16,6 +16,11 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - People and agents can set task priority, which appears on the task card and orders tasks within each list group.
 
+### Changed
+
+- The task list shows compact rows with links to goals and collapsible status groups, with an add button where the department can take tasks.
+- Task rows show what they wait for and which tasks from other departments need them.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

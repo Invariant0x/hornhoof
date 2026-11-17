@@ -21,14 +21,19 @@ export function boardStatus(task: TaskLine, asksYou = false): BoardStatus {
   return status;
 }
 
-/* The order the list's groups read in: what needs people first, then what stopped, is checked, moves and has not started,
-   and what is over. */
-const NEED: HumanStatus[] = ['waitingYou', 'waiting', 'stopped', 'review', 'working', 'notStarted', 'paused', 'done', 'cancelled'];
+type ListStatus = HumanStatus | 'waitingPerson';
+const LIST_ORDER: ListStatus[] = ['working', 'review', 'waitingPerson', 'waitingYou', 'waiting', 'stopped', 'notStarted', 'paused', 'done', 'cancelled'];
+
+function listStatus(task: TaskLine, asksYou = false): ListStatus {
+  const status = humanStatus(task, asksYou);
+  if ((status === 'waiting' || status === 'waitingYou') && task.time?.waitsOn.some(wait => wait.kind === 'person')) return 'waitingPerson';
+  return status;
+}
 export const priorityOf = (task: TaskLine) => task.priority ?? 'normal';
 const byPriority = (a: TaskTree, b: TaskTree) => TASK_PRIORITIES.indexOf(priorityOf(a.task)) - TASK_PRIORITIES.indexOf(priorityOf(b.task)) || newestFirst(a, b);
 const newestFirst = (a: TaskTree, b: TaskTree) => b.task.number - a.task.number;
 
-export type ListGroup = { status: HumanStatus; trees: TaskTree[] };
+export type ListGroup = { status: ListStatus; trees: TaskTree[] };
 
 /* Each task's subtasks done of all of them, cancelled ones aside, counted over all the work: what a view leaves out of sight
    still counts. */
@@ -47,7 +52,7 @@ function counted(nodes: TaskTree[], all: TaskLine[]): TaskTree[] {
    subtasks are counted over, when those given are only part of it. */
 export function listGroups(tasks: TaskLine[], asksYou?: Asks, all: TaskLine[] = tasks): ListGroup[] {
   const top = counted(trees(tasks), all);
-  return NEED.map(status => ({ status, trees: top.filter(tree => humanStatus(tree.task, asksYou?.(tree.task.id) ?? false) === status).sort(byPriority) })).filter(g => g.trees.length > 0);
+  return LIST_ORDER.map(status => ({ status, trees: top.filter(tree => listStatus(tree.task, asksYou?.(tree.task.id) ?? false) === status).sort(byPriority) })).filter(g => g.trees.length > 0);
 }
 
 /* A stage with how deep it stands in its pipeline's tree. */

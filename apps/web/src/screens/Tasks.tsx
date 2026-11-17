@@ -358,8 +358,8 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const other = who !== me.person.id;
   const asking = new Set((decisions?.requests ?? []).filter(r => r.canAnswer).map(r => r.task.id));
   const asksYou = (id: string) => asking.has(id);
-  const rows: Rows = { selected, onOpenTask, asksYou };
   const place_ = (p: TaskLine['department']) => placeName(t, org, p);
+  const rows: Rows = { selected, onOpenTask, onOpenGoal, asksYou, placeName: place_ };
   const own = mine(all, goals, who);
   const working = workingNow(all, org);
   const waitsOnWho = waitingOn(all, recipient);
@@ -381,6 +381,8 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const work = filterTasks(base.tasks, { ...base.filter, ...set } as WorkFilter, goals, asksYou);
   const chipTasks = filterTasks(base.tasks, base.filter, goals, asksYou);
   const view = place.view ?? 'list';
+  const addInGroup = department?.mayPlan && org?.departments.find(d => d.id === department.id)?.employees.some(e => e.kind === 'head')
+    ? () => setMaking('task') : undefined;
   const found = query.trim() ? searchTasks(all, query) : null;
 
   const graph = (): { forest: GraphNode[]; crumbs: Crumb[] } => {
@@ -486,7 +488,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
           <>
             <section className="tr-found" aria-label={t.tracker.search.results}>
               <h2>{t.tracker.search.results}</h2>
-              {found.length ? <TrackerFound tasks={found} rows={rows} /> : <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
+              {found.length ? <TrackerFound tasks={found} all={all} rows={rows} /> : <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
             </section>
             {/* A search leaves what waits for the person where it was. */}
             {(section.kind === 'waits' || section.kind === 'mine') && waiting}
@@ -504,7 +506,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
                 <FilterChips chips={chips} onChange={setChips} tasks={chipTasks} goals={goals} />
               </div>
               {tasks && (
-                view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} />
+                view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} onAddTask={addInGroup} />
                 : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={chips.status === 'cancelled'} rows={rows} />
                 : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStages } : undefined} />
               )}
