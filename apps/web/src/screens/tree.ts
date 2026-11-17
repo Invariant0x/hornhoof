@@ -8,7 +8,7 @@ export const SEGMENT_CLASS: Record<SegmentKind, string> = { work: 'w', after: 'a
 export const trunkBranch = (department: Department) => department.repository?.branch ?? 'main';
 export const treeClock = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 export const secondsBetween = (from: string, to: string) => Math.max(0, (Date.parse(to) - Date.parse(from)) / 1000);
-export const currentSegment = (segments: TreeSegment[], now: string) => segments.find(s => s.from <= now && (!s.to || s.to > now));
+const currentSegment = (segments: TreeSegment[], now: string) => segments.find(s => s.from <= now && (!s.to || s.to > now));
 
 const IDLE_CLASS = { stall: 'm', person: 'p', after: 'm', lost: 'bad', alarm: 'bad', queued: 'm', unknown: 'm' };
 export const idleClass = (kind: Exclude<SegmentKind, 'work'>): string => IDLE_CLASS[kind];
@@ -33,7 +33,7 @@ export type TreeRow = {
   activity?: TreeActivity;
   pick?: TreePick;
 };
-export type TreePath = {
+type TreePath = {
   kind: 'grid' | 'now' | 'main' | 'turn' | 'segment' | 'fork' | 'merge' | 'bridge';
   points: Point[];
   cls: string;

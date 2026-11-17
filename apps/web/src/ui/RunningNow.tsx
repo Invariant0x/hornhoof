@@ -16,7 +16,7 @@ export function AgentsCell({ agents }: { agents: RunningAgent[] }) {
   return <span><span className="num">{agents.length}</span>{busy > 0 && <>, <span className="tk">{t.running.working(busy)}</span></>}</span>;
 }
 
-export function RunHead({ title, agents, parts }: { title: string; agents: RunningAgent[]; parts: Running['parts'] }) {
+function RunHead({ title, agents, parts }: { title: string; agents: RunningAgent[]; parts: Running['parts'] }) {
   const t = useT();
   const busy = workingCount(agents);
   const counts = [agents.length ? t.running.agents(agents.length) : null, busy ? t.running.working(busy) : null, parts.length ? t.running.tests(parts.length) : null].filter(Boolean);

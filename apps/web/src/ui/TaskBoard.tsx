@@ -115,7 +115,7 @@ function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
   );
 }
 
-export function GoalList({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
+function GoalList({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
   if (!goals.length) return null;
   return <ul className="goals">{goals.map(goal => <li key={goal.task.id}><GoalCard goal={goal} rows={rows} /></li>)}</ul>;
 }

@@ -11,7 +11,7 @@ export type PhoneView = {
   id: string; name: string; owner: { id: string; name: string }; machineId: string; lending: boolean; online: boolean;
   state: 'owner' | 'busy' | 'available'; queued: number; stopping: boolean; endpoint?: string;
 };
-export type PhoneMachines = Pick<MachineView, 'id' | 'hostname' | 'online'>[];
+type PhoneMachines = Pick<MachineView, 'id' | 'hostname' | 'online'>[];
 
 /* An older read cannot undo Stop or a registration that finished after it started. */
 export function Phones({ me, machines }: { me: Me; machines: PhoneMachines }) {
