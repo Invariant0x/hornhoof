@@ -11,7 +11,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
    which keeps a picture of the screen it shows. `api` reads a page as ever there, and its route turns a change away. */
 export const READ_TOOLS: ReadonlySet<string> = new Set([
   'company', 'staffing_options', 'tasks', 'task', 'turns', 'agents', 'failures', 'test_run', 'work_run', 'notebook', 'improvements', 'database', 'api', 'pool',
-  'machines', 'briefing', 'backlog', 'merge_conflicts', 'outbound_status', 'outbound_options', 'approval_policy', 'test_harness', 'find_tool',
+  'machines', 'briefing', 'backlog', 'merge_conflicts', 'outbound_status', 'outbound_options', 'approval_policy', 'test_harness', 'find_tool', 'source', 'logs',
 ]);
 
 /* What a tool that changes something answers on a machine that only reads for a moment, should a call reach it past

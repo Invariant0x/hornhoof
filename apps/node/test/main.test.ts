@@ -190,6 +190,16 @@ describe('reporting the node lifecycle', () => {
     expect(after.nodeLog).toContain('Connection closed');
     expect(server.received.filter(m => m.type === 'node.stopping')).toEqual([]);
   });
+
+  it('gives Hornhoof its current log when asked', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'node.log.read', requestId: '0b7c6d4e-1f2a-4b3c-8d9e-0f1a2b3c4d5e' });
+    await server.wait(() => server.received.some(m => m.type === 'node.log'));
+    expect(server.received.find(m => m.type === 'node.log')).toMatchObject({ requestId: '0b7c6d4e-1f2a-4b3c-8d9e-0f1a2b3c4d5e', log: expect.stringContaining('Node started at') });
+  });
 });
 
 describe('reporting managed programs', () => {
