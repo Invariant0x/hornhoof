@@ -78,10 +78,12 @@ export async function answerRequest(ctx: Ctx, me: Person, id: string, body: z.in
   const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
   if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
-  /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
+  /* The orchestrator answers for the person its turn answers, under its input lock, checked again as it is kept; its call
+     of its own is the owner's answer. */
   const on = delegationOf(me);
   requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
-  const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on, me.assistant ? { assistant: me.assistant.id } : {}));
+  const actor = me.via && !on ? { personId: me.id } : actorOf(me);
+  const done = await lockedFor(ctx, on, () => answer(ctx, actor, id, body, on, me.assistant ? { assistant: me.assistant.id } : {}));
   await wakeAll(ctx, done.wakes);
   /* An agent switched off while it waited for this answer leaves the work now. */
   await leaveIfOff(ctx, done.request.agentId);
