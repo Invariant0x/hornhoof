@@ -106,19 +106,30 @@ async function waited(command: string[], env: NodeJS.ProcessEnv): Promise<number
       if (!held || !child.pid) { child.kill(value); return; }
       try { process.kill(-child.pid, value); } catch { /* The group is gone already. */ }
     };
-    for (const value of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(value, () => signal(value));
     let ended = false, stopped = null as NodeJS.Signals | null, killing: NodeJS.Timeout | undefined;
+    const cancel = (value: NodeJS.Signals) => {
+      if (ended) return;
+      stopped ??= value;
+      signal(value);
+      killing ??= setTimeout(() => { stopped = 'SIGKILL'; signal('SIGKILL'); }, KILL_AFTER_MS);
+    };
+    const listeners = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(value => ({ value, stop: () => cancel(value) }));
+    for (const listener of listeners) process.on(listener.value, listener.stop);
     if (held) void lapsed(held.rest).then(async why => {
       if (ended) return;
-      stopped = 'SIGTERM'; signal('SIGTERM');
-      killing = setTimeout(() => { stopped = 'SIGKILL'; signal('SIGKILL'); }, KILL_AFTER_MS);
-      await write(process.stderr, `${why} The command stops.\n`);
+      cancel('SIGTERM');
+      await write(process.stderr, `${why} The command stops.\n`).catch(() => {});
     });
-    const [code, by] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
-    ended = true; clearTimeout(killing);
-    if (held) signal('SIGKILL');
-    const ending = stopped ?? (code === null ? by : null);
-    return ending ? 128 + constants.signals[ending] : code ?? 1;
+    try {
+      const [code, by] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
+      ended = true;
+      if (held) signal('SIGKILL');
+      const ending = stopped ?? (code === null ? by : null);
+      return ending ? 128 + constants.signals[ending] : code ?? 1;
+    } finally {
+      ended = true; clearTimeout(killing);
+      for (const listener of listeners) process.removeListener(listener.value, listener.stop);
+    }
   } finally { stop.abort(); }
 }
 

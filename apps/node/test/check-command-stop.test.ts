@@ -127,3 +127,44 @@ it('sends a signal it is given to the whole group of the command', async () => {
   child.emit('exit', null, 'SIGINT');
   expect(await pending).toBe(130);
 });
+
+it('never reports success when a command catches the wrapper cancellation and exits zero', async () => {
+  const { child } = recorded();
+  slotStream();
+  const pending = checkCommand(['--wait', '--', 'recorded-tool'], AGENT);
+  await tick();
+  process.emit('SIGTERM', 'SIGTERM');
+  child.emit('exit', 0, null);
+  expect(await pending).toBe(143);
+});
+
+it('bounds cleanup when a command ignores cancellation sent to the wrapper', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const { child, group } = recorded();
+  slotStream();
+  const pending = checkCommand(['--wait', '--', 'recorded-tool'], AGENT);
+  await tick();
+  process.emit('SIGTERM', 'SIGTERM');
+  try {
+    expect(group).toEqual(['SIGTERM']);
+    vi.advanceTimersByTime(4999);
+    expect(group).toEqual(['SIGTERM']);
+    vi.advanceTimersByTime(1);
+    expect(group).toEqual(['SIGTERM', 'SIGKILL']);
+  } finally {
+    child.emit('exit', null, 'SIGKILL');
+    await pending;
+  }
+});
+
+it('keeps cancellation cleanup alive when its diagnostic cannot be written', async () => {
+  const { child } = recorded();
+  const stream = slotStream();
+  const pending = checkCommand(['--wait', '--', 'recorded-tool'], AGENT);
+  await tick();
+  vi.mocked(process.stderr.write).mockImplementationOnce(() => { throw new Error('recorded EPIPE'); });
+  stream().close();
+  await tick();
+  child.emit('exit', 0, null);
+  expect(await pending).toBe(143);
+});
