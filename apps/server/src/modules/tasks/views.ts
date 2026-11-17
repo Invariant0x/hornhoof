@@ -236,7 +236,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
   const proofs = await proofsOf(db, task, asks);
   const files = await filesOf(db, task.id);
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
-  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
+  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.flatMap(r => [r.agentId, r.answeredByAgentId]), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
   const by = byOf(n, await forWhom(db, events.map(e => e.data)));
@@ -263,7 +263,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
       picked: r.picked,
       status: r.status,
       answer: r.answer,
-      byOrchestrator: r.answeredByAgentId !== null,
+      byOrchestrator: n.agent(r.answeredByAgentId)?.kind === 'orchestrator',
       agent: n.agent(r.agentId),
       at: r.createdAt.toISOString(),
     })),
