@@ -10,7 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { clientAddress } from '../src/auth/tunnel.js';
 import { loadConfig } from '../src/config.js';
@@ -539,6 +539,40 @@ describe('the keeper', () => {
     await sleep(100);
     expect(readKeeperState(dir)?.at).toBe(last);
   });
+
+  it('keeps a socket that stays open through the grace when it stops, and ends the stop once the grace is over', async () => {
+    /* The keeper's grace for what is still open when it stops: half of the 10 s Docker waits after its signal. */
+    const STOP_GRACE_MS = 5000;
+    const app = http.createServer();
+    const sockets = new WebSocketServer({ server: app });
+    const { keeper, front } = await keeperOn(await listening(app));
+    const client = new WebSocket(`ws://127.0.0.1:${front.port}/socket`);
+    client.on('error', () => {});
+    onTestFinished(() => client.terminate());
+    const arrived = once(sockets, 'connection') as Promise<[WebSocket]>;
+    await once(client, 'open');
+    const [atApp] = await arrived;
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
+    let stopped = false;
+    const stopping = keeper.stop().then(() => {
+      stopped = true;
+    });
+    await vi.advanceTimersByTimeAsync(STOP_GRACE_MS - 1);
+    expect(stopped).toBe(false);
+    const up = once(atApp, 'message');
+    client.send('still here');
+    expect(String((await up)[0])).toBe('still here');
+    const down = once(client, 'message');
+    atApp.send('so am I');
+    expect(String((await down)[0])).toBe('so am I');
+    expect(stopped).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+    await expect(send(front)).rejects.toThrow('ECONNREFUSED');
+  });
 });
 
 describe('the keeper container', () => {
@@ -608,20 +642,5 @@ describe('the keeper container', () => {
     expect(wordIn(dir)).toBe('read');
     child.kill(signal);
     expect(await exit).toEqual([0, null]);
-  });
-
-  it('exits 0 in about 5 seconds with a socket that stays open', async () => {
-    const app = http.createServer();
-    new WebSocketServer({ server: app });
-    const { child, exit, front } = await container(await listening(app));
-    const client = new WebSocket(`ws://127.0.0.1:${front.port}/socket`);
-    client.on('error', () => {});
-    onTestFinished(() => client.terminate());
-    await once(client, 'open');
-    const started = Date.now();
-    child.kill('SIGTERM');
-    expect(await exit).toEqual([0, null]);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(4500);
-    expect(Date.now() - started).toBeLessThan(7000);
   });
 });
