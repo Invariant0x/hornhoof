@@ -81,12 +81,6 @@ export function answeredWords<T extends { seq: number; personId: string | null; 
   return said.length === 0 && createdBy ? { personId: createdBy, sourceSeq: null } : null;
 }
 
-/* Whose click Hornhoof's note that opened the turn tells of, as their order, until a person writes or types into it. */
-export const clickWords = (
-  job: Pick<Standing, 'createdBy' | 'answersCeo'>,
-  said: readonly { personId: string | null; kind: string; data: unknown }[],
-): string | null => (!said.some(byPerson) && job.answersCeo ? job.createdBy : null);
-
 function parseGrant(raw: unknown): ClickGrant | null {
   if (!raw || typeof raw !== 'object') return null;
   const { personId, machineId, seq } = raw as { personId?: unknown; machineId?: unknown; seq?: unknown };
