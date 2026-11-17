@@ -8,7 +8,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentRole, grantsFor, readerGrantsFor, readerRole, type SqlMode } from '../src/db/agent-sql.js';
+import type { SqlMode } from '../src/db/agent-sql.js';
 import { MIGRATIONS } from '../src/db/client.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, teams, turns } from '../src/db/schema.js';
 import { applyTeams } from '../src/modules/departments/routes.js';
@@ -16,7 +16,7 @@ import { cancel, createTask, report, submit, updateTask, type NewTask } from '..
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { mayHoldTask, setUrgent, urgentOnlyAgents } from '../src/modules/tasks/urgency.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, createTestDb, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { agentSqlOn, as, createTestDb, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 type Res = { content: { text: string }[]; isError?: boolean };
 const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
@@ -383,25 +383,25 @@ describe('who may hold what', () => {
 
 describe('the SQL roles', () => {
   async function roles() {
-    const { $client: client } = await createTestDb();
-    const names = { write: agentRole('postgres'), read: readerRole('postgres') };
-    await client.exec(`${grantsFor(names.write)};\n${readerGrantsFor(names.read)}`);
-    return (mode: SqlMode, statement: string) => client.transaction(async tx => {
-      await tx.exec(`SET LOCAL ROLE "${names[mode]}"`);
-      return tx.exec(statement);
-    });
+    const sql = agentSqlOn((await createTestDb()).$client);
+    return (mode: SqlMode, statement: string) => sql.run(statement, mode);
   }
 
-  it.each(['write', 'read'] as const)('read urgency and never write it: %s', async mode => {
+  it('let both read urgency, and only the orchestrator change it, as Hornhoof itself', async () => {
     const run = await roles();
-    expect((await run(mode, 'SELECT urgent FROM tasks'))[0]!.rows).toEqual([]);
-    expect((await run(mode, 'SELECT urgent_only FROM teams'))[0]!.rows).toEqual([]);
+    for (const mode of ['write', 'read'] as const) {
+      expect((await run(mode, 'SELECT urgent FROM tasks'))[0]!.rows).toEqual([]);
+      expect((await run(mode, 'SELECT urgent_only FROM teams'))[0]!.rows).toEqual([]);
+    }
     for (const write of [
       'UPDATE tasks SET urgent = true WHERE false',
       'INSERT INTO tasks (company_id, number, title, urgent) SELECT company_id, number, title, true FROM tasks WHERE false',
       'UPDATE teams SET urgent_only = true WHERE false',
       'INSERT INTO teams (company_id, department_id, name, urgent_only) SELECT company_id, department_id, name, true FROM teams WHERE false',
-    ]) await expect(run(mode, write)).rejects.toThrow(/permission denied/);
+    ]) {
+      await expect(run('read', write), write).rejects.toThrow(/permission denied|read-only/);
+      await expect(run('write', write), write).resolves.toBeDefined();
+    }
   });
 
   it('keep the orchestrator\'s other rights on tasks and teams', async () => {

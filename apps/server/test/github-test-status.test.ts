@@ -5,11 +5,10 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
-import { agentRole, grantsFor } from '../src/db/agent-sql.js';
 import { cancel, createTask } from '../src/modules/tasks/engine.js';
 import { markCommit, type TestsMark } from '../src/modules/testruns/github-status.js';
 import { checkTestTimes } from '../src/modules/testruns/runs.js';
-import { as, connectNode, createTestDb, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until, type FakeNode } from './helpers.js';
+import { agentSqlOn, as, connectNode, createTestDb, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until, type FakeNode } from './helpers.js';
 import { listenIn } from '../../../test-support/ports.mjs';
 import { BUILTIN } from './builtin.js';
 
@@ -492,17 +491,14 @@ describe("the repository's full test command", () => {
     expect((await c.db.select().from(departments).where(eq(departments.id, c.dev.id)))[0]!.repoFullTestCommand).toBe('true');
   });
 
-  /* Whoever may change it decides what lets a commit past GitHub's tests, so an agent's SQL may read it and no more. */
-  it('stays out of what an agent may write with SQL', async () => {
-    const { $client: client } = await createTestDb();
-    const role = agentRole('postgres');
-    await client.exec(grantsFor(role));
-    const as_agent = (statement: string) => client.transaction(async tx => {
-      await tx.exec(`SET LOCAL ROLE "${role}"`);
-      return tx.exec(statement);
-    });
-    await expect(as_agent(`UPDATE departments SET repo_full_test_command = 'true' WHERE false`)).rejects.toThrow(/permission denied/);
-    await expect(as_agent(`INSERT INTO departments (repo_full_test_command) SELECT 'true' WHERE false`)).rejects.toThrow(/permission denied/);
-    expect((await as_agent('SELECT repo_full_test_command FROM departments'))[0]!.rows).toEqual([]);
+  /* Whoever may change it decides what lets a commit past GitHub's tests: Operations' SQL reads it and no more, the
+     orchestrator's changes it as Hornhoof itself. */
+  it('stays out of what Operations may write with SQL, and the orchestrator may', async () => {
+    const sql = agentSqlOn((await createTestDb()).$client);
+    for (const statement of [`UPDATE departments SET repo_full_test_command = 'true' WHERE false`, `INSERT INTO departments (repo_full_test_command) SELECT 'true' WHERE false`]) {
+      await expect(sql.run(statement, 'read'), statement).rejects.toThrow(/permission denied|read-only/);
+      await expect(sql.run(statement, 'write'), statement).resolves.toBeDefined();
+    }
+    expect((await sql.run('SELECT repo_full_test_command FROM departments', 'read'))[0]!.rows).toEqual([]);
   });
 });

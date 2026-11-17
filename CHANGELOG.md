@@ -5,6 +5,27 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [0.32.0] - 2026-11-17
+
+### Fixed
+
+- `message_employee` counts an employee's recent messages through an index instead of reading every one of them.
+- No false "assignment words not recorded" case while a program runs a tool with those words in it.
+
+### Added
+
+- The orchestrator has a `shell` tool that runs any command in the server's own container.
+- The orchestrator's `database` tool runs as Hornhoof itself: it reads and changes every table, every column and the schema.
+
+### Changed
+
+- Before you update: put each department's mailbox sign-ins into the vault and its letters and recipient lists into its git, as External messaging is gone (its tables stay in the database).
+- External messaging is removed: agents write to people themselves, from a department mailbox or through the company's phones, and mark each step in the department's git.
+- Only an irreversible deletion waits for the CEO's yes; a message, a price or a publication asks nobody unless the department sets its own rule.
+- The orchestrator is refused nothing: it sets up assistants, sends files, and reaches plans and computer events like the owner.
+- Security and code review never count what the orchestrator can see or do as a finding.
+- The orchestrator's prompt and the setup screen say plainly that it can do anything and change its own system.
+
 ## [0.31.0] - 2026-11-17
 
 ### Fixed

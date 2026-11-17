@@ -1,11 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { ASSISTANT_TABLES, HIDDEN, isKey, KEY_FIELDS, KEY_NAMES, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
+import { ASSISTANT_TABLES, HIDDEN, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
 import { notConfirmed } from '../../db/confirm.js';
 import { checkAgentSql, SqlRefused } from '../../db/sql-check.js';
 import { sources } from '../../db/sources.js';
-import { answersCeoOrDelegate, standingPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { currentInvocation, keptAnswer } from './calls.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
@@ -20,62 +19,11 @@ const SECRETS = Object.values(SECRET).flat().join(', ');
 const CLOSED_AFTER_SIGN_INS =
   "invites, install codes, sealed plan sign-ins, the public link, Hornhoof's records of where changes came from, the company's certificate authority, its machines' certificates and the peer secrets, the machines' join tickets and online time, people's keys, the machines' computer access and the commands run there, and the recovery keys";
 const CLOSED = `Sign-ins, ${CLOSED_AFTER_SIGN_INS} are closed to this tool.`;
-/* What the orchestrator reads of them and of every other table: all but the keys. */
-const KEYS = `the keys (columns ending in _enc or _hash, and ${KEY_NAMES.slice(0, -1).join(', ')} and ${KEY_NAMES.at(-1)})`;
-const KEYS_CLOSED = `The tool reads every column but ${KEYS}, secret tool answers, assistant event payloads and delivery addresses: name the other columns instead of *.`;
-const HORNHOOF_WRITES = `Hornhoof writes sign-ins, ${CLOSED_AFTER_SIGN_INS} itself: the tool only reads them.`;
 export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
-/* The orchestrator's in a company with no active owner, for whom else it would write. */
-export const READS_IN_THIS_TURN = 'The tool only reads now: this company has no active owner, and nobody acts as the CEO in this turn. A change goes once the CEO or the CEO delegate asks for it.';
-const DECISIONS = 'Requests, cards and the logs of tasks and conversations change only through the other tools: a request closes only with answer_request.';
-const PEOPLE = 'People and what they reach change only through invite_person, change_person and invite_again, which only the CEO may ask for.';
-const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
-const TESTS = 'Whole-suite runs on free machines and work runs start and stop only through run_tests, run_work, stop_tests and stop_work, so they reach only the machines lent to them.';
-const HARNESS = 'Hornhoof keeps where a test harness stands itself and builds it by itself: test_harness shows it, and the tool only reads it.';
-const ASSISTANTS = "An assistant, its key and the addresses Hornhoof reaches it at change only on the People screen, by a person who may set it up.";
-const ASSISTANT_READS = 'Hornhoof keeps what an assistant reads and the answers it waits for itself: the tool only reads it.';
 const ASSISTANTS_CLOSED = 'Personal assistants are closed to this tool.';
-/* What the orchestrator may not do with a table, in the words he acts on. */
-const RULES: Record<string, string> = {
-  people: PEOPLE,
-  person_access: PEOPLE,
-  subscriptions: PLANS,
-  machines: PLANS,
-  nodes: PLANS,
-  node_connections: 'Hornhoof writes the history of node connections itself: the tool only reads it.',
-  test_runs: TESTS,
-  test_parts: TESTS,
-  turn_snapshots: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
-  turn_tokens: 'Hornhoof counts what each turn used itself, from what its program told: the tool only reads it.',
-  agent_fallbacks: 'Hornhoof moves an employee to a fallback plan and back itself: the tool only reads it. A plan of an employee changes by change_employee.',
-  test_part_timings: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
-  test_file_results: 'Hornhoof keeps which test files passed itself, as a forged row would let a test go unrun: the tool only reads it.',
-  test_suite_memory: 'Hornhoof keeps what test runs leave for their next run itself: the tool only reads it.',
-  harness_builds: HARNESS,
-  harness_products: HARNESS,
-  departments: "A department's repository changes only on its screen or with set_repository, on the word of the CEO or a person who runs it; its owner and autonomous release change only on the screen.",
-  agents:
-    "Employees come by hire and go by fire_employee, and their skills and subscription change by change_employee, which make the CEO's checks; kind and role_key never change, a head stays in its department, and an assistant's own agent belongs to its owner.",
-  jobs: 'Hornhoof starts the turns: the tool changes only their status, error and finished_at.',
-  requests: DECISIONS,
-  proposals: DECISIONS,
-  agent_events: DECISIONS,
-  task_events: DECISIONS,
-  assistants: ASSISTANTS,
-  assistant_events: ASSISTANT_READS,
-  assistant_seqs: ASSISTANT_READS,
-  assistant_replies: ASSISTANT_READS,
-  assistant_requests: ASSISTANT_READS,
-  agent_inbox: "Hornhoof keeps employees' inboxes itself, as each letter names who wrote it: the tool only reads them. An employee marks its own letters with inbox_mark, and the orchestrator any employee's, with inbox_mark and its id in employee.",
-};
 const closedColumns = (table: string, columns: string[]) =>
   `${columns.join(' and ')} ${columns.length > 1 ? 'are' : 'is'} closed to this tool: name the other columns of ${table} instead of *.`;
 const secretsOf = (table: string) => (SECRET[table] ? closedColumns(table, SECRET[table]) : undefined);
-/* The orchestrator's: the keys of a table it knows by name, or which they are. */
-const keysOf = (table: string) => {
-  const keys = [...(SECRET[table] ?? []).filter(isKey), ...(KEY_FIELDS[table] ?? [])];
-  return keys.length ? closedColumns(table, keys) : KEYS_CLOSED;
-};
 const closedToRead = (table: string): string | undefined =>
   ASSISTANT_TABLES.includes(table) ? ASSISTANTS_CLOSED : secretsOf(table);
 const isReadOnlyError = (denied: boolean, err: Error & { code?: string }): boolean =>
@@ -85,57 +33,42 @@ function readWhy(denied: boolean, err: Error & { code?: string }, table: string 
   return closed ?? (isReadOnlyError(denied, err) ? readOnly : undefined);
 }
 
-/* The database's words, and after them why, when it refused. A read-only role refused only a write, unless the table is
-   hidden, an assistant table or has secrets. */
-function refusal(err: Error & { code?: string }, mode: SqlMode, readOnly = READ_ONLY): string {
+/* The database's words, and after them why, when it refused Operations. A read-only role refused only a write, unless the
+   table is hidden, an assistant table or has secrets. */
+function refusal(err: Error & { code?: string }, mode: SqlMode): string {
   const table = /permission denied for table "?(\w+)"?/.exec(err.message)?.[1];
   const denied = err.code === '42501' || /permission denied/.test(err.message);
   let why: string | undefined;
   if (mode === 'read' && table && HIDDEN.includes(table)) why = CLOSED;
-  else if (mode === 'read') why = readWhy(denied, err, table, readOnly);
-  else if (table) why = [RULES[table] ?? (HIDDEN.includes(table) ? HORNHOOF_WRITES : undefined), keysOf(table)].filter(Boolean).join(' ');
+  else if (mode === 'read') why = readWhy(denied, err, table, READ_ONLY);
   return `The database answered: ${err.message}${why ? `. ${why}` : ''}`;
 }
 
 /* A text the check refused never reached the database, so it hears that and not the database's words. What is no row change
    in a call that only reads is a change it may not make, so it hears why too. */
-function refusedText(err: SqlRefused, mode: SqlMode, readOnly: string): string {
-  return `Hornhoof did not run this SQL: ${err.message}${mode === 'read' && err.kind === 'statement' ? ` ${readOnly}` : ''}`;
+function refusedText(err: SqlRefused): string {
+  return `Hornhoof did not run this SQL: ${err.message}${err.kind === 'statement' ? ` ${READ_ONLY}` : ''}`;
 }
 
-function failureText(err: Error, mode: SqlMode, readOnly: string): string {
-  if (err instanceof SqlRefused) return refusedText(err, mode, readOnly);
+function failureText(err: Error, mode: SqlMode): string {
+  if (err instanceof SqlRefused) return refusedText(err);
   if (notConfirmed(err)) return `The database answered: ${err.message} The call may have run; check before repeating it.`;
-  return refusal(err, mode, readOnly);
+  return refusal(err, mode);
 }
 
+/* What the tool says of itself in each mode. */
 const DESCRIPTIONS: Record<SqlMode, string> = {
   write:
-    "Runs SQL on Hornhoof's own Postgres database, to see how Hornhoof runs right now with source and logs, and for what no other tool does: fixing a stuck row, changing a field, removing what the screens cannot. " +
-    'Only SELECT, INSERT, UPDATE, DELETE and WITH statements run, several in one transaction that Hornhoof begins and commits, undone together when one fails; a call may take 5 seconds. It reads and changes the rows of every table ' +
-    `but sign-ins, ${CLOSED_AFTER_SIGN_INS}, which it only reads; it reads every table and column but ${KEYS}, so name columns instead of * where a table has one. ` +
-    "People and their access, subscriptions, machines, repositories, an employee's kind, role, skills and subscription, a head's department and a turn but its status change only through the other tools. " +
-    'It cannot change the tables themselves. A change skips the checks and notices the other tools make, so prefer them, read before you write and change only ' +
-    'the rows you mean. Each statement comes back as { rows, changed }.',
+    "Runs any SQL on Hornhoof's own Postgres database with Hornhoof's own rights: it reads and changes every table and every column, keys, tokens and secrets included, " +
+    "the network's records in net and net_local too, and the schema itself. Use it to see how Hornhoof runs right now with source and logs, and for what no other tool does. " +
+    'Several statements run in one transaction that Hornhoof begins and commits, undone together when one fails; a call may take 5 seconds. ' +
+    'A change skips the checks and notices the other tools make, so prefer them where they fit, read before you write and change only the rows you mean. ' +
+    'Each statement comes back as { rows, changed }.',
   read:
     "Reads Hornhoof's own Postgres database, to find what went wrong: stuck rows, failed turns, who changed what and when. Only SELECT and WITH statements run, several in one " +
     `transaction; a call may take 15 seconds. It reads the rows of every table but sign-ins, ${CLOSED_AFTER_SIGN_INS}, and never the columns ` +
     `with secrets (${SECRETS}), so name columns instead of * on those tables. ${READ_ONLY} Each statement comes back as { rows, changed }.`,
 };
-
-/* What the tool says of itself, and why a read-only call refused a write, in each mode. */
-const DESCRIBED: Record<SqlMode, string> = {
-  write: DESCRIPTIONS.write,
-  read: DESCRIPTIONS.read,
-};
-const WHY_READ_ONLY: Record<SqlMode, string> = { write: READS_IN_THIS_TURN, read: READ_ONLY };
-
-/* The mode a call runs in: the orchestrator's changes rows only for the CEO or the delegate, the last person who wrote to
-   it, in this turn or an earlier one. */
-async function modeNow(ctx: Ctx, job: ToolJob, mode: SqlMode): Promise<SqlMode> {
-  if (mode === 'read') return 'read';
-  return (await answersCeoOrDelegate(ctx.db, job.id, standingPrincipal)) ? 'write' : 'read';
-}
 
 /* What the agent reads of a call that ran. */
 function answerOf(answers: SqlAnswer[]) {
@@ -160,27 +93,24 @@ function recorded(job: ToolJob): SqlCall | undefined {
   };
 }
 
+/* Operations' text passes the check first; the orchestrator's goes as Hornhoof's own would. */
 async function runSql(ctx: Ctx, agentSql: NonNullable<Ctx['agentSql']>, job: ToolJob, sql: string, mode: SqlMode) {
-  const now = await modeNow(ctx, job, mode);
   try {
-    await checkAgentSql(sql);
-    const answers = await agentSql.run(sql, now, now === 'write' ? recorded(job) : undefined);
+    if (mode === 'read') await checkAgentSql(sql);
+    const answers = await agentSql.run(sql, mode, mode === 'write' ? recorded(job) : undefined);
     if (answers.some(a => a.changed > 0)) ctx.bus.publish(job.companyId, { type: 'org' });
     return answerOf(answers);
   } catch (err) {
-    return say(failureText(err as Error, now, WHY_READ_ONLY[mode]), true);
+    return say(failureText(err as Error, mode), true);
   }
 }
 
-/* SQL on Hornhoof's own database, for what the other tools do not reach: the orchestrator's changes rows, the head of
-   Operations' only reads. The orchestrator writes in any turn, as the CEO or the delegate who wrote to it or else as the
-   company's owner, found when the call runs, under the input lock words for the turn take; only in a company with no
-   active owner does it read. The map is told to look again after a change. */
+/* SQL on Hornhoof's own database: the orchestrator's does anything Hornhoof itself may (Ivan's word of 17 November 2026),
+   in any turn; the head of Operations' only reads. The map is told to look again after a change. */
 export function registerDatabaseTool(server: McpServer, ctx: Ctx, job: ToolJob, mode: SqlMode): void {
-  server.registerTool('database', { description: DESCRIBED[mode], inputSchema: { sql: z.string().trim().min(1).max(20_000) } }, async ({ sql }) => {
+  server.registerTool('database', { description: DESCRIPTIONS[mode], inputSchema: { sql: z.string().trim().min(1).max(20_000) } }, async ({ sql }) => {
     const agentSql = ctx.agentSql;
     if (!agentSql) return say(ctx.agentSqlPending ? 'Hornhoof is starting.' : "This Hornhoof's database does not let Hornhoof make the role this tool runs as.", true);
-    const run = () => runSql(ctx, agentSql, job, sql, mode);
-    return mode === 'write' ? withInputLock(ctx, job.agentId, run) : run();
+    return runSql(ctx, agentSql, job, sql, mode);
   });
 }

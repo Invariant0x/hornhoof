@@ -267,16 +267,15 @@ describe('the journal taken off for a migration', () => {
     expect((await db.$client.query('SELECT net.journal_later() AS one')).rows).toEqual([{ one: 1 }]);
   });
 
-  it('names the tables whose journal is off, and to no agent', async () => {
+  it('names the tables whose journal is off, to the orchestrator as to Hornhoof and not to Operations', async () => {
     const { app, db } = await testApp();
     const testDb = db as unknown as TestDb;
     expect(await tablesWithJournalOff(testDb)).toEqual([]);
 
     await takeJournalOff(testDb);
     expect(await tablesWithJournalOff(testDb)).toEqual(expect.arrayContaining(['companies', 'notebook_notes']));
-    for (const mode of ['write', 'read'] as const) {
-      await expect(app.ctx.agentSql!.run('SELECT * FROM net.journals_off()', mode)).rejects.toThrow(/permission denied/);
-    }
+    await expect(app.ctx.agentSql!.run('SELECT * FROM net.journals_off()', 'read')).rejects.toThrow(/permission denied/);
+    expect((await app.ctx.agentSql!.run('SELECT * FROM net.journals_off()', 'write'))[0]!.rows).toEqual(expect.arrayContaining([{ table_name: 'companies' }]));
 
     await putJournalOn(testDb);
     expect(await tablesWithJournalOff(testDb)).toEqual([]);

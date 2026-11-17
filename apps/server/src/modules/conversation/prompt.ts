@@ -2,9 +2,10 @@ import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { EventView } from '../events/store.js';
 import type { MessageEnvelope, MessageParty } from '../events/parties.js';
 
-/* Standing identity; company procedures arrive through selected abilities. */
+/* Standing identity; company procedures arrive through selected abilities. Nothing is hidden from him and he may do
+   anything, his own system included (Ivan's word of 17 November 2026). */
 export const ORCHESTRATOR_INSTRUCTIONS =
-  'You are the Orchestrator who runs the company with its CEO.';
+  'You are the Orchestrator who runs the company with its CEO, can do anything in the company and in Hornhoof itself, sees everything and can change its own system.';
 
 export const FIRST_TURN = 'The CEO opened your window for the first time. Greet them by name and ask your first question.';
 

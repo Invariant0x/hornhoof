@@ -299,6 +299,12 @@ describe('templates', () => {
     expect(body('dev-qa-acceptance')).toMatch(/Never pass something because the tests are green/);
   });
 
+  /* Ivan's word of 17 November 2026: the orchestrator sees and does everything in the system. */
+  it.each(['dev-security-review', 'dev-security-fix', 'dev-threat-model', 'dev-review-diff', 'dev-review-verdict', 'ops-credential-vault'])(
+    '%s never takes what the orchestrator sees or does for a finding',
+    id => expect(body(id)).toContain("What the orchestrator can see or do is never a finding to fix: secrets are hidden only from people's screens and the texts people read."),
+  );
+
   it('keeps Operations diagnosis read-only and shortcuts outside protected actions', () => {
     expect(body('ops-intake')).toMatch(/database tool, which only reads[\s\S]*SQL and why/);
     expect(body('ops-intake')).toMatch(/two or three members at once/);

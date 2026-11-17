@@ -82,7 +82,7 @@ export const en = {
     yourName: 'Your name',
     yourTitle: 'Your title',
     emailProblem: 'Enter an email like name@company.com.',
-    orchestratorIntro: 'The orchestrator is the agent in the center of the map. It builds departments for you and runs on this subscription.',
+    orchestratorIntro: 'The orchestrator is the agent in the center of the map. It builds departments for you and runs on this subscription. It can do anything in your company and in Hornhoof itself, sees everything, and can change its own system.',
     howOrchestratorRuns: 'How the orchestrator runs',
     modes: {
       api_key: { label: 'API key', hint: 'Paste a company key. It is stored encrypted and never shown again.' },

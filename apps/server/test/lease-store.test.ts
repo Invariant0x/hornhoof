@@ -1,7 +1,7 @@
 import net, { type AddressInfo } from 'node:net';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agentRole, PUBLIC_REVOKES, readerRole } from '../src/db/agent-sql.js';
+import { PUBLIC_REVOKES, readerRole } from '../src/db/agent-sql.js';
 import { isLeaseRefused } from '../src/db/net.js';
 import { companies } from '../src/db/schema.js';
 import { keeperSql, leaseOfMachine, leaseStore, UNNAMED_MACHINE } from '../src/modules/keeper/lease-store.js';
@@ -96,7 +96,7 @@ describe('the lease the keeper holds in the database', () => {
 
   it('names each fence that does not hold', async () => {
     const s = await store();
-    const role = agentRole('postgres');
+    const role = readerRole('postgres');
     await s.run.query(`ALTER TABLE companies DISABLE TRIGGER net_journal; ALTER TABLE net.journal DISABLE TRIGGER net_fence;
       GRANT EXECUTE ON FUNCTION net.attach_journal() TO PUBLIC; GRANT SELECT ON net_local.lease TO "${role}"; GRANT pg_signal_backend TO "${role}"; GRANT SELECT ON applied, tool_calls TO "${role}"`);
     expect(await s.lease.problems()).toEqual([
@@ -107,9 +107,8 @@ describe('the lease the keeper holds in the database', () => {
       `${role} may reach net_local.lease`,
       `${role} may reach public.applied`,
       `${role} may reach public.tool_calls`,
-      `${role} may run net.attach_journal()`,
       /* What PUBLIC may run, every role may. */
-      `${readerRole('postgres')} may run net.attach_journal()`,
+      `${role} may run net.attach_journal()`,
     ]);
   });
 

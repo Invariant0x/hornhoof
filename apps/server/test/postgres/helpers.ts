@@ -13,7 +13,7 @@ import { onTestFinished } from 'vitest';
 import { buildApp, type Ctx } from '../../src/app.js';
 import { loadConfig } from '../../src/config.js';
 import { encryptSecret } from '../../src/crypto/secrets.js';
-import { agentRole, readerRole } from '../../src/db/agent-sql.js';
+import { formerAgentRole, readerRole } from '../../src/db/agent-sql.js';
 import { applyMissingMigrations, MIGRATIONS } from '../../src/db/client.js';
 import * as schema from '../../src/db/schema.js';
 import { createRoute } from '../../src/modules/tasks/echelons-store.js';
@@ -160,7 +160,7 @@ export async function privatePostgres(options: { migrate?: boolean; migrations?:
   await control.query(`CREATE DATABASE "${name}"${template}`);
   cleanups.push(async () => {
     await control.query(`DROP DATABASE "${name}" WITH (FORCE)`);
-    await control.query(`DROP ROLE IF EXISTS "${agentRole(name)}", "${readerRole(name)}"`);
+    await control.query(`DROP ROLE IF EXISTS "${formerAgentRole(name)}", "${readerRole(name)}"`);
   });
   const url = new URL(source);
   url.pathname = `/${name}`;

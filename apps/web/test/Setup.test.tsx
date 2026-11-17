@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ru } from '../src/i18n/ru';
 import { Setup } from '../src/screens/Setup';
 import { mockApi, type Call, withKey } from './api-mock';
 import { decl } from './css';
@@ -97,6 +98,8 @@ describe('Setup', () => {
     render(<Setup onDone={onDone} />);
     await fillFirstTwoSteps(user);
     expect(screen.getByRole('heading', { name: 'Connect the orchestrator' })).toBeInTheDocument();
+    expect(screen.getByText(/It can do anything in your company and in Hornhoof itself, sees everything, and can change its own system\./)).toBeInTheDocument();
+    expect(ru.setup.orchestratorIntro).toContain('Он может все в вашей компании и в самом Hornhoof, видит все и может менять свою систему.');
     await user.click(screen.getByRole('radio', { name: 'API key' }));
     await user.selectOptions(screen.getByLabelText('Provider'), 'Anthropic');
     await user.type(screen.getByLabelText('Key'), 'sk-ant-xyz12345');
