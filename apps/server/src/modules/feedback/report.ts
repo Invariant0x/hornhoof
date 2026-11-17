@@ -50,8 +50,6 @@ export type Shown = Omit<Report, 'v' | 'installation' | 'repeats'>;
 export const Written = z.strictObject({ kind: Kind, title: Title, text: Text, improvement: z.uuid().optional() });
 export type Written = z.infer<typeof Written>;
 
-export const isErrorCode = (code: string) => CODE.test(code);
-
 /* An issue of Hornhoof's repository on GitHub. Its page is only ever the exact one of its number there, so an answer that
    passed hornhoof.org cannot put any other link on a card. */
 export type IssueLink = { number: number; url: string };
