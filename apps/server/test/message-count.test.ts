@@ -65,8 +65,8 @@ describe('the persisted message quota', () => {
     expect(nodes.map(node => node['Index Name'])).toContain(INDEX);
     expect(nodes.filter(node => node['Relation Name'] === 'agent_events' && node['Node Type'] === 'Seq Scan')).toEqual([]);
     expect(nodes.map(node => node['Node Type'])).toContain('Limit');
-    const count = await c.db.$client.query<{ n: number | string }>(query.sql, query.params);
-    expect(Number(count.rows[0]!.n)).toBe(TURN_NUDGES);
+    const count = await c.db.$client.query<Record<string, number | string>>(query.sql, query.params);
+    expect(Object.values(count.rows[0]!).map(Number)).toEqual([TURN_NUDGES]);
   });
 
   it('counts the inclusive turn window, excluding older messages, other senders, companies and kinds', async () => {
@@ -98,8 +98,8 @@ describe('the persisted message quota', () => {
     expect((await c.send()).isError).toBe(true);
     await c.db.insert(agentEvents).values(c.rows(1, CREATED));
     const query = counter(seen);
-    const count = await c.db.$client.query<{ n: number | string }>(query.sql, query.params);
-    expect(Number(count.rows[0]!.n)).toBe(TURN_NUDGES);
+    const count = await c.db.$client.query<Record<string, number | string>>(query.sql, query.params);
+    expect(Object.values(count.rows[0]!).map(Number)).toEqual([TURN_NUDGES]);
   });
 });
 
@@ -112,7 +112,6 @@ describe('the message sender index migration', () => {
 
   it('upgrades 0136 twice without changing its stored messages', async () => {
     const client = await olderInstall('0136_outbound_contact_log');
-    onTestFinished(() => client.close());
     const db = drizzle(client);
     await db.execute(sql`insert into companies (id, name) values ('00000000-0000-4000-8000-000000000001', 'Acme')`);
     await db.execute(sql`insert into agents (id, company_id, kind, name, model)
