@@ -98,6 +98,7 @@ export type TaskDetail = TaskLine & {
 type Names = {
   route(t: Task): EchelonsSnapshot;
   agent(id: string | null): AgentRef | null;
+  isOrchestrator(id: string | null): boolean;
   place(id: string | null): Place;
   turn(id: string | null): number | null;
   after(t: Pick<Task, 'after'>): Task[];
@@ -130,7 +131,9 @@ type NamedRows = {
 };
 
 function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Omit<Names, 'route'> {
+  const orchestrators = new Set<string | null>(agentRows.filter(a => a.kind === 'orchestrator').map(a => a.id));
   return {
+    isOrchestrator: id => orchestrators.has(id),
     agent: id => {
       const a = agentRows.find(r => r.id === id);
       return a ? { id: a.id, name: a.name, kind: a.kind, role: (a.roleKey && ctx.templates.roles.get(a.roleKey)?.title) || null } : null;
@@ -263,7 +266,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
       picked: r.picked,
       status: r.status,
       answer: r.answer,
-      byOrchestrator: n.agent(r.answeredByAgentId)?.kind === 'orchestrator',
+      byOrchestrator: n.isOrchestrator(r.answeredByAgentId),
       agent: n.agent(r.agentId),
       at: r.createdAt.toISOString(),
     })),
