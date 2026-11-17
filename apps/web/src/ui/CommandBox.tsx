@@ -28,6 +28,9 @@ export const hideShownCommand = async (id: string): Promise<void> => {
 
 const fetchShownCommands = () => api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
 
+/* A look's answer counts while the screen is up and no change of the person's came after the look began. */
+const stillWanted = (live: { current: boolean }, changes: { current: number }, since: number) => live.current && changes.current === since;
+
 /* The commands the server shows, into the screen's state. changes counts the person's own changes to them: a look that
    began before the latest one leaves them as they are, since the server may have read it before a Cancel or a new command
    and its answer can reach the page after them. The next look brings what the server holds then. */
@@ -40,7 +43,7 @@ export async function loadMachineCommands(
 ): Promise<void> {
   const since = changes.current;
   const res = await fetchShownCommands();
-  if (!live.current || !res || changes.current !== since) return;
+  if (!res || !stillWanted(live, changes, since)) return;
   const found = res.commands.findLast(c => c.kind === 'machine');
   setCommand(found ? toActiveCommand(found) : null);
   const adds: Record<string, ActiveCommand> = {};
