@@ -1,0 +1,1962 @@
+{
+  "version": 1,
+  "commit": "8797456d19be31f7385c8e5c25f0b7c34dbd6bc9",
+  "baseCommit": "11aa5777c4a5f74a550c0e53570ec35ebae39f53",
+  "status": "selected",
+  "sourcePaths": [
+    "apps/server/drizzle/0137_message_sender_window.sql",
+    "apps/server/drizzle/meta/0137_snapshot.json",
+    "apps/server/drizzle/meta/_journal.json",
+    "apps/server/src/db/schema.ts",
+    "apps/server/src/modules/tools/watch.ts",
+    "apps/server/test/message-count.test.ts"
+  ],
+  "packages": [
+    {
+      "packageId": "server",
+      "mode": "related",
+      "units": [
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/about-version.test.ts",
+          "selectionUnit": "apps/server/test/about-version.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/access.test.ts",
+          "selectionUnit": "apps/server/test/access.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-current-task.test.ts",
+          "selectionUnit": "apps/server/test/agent-current-task.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-plan-release.test.ts",
+          "selectionUnit": "apps/server/test/agent-plan-release.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-switch.test.ts",
+          "selectionUnit": "apps/server/test/agent-switch.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-view-lists.test.ts",
+          "selectionUnit": "apps/server/test/agent-view-lists.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-view-stream.test.ts",
+          "selectionUnit": "apps/server/test/agent-view-stream.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-view-table.test.ts",
+          "selectionUnit": "apps/server/test/agent-view-table.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-view-waits.test.ts",
+          "selectionUnit": "apps/server/test/agent-view-waits.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agent-view.test.ts",
+          "selectionUnit": "apps/server/test/agent-view.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/agents.test.ts",
+          "selectionUnit": "apps/server/test/agents.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/api-connections.test.ts",
+          "selectionUnit": "apps/server/test/api-connections.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/api-key-secrets.test.ts",
+          "selectionUnit": "apps/server/test/api-key-secrets.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/app-mode.test.ts",
+          "selectionUnit": "apps/server/test/app-mode.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/approval-policy.test.ts",
+          "selectionUnit": "apps/server/test/approval-policy.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistant-agent.test.ts",
+          "selectionUnit": "apps/server/test/assistant-agent.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-events.test.ts",
+          "selectionUnit": "apps/server/test/assistants-events.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-files.test.ts",
+          "selectionUnit": "apps/server/test/assistants-files.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-isolation-views.test.ts",
+          "selectionUnit": "apps/server/test/assistants-isolation-views.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-isolation.test.ts",
+          "selectionUnit": "apps/server/test/assistants-isolation.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-mcp.test.ts",
+          "selectionUnit": "apps/server/test/assistants-mcp.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-messages.test.ts",
+          "selectionUnit": "apps/server/test/assistants-messages.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-orchestrator.test.ts",
+          "selectionUnit": "apps/server/test/assistants-orchestrator.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-people.test.ts",
+          "selectionUnit": "apps/server/test/assistants-people.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/assistants-rights.test.ts",
+          "selectionUnit": "apps/server/test/assistants-rights.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/attachment-token.test.ts",
+          "selectionUnit": "apps/server/test/attachment-token.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/auth.test.ts",
+          "selectionUnit": "apps/server/test/auth.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/authority.test.ts",
+          "selectionUnit": "apps/server/test/authority.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/autonomous-release.test.ts",
+          "selectionUnit": "apps/server/test/autonomous-release.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/backlog.test.ts",
+          "selectionUnit": "apps/server/test/backlog.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/backups-routes.test.ts",
+          "selectionUnit": "apps/server/test/backups-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/before-sign-in.test.ts",
+          "selectionUnit": "apps/server/test/before-sign-in.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/briefings.test.ts",
+          "selectionUnit": "apps/server/test/briefings.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/browser-ready.test.ts",
+          "selectionUnit": "apps/server/test/browser-ready.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/builtin-nodes-apart.test.ts",
+          "selectionUnit": "apps/server/test/builtin-nodes-apart.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/builtin-work.test.ts",
+          "selectionUnit": "apps/server/test/builtin-work.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/carry.test.ts",
+          "selectionUnit": "apps/server/test/carry.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/channels.test.ts",
+          "selectionUnit": "apps/server/test/channels.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/check-queue-watchdog.test.ts",
+          "selectionUnit": "apps/server/test/check-queue-watchdog.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/computer-machines.test.ts",
+          "selectionUnit": "apps/server/test/computer-machines.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/computer.test.ts",
+          "selectionUnit": "apps/server/test/computer.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/conversation.test.ts",
+          "selectionUnit": "apps/server/test/conversation.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/copies-move.test.ts",
+          "selectionUnit": "apps/server/test/copies-move.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/copies-order.test.ts",
+          "selectionUnit": "apps/server/test/copies-order.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/copies-priority.test.ts",
+          "selectionUnit": "apps/server/test/copies-priority.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/copies-routes.test.ts",
+          "selectionUnit": "apps/server/test/copies-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/copies-scope.test.ts",
+          "selectionUnit": "apps/server/test/copies-scope.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/copies-view.test.ts",
+          "selectionUnit": "apps/server/test/copies-view.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/credentials.test.ts",
+          "selectionUnit": "apps/server/test/credentials.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/data-links.test.ts",
+          "selectionUnit": "apps/server/test/data-links.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/db.test.ts",
+          "selectionUnit": "apps/server/test/db.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/decision-context.test.ts",
+          "selectionUnit": "apps/server/test/decision-context.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/decisions-answers-fallback.test.ts",
+          "selectionUnit": "apps/server/test/decisions-answers-fallback.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/decisions.test.ts",
+          "selectionUnit": "apps/server/test/decisions.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-branches.test.ts",
+          "selectionUnit": "apps/server/test/department-branches.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-echelons.test.ts",
+          "selectionUnit": "apps/server/test/department-echelons.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-owner-control.test.ts",
+          "selectionUnit": "apps/server/test/department-owner-control.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-owner-rights.test.ts",
+          "selectionUnit": "apps/server/test/department-owner-rights.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-owner.test.ts",
+          "selectionUnit": "apps/server/test/department-owner.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-repositories.test.ts",
+          "selectionUnit": "apps/server/test/department-repositories.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-routes-without-checkers.test.ts",
+          "selectionUnit": "apps/server/test/department-routes-without-checkers.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-turn-progress.test.ts",
+          "selectionUnit": "apps/server/test/department-turn-progress.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/department-turns.test.ts",
+          "selectionUnit": "apps/server/test/department-turns.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/departments.test.ts",
+          "selectionUnit": "apps/server/test/departments.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-acceptance.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-acceptance.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-coordination.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-coordination.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-fast-route.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-fast-route.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-handoff.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-handoff.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-head.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-head.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-lineage.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-lineage.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-observers.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-observers.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-ownership.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-ownership.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-projections.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-projections.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-races.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-races.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-review-fixes.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-review-fixes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-schema.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-schema.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-staff.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-staff.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-test-failures.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-test-failures.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-tests-1136.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-tests-1136.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-tests-main.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-tests-main.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-tests-repair.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-tests-repair.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-tools.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-turnkey.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-turnkey.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/development-echelons-waits.test.ts",
+          "selectionUnit": "apps/server/test/development-echelons-waits.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/employee-assignment.test.ts",
+          "selectionUnit": "apps/server/test/employee-assignment.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/encoded-text.test.ts",
+          "selectionUnit": "apps/server/test/encoded-text.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/events.test.ts",
+          "selectionUnit": "apps/server/test/events.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/external-wait.test.ts",
+          "selectionUnit": "apps/server/test/external-wait.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/failure-states.test.ts",
+          "selectionUnit": "apps/server/test/failure-states.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/failures.test.ts",
+          "selectionUnit": "apps/server/test/failures.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/feedback-inbox.test.ts",
+          "selectionUnit": "apps/server/test/feedback-inbox.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/feedback-issue.test.ts",
+          "selectionUnit": "apps/server/test/feedback-issue.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/feedback-send.test.ts",
+          "selectionUnit": "apps/server/test/feedback-send.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/first-setup.test.ts",
+          "selectionUnit": "apps/server/test/first-setup.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/fixed-clock-fixture.test.ts",
+          "selectionUnit": "apps/server/test/fixed-clock-fixture.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/follow-keeper.test.ts",
+          "selectionUnit": "apps/server/test/follow-keeper.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/follow.test.ts",
+          "selectionUnit": "apps/server/test/follow.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/fresh-model-check.test.ts",
+          "selectionUnit": "apps/server/test/fresh-model-check.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/gate.test.ts",
+          "selectionUnit": "apps/server/test/gate.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/github-test-status.test.ts",
+          "selectionUnit": "apps/server/test/github-test-status.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/handing.test.ts",
+          "selectionUnit": "apps/server/test/handing.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/harness.test.ts",
+          "selectionUnit": "apps/server/test/harness.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/head-department-control.test.ts",
+          "selectionUnit": "apps/server/test/head-department-control.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/holders.test.ts",
+          "selectionUnit": "apps/server/test/holders.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/hook-rejections.test.ts",
+          "selectionUnit": "apps/server/test/hook-rejections.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/improvements.test.ts",
+          "selectionUnit": "apps/server/test/improvements.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/inbox.test.ts",
+          "selectionUnit": "apps/server/test/inbox.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/instructions.test.ts",
+          "selectionUnit": "apps/server/test/instructions.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/jobs.test.ts",
+          "selectionUnit": "apps/server/test/jobs.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/journal.test.ts",
+          "selectionUnit": "apps/server/test/journal.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/keeper-backups.test.ts",
+          "selectionUnit": "apps/server/test/keeper-backups.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/keeper-certificate.test.ts",
+          "selectionUnit": "apps/server/test/keeper-certificate.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/keeper-identity.test.ts",
+          "selectionUnit": "apps/server/test/keeper-identity.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/keeper-link.test.ts",
+          "selectionUnit": "apps/server/test/keeper-link.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/keeper-peer.test.ts",
+          "selectionUnit": "apps/server/test/keeper-peer.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/keeper.test.ts",
+          "selectionUnit": "apps/server/test/keeper.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/lease-store.test.ts",
+          "selectionUnit": "apps/server/test/lease-store.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/left-input.test.ts",
+          "selectionUnit": "apps/server/test/left-input.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/link-tls.test.ts",
+          "selectionUnit": "apps/server/test/link-tls.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/link.test.ts",
+          "selectionUnit": "apps/server/test/link.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/live-fallback.test.ts",
+          "selectionUnit": "apps/server/test/live-fallback.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/live-session-review.test.ts",
+          "selectionUnit": "apps/server/test/live-session-review.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/live.test.ts",
+          "selectionUnit": "apps/server/test/live.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/long-text-boundaries.test.ts",
+          "selectionUnit": "apps/server/test/long-text-boundaries.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/long-text-storage.test.ts",
+          "selectionUnit": "apps/server/test/long-text-storage.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/machine-away.test.ts",
+          "selectionUnit": "apps/server/test/machine-away.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/machine-load.test.ts",
+          "selectionUnit": "apps/server/test/machine-load.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/machine-memory.test.ts",
+          "selectionUnit": "apps/server/test/machine-memory.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/map-layout.test.ts",
+          "selectionUnit": "apps/server/test/map-layout.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/map-state.test.ts",
+          "selectionUnit": "apps/server/test/map-state.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/merge-apply.test.ts",
+          "selectionUnit": "apps/server/test/merge-apply.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/merge-kept.test.ts",
+          "selectionUnit": "apps/server/test/merge-kept.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/merge-peer.test.ts",
+          "selectionUnit": "apps/server/test/merge-peer.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/merge-read.test.ts",
+          "selectionUnit": "apps/server/test/merge-read.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/merge-routes.test.ts",
+          "selectionUnit": "apps/server/test/merge-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/merge-task.test.ts",
+          "selectionUnit": "apps/server/test/merge-task.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/merge-tools.test.ts",
+          "selectionUnit": "apps/server/test/merge-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/message-count.test.ts",
+          "selectionUnit": "apps/server/test/message-count.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/message-pictures.test.ts",
+          "selectionUnit": "apps/server/test/message-pictures.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/message-routing.test.ts",
+          "selectionUnit": "apps/server/test/message-routing.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/migrations-0034-0046.test.ts",
+          "selectionUnit": "apps/server/test/migrations-0034-0046.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/model-check-department.test.ts",
+          "selectionUnit": "apps/server/test/model-check-department.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/model-check-routes.test.ts",
+          "selectionUnit": "apps/server/test/model-check-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/model-check-schema.test.ts",
+          "selectionUnit": "apps/server/test/model-check-schema.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/model-check-store.test.ts",
+          "selectionUnit": "apps/server/test/model-check-store.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/network-join.test.ts",
+          "selectionUnit": "apps/server/test/network-join.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/network-routes.test.ts",
+          "selectionUnit": "apps/server/test/network-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/network-tables.test.ts",
+          "selectionUnit": "apps/server/test/network-tables.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-commands.test.ts",
+          "selectionUnit": "apps/server/test/node-commands.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-connections.test.ts",
+          "selectionUnit": "apps/server/test/node-connections.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-drain-each.test.ts",
+          "selectionUnit": "apps/server/test/node-drain-each.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-drain-stuck.test.ts",
+          "selectionUnit": "apps/server/test/node-drain-stuck.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-drain.test.ts",
+          "selectionUnit": "apps/server/test/node-drain.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-messages.test.ts",
+          "selectionUnit": "apps/server/test/node-messages.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-restart-evidence.test.ts",
+          "selectionUnit": "apps/server/test/node-restart-evidence.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/node-return-backlog.test.ts",
+          "selectionUnit": "apps/server/test/node-return-backlog.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/nodes.test.ts",
+          "selectionUnit": "apps/server/test/nodes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/notebook.test.ts",
+          "selectionUnit": "apps/server/test/notebook.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/notification-actions.test.ts",
+          "selectionUnit": "apps/server/test/notification-actions.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/notification-cause.test.ts",
+          "selectionUnit": "apps/server/test/notification-cause.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/notification-sources.test.ts",
+          "selectionUnit": "apps/server/test/notification-sources.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/numbers.test.ts",
+          "selectionUnit": "apps/server/test/numbers.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/offline-machine.test.ts",
+          "selectionUnit": "apps/server/test/offline-machine.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/operations-card.test.ts",
+          "selectionUnit": "apps/server/test/operations-card.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/operations-plan.test.ts",
+          "selectionUnit": "apps/server/test/operations-plan.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/operations-recovery.test.ts",
+          "selectionUnit": "apps/server/test/operations-recovery.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/operations-required-existing.test.ts",
+          "selectionUnit": "apps/server/test/operations-required-existing.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/operations-required.test.ts",
+          "selectionUnit": "apps/server/test/operations-required.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/orchestrator-any-tool.test.ts",
+          "selectionUnit": "apps/server/test/orchestrator-any-tool.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/orchestrator-api-boundaries.test.ts",
+          "selectionUnit": "apps/server/test/orchestrator-api-boundaries.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/orchestrator-control.test.ts",
+          "selectionUnit": "apps/server/test/orchestrator-control.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/orchestrator-self.test.ts",
+          "selectionUnit": "apps/server/test/orchestrator-self.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/org.test.ts",
+          "selectionUnit": "apps/server/test/org.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/orphan-turns.test.ts",
+          "selectionUnit": "apps/server/test/orphan-turns.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-accounts.test.ts",
+          "selectionUnit": "apps/server/test/outbound-accounts.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-admission.test.ts",
+          "selectionUnit": "apps/server/test/outbound-admission.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-approvals.test.ts",
+          "selectionUnit": "apps/server/test/outbound-approvals.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-credentials.test.ts",
+          "selectionUnit": "apps/server/test/outbound-credentials.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-department-access.test.ts",
+          "selectionUnit": "apps/server/test/outbound-department-access.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-department.test.ts",
+          "selectionUnit": "apps/server/test/outbound-department.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-dispatcher.test.ts",
+          "selectionUnit": "apps/server/test/outbound-dispatcher.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-e2e.test.ts",
+          "selectionUnit": "apps/server/test/outbound-e2e.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-evaluation-port.test.ts",
+          "selectionUnit": "apps/server/test/outbound-evaluation-port.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-live.integration.test.ts",
+          "selectionUnit": "apps/server/test/outbound-live.integration.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-model-checks.test.ts",
+          "selectionUnit": "apps/server/test/outbound-model-checks.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-restore.test.ts",
+          "selectionUnit": "apps/server/test/outbound-restore.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-routes.test.ts",
+          "selectionUnit": "apps/server/test/outbound-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-schema.test.ts",
+          "selectionUnit": "apps/server/test/outbound-schema.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-support.test.ts",
+          "selectionUnit": "apps/server/test/outbound-support.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/outbound-views.test.ts",
+          "selectionUnit": "apps/server/test/outbound-views.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/own-test-databases.test.ts",
+          "selectionUnit": "apps/server/test/own-test-databases.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/owner-keys.test.ts",
+          "selectionUnit": "apps/server/test/owner-keys.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/parked.test.ts",
+          "selectionUnit": "apps/server/test/parked.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/peer-server.test.ts",
+          "selectionUnit": "apps/server/test/peer-server.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/peer-sessions.test.ts",
+          "selectionUnit": "apps/server/test/peer-sessions.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/people.test.ts",
+          "selectionUnit": "apps/server/test/people.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/person-standing.test.ts",
+          "selectionUnit": "apps/server/test/person-standing.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/phone-lifecycle.test.ts",
+          "selectionUnit": "apps/server/test/phone-lifecycle.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/phone-tools.test.ts",
+          "selectionUnit": "apps/server/test/phone-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/phones.test.ts",
+          "selectionUnit": "apps/server/test/phones.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/pipeline-report.test.ts",
+          "selectionUnit": "apps/server/test/pipeline-report.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/placement.test.ts",
+          "selectionUnit": "apps/server/test/placement.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/plan-fallback.test.ts",
+          "selectionUnit": "apps/server/test/plan-fallback.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-gone.test.ts",
+          "selectionUnit": "apps/server/test/program-gone.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-history.test.ts",
+          "selectionUnit": "apps/server/test/program-history.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-assistant.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-assistant.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-attachments.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-attachments.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-cases.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-cases.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-check.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-check.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-deliveries.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-deliveries.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-dispatch.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-dispatch.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-escalations.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-escalations.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-evidence.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-evidence.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-failures.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-failures.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-first-signal.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-first-signal.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-hold.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-hold.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-placement.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-placement.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-recovery.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-recovery.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-requeue.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-requeue.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-tools.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-operator-unheard.test.ts",
+          "selectionUnit": "apps/server/test/program-operator-unheard.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-restarts.test.ts",
+          "selectionUnit": "apps/server/test/program-restarts.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-signs.test.ts",
+          "selectionUnit": "apps/server/test/program-signs.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/program-updates.test.ts",
+          "selectionUnit": "apps/server/test/program-updates.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/pump-wakeups.test.ts",
+          "selectionUnit": "apps/server/test/pump-wakeups.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/question-routes.test.ts",
+          "selectionUnit": "apps/server/test/question-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/queued-live-turn.test.ts",
+          "selectionUnit": "apps/server/test/queued-live-turn.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/read-sign-in.test.ts",
+          "selectionUnit": "apps/server/test/read-sign-in.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/read-tools.test.ts",
+          "selectionUnit": "apps/server/test/read-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/recovery.test.ts",
+          "selectionUnit": "apps/server/test/recovery.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/repo-hosts.test.ts",
+          "selectionUnit": "apps/server/test/repo-hosts.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/repository-token-revision.test.ts",
+          "selectionUnit": "apps/server/test/repository-token-revision.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/request-choice-feedback.test.ts",
+          "selectionUnit": "apps/server/test/request-choice-feedback.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/request-media.test.ts",
+          "selectionUnit": "apps/server/test/request-media.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/request-sources.test.ts",
+          "selectionUnit": "apps/server/test/request-sources.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/restarts.test.ts",
+          "selectionUnit": "apps/server/test/restarts.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/restore.test.ts",
+          "selectionUnit": "apps/server/test/restore.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/review-fix-regressions.test.ts",
+          "selectionUnit": "apps/server/test/review-fix-regressions.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/review-large-files.test.ts",
+          "selectionUnit": "apps/server/test/review-large-files.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/review-provenance.test.ts",
+          "selectionUnit": "apps/server/test/review-provenance.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/running-agent-access.test.ts",
+          "selectionUnit": "apps/server/test/running-agent-access.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/seed-view.test.ts",
+          "selectionUnit": "apps/server/test/seed-view.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/selections.test.ts",
+          "selectionUnit": "apps/server/test/selections.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/setup-turnkey.test.ts",
+          "selectionUnit": "apps/server/test/setup-turnkey.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/setup.test.ts",
+          "selectionUnit": "apps/server/test/setup.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/shared-test-database.test.ts",
+          "selectionUnit": "apps/server/test/shared-test-database.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/sign-in-failures.test.ts",
+          "selectionUnit": "apps/server/test/sign-in-failures.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/socket.test.ts",
+          "selectionUnit": "apps/server/test/socket.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/sources.test.ts",
+          "selectionUnit": "apps/server/test/sources.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/spreadsheet-delivery.test.ts",
+          "selectionUnit": "apps/server/test/spreadsheet-delivery.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/staff.test.ts",
+          "selectionUnit": "apps/server/test/staff.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/stop-turn-events.test.ts",
+          "selectionUnit": "apps/server/test/stop-turn-events.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/stuck-policy.test.ts",
+          "selectionUnit": "apps/server/test/stuck-policy.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/submit-starts-no-run.test.ts",
+          "selectionUnit": "apps/server/test/submit-starts-no-run.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/subscriptions.test.ts",
+          "selectionUnit": "apps/server/test/subscriptions.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/switched.test.ts",
+          "selectionUnit": "apps/server/test/switched.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/task-comments.test.ts",
+          "selectionUnit": "apps/server/test/task-comments.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/task-completion-notices.test.ts",
+          "selectionUnit": "apps/server/test/task-completion-notices.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/task-files.test.ts",
+          "selectionUnit": "apps/server/test/task-files.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/task-messages.test.ts",
+          "selectionUnit": "apps/server/test/task-messages.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/task-urgency.test.ts",
+          "selectionUnit": "apps/server/test/task-urgency.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/task-wake-state.test.ts",
+          "selectionUnit": "apps/server/test/task-wake-state.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-after.test.ts",
+          "selectionUnit": "apps/server/test/tasks-after.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-department-access.test.ts",
+          "selectionUnit": "apps/server/test/tasks-department-access.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-engine.test.ts",
+          "selectionUnit": "apps/server/test/tasks-engine.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-history.test.ts",
+          "selectionUnit": "apps/server/test/tasks-history.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-outside-turns.test.ts",
+          "selectionUnit": "apps/server/test/tasks-outside-turns.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-pulses.test.ts",
+          "selectionUnit": "apps/server/test/tasks-pulses.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-reconcile.test.ts",
+          "selectionUnit": "apps/server/test/tasks-reconcile.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-routes.test.ts",
+          "selectionUnit": "apps/server/test/tasks-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-tools.test.ts",
+          "selectionUnit": "apps/server/test/tasks-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tasks-wake.test.ts",
+          "selectionUnit": "apps/server/test/tasks-wake.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/telegram-files.test.ts",
+          "selectionUnit": "apps/server/test/telegram-files.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/telegram-two-people.test.ts",
+          "selectionUnit": "apps/server/test/telegram-two-people.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/telegram.test.ts",
+          "selectionUnit": "apps/server/test/telegram.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/templates-pipeline.test.ts",
+          "selectionUnit": "apps/server/test/templates-pipeline.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/terminal-access.test.ts",
+          "selectionUnit": "apps/server/test/terminal-access.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/terminal-input-rights.test.ts",
+          "selectionUnit": "apps/server/test/terminal-input-rights.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/terminals.test.ts",
+          "selectionUnit": "apps/server/test/terminals.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-evidence.test.ts",
+          "selectionUnit": "apps/server/test/test-evidence.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-run-batch-integration.test.ts",
+          "selectionUnit": "apps/server/test/test-run-batch-integration.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-run-file-results.test.ts",
+          "selectionUnit": "apps/server/test/test-run-file-results.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-run-left-open.test.ts",
+          "selectionUnit": "apps/server/test/test-run-left-open.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-run-machine-pace.test.ts",
+          "selectionUnit": "apps/server/test/test-run-machine-pace.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-run-preparation.test.ts",
+          "selectionUnit": "apps/server/test/test-run-preparation.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-runs-commit.test.ts",
+          "selectionUnit": "apps/server/test/test-runs-commit.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-runs-hosts.test.ts",
+          "selectionUnit": "apps/server/test/test-runs-hosts.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-runs-named-files.test.ts",
+          "selectionUnit": "apps/server/test/test-runs-named-files.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-runs-release-only.test.ts",
+          "selectionUnit": "apps/server/test/test-runs-release-only.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-runs-wait.test.ts",
+          "selectionUnit": "apps/server/test/test-runs-wait.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-runs-work.test.ts",
+          "selectionUnit": "apps/server/test/test-runs-work.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-runs.test.ts",
+          "selectionUnit": "apps/server/test/test-runs.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/test-timings.test.ts",
+          "selectionUnit": "apps/server/test/test-timings.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/timers.test.ts",
+          "selectionUnit": "apps/server/test/timers.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tool-calls.test.ts",
+          "selectionUnit": "apps/server/test/tool-calls.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tools-outside-turn.test.ts",
+          "selectionUnit": "apps/server/test/tools-outside-turn.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tools.test.ts",
+          "selectionUnit": "apps/server/test/tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tree-history-query.test.ts",
+          "selectionUnit": "apps/server/test/tree-history-query.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/tree-history.test.ts",
+          "selectionUnit": "apps/server/test/tree-history.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turn-effort-dispatch.test.ts",
+          "selectionUnit": "apps/server/test/turn-effort-dispatch.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turn-endings.test.ts",
+          "selectionUnit": "apps/server/test/turn-endings.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turn-release-step.test.ts",
+          "selectionUnit": "apps/server/test/turn-release-step.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turn-releases-migration.test.ts",
+          "selectionUnit": "apps/server/test/turn-releases-migration.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turn-tag-close.test.ts",
+          "selectionUnit": "apps/server/test/turn-tag-close.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turnkey-parent-close.test.ts",
+          "selectionUnit": "apps/server/test/turnkey-parent-close.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turns-as-releases.test.ts",
+          "selectionUnit": "apps/server/test/turns-as-releases.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/turns.test.ts",
+          "selectionUnit": "apps/server/test/turns.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/unheard.test.ts",
+          "selectionUnit": "apps/server/test/unheard.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/updates.test.ts",
+          "selectionUnit": "apps/server/test/updates.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/vault-phone-privacy.test.ts",
+          "selectionUnit": "apps/server/test/vault-phone-privacy.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/vault-tools.test.ts",
+          "selectionUnit": "apps/server/test/vault-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/vault.test.ts",
+          "selectionUnit": "apps/server/test/vault.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-boundaries.test.ts",
+          "selectionUnit": "apps/server/test/wait-boundaries.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-dependency.test.ts",
+          "selectionUnit": "apps/server/test/wait-dependency.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-escalation.test.ts",
+          "selectionUnit": "apps/server/test/wait-escalation.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-goals.test.ts",
+          "selectionUnit": "apps/server/test/wait-goals.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-monitor.test.ts",
+          "selectionUnit": "apps/server/test/wait-monitor.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-notice-effects.test.ts",
+          "selectionUnit": "apps/server/test/wait-notice-effects.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-notices.test.ts",
+          "selectionUnit": "apps/server/test/wait-notices.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-policy-routes.test.ts",
+          "selectionUnit": "apps/server/test/wait-policy-routes.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-policy.test.ts",
+          "selectionUnit": "apps/server/test/wait-policy.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-producers.test.ts",
+          "selectionUnit": "apps/server/test/wait-producers.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-state.test.ts",
+          "selectionUnit": "apps/server/test/wait-state.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-target.test.ts",
+          "selectionUnit": "apps/server/test/wait-target.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/wait-views.test.ts",
+          "selectionUnit": "apps/server/test/wait-views.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/watch-machine-drain.test.ts",
+          "selectionUnit": "apps/server/test/watch-machine-drain.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/watch-tools.test.ts",
+          "selectionUnit": "apps/server/test/watch-tools.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/watch.test.ts",
+          "selectionUnit": "apps/server/test/watch.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/work-tree-route.test.ts",
+          "selectionUnit": "apps/server/test/work-tree-route.test.ts"
+        },
+        {
+          "suiteId": "server",
+          "file": "apps/server/test/worker-keeper.test.ts",
+          "selectionUnit": "apps/server/test/worker-keeper.test.ts"
+        }
+      ],
+      "reasons": [
+        {
+          "code": "full_package_rule",
+          "path": "apps/server/drizzle/0137_message_sender_window.sql"
+        },
+        {
+          "code": "full_package_rule",
+          "path": "apps/server/drizzle/meta/0137_snapshot.json"
+        },
+        {
+          "code": "full_package_rule",
+          "path": "apps/server/drizzle/meta/_journal.json"
+        },
+        {
+          "code": "full_package_rule",
+          "path": "apps/server/src/db/schema.ts"
+        },
+        {
+          "code": "migration",
+          "path": "apps/server/drizzle/0137_message_sender_window.sql"
+        },
+        {
+          "code": "migration",
+          "path": "apps/server/drizzle/meta/0137_snapshot.json"
+        },
+        {
+          "code": "migration",
+          "path": "apps/server/drizzle/meta/_journal.json"
+        },
+        {
+          "code": "new_test",
+          "path": "apps/server/test/message-count.test.ts"
+        },
+        {
+          "code": "related",
+          "path": "apps/server/src/modules/tools/watch.ts"
+        },
+        {
+          "code": "related",
+          "path": "apps/server/test/message-count.test.ts"
+        },
+        {
+          "code": "schema",
+          "path": "apps/server/src/db/schema.ts"
+        }
+      ]
+    }
+  ],
+  "leftToFullRun": [
+    "apps/server/test/acme-fake.test.ts",
+    "apps/server/test/addresses.test.ts",
+    "apps/server/test/age-key.test.ts",
+    "apps/server/test/agent-sql-permissions.test.ts",
+    "apps/server/test/agent-sql.test.ts",
+    "apps/server/test/agent-view-company.test.ts",
+    "apps/server/test/agent-view-rule.test.ts",
+    "apps/server/test/api-models.test.ts",
+    "apps/server/test/app-close.test.ts",
+    "apps/server/test/ari.test.ts",
+    "apps/server/test/assistants-migration.test.ts",
+    "apps/server/test/autonomous-release-migration.test.ts",
+    "apps/server/test/beats.test.ts",
+    "apps/server/test/become.test.ts",
+    "apps/server/test/builtin-node-connections-migration.test.ts",
+    "apps/server/test/bundle-store.test.ts",
+    "apps/server/test/bundle.test.ts",
+    "apps/server/test/challenges.test.ts",
+    "apps/server/test/check-queue.test.ts",
+    "apps/server/test/cli.test.ts",
+    "apps/server/test/client.test.ts",
+    "apps/server/test/closed-port.test.ts",
+    "apps/server/test/composable-skills.test.ts",
+    "apps/server/test/compose.test.ts",
+    "apps/server/test/computer-keeper.test.ts",
+    "apps/server/test/config.test.ts",
+    "apps/server/test/confirm.test.ts",
+    "apps/server/test/connection-history.test.ts",
+    "apps/server/test/copies-score.test.ts",
+    "apps/server/test/copy-maker.test.ts",
+    "apps/server/test/copy-updating.test.ts",
+    "apps/server/test/crypto.test.ts",
+    "apps/server/test/db-door.test.ts",
+    "apps/server/test/db-pool.test.ts",
+    "apps/server/test/decision-policy.test.ts",
+    "apps/server/test/decisions-answers-ceo.test.ts",
+    "apps/server/test/decisions-answers-department.test.ts",
+    "apps/server/test/department-echelons-template.test.ts",
+    "apps/server/test/department-mode-schema.test.ts",
+    "apps/server/test/department-turns-migration.test.ts",
+    "apps/server/test/development-checks-template.test.ts",
+    "apps/server/test/development-echelons-cleanup.test.ts",
+    "apps/server/test/development-echelons-controls.test.ts",
+    "apps/server/test/development-echelons-findings.test.ts",
+    "apps/server/test/development-echelons-parent.test.ts",
+    "apps/server/test/development-echelons-paths.test.ts",
+    "apps/server/test/development-echelons-route.test.ts",
+    "apps/server/test/development-echelons-submit-source.test.ts",
+    "apps/server/test/development-echelons-template.test.ts",
+    "apps/server/test/development-echelons-tests.test.ts",
+    "apps/server/test/development-echelons-wake.test.ts",
+    "apps/server/test/echelons-policy.test.ts",
+    "apps/server/test/entry.test.ts",
+    "apps/server/test/errors.test.ts",
+    "apps/server/test/fake-relay.test.ts",
+    "apps/server/test/feedback-clean.test.ts",
+    "apps/server/test/fence-lint.test.ts",
+    "apps/server/test/follow-config.test.ts",
+    "apps/server/test/following.test.ts",
+    "apps/server/test/fresh-pglite.test.ts",
+    "apps/server/test/front-calls.test.ts",
+    "apps/server/test/front.test.ts",
+    "apps/server/test/gate-compare.test.ts",
+    "apps/server/test/github-create-repository.test.ts",
+    "apps/server/test/grant.test.ts",
+    "apps/server/test/granting-skill.test.ts",
+    "apps/server/test/harness-migration.test.ts",
+    "apps/server/test/health.test.ts",
+    "apps/server/test/helpers-basic.test.ts",
+    "apps/server/test/helpers-db-metadata.test.ts",
+    "apps/server/test/holder.test.ts",
+    "apps/server/test/hub.test.ts",
+    "apps/server/test/images-workflow.test.ts",
+    "apps/server/test/install-nodes-only.test.ts",
+    "apps/server/test/install-nodes-updater.test.ts",
+    "apps/server/test/install-ps1.test.ts",
+    "apps/server/test/install-script-browser.test.ts",
+    "apps/server/test/install-script-join.test.ts",
+    "apps/server/test/install-script-served.test.ts",
+    "apps/server/test/install-script-server-check.test.ts",
+    "apps/server/test/install-script-steps.test.ts",
+    "apps/server/test/install-script.test.ts",
+    "apps/server/test/install-worker.test.ts",
+    "apps/server/test/internet.test.ts",
+    "apps/server/test/keeper-app-call.test.ts",
+    "apps/server/test/keeper-restore.test.ts",
+    "apps/server/test/keeper-role.test.ts",
+    "apps/server/test/keeper-ticker.test.ts",
+    "apps/server/test/lab/network.test.ts",
+    "apps/server/test/lab/overlap.test.ts",
+    "apps/server/test/lead-update.test.ts",
+    "apps/server/test/lease-holder.test.ts",
+    "apps/server/test/lease.test.ts",
+    "apps/server/test/leaving.test.ts",
+    "apps/server/test/led.test.ts",
+    "apps/server/test/limit.test.ts",
+    "apps/server/test/link-listener.test.ts",
+    "apps/server/test/logging.test.ts",
+    "apps/server/test/machine-keys.test.ts",
+    "apps/server/test/materials-schema.test.ts",
+    "apps/server/test/measures.test.ts",
+    "apps/server/test/merge-plan.test.ts",
+    "apps/server/test/merge-rules.test.ts",
+    "apps/server/test/message-prompt.test.ts",
+    "apps/server/test/migrate-masking.test.ts",
+    "apps/server/test/migrate.test.ts",
+    "apps/server/test/migration-history.test.ts",
+    "apps/server/test/migration-metadata.test.ts",
+    "apps/server/test/migrations-0003-0033.test.ts",
+    "apps/server/test/migrations-0047-0049.test.ts",
+    "apps/server/test/migrations-0050-0062.test.ts",
+    "apps/server/test/migrations.test.ts",
+    "apps/server/test/model-check-dataset.test.ts",
+    "apps/server/test/model-check-lifecycle.test.ts",
+    "apps/server/test/model-check-run.test.ts",
+    "apps/server/test/model-check-score.test.ts",
+    "apps/server/test/multi-company-isolation.test.ts",
+    "apps/server/test/named-test-files.test.ts",
+    "apps/server/test/naming.test.ts",
+    "apps/server/test/next-section.test.ts",
+    "apps/server/test/node-build.test.ts",
+    "apps/server/test/node-image.test.ts",
+    "apps/server/test/node-programs.test.ts",
+    "apps/server/test/notification-heading.test.ts",
+    "apps/server/test/operator-hub.test.ts",
+    "apps/server/test/orchestrator-sql-secrets.test.ts",
+    "apps/server/test/origin.test.ts",
+    "apps/server/test/outbound-checks.test.ts",
+    "apps/server/test/outbound-delivery.test.ts",
+    "apps/server/test/outbound-grants.test.ts",
+    "apps/server/test/outbound-render.test.ts",
+    "apps/server/test/outbound-setup-log.test.ts",
+    "apps/server/test/outbound-smtp.test.ts",
+    "apps/server/test/outbound-webhook.test.ts",
+    "apps/server/test/peer-client.test.ts",
+    "apps/server/test/peer-session-silence.test.ts",
+    "apps/server/test/peer-stream-clock.test.ts",
+    "apps/server/test/phone-access.test.ts",
+    "apps/server/test/phone-recording.test.ts",
+    "apps/server/test/phones-migration.test.ts",
+    "apps/server/test/pins.test.ts",
+    "apps/server/test/pipeline-echelons.test.ts",
+    "apps/server/test/pipeline-facts.test.ts",
+    "apps/server/test/pipeline-guidance.test.ts",
+    "apps/server/test/planned-vitest-sequencer.test.ts",
+    "apps/server/test/private-upload.test.ts",
+    "apps/server/test/program-operator-migration.test.ts",
+    "apps/server/test/program-operator-nodes-migration.test.ts",
+    "apps/server/test/program-operator-policy.test.ts",
+    "apps/server/test/program-operator-rpc.test.ts",
+    "apps/server/test/program-operator-screen.test.ts",
+    "apps/server/test/promote.test.ts",
+    "apps/server/test/prompt.test.ts",
+    "apps/server/test/proofs.test.ts",
+    "apps/server/test/proxy-header.test.ts",
+    "apps/server/test/proxy.test.ts",
+    "apps/server/test/question-schema.test.ts",
+    "apps/server/test/question.test.ts",
+    "apps/server/test/read-cookie.test.ts",
+    "apps/server/test/relay-client.test.ts",
+    "apps/server/test/release-benchmark.test.ts",
+    "apps/server/test/release-improvement-templates.test.ts",
+    "apps/server/test/replica.test.ts",
+    "apps/server/test/repo-full-command-migration.test.ts",
+    "apps/server/test/review-source-lines.test.ts",
+    "apps/server/test/role-levels-guide.test.ts",
+    "apps/server/test/role-model.test.ts",
+    "apps/server/test/round-trips.test.ts",
+    "apps/server/test/route-access.test.ts",
+    "apps/server/test/sign-in-limit.test.ts",
+    "apps/server/test/skill-independence.test.ts",
+    "apps/server/test/slots.test.ts",
+    "apps/server/test/sql-check.test.ts",
+    "apps/server/test/sql-parser.test.ts",
+    "apps/server/test/static.test.ts",
+    "apps/server/test/stuck-recipients-migration.test.ts",
+    "apps/server/test/stumbles.test.ts",
+    "apps/server/test/switch-step.test.ts",
+    "apps/server/test/switch-word.test.ts",
+    "apps/server/test/sync-step.test.ts",
+    "apps/server/test/sync.test.ts",
+    "apps/server/test/takeover-rows.test.ts",
+    "apps/server/test/takeover-step.test.ts",
+    "apps/server/test/taking.test.ts",
+    "apps/server/test/task-pause.test.ts",
+    "apps/server/test/templates-once.test.ts",
+    "apps/server/test/templates-watch-idle.test.ts",
+    "apps/server/test/templates.test.ts",
+    "apps/server/test/terminal-input-line.test.ts",
+    "apps/server/test/terminal-look.test.ts",
+    "apps/server/test/test-capacity.test.ts",
+    "apps/server/test/test-database-parsers.test.ts",
+    "apps/server/test/test-environment-migration.test.ts",
+    "apps/server/test/test-environment-runs.test.ts",
+    "apps/server/test/test-environment-templates.test.ts",
+    "apps/server/test/test-execution-receipt.test.ts",
+    "apps/server/test/test-pick.test.ts",
+    "apps/server/test/test-result-reuse-migration.test.ts",
+    "apps/server/test/test-run-commit-migration.test.ts",
+    "apps/server/test/test-run-environment-plan.test.ts",
+    "apps/server/test/test-run-plan.test.ts",
+    "apps/server/test/test-run-product-config.test.ts",
+    "apps/server/test/test-run-product-plan.test.ts",
+    "apps/server/test/test-run-reuse.test.ts",
+    "apps/server/test/test-run-speed-plan.test.ts",
+    "apps/server/test/test-run-suite-shards.test.ts",
+    "apps/server/test/test-tool-text.test.ts",
+    "apps/server/test/testruns-refs-create.test.ts",
+    "apps/server/test/testruns-refs.test.ts",
+    "apps/server/test/throughput.test.ts",
+    "apps/server/test/tls-checks.test.ts",
+    "apps/server/test/total-loss.test.ts",
+    "apps/server/test/tree-programs.test.ts",
+    "apps/server/test/tunnel.test.ts",
+    "apps/server/test/turn-effort.test.ts",
+    "apps/server/test/undelivered.test.ts",
+    "apps/server/test/update-steps.test.ts",
+    "apps/server/test/updater-backups.test.ts",
+    "apps/server/test/updater-computer.test.ts",
+    "apps/server/test/updater-control.test.ts",
+    "apps/server/test/updater-copies.test.ts",
+    "apps/server/test/updater-node-images.test.ts",
+    "apps/server/test/updater-nodes.test.ts",
+    "apps/server/test/updater-paths.test.ts",
+    "apps/server/test/updater-revision2.test.ts",
+    "apps/server/test/updater-stopped-nodes.test.ts",
+    "apps/server/test/updater-uploads.test.ts",
+    "apps/server/test/updater-worker.test.ts",
+    "apps/server/test/updater.test.ts",
+    "apps/server/test/vault-totp.test.ts",
+    "apps/server/test/version.test.ts",
+    "apps/server/test/visit-client.test.ts",
+    "apps/server/test/wait-graph.test.ts",
+    "apps/server/test/wait-notice-migration.test.ts",
+    "apps/server/test/web-crypto-types.test.ts",
+    "apps/server/test/work-tree.test.ts",
+    "apps/server/test/worker-keeper-fixture.test.ts",
+    "apps/server/test/worker-pages.test.ts",
+    "apps/server/test/x509.test.ts",
+    "apps/server/test/yaml-once.test.ts"
+  ],
+  "reason": null,
+  "fullSuiteComparator": "unavailable"
+}

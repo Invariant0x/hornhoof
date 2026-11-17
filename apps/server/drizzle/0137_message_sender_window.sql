@@ -1,0 +1,1 @@
+CREATE INDEX "agent_events_message_sender_window" ON "agent_events" USING btree ("company_id",("data"->>'by'),"created_at") WHERE "agent_events"."kind" = 'message';

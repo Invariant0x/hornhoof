@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OperatorNodeMessage, OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
-import { expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { OperatorRuntime } from '../src/terminal/operator-runtime.js';
 
-type RecoverySource = Pick<ConstructorParameters<typeof OperatorRuntime>[1], 'current' | 'recovery'>;
+type RecoverySource = Pick<ConstructorParameters<typeof OperatorRuntime>[1], 'current' | 'recovery' | 'facts'>;
 
 function fixture(shown: Partial<RecoverySource> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-runtime-'));
@@ -245,4 +245,52 @@ it.each<[string, (c: ReturnType<typeof fixture>) => void]>([
   await c.runtime.message({ ...opened, revision: 2, disposition: 'revoke', closedBecause: 'failed' });
   expect(c.runtime.failure(key)).toBe('failed');
   expect(c.runtime.failureDetail(key)).toBe(`failed; case ${opened.case}`);
+});
+
+/* The program ran a long Bash as its assignment came: the screen said working, Hornhoof's words had gone in, and a case of
+   words not recorded opened all the same (three of them on the morning of 17.11). A program inside a tool call records
+   the words it was given once the call ends. */
+describe('the case of assignment words not recorded while the program is inside a tool call', () => {
+  const settled = () => new Promise(done => setImmediate(done));
+  const working = (tool: { running: boolean }, words: { undelivered: boolean }) => fixture({
+    current: () => ({ ...program, runningTool: tool.running }),
+    facts: async () => ({ jobId: null, instance: randomUUID(), working: true, tool: tool.running ? 'Bash' : null, question: null, input: 'empty', undelivered: words.undelivered }),
+  });
+  const unrecorded = (c: ReturnType<typeof fixture>) => c.sent.filter(f => f.type === 'program.operator_needed' && f.reason === 'assignment_unrecorded');
+  const lookAt = async (c: ReturnType<typeof fixture>, ms: number) => { c.at(ms); c.runtime.tick(); await settled(); await settled(); };
+
+  it('opens none while a long Bash runs with the words gone in', async () => {
+    const c = working({ running: true }, { undelivered: false });
+    for (const ms of [60_000, 90_000, 120_000, 300_000, 600_000]) await lookAt(c, ms);
+    expect(unrecorded(c)).toEqual([]);
+  });
+
+  it('opens one when the words never went in and nothing moved for sixty seconds', async () => {
+    const c = working({ running: true }, { undelivered: true });
+    await lookAt(c, 59_999);
+    expect(unrecorded(c)).toEqual([]);
+    await lookAt(c, 60_000);
+    expect(unrecorded(c)).toEqual([expect.objectContaining({ deliveryId: c.assignment.id, elapsedMs: 60_000 })]);
+  });
+
+  it('opens one once the call ended and the words were still not recorded', async () => {
+    const tool = { running: true };
+    const c = working(tool, { undelivered: false });
+    await lookAt(c, 60_000);
+    tool.running = false;
+    await lookAt(c, 90_000);
+    expect(unrecorded(c)).toEqual([]);
+    await lookAt(c, 120_000);
+    expect(unrecorded(c)).toEqual([expect.objectContaining({ deliveryId: c.assignment.id, elapsedMs: 120_000 })]);
+  });
+
+  it('opens none once the words got recorded after the call', async () => {
+    const tool = { running: true };
+    const c = working(tool, { undelivered: false });
+    await lookAt(c, 60_000);
+    tool.running = false;
+    c.runtime.receipt(c.identity.agentKey, c.assignment, 'taken');
+    await lookAt(c, 120_000);
+    expect(unrecorded(c)).toEqual([]);
+  });
 });
