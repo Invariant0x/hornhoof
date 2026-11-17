@@ -3,13 +3,16 @@
 Kind: bug. Risk: test expectations only; no runtime permission change.
 Branch: `task-1278`, from fresh `origin/turn-32` at
 `cf64981ca64e5fa3e6dad5ad4171007534651e2c`.
-Checked implementation: `5bcf680d6ab306a390fe441e85c3f0567dc5acc5`.
-The following evidence commit changes documents and logs only.
+Current integration base: `94200fd668d90363946cea19aeeccc5e929e9ad8`.
+Checked implementation: `ba9c9b97951b9f38aa18dece93b2e019147f24cd`.
+Commits after that implementation change documents and logs only.
 
 The reproduced failure is the head's list at `tasks-tools.test.ts:99`,
 not the orchestrator's list. The worker expectation has the same omission.
-The orchestrator assertion already passes. The relevant files match the
-reported `2f48ff9192198d6ad71f3c74b48d3a52071f0d83` baseline.
+The orchestrator assertion already passes. At the initial reproduction, the
+relevant files matched the reported
+`2f48ff9192198d6ad71f3c74b48d3a52071f0d83` baseline. The employee expectation
+in `tools.test.ts:74` had the same stale list.
 
 History and intent:
 
@@ -26,30 +29,40 @@ History and intent:
   requires company agents to use `all_agents` access, excluding assistants.
   Its `computer-scope.test.ts` MCP case explicitly checks both employee kinds.
 
-Only the two head/worker expected arrays changed. Each still uses sorted,
-exact equality with a literal list; no tool is ignored, skipped or inferred
-from the actual result. The orchestrator expectation is unchanged.
+Three literal arrays changed: the head/worker lists in `tasks-tools.test.ts`
+and the employee list in `tools.test.ts`. Each still uses sorted, exact
+equality; no tool is ignored, skipped or inferred from the actual result.
+The orchestrator expectation retains `close_task` from the current turn.
+The task branch took in the current turn without removing either change.
 
 Requirement to check:
 
 - Exact lists per kind: `tasks-tools.test.ts`, 30 PASS.
+- The employee's company view and tool list: `tools.test.ts`, 7 PASS.
 - Intentional employee tools and access guards: `computer-scope.test.ts`,
   19 PASS, including refusal before `all_agents`, successful recorded command
   and result handling, exclusion of assistants/other companies, and no
   employee `ask_computer_access` tool.
 - Original orchestrator computer behavior: `computer.test.ts`, 20 PASS.
+- The current turn's task-closing contract: `orchestrator-close.test.ts`,
+  22 PASS.
 
-RED on the base: 29 PASS, one intended failure, exit 1. Final named checks
-on the checked implementation: 69 PASS across three files, exit 0.
+RED on the initial base: 29 PASS, one intended failure, exit 1. The additional
+`tools.test.ts` RED on `289f63f541af626f242fe6e5a1d6387dfcbdafee` had 6 PASS
+and one intended failure, exit 1. Final named checks on the checked
+implementation: 98 PASS across five files, exit 0.
 Server types including tests, eslint of the changed test, server build and
 `git diff --check` all exit 0. Commands, versions and statuses are recorded
-in `docs/evidence/task-1278/checks.json`; complete output is beside it.
+in `docs/evidence/task-1278/integration/checks.json`; complete output is
+beside it. Earlier receipts are retained in `checks.json` and
+`additional-history.json` under the same evidence folder.
 No full run, `run_tests` or broad author check was invoked.
 
-Own diff and security inspection found no issue: the two changes retain
+Own diff and security inspection found no issue: the three changes retain
 exact exposure checks and do not alter production access, identities,
 secrets, dependencies or clocks. The existing scope tests check the runtime
-boundary. Native `codex review --base task-1278-base` returned exit 0 but
+boundary. Native `codex review --base task-1278-base` on the original
+`5bcf680d6ab306a390fe441e85c3f0567dc5acc5` returned exit 0 but
 could not read any code because bubblewrap could not create a namespace.
 It is recorded as NOT_RUN, not a passing review. No sandbox bypass or system
 change was attempted. Release-wide checks remain with the release owner.
