@@ -145,16 +145,19 @@ export async function dropAccess(tx: Db, machineIds: string[], now: Date): Promi
 export class Computers {
   readonly waitMs: number;
   private readonly now: () => Date;
+  private readonly pause: (ms: number) => Promise<unknown>;
   private readonly seenAt = new Map<string, number>();
   private legacyDone = false;
   private clearedAt = 0;
 
   constructor(
     private readonly ctx: Pick<Ctx, 'db' | 'config' | 'log'>,
-    opts: { now?: () => Date; waitMs?: number } = {},
+    opts: { now?: () => Date; waitMs?: number; pause?: (ms: number) => Promise<unknown> } = {},
   ) {
     this.now = opts.now ?? (() => new Date());
     this.waitMs = opts.waitMs ?? WAIT_MS;
+    /* How a wait for a command's answer lets time go by before it looks again. */
+    this.pause = opts.pause ?? sleep;
   }
 
   private own(row: Pick<Row, 'networkId'>): boolean {
@@ -370,7 +373,7 @@ export class Computers {
   /* Waits a while for the command's answer. One that no keeper took in time is ended here too, so whoever asked hears
      that it was not run. */
   async wait(runId: string, companyId: string, agentId: string, ms = this.waitMs): Promise<Waited> {
-    const end = Date.now() + ms;
+    const end = this.now().getTime() + ms;
     const mine = and(eq(computerRuns.id, runId), eq(computerRuns.companyId, companyId), eq(computerRuns.agentId, agentId));
     const read = () => this.ctx.db.select({ state: computerRuns.state, machineId: computerRuns.machineId, createdAt: computerRuns.createdAt }).from(computerRuns).where(mine);
     for (;;) {
@@ -385,8 +388,8 @@ export class Computers {
         const [done] = await this.ctx.db.select({ exit: computerRuns.exit, output: computerRuns.output }).from(computerRuns).where(mine);
         return { exit: done?.exit ?? -1, output: done?.output ?? '' };
       } else if (run.state === 'lost') return 'lost';
-      else if (Date.now() >= end) return 'running';
-      else await sleep(POLL_MS);
+      else if (this.now().getTime() >= end) return 'running';
+      else await this.pause(POLL_MS);
     }
   }
 

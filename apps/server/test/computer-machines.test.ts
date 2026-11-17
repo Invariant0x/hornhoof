@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, desc, eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, computerRuns, departments, jobs, machineAccess, machines, people, personKeys, subscriptions } from '../src/db/schema.js';
@@ -17,7 +17,10 @@ import { VIA } from '../src/modules/network/via.js';
 import { BUILTIN } from './builtin.js';
 import { identityOf, ownBuiltin } from '../src/modules/nodes/hub.js';
 import { as, connectNode, invitePerson, listen, mcp, openStream, setUpCompany, testApp, until, viaLink } from './helpers.js';
-import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
+import { companyRows, nextTurn, SERVER_MACHINE_ENV, serverMachine, testComputers } from './helpers-computer.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -53,17 +56,22 @@ const notTheirs = (owner: string, machine: string) => `The last words in this tu
 async function company(env: NodeJS.ProcessEnv = {}) {
   const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
   const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control, TUNNEL_HOST: 'localhost', ...SERVER_MACHINE_ENV, ...env });
+  testComputers(app);
   const url = await listen(app);
-  const ceo = await setUpCompany(app);
+  /* The people and their department, made once for the file. */
+  const tokens = await companyRows(app, 'computer-machines people', async () => {
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
+    return {
+      ceo,
+      marat: await invitePerson(app, ceo, { name: 'Marat', email: 'marat@acme.com', access: { departments: [dev!.id], teams: [] } }),
+      zed: await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } }),
+      dan: await invitePerson(app, ceo, { name: 'Dan', email: 'dan@acme.com', access: { departments: [dev!.id], teams: [] } }),
+    };
+  });
   const [acme] = await db.select().from(companies);
   const server = await serverMachine(app);
-  const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
-  const tokens = {
-    ceo,
-    marat: await invitePerson(app, ceo, { name: 'Marat', email: 'marat@acme.com', access: { departments: [dev!.id], teams: [] } }),
-    zed: await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } }),
-    dan: await invitePerson(app, ceo, { name: 'Dan', email: 'dan@acme.com', access: { departments: [dev!.id], teams: [] } }),
-  };
   const ids = Object.fromEntries((await db.select().from(people)).map(p => [p.name.toLowerCase(), p.id])) as Record<'ivan' | 'marat' | 'zed' | 'dan', string>;
   const key = await browserKey();
   await db.insert(personKeys).values({ personId: ids.marat, companyId: acme!.id, publicKey: key.publicKey, wrapped: 'w', salt: 's', iv: 'i', iterations: 600_000 });
@@ -217,10 +225,31 @@ describe('computer access to a machine of the company', () => {
     expect((await c.open(c.tokens.ceo, c.server)).statusCode).toBe(200);
   });
 
+  it('waits for an answer on its own clock, and lets time go by only through its pause', async () => {
+    const c = await company();
+    let now = Date.now();
+    const pauses: number[] = [];
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 1000, pause: async ms => { pauses.push(ms); now += ms; } });
+    computer.moveLegacy(c.control);
+    computer.seen(c.mac, true);
+    c.app.ctx.computer = computer;
+    await c.openMac();
+    const run = await c.start(c.mac);
+    /* Nobody answers: the wait looks again after each pause of its own, and ends once its clock passed the second. */
+    expect(await computer.wait(run, c.acme.id, c.orchestrator.id)).toBe('running');
+    expect(pauses).toEqual([250, 250, 250, 250]);
+    /* An answer that is there already ends the wait at its first look. */
+    expect((await computer.take(c.mac, [])).runs.map(r => r.id)).toEqual([run]);
+    expect(await computer.answer(c.mac, run, { exit: 0, output: 'recorded sample' })).toBe(true);
+    pauses.length = 0;
+    expect(await computer.wait(run, c.acme.id, c.orchestrator.id)).toEqual({ exit: 0, output: 'recorded sample' });
+    expect(pauses).toEqual([]);
+  });
+
   it('is not reachable without its keeper', async () => {
     const c = await company();
     let now = Date.now();
-    const computer = new Computers(c.app.ctx, { now: () => new Date(now) });
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), pause: nextTurn });
     computer.moveLegacy(c.control);
     c.app.ctx.computer = computer;
     const grant = async () => ({ grant: await c.key.grant(c.NETWORK_ID) });
@@ -274,7 +303,7 @@ describe('computer access to a machine of the company', () => {
   it('keeps a command its keeper holds, and counts one it lost as lost, never sending it again', async () => {
     const c = await company();
     let now = Date.now();
-    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0 });
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0, pause: nextTurn });
     computer.moveLegacy(c.control);
     computer.seen(c.mac, true);
     c.app.ctx.computer = computer;
@@ -301,7 +330,7 @@ describe('computer access to a machine of the company', () => {
   it('does not give up a command that waits behind one that still runs', async () => {
     const c = await company();
     let now = Date.now();
-    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0 });
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0, pause: nextTurn });
     computer.moveLegacy(c.control);
     computer.seen(c.mac, true);
     c.app.ctx.computer = computer;
@@ -343,7 +372,7 @@ describe('computer access to a machine of the company', () => {
   it('gives up a command that waited or was out too long, and tells the keeper what to let go of', async () => {
     const c = await company();
     let now = Date.now();
-    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0 });
+    const computer = new Computers(c.app.ctx, { now: () => new Date(now), waitMs: 0, pause: nextTurn });
     computer.moveLegacy(c.control);
     computer.seen(c.mac, true);
     c.app.ctx.computer = computer;
@@ -670,7 +699,7 @@ describe('what an app from before access was per machine left', () => {
 
   /* The next start of the app on the same control folder, as after an update: it leads at once. */
   function nextStart(app: Awaited<ReturnType<typeof testApp>>['app'], control: string, server: string): Computers {
-    const computer = new Computers(app.ctx);
+    const computer = new Computers(app.ctx, { pause: nextTurn });
     computer.moveLegacy(control);
     computer.seen(server, true);
     app.ctx.computer = computer;
@@ -719,8 +748,13 @@ describe('what an app from before access was per machine left', () => {
     const untilSec = Math.floor(Date.now() / 1000) + 3600;
     legacy(control, { untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null });
     const { app, db } = await testApp({ HORNHOOF_CONTROL_DIR: control, ...SERVER_MACHINE_ENV });
+    /* The app looks again for its own machine's row on a timer: the test's clock moves it. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     await setUpCompany(app);
     const server = await serverMachine(app);
+    expect(app.ctx.computer.ready()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
     await until(() => app.ctx.computer.ready());
     expect((await db.select().from(machineAccess))[0]).toMatchObject({ machineId: server, until: new Date(untilSec * 1000) });
     /* A server installed before machines had ids has no machine of its own to open: there is nothing to wait for. */
@@ -770,7 +804,7 @@ describe('computer access button through inbox mode', () => {
           expect(await c.app.ctx.computer.answer(machine, run.id, { exit: 0, output })).toBe(true);
           return;
         }
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await nextTurn();
       }
     })();
     const res = await call(client, 'computer', args);

@@ -3,11 +3,13 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, computerRuns, departments, jobs, machineAccess, machines, people, personKeys, subscriptions } from '../src/db/schema.js';
-import { Computers } from '../src/modules/computer/access.js';
 import { keyPrint } from '../src/modules/computer/owner-key.js';
 import { decisionPrincipal, machinePrincipal } from '../src/modules/conversation/decision-context.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
-import { SERVER_MACHINE_ENV, serverMachine } from './helpers-computer.js';
+import { companyRows, SERVER_MACHINE_ENV, serverMachine, testComputers } from './helpers-computer.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 const AT = new Date('2026-11-17T12:00:00.000Z');
 const DURATIONS = [['1h', 3600], ['8h', 28800], ['24h', 86400]] as const;
@@ -17,18 +19,20 @@ async function company() {
   vi.setSystemTime(AT);
   onTestFinished(() => { vi.useRealTimers(); });
   const { app, db } = await testApp(SERVER_MACHINE_ENV);
-  const ceo = await setUpCompany(app);
+  /* The company and its agents, made once for the file at the frozen time. */
+  const { ceo, worker, head, assistant } = await companyRows(app, 'computer-scope company', async () => {
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [subscription] = await db.select().from(subscriptions);
+    const [dept] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const hire = async (kind: 'worker' | 'head' | 'assistant') => (await db.insert(agents).values({ companyId: company!.id, kind, name: kind, roleKey: 'DEV-BE', departmentId: dept!.id, subscriptionId: subscription!.id, model: '' }).returning())[0]!;
+    return { ceo, worker: await hire('worker'), head: await hire('head'), assistant: await hire('assistant') };
+  }, AT);
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [plan] = await db.select().from(subscriptions);
-  const [dept] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-  const hire = async (kind: 'worker' | 'head' | 'assistant') => (await db.insert(agents).values({ companyId: acme!.id, kind, name: kind, roleKey: 'DEV-BE', departmentId: dept!.id, subscriptionId: plan!.id, model: '' }).returning())[0]!;
-  const worker = await hire('worker');
-  const head = await hire('head');
-  const assistant = await hire('assistant');
-  app.ctx.computer = new Computers(app.ctx, { waitMs: 0 });
-  app.ctx.computer.moveLegacy(app.ctx.config.controlDir);
+  testComputers(app, { waitMs: 0 });
   const machine = await serverMachine(app);
   const run = async (agent = worker) => {
     const token = `scope-${agent.id}-0123456789abcdef`;
@@ -216,6 +220,22 @@ describe('machine access scope', () => {
     const lines = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer'))).orderBy(agentEvents.seq);
     const changes = lines.filter(line => ['closed', 'declined'].includes((line.data as { state: string }).state));
     expect(changes.map(line => [(line.data as { state: string }).state, line.personId])).toEqual([['closed', null], ['declined', null]]);
+  });
+
+  it('names the person who closes access or declines its request', async () => {
+    const c = await company();
+    const delegate = await invitePerson(c.app, c.ceo, { name: 'Delegate', email: 'delegate@scope.test', access: { whole: true } });
+    const [deputy] = await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.email, 'delegate@scope.test')).returning();
+    const change = async (action: 'close' | 'decline', token: string) => expect((await c.app.inject({ method: 'POST', url: `/api/machines/${c.machine}/access/${action}`, ...as(token) })).statusCode).toBe(200);
+    expect((await c.open()).statusCode).toBe(200);
+    await change('close', c.ceo);
+    await c.app.ctx.computer.ask(c.acme.id, c.machine, 'Synthetic declined request');
+    await change('decline', c.ceo);
+    expect((await c.open()).statusCode).toBe(200);
+    await change('close', delegate);
+    const lines = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.orchestrator.id), eq(agentEvents.kind, 'computer'))).orderBy(agentEvents.seq);
+    const changes = lines.filter(line => ['closed', 'declined'].includes((line.data as { state: string }).state));
+    expect(changes.map(line => [(line.data as { state: string }).state, line.personId])).toEqual([['closed', c.owner.id], ['declined', c.owner.id], ['closed', deputy!.id]]);
   });
 
   it('offers heads and workers command tools without asking for access', async () => {
