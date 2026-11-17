@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, sessions, subscriptions } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { appFixture, as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
@@ -47,7 +48,7 @@ export async function vaultCompany() {
   /* A running turn of the agent and the token its program calls the tools with. */
   const startTurn = async (agentId: string, taskId: string | null = null) => {
     const token = `vault-tool-token-${++seq}-0123456789abcdef`;
-    const [{ companyId: of }] = (await db.select({ companyId: agents.companyId }).from(agents).where(eq(agents.id, agentId))) as [{ companyId: string }];
+    const [{ companyId: of }] = (await db.select(only(agents, 'companyId')).from(agents).where(eq(agents.id, agentId))) as [{ companyId: string }];
     const [job] = await db
       .insert(jobs)
       .values({ companyId: of, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'sign in', timeoutMs: 900_000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token), taskId })

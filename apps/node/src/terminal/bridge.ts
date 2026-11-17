@@ -13,6 +13,9 @@ const MAX_BODY = 4 * 1024 * 1024;
 const MAX_FILE = 51 * 1024 * 1024;
 /* A hook's answer waits this long for the host to give it. */
 const HOOK_WAIT_MS = 10_000;
+/* How long the bridge keeps a program's idle connection, as Hornhoof's front does: a program keeps it between two tool
+   calls, and with Node's 5 seconds its next call on a connection the bridge was closing broke with ECONNRESET. */
+const KEEP_ALIVE_MS = 72_000;
 
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
@@ -80,7 +83,7 @@ export class Bridge {
   }
 
   async start(): Promise<void> {
-    const server = createServer((req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
+    const server = createServer({ keepAliveTimeout: KEEP_ALIVE_MS }, (req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
     server.on('connection', socket => {
       if (this.owns) this.accepted.set(socket, this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
     });

@@ -1,8 +1,9 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { repoAt } from '../departments/repository.js';
-import { testedEvidence } from './echelons-tests.js';
+import { requireTestsReport } from './echelons-tests.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { acceptedDocument } from './echelons-document.js';
 import type { Ctx } from '../../app.js';
@@ -10,7 +11,8 @@ import { requiredStagesComplete } from './echelons-accept.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { giver, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 
-const Acceptance = z.object({ candidateId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/), routeRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/) })) });
+/* Acceptances and aggregates made before checks went local also name test runs, which are left out. */
+const Acceptance = z.object({ candidateId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/), routeRevision: z.number().int().positive() });
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 
@@ -31,9 +33,9 @@ export async function architectureReport(ctx: Reader, task: Task, route: Route, 
   return { task: row, wakes };
 }
 
-type AcceptedChild = { taskId: string; candidateId: string; commit: string; evidence: { runId: string; commit: string }[] } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true } | { taskId: string; candidateId: string; digest: string };
+type AcceptedChild = { taskId: string; candidateId: string; commit: string } | { taskId: string; children: AcceptedChild[] } | { taskId: string; turnkey: true } | { taskId: string; candidateId: string; digest: string };
 const ChildReference: z.ZodType<AcceptedChild> = z.lazy(() => z.union([
-  z.object({ taskId: z.uuid(), candidateId: z.uuid(), commit: z.string(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string() })) }),
+  z.object({ taskId: z.uuid(), candidateId: z.uuid(), commit: z.string() }),
   z.object({ taskId: z.uuid(), children: z.array(ChildReference) }),
   z.object({ taskId: z.uuid(), turnkey: z.literal(true) }),
   z.object({ taskId: z.uuid(), candidateId: z.uuid(), digest: z.string() }),
@@ -57,7 +59,7 @@ async function acceptedChild(tx: Tx, child: Task, path: Set<string>): Promise<Ac
   if (child.status !== 'done') throw refuse(409, 'task_invalid', 'Every child must be accepted before the group closes.');
   const route = await routeOf(tx, child);
   if (route.state.phase !== 'done') throw refuse(409, 'task_invalid', 'A closed child has no completed route.');
-  const [report] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
+  const [report] = await tx.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
   /* Turnkey work has no candidate and no stages: its holder closed it alone, and nobody checks it after. */
   if (route.state.resultKind === 'turnkey') return { taskId: child.id, turnkey: true };
   if (route.state.resultKind === 'document') return acceptedDocument(tx, child, route, report?.data);
@@ -72,23 +74,22 @@ async function acceptedAggregate(tx: Tx, child: Task, route: Route, report: Repo
 }
 
 function acceptedIdentity(acceptance: z.infer<typeof Acceptance>, route: Route, candidate: Awaited<ReturnType<typeof currentCandidate>>): boolean {
-  return acceptance.candidateId === candidate.id && acceptance.commit === candidate.commit && acceptance.routeRevision === route.revision && acceptance.evidence.every(proof => proof.commit === candidate.commit);
+  return acceptance.candidateId === candidate.id && acceptance.commit === candidate.commit && acceptance.routeRevision === route.revision;
 }
 
 async function acceptedCode(tx: Tx, child: Task, route: Route, report: ReportData): Promise<AcceptedChild> {
   const candidate = await currentCandidate(tx, child, route);
   const acceptance = Acceptance.safeParse(report?.acceptedCandidate);
   if (!requiredStagesComplete(route) || !acceptance.success || !acceptedIdentity(acceptance.data, route, candidate)) throw refuse(409, 'task_invalid', 'A child candidate is unreviewed, unaccepted or stale.');
-  const evidence = (await testedEvidence(tx, child, route, candidate, route.revision - 1)).sort((a, b) => a.runId.localeCompare(b.runId));
-  if (evidence.length !== acceptance.data.evidence.length || acceptance.data.evidence.some(proof => !evidence.some(run => run.runId === proof.runId && run.commit === proof.commit))) throw refuse(409, 'task_changed', 'The accepted evidence differs from its Tests report.');
-  return { taskId: child.id, candidateId: candidate.id, commit: candidate.commit, evidence };
+  await requireTestsReport(tx, child, route, candidate, route.revision - 1);
+  return { taskId: child.id, candidateId: candidate.id, commit: candidate.commit };
 }
 
 /* Where the department keeps code, a worker's own report would hand in work no Review saw: a worker closes a coordination task
    there only on accepted results of its subtasks. A head or the orchestrator still closes a finding that has no code. */
 async function closableBy(ctx: Reader, tx: Tx, task: Task, agentId: string, children: unknown[]): Promise<void> {
   if (children.length || !ctx.config) return;
-  const [agent] = await tx.select({ kind: agents.kind }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await tx.select(only(agents, 'kind')).from(agents).where(eq(agents.id, agentId));
   if (agent?.kind !== 'worker' || !(await repoAt({ db: tx, config: ctx.config }, [task.productId, task.departmentId]))) return;
   throw refuse(409, 'task_invalid', `#${task.number} closes only on accepted results of its subtasks, as its department keeps code: hand in code through submit on a code task, or tell whoever gave you #${task.number} what you found with comment, and they close it.`);
 }

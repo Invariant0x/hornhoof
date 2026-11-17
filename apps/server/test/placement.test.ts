@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, nodes as nodeRows, subscriptions, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -205,7 +206,7 @@ describe('agents of one plan on several machines', () => {
     await until(async () => (await state(app, ceo, bruno.id)).reason === 'machine_offline');
     /* A turn waits for him, as a task or a timer queues one. */
     await db.insert(jobs).values({ companyId: bruno.companyId, subscriptionId: plan, agentId: bruno.id, kind: 'conversation', prompt: 'Go on with the checkout', timeoutMs: 900000, status: 'queued' });
-    const [own] = await db.select({ machineId: nodeRows.machineId }).from(nodeRows).where(eq(nodeRows.id, nodes.mac.nodeId));
+    const [own] = await db.select(only(nodeRows, 'machineId')).from(nodeRows).where(eq(nodeRows.id, nodes.mac.nodeId));
     expect((await app.inject({ method: 'POST', url: `/api/machines/${own!.machineId}/disconnect`, ...as(ceo) })).statusCode).toBe(204);
     const run = await nextRun(lap);
     expect(run.prompt).toContain('Go on with the checkout');

@@ -12,6 +12,7 @@ import { callSkill, hasSkills } from './skills.js';
 import { registerVaultTools } from '../vault/tools.js';
 import { guardTools } from '../tools/calls.js';
 import { turnProtection } from '../tools/privacy.js';
+import { registerPhoneTools } from '../phones/tools.js';
 import { agentsFor, answerFor, EventsQuery, eventsFor, MessageBody, requestsFor, whoAmI, Words, writeFor } from './routes.js';
 
 /* What the program's model reads first: what Hornhoof is to it, and how the tools go together. */
@@ -116,6 +117,7 @@ export async function assistantAgentTools(ctx: Ctx, job: { id: string; agentId: 
   registerTools(server, ctx, owner, new AbortController().signal, job.agentId);
   /* The company's vault, as for every agent of the company: the assistant's own agent, in this turn. */
   registerVaultTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
+  registerPhoneTools(server, ctx, { id: job.agentId, companyId: job.companyId, jobId: job.id });
   server.registerTool(
     'tell_owner',
     {

@@ -1,4 +1,4 @@
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
@@ -209,7 +209,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; computerAccess?: { machineId: string; inboxId?: string }; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; byTurn?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; computerAccess?: { machineId: string; inboxId?: string }; action?: string; report?: string; reportContext?: string; senders?: MessageParty[]; pictures?: { id: string; name: string }[]; channel?: 'telegram' | 'assistant'; telegram?: { bot: string; chat: number; update: number }; assistant?: { id: string; name: string; message: string } }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null; fresh?: string };
 
 export type TurnMessage = NonNullable<Turn['message']>;
 
@@ -323,7 +323,7 @@ export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string
 
 /* A turn its words went into as it ran. */
 async function runsNow(ctx: Ctx, jobId: string): Promise<boolean> {
-  const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
+  const [job] = await ctx.db.select(only(jobs, 'status')).from(jobs).where(eq(jobs.id, jobId));
   return job?.status === 'running';
 }
 
@@ -1237,7 +1237,7 @@ export function pump(ctx: Ctx, agentId: string): Promise<void> {
 
 /* Every agent with turns waiting, after a machine came back or a subscription changed. */
 export async function pumpWaiting(ctx: Ctx): Promise<void> {
-  const waiting = await ctx.db.selectDistinct({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
+  const waiting = await ctx.db.selectDistinct(only(jobs, 'agentId')).from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));
   for (const { agentId } of waiting) if (agentId) await pump(ctx, agentId);
 }
 
@@ -1279,7 +1279,7 @@ export async function reconnecting(ctx: Ctx, agentId: string): Promise<boolean> 
   const sub = await liveSubscription(ctx, agentId);
   if (!sub) return false;
   if (sub.kind === 'api_key') return comingBack(ctx, ownBuiltin(ctx.config));
-  const [agent] = await ctx.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+  const [agent] = await ctx.db.select(only(agents, 'nodeId')).from(agents).where(eq(agents.id, agentId));
   const all = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready');
   const own = all.find(n => n.id === agent?.nodeId);
   const waited = own && (await holdsWork(ctx, agentId)) ? [own] : all;

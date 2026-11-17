@@ -2,7 +2,7 @@ import { isStaged } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { forgetPrivateTurn } from '../tools/privacy.js';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, GONE_ALONG, insertTurn, keepLetter, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
@@ -23,6 +23,7 @@ import { afterFailure } from './failures.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
+import { releaseJobPhones } from '../phones/queue.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -31,7 +32,7 @@ type RouteKind = ReturnType<typeof routeSnapshot>['resultKind'];
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: string; stuck: string } {
   if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
-    finish: 'carry its task scope end to end alone on its task branch, checking named test files of the changed area, build, types and lint locally in your workspace without calling run_tests unless this task itself assembles the final release to main; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
+    finish: 'carry its task scope end to end alone on its task branch, checking what you touched with local tests, as the full run happens once at release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
     stuck: 'use blocked',
   };
   if (task.assigneeAgentId === agentId && kind === 'document') return {
@@ -39,7 +40,7 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   if (task.assigneeAgentId === agentId) return {
-    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; verify local affected checks in Tests without calling run_tests on non-main task branches (naming runIds only for direct main integration); integrate only with the head authorization',
+    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; in Tests check what the change touched with local tests, as the full run happens once at release, and report the exact candidate; integrate only with the head authorization',
     stuck: 'use blocked or escalate a wrong goal to the head',
   };
   return { finish: 'assign an eligible current owner with update_task, or report the checked coordination result', stuck: 'report what is missing to the head' };
@@ -56,8 +57,7 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind
 }
 
 const READ_TASK = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
-/* What a reviewer may take from the test runs on a task. */
-const READ_PROOF = 'For a pinned review, use review.commit and review.runs: verified evidence names the exact candidate, author run IDs, commands and part counts. Check those IDs and commits and candidate identity without rerunning unchanged author checks. testEvidence describes the live branch: only a run with proves true counts for that branch; a run on another commit proves nothing about it.';
+const LOCAL_TESTS = 'Check what you touched with local tests; the full run happens once at release.';
 
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKind): string {
   const ref = `#${task.number} "${task.title}"`;
@@ -86,10 +86,10 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
       return waitEndedPrompt(task, w.text);
     case 'review':
       if (kind === 'document') return `${ref} is with you at its current checking stage. ${read} It is handed in as a document: read the hand-in in its log and fetch the files it names. Check it against the task and correct what is wrong yourself. Submit the corrected document, or give verdict naming candidateId from task.echelons when it meets the goal. Escalate a wrong goal to the head.`;
-      return `${ref} is with you at its current checking stage. ${read} ${READ_PROOF} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
+      return `${ref} is with you at its current checking stage. ${read} ${LOCAL_TESTS} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
     case 'reviewed':
       if (kind === 'document') return `${ref} passed every stage of its route. ${read} Read the checked document and record acceptance with report done true. Do not request another version from the author.`;
-      return `${ref} passed the last stage of its route on its final candidate. ${read} Verify the exact candidate and finished receipts, then integrate only within your authority and record acceptance. Do not request another implementation from the author.`;
+      return `${ref} passed the last stage of its route on its final candidate. ${read} Verify the exact candidate, then integrate only within your authority and record acceptance. Do not request another implementation from the author.`;
     case 'done':
       return `${ref}, which you gave out, has an accepted result and is done. Read the result with the task tool, then go on with ${own}.`;
     case 'reported':
@@ -238,7 +238,7 @@ async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$infe
   let text: string;
   if (request.kind === 'stuck' && request.audience === 'internal') {
     if (request.triageAgentId !== w.agentId) return null;
-    const [recipient] = await ctx.db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, w.agentId));
+    const [recipient] = await ctx.db.select(only(agents, 'kind')).from(agents).where(eq(agents.id, w.agentId));
     const action = recipient?.kind === 'orchestrator'
       ? `Read the task, then close this request yourself with "answer_request" and request ${request.id}, with answer or retry true. Do not ask a person.`
       : `Read the task, then answer it with "comment" on #${task.number}. Do not ask a person.`;
@@ -626,7 +626,7 @@ function planHandoffText(name: string | undefined, other: PlanStandIn, until: st
 }
 
 async function handOverAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string, other: PlanStandIn): Promise<Moved | null> {
-  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const [me] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, agentId));
   return handOver(ctx, task, other.id, planHandoffText(me?.name, other, until)).catch(changedWhileResuming);
 }
 
@@ -671,7 +671,7 @@ async function wakeBrokenTurn(ctx: Ctx, job: HeldJob, task: Task): Promise<boole
 }
 
 async function brokenTurnText(ctx: Ctx, job: HeldJob, task: Task, quick: boolean): Promise<string> {
-  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
+  const [me] = await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId));
   return crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task, quick);
 }
 
@@ -704,6 +704,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .from(jobs)
     .where(eq(jobs.id, jobId));
   if (job && (job.status === 'done' || job.status === 'failed')) forgetPrivateTurn(ctx.db, jobId);
+  await releaseJobPhones(ctx, jobId, job?.status === 'done' ? 'completed' : job?.error === 'cancelled' ? 'cancelled' : 'lost');
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
   /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
@@ -754,6 +755,7 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const job = await requestCancellation(ctx, jobId);
   if (!job) return;
+  await releaseJobPhones(ctx, jobId);
   const node = identityOf(job.sub, job.job.nodeId, job.job.builtinMachine, ownBuiltin(ctx.config));
   if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db

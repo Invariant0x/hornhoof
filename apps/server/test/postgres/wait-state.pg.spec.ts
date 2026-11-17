@@ -125,7 +125,7 @@ it('gives the one signal of an operation to one of two sweeps, none after a rest
 
 it('tells the result once and refuses the wait built before it, with no wake at the deadline, across connections', async () => {
   const c = await waits();
-  const reply = await startRun(c.one.ctx, c.one.job, { task: c.one.task.number, command: 'never-runs', parts: 1 });
+  const reply = await startRun(c.one.ctx, c.one.job, { task: c.one.task.number, branch: `release-${c.one.task.number}`, command: 'never-runs', parts: 1 });
   expect(reply).toContain('Test run 1');
   const original = noticeModule.requestedWaitNotice;
   let checked!: () => void;
@@ -161,7 +161,7 @@ it('tells the result once and refuses the wait built before it, with no wake at 
 
 it('takes the task before the run when a run ends, leaving the run row free until it has it', async () => {
   const c = await waits();
-  await startRun(c.one.ctx, c.one.job, { task: c.one.task.number, command: 'never-runs', parts: 1 });
+  await startRun(c.one.ctx, c.one.job, { task: c.one.task.number, branch: `release-${c.one.task.number}`, command: 'never-runs', parts: 1 });
   const [run] = await c.pg.db.select().from(testRuns);
   const locker = await c.pg.pool('locker').connect();
   const pid = await backendPid(c.two.pool);

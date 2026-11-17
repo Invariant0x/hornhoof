@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { jobs, vaultLog } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { refusal } from '../../errors.js';
 import { changeEntry, companyEntries, createEntry, entryByName, entryViews, NewEntry, parseBody, secretsOf, unknownEntry } from './store.js';
 import { totpCode, totpSecondsLeft } from './totp.js';
@@ -49,7 +50,7 @@ export function registerVaultTools(server: McpServer, ctx: Ctx, agent: VaultAgen
         const entry = await entryByName(ctx, agent.companyId, name);
         if (!entry) throw unknownEntry();
         const { password, totp } = secretsOf(ctx, entry);
-        const [job] = await ctx.db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, agent.jobId));
+        const [job] = await ctx.db.select(only(jobs, 'taskId')).from(jobs).where(eq(jobs.id, agent.jobId));
         await ctx.db.insert(vaultLog).values({ companyId: entry.companyId, entryId: entry.id, entryName: entry.name, site: entry.site, kind: 'taken', agentId: agent.id, taskId: job?.taskId ?? null });
         const at = ctx.clock();
         return { name: entry.name, site: entry.site, login: entry.login, password, ...(totp ? { code: totpCode(totp, at), codeSecondsLeft: totpSecondsLeft(totp, at) } : {}) };

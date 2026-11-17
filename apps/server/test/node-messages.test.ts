@@ -7,6 +7,7 @@ import WebSocket from 'ws';
 import type { Db } from '../src/db/client.js';
 import { confirmCommits, NotConfirmed } from '../src/db/confirm.js';
 import { agentEvents, agents, jobs } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { listed } from '../src/db/sources.js';
 import { ApiError } from '../src/errors.js';
 import { UNNAMED_BUILTIN } from '../src/modules/nodes/hub.js';
@@ -48,7 +49,7 @@ async function live(stream: string | null = randomUUID()) {
 }
 
 const textsOf = async (db: Db, jobId: string): Promise<unknown[]> =>
-  (await db.select({ data: agentEvents.data }).from(agentEvents).where(sql`${agentEvents.jobId} = ${jobId} and ${agentEvents.kind} = 'text'`)).map(row => (row.data as { text: string }).text);
+  (await db.select(only(agentEvents, 'data')).from(agentEvents).where(sql`${agentEvents.jobId} = ${jobId} and ${agentEvents.kind} = 'text'`)).map(row => (row.data as { text: string }).text);
 const word = (jobId: string, text: string, n?: number) => ({ type: 'job.event' as const, jobId, seq: n ?? 0, event: { kind: 'text' as const, text }, ...(n === undefined ? {} : { n }) });
 
 /* The key the built-in node of that machine signs in with. */
