@@ -74,6 +74,17 @@ describe('timers', () => {
     expect([res.statusCode, res.json().error.reason]).toEqual([400, 'orchestrator_card']);
   });
 
+  it('starts a round sooner when a change asked for one, and then counts its interval from that round', async () => {
+    const { app, db, ceo, wandaId } = await company();
+    await patch(app, ceo, wandaId, { timer: { minutes: 240, order: 'Go over the tracker.' } });
+    const [{ timerAt }] = (await db.select({ timerAt: agents.timerAt }).from(agents).where(eq(agents.id, wandaId))) as [{ timerAt: Date }];
+    await db.update(agents).set({ timerNudgedAt: new Date(timerAt.getTime() + 20 * MIN) }).where(eq(agents.id, wandaId));
+    expect(await timerTick(app.ctx, new Date(timerAt.getTime() + 19 * MIN))).toBe(0);
+    expect(await timerTick(app.ctx, new Date(timerAt.getTime() + 20 * MIN))).toBe(1);
+    const [after] = await db.select({ at: agents.timerAt, nudged: agents.timerNudgedAt }).from(agents).where(eq(agents.id, wandaId));
+    expect([after!.at!.getTime(), after!.nudged]).toEqual([timerAt.getTime() + 20 * MIN, null]);
+  });
+
   it('wakes an employee once each interval with its order, outside any task', async () => {
     const { app, db, ceo, wandaId } = await company();
     await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Check that every agent reported its task.' } });

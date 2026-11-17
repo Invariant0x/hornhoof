@@ -11,7 +11,7 @@ import { stageName } from './stage-name';
 
 export const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', queued: 's-q', handed: 's-r', waiting: 's-h', idle: 's-i', off: 's-o' };
 
-const taskText = (e: Employee, t: ReturnType<typeof useT>) => {
+export const taskText = (e: Employee, t: ReturnType<typeof useT>) => {
   if (!e.task) return '';
   const route = e.task.echelons;
   const stage = route.ownerAgentId === e.id && route.stage ? `${stageName(t, route, route.stage)} ` : '';

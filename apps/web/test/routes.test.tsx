@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { parseRoute, routePath, useRoute } from '../src/routes';
+import { parseRoute, placeOf, routePath, useRoute } from '../src/routes';
 
 describe('workspace addresses', () => {
   it.each([
@@ -22,6 +22,14 @@ describe('workspace addresses', () => {
     ['/about', { kind: 'about' }],
     ['/invite/abc123', { kind: 'invite', token: 'abc123' }],
     ['/tasks?person=p2', { kind: 'tasks', personId: 'p2' }],
+    ['/tasks/g1?card=goal', { kind: 'tasks', id: 'g1', card: 'goal' }],
+    ['/tasks?department=d2&pipeline=pl1&view=board', { kind: 'tasks', department: 'd2', pipeline: 'pl1', view: 'board' }],
+    ['/tasks?department=d2&product=pd1', { kind: 'tasks', department: 'd2', product: 'pd1' }],
+    ['/tasks?goal=g1&root=t12&view=graph', { kind: 'tasks', goal: 'g1', root: 't12', view: 'graph' }],
+    ['/tasks?show=waits&person=p2', { kind: 'tasks', show: 'waits', personId: 'p2' }],
+    ['/tasks?show=turns', { kind: 'tasks', show: 'turns' }],
+    ['/tasks?show=company&view=graph', { kind: 'tasks', show: 'company', view: 'graph' }],
+    ['/tasks?department=none&responsible=p3&view=list', { kind: 'tasks', department: 'none', responsible: 'p3', view: 'list' }],
   ] as const)('opens and shares %s', (path, route) => {
     expect(parseRoute(path)).toEqual(route);
     expect(routePath(route)).toBe(path);
@@ -33,6 +41,8 @@ describe('workspace addresses', () => {
 
   it('does not follow an external return parameter', () => {
     expect(parseRoute('/tasks?next=https://outside.example')).toEqual({ kind: 'tasks' });
+    expect(parseRoute('/tasks?view=map&show=all&department=%2fsecret&goal=..&card=task')).toEqual({ kind: 'tasks' });
+    expect(routePath({ kind: 'tasks', department: '//outside.example', view: 'board' })).toBe('/tasks?view=board');
     expect(routePath({ kind: 'people', id: '//outside.example' })).toBe('/not-found');
   });
 
@@ -67,5 +77,12 @@ describe('workspace addresses', () => {
     act(() => result.current.closeOverlay());
     expect(location.pathname).toBe('/');
     expect(location.host).toBe('localhost:3000');
+  });
+});
+
+describe('the place of the tracker', () => {
+  it('keeps where the tracker is and leaves out the card on top of it', () => {
+    expect(placeOf({ kind: 'tasks', department: 'd2', view: 'graph', personId: 'p2' })).toEqual({ department: 'd2', view: 'graph', personId: 'p2' });
+    expect(placeOf({ kind: 'tasks', id: 'g1', card: 'goal' })).toEqual({});
   });
 });

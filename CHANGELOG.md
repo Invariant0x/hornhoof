@@ -16,6 +16,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - The orchestrator has a `shell` tool that runs any command in the server's own container.
 - The orchestrator's `database` tool runs as Hornhoof itself: it reads and changes every table, every column and the schema.
+- Goals split into department goals and smaller goals, each with a why, a person who answers for it, a date and a target; progress comes from the target or from the tasks done under it.
+- Every task has one person who answers for it, a short why and a due date; when that person leaves, their open tasks and goals pass to the one who decides for the department.
+- Every status change of a task is kept, and its card shows how long it stands, how long it was worked on and whom it waits for.
+- Department pipelines map who hands work to whom in stages owned by a role or an employee; a task stands in the stage of whoever holds it.
+- The Tasks tab is a tracker: the person's own work first, the same work as a list, a board and a graph, one card for tasks and goals, and "View as" for the CEO and the CEO's delegate.
+- Every department and company template has a product manager who keeps titles, whys, goals, the people who answer and pipelines clear, and never gives out or moves work.
+- Agents read `goals`, set goals and pipelines with `set_goal` and `set_pipeline`, a product manager tidies a task of its department with `tidy_task`, and task tools take a goal, the person who answers, why, due date, pipeline and stage.
+- People's routes for goals and pipelines, `PATCH /api/tasks/:id` on the task's version, `GET /api/tasks?responsible=`, and `parent` in `POST /api/tasks`.
 
 ### Changed
 
@@ -25,6 +33,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The orchestrator is refused nothing: it sets up assistants, sends files, and reaches plans and computer events like the owner.
 - Security and code review never count what the orchestrator can see or do as a finding.
 - The orchestrator's prompt and the setup screen say plainly that it can do anything and change its own system.
+- The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
+- Migration 0138 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
 
 ## [0.31.0] - 2026-11-17
 

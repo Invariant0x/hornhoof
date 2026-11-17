@@ -45,7 +45,7 @@ it('opens a product employee task without a map employee', async () => {
   });
   const user = userEvent.setup();
   render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } }} onSignOut={() => {}} />);
-  await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Subscriptions & API' }));
+  await user.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name: 'Subscriptions & API' }));
   await user.click(await screen.findByRole('button', { name: 'Open the card of Claude' }));
   await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
   const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });

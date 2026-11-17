@@ -15,7 +15,8 @@ function taskDepartments(routes: Record<string, Route>): Route {
     const org = routes['GET /api/org'];
     const reply = typeof org === 'function' ? await org(undefined) : org;
     const departments = (reply?.[1] as Partial<Org> | undefined)?.departments ?? [];
-    return [200, { whole: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: true })) }];
+    /* The owner, as most tests sign in: the server lets them plan everywhere. */
+    return [200, { whole: true, mayPlanCompany: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: true, mayPlan: true })) }];
   };
 }
 

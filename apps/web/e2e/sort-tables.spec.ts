@@ -282,10 +282,8 @@ async function checkPeople(page: Page, info: TestInfo, t: Messages, tag: string,
 }
 
 async function checkBacklog(page: Page, info: TestInfo, t: Messages, tag: string, browserName: string, dir: 'ltr' | 'rtl'): Promise<Measured> {
-  await page.goto('/tasks');
+  await page.goto('/tasks?show=turns');
   await page.evaluate(d => { document.documentElement.dir = d; }, dir);
-  const view = page.getByRole('group', { name: t.tasks.board.view });
-  await view.getByRole('radio', { name: t.tasks.board.views.releases }).check({ force: true });
   await page.getByRole('combobox', { name: t.tasks.department }).selectOption({ label: 'Development' });
   const backlog = page.locator('section.backlog');
   await expect(backlog.locator('tr.bl-row')).toHaveCount(BACKLOG_ITEMS.length);

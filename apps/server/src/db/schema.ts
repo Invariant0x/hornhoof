@@ -88,6 +88,9 @@ export const companies = pgTable('companies', {
      task-N or a version 0.N.0 never names two pieces of work. */
   taskNumbersUsed: integer('task_numbers_used').notNull().default(0),
   turnNumbersUsed: integer('turn_numbers_used').notNull().default(0),
+  /* A company from before the tracker gets its open tasks' responsible people and a product manager in each department
+     once, by the server's own rules; a new one starts with them. */
+  trackerDue: boolean('tracker_due').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -695,6 +698,8 @@ export const agents = pgTable(
     timerOrder: text('timer_order'),
     timerAt: timestamp('timer_at', { withTimezone: true }),
     timerForWork: boolean('timer_for_work').notNull().default(false),
+    /* A round sooner than the timer's own, asked for by a change the employee keeps track of; timerAt stays its last round. */
+    timerNudgedAt: timestamp('timer_nudged_at', { withTimezone: true }),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -1127,12 +1132,28 @@ export const tasks = pgTable(
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
     createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    /* The goal a task with nothing above it serves; work under a task serves its goal and keeps none of its own. */
+    goalId: uuid('goal_id').references((): AnyPgColumn => goals.id),
+    /* The person who answers for it, named when it is made: it changes attention, counts and filters, never rights. */
+    responsiblePersonId: uuid('responsible_person_id').references(() => people.id),
+    /* Why the task exists, in plain words; the brief says what the result is. */
+    why: text('why').notNull().default(''),
+    dueAt: timestamp('due_at', { withTimezone: true }),
+    /* The department's map of hand-offs the task is placed on, and the stage it stands in. */
+    pipelineId: uuid('pipeline_id').references((): AnyPgColumn => pipelines.id),
+    pipelineStageId: uuid('pipeline_stage_id').references((): AnyPgColumn => pipelineStages.id),
+    /* Grows with every change of what the tracker keeps, which is no move and leaves the version as it is: two such changes
+       that read the same task cannot both land. */
+    trackerRevision: integer('tracker_revision').notNull().default(0),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   t => [
     unique('tasks_company_number').on(t.companyId, t.number),
+    index('tasks_goal_id').on(t.goalId),
+    index('tasks_responsible').on(t.responsiblePersonId),
+    index('tasks_pipeline_id').on(t.pipelineId),
     index('tasks_department_id').on(t.departmentId),
     index('tasks_assignee').on(t.assigneeAgentId),
     index('tasks_parent_id').on(t.parentId),
@@ -1181,7 +1202,7 @@ export const taskRoutes = pgTable('task_routes', {
   check('task_routes_paths', sql`jsonb_typeof(${t.paths}) = 'array'`),
 ]);
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card', 'away', 'status', 'edited'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -1201,6 +1222,103 @@ export const taskEvents = pgTable(
     createdAt: createdAt(),
   },
   t => [index('task_events_task_id').on(t.taskId)],
+);
+
+export const GOAL_STATUSES = ['active', 'reached', 'dropped'] as const;
+export type GoalStatus = (typeof GOAL_STATUSES)[number];
+
+/* A result the company or a department works towards, made of smaller goals and the tasks that serve it. Its progress is
+   its number target when it has one, else the share of its tasks done. */
+export const goals = pgTable(
+  'goals',
+  {
+    id: id(),
+    companyId: companyId(),
+    number: integer('number').notNull(),
+    /* None: a goal of the whole company. */
+    departmentId: uuid('department_id').references(() => departments.id),
+    parentGoalId: uuid('parent_goal_id').references((): AnyPgColumn => goals.id),
+    title: text('title').notNull(),
+    why: text('why').notNull().default(''),
+    responsiblePersonId: uuid('responsible_person_id').notNull().references(() => people.id),
+    targetValue: doublePrecision('target_value'),
+    currentValue: doublePrecision('current_value'),
+    unit: text('unit').notNull().default(''),
+    dueAt: timestamp('due_at', { withTimezone: true }),
+    status: text('status', { enum: GOAL_STATUSES }).notNull().default('active'),
+    createdByPersonId: uuid('created_by_person_id').references(() => people.id),
+    createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    version: integer('version').notNull().default(0),
+  },
+  t => [
+    unique('goals_company_number').on(t.companyId, t.number),
+    index('goals_department_id').on(t.departmentId),
+    index('goals_parent_goal_id').on(t.parentGoalId),
+    check('goals_status', sql`${t.status} IN ('active', 'reached', 'dropped')`),
+    check('goals_not_own_parent', sql`${t.parentGoalId} IS NULL OR ${t.parentGoalId} <> ${t.id}`),
+  ],
+);
+
+/* Everything that happened to a goal, read as a task's history is. */
+export const goalEvents = pgTable(
+  'goal_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /* What names this event across machines, where the serial id of each differs. */
+    uuid: uuid('uuid').notNull().defaultRandom().unique(),
+    companyId: companyId(),
+    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    kind: text('kind').notNull(),
+    personId: uuid('person_id').references(() => people.id),
+    agentId: uuid('agent_id').references(() => agents.id),
+    text: text('text').notNull().default(''),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  t => [index('goal_events_goal_id').on(t.goalId)],
+);
+
+/* A department's map of who hands work to whom: a tree of stages from its head, with forks and no joins. Tasks are placed
+   on it and stand in a stage while its owner holds them; it makes and moves no work of its own. */
+export const pipelines = pgTable(
+  'pipelines',
+  {
+    id: id(),
+    companyId: companyId(),
+    departmentId: uuid('department_id').notNull().references(() => departments.id),
+    name: text('name').notNull(),
+    why: text('why').notNull().default(''),
+    position: integer('position').notNull().default(0),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdByPersonId: uuid('created_by_person_id').references(() => people.id),
+    createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    version: integer('version').notNull().default(0),
+  },
+  t => [index('pipelines_department_id').on(t.departmentId)],
+);
+
+/* A stage of a pipeline: none above it for the first ones after the head, owned by a role or by one employee. */
+export const pipelineStages = pgTable(
+  'pipeline_stages',
+  {
+    id: id(),
+    companyId: companyId(),
+    pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    parentStageId: uuid('parent_stage_id').references((): AnyPgColumn => pipelineStages.id),
+    name: text('name').notNull(),
+    ownerRole: text('owner_role'),
+    ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
+    position: integer('position').notNull().default(0),
+  },
+  t => [
+    index('pipeline_stages_pipeline_id').on(t.pipelineId),
+    check('pipeline_stages_one_owner', sql`(${t.ownerRole} IS NULL) <> (${t.ownerAgentId} IS NULL)`),
+    check('pipeline_stages_not_own_parent', sql`${t.parentStageId} IS NULL OR ${t.parentStageId} <> ${t.id}`),
+  ],
 );
 
 /* A line of the map from an agent to the one above it: the orchestrator to a department's head, a head to an employee of
