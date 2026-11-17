@@ -12,6 +12,7 @@ import { CLOSED, type Task, type Tx } from '../tasks/engine.js';
 import { taskByRef } from '../tasks/views.js';
 import { approvalNeed, approvalState, askApproval, authorityFingerprint, deciderOf, rulesFor, sendingChannel, type ApprovalState, type Bound, type Need, type Shared, withdrawAskedBefore } from './approvals.js';
 import { catalogValue, currentRevision, digestOf, unsafeLink, usable, type Catalog, type Money, type Place, type Source } from './checks.js';
+import { fieldsOfContact } from './contact-fields.js';
 import { recipientDigest, unsubscribeUrl } from './contacts.js';
 import { currentPolicy, dayOf, lockBuckets, releaseAttempt, reviewCheck, selectedForReview, stopChannel, usedWithin, type Channel, type CurrentPolicy } from './policies.js';
 import type { BeginDispatch, DispatchAdmission, SealedPayload, SettleAttempt } from './ports.js';
@@ -194,7 +195,7 @@ async function draw(tx: Tx, ctx: Ctx, s: Sketch): Promise<Drawn> {
   const result = renderMessage({
     document: s.document, place: placeOf(s.channel), audience: s.channel.audience, catalog: await catalogFor(tx, s.channel.companyId, s.document),
     unsubscribe: { source: s.channel.audience === 'direct' ? await stopWords(tx, s.channel, s.document.locale, s.now) : null, url: stopAddress(ctx, s) },
-    fields: { account_label: s.account.label, channel_name: s.channel.name }, now: s.now,
+    fields: { ...(s.contactId ? await fieldsOfContact(tx, ctx.config.secret, { companyId: s.channel.companyId, departmentId: s.channel.departmentId, contactId: s.contactId }) : {}), account_label: s.account.label, channel_name: s.channel.name }, now: s.now,
   });
   if (!result.ok) return { ok: false, reasons: result.reasonCodes };
   const extra = [s.segment, s.audience].filter(source => source !== null).map(refOf);
@@ -477,7 +478,7 @@ async function currentBytes(tx: Tx, ctx: Ctx, l: Look, reached: Reached): Promis
   const drawn = await draw(tx, ctx, { channel, account, document: revision.document, contactId: m.contactId, segment: segment.source, audience: reached.source, base: prepared.base, now: prepared.now });
   if (!drawn.ok) return { final: drawn.reasons };
   const sealed = openSeal(ctx, m, revision, channel);
-  return sealed && drawn.sourcesDigest === revision.sourceRevisionsDigest ? { drawn, sealed } : { final: ['stale_binding'] };
+  return sealed && sealed.recipient === reached.recipient && sealed.subject === drawn.rendered.subject && sealed.text === drawn.rendered.text && drawn.sourcesDigest === revision.sourceRevisionsDigest ? { drawn, sealed } : { final: ['stale_binding'] };
 }
 
 type Look = { message: Message; revision: Revision; channel: Channel; account: Account; way: Way; prepared: Prepared };

@@ -42,7 +42,7 @@ const Currency = z.string().regex(/^[A-Z]{3}$/);
 /* The name of a task the way its tools take it: 12, "#12", or its id. */
 const TaskRef = z.union([z.number().int().positive(), z.string().regex(/^#[1-9][0-9]*$/), Uuid]);
 
-export const GATE_CODES = ['price_unapproved', 'terms_unapproved', 'link_unapproved', 'claim_unapproved', 'template_unapproved', 'unsupported_locale', 'contact_suppressed', 'consent_missing', 'support_escalation_required', 'support_intent_forbidden', 'secret_forbidden', 'pii_forbidden', 'channel_stopped', 'account_bound_elsewhere', 'stale_binding', 'daily_limit_exceeded', 'approval_required', 'review_unavailable', 'review_failed', 'check_uncertified', 'delivery_unknown', 'restored'] as const;
+export const GATE_CODES = ['price_unapproved', 'terms_unapproved', 'link_unapproved', 'claim_unapproved', 'template_unapproved', 'contact_field_missing', 'contact_field_invalid', 'unsupported_locale', 'contact_suppressed', 'consent_missing', 'support_escalation_required', 'support_intent_forbidden', 'secret_forbidden', 'pii_forbidden', 'channel_stopped', 'account_bound_elsewhere', 'stale_binding', 'daily_limit_exceeded', 'approval_required', 'review_unavailable', 'review_failed', 'check_uncertified', 'delivery_unknown', 'restored'] as const;
 export const GateCode = z.enum(GATE_CODES);
 export type GateCode = z.infer<typeof GateCode>;
 

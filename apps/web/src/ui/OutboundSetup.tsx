@@ -3,6 +3,8 @@ import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import type { Messages } from '../i18n/en';
 import { joined, RevisionView, whenOf } from './CatalogRevision';
+import { ContactImport } from './ContactImport';
+import { ContactValues, contactValueProblems, contactValues, type ContactValueRow } from './ContactValues';
 import { Field } from './Field';
 import { TickBox } from './TickBox';
 
@@ -322,7 +324,7 @@ function ContactLine({ contact, said, onTakenBack, onChanged }: { contact: Conse
   );
 }
 
-type Open = 'account' | 'policy' | 'contact' | null;
+type Open = 'account' | 'policy' | 'contact' | 'import' | null;
 
 /* One channel: what it goes by and who sends from it, and the moves of the people who run it. */
 function ChannelCard({ channel, contacts, onChanged }: { channel: SetupChannel; contacts: readonly Consent[]; onChanged(): void }) {
@@ -351,6 +353,7 @@ function ChannelCard({ channel, contacts, onChanged }: { channel: SetupChannel; 
       {!working && <p className="muted" dir="auto">{s.noAccount}</p>}
       {open === 'account' && <AccountForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'policy' && <PolicyForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
+      {open === 'import' && <ContactImport channel={channel} onChanged={onChanged} onCancel={() => setOpen(null)} />}
       {open === 'contact' && <ContactForm channel={channel} onDone={added => { setOpen(null); setSaid(added); onChanged(); }} onCancel={() => setOpen(null)} />}
       {open === null && <ChannelActions channel={channel} onOpen={form => { setSaid(null); setOpen(form); }} onChanged={onChanged} />}
       {channel.audience === 'direct' && <ContactList contacts={contacts} said={said} onSaid={setSaid} onChanged={onChanged} />}
@@ -368,7 +371,7 @@ function ChannelActions({ channel, onOpen, onChanged }: { channel: SetupChannel;
       <EntryActions>
         <button className="btn ghost" type="button" onClick={() => onOpen('account')}>{channel.adapter === 'smtp' ? s.connectMail : s.connectHook}</button>
         <button className="btn ghost" type="button" onClick={() => onOpen('policy')}>{channel.policy ? s.changePolicy : s.setPolicy}</button>
-        {channel.audience === 'direct' && <button className="btn ghost" type="button" onClick={() => onOpen('contact')}>{s.contact.add}</button>}
+        {channel.audience === 'direct' && <><button className="btn ghost" type="button" onClick={() => onOpen('contact')}>{s.contact.add}</button><button className="btn ghost" type="button" onClick={() => onOpen('import')}>{s.contact.importAddresses}</button></>}
         <button className={stopOrReopen === 'stop' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/channels/${channel.id}/${stopOrReopen}`, {}))}>{s[stopOrReopen]}</button>
       </EntryActions>
       <Failure failure={failure} />
@@ -377,8 +380,8 @@ function ChannelActions({ channel, onOpen, onChanged }: { channel: SetupChannel;
 }
 
 type ContactField = 'address' | 'source' | 'evidence' | 'agreed';
-type ContactDraft = Record<Exclude<ContactField, 'agreed'>, string> & { agreed: boolean };
-type ContactProblems = Partial<Record<ContactField, string>>;
+type ContactDraft = Record<Exclude<ContactField, 'agreed'>, string> & { agreed: boolean; values: ContactValueRow[] };
+type ContactProblems = Record<string, string | undefined>;
 type ContactWords = Messages['outboundSetup']['contact'];
 const CONTACT_FIELDS: readonly ContactField[] = ['address', 'source', 'evidence', 'agreed'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -395,7 +398,7 @@ function contactProblems(c: ContactWords, email: boolean, v: ContactDraft): Cont
   if (!v.source.trim()) found.source = c.sourceMissing;
   if (!v.evidence.trim()) found.evidence = c.evidenceMissing;
   if (!v.agreed) found.agreed = c.agreedMissing;
-  return found;
+  return { ...found, ...contactValueProblems(v.values, c) };
 }
 
 /* The server's refusal, where the form shows it: an address it does not take at its field, a person who said no for
@@ -413,17 +416,20 @@ function useContactForm(channel: SetupChannel, onDone: (added: Said) => void) {
   const t = useT();
   const c = t.outboundSetup.contact;
   const email = channel.adapter === 'smtp';
-  const [v, setV] = useState<ContactDraft>({ address: '', source: '', evidence: '', agreed: false });
+  const [v, setV] = useState<ContactDraft>({ address: '', source: '', evidence: '', agreed: false, values: [{ name: '', value: '' }] });
   const [problems, setProblems] = useState<ContactProblems>({});
   const [alert, setAlert] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const valueRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const refs = { address: useRef<HTMLInputElement>(null), source: useRef<HTMLInputElement>(null), evidence: useRef<HTMLTextAreaElement>(null), agreed: useRef<HTMLInputElement>(null) };
   /* The problems at their fields, and the focus on the first of them; true when there is one. */
   const show = (found: ContactProblems): boolean => {
     setProblems(found);
     const first = CONTACT_FIELDS.find(f => found[f]);
-    if (first) refs[first].current?.focus();
-    return first !== undefined;
+    if (first) { refs[first].current?.focus(); return true; }
+    const value = Object.keys(found).find(key => found[key]);
+    if (value) valueRefs.current[value]?.focus();
+    return value !== undefined;
   };
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -432,7 +438,7 @@ function useContactForm(channel: SetupChannel, onDone: (added: Said) => void) {
     const address = v.address.trim();
     setBusy(true);
     try {
-      const said = await api.post<{ permissionId: string | null }>('/api/outbound/contacts', { channelId: channel.id, kind: email ? 'email' : 'direct', address, source: v.source.trim(), evidence: v.evidence.trim() });
+      const said = await api.post<{ permissionId: string | null }>('/api/outbound/contacts', { channelId: channel.id, kind: email ? 'email' : 'direct', address, source: v.source.trim(), evidence: v.evidence.trim(), ...(Object.keys(contactValues(v.values)).length ? { fields: contactValues(v.values) } : {}) });
       onDone({ said: said.permissionId ? c.added(address) : c.known(address), permissionId: said.permissionId, address });
     } catch (err) {
       const refused = contactRefusal(t, email, err);
@@ -443,7 +449,7 @@ function useContactForm(channel: SetupChannel, onDone: (added: Said) => void) {
     }
   }
   const address = email ? { label: c.email, type: 'email', inputMode: 'email' as const } : { label: c.handle, type: 'text', inputMode: undefined };
-  return { v, setV, problems, alert, busy, refs, save, address };
+  return { v, setV, problems, alert, busy, refs, valueRefs, save, address };
 }
 
 /* An address that agreed to the channel's purpose, a test address of the team among them. It goes through the server's
@@ -453,7 +459,7 @@ function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onD
   const t = useT();
   const c = t.outboundSetup.contact;
   const id = useId();
-  const { v, setV, problems, alert, busy, refs, save, address } = useContactForm(channel, onDone);
+  const { v, setV, problems, alert, busy, refs, valueRefs, save, address } = useContactForm(channel, onDone);
   const set = (k: Exclude<ContactField, 'agreed'>) => (e: { target: { value: string } }) => setV({ ...v, [k]: e.target.value });
   const agreedNote = problems.agreed && `${id}-agreed`;
   return (
@@ -463,6 +469,7 @@ function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onD
       </Field>
       <Field label={c.source} hint={c.sourceHint} problem={problems.source}>{p => <input {...p} ref={refs.source} value={v.source} onChange={set('source')} maxLength={200} />}</Field>
       <Field label={c.evidence} hint={c.evidenceHint} problem={problems.evidence}>{p => <textarea {...p} ref={refs.evidence} rows={3} value={v.evidence} onChange={set('evidence')} maxLength={2000} />}</Field>
+      <ContactValues rows={v.values} onChange={values => setV({ ...v, values })} problems={problems} refs={valueRefs} words={c} />
       <label className="check-card">
         <TickBox ref={refs.agreed} checked={v.agreed} onChange={e => setV({ ...v, agreed: e.target.checked })} aria-invalid={agreedNote ? true : undefined} aria-describedby={agreedNote || undefined} />
         <span>

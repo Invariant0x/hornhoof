@@ -31,7 +31,7 @@ export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => P
 const OUTBOUND = [
   'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions', 'outbound_contact_events',
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
-  'outbound_setup_events',
+  'outbound_setup_events', 'outbound_contact_fields',
   'support_tickets', 'support_classifications',
 ];
 export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames', ...OUTBOUND];

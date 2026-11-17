@@ -835,3 +835,5 @@ function parse<T>(schema: z.ZodType<T>, raw: string): T | null {
 
 export const parseNodeMessage = (raw: string): NodeMessage | null => parse(NodeMessage, raw);
 export const parseServerMessage = (raw: string): ServerMessage | null => parse(ServerMessage, raw);
+
+export * from './outbound-contact-fields.js';

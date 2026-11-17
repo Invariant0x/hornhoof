@@ -24,6 +24,7 @@ export type ErrorReason =
   | 'model_check_place'
   | 'model_check_thresholds'
   | 'model_check_set'
+  | 'outbound_import_invalid'
   | 'outbound_invalid'
   | 'outbound_not_allowed'
   | 'outbound_unknown'

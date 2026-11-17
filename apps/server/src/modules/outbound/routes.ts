@@ -1,4 +1,4 @@
-import { OutboundPolicyValue, OutboundSubmit } from '@hornhoof/protocol';
+import { ContactFields, OutboundPolicyValue, OutboundSubmit } from '@hornhoof/protocol';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -12,6 +12,8 @@ import { accountRoutes } from './accounts.js';
 import { catalogRow, proposeRevision, ProposalInput, publishRevision, requireProductOf, revokeRevision, ShownRevision } from './catalog.js';
 import { catalogOf } from './catalog-view.js';
 import { digestOf } from './checks.js';
+import { importContacts } from './contact-import.js';
+import { MAX_IMPORT_BYTES } from './contact-table.js';
 import { addContact, contactsOf, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
 import { outboundStatus, submitOutbound } from './core.js';
 import { receiptRoutes } from './dispatcher.js';
@@ -32,7 +34,7 @@ const TokenParams = z.object({ '*': z.string().min(1).max(1000) });
 const Name = z.string().trim().min(1).max(200);
 const Evidence = z.string().trim().min(1).max(2000);
 const ChannelBody = z.strictObject({ departmentId: z.uuid(), productId: z.uuid().optional(), name: Name, adapter: z.enum(['smtp', 'webhook']), purpose: Name, audience: z.enum(['direct', 'public']) });
-const ContactBody = z.strictObject({ channelId: z.uuid(), kind: z.enum(['email', 'direct']), address: z.string().min(1).max(320), source: Name, evidence: Evidence });
+const ContactBody = z.strictObject({ channelId: z.uuid(), kind: z.enum(['email', 'direct']), address: z.string().min(1).max(320), source: Name, evidence: Evidence, fields: ContactFields.optional() });
 const SuppressBody = z.strictObject({ evidence: Evidence });
 
 const idOf = (req: FastifyRequest): string => IdParams.parse(req.params).id;
@@ -168,6 +170,16 @@ function contactRoutes(app: FastifyInstance, ctx: Ctx): void {
     const added = await addContact(ctx, { ...body, companyId: me.companyId, channel });
     if (added.permissionId) await logSetup(db, me, { ...setupOf(channel), kind: 'contact_added', subjectId: added.permissionId, detail: { kind: body.kind } });
     return added;
+  });
+
+  app.post('/api/outbound/contacts/import', { bodyLimit: 3 * 1024 * 1024 }, async req => {
+    const me = await requirePerson(req, db);
+    const body = z.strictObject({ channelId: z.uuid(), filename: z.string().min(1).max(200), data: z.string().min(1).max(Math.ceil(MAX_IMPORT_BYTES / 3) * 4).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/), source: Name, evidence: Evidence }).parse(req.body);
+    const channel = await manageChannel(ctx, me, body.channelId);
+    if (channel.audience !== 'direct') throw new ApiError(400, 'validation', 'A public channel has no contact list.', 'outbound_invalid');
+    return importContacts(ctx, { ...body, channel }, async (permissionId, kind) => {
+      await logSetup(db, me, { ...setupOf(channel), kind: 'contact_added', subjectId: permissionId, detail: { kind } });
+    });
   });
 
   /* Contacts are the company's. A refusal only ever writes less, so any department's owner may record it. */

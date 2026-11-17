@@ -561,3 +561,63 @@ describe('the panel right to left', () => {
     expect(unisolated(container)).toEqual([]);
   });
 });
+
+describe('contact template fields', () => {
+  it('adds named private contact fields with the consented address', async () => {
+    const calls = mockApi({ ...routes([CHANNEL]), 'POST /api/outbound/contacts': [200, { contactId: 'k-fields', permissionId: 'p-fields' }] });
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole('button', { name: 'Add an address' }));
+    const form = screen.getByRole('form', { name: 'Add an address' });
+    await user.type(within(form).getByLabelText('Email address'), 'ann@shop.example');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Signup form');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Recorded consent');
+    await user.click(within(form).getByRole('checkbox'));
+    await user.type(within(form).getByLabelText('Field name 1'), 'name');
+    await user.type(within(form).getByLabelText('Field value 1'), 'Ann');
+    await user.click(within(form).getByRole('button', { name: 'Add a field' }));
+    await user.type(within(form).getByLabelText('Field name 2'), 'personal_line');
+    await user.type(within(form).getByLabelText('Field value 2'), 'Thank you for visiting.');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({ fields: { name: 'Ann', personal_line: 'Thank you for visiting.' } }));
+  });
+
+  it('focuses the invalid field name and then its missing value without sending anything', async () => {
+    const calls = mockApi(routes([CHANNEL]));
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole('button', { name: 'Add an address' }));
+    const form = screen.getByRole('form', { name: 'Add an address' });
+    await user.type(within(form).getByLabelText('Email address'), 'ann@shop.example');
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Signup form');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Recorded consent');
+    await user.click(within(form).getByRole('checkbox'));
+    const name = within(form).getByLabelText('Field name 1');
+    await user.type(name, 'display name');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute('aria-invalid', 'true');
+    await user.clear(name);
+    await user.type(name, 'name');
+    await user.click(within(form).getByRole('button', { name: 'Add' }));
+    expect(within(form).getByLabelText('Field value 1')).toHaveFocus();
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+  });
+
+  it('imports a table and shows skipped row numbers and reasons without private cells', async () => {
+    const calls = mockApi({ ...routes([CHANNEL]), 'POST /api/outbound/contacts/import': [200, { added: 1, updated: 0, skipped: [{ row: 3, reason: 'consent_missing' }] }] });
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole('button', { name: 'Import addresses' }));
+    const form = screen.getByRole('form', { name: 'Import addresses' });
+    const csv = 'address,consent,name\nann@shop.example,yes,Ann\nno@shop.example,,Private skipped cell';
+    await user.upload(within(form).getByLabelText('CSV or XLSX file'), new File([csv], 'contacts.csv', { type: 'text/csv' }));
+    await user.type(within(form).getByLabelText('Where they agreed'), 'Signup sheet');
+    await user.type(within(form).getByLabelText('Proof of their consent'), 'Recorded consent');
+    await user.click(within(form).getByRole('button', { name: 'Import' }));
+    expect(await within(form).findByRole('status')).toHaveTextContent('Added: 1. Updated: 0. Skipped: 1.');
+    expect(form).toHaveTextContent('Row 3: no consent');
+    expect(form).not.toHaveTextContent('Private skipped cell');
+    await waitFor(() => expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({ channelId: 'ch1', filename: 'contacts.csv', source: 'Signup sheet' }));
+  });
+});

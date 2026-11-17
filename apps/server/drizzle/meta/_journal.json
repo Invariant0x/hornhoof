@@ -946,6 +946,13 @@
       "when": 1794877024839,
       "tag": "0136_outbound_contact_log",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1794914346932,
+      "tag": "0137_outbound_contact_fields",
+      "breakpoints": true
     }
   ]
 }

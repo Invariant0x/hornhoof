@@ -1,3 +1,4 @@
+import { ContactFields } from '@hornhoof/protocol';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -11,6 +12,7 @@ import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf } from './checks.js';
 import { cancelQueuedTo } from './policies.js';
+import { saveContactFields } from './contact-fields.js';
 import { addersOf } from './setup-log.js';
 
 /* Whom a company may write to and what they said about it. One row for one address, sealed. A refusal is for good: nothing
@@ -47,16 +49,18 @@ type Said = { contact: Contact; kind: EventKind; dedupKey: string; evidenceDiges
 const record = (tx: Tx, s: Said) =>
   tx.insert(outboundContactEvents).values({ companyId: s.contact.companyId, contactId: s.contact.id, kind: s.kind, dedupKey: s.dedupKey, evidenceDigest: s.evidenceDigest, occurredAt: s.now }).onConflictDoNothing();
 
-export type NewContact = { companyId: string; kind: ContactKind; address: string; channel: { id: string; purpose: string }; source: string; evidence: string };
+export type NewContact = { companyId: string; kind: ContactKind; address: string; channel: { id: string; purpose: string; departmentId: string }; source: string; evidence: string; fields?: ContactFields };
 
 /* A contact and their permission for a channel's purpose. Someone who said no stays no, whatever a list says. */
 export async function addContact(ctx: Pick<Ctx, 'db' | 'config'>, input: NewContact, now = new Date()): Promise<{ contactId: string; permissionId: string | null }> {
+  const fields = ContactFields.parse(input.fields ?? {});
   const address = readAddress(input.kind, input.address);
   const addressHash = recipientDigest(address);
   return ctx.db.transaction(async tx => {
     await tx.insert(outboundContacts).values({ companyId: input.companyId, kind: input.kind, addressEnc: encryptSecret(address, ctx.config.secret), addressHash }).onConflictDoNothing();
     const [contact] = await tx.select().from(outboundContacts).where(and(eq(outboundContacts.companyId, input.companyId), eq(outboundContacts.kind, input.kind), eq(outboundContacts.addressHash, addressHash))).for('update');
     if (contact!.doNotContact) throw new ApiError(409, 'conflict', 'This contact asked not to be written to. An import does not change that.', 'outbound_conflict', { reasonCodes: ['contact_suppressed'] });
+    await saveContactFields(tx, ctx.config.secret, { companyId: input.companyId, departmentId: input.channel.departmentId, contactId: contact!.id }, fields);
     const evidenceDigest = digestOf(input.evidence);
     const [permission] = await tx.insert(outboundPermissions).values({ companyId: input.companyId, contactId: contact!.id, channelId: input.channel.id, purpose: input.channel.purpose, source: input.source, evidenceDigest }).onConflictDoNothing().returning();
     await record(tx, { contact: contact!, kind: 'consent_granted', dedupKey: `consent:${contact!.id}:${input.channel.id}:${input.channel.purpose}:${evidenceDigest}`, evidenceDigest, now });

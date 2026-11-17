@@ -1,3 +1,4 @@
+import { SENDER_FIELDS } from '@hornhoof/protocol';
 import type { CatalogValue, GateCode, MessageDocument } from '@hornhoof/protocol';
 import { catalogValue, checkPrice, digestOf, formatMoney, scanText, unsafeLink, usable, type Catalog, type Money, type Place, type Source } from './checks.js';
 
@@ -17,7 +18,7 @@ export type RenderRequest = {
   catalog: Catalog;
   /* The published words of this language and the signed address, when there are any. */
   unsubscribe: { source: Source | null; url: string | null };
-  /* The sender's fields a variable may name. Nothing about a contact is here. */
+  /* Sender fields and this department's private values for the selected contact. */
   fields: Readonly<Record<string, string>>;
   now: Date;
 };
@@ -115,11 +116,15 @@ function termsWords(source: Source | undefined, notes: Notes): string | null {
   return value ? clean(notes, value.text) : null;
 }
 
-function fieldValue(valueRef: string, request: RenderRequest): string | null {
+function fieldValue(valueRef: string, request: RenderRequest, notes: Notes): string | null {
   const source = request.catalog(valueRef);
   const value = source && usable(source, request.place, request.now) ? catalogValue(source, 'variable') : null;
-  const said = value ? request.fields[value.field] : undefined;
-  return said !== undefined && said.length <= MAX_FIELD && ONE_LINE.test(said) ? said : null;
+  if (!value) return refuse(notes, 'template_unapproved');
+  const contact = !(SENDER_FIELDS as readonly string[]).includes(value.field);
+  const said = Object.hasOwn(request.fields, value.field) ? request.fields[value.field] : undefined;
+  if (said === undefined) return refuse(notes, contact ? 'contact_field_missing' : 'template_unapproved');
+  if (said.length > MAX_FIELD || !said.trim() || !ONE_LINE.test(said)) return refuse(notes, contact ? 'contact_field_invalid' : 'template_unapproved');
+  return said;
 }
 
 /* Variables name a slot and an approved field. A value is one short plain line, and it gets no way to be more. */
@@ -131,8 +136,8 @@ function variableFillers(template: TemplateValue, request: RenderRequest, notes:
   return new Map(refs.map(ref => [ref.slotId, variableWords(ref.valueRef, request, notes)]));
 }
 function variableWords(valueRef: string, request: RenderRequest, notes: Notes): string | null {
-  const said = fieldValue(valueRef, request);
-  if (said === null) return refuse(notes, 'template_unapproved');
+  const said = fieldValue(valueRef, request, notes);
+  if (said === null) return null;
   used(notes, request.catalog(valueRef)!);
   return clean(notes, said);
 }

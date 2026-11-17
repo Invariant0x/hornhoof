@@ -3,6 +3,7 @@ import type { AgentEvent } from './index.js';
 export type ToolPrivacyPolicy = { sensitive?: boolean; secretInput?: readonly string[]; secretOutput?: readonly string[]; secretCommand?: boolean; secretExecution?: boolean; delegatesTool?: boolean };
 /* Registration and telemetry use the same definitions. No secret value belongs to replay or a transcript. */
 export const PRIVATE_TOOLS = {
+  contact: { name: 'outbound_contact_add', _meta: { sensitive: true, secretInput: ['fields', 'address', 'evidence'], secretOutput: [] } },
   entry: { name: 'vault_entry', _meta: { sensitive: true, secretInput: [], secretOutput: ['password', 'code'] } },
   save: { name: 'vault_save', _meta: { sensitive: true, secretInput: ['password', 'code'], secretOutput: [] } },
   phone: { name: 'phone_action', _meta: { secretExecution: true, secretInput: [], secretOutput: [] } },

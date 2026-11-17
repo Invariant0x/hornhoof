@@ -2226,6 +2226,19 @@ export const outboundContacts = pgTable('outbound_contacts', {
   isDigest('outbound_contacts_hash', t.addressHash),
 ]);
 
+/* Private template values belong to the department that supplied them, even when the address is shared. */
+export const outboundContactFields = pgTable('outbound_contact_fields', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id').notNull().references(() => companies.id),
+  departmentId: uuid('department_id').notNull(),
+  contactId: uuid('contact_id').notNull(),
+  fieldsEnc: text('fields_enc').notNull(),
+}, t => [
+  unique('outbound_contact_fields_place').on(t.companyId, t.departmentId, t.contactId),
+  sameCompany('outbound_contact_fields_department', t.companyId, t.departmentId, departments),
+  sameCompany('outbound_contact_fields_contact', t.companyId, t.contactId, outboundContacts),
+]);
+
 /* A contact's permission for one purpose on one channel. Once taken away it does not come back: a new grant is a new row. */
 export const outboundPermissions = pgTable('outbound_permissions', {
   id: id(),
