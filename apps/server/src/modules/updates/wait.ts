@@ -295,12 +295,13 @@ export class UpdateWait {
     await this.exclusive(() => this.callOff(wait, calling));
   }
 
-  /* Written down first, so a wait that cannot be written down stays as it was. Its turns go, and the orchestrator hears
-     of it unless a person or the orchestrator called it off themselves. */
+  /* No check of this app hands it over once this starts. Its turns go, and when it cannot be written down it stays
+     waiting in update_waits, where the next check takes it up again. The orchestrator hears of it unless a person or the
+     orchestrator called it off themselves. */
   private async callOff(wait: Wait, calling: CallingOff): Promise<void> {
     const at = new Date(this.now());
-    if (!(await this.end(wait.id, { outcome: 'called_off', ...calling }, at))) return;
     this.disarm(true, wait.id);
+    if (!(await this.end(wait.id, { outcome: 'called_off', ...calling }, at))) return;
     const { version, commit } = wait.request;
     const called: UpdateCalledOff = { version, commit, at: at.toISOString(), until: wait.until.toISOString(), ...calling };
     this.ctx.log.warn({ version, reason: calling.reason, turns: calling.turns, error: calling.error }, 'Called off the update that waited for the agents.');
