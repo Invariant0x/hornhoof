@@ -115,8 +115,9 @@ jobs:
       - name: Lint and release checks
         if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.part == 1 }}
         env:
-          # Twice the 2048 MB node sets by itself on a machine with less than 15 GB of memory: the server's types with its
-          # tests took about 2.09 GB and ran out at 2048. Making tsc need less goes on separately in #1125 and #1126.
+          # Twice the 2048 MB node sets by itself on a machine with less than 15 GB of memory, for the lint: it reads the
+          # server's types with its tests through TypeScript 5.9 in node, which took about 2.09 GB and ran out at 2048. tsc is
+          # TypeScript 7 and runs outside node.
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
           node scripts/tests-select.mjs --lint
