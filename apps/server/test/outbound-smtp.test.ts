@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SealedPayload } from '../src/modules/outbound/delivery.js';
 import { smtpAdapter, type SmtpAccount, type SmtpTimeouts } from '../src/modules/outbound/smtp.js';
-import { CERT, PASSWORD, USERNAME, closedPort, header, parts, scriptedSmtp, smtpReceiver, subjectOf, wordsOf } from './outbound-receivers.js';
+import { CERT, PASSWORD, USERNAME, header, parts, scriptedSmtp, smtpReceiver, subjectOf, wordsOf } from './outbound-receivers.js';
+import { closedPort } from './closed-port.js';
 
 const FROM = 'sender@acme.test';
 const PAYLOAD: SealedPayload = { recipient: 'buyer@example.test', subject: 'Your order', text: 'Plain words.\n' };

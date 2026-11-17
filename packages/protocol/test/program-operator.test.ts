@@ -39,6 +39,14 @@ describe('bounded program operator protocol', () => {
     expect(OperatorNodeMessage.safeParse({ ...screen, command: 'shell' }).success).toBe(false);
   });
 
+  it('bounds an optional completed-response proof while accepting older node views', () => {
+    const view = { type: 'program.view', agentKey: id, request: id, result: 'ok', reason: null, jobId: id, instance: id, snapshot: id, state: 'idle', tool: null, question: null, input: 'empty', undelivered: false, cols: 80, rows: 24, cells: 'response' };
+    const completion = 'a'.repeat(64);
+    expect(OperatorNodeMessage.parse(view)).toEqual(view);
+    expect(OperatorNodeMessage.parse({ ...view, completion })).toEqual({ ...view, completion });
+    for (const invalid of ['', 'a'.repeat(65), 'G'.repeat(64), null]) expect(OperatorNodeMessage.safeParse({ ...view, completion: invalid }).success).toBe(false);
+  });
+
   it('takes any key by its tmux name, Ctrl, Alt and Shift too, and nothing that could become a tmux option', () => {
     for (const key of ['Enter', 'Escape', 'Tab', 'BTab', 'BSpace', 'Up', 'PageDown', 'F5', 'F12', 'a', 'Z', '1', 'C-u', 'C-c', 'M-b', 'S-Tab', 'C-M-x']) expect(ProgramKey.parse(key)).toBe(key);
     for (const key of ['-t', 'Enter;kill-server', 'Ctrl+U', 'C-', 'F13', 'hello', '\n', ' Enter', '', ['Enter', 'Tab']]) expect(ProgramKey.safeParse(key).success).toBe(false);

@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns, vaultEntries, vaultLog } from '../src/db/schema.js';
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { ask } from '../src/modules/tasks/engine.js';
-import { as, testApp } from './helpers.js';
+import { appFixture, as, testApp } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
@@ -142,6 +142,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/turns/current', url: () => '/api/turns/current', statuses: ALL_OK },
   { route: 'GET /api/subscriptions', url: () => '/api/subscriptions', statuses: ALL_OK },
   { route: 'GET /api/machines', url: () => '/api/machines', statuses: ALL_OK },
+  { route: 'GET /api/phones', url: () => '/api/phones', statuses: ALL_OK },
   { route: 'GET /api/pool', url: () => '/api/pool', statuses: ALL_OK },
   { route: 'GET /api/people', url: () => '/api/people', statuses: ALL_OK },
   { route: 'GET /api/me', url: () => '/api/me', statuses: ALL_OK },
@@ -190,6 +191,12 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/requests/:id/outbound-approval': 'outbound-views.test.ts: whoever may open the request',
   'GET /api/outbound/catalog': "outbound-department.test.ts: the people who run the department, and its head on their word; 403 for another department's owner, 404 through a head of another one",
   'GET /api/outbound/setup-log': "outbound-department.test.ts: the people who run the department, and its head on their word; 403 for another department's owner",
+  'GET /api/outbound/contacts': "outbound-department-access.test.ts, outbound-department.test.ts: the department's addresses only for its owner, CEO or delegate, the orchestrator acting for the CEO, and its own head on their word; 403 for another department's owner, 404 through a head of another one",
+  'GET /api/phones/:id': 'phones.test.ts: phone metadata of this company, 403 for another company; the connection address is shown only to its owner',
+  'GET /api/phones/:id/live': 'phone-recording.test.ts, phones.test.ts: the signed-in phone owner or the orchestrator acting for the CEO reads the live frame; 403 for another person or a head',
+  'GET /api/phones/:id/live/image': 'phone-recording.test.ts, phones.test.ts: the same phone-owner or orchestrator check protects the live image, never the rights of a task viewer',
+  'GET /api/tasks/:id/phone-recordings': 'phone-recording.test.ts: a visible task of this company, with recordings filtered to agents the viewer may open',
+  'GET /api/phone-sessions/:id/frames/:sequence/image': 'phone-recording.test.ts: a recording of this company whose task and agent the viewer may open; 403 otherwise',
   'GET /api/assistant/me': "assistants-rights.test.ts: an assistant key, read with its owner's rights as they are now",
   'GET /api/assistant/agents': "assistants-rights.test.ts: exactly the agents its owner may write to in the agent's window",
   'POST /api/assistant/messages': "assistants-rights.test.ts, assistants-messages.test.ts: an agent its owner may write to, 403 otherwise",
@@ -216,6 +223,8 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/outbound/unsubscribe/*', 'POST /api/outbound/unsubscribe/*',
   'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
   'POST /api/machines/:id/access/close', 'POST /api/machines/:id/access/decline', 'POST /api/machines/:id/access/open',
+  /* A person or the orchestrator registers and probes; the phone owner or the orchestrator stops and resumes, never a head. */
+  'POST /api/phones/probe', 'POST /api/phones', 'POST /api/phones/:id/stop', 'POST /api/phones/:id/resume',
   'GET /api/feedback', 'POST /api/feedback/inbound',
   'PUT /api/departments/:id/model-checks/:kind/thresholds', 'POST /api/departments/:id/model-checks/:kind/sets', 'POST /api/departments/:id/model-checks/:kind/misses',
   'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',
@@ -248,24 +257,27 @@ const call = (c: AclCompany, { method, url, payload }: Call, viewer: Viewer) => 
 /* A company with work in every corner: tasks, a turn, requests, notes, ideas and running parts of every agent. */
 async function busy() {
   const c = await aclCompany();
-  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret words', at: new Date().toISOString() }], openedAt: new Date(Date.now() - 3_600_000) }).returning();
-  const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ids.wes, machineKey: 'wes-machine-12345', hostname: 'wes-box' }).returning();
-  const work: Partial<Record<Crew, typeof tasks.$inferSelect>> = {};
-  let number = 0;
-  for (const key of Object.keys(c.crew) as Crew[]) {
-    const agent = c.crew[key];
-    const task = await c.work(`Secret of ${agent.name}`, agent, agent.departmentId!);
-    work[key] = task;
-    await c.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
-    await ask(c.app.ctx, agent.id, task.id, { text: wordsOf(key), kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
-    await c.db.insert(improvements).values({ companyId: c.companyId, agentId: agent.id, title: `Idea of ${agent.name}`, text: 'x' });
-    await addNote(c.app.ctx, agent.departmentId === c.dev.id ? departmentBook(c.dev) : departmentBook(c.sales), `Note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
-    await addNote(c.app.ctx, companyBook(c.companyId), `Company note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
-    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: agent.subscriptionId!, agentId: agent.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
-    const [run] = await c.db.insert(testRuns).values({ companyId: c.companyId, number: ++number, kind: 'tests', departmentId: agent.departmentId!, taskId: task.id, agentId: agent.id, jobId: job!.id, branch: 'main', command: 'echo ok', parts: 1, timeoutMs: 60_000, status: 'running' }).returning();
-    await c.db.insert(testParts).values({ runId: run!.id, companyId: c.companyId, part: 1, status: 'running', machineId: box!.id, startedAt: new Date() });
-  }
-  return { ...c, tasksOf: work as Record<Crew, typeof tasks.$inferSelect> };
+  const work = await appFixture(c.app, 'agent visibility company with work', async () => {
+    const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, departmentId: c.dev.id, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret words', at: new Date().toISOString() }], openedAt: new Date(Date.now() - 3_600_000) }).returning();
+    const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ids.wes, machineKey: 'wes-machine-12345', hostname: 'wes-box' }).returning();
+    const work: Partial<Record<Crew, typeof tasks.$inferSelect>> = {};
+    let number = 0;
+    for (const key of Object.keys(c.crew) as Crew[]) {
+      const agent = c.crew[key];
+      const task = await c.work(`Secret of ${agent.name}`, agent, agent.departmentId!);
+      work[key] = task;
+      await c.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
+      await ask(c.app.ctx, agent.id, task.id, { text: wordsOf(key), kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
+      await c.db.insert(improvements).values({ companyId: c.companyId, agentId: agent.id, title: `Idea of ${agent.name}`, text: 'x' });
+      await addNote(c.app.ctx, agent.departmentId === c.dev.id ? departmentBook(c.dev) : departmentBook(c.sales), `Note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
+      await addNote(c.app.ctx, companyBook(c.companyId), `Company note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
+      const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: agent.subscriptionId!, agentId: agent.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
+      const [run] = await c.db.insert(testRuns).values({ companyId: c.companyId, number: ++number, kind: 'tests', departmentId: agent.departmentId!, taskId: task.id, agentId: agent.id, jobId: job!.id, branch: 'main', command: 'echo ok', parts: 1, timeoutMs: 60_000, status: 'running' }).returning();
+      await c.db.insert(testParts).values({ runId: run!.id, companyId: c.companyId, part: 1, status: 'running', machineId: box!.id, startedAt: new Date() });
+    }
+    return work as Record<Crew, typeof tasks.$inferSelect>;
+  });
+  return { ...c, tasksOf: work };
 }
 
 /* What each person may open of the crew. */

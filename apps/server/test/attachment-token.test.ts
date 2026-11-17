@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { attachments, agentEvents, agents, jobs, machines, nodes, people, subscriptions } from '../src/db/schema.js';
+import { attachments, agentEvents, agents, companies, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { builtinOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -67,13 +67,16 @@ describe('attachment authorization over the node link', () => {
     expect(await c.db.select().from(attachments)).toHaveLength(1);
   });
 
-  it('restricts the permission to this task, excludes chat and pictures, and rejects forgery', async () => {
+  it('restricts the permission to this task and company, excludes chat and pictures, and rejects forgery', async () => {
     const c = await company();
     const other = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Other', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true })).task;
     const granted = await c.grant();
     expect(typeof granted.result?.token).toBe('string');
     const token = granted.result!.token;
+    const [foreignCompany] = await c.db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
+    const [foreignTask] = await c.db.insert(tasks).values({ companyId: foreignCompany!.id, number: c.task.number, title: 'Foreign task' }).returning();
     expect((await c.send(token, `task=${other.number}&name=review.md`)).statusCode).toBe(403);
+    expect((await c.send(token, `task=${foreignTask!.id}&name=review.md`)).statusCode).toBe(403);
     expect((await c.send(token, `task=${c.task.number}&chat=1&name=review.md`)).statusCode).toBe(403);
     expect((await c.send(token, 'name=review.md')).statusCode).toBe(403);
     expect((await c.send(`${token}forged`)).statusCode).toBe(401);
