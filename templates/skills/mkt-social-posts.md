@@ -15,4 +15,4 @@ Use this ability to draft posts for an assigned network and audience. Inputs are
 6. Propose timing from available audience evidence within the assigned account limits. Do not create a sending schedule without authorization.
 7. Check facts and permitted links; identify the source for every claim. Include media requirements and useful alt text.
 
-Return each draft with network, account, language, proposed time and sources. A draft does not authorize posting or replying. Public items require published catalog sources through the server outbound gateway and explicit approval of the exact rendered content, using only the authorized company account.
+Return each draft with network, account, language, proposed time and sources. A draft does not authorize posting or replying. A public item goes from the company's own account, is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.

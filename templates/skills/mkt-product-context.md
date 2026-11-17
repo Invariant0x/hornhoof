@@ -19,4 +19,4 @@ Record:
 
 Separate confirmed facts, owner decisions, hypotheses and unknowns. Date updates and identify what changed after a product, price or policy revision. Read only customer evidence the assignment permits and remove identifying details unnecessary to the document.
 
-Return or update the context in the assigned location, with sources and unresolved decisions. A draft addition is not an approved claim or price. Changes to commercial commitments need their authorized human decision, and public use requires the server publication gateway and exact approval of each public item.
+Return or update the context in the assigned location, with sources and unresolved decisions. A draft addition is not an approved claim or price. Changes to commercial commitments need their authorized human decision, and public use is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it.

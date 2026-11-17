@@ -6,10 +6,6 @@ import { linkOf } from '../modules/link/link.js';
 
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-/* The stop link's own page asks for no referrer, so a browser names no site for its form, only "null". The link in the address
-   is the whole right here and a site that has it needs no browser, so this takes nothing from the rule below. */
-const namesNoSite = (req: FastifyRequest): boolean => req.headers.origin === 'null' && req.method === 'POST' && req.routeOptions.url === '/api/outbound/unsubscribe/*';
-
 function ordinaryRead(req: FastifyRequest): boolean {
   return READS.has(req.method) && req.headers.upgrade?.toLowerCase() !== 'websocket';
 }
@@ -35,7 +31,6 @@ export function fromOwnPages(config: Config, db: Db) {
     const origin = req.headers.origin;
     if (origin === undefined || origin === own) return;
     if (ordinaryRead(req)) return;
-    if (namesNoSite(req)) return;
     if (await fromKnownAddress(db, req, origin)) return;
     throw new ApiError(403, 'forbidden', 'This came from a page of another site, so Hornhoof did not do it.', 'cross_site');
   };

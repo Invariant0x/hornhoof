@@ -1,9 +1,18 @@
 import { lookup as resolveName } from 'node:dns/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { isIP, type LookupFunction } from 'node:net';
+import { BlockList, isIP, type LookupFunction } from 'node:net';
 import type { ApiEndpoint, ApiProvider, ModelOption } from '@hornhoof/protocol';
-import { isPublicAddress } from '../outbound/extension.js';
+
+const NOT_PUBLIC = new BlockList();
+for (const [network, prefix] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]] as const) NOT_PUBLIC.addSubnet(network, prefix, 'ipv4');
+for (const [network, prefix] of [['::', 96], ['64:ff9b::', 96], ['100::', 64], ['2001::', 32], ['2001:db8::', 32], ['2002::', 16], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]] as const) NOT_PUBLIC.addSubnet(network, prefix, 'ipv6');
+
+/* Which addresses are on the public internet. Node checks an IPv4 address written in IPv6 against the IPv4 rules. */
+export const isPublicAddress = (address: string): boolean => {
+  const family = isIP(address);
+  return family !== 0 && !NOT_PUBLIC.check(address, family === 4 ? 'ipv4' : 'ipv6');
+};
 
 /* The server asks an API for its models at an address a person gave. It never reaches the internal network unless the
    server's operator allowed that host, follows no redirect, reads a bounded answer and gives up after a while. */

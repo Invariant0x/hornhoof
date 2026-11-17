@@ -15,4 +15,4 @@ Use this ability to write or adapt an assigned text for a Russian-speaking audie
 - **Local evidence**: use verified local prices, payment options and examples only when the company actually offers them. Mark missing facts instead of assuming them.
 - **Paid advertising**: identify placements subject to registration, labeling or other local rules and obtain current authoritative requirements and the authorized human decision before commitment.
 
-Return the Russian draft, its claim sources and unresolved language or compliance questions. Public Russian content needs its own exact human approval and the server publication gateway; another language's approval does not cover it. Any assigned brand review must use someone able to assess Russian.
+Return the Russian draft, its claim sources and unresolved language or compliance questions. Public Russian content is its own text, is marked in the department's git and waits for nobody's yes unless its department set an approval rule for it. Any assigned brand review must use someone able to assess Russian.

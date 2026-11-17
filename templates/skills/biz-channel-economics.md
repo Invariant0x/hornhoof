@@ -13,4 +13,4 @@ Use this ability to estimate the economics of an assigned distribution or partne
 4. Model low, expected and high cases. Vary one input at a time to identify the assumptions that move the result most.
 5. Propose a share or fee range that retains positive margin in the low case, and a walk-away point. If none is defensible, say so.
 
-Return a table with formulas, source dates, sensitivity and uncertainty so another assigned checker can recompute it. Do not round in the company's favor. These figures inform a decision and are not an offer: prices, discounts and terms require the authorized human approval, partner messages require the approved outbound gateway, and a human signs contracts.
+Return a table with formulas, source dates, sensitivity and uncertainty so another assigned checker can recompute it. Do not round in the company's favor. These figures inform a decision and are not an offer: prices and discounts go by the department's price rule, partner messages are marked in the department's git, and a human signs contracts.

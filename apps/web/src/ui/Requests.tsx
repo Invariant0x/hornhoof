@@ -6,7 +6,6 @@ import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
 import { MaterialViewer } from './MaterialViewer';
-import { BoundApprovalSnapshot } from './Outbound';
 import { OptionMaterialItems, RequestMaterialsZone, readMaterialStamp, useRequestMaterials, type MaterialItem, type MaterialManifestView } from './RequestMaterials';
 import { proseErrorText } from './TaskAttachments';
 
@@ -407,8 +406,8 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
 }
 
 /* The exact commit, linked on GitHub when the repository is there. */
-/* An approval under a department's policy is about the work its words name, and shows its bound snapshot when present. */
-const ApprovedCommit = ({ request }: { request: WaitingRequest }) => (request.commit ? <Commit request={request} /> : <BoundApprovalSnapshot requestId={request.id} />);
+/* An approval under a department's policy is about the work its words name, and shows no commit. */
+const ApprovedCommit = ({ request }: { request: WaitingRequest }) => (request.commit ? <Commit request={request} /> : null);
 
 function Commit({ request }: { request: WaitingRequest }) {
   const code = <code className="req-commit">{request.commit}</code>;

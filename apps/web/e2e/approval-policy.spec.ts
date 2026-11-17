@@ -75,8 +75,6 @@ async function open(page: Page, lang: 'en' | 'ru', theme: string, width: number,
     if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-355' }, available: false, latest: null, updater: { status: null, waiting: null } } });
     if (url.pathname === '/api/departments/d2/approval-policy') return route.fulfill({ json: shown });
     if (url.pathname === '/api/autonomous-releases') return route.fulfill({ json: { entries: JOURNAL } });
-    /* The panel also holds the department's outbound setup, here with nothing set up. */
-    if (url.pathname === '/api/outbound') return route.fulfill({ json: { channels: [], messages: [], escalations: [], approvals: [], departments: [] } });
     if (url.pathname === '/api/departments/d2/approval-policy/autonomous-release') {
       const body = route.request().postDataJSON() as { enabled: boolean };
       puts.push({ url: url.pathname, body });

@@ -131,9 +131,9 @@ function EntryLog({ entry, lines, onClose }: { entry: VaultEntry; lines: LogLine
       {lines === null ? (
         <p className="muted" role="status">{t.common.loading}</p>
       ) : (
-        <ul className="outbound-list outbound-entries">
+        <ul className="vault-list">
           {lines.map(line => (
-            <li key={line.id} className="outbound-entry">
+            <li key={line.id} className="vault-entry">
               <span>{v.logLine(line.kind, line.person?.name ?? line.agent?.name ?? '', line.task?.number ?? null)}</span>
               <small>{when(line.at)}</small>
             </li>
@@ -208,11 +208,11 @@ export function Vault() {
           {entries === null && failure === null && <p className="muted" role="status">{t.common.loading}</p>}
           {entries?.length === 0 && <p className="muted">{v.none}</p>}
           {entries && entries.length > 0 && (
-            <ul className="outbound-list outbound-entries">
+            <ul className="vault-list">
               {entries.map(entry => (
-                <li key={entry.id} className="outbound-entry">
+                <li key={entry.id} className="vault-entry">
                   <b>{entry.name}</b>
-                  <span className="outbound-address">{entry.site}</span>
+                  <span className="vault-site">{entry.site}</span>
                   <span>{v.loginIs(entry.login)}{entry.hasCode ? ` ${v.withCode}` : ''}</span>
                   <small>{entry.createdBy ? v.addedBy(entry.createdBy.name, when(entry.createdAt)) : v.added(when(entry.createdAt))}</small>
                   {mode.kind === 'remove' && mode.entry.id === entry.id ? (

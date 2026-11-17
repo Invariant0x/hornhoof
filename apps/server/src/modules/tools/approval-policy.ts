@@ -62,11 +62,11 @@ type Asked = {
   plan?: WaitPlan | undefined;
 };
 
-/* The rule of a channel of the task's department; a task of no department asks every time. */
+/* The rule of a channel of the task's department; a task of no department goes by the rule nobody set. */
 async function ruleFor(ctx: Pick<Ctx, 'db'>, task: Task, channel: ApprovalChannel) {
-  if (!task.departmentId) return ruleOf(undefined);
+  if (!task.departmentId) return ruleOf(undefined, channel);
   const [stored] = await ctx.db.select().from(approvalPolicies).where(and(eq(approvalPolicies.departmentId, task.departmentId), eq(approvalPolicies.channel, channel)));
-  return ruleOf(stored);
+  return ruleOf(stored, channel);
 }
 
 const limitWords = (rule: { limit: number; unit?: string | undefined }) => `${rule.limit}${rule.unit ? ` ${rule.unit}` : ''}`;
@@ -105,6 +105,7 @@ async function letGoBecause(ctx: Pick<Ctx, 'db'>, job: ToolJob, task: Task, aske
   const rule = await ruleFor(ctx, task, asked.channel);
   const known = task.departmentId !== null && rule.mode === 'new_kinds' && (await kindKnown(ctx.db, job.companyId, task.departmentId, asked.channel, asked.kind));
   if (approvalNeeded(rule, { amount: asked.amount ?? null, known })) return null;
+  if (rule.mode === 'none') return `the department asks no approval for ${asked.channel}`;
   return rule.mode === 'within_limits' ? `${asked.amount} is within the limit of ${limitWords(rule)}` : 'this kind was approved before';
 }
 
@@ -196,7 +197,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'approval_policy',
     {
       description:
-        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for exact commits to main, and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks every time.",
+        "A department's approvals: who owns them (none means the CEO), whether its people enabled autonomousRelease for exact commits to main, and the rule of each channel: none, every, new_kinds, or within_limits with its limit. A channel with no rule of its own asks nothing for what goes out (message, price, publication), every time for a commit, and only for a new kind of spend or other.",
       inputSchema: { department: Department },
     },
     ({ department }) => readable(() => readPolicy(ctx, job, department)),
@@ -206,7 +207,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'request_approval',
     {
       description:
-        'Before work that may need a person\'s approval (a message out, a price, a publication, a spend and so on), ask here. It follows the policy of the task\'s department. ' +
+        'Before work that may need a person\'s approval under the rules of the task\'s department (a spend, or a message, price or publication its department chose to approve), ask here. It follows the policy of the task\'s department: what goes out asks nobody unless the department set a rule for it. ' +
         'When the policy lets the work go, no person is asked: the answer says so and a line goes in the task\'s log, so go on with the work. Otherwise the task waits, the department\'s owner (with none, the CEO) is asked, and you are woken with the answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
         'amount: how much this one is, in what the channel\'s limit counts. Without it, a limit never lets the work go. text: what you want to do, in plain words. link: an https page where it can be seen.' +
@@ -273,7 +274,7 @@ function registerPolicyTools(server: McpServer, change: Change, who: string, min
     'set_approval_policy',
     {
       description:
-        'Sets how one channel of a department is approved. mode every: each one asks. new_kinds: only a kind nobody approved yet asks. within_limits: no approval up to limit, above it the owner is asked; unit says what the limit counts, like USD. ' +
+        'Sets how one channel of a department is approved. mode none: nothing asks. every: each one asks. new_kinds: only a kind nobody approved yet asks. within_limits: no approval up to limit, above it the owner is asked; unit says what the limit counts, like USD. ' +
         who,
       inputSchema: { department: Department, channel: ApprovalChannel, mode: z.enum(APPROVAL_MODES), limit: ApprovalAmount.optional(), unit: z.string().trim().min(1).max(16).optional() },
     },
