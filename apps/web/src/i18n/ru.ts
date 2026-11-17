@@ -1883,7 +1883,7 @@ export const ru: Messages = {
     searchPlaceholder: 'Номер или слова',
     clearSearch: 'Очистить поиск',
     noSearchResults: 'Задачи не найдены. Попробуйте другие слова или очистите поиск.',
-    states: { open: 'Не начата', working: 'В работе', review: 'На проверке', waiting: 'Ждет человека', blocked: 'Не может продолжить', done: 'Готова', cancelled: 'Отменена' },
+    states: { open: 'Не начата', working: 'В работе', review: 'На проверке', waiting: 'Ждет', blocked: 'Не может продолжить', done: 'Готова', cancelled: 'Отменена' },
     waitsFor: tasks => `ждет ${tasks}`,
     givenBy: name => `Поставил ${name}`,
     details: 'Подробно',
@@ -1996,8 +1996,8 @@ export const ru: Messages = {
     where: {
       mine: 'Мои задачи',
       theirs: (name: string) => `Задачи: ${name}`,
-      waits: 'Ждет меня',
-      waitsFor: (name: string) => `Ждет ответа: ${name}`,
+      waits: 'Ждет моего ответа',
+      waitsFor: (name: string) => `Работа ждет ответа (${name})`,
       working: 'Сейчас в работе',
       workingAbout: 'Задачи, над которыми сотрудники работают прямо сейчас.',
       turns: 'Ходы и выпуски',
@@ -2016,7 +2016,7 @@ export const ru: Messages = {
     filters: { label: 'Фильтры', status: 'Статус', executor: 'Исполнитель', responsible: 'Ответственный', goal: 'Цель', any: 'Любой' },
     statuses: { notStarted: 'Не начата', working: 'В работе', review: 'На проверке', waits: 'Ждет', done: 'Готово', cancelled: 'Отменена' },
     groups: {
-      notStarted: 'Не начата', working: 'В работе', review: 'На проверке', waiting: 'Ждет человека', waitingYou: 'Ждет вашего ответа', stopped: 'Остановлена',
+      notStarted: 'Не начата', working: 'В работе', review: 'На проверке', waiting: 'Ждет', waitingYou: 'Ждет вашего ответа', stopped: 'Остановлена',
       paused: 'На паузе', done: 'Готово', cancelled: 'Отменена',
     },
     yourGoals: 'Ваши цели',
@@ -2026,13 +2026,25 @@ export const ru: Messages = {
     noMine: 'Открытых задач, за которые нужно отвечать, нет.',
     nothingWorking: 'Сейчас никто не работает над задачами.',
     waitTasks: 'Задачи, которые ждут вас',
-    waitTasksOf: (name: string) => `Задачи, которые ждут: ${name}`,
+    waitTasksOf: (name: string) => `Задачи, которые ждут ответа (${name})`,
     list: { task: 'Задача', executor: 'Исполнитель', responsible: 'Ответственный', goal: 'Цель', due: 'Срок', subtasks: (done: number, total: number) => `Подзадачи: готово ${done} из ${total}` },
     nobody: 'Никто',
     noGoal: 'Без цели',
     late: (day: string) => `${day}, срок прошел`,
-    waitsFor: (name: string, span: string) => `ждет: ${name}, ${span}`,
-    waitsSomething: (span: string) => `ждет ${span}`,
+    wait: {
+      person: (name, span) => `ждет ответа ${span}${name ? ` (${name})` : ''}`,
+      after: (task, span) => `ждет ${task ? `задачу ${task}` : 'другую задачу'} уже ${span}`,
+      review: (name, span) => `ждет проверки ${span}${name ? ` (${name})` : ''}`,
+      run: (number, span) => `ждет прогон тестов${number ? ` ${number}` : ''} уже ${span}`,
+      work: (number, span) => `ждет завершения работы${number ? ` ${number}` : ''} уже ${span}`,
+      external: (name, reason, span) => {
+        if (name) return `ждет действий ${span} (${name})${reason ? `: ${reason}` : ''}`;
+        return reason ? `ждет ${span}: ${reason}` : `ждет внешнего события уже ${span}`;
+      },
+      unknown: span => `ждет ${span}`,
+      setBy: (name, until) => `ожидание поставил ${name}, до ${until}`,
+      until: until => `до ${until}`,
+    },
     time: {
       minutes: (n: number) => `${n} ${plural('ru', n, { one: 'минуту', few: 'минуты', many: 'минут', other: 'минуты' })}`,
       hours: (h: number, m: number) => `${h} ${plural('ru', h, { one: 'час', few: 'часа', many: 'часов', other: 'часа' })}${m ? ` ${m} мин` : ''}`,

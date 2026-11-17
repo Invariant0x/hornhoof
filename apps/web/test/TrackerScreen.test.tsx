@@ -26,7 +26,7 @@ const line = (over: Partial<TaskLine> & { id: string; number: number; title: str
 const PAY = line({ id: 't21', number: 21, title: 'Take card payments', goal: SERVES, responsible: MARIA, why: 'Shops sell online.', pipelineId: 'pl1', pipelineStageId: 's1' });
 const FORM = line({ id: 't22', number: 22, title: 'Card form', status: 'open', parentId: 't21', goal: SERVES, responsible: MARIA });
 const REFUND = line({ id: 't23', number: 23, title: 'Refund button', status: 'review', goal: SERVES, waitsFor: [21] });
-const LOGIN = line({ id: 't24', number: 24, title: 'Fix the login page', status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ who: { kind: 'person', ...IVAN }, since: '2026-11-13T08:00:00.000Z' }] } });
+const LOGIN = line({ id: 't24', number: 24, title: 'Fix the login page', status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ kind: 'person', who: { kind: 'person', ...IVAN }, reason: null, since: '2026-11-13T08:00:00.000Z' }] } });
 const TASKS = [LOGIN, REFUND, FORM, PAY];
 const PIPELINE: Pipeline = { id: 'pl1', department: DEV, name: 'Payments way', why: '', archived: false, version: 3, mayEdit: true, stages: [{ id: 's1', parentId: null, name: 'Build', ownerRole: 'DEV-BE', owner: null, position: 0 }, { id: 's2', parentId: 's1', name: 'Check', ownerRole: 'DEV-HEAD', owner: null, position: 0 }] };
 const detail = (task: TaskLine, over: Partial<TaskDetail> = {}): TaskDetail => ({
@@ -103,6 +103,20 @@ describe('My tasks and View as', () => {
     expect(screen.queryByRole('combobox', { name: 'View as' })).not.toBeInTheDocument();
   });
 
+  it("titles a named wait list for that person and labels only the waits they can act on", async () => {
+    const since = '2026-11-13T08:00:00.000Z';
+    const external = { kind: 'external' as const, who: null, reason: 'Deployment', since };
+    const forMaria = line({ ...LOGIN, id: 'maria', number: 26, title: 'Ask Maria', time: { inStatusSince: since, workSeconds: 0, waitsOn: [external, { kind: 'person', who: { kind: 'person', ...MARIA }, reason: null, since }] } });
+    const ownedByMaria = line({ ...LOGIN, id: 'run', number: 27, title: 'Run the checks', time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'run', who: { kind: 'person', ...MARIA }, reason: '108', since }] } });
+    shell('/tasks?show=waits&person=p2', { 'GET /api/tasks?status=all': [200, { tasks: [LOGIN, forMaria, ownedByMaria] }] }, listed('p1', 'Ivan'));
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(await within(waiting).findByRole('heading', { name: 'Tasks that wait for Maria' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Waits for Maria');
+    expect(waiting).toHaveTextContent('Ask Maria');
+    expect(waiting).toHaveTextContent('waits for an answer from Maria');
+    expect(waiting).not.toHaveTextContent(/Fix the login page|Run the checks|Deployment/);
+  });
+
   it("opens another person's screen from the address for the CEO delegate", async () => {
     shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, isOwner: false, isCeoDelegate: true } });
     const list = await main();
@@ -123,6 +137,25 @@ describe('My tasks and View as', () => {
 });
 
 describe('the views and the card', () => {
+  it('shows the run in the list and the person who set the wait and its deadline on the card', async () => {
+    const user = userEvent.setup();
+    const since = '2026-11-17T21:45:00.000Z';
+    const reason = `Rerun 108 on ${'turn-32'.repeat(30)} then release_turn`;
+    const run = line({ id: 'run', number: 1289, title: 'Release the turn', executor: BRUNO,
+      externalWait: { reason, since, until: new Date(2026, 10, 17, 22, 35).toISOString() },
+      time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind: 'run', who: null, reason: '108', since }] } });
+    shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [run] }], 'GET /api/tasks/run': [200, { task: detail(run) }] });
+    const list = await main();
+    const row = await waitFor(() => rowOf(list, '#1289 Release the turn'));
+    expect(row).toHaveTextContent('waits for test run 108');
+    expect(within(list).getByRole('heading', { name: 'Waiting: 1' })).toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: 'Release the turn' }));
+    const panel = await card('#1289 Release the turn');
+    expect(panel).toHaveTextContent('waits for test run 108');
+    expect(panel).toHaveTextContent(reason);
+    expect(panel).toHaveTextContent('set by Bruno, until 22:35');
+  });
+
   it('opens the same card from the list, the board and the graph', async () => {
     const user = userEvent.setup();
     shell('/tasks?department=d2');
@@ -288,7 +321,7 @@ describe('the list', () => {
     shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [...TASKS, shipped, dropped] }] });
     const list = await main();
     const done = await within(list).findByRole('button', { name: 'Done: 1' });
-    expect([...list.querySelectorAll('h2')].map(h => h.textContent)).toEqual(['Waits for a person: 1', 'Review: 1', 'In work: 1', 'Done: 1']);
+    expect([...list.querySelectorAll('h2')].map(h => h.textContent)).toEqual(['Waiting: 1', 'Review: 1', 'In work: 1', 'Done: 1']);
     expect(within(list).queryByRole('listitem', { name: '#19 Price page' })).not.toBeInTheDocument();
     await user.click(done);
     expect(within(list).getByRole('listitem', { name: '#19 Price page' })).toBeInTheDocument();

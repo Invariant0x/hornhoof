@@ -1778,8 +1778,10 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .tr-goals .linkish { justify-self: start; font-weight: 600; overflow-wrap: anywhere; }
 .tr-found { display: grid; gap: 10px; min-width: 0; }
 .tr-waits { display: grid; gap: 6px; }
-.tr-waits h3 { margin: 0; font-size: 14px; }
-.tr-wait { color: var(--amber-ink); }
+.tr-waits h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.tr-waits .tp-subs li { display: grid; grid-template-columns: minmax(0, 1fr); min-inline-size: 0; }
+.tr-waits .tp-subs :is(.linkish, small) { white-space: normal; overflow-wrap: anywhere; }
+.tr-wait { color: var(--amber-ink); overflow-wrap: anywhere; }
 .tp-late { color: var(--amber-ink); font-weight: 600; }
 
 /* The list: a group per state in words, the names of its columns above it where the list is wide, each task a row of name,

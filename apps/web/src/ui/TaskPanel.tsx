@@ -1,7 +1,6 @@
 import { HIDDEN } from '@hornhoof/protocol/redaction';
 import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
-import { taskWaitText } from './task-wait';
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
@@ -11,7 +10,7 @@ import { graphPath } from '../tracker';
 import type { GoalView, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { TaskEdit } from './TrackerForms';
-import { dueText, momentText, sinceSeconds, spanText, trackerLine, waitText } from './tracker-words';
+import { dueText, localeOf, matchesExternalWait, momentText, sinceSeconds, spanText, taskWaits, trackerLine, waitLabel } from './tracker-words';
 import { OfflineMachine } from './OfflineMachine';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
@@ -134,14 +133,6 @@ function WorkLabels({ task }: { task: TaskDetail }) {
   return labels.length > 0 && <p className="muted tp-kind">{labels.join(', ')}</p>;
 }
 
-function ExternalTaskWait({ wait }: { wait: TaskDetail['externalWait'] }) {
-  const t = useT();
-  const { language } = useLanguage();
-  if (!wait) return null;
-  const until = new Date(wait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
-  return <p className="muted">{taskWaitText(t, wait, until)}</p>;
-}
-
 function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
   const t = useT();
   const turnText = task.turn !== null ? t.tasks.turn(task.turn) : null;
@@ -157,7 +148,6 @@ function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
         {task.urgent && <span className="badge urgent">{t.tracker.card.urgent}</span>}
       </p>
       {task.assigneeOffline && <OfflineMachine offline={task.assigneeOffline} />}
-      <ExternalTaskWait wait={task.externalWait} />
       {task.paused && <p className="muted">{t.tasks.pausedLine(task.paused.reason)}</p>}
       {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
     </header>
@@ -314,18 +304,32 @@ function TaskFacts({ task }: { task: TaskDetail }) {
   const stage = pipeline?.stages.find(s => s.id === task.pipelineStageId);
   const due = dueText(t, language, task);
   const time = task.time;
-  const waits = waitText(t, task);
+  const waits = taskWaits(task);
+  const external = task.externalWait;
+  const setter = task.assignee?.name;
+  const until = external && new Date(external.until).toLocaleTimeString(localeOf(language), { hour: '2-digit', minute: '2-digit' });
+  const deadline = until && (setter ? t.tracker.wait.setBy(setter, until) : t.tracker.wait.until(until));
+  const now = Date.now();
   return (
     <dl className="facts tp-facts" aria-label={words.facts}>
       <Fact name={words.responsible}>{task.responsible?.name ?? t.tracker.nobody}</Fact>
       <Fact name={words.executor}>{task.executor?.name ?? task.assignee?.name ?? t.tracker.nobody}</Fact>
       {pipeline && <Fact name={words.pipeline}>{stage ? `${pipeline.name}: ${stage.name}` : pipeline.name}</Fact>}
       {due && <Fact name={words.due}><span className={due.late ? 'tp-late' : undefined}>{due.text}</span></Fact>}
-      {time && (
+      {(time || waits.length > 0) && (
         <Fact name={words.time}>
-          {words.inStatus(t.tasks.states[task.status], spanText(t, sinceSeconds(time.inStatusSince)))}
-          {time.workSeconds > 0 && <small>{words.worked(spanText(t, time.workSeconds))}</small>}
-          {waits && <small>{waits}</small>}
+          {time && words.inStatus(t.tasks.states[task.status], spanText(t, sinceSeconds(time.inStatusSince, now)))}
+          {time && time.workSeconds > 0 && <small>{words.worked(spanText(t, time.workSeconds))}</small>}
+          {waits.map((wait, i) => {
+            const recorded = external && matchesExternalWait(wait, external) ? external : null;
+            return (
+              <Fragment key={i}>
+                <small dir="auto">{waitLabel(t, task, wait, now)}</small>
+                {recorded && wait.kind !== 'external' && <small dir="auto">{recorded.reason}</small>}
+                {recorded && deadline && <small dir="auto">{deadline}</small>}
+              </Fragment>
+            );
+          })}
         </Fact>
       )}
     </dl>

@@ -1880,7 +1880,7 @@ export const en = {
     searchPlaceholder: 'Number or words',
     clearSearch: 'Clear search',
     noSearchResults: 'No tasks found. Try other words or clear the search.',
-    states: { open: 'Not started', working: 'In progress', review: 'In review', waiting: 'Waiting for a person', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled' },
+    states: { open: 'Not started', working: 'In progress', review: 'In review', waiting: 'Waiting', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled' },
     waitsFor: (tasks: string) => `waits for ${tasks}`,
     givenBy: (name: string) => `Given by ${name}`,
     details: 'Details',
@@ -2020,7 +2020,7 @@ export const en = {
     statuses: { notStarted: 'Not started', working: 'In work', review: 'Review', waits: 'Waits', done: 'Done', cancelled: 'Cancelled' },
     /* The list's groups, by what a task needs now. */
     groups: {
-      notStarted: 'Not started', working: 'In work', review: 'Review', waiting: 'Waits for a person', waitingYou: 'Waits for your answer', stopped: 'Stopped',
+      notStarted: 'Not started', working: 'In work', review: 'Review', waiting: 'Waiting', waitingYou: 'Waits for your answer', stopped: 'Stopped',
       paused: 'Paused', done: 'Done', cancelled: 'Cancelled',
     },
     yourGoals: 'Your goals',
@@ -2035,8 +2035,20 @@ export const en = {
     nobody: 'Nobody',
     noGoal: 'No goal',
     late: (day: string) => `${day}, late`,
-    waitsFor: (name: string, span: string) => `waits for ${name} ${span}`,
-    waitsSomething: (span: string) => `waits ${span}`,
+    wait: {
+      person: (name: string | null, span: string) => name ? `waits for an answer from ${name} for ${span}` : `waits for an answer for ${span}`,
+      after: (task: string | null, span: string) => `waits for ${task || 'another task'} for ${span}`,
+      review: (name: string | null, span: string) => name ? `waits for ${name} to review for ${span}` : `waits for a review for ${span}`,
+      run: (number: string | null, span: string) => number ? `waits for test run ${number} for ${span}` : `waits for a test run for ${span}`,
+      work: (number: string | null, span: string) => number ? `waits for work run ${number} for ${span}` : `waits for a work run for ${span}`,
+      external: (name: string | null, reason: string | null, span: string) => {
+        if (name) return `waits for ${name} for ${span}${reason ? `: ${reason}` : ''}`;
+        return reason ? `waits for ${span}: ${reason}` : `waits for an external event for ${span}`;
+      },
+      unknown: (span: string) => `waits for ${span}`,
+      setBy: (name: string, until: string) => `set by ${name}, until ${until}`,
+      until: (until: string) => `until ${until}`,
+    },
     time: {
       minutes: (n: number) => (n === 1 ? '1 minute' : `${n} minutes`),
       hours: (h: number, m: number) => `${h === 1 ? '1 hour' : `${h} hours`}${m ? ` ${m} min` : ''}`,

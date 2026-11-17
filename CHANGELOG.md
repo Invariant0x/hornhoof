@@ -5,6 +5,13 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- The tracker says what a task waits for, including the test run number when known, and the task card shows who set an external wait and when it is due to end.
+- A person's waiting list shows only the tasks that need their answer, and the page title names the same person.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

@@ -148,12 +148,15 @@ describe('a task', () => {
     await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const clock = new Date(externalWait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
-    const text = language === 'ru' ? `ждет: Images on the registry, до ${clock}` : `waits: Images on the registry, until ${clock}`;
-    expect(within(panel).getByText(text)).toHaveClass('muted');
+    const reason = /Images on the registry/;
+    const deadline = language === 'ru' ? `ожидание поставил Rita, до ${clock}` : `set by Rita, until ${clock}`;
+    expect(within(panel).getByText(reason)).toBeInTheDocument();
+    expect(within(panel).getByText(deadline)).toBeInTheDocument();
     mockApi({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }], 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait: null } }] });
     await user.type(within(panel).getByRole('textbox', { name: language === 'ru' ? 'Комментарий' : 'Comment' }), 'Images ready.');
     await user.click(within(panel).getByRole('button', { name: language === 'ru' ? 'Добавить комментарий' : 'Add comment' }));
-    await waitFor(() => expect(within(panel).queryByText(text)).toBeNull());
+    await waitFor(() => expect(within(panel).queryByText(reason)).toBeNull());
+    expect(within(panel).queryByText(deadline)).toBeNull();
     localStorage.removeItem('hh-lang');
   });
 

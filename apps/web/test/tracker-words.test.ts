@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { dueText } from '../src/ui/tracker-words';
+import type { TaskLine } from '../src/types';
+import { dueText, waitText } from '../src/ui/tracker-words';
 
 /* A due date is a day of the calendar, kept as its midnight in UTC. */
 const DUE = '2026-11-20T00:00:00.000Z';
@@ -24,5 +25,30 @@ describe('a due day', () => {
     expect(dueText(en, 'en', { dueAt: DUE, status: 'working' }, Date.parse('2026-11-20T23:59:00.000Z'))).toEqual({ text: '20 Nov', late: false });
     expect(dueText(en, 'en', { dueAt: DUE, status: 'working' }, Date.parse('2026-11-21T00:00:00.000Z'))).toEqual({ text: '20 Nov, late', late: true });
     expect(dueText(en, 'en', { dueAt: DUE, status: 'done' }, Date.parse('2026-11-25T00:00:00.000Z'))).toEqual({ text: '20 Nov', late: false });
+  });
+});
+
+describe('what a task is waiting for', () => {
+  const since = '2026-11-17T21:45:00.000Z';
+  const now = Date.parse('2026-11-17T22:05:00.000Z');
+  const owner = { kind: 'agent', id: 'head', name: 'Head of development' } as const;
+  const executor = { ...owner, kind: 'head', role: null } as const;
+  const person = { kind: 'person', id: 'ivan', name: 'Иван Король' } as const;
+  const reviewer = { kind: 'agent', id: 'hana', name: 'Hana' } as const;
+
+  it.each([
+    ['person', person, null, 'waits for an answer from Иван Король for 20 minutes', 'ждет ответа 20 минут (Иван Король)'],
+    ['after', owner, '#42', 'waits for #42 for 20 minutes', 'ждет задачу #42 уже 20 минут'],
+    ['review', reviewer, null, 'waits for Hana to review for 20 minutes', 'ждет проверки 20 минут (Hana)'],
+    ['review', owner, null, 'waits for a review for 20 minutes', 'ждет проверки 20 минут'],
+    ['run', owner, '108', 'waits for test run 108 for 20 minutes', 'ждет прогон тестов 108 уже 20 минут'],
+    ['run', owner, null, 'waits for a test run for 20 minutes', 'ждет прогон тестов уже 20 минут'],
+    ['external', null, 'Deployment', 'waits for 20 minutes: Deployment', 'ждет 20 минут: Deployment'],
+    ['external', reviewer, 'Deployment', 'waits for Hana for 20 minutes: Deployment', 'ждет действий 20 минут (Hana): Deployment'],
+  ] as const)('names the target of a %s wait in both languages', (kind, who, reason, english, russian) => {
+    const status: TaskLine['status'] = 'working';
+    const task = { status, executor, time: { inStatusSince: since, workSeconds: 0, waitsOn: [{ kind, who, reason, since }] } };
+    expect(waitText(en, task, now)).toBe(english);
+    expect(waitText(ru, task, now)).toBe(russian);
   });
 });
