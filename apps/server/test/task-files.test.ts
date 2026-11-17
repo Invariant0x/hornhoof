@@ -11,6 +11,9 @@ import { ask, comment, createTask } from '../src/modules/tasks/engine.js';
 import { dropOldFiles, FILE_BYTES, TASK_FILES_BYTES } from '../src/modules/tasks/attachments.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { setUpCompany, testApp } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 async function company(env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp(env);
@@ -105,6 +108,21 @@ describe('a task file', () => {
     const got = await fetchFile(token, `task=${task.number}&file=big.bin`);
     expect(got.headers['content-length']).toBe(String(bytes.length));
     expect(Buffer.compare(got.rawPayload, bytes)).toBe(0);
+  });
+});
+
+describe('an employee chat file', () => {
+  it('is readable by its sender, while another employee still cannot fetch it', async () => {
+    const { bruno, sam, turn, attach, fetchFile } = await company();
+    const token = await turn(bruno);
+    const bytes = Buffer.from('Owned report');
+    const uploaded = await attach(token, 'chat=1&name=report.txt', bytes);
+    expect(uploaded.statusCode).toBe(201);
+    const query = `task=message&file=${uploaded.json().id}`;
+    const own = await fetchFile(token, query);
+    expect(own.statusCode).toBe(200);
+    expect(own.rawPayload).toEqual(bytes);
+    expect((await fetchFile(await turn(sam), query)).statusCode).toBe(404);
   });
 });
 

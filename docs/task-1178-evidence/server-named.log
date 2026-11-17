@@ -1,0 +1,159 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/server
+      Coverage enabled with v8
+
+ ✓ test/assistant-agent.test.ts (35 tests) 203602ms
+   ✓ an assistant's own agent (5)
+     ✓ runs on the plan its owner picks on the assistant's card, and takes the assistant's words with no agent named 15316ms
+     ✓ runs only on a personal plan of its owner, which its owner alone picks, and waits with none 7786ms
+     ✓ is seen and written to by its owner alone: not the CEO, not the orchestrator, not another assistant 4785ms
+     ✓ is the CEO's own when the CEO owns it, still out of the orchestrator's reach 4191ms
+     ✓ works with its owner's assistant tools, the company's vault and phones, not with the rest of the company's 4812ms
+   ✓ the sender of an assistant message (2)
+     ✓ marks replies and their end when the own agent sent the message, and keeps the origin after a restart 10910ms
+     ✓ marks replies and their end false for a message from the program, even when its own agent answers 12450ms
+   ✓ an assistant's own agent, for the company (2)
+     ✓ is changed on its assistant's card, not as an employee: its own card neither edits nor removes it 6768ms
+     ✓ is no employee: no task takes it or waits for it, and no plan comes to it by itself 4057ms
+   ✓ an assistant's own agent, out of everyone else's sight (5)
+     ✓ says nothing of it on the CEO's live stream, not its words, its pulses or how full it is, and all of it on its owner's 6758ms
+     ✓ is nobody at the other end of a message for the CEO and the orchestrator, as an agent they do not see 2923ms
+     ✓ counts none of its turns among the employees at work, on the map or on the live stream 5978ms
+     ✓ lets go of its plan when the assistant is switched off, and takes none until it is on again 7481ms
+     ✓ is made once when its owner picks a plan from several screens at the same moment 5260ms
+   ✓ persona_call (6)
+     ✓ is among its tools only while the assistant has a skills address, as the address is at each list, and a call by name without one says so 7227ms
+     ✓ is in its instructions only while there is a skills address, and a change of that starts its program anew 8985ms
+     ✓ is not in the instructions of an own agent whose assistant is gone, which speaks for its owner with no names 3145ms
+     ✓ asks the assistant's program at its skills address, signed, with the message that started the turn, and gives its answer 5088ms
+     ✓ says so when the assistant has no skills address, or the program refuses, and never follows a redirect 4489ms
+     ✓ says so when the program breaks off in the middle of its answer 4208ms
+   ✓ GET /api/assistant/attachments/:id (6)
+     ✓ gives a file its own agent put with hh-attach --chat, by the id hh-attach printed, its exact bytes under its type and name, as often as asked 7744ms
+     ✓ names a file of any letters as UTF-8 in filename*, and in plain ASCII in filename 4640ms
+     ✓ keeps a name with quotes, a backslash or line breaks inside its one header, so no other header comes of it 6288ms
+     ✓ opens with the assistant's own key alone, as every assistant call: 401 with none, a wrong one, a turn's token or a revoked key 4336ms
+     ✓ answers a file its owner may not have exactly as one that is not there: of another owner's assistant, another company, or no id at all 7511ms
+     ✓ keeps operator case files closed even when they are named files of its own agent and visible to its owner 4468ms
+   ✓ tell_owner (3)
+     ✓ passes words its owner asked for in its window to the program, as one reply with no message and no end, and wakes the program 5416ms
+     ✓ wakes OpenClaw's model for them at once, as words its owner waits for 2901ms
+     ✓ passes on no empty words, and nothing of an assistant that is switched off 4111ms
+   ✓ freshText (6)
+     ✓ takes text of 1 to 50000 characters and freshText of up to 200000 after trimming, and cuts nothing: more is refused 3500ms
+     ✓ takes a body near 2 MiB, as a program that escapes every letter in its JSON sends it, and refuses a bigger one 3270ms
+     ✓ goes in place of the text and of Hornhoof's catch-up when the own agent's turn starts a new session, and the window shows only the text 5102ms
+     ✓ goes beside the text when the own agent goes on in its session, for the node to type only into a session begun anew 3182ms
+     ✓ carries the files of the message for its own agent to open, in the text and in freshText alike 3296ms
+     ✓ is left aside for any other agent, an employee or another assistant's own agent, even when its turn starts a new session 3950ms
+ ✓ test/task-files.test.ts (11 tests) 27069ms
+   ✓ a task file (5)
+     ✓ is attached by an agent on the task and downloaded by any agent of the company by its name or id 4271ms
+     ✓ keeps the newest of two files with one name, and only the name, never a folder 1475ms
+     ✓ is refused from an agent not on the task, past 50 MB, without a name, and for a task or file that is not there 1327ms
+     ✓ still takes only pictures, up to 3 MB, without a task 720ms
+     ✓ downloads a file of several megabytes whole 7599ms
+   ✓ the room for task files (3)
+     ✓ holds 500 MB on one task and says so plainly past it 1136ms
+     ✓ holds the company's setting across its tasks, 2 GB unless TASK_FILES_MB says otherwise 5032ms
+     ✓ lets go of the files of a turn closed 30 days ago, and keeps the rest 601ms
+   ✓ a task file over 50 MB (1)
+     ✓ lives on the disk of the machine that took it, for any agent to fetch, and goes after 30 days though its turn is open 1532ms
+   ✓ cross-department hh-fetch and attachment boundaries (2)
+     ✓ lets Development and Design employees read each other task files, full-text reviews and request pictures via hh-fetch 1307ms
+     ✓ refuses another company, personal assistants, private secrets, message pictures, cross-department writes and deletes, and empty uploads 1562ms
+ ✓ test/tools-outside-turn.test.ts (15 tests) 11348ms
+   ✓ an agent's tools with no turn of it running (8)
+     ✓ answer the program of an agent as it connects, before any turn and with nothing kept on its node, as a turn answers it 5425ms
+     ✓ answer the program of an head as it connects, before any turn and with nothing kept on its node, as a turn answers it 1511ms
+     ✓ answer the program of an orchestrator as it connects, before any turn and with nothing kept on its node, as a turn answers it 473ms
+     ✓ give a switched-off employee its tools as it connects, and refuse its calls until it is on again 375ms
+   ✓ a running turn's tools (3)
+     ✓ stop at once when a person stops the turn, while its program still winds down 312ms
+     ✓ stop at once, with its calls with no turn, when its machine is disconnected 481ms
+   ✓ a step of the tools (1)
+     ✓ is no work that holds an employee: one in a step is removed, and one switched off hands its work on 332ms
+   ✓ a check command its program runs with no turn running (3)
+     ✓ runs in a step of its own, open while it runs, that the machine's check slot goes to, and ends as the node says it did 482ms
+     ✓ may not run for one switched off, one that left the company, or one whose program another node runs 309ms
+     ✓ stops at once when the employee is removed, and when its machine is disconnected 314ms
+ ✓ test/vault-tools.test.ts (18 tests) 7999ms
+   ✓ the vault for agents (18)
+     ✓ keeps no secret answer in replay storage or the journal 1266ms
+     ✓ checks the entry again when the same invocation is repeated after deletion 738ms
+     ✓ keeps the orchestrator shelf outside replay for a sensitive target 378ms
+     ✓ does not retain a secret tool input or result reported by a node, delegated: false 466ms
+     ✓ does not retain a secret tool input or result reported by a node, delegated: true 837ms
+     ✓ hides raw completion output even when the node never reported the sensitive call 1051ms
+     ✓ keeps vault_save arguments out of replay storage and error responses 531ms
+     ✓ lists every entry of the company to each of its agents, with no password 321ms
+ ✓ test/tool-calls.test.ts (16 tests) 6289ms
+   ✓ a tool call with an invocation id (8)
+     ✓ answers a retried call from what it kept, and runs it once 1262ms
+     ✓ runs two calls with two ids, and a call without an id as before 508ms
+     ✓ tells a retry that the answer was lost, and does not run it again 318ms
+     ✓ takes an invocation id from the keeper alone with {"TUNNEL_HOST":"keeper.invalid"} 425ms
+     ✓ takes an invocation id from the keeper alone with {} 459ms
+   ✓ the database tool with an invocation id (1)
+     ✓ keeps its answer in the change's own commit, and answers a retry from it 1210ms
+ ✓ test/node-messages.test.ts (12 tests) 4384ms
+   ✓ each machine's built-in node (3)
+     ✓ keeps each built-in node's jobs apart 1166ms
+     ✓ keeps a turn across a planned switch 545ms
+     ✓ keeps an agent on its machine's built-in node 440ms
+   ✓ numbered messages of a node (6)
+     ✓ applies a numbered message once, and confirms it each time it comes 335ms
+     ✓ handles a job's end again when it is listed, and goes on from the steps it had 443ms
+     ✓ takes a message again after a failure that passes, and nothing that came after it 306ms
+     ✓ talks to a node of the build before as it always did 448ms
+     ✓ tells its nodes that the server is stopping, once what they sent is handled 345ms
+ ✓ test/read-tools.test.ts (6 tests) 9513ms
+   ✓ the tools of an agent on a machine that only reads (6)
+     ✓ lists the same tools in every mode, and answers the ones that read 1911ms
+     ✓ tells an agent on a machine that is cut off to wrap up, and asks one whose machine still has the internet to wait 1691ms
+     ✓ writes nothing in read, with or without the id of a call 1251ms
+     ✓ lets the orchestrator read the database, and nothing more 3043ms
+     ✓ keeps maintenance shut 1303ms
+ ✓ test/events.test.ts (10 tests) 9400ms
+   ✓ GET /api/stream (10)
+     ✓ refuses a signed-out request 898ms
+     ✓ sends the orchestrator's conversation to people who see the whole company 1331ms
+     ✓ keeps no machine command in a conversation, only the command with its code hidden 316ms
+     ✓ keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream 1228ms
+     ✓ keeps the conversation from a department head but tells them the org changed 1350ms
+     ✓ ends open streams first when the server shuts down, so it does not wait for them 527ms
+     ✓ ends the stream of a person who was disabled, at the next ping 468ms
+     ✓ ends the stream of a person who was disabled at once, without waiting for the ping 418ms
+     ✓ stops sending a department's news to a person at once when they no longer reach it 1295ms
+     ✓ counts an agent with a running conversation as working, on the map and in the stream 1405ms
+ ✓ test/vault.test.ts (8 tests) 2007ms
+   ✓ the company vault for people (8)
+     ✓ keeps the password and the code secret encrypted and never gives them back 519ms
+     ✓ takes an entry from the orchestrator acting for a person, as added by the orchestrator 332ms
+ ✓ test/orchestrator-any-tool.test.ts (8 tests) 9159ms
+   ✓ the orchestrator takes any tool of Hornhoof when it needs it (8)
+     ✓ lists the tools to find and call any other, and keeps the rest off its list 5532ms
+     ✓ finds stop_tests by name, loads it and stops a run another agent started 1292ms
+     ✓ says what a call lacks, and which tools there are when the name is wrong 379ms
+     ✓ runs a tool of a department's own for the department it names, and without one names the departments 307ms
+     ✓ sets a worker's assignment and reads the briefing in the department it names 401ms
+     ✓ calls any route of the API as the owner, one that refused it too 352ms
+     ✓ is refused no screen of a person's own: Google Sheets, a Telegram bot, who a person is in Telegram, the owner's key 448ms
+ ✓ test/vault-phone-privacy.test.ts (1 test) 3389ms
+   ✓ keeps phone execution private after a vault value, while ordinary replay and recordings still work 3048ms
+ ✓ test/phone-tools.test.ts (2 tests) 3606ms
+   ✓ gives one agent the phone and queues the next until the first session ends 2372ms
+   ✓ lets the agent type a login and password it holds as text, with no tool that signs in for it 1024ms
+ ✓ test/phone-lifecycle.test.ts (2 tests) 4463ms
+   ✓ owner Stop revokes before acknowledgement, cancels the queue and keeps owner control 1837ms
+   ✓ cancellation and a lost lease release the phone and promote the next live job on virtual time 1810ms
+ ✓ test/phone-recording.test.ts (1 test) 6721ms
+   ✓ keeps the session recording on the task and shows the owner its live frame 5670ms
+ ✓ test/private-upload.test.ts (3 tests) 12ms
+ ✓ test/vault-totp.test.ts (7 tests) 3ms
+
+ Test Files  16 passed (16)
+      Tests  155 passed (155)
+   Start at  03:33:16
+   Duration  552.18s (tests 68%, import 23%, transform 9%)
+

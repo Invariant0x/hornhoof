@@ -7,6 +7,7 @@ import type { Ctx } from '../../app.js';
 import { proposals } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { appendEvent } from '../events/store.js';
+import { turnProtection } from './privacy.js';
 import { isOperations } from '../operations/required.js';
 import { ApiError } from '../../errors.js';
 import { guardTools, invocationOf } from './calls.js';
@@ -67,14 +68,14 @@ async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles
    it decide, tells the orchestrator and puts what to improve under Improvements, and the orchestrator also proposes cards
    and does whatever the CEO can do in the screens. Whatever any other agent has, the orchestrator has on its shelf, off its
    list until it needs it. listing: the request reads the list, which leaves the shelf out. */
-function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null, reading: { cut: boolean } | null = null, listing = false): McpServer {
+async function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null, reading: { cut: boolean } | null = null, listing = false): Promise<McpServer> {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   const shelf = job.agentKind === 'orchestrator' ? new Shelf(server, ctx, job) : null;
-  /* Before any tool is registered, so that every one of them is covered. */
-  guardTools(server, ctx, job, invocation);
   /* On a machine that only reads, no tool that changes something runs, however the call came: cut off, it tells the
      agent to wrap up; else, that the call did not run. */
   if (reading) cutOff(server, { text: reading.cut ? CUT_OFF : PAUSED });
+  /* The mode guard owns the registration first, so a refused sensitive call never starts its audit or value masks. */
+  guardTools(server, ctx, job, invocation, await turnProtection(ctx, job.id));
   server.registerTool(
     'company',
     { description: "The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates. An employee with ownText has text of its own over its role's, which may narrow the work it takes: ask it before you give it work its role would." },
@@ -226,10 +227,9 @@ export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* An assistant's own agent works for its owner alone, with the owner's assistant tools, never the company's; on a
        machine that only reads it waits, as its tools keep what they do. */
     if (reading && job.agentKind === 'assistant') throw paused();
-    const server =
-      job.agentKind === 'assistant'
-        ? await assistantAgentTools(ctx, job, callName(req.body))
-        : toolsFor(ctx, app, actingFor(job, req.body), reading ? null : await invocationOf(req, ctx.config), reading, callName(req.body) === null);
+    const server = job.agentKind === 'assistant'
+      ? await assistantAgentTools(ctx, job, callName(req.body))
+      : await toolsFor(ctx, app, actingFor(job, req.body), reading ? null : await invocationOf(req, ctx.config), reading, callName(req.body) === null);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

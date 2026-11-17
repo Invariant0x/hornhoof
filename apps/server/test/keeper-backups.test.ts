@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { gzipSync } from 'node:zlib';
 import { sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { openBundle, type BundleSecrets } from '../src/modules/backups/bundle.js';
 import { certificates } from '../src/db/schema.js';
 import { bundleRow, bundleRows } from '../src/modules/backups/records.js';
@@ -476,9 +476,11 @@ describe('the keeper of backups', () => {
       dir: s.dir, controlDir: s.controlDir, key: s.key, held: () => s.held, age: { identity: s.ownIdentity, recipient: s.ownAge }, secrets: () => SECRETS,
       ask: silent, leads: () => true, log: () => undefined,
     });
+    /* The clock stands still from here: a stop that waited for any time to pass would never end. */
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
     const round = keeper.round();
-    const stopped = await Promise.race([keeper.stop().then(() => true), new Promise<boolean>(resolve => setTimeout(() => resolve(false), 2000))]);
-    expect(stopped).toBe(true);
+    await keeper.stop();
     await round;
   });
 });

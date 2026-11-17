@@ -6,13 +6,16 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { privateTurn } from '../tools/private-turns.js';
+import { privateFilename, privateUpload } from '../tools/private-upload.js';
+import { PRIVATE_TURN_LOST } from '@hornhoof/protocol';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import { appendEvent } from '../events/store.js';
+import { appendEvent, sensitiveTurn } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
@@ -278,14 +281,15 @@ const FetchQuery = z.object({ task: z.string().min(1), file: z.string().min(1) }
 /* What hh-fetch names instead of a task for a picture that came with a message. */
 const MESSAGE_FILES = 'message';
 
-/* A picture a person sent this agent, for this agent alone. Two pictures pasted from the clipboard have one name, so the
-   file's name starts with its id. */
+/* A picture sent to this agent, or an employee's own chat file. Two clipboard pictures have one name, so the download
+   name starts with its id. */
 async function messagePicture(db: Db, job: ToolJob, id: string) {
   if (!z.uuid().safeParse(id).success) return undefined;
+  const ownChat = job.agentKind === 'assistant' ? undefined : and(isNotNull(attachments.name), isNull(attachments.requestId));
   const [found] = await db
     .select({ id: attachments.id, name: attachments.name, length: attachments.size })
     .from(attachments)
-    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.taskId), isNull(attachments.operatorCaseId)));
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), or(isNotNull(attachments.personId), ownChat), isNull(attachments.taskId), isNull(attachments.operatorCaseId)));
   return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
 }
 
@@ -374,11 +378,17 @@ export async function attachmentBytesForPerson(
   };
 }
 
+/* Reads a delivery's bytes only when both its sending agent and its recipient may read the file. */
+export async function attachmentBytesForDelivery(ctx: Pick<Ctx, 'db'>, job: ToolJob, person: Person, id: string) {
+  if (!(await agentCanReadAttachment(ctx, job, id))) return null;
+  return attachmentBytesForPerson(ctx.db, person, id);
+}
+
 const PICTURE_EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
 const defaultPictureName = (id: string, mediaType: string): string => `${id}${PICTURE_EXT[mediaType] ?? ''}`;
 
 /* Working employees of the company read files of any company task, never personal assistant work. */
-async function companyTaskForAgent(ctx: Ctx, job: ToolJob, ref: string): Promise<Task | null> {
+async function companyTaskForAgent(ctx: Pick<Ctx, 'db'>, job: ToolJob, ref: string): Promise<Task | null> {
   if (job.agentKind === 'assistant') return null;
   const task = await taskByRef(ctx, job.companyId, ref);
   if (!task) return null;
@@ -404,6 +414,22 @@ async function taskAttachmentForAgent(db: Db, companyId: string, taskId: string,
     .orderBy(desc(attachments.createdAt))
     .limit(1);
   return found && { ...found, name: found.name ?? defaultPictureName(found.id, found.mediaType) };
+}
+
+/* The same task and message checks as hh-fetch, by id, before another tool shares a file or gives out its link. */
+export async function agentCanReadAttachment(ctx: Pick<Ctx, 'db'>, job: ToolJob, id: string): Promise<boolean> {
+  if (!z.uuid().safeParse(id).success) return false;
+  if (await messagePicture(ctx.db, job, id)) return true;
+  const [file] = await ctx.db
+    .select({ taskId: attachments.taskId, requestTaskId: requests.taskId })
+    .from(attachments)
+    .leftJoin(requests, eq(requests.id, attachments.requestId))
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), isNull(attachments.operatorCaseId)));
+  const taskId = file?.taskId ?? file?.requestTaskId;
+  if (!taskId) return false;
+  const task = await companyTaskForAgent(ctx, job, taskId);
+  /* By id alone: a file of the task named like this id is another file, and never vouches for this one. */
+  return Boolean(task) && (await taskAttachmentForAgent(ctx.db, job.companyId, task!.id, id))?.id === id;
 }
 
 /* A file's name, which a file for a task or the chat needs; a picture for a request goes without one. */
@@ -451,17 +477,19 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     scope.addContentTypeParser(['application/octet-stream', 'image/png', 'image/jpeg', 'image/webp'], (_req, body, done) => done(null, body));
     scope.post('/api/attachments', async (req, reply) => {
       const job = await attachmentJobOf(ctx, req);
+      const values = await uploadValues(db, job.id);
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
       checkAttachmentTask(job, task, toChat);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
+
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
       await checkAttachmentSpace(ctx, job.companyId, task, toChat, Number(req.headers['content-length'] ?? 0) || 0);
-      const taken = await received(ctx.config.filesDir, req.body);
+      const taken = await received(ctx.config.filesDir, privateUpload(req.body, values));
       const row = await keepTaken(ctx.config.filesDir, taken, async () => {
-        const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, raw);
+        const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, privateFilename(values, raw));
         await checkAttachmentSpace(ctx, job.companyId, task, toChat, taken.size);
         const [kept] = await db
           .insert(attachments)
@@ -519,4 +547,10 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       .type(file.mediaType)
       .send(await fileStream(ctx, file.id, file.length));
   });
+}
+
+async function uploadValues(db: Db, jobId: string) {
+  const values = privateTurn(db, jobId)?.values;
+  if (!values && await sensitiveTurn(db, jobId, true)) throw new ApiError(409, 'conflict', PRIVATE_TURN_LOST, 'attachment_invalid');
+  return values;
 }

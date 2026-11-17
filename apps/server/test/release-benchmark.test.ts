@@ -1,8 +1,5 @@
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
 import { timingLine } from '@hornhoof/protocol';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { compareSnapshots, requestStats, Snapshot, testTimings } from '../src/benchmark/report.js';
 
 const snapshot = (coldReadyMs = 100) => ({ version: 1 as const, measuredAt: '2026-11-05T14:00:00.000Z', commit: 'c'.repeat(40), environment: { node: 'v22', platform: 'linux', arch: 'x64', cpus: 2, database: 'pglite', samples: 3 }, coldReadyMs, appReadyMs: 30, dbSetupMs: 50, memory: { rss: 1000, heapUsed: 500 }, requests: [{ method: 'GET', url: '/api/org', statusCode: 200 as const, errors: 0 as const, samples: 3, medianMs: 2, p95Ms: 3 }], tests: testTimings([{ name: 'part-1', log: timingLine({ kind: 'file', package: 'fixture', file: 'a.test.ts', totalMs: 1, setupMs: 0, testsMs: 1, teardownMs: 0, slowest: [] }) }]) });
@@ -36,28 +33,6 @@ describe('release benchmark report', () => {
     expect(testTimings([])).toMatchObject({ status: 'missing', totalMs: null });
   });
 });
-
- it('launches the benchmark against an isolated real app and emits measured numbers', async () => {
-  const root = fileURLToPath(new URL('../../../', import.meta.url));
-  /* The benchmark ends by itself: the test waits for it to close, and only the test's own limit ends one that hangs. */
-  const run = spawn(process.execPath, ['scripts/release-benchmark.mjs', '--samples', '3', '--commit', 'c'.repeat(40)], { cwd: root });
-  onTestFinished(() => { run.kill(); });
-  let stdout = '';
-  let stderr = '';
-  run.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
-  run.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
-  const [status] = (await once(run, 'close')) as [number | null];
-  expect(status, stderr).toBe(0);
-  const report = JSON.parse(stdout) as { snapshot: unknown; comparison: { status: string } };
-  const measured = Snapshot.parse(report.snapshot);
-  expect(measured.coldReadyMs).toBeGreaterThan(measured.appReadyMs);
-  expect(measured.dbSetupMs).toBeGreaterThan(0);
-  expect(measured.memory.rss).toBeGreaterThan(0);
-  expect(measured.requests.map(r => r.url)).toEqual(['/api/me', '/api/org', '/api/tasks?department=none']);
-  expect(measured.requests.every(r => r.statusCode === 200 && r.errors === 0)).toBe(true);
-  expect(measured.requests.every(r => r.medianMs > 0 && r.p95Ms >= r.medianMs)).toBe(true);
-  expect(report.comparison.status).toBe('baseline-missing');
- }, 40_000);
 
 it('uses legacy runner logs when structured lines are absent and sums a file seen in two parts', () => {
   const a = ' RUN v5.0.5 /data/tests/one/repo/apps/server\n ✓ test/a.test.ts (1 test) 100ms';

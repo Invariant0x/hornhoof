@@ -9,7 +9,7 @@ import type { Db } from '../../db/client.js';
 import { agents, departments, people, telegramBots } from '../../db/schema.js';
 import { fileLink, LINK_DAYS } from '../assistants/files.js';
 import { publicUrl } from '../link/link.js';
-import { attachmentBytesForPerson } from '../tasks/attachments.js';
+import { attachmentBytesForDelivery } from '../tasks/attachments.js';
 import type { ToolJob } from '../tools/job.js';
 import { sendDocument, TELEGRAM_CAPTION_MAX, TelegramError } from './api.js';
 import { markTelegramFileSent } from './bots.js';
@@ -136,7 +136,7 @@ export function registerTelegramTools(server: McpServer, ctx: Ctx, job: ToolJob)
       if (!sender || !(await canViewAgent(ctx.db, person, sender))) {
         return say('That person is not allowed to receive files from you.', true);
       }
-      const file = await attachmentBytesForPerson(ctx.db, person, attachment);
+      const file = await attachmentBytesForDelivery(ctx, job, person, attachment);
       if (!file) return say('That file does not exist or that person is not allowed to see it.', true);
       if (file.big) {
         const link = fileLink(ctx.config.secret, await publicUrl(ctx.db, ctx.config), file.id);

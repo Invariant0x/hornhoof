@@ -636,6 +636,8 @@ export const en = {
     month: 'Month',
     lessThanMinute: 'less than a minute',
     resetsIn: (duration: string) => `resets in ${duration}`,
+    /* A limit's cell in the list: its used share, then when it resets. */
+    usedAndReset: (share: string, reset: string) => `${share}, ${reset}`,
     resetUnknown: 'Reset time unknown',
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',

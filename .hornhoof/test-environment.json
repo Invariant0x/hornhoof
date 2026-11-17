@@ -31,6 +31,7 @@
         "web",
         "release-scripts",
         "server-postgres",
+        "server-slow",
         "browser",
         "mutation"
       ]
@@ -44,6 +45,7 @@
         "web",
         "release-scripts",
         "server-postgres",
+        "server-slow",
         "browser",
         "browser-matrix",
         "mutation"
@@ -237,7 +239,8 @@
   "reset": [
     {
       "suiteIds": [
-        "server"
+        "server",
+        "server-slow"
       ],
       "scope": "file",
       "command": null,
@@ -423,6 +426,33 @@
       "finalChecks": []
     },
     {
+      "id": "server-slow",
+      "root": "apps/server",
+      "files": [
+        "apps/server/test/slow/**/*.slow.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "vitest",
+          "run",
+          "--config",
+          "vitest.product.config.mjs",
+          "--project=@hornhoof/server:slow"
+        ],
+        "cwd": "."
+      },
+      "split": {
+        "kind": "vitest-shard"
+      },
+      "profiles": [
+        "final",
+        "full"
+      ],
+      "finalChecks": []
+    },
+    {
       "id": "browser",
       "root": "apps/web/e2e",
       "files": [
@@ -530,6 +560,7 @@
           "web",
           "release-scripts",
           "server-postgres",
+          "server-slow",
           "browser",
           "browser-matrix"
         ]
@@ -545,7 +576,8 @@
         ],
         "suiteIds": [
           "server",
-          "server-postgres"
+          "server-postgres",
+          "server-slow"
         ]
       },
       {
@@ -574,7 +606,8 @@
           "server",
           "web",
           "release-scripts",
-          "server-postgres"
+          "server-postgres",
+          "server-slow"
         ]
       },
       {
@@ -710,7 +743,8 @@
         ],
         "suiteIds": [
           "release-scripts",
-          "server"
+          "server",
+          "server-slow"
         ]
       }
     ],
@@ -723,7 +757,15 @@
     "status": "supported",
     "candidateRun": {
       "program": "node",
-      "args": ["scripts/mutation/run.mjs", "--base", "{baseCommit}", "--head", "{commit}", "--plan-file", "{planFile}"],
+      "args": [
+        "scripts/mutation/run.mjs",
+        "--base",
+        "{baseCommit}",
+        "--head",
+        "{commit}",
+        "--plan-file",
+        "{planFile}"
+      ],
       "cwd": "."
     },
     "tool": "mutator",

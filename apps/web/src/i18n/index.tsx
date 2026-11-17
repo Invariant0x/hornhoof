@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiFailure } from '../api';
 import { en, type Messages } from './en';
 import type { Language } from './plural';
@@ -61,6 +61,16 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 }
 
 export const useT = (): Messages => useContext(LanguageContext).t;
+
+/* The first of the characters no words hold, each marking the place of one value in a phrase. */
+const SLOT = 0xe000;
+
+/* A phrase of the dictionary with elements in its places: its words, as a language writes them, decide where each value
+   stands. The caller isolates a value that must read its own way, and the phrase whole in its own direction. */
+export function Phrase({ words, values }: { words: (...values: string[]) => string; values: readonly ReactNode[] }) {
+  const text = words(...values.map((_, i) => String.fromCharCode(SLOT + i)));
+  return <>{text.split(/([\ue000-\uf8ff])/).map((part, i) => (i % 2 ? <Fragment key={i}>{values[part.charCodeAt(0) - SLOT]}</Fragment> : part))}</>;
+}
 
 export function useLanguage(): { language: Language; setLanguage: (l: Language) => void } {
   const { language, setLanguage } = useContext(LanguageContext);

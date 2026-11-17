@@ -13,7 +13,8 @@ import { PeerServer } from '../../src/net/peer-server.js';
 import { PeerSessions } from '../../src/net/peer-sessions.js';
 import { fakeRelay } from '../fake-relay.js';
 import { bridgeScript, directPeerBlockScript, keeperTcpProbeCommand, probeKeeperTcp, type Ran } from './lab.js';
-import { closedPort, createDelayGate, createPeerRelay, ed25519Key, virtualClock } from './network.js';
+import { createDelayGate, createPeerRelay, ed25519Key, virtualClock } from './network.js';
+import { closedPort } from '../closed-port.js';
 
 const COMPANY_ID = '00000000-0000-4000-8000-0000000000aa';
 const MACHINE_A = '11111111-0000-4000-8000-000000000001';
@@ -427,6 +428,8 @@ describe('the network lab relay and peer path with controllable delay', () => {
     expect(visitorPort).toBeGreaterThan(0);
 
     const ranCommands: string[] = [];
+    const deadDirect = 8180;
+    const probeTargets: { host: string; port: number; timeout: number }[] = [];
     const dindMachine = {
       exec: (cmd: string): Promise<Ran> => {
         ranCommands.push(cmd);
@@ -447,7 +450,13 @@ describe('the network lab relay and peer path with controllable delay', () => {
           vm.runInNewContext(script, {
             require: (id: string) => {
               if (id !== 'node:net') throw new Error(`unexpected module ${id}`);
-              return net;
+              /* Recorded connect results test our generated probe, without depending on an unowned port. */
+              return { connect: (target: { host: string; port: number; timeout: number }, connected: () => void) => {
+                probeTargets.push(target);
+                const socket = new net.Socket();
+                queueMicrotask(() => target.port === deadDirect ? socket.emit('error', Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })) : connected());
+                return socket;
+              } };
             },
             console: { log: (...parts: unknown[]) => lines.push(parts.map(String).join(' ')) },
             process: { exit: finish },
@@ -456,7 +465,6 @@ describe('the network lab relay and peer path with controllable delay', () => {
       },
     };
 
-    const deadDirect = await closedPort();
     const directRes = await probeKeeperTcp({ machine: dindMachine, folder: '/root/hornhoof-abcdef' }, '127.0.0.1', deadDirect);
     expect(directRes.code, directRes.out).toBe(1);
     expect(directRes.out.trim()).toBe('REJECTED:ECONNREFUSED');
@@ -468,6 +476,7 @@ describe('the network lab relay and peer path with controllable delay', () => {
     expect(relayedRes.code, relayedRes.out).toBe(0);
     expect(relayedRes.out.trim()).toBe('CONNECTED');
     expect(ranCommands).toHaveLength(2);
+    expect(probeTargets).toEqual([{ host: '127.0.0.1', port: deadDirect, timeout: 3000 }, { host: '127.0.0.1', port: visitorPort, timeout: 3000 }]);
 
     let relayedReply: string | undefined;
     void askLine(visitorPort, 'PING').then(res => {
