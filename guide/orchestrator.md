@@ -1,6 +1,6 @@
 # The orchestrator
 
-> In short: the orchestrator is the main agent, the circle in the middle of the map. Tell him what you want, and he does what the CEO can do in the screens, with the same checks. Orders about people, access, plans, machines, repositories and updates he takes only from the CEO.
+> In short: the orchestrator is the main agent, the circle in the middle of the map. Tell him what you want, and he does what the CEO can do in the screens, with the same checks. He does it in any turn, for whoever asked, an employee too. Paying, signing and deleting for good still wait for a person.
 
 ## How do I start?
 
@@ -24,12 +24,15 @@ He runs the company the way the CEO does in the screens. So you can just tell hi
 
 Each of these goes through the same check as the CEO's click. What is refused to the CEO is refused to him too. For example, nobody can fire the orchestrator, disable the owner or remove the last employee in a role Operations must have.
 
-## Who can give him orders?
+## Who can ask him?
 
-He is the CEO's hands. He takes orders about people, access, the public link, subscriptions, machines, repositories and Hornhoof updates only from the CEO.
+Anyone in the company: the CEO, another person or an employee. What is not forbidden is allowed.
 
-- Those tools work only in a turn that answers a message of the CEO.
-- In a turn an employee, a timer or a task woke, they refuse. He then tells the employee to ask the CEO.
+- He changes people and their access, the public link, subscriptions, machines, repositories and Hornhoof updates in any turn: one that answers the CEO, and one an employee, a timer or a task woke.
+- In a turn that answers the CEO or the CEO delegate, he acts as them. In any other turn he acts as the company's owner, for whoever asked. Each change goes through the same check as the CEO's click.
+- He checks the exact target before a change. He also approves an exact commit for the owner, once he has checked its tests and evidence.
+- What the company does not want him to do, or wants done only on someone's word, goes in the company's notebook. He reads it and keeps to it.
+- Paying and signing in the company's name wait for a person. Deleting for good waits for the CEO's yes: a person, a backup, a repository or other data.
 
 Another person who sees the whole company does these things in the screens.
 
@@ -60,7 +63,7 @@ Yes, when the CEO lets him. Some trouble sits outside Hornhoof, in Docker or in 
 3. For a day he runs commands on that computer as root, and each one shows in his window.
 4. Access closes by itself after a day. **Close access** in his window closes it sooner. **Not now** turns a request down.
 
-Only the CEO opens and closes it, in the CEO's own window. He runs commands only in a turn that answers the CEO, or the one that starts when the CEO opens access. The computer here is the one the server runs on, whichever machine you open Hornhoof from, so the card names that machine and shows on every screen of yours. On a Mac, he reaches Docker's own Linux system there, not macOS.
+Only the CEO opens and closes it, in the CEO's own window. While access is open, he runs commands there in any turn of his, also one an employee's letter, a timer or a retry started. He runs nothing there in a turn whose last words came from a person other than the CEO, the CEO delegate or the computer's owner, or from someone Hornhoof cannot name. The computer here is the one the server runs on, whichever machine you open Hornhoof from, so the card names that machine and shows on every screen of yours. On a Mac, he reaches Docker's own Linux system there, not macOS.
 
 ## What stays with people?
 

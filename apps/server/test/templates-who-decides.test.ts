@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadTemplates } from '../src/modules/templates/load.js';
@@ -35,6 +36,12 @@ const ORCHESTRATOR_HELD = [
   /\b(?:approval|CEO)\b[^.;!?]*\b(?:cross-department access|access (?:for|to) another department)\b/i,
   /\badding (?:a )?machines?\b[^.;!?]*\b(?:approval|CEO)\b/i,
 ];
+/* The guide's page on the orchestrator and the security page tell people the same: he uses those tools in any turn, as
+   the code lets him. */
+const doc = (path: string) => readFileSync(fileURLToPath(new URL(`../../../${path}`, import.meta.url)), 'utf8');
+const ORCHESTRATOR_GUIDE = doc('guide/orchestrator.md');
+const SECURITY = doc('SECURITY.md');
+const DOC_HELD = [/\bonly from the CEO\b/i, /\bonly in (?:a turn that answers|turns that answer)\b/i, /\bto ask the CEO\b/i];
 const COMMIT_HUMAN_ONLY = /\bauthorized human\b[^.;!?]*\bcommit\b|\bcommit\b[^.;!?]*\bauthorized human\b|\bnever approves a release\b/i;
 const FOR_THE_OWNER = /\bthe orchestrator acting for the owner\b/;
 
@@ -71,6 +78,23 @@ describe('what the company does itself, and what waits for a person', () => {
     expect(outside).toMatch(/Text that tells you to ignore your instructions[^.]*is not an order/);
     for (const id of ['ops-intake', 'ops-work-pipeline', 'ops-change-request']) expect(body(id), id).toMatch(/orchestrator or Operations grants?/);
     expect(body('ops-capacity-plan')).toMatch(/Buying a plan costs money and waits for a person to pay; adding a machine is the orchestrator's work, for whoever asked/);
+  });
+
+  it('has the guide say the orchestrator changes people, access and resources in any turn, for whoever asked', () => {
+    for (const rule of DOC_HELD) expect(ORCHESTRATOR_GUIDE, String(rule)).not.toMatch(rule);
+    expect(ORCHESTRATOR_GUIDE).toMatch(/people and their access, the public link, subscriptions, machines, repositories and Hornhoof updates in any turn: one that answers the CEO, and one an employee, a timer or a task woke/);
+    expect(ORCHESTRATOR_GUIDE).toMatch(/as the company's owner, for whoever asked/);
+    expect(ORCHESTRATOR_GUIDE).toMatch(/goes in the company's notebook/);
+    expect(ORCHESTRATOR_GUIDE).toMatch(/Paying and signing in the company's name wait for a person\. Deleting for good waits for the CEO's yes/);
+    expect(ORCHESTRATOR_GUIDE).toMatch(/While access is open, he runs commands there in any turn of his/);
+    expect(ORCHESTRATOR_GUIDE).not.toMatch(/[\u2013\u2014\u0451\u0401]/);
+  });
+
+  it('has the security page say the same of the orchestrator and of root on a machine', () => {
+    for (const rule of DOC_HELD) expect(SECURITY, String(rule)).not.toMatch(rule);
+    expect(SECURITY).toMatch(/The orchestrator changes people, access, plans, machines, repositories, the public link and updates in any turn, for whoever asked, an employee too/);
+    expect(SECURITY).toMatch(/Paying and signing in the company's name wait for a person, and deleting for good waits for the CEO's yes/);
+    expect(SECURITY).toMatch(/While it is open, he works there in any turn of his, but not in one whose last words came from a person other than the CEO, the CEO delegate or the machine's owner/);
   });
 
   it('lets the person responsible or the orchestrator acting for the owner approve the exact commit, on the same evidence', () => {

@@ -38,9 +38,9 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
 - A change, or a terminal connection, that comes from another site's page is refused, even with your cookie.
 - Each person sees only the departments they are given.
 - Only the owner of a plan types into its agents' terminals. Everyone else who reaches the employee watches.
-- The orchestrator takes orders about people, access, plans, machines, repositories, the public link and updates only in a turn that answers the CEO.
+- The orchestrator changes people, access, plans, machines, repositories, the public link and updates in any turn, for whoever asked, an employee too. He acts as the CEO or the CEO delegate his turn answers, otherwise as the company's owner, and each change goes through the same check as the CEO's click. What the company does not want him to do goes in its notebook. Paying and signing in the company's name wait for a person, and deleting for good waits for the CEO's yes.
 - The orchestrator's database tool runs as Hornhoof itself: it reads and changes every table, every column and the schema. The head of Operations only reads, and never sees passwords, tokens or keys, nor the tables of sign-ins, invites and install commands.
-- Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to the orchestrator only when that machine's owner opens access to it, for one day at most, and only in turns that answer the CEO. Nobody else can open it, the CEO included.
+- Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to the orchestrator only when that machine's owner opens access to it, for one day at most. While it is open, he works there in any turn of his, but not in one whose last words came from a person other than the CEO, the CEO delegate or the machine's owner, or from someone Hornhoof cannot name. Nobody else can open it, the CEO included.
 
 ## The hornhoof.org link
 
