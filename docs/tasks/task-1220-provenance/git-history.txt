@@ -1,0 +1,9 @@
+Read during this audit, not at test launch.
+b0b972aa7 task-1220@{2026-11-17T08:06:01+00:00}: commit: Name the head and its authority in employee history
+dd4b7b628 task-1220@{2026-11-17T07:52:53+00:00}: commit (merge): Take the approved head authority base for employee history
+d66af4d0c task-1220@{2026-11-17T04:47:12+00:00}: commit: Plan truthful employee history attribution for heads
+72c1a3742 task-1220@{2026-11-17T04:45:14+00:00}: branch: Created from origin/task-1112
+
+b0b972aa75fbfa31a6f0b0decf500858ea68278a dd4b7b628f7e08160ca728827542d64f588b7aa5 2026-11-17T08:06:01+00:00 Name the head and its authority in employee history
+dd4b7b628f7e08160ca728827542d64f588b7aa5 d66af4d0c357cdc4c9a4ad7dc1e301e34677c25b 76c4b7d571aba37c5eefd12cac4eeee4945c01e5 2026-11-17T07:52:53+00:00 Take the approved head authority base for employee history
+76c4b7d571aba37c5eefd12cac4eeee4945c01e5 13e3ac895b57b4cd1d959872ffc8ee8bd492feda 77c5f226f7ef84de8876cf42da3312fe8da779ce 2026-11-17T05:56:50+00:00 Merge turn-31 77c5f226 into task-1112

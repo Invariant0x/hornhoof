@@ -1,0 +1,107 @@
+--- a/apps/web/e2e/agent-history.config.ts
++++ b/apps/web/e2e/agent-history.config.ts
+@@ -4,7 +4,7 @@
+ export default defineConfig({
+   ...assignment,
+   testMatch: 'agent-history.spec.ts',
+-  outputDir: 'results/agent-history',
++  outputDir: 'e2e/results/agent-history',
+   projects: ['chromium', 'firefox', 'webkit'].map(browserName => ({
+     name: `history-${browserName}`,
+     use: { browserName: browserName as 'chromium' | 'firefox' | 'webkit' },
+--- a/apps/web/e2e/agent-history.spec.ts
++++ b/apps/web/e2e/agent-history.spec.ts
+@@ -62,8 +62,6 @@
+         await serveApi(page);
+         const routes: Record<string, unknown> = {
+           '/api/org': ORG,
+-          '/api/version': { version: '0.31.1', commit: 'employee-history-fixture' },
+-          '/api/updates': { current: { version: '0.31.1', commit: 'employee-history-fixture' }, available: false, latest: null, updater: { status: null, waiting: null } },
+           '/api/tasks?status=open&department=d2': { tasks: [] },
+           '/api/agents/b1': CARD,
+           '/api/agents/b1/events?last=300': { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: false } },
+@@ -86,7 +84,7 @@
+         await expect(lines.nth(1)).toContainText('Ivan');
+         await expect(lines.nth(2)).toContainText(t.agent.byOrchestrator);
+         await expect(lines.nth(3)).not.toContainText(PERSON);
+-        const fits = () => history.evaluate(root => [root, root.closest('.ac-body')!, ...root.querySelectorAll('li')].every(element => element.scrollWidth <= element.clientWidth));
++        const fits = () => history.evaluate(root => [...root.querySelectorAll('li')].every(li => li.scrollWidth <= li.clientWidth));
+         expect(await fits()).toBe(true);
+         /* Prove the geometry assertion detects the long actor being clipped or overflowing. */
+         await lines.nth(0).evaluate(li => { li.style.whiteSpace = 'nowrap'; });
+--- a/apps/web/src/ui/AgentCard.tsx
++++ b/apps/web/src/ui/AgentCard.tsx
+@@ -1,7 +1,7 @@
+ import { OfflinePlan } from './OfflineMachine';
+ import { useEffect, useId, useState } from 'react';
+ import { api } from '../api';
+-import { errorText, useLanguage, useT, type Messages } from '../i18n';
++import { errorText, useLanguage, useT } from '../i18n';
+ import { cutLine } from '../restarts';
+ import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
+ import { defaultEffort, PROVIDER_NAMES } from '../providers';
+@@ -105,11 +105,6 @@
+ }
+ 
+ const subLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
+-
+-function changeAuthor(t: Messages, change: AgentCardView['changes'][number]): string | null {
+-  if (change.actingAgent) return t.agent.byHead(change.actingAgent.name, change.personName);
+-  return change.byOrchestrator ? t.agent.byOrchestrator : change.personName;
+-}
+ 
+ const hasSubUnits = (card: AgentCardView) => card.kind === 'worker' && Boolean(card.teams?.length || card.team);
+ 
+@@ -522,7 +517,7 @@
+             <h4 id={`${id}-history`}>{t.agent.history}</h4>
+             <ul>
+               {card.changes.map((c, i) => (
+-                <li key={i}>{t.agent.changed(t.agent.fields[c.field] ?? c.field, changeAuthor(t, c), when(c.at))}</li>
++                <li key={i}>{t.agent.changed(t.agent.fields[c.field] ?? c.field, c.actingAgent ? t.agent.byHead(c.actingAgent.name, c.personName) : c.byOrchestrator ? t.agent.byOrchestrator : c.personName, when(c.at))}</li>
+               ))}
+             </ul>
+           </section>
+--- a/docs/tasks/task-1220-plan.md
++++ b/docs/tasks/task-1220-plan.md
+@@ -1,7 +1,7 @@
+ # Employee history attribution, task 1220
+ 
+-Implementation base: `task-1112` at `76c4b7d571aba37c5eefd12cac4eeee4945c01e5`.
+-This belongs to turn 32 and must never enter turn 31. The head explicitly authorized implementation from this checked base. Take later changes of task 1112 into this branch if it moves. Review, independent Security and Tests precede integration by the head.
++Architecture only. Base: `task-1112` at `72c1a37423e03c79e49670bf4280379c326e5d30`.
++This belongs to turn 32 and must never enter turn 31. The head's order is to save this plan, finish task 1119, then implement this task or resume when task 1112 is accepted. Refresh the accepted base before implementation; task 1112 is still under review.
+ 
+ ## Storage and authorship
+ 
+@@ -15,7 +15,7 @@
+ 
+ ## Migration and checks
+ 
+-Generated the additive migration and snapshot with Drizzle. The head reserved `0139_agent_change_actor`: 0137 belongs to task 1077 and 0138 to task 1119. Its journal time, 1794902232536, is strictly after 0138's 1794891391437. The snapshot follows 0136 in this base; the head will link it to 0138 when integrating the three changes. No existing migration or row is changed. Check a fresh database, upgrade with existing history, and repeat application. Old code can ignore the nullable column; down migrations are not supplied by this project.
++Generate an additive migration and snapshot with Drizzle after taking the accepted task 1112 and the turn 32 migration journal. Tell the head the exact next number and paths before submission. Do not reserve 0130 from task 1112's old journal or change any shipped migration. Leave old rows untouched. Check a fresh database, upgrade with existing history, and repeat application. Old code can ignore the nullable column; down migrations are not supplied by this project.
+ 
+ RED first: the head's hire/change/reset/fire/team-removal records lack the acting agent on this base. GREEN must prove both agent and authority person, a department owner and CEO fallback, unchanged human/orchestrator attribution, and that input cannot choose the author. Check the employee card response and en/ru rendering, including an old row and a removed head.
+ 
+@@ -25,8 +25,8 @@
+ 
+ - `docs/tasks/task-1220-plan.md`
+ - `apps/server/src/db/schema.ts`
+-- `apps/server/drizzle/0139_agent_change_actor.sql`
+-- `apps/server/drizzle/meta/0139_snapshot.json`
++- `apps/server/drizzle/0NNN_agent_change_actor.sql`
++- `apps/server/drizzle/meta/0NNN_snapshot.json`
+ - `apps/server/drizzle/meta/_journal.json`
+ - `apps/server/src/auth/session.ts`
+ - `apps/server/src/modules/agents/routes.ts`
+@@ -43,9 +43,8 @@
+ - `apps/web/src/i18n/en.ts`
+ - `apps/web/src/i18n/ru.ts`
+ - `apps/web/test/AgentCard.test.tsx`
+-- `apps/web/test/api-mock.ts`
+ - `apps/web/e2e/agent-history.spec.ts`
+-- `apps/web/e2e/agent-history.config.ts`
++- `apps/web/e2e/owner-screens.config.ts` if the existing selector must include the new scenario
+ - `templates/skills/hh-head.md`
+ 
+-The head added all 24 paths to the task before submission. Review and independent Security are mandatory, followed by Tests on the final exact candidate. Integration requires the head's authorization and targets turn 32 only.
++Confirm the final numbered paths with the head before Development submission. Review and independent Security are mandatory, followed by Tests on the final exact candidate. Integration requires the head's authorization and targets turn 32 only.

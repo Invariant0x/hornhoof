@@ -1,0 +1,467 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Provenance clarification only. No tests, builds or quality commands were repeated.",
+  "candidate": "b0b972aa75fbfa31a6f0b0decf500858ea68278a",
+  "base": "76c4b7d571aba37c5eefd12cac4eeee4945c01e5",
+  "preCandidateHead": "dd4b7b628f7e08160ca728827542d64f588b7aa5",
+  "originalArchive": {
+    "name": "task-1220-checks-b0b972aa7.zip",
+    "attachment": "c039adc7-8795-4f99-85a0-795e7b158f59",
+    "sha256": "75072b731f299fb5902caeee26da17d410f1c95fa01cf52a6478edc9a3ad47fd"
+  },
+  "primarySource": {
+    "sessionId": "01a1e835-68ae-7bd0-9dd2-f4d44a115aee",
+    "kind": "Existing timestamped tool-call/tool-output records",
+    "excerpts": "tool-events.jsonl",
+    "fullSessionNotShared": "Only relevant command/mutation/receipt records are exported; no other session data is included."
+  },
+  "limitations": [
+    "Raw test logs did not capture source hashes, command or commit headers at launch.",
+    "The generated snapshot hashes are an explicitly retrospective reconstruction. Their contemporaneous evidence is the preserved ordered mutation log, launch and completion receipts, plus Git history. They are not a new independent test receipt.",
+    "Source equivalence assumes the recorded author writes are complete; no claim of a tamper-proof filesystem capture is made.",
+    "The first browser process exited 143 after twelve individual PASS cases. It is not a whole-process PASS."
+  ],
+  "runs": [
+    {
+      "name": "core",
+      "originalLog": "server-core-green-2.log",
+      "originalLogSha256": "1efae4d27352c33d3b224b3e5437bcb7e967eab8c8b55364fe2f50fecacf4edb",
+      "headAtLaunch": "dd4b7b628f7e08160ca728827542d64f588b7aa5",
+      "headEvidence": "Reflog order plus original commit command/result timestamps; not an inline rev-parse in this test log.",
+      "sessionId": 95402,
+      "launch": {
+        "recordedAt": "2026-11-17T08:01:51.945Z",
+        "callId": "call_e9d0df72fde044ffaf963e7004edace7",
+        "sourceLine": 302,
+        "shell": "npx --no-install vitest run test/head-department-control.test.ts test/agent-changes-migration.test.ts test/agents.test.ts --maxWorkers=1 > ../../.task-1220-evidence/server-core-green-2.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/server-core-green-2.log; exit \"$task1220_status\"",
+        "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server",
+        "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+      },
+      "completion": {
+        "recordedAt": "2026-11-17T08:03:43.294Z",
+        "callId": "call_6187f6e2d2254be18b694cde2b95913d",
+        "sourceLine": 339,
+        "receipt": {
+          "chunk_id": "e60351",
+          "wall_time_seconds": 3.7417e-05,
+          "exit_code": 0,
+          "original_token_count": 1110,
+          "output": "\n RUN  v5.0.5 /data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server\n\n ✓ test/agents.test.ts (29 tests) 28928ms\n   ✓ hiring (1)\n     ✓ hires an employee with as many skills as a hire takes, their bodies going as files 5073ms\n   ✓ the employee card (28)\n     ✓ stores an orchestrator assignment separately from its standing identity 821ms\n     ✓ opens an employee's card with its skills, prompt parts and raw text 1021ms\n     ✓ moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default 1384ms\n     ✓ sets how hard an employee thinks, from the levels its model takes, and keeps who changed it 719ms\n     ✓ shows the fitted role effort on the map for Kimi unless a person picks a level 1001ms\n     ✓ shows a Codex employee on the map at its role effort unless set 877ms\n     ✓ shows no level for a model with no known efforts, and its own default for a role without one 959ms\n     ✓ refuses a model the subscription cannot run, and a subscription that cannot serve the department 581ms\n     ✓ turns a skill off but never a locked one 522ms\n     ✓ keeps every change with who made it 649ms\n     ✓ keeps the instructions within what a turn carries, counting only what is not a skill file 1116ms\n     ✓ keeps both of two changes sent at once 800ms\n     ✓ removes a department whose employees were removed and that had a staff proposal 577ms\n     ✓ takes a prompt edit far longer than nodes before skill files took 491ms\n     ✓ resets template abilities while preserving the employee assignment 474ms\n     ✓ refreshes the map after resetting an effort to the role 648ms\n     ✓ lets someone of a product who owns the plan change an employee, and only the whole company or the department's people remove them 974ms\n     ✓ lets go of a plan whose owner lost the department or was disabled 1176ms\n     ✓ names the model its role asks for when an employee gets a plan and no model comes with it 1069ms\n     ✓ removes an employee that is not working 677ms\n     ✓ changes the orchestrator's model from his card 410ms\n     ✓ lists the employees of each department on the map 586ms\n     ✓ lists the head first, then by hire, people hired together in the order of the roster 848ms\n     ✓ replaces a checker moved into a sub-unit while retaining required Review and its question (question: false) 1089ms\n     ✓ replaces a checker moved into a sub-unit while retaining required Review and its question (question: true) 1073ms\n     ✓ keeps current and independent questions when a Review owner moves into a sub-unit (other question: false) 769ms\n     ✓ keeps current and independent questions when a Review owner moves into a sub-unit (other question: true) 1195ms\n     ✓ keeps an executor question when moving into a sub-unit leaves its current assignment 918ms\n ✓ test/head-department-control.test.ts (10 tests) 17742ms\n   ✓ a department head's tools (1)\n     ✓ run its own department, and no worker has them 5957ms\n   ✓ a department head for a person who runs its department (7)\n     ✓ creates, renames and removes sub-units and adds and removes products of its department 1659ms\n     ✓ records the head and its authority person for hiring, changes, reset, team removal and firing 1913ms\n     ✓ moves an employee who holds work into an urgent-only sub-unit 877ms\n     ✓ uses its named owner without a fresh message, and records the head and whose rights it used 664ms\n     ✓ keeps the orchestrator's own department and staffing changes in its own history 1190ms\n     ✓ keeps a human author and refuses author fields sent in the request 605ms\n     ✓ keeps its own owner when another person, assistant or employee writes into the turn 921ms\n   ✓ a department head refuses (2)\n     ✓ uses the active CEO when no department owner is named, whoever opened the turn 1821ms\n     ✓ anything outside its own department, even on the CEO's word 1586ms\n ✓ test/agent-changes-migration.test.ts (2 tests) 5084ms\n   ✓ employee change actor migration (2)\n     ✓ gives a fresh install a nullable acting agent linked to the employee table 2703ms\n     ✓ upgrades without attributing old changes to an agent, and can migrate again 2325ms\n\n Test Files  3 passed (3)\n      Tests  41 passed (41)\n   Start at  08:01:56\n   Duration  96.20s (tests 73%, import 22%, transform 5%)\n\n"
+        }
+      },
+      "reconstructedWorkingState": "core"
+    },
+    {
+      "name": "callers",
+      "originalLog": "callers-green.log",
+      "originalLogSha256": "d4d364941b856922599fd9bef4bb20d24cdbb235168cf507e2f20597dcbfee5a",
+      "headAtLaunch": "dd4b7b628f7e08160ca728827542d64f588b7aa5",
+      "headEvidence": "Reflog order plus original commit command/result timestamps; not an inline rev-parse in this test log.",
+      "sessionId": 87548,
+      "launch": {
+        "recordedAt": "2026-11-17T08:04:18.515Z",
+        "callId": "call_f59458cf82ca46328658004d7a1fc72d",
+        "sourceLine": 345,
+        "shell": "npx --no-install vitest run test/migration-metadata.test.ts test/migration-history.test.ts test/migrations.test.ts test/departments.test.ts test/people.test.ts test/assistants-people.test.ts test/telegram.test.ts test/department-owner-control.test.ts --maxWorkers=1 > ../../.task-1220-evidence/callers-green.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/callers-green.log; exit \"$task1220_status\"",
+        "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server",
+        "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+      },
+      "completion": {
+        "recordedAt": "2026-11-17T08:13:30.460Z",
+        "callId": "call_62e58830d6fe43da8344f48a45e1e0c5",
+        "sourceLine": 504,
+        "receipt": {
+          "chunk_id": "decefa",
+          "wall_time_seconds": 6.6791e-05,
+          "exit_code": 0,
+          "original_token_count": 3353,
+          "output": "\n RUN  v5.0.5 /data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server\n\n ✓ test/migrations.test.ts (41 tests) 168274ms\n   ✓ department owner and approval policy migration (3)\n     ✓ leaves every department without an owner and every company without rules, with nobody given anything 2217ms\n     ✓ keeps the approvals already asked as they are, and still refuses an approval that says nothing of what it approves 4413ms\n     ✓ refuses a stored rule that would let everything through: a mode of limits with no limit 1224ms\n   ✓ model checks migration (1)\n     ✓ adds its tables empty, with nobody given anything and no row of an older database touched 1532ms\n   ✓ outbound gateway migration (2)\n     ✓ adds its tables empty, with nobody given anything and no row of two older companies touched 1485ms\n     ✓ leaves its guards in place when it is run again 1011ms\n   ✓ migration 0081 (1)\n     ✓ keeps on every card the text that moved out of a skill it holds, and adds nothing else 1991ms\n   ✓ migration 0084 (1)\n     ✓ gives what leading and working on code took out of the common skills to every card that leads or works on code, and nothing to the others 2427ms\n   ✓ migration 0085 (1)\n     ✓ gives the speed skill every role lists to every head and member that keeps a list of its own, once, and nothing to the orchestrator 2161ms\n   ✓ migration 0086 composable skills (3)\n     ✓ preserves sole and mixed pending staffing cards when retiring the developer role 6848ms\n     ✓ retires only the saved DEV-GEN role key without changing card text, skill choices or run settings 5025ms\n     ✓ appends only missing split company abilities to saved selections and preserves custom bodies, hashes and list order 5681ms\n   ✓ migration 0106, the tables of the network (1)\n     ✓ marks the sessions of an older install as made before the __Host- cookie 5849ms\n   ✓ a database from before the link had a certificate (1)\n     ✓ reads as having none, as the keeper meets it before an update migrates 3128ms\n   ✓ migration 0107, the fences and the journal (2)\n     ✓ adds the fences, and the journal once migrated 5111ms\n     ✓ refuses a table it could not journal, rather than leave it out 4021ms\n   ✓ migrations 0108 and 0109, where each change came from (3)\n     ✓ keeps the base of each step, with the indexes pruning reads by 2412ms\n     ✓ gives every event of a task a name that holds across machines 3337ms\n     ✓ records a database call in the lease check, and nothing for a check without a call 3427ms\n   ✓ migration 0110, the tables of the company's network (2)\n     ✓ adds what a machine is in the network, and the authority's tables, journaled and closed 3527ms\n     ✓ keeps one row to a network id, and only the roles and kinds there are 4981ms\n   ✓ migration 0111, what joined machines need (2)\n     ✓ adds its tables, journaled and closed, and what a machine says of its link and its update 4642ms\n     ✓ takes only the paths, update states, kinds and amounts there are 4334ms\n   ✓ migration 0112, computer access per machine (2)\n     ✓ adds access per machine and its commands, journaled and closed 5467ms\n     ✓ takes only the states and times of a command there are, and a request only whole 4972ms\n   ✓ migrations 0113 and 0114, the backups (2)\n     ✓ adds each machine's age key and holdings, and the recovery keys, journaled and closed 3665ms\n     ✓ adds net.backups, fenced, with only the reasons, sizes and hashes there are 5586ms\n   ✓ migration 0115, the merge records (3)\n     ✓ adds the merge records, fenced 6273ms\n     ✓ takes a fork among the reasons of a backup 6913ms\n     ✓ takes only the merges, conflicts and rows there are 5800ms\n   ✓ migration 0116, the server order and the copies (2)\n     ✓ adds the server order and the copy's columns 5250ms\n     ✓ adds the pulse, fenced, and the sources of a merge a machine gives 5743ms\n   ✓ migration 0117, the measures of the server order (1)\n     ✓ adds the measures and the ranking's row 5079ms\n   ✓ migration 0118, the tables of a server move (4)\n     ✓ holds one move 4298ms\n     ✓ records a handover 6118ms\n     ✓ names a built-in node's machine 4413ms\n     ✓ records the handover a state ended with 3586ms\n   ✓ migration 0119, the tables of takeovers, parked job results and the hidden link (3)\n     ✓ records the kind of each handover 3459ms\n     ✓ parks a job's messages 3112ms\n     ✓ keeps the led term of an old database, hides a link, and knows a copy that saves what it led 3445ms\n   ✓ migration 0131, the fallbacks of a plan (1)\n     ✓ gives every plan an empty list of fallbacks, keeps the plans and cards as they were, and puts nobody on a fallback 3756ms\n ✓ test/people.test.ts (28 tests) 33909ms\n   ✓ invites (7)\n     ✓ lets the CEO invite a person who then signs in 9266ms\n     ✓ gives 410 for a used invite and 404 for an unknown one 2276ms\n     ✓ stops the 11th accept for one invite within 15 minutes and leaves other invites alone 889ms\n     ✓ gives 410 for an expired invite 750ms\n     ✓ refuses a duplicate email in a different case 551ms\n     ✓ refuses a department or team that does not exist 416ms\n     ✓ only lets people with the whole company invite people 593ms\n   ✓ GET /api/people (2)\n     ✓ lists people with the names of what they reach 871ms\n     ✓ lists only people from the session company 718ms\n   ✓ PATCH /api/people/:id (10)\n     ✓ disables a person and ends their sessions 701ms\n     ✓ changes title and access 351ms\n     ✓ protects the owner and yourself 362ms\n     ✓ lets anyone change their own title, and only that 594ms\n     ✓ lets anyone trim and change only their own name, with the new name in every live view and agent signature 763ms\n     ✓ scopes person changes and invites to the session company 302ms\n     ✓ saves a name and a title together and shows the new name to the list and the map, wherever the person sits 688ms\n     ✓ tells open maps when a name changes, and nothing about access 953ms\n     ✓ lets only the CEO or an active delegate rename another person and records the actor 755ms\n     ✓ stops a disabled invitee from accepting 813ms\n   ✓ POST /api/people/:id/invite (4)\n     ✓ gives a person a new link that also resets their password 1114ms\n     ✓ takes the person's own key away on a reset, and lets them make a new one 1295ms\n     ✓ replaces an expired invite 1154ms\n     ✓ protects the owner and yourself and needs company scope 1101ms\n   ✓ PUT /api/people/:id/ceo-delegate (5)\n     ✓ lets the CEO set and take off the mark of a person with the whole company, and says so in /api/me and /api/people 1861ms\n     ✓ gives no mark to a new invite, nor to a person who does not see the whole company 1299ms\n     ✓ is the real CEO's alone, by himself or through the orchestrator: not a person of the whole company, not the delegate, not for the CEO 1506ms\n     ✓ takes the mark off for good when the delegate is disabled, sent a new invite or loses the whole company 922ms\n     ✓ lets only the CEO change the access or status of the delegate, or send them a new invite 615ms\n ✓ test/telegram.test.ts (19 tests) 32358ms\n   ✓ a Telegram bot of a head (6)\n     ✓ is checked with Telegram, kept encrypted and shown on the card only by its name 8893ms\n     ✓ refuses a token Telegram does not take, and says so when Telegram cannot be reached 2316ms\n     ✓ takes off a webhook the bot had before, keeping what waits for it, or is not kept when that fails 1355ms\n     ✓ belongs to one head only, and only heads and the orchestrator have one 1437ms\n     ✓ is set by people with the whole company and by everyone given the head's department, by no one else 1998ms\n     ✓ stops listening when it is taken off, and when its head leaves the company 1803ms\n   ✓ a person's Telegram (2)\n     ✓ is set by the person as a username or a number, and cleared 1025ms\n     ✓ belongs to one person, and only the CEO sets the CEO's 1185ms\n   ✓ a message through the bot (10)\n     ✓ reaches the orchestrator as the CEO's own words, and his answer goes back to the same chat as plain text 1823ms\n     ✓ finds the person by the number once known, even after the username moved on 1737ms\n     ✓ tells an unknown sender their id and username for the owner, in their language 664ms\n     ✓ says plainly when the person may not write to this agent in Hornhoof, and sends nothing to it 519ms\n     ✓ does not listen to a disabled person, nor to a group chat 622ms\n     ✓ carries a head's answer back, cut under Telegram's limit without losing a character 654ms\n     ✓ tells a head who wrote: the CEO's delegate who is responsible for its department 507ms\n     ✓ tells the person when the agent could not answer 482ms\n     ✓ keeps where it read up to, so a restart neither loses nor repeats a message 788ms\n     ✓ goes on listening after Telegram was away 4162ms\n ✓ test/departments.test.ts (12 tests) 21060ms\n   ✓ POST /api/departments/build (10)\n     ✓ builds the proposed departments with their products and tells the orchestrator 4314ms\n     ✓ tells the orchestrator who clicked when the owner of a department changes it, not the CEO 1048ms\n     ✓ tells the orchestrator who clicked when the owner of a department hires in it, not the CEO 1135ms\n     ✓ applies a proposal only once 551ms\n     ✓ builds by hand when the orchestrator has no subscription, and queues nothing 445ms\n     ✓ removes an empty department and keeps Operations 580ms\n     ✓ removes a product that once had an employee, and keeps one that has one 837ms\n     ✓ keeps a department that people work in 800ms\n     ✓ refuses removing or renaming a sub-unit of another department and keeps its access and subscription target 741ms\n     ✓ is only for people who see the whole company 730ms\n   ✓ removing a department of a company with a long history (2)\n     ✓ keeps a product with an open task, then removes it and its whole department as before 3203ms\n     ✓ reads only the tasks of the department and its products 6200ms\n ✓ test/department-owner-control.test.ts (11 tests) 28055ms\n   ✓ a department's API keys (4)\n     ✓ are added, seen, renamed and removed by the person who runs it, without the CEO 10889ms\n     ✓ include one the CEO placed in the department, which its person keeps as the CEO does 1341ms\n     ✓ are no one's elsewhere: another department, a team of it, the whole company or the orchestrator stay closed 1548ms\n     ✓ never show another person's personal plan or its secret, and are never added by an agent 866ms\n   ✓ hiring with a skill that shows the whole company (2)\n     ✓ is left to people who see the whole company, while the department hires the rest itself 844ms\n     ✓ is never done by a head, even on the CEO's word, for a new employee or one there is 2091ms\n   ✓ a head's own approval and wait policies (2)\n     ✓ are set in a turn that answers the person who runs the department, for it and no other 2336ms\n     ✓ are set in any turn with the rights of whoever runs the department, whoever wrote or nobody, but never for commits 3446ms\n   ✓ a head and its department's work (3)\n     ✓ cancels a task given to its department by the orchestrator, and none of another department 1398ms\n     ✓ never rewrites how a request reads for people: that is the orchestrator's 824ms\n     ✓ sets the department description in any turn, whoever wrote or nobody, as the person who runs it does on the screen 1627ms\nstdout | test/migration-history.test.ts > migration histories merged in turn 5 > upgrades an existing turn-5 installation with all retained rows and one record per migration\nApplied missing migration 0046_turn_failures\n\n ✓ test/migration-history.test.ts (2 tests) 26221ms\n   ✓ migration histories merged in turn 5 (2)\n     ✓ upgrades an existing main installation with all retained rows and one record per migration 14242ms\n     ✓ upgrades an existing turn-5 installation with all retained rows and one record per migration 11959ms\n ✓ test/assistants-people.test.ts (7 tests) 26377ms\n   ✓ an assistant in People (7)\n     ✓ is a person marked as an agent of its owner, with no email and no access of its own 12045ms\n     ✓ gets a key and a signing secret shown once, kept as a hash and encrypted, replaced and revoked 2534ms\n     ✓ gives OpenClaw and Hermes their settings with a new key: Hornhoof's MCP server, and the webhook when Hornhoof wakes them 4429ms\n     ✓ changes its program and events address, which must be a web address 1842ms\n     ✓ is set up by its owner, and by people with the whole company, but the CEO's and the delegate's only by the CEO 3758ms\n     ✓ belongs to an active person of the company, never to another assistant 639ms\n     ✓ never signs in: no invite link, no access, no Telegram, and it comes back active 486ms\n ✓ test/migration-metadata.test.ts (4 tests) 9209ms\n   ✓ merged migration metadata (4)\n     ✓ links snapshots in execution order without a second child of the same predecessor 769ms\n     ✓ describes the columns and regular indexes of a freshly migrated database 8379ms\n\n Test Files  8 passed (8)\n      Tests  124 passed (124)\n   Start at  08:04:22\n   Duration  466.00s (tests 83%, import 15%, transform 2%)\n\n"
+        }
+      },
+      "reconstructedWorkingState": "callers"
+    },
+    {
+      "name": "browser-part-1",
+      "originalLog": "browser-green-2.log",
+      "originalLogSha256": "a906919908024e053ff4d3b8bac5683fb3c1e76d60091c0c0addd7db3b3ac1d1",
+      "headAtLaunch": "dd4b7b628f7e08160ca728827542d64f588b7aa5",
+      "headEvidence": "Reflog order plus original commit command/result timestamps; not an inline rev-parse in this test log.",
+      "sessionId": 75627,
+      "launch": {
+        "recordedAt": "2026-11-17T08:05:57.673Z",
+        "callId": "call_7b532f3d199f4667b3cbacb4946dd935",
+        "sourceLine": 375,
+        "shell": "PLAYWRIGHT_BROWSERS_PATH=/data/browsers npx --no-install playwright test e2e/agent-history.spec.ts --config e2e/agent-history.config.ts --workers=1 > ../../.task-1220-evidence/browser-green-2.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/browser-green-2.log; exit \"$task1220_status\"",
+        "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web",
+        "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+      },
+      "completion": {
+        "recordedAt": "2026-11-17T08:08:05.930Z",
+        "callId": "call_c4c89021f01f48ae93312d74019bef04",
+        "sourceLine": 424,
+        "receipt": {
+          "chunk_id": "62a2f0",
+          "wall_time_seconds": 4.9292e-05,
+          "exit_code": 143,
+          "original_token_count": 0,
+          "output": ""
+        }
+      },
+      "reconstructedWorkingState": "browser-all-parts"
+    },
+    {
+      "name": "browser-part-2",
+      "originalLog": "browser-remaining-1.log",
+      "originalLogSha256": "9a576e8ccea5a8b8573ed64162f3f2d73b36234464f3a8ea7c6ffe88ac609f12",
+      "headAtLaunch": "b0b972aa75fbfa31a6f0b0decf500858ea68278a",
+      "headEvidence": "Reflog order plus original commit command/result timestamps; not an inline rev-parse in this test log.",
+      "sessionId": 48534,
+      "launch": {
+        "recordedAt": "2026-11-17T08:10:07.001Z",
+        "callId": "call_2ed786de432d47559984137cb061a12e",
+        "sourceLine": 461,
+        "shell": "PLAYWRIGHT_BROWSERS_PATH=/data/browsers npx --no-install playwright test e2e/agent-history.spec.ts --config e2e/agent-history.config.ts --project history-webkit --project history-firefox --grep-invert 'in ru,' --workers=1 > ../../.task-1220-evidence/browser-remaining-1.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/browser-remaining-1.log; exit \"$task1220_status\"",
+        "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web",
+        "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+      },
+      "completion": {
+        "recordedAt": "2026-11-17T08:12:27.591Z",
+        "callId": "call_e962a89b22484357bba211f92ba03c39",
+        "sourceLine": 491,
+        "receipt": {
+          "chunk_id": "343d6b",
+          "wall_time_seconds": 5.3708e-05,
+          "exit_code": 0,
+          "original_token_count": 374,
+          "output": "[WebServer] (node:956845) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n\nRunning 8 tests using 1 worker\n\n(node:956893) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n  ✓  1 [history-firefox] › e2e/agent-history.spec.ts:50:7 › employee history in en, light, at 375px (13.9s)\n  ✓  2 [history-firefox] › e2e/agent-history.spec.ts:50:7 › employee history in en, light, at 1280px (9.6s)\n  ✓  3 [history-firefox] › e2e/agent-history.spec.ts:50:7 › employee history in en, cyberpunk, at 375px (13.1s)\n  ✓  4 [history-firefox] › e2e/agent-history.spec.ts:50:7 › employee history in en, cyberpunk, at 1280px (10.2s)\n(node:958100) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n  ✓  5 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in en, light, at 375px (11.1s)\n  ✓  6 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in en, light, at 1280px (9.1s)\n  ✓  7 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in en, cyberpunk, at 375px (8.9s)\n  ✓  8 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in en, cyberpunk, at 1280px (11.3s)\n\n  8 passed (1.7m)\n"
+        }
+      },
+      "reconstructedWorkingState": "browser-all-parts"
+    },
+    {
+      "name": "browser-part-3",
+      "originalLog": "browser-remaining-2.log",
+      "originalLogSha256": "04aef803e3cd86e40ebbc0974a720f726eed95732bb7f0d5ca05e71014876c32",
+      "headAtLaunch": "b0b972aa75fbfa31a6f0b0decf500858ea68278a",
+      "headEvidence": "Reflog order plus original commit command/result timestamps; not an inline rev-parse in this test log.",
+      "sessionId": 86269,
+      "launch": {
+        "recordedAt": "2026-11-17T08:12:23.361Z",
+        "callId": "call_e962a89b22484357bba211f92ba03c39",
+        "sourceLine": 488,
+        "shell": "cp -a e2e/results/agent-history ../../.task-1220-evidence/browser-remaining-1 && PLAYWRIGHT_BROWSERS_PATH=/data/browsers npx --no-install playwright test e2e/agent-history.spec.ts --config e2e/agent-history.config.ts --project history-webkit --grep 'in ru,' --workers=1 --output=./e2e/results/agent-history-webkit-ru > ../../.task-1220-evidence/browser-remaining-2.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/browser-remaining-2.log; exit \"$task1220_status\"",
+        "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web",
+        "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+      },
+      "completion": {
+        "recordedAt": "2026-11-17T08:14:31.904Z",
+        "callId": "call_6c3a4e71393c4fc59ff6291c10b7629f",
+        "sourceLine": 515,
+        "receipt": {
+          "chunk_id": "58e221",
+          "wall_time_seconds": 3.2833e-05,
+          "exit_code": 0,
+          "original_token_count": 217,
+          "output": "[WebServer] (node:959817) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n\nRunning 4 tests using 1 worker\n\n(node:959874) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n  ✓  1 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in ru, light, at 375px (15.8s)\n  ✓  2 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in ru, light, at 1280px (19.3s)\n  ✓  3 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in ru, cyberpunk, at 375px (16.1s)\n  ✓  4 [history-webkit] › e2e/agent-history.spec.ts:50:7 › employee history in ru, cyberpunk, at 1280px (6.2s)\n\n  4 passed (1.1m)\n"
+        }
+      },
+      "reconstructedWorkingState": "browser-all-parts"
+    }
+  ],
+  "snapshots": {
+    "core": {
+      "method": "Reconstructed now from candidate bytes and reversed contemporaneously recorded writes; not a hash captured at launch.",
+      "differingPathsFromCandidate": [
+        "apps/web/e2e/agent-history.config.ts",
+        "apps/web/e2e/agent-history.spec.ts",
+        "apps/web/src/ui/AgentCard.tsx",
+        "docs/tasks/task-1220-plan.md"
+      ],
+      "fileSha256": {
+        "apps/server/drizzle/0139_agent_change_actor.sql": "2d431cebce6a3f924e25fb16134404292a1a40bc98a34c448ff44b7bfb233d92",
+        "apps/server/drizzle/meta/0139_snapshot.json": "8f51cd0b520e03d0c1c24e1e93d09c2bad30dc144569997a4d3b0d4281a551f7",
+        "apps/server/drizzle/meta/_journal.json": "7e8b7de7af9629297e82369f7a3bf4ba6b402c993f576c88b692c78bb4c83dd4",
+        "apps/server/src/auth/session.ts": "676dfacebfafc0b0e637d6a36a195a8e3d175119c984ce2c48dedf85ec56c1a0",
+        "apps/server/src/db/schema.ts": "4f5184ad3bf3f1c791f26c061a8f06407634fdd3559c82d37d4c44b62dfd5d3d",
+        "apps/server/src/modules/agents/routes.ts": "1791feb508ece0d2a1ac273f2a1ea93b1a11fc4363fd3837a51314c53c3cdc52",
+        "apps/server/src/modules/assistants/setup.ts": "0f9e8a19ec6692009c170c7bb311b73b34a1c7aa59f518f66087001af6082bff",
+        "apps/server/src/modules/departments/hire.ts": "607238d40e925f10ba817b9ac8cfe18587f34cafe259eff255b23b327e992295",
+        "apps/server/src/modules/departments/routes.ts": "083ed6ba68bc39140f0130191a045b8c13ebe9669fed59eaace22ca86217e6e2",
+        "apps/server/src/modules/people/routes.ts": "7a739f5bf94b909a26d89372c769aa7890c21eb0e731cc03e67de53987b50c6b",
+        "apps/server/src/modules/telegram/routes.ts": "66d0a3c650724691ff5b537b7038ca73e3c3f804f2e9f5bed184ace37a10a234",
+        "apps/server/test/agent-changes-migration.test.ts": "7a3d0f6c65c001919c8a0664a948734d779c723790bcb32b0433254afc66359d",
+        "apps/server/test/agents.test.ts": "904154e93f1551e8e0db645a0fcf1dd13b6088a4a716aa4e59521ea16fdcd801",
+        "apps/server/test/head-department-control.test.ts": "ef9c2340e69bf0abca4fd7e70ed541f9e592e8906d7c60a2300b39b474afeaba",
+        "apps/web/e2e/agent-history.config.ts": "23671c5fd39f63d58f360cab527cb096ab5124db4b8be70293a0f69fa0f464c7",
+        "apps/web/e2e/agent-history.spec.ts": "0a3a8fb3e9a7effa36b7d8d32edfa6850a95558a77ca59bb900a02458d2bf3a4",
+        "apps/web/src/i18n/en.ts": "e18cebfbc9400e87c60739b8d0291b26a6ab28e05f04d817bb85cf47d4748f2b",
+        "apps/web/src/i18n/ru.ts": "1c2b0bab5dedb43d7b60c52e9288c350ea9fbbd922c75f1e4bfb8008153fee04",
+        "apps/web/src/types.ts": "50eb1f0ca275936299620b95fd109d0e4b95b04ffe78a0af8eba404142363ae5",
+        "apps/web/src/ui/AgentCard.tsx": "995e77dcbdfbb584eb61963052c5e2230c9680264476d23773b39c35d9fc6a78",
+        "apps/web/test/AgentCard.test.tsx": "f2a711d9431df71cf074eb17baa14230fcb33da3cc83fdf0776d477f1e87a0bb",
+        "apps/web/test/api-mock.ts": "fcab20404b6a5884f85ceb5d419b86278499108b86d25cea97916a72258a6142",
+        "docs/tasks/task-1220-plan.md": "8733c7e7aad033300beb3fa2fcdea5644a11f7c1d3fb3024c81e98a996454be5",
+        "templates/skills/hh-head.md": "c0f7e275f41523836a7637aea2d1106c52a8d6637a8c7828961724af6f4b23c3"
+      }
+    },
+    "callers": {
+      "method": "Reconstructed now from candidate bytes and reversed contemporaneously recorded writes; not a hash captured at launch.",
+      "differingPathsFromCandidate": [
+        "apps/web/e2e/agent-history.spec.ts",
+        "docs/tasks/task-1220-plan.md"
+      ],
+      "fileSha256": {
+        "apps/server/drizzle/0139_agent_change_actor.sql": "2d431cebce6a3f924e25fb16134404292a1a40bc98a34c448ff44b7bfb233d92",
+        "apps/server/drizzle/meta/0139_snapshot.json": "8f51cd0b520e03d0c1c24e1e93d09c2bad30dc144569997a4d3b0d4281a551f7",
+        "apps/server/drizzle/meta/_journal.json": "7e8b7de7af9629297e82369f7a3bf4ba6b402c993f576c88b692c78bb4c83dd4",
+        "apps/server/src/auth/session.ts": "676dfacebfafc0b0e637d6a36a195a8e3d175119c984ce2c48dedf85ec56c1a0",
+        "apps/server/src/db/schema.ts": "4f5184ad3bf3f1c791f26c061a8f06407634fdd3559c82d37d4c44b62dfd5d3d",
+        "apps/server/src/modules/agents/routes.ts": "1791feb508ece0d2a1ac273f2a1ea93b1a11fc4363fd3837a51314c53c3cdc52",
+        "apps/server/src/modules/assistants/setup.ts": "0f9e8a19ec6692009c170c7bb311b73b34a1c7aa59f518f66087001af6082bff",
+        "apps/server/src/modules/departments/hire.ts": "607238d40e925f10ba817b9ac8cfe18587f34cafe259eff255b23b327e992295",
+        "apps/server/src/modules/departments/routes.ts": "083ed6ba68bc39140f0130191a045b8c13ebe9669fed59eaace22ca86217e6e2",
+        "apps/server/src/modules/people/routes.ts": "7a739f5bf94b909a26d89372c769aa7890c21eb0e731cc03e67de53987b50c6b",
+        "apps/server/src/modules/telegram/routes.ts": "66d0a3c650724691ff5b537b7038ca73e3c3f804f2e9f5bed184ace37a10a234",
+        "apps/server/test/agent-changes-migration.test.ts": "7a3d0f6c65c001919c8a0664a948734d779c723790bcb32b0433254afc66359d",
+        "apps/server/test/agents.test.ts": "904154e93f1551e8e0db645a0fcf1dd13b6088a4a716aa4e59521ea16fdcd801",
+        "apps/server/test/head-department-control.test.ts": "ef9c2340e69bf0abca4fd7e70ed541f9e592e8906d7c60a2300b39b474afeaba",
+        "apps/web/e2e/agent-history.config.ts": "47a9aeaa3236bf464e55cb67cb929a9ccaeba3f4c7aadf217f39ff4457f19672",
+        "apps/web/e2e/agent-history.spec.ts": "8dbcb6da4cb27b30eaf5e05fca924b430c7290a8ea4ea27d52319aed72f05121",
+        "apps/web/src/i18n/en.ts": "e18cebfbc9400e87c60739b8d0291b26a6ab28e05f04d817bb85cf47d4748f2b",
+        "apps/web/src/i18n/ru.ts": "1c2b0bab5dedb43d7b60c52e9288c350ea9fbbd922c75f1e4bfb8008153fee04",
+        "apps/web/src/types.ts": "50eb1f0ca275936299620b95fd109d0e4b95b04ffe78a0af8eba404142363ae5",
+        "apps/web/src/ui/AgentCard.tsx": "183d8835034f750cfbbf3e55f1bf8e2814ed86bad150f5ea9370558eafdc5a10",
+        "apps/web/test/AgentCard.test.tsx": "f2a711d9431df71cf074eb17baa14230fcb33da3cc83fdf0776d477f1e87a0bb",
+        "apps/web/test/api-mock.ts": "fcab20404b6a5884f85ceb5d419b86278499108b86d25cea97916a72258a6142",
+        "docs/tasks/task-1220-plan.md": "8733c7e7aad033300beb3fa2fcdea5644a11f7c1d3fb3024c81e98a996454be5",
+        "templates/skills/hh-head.md": "c0f7e275f41523836a7637aea2d1106c52a8d6637a8c7828961724af6f4b23c3"
+      }
+    },
+    "card-before-changeAuthor": {
+      "method": "Reconstructed now from candidate bytes and reversed contemporaneously recorded writes; not a hash captured at launch.",
+      "differingPathsFromCandidate": [
+        "apps/server/test/agent-changes-migration.test.ts",
+        "apps/server/test/head-department-control.test.ts",
+        "apps/web/e2e/agent-history.config.ts",
+        "apps/web/e2e/agent-history.spec.ts",
+        "apps/web/src/ui/AgentCard.tsx",
+        "docs/tasks/task-1220-plan.md"
+      ],
+      "fileSha256": {
+        "apps/server/drizzle/0139_agent_change_actor.sql": "2d431cebce6a3f924e25fb16134404292a1a40bc98a34c448ff44b7bfb233d92",
+        "apps/server/drizzle/meta/0139_snapshot.json": "8f51cd0b520e03d0c1c24e1e93d09c2bad30dc144569997a4d3b0d4281a551f7",
+        "apps/server/drizzle/meta/_journal.json": "7e8b7de7af9629297e82369f7a3bf4ba6b402c993f576c88b692c78bb4c83dd4",
+        "apps/server/src/auth/session.ts": "676dfacebfafc0b0e637d6a36a195a8e3d175119c984ce2c48dedf85ec56c1a0",
+        "apps/server/src/db/schema.ts": "4f5184ad3bf3f1c791f26c061a8f06407634fdd3559c82d37d4c44b62dfd5d3d",
+        "apps/server/src/modules/agents/routes.ts": "1791feb508ece0d2a1ac273f2a1ea93b1a11fc4363fd3837a51314c53c3cdc52",
+        "apps/server/src/modules/assistants/setup.ts": "0f9e8a19ec6692009c170c7bb311b73b34a1c7aa59f518f66087001af6082bff",
+        "apps/server/src/modules/departments/hire.ts": "607238d40e925f10ba817b9ac8cfe18587f34cafe259eff255b23b327e992295",
+        "apps/server/src/modules/departments/routes.ts": "083ed6ba68bc39140f0130191a045b8c13ebe9669fed59eaace22ca86217e6e2",
+        "apps/server/src/modules/people/routes.ts": "7a739f5bf94b909a26d89372c769aa7890c21eb0e731cc03e67de53987b50c6b",
+        "apps/server/src/modules/telegram/routes.ts": "66d0a3c650724691ff5b537b7038ca73e3c3f804f2e9f5bed184ace37a10a234",
+        "apps/server/test/agent-changes-migration.test.ts": "25cc84ccc63e4edb753b8caade5279055407bdb7cafad7a5ef0170db540db3c9",
+        "apps/server/test/agents.test.ts": "904154e93f1551e8e0db645a0fcf1dd13b6088a4a716aa4e59521ea16fdcd801",
+        "apps/server/test/head-department-control.test.ts": "30074d845c2492860c1eacb4461b25b74d4295d6cc48baaa18f9eb5a2d8afac8",
+        "apps/web/e2e/agent-history.config.ts": "23671c5fd39f63d58f360cab527cb096ab5124db4b8be70293a0f69fa0f464c7",
+        "apps/web/e2e/agent-history.spec.ts": "0a3a8fb3e9a7effa36b7d8d32edfa6850a95558a77ca59bb900a02458d2bf3a4",
+        "apps/web/src/i18n/en.ts": "e18cebfbc9400e87c60739b8d0291b26a6ab28e05f04d817bb85cf47d4748f2b",
+        "apps/web/src/i18n/ru.ts": "1c2b0bab5dedb43d7b60c52e9288c350ea9fbbd922c75f1e4bfb8008153fee04",
+        "apps/web/src/types.ts": "50eb1f0ca275936299620b95fd109d0e4b95b04ffe78a0af8eba404142363ae5",
+        "apps/web/src/ui/AgentCard.tsx": "995e77dcbdfbb584eb61963052c5e2230c9680264476d23773b39c35d9fc6a78",
+        "apps/web/test/AgentCard.test.tsx": "f2a711d9431df71cf074eb17baa14230fcb33da3cc83fdf0776d477f1e87a0bb",
+        "apps/web/test/api-mock.ts": "fcab20404b6a5884f85ceb5d419b86278499108b86d25cea97916a72258a6142",
+        "docs/tasks/task-1220-plan.md": "8733c7e7aad033300beb3fa2fcdea5644a11f7c1d3fb3024c81e98a996454be5",
+        "templates/skills/hh-head.md": "c0f7e275f41523836a7637aea2d1106c52a8d6637a8c7828961724af6f4b23c3"
+      }
+    },
+    "browser-all-parts": {
+      "method": "Reconstructed now from candidate bytes and reversed contemporaneously recorded writes; not a hash captured at launch.",
+      "differingPathsFromCandidate": [],
+      "fileSha256": {
+        "apps/server/drizzle/0139_agent_change_actor.sql": "2d431cebce6a3f924e25fb16134404292a1a40bc98a34c448ff44b7bfb233d92",
+        "apps/server/drizzle/meta/0139_snapshot.json": "8f51cd0b520e03d0c1c24e1e93d09c2bad30dc144569997a4d3b0d4281a551f7",
+        "apps/server/drizzle/meta/_journal.json": "7e8b7de7af9629297e82369f7a3bf4ba6b402c993f576c88b692c78bb4c83dd4",
+        "apps/server/src/auth/session.ts": "676dfacebfafc0b0e637d6a36a195a8e3d175119c984ce2c48dedf85ec56c1a0",
+        "apps/server/src/db/schema.ts": "4f5184ad3bf3f1c791f26c061a8f06407634fdd3559c82d37d4c44b62dfd5d3d",
+        "apps/server/src/modules/agents/routes.ts": "1791feb508ece0d2a1ac273f2a1ea93b1a11fc4363fd3837a51314c53c3cdc52",
+        "apps/server/src/modules/assistants/setup.ts": "0f9e8a19ec6692009c170c7bb311b73b34a1c7aa59f518f66087001af6082bff",
+        "apps/server/src/modules/departments/hire.ts": "607238d40e925f10ba817b9ac8cfe18587f34cafe259eff255b23b327e992295",
+        "apps/server/src/modules/departments/routes.ts": "083ed6ba68bc39140f0130191a045b8c13ebe9669fed59eaace22ca86217e6e2",
+        "apps/server/src/modules/people/routes.ts": "7a739f5bf94b909a26d89372c769aa7890c21eb0e731cc03e67de53987b50c6b",
+        "apps/server/src/modules/telegram/routes.ts": "66d0a3c650724691ff5b537b7038ca73e3c3f804f2e9f5bed184ace37a10a234",
+        "apps/server/test/agent-changes-migration.test.ts": "7a3d0f6c65c001919c8a0664a948734d779c723790bcb32b0433254afc66359d",
+        "apps/server/test/agents.test.ts": "904154e93f1551e8e0db645a0fcf1dd13b6088a4a716aa4e59521ea16fdcd801",
+        "apps/server/test/head-department-control.test.ts": "ef9c2340e69bf0abca4fd7e70ed541f9e592e8906d7c60a2300b39b474afeaba",
+        "apps/web/e2e/agent-history.config.ts": "47a9aeaa3236bf464e55cb67cb929a9ccaeba3f4c7aadf217f39ff4457f19672",
+        "apps/web/e2e/agent-history.spec.ts": "1cbedae2f9c5735b364c13fd84ababca3fa5f182b5675b406fd1cad9e612c871",
+        "apps/web/src/i18n/en.ts": "e18cebfbc9400e87c60739b8d0291b26a6ab28e05f04d817bb85cf47d4748f2b",
+        "apps/web/src/i18n/ru.ts": "1c2b0bab5dedb43d7b60c52e9288c350ea9fbbd922c75f1e4bfb8008153fee04",
+        "apps/web/src/types.ts": "50eb1f0ca275936299620b95fd109d0e4b95b04ffe78a0af8eba404142363ae5",
+        "apps/web/src/ui/AgentCard.tsx": "183d8835034f750cfbbf3e55f1bf8e2814ed86bad150f5ea9370558eafdc5a10",
+        "apps/web/test/AgentCard.test.tsx": "f2a711d9431df71cf074eb17baa14230fcb33da3cc83fdf0776d477f1e87a0bb",
+        "apps/web/test/api-mock.ts": "fcab20404b6a5884f85ceb5d419b86278499108b86d25cea97916a72258a6142",
+        "docs/tasks/task-1220-plan.md": "36e8c9dcbbb5db8f3006ff1c77412d1595d16a140793cc97ed85e04786d5967b",
+        "templates/skills/hh-head.md": "c0f7e275f41523836a7637aea2d1106c52a8d6637a8c7828961724af6f4b23c3"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "recordedAt": "2026-11-17T07:53:54.696Z",
+      "callId": "call_c42320968a154ce2a5e30a428ab52d73",
+      "sourceLine": 139,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/test/head-department-control.test.ts"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T07:55:14.405Z",
+      "callId": "call_50ac1422231049bcb66546ee724b9041",
+      "sourceLine": 166,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/test/head-department-control.test.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/test/AgentCard.test.tsx"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T07:55:49.709Z",
+      "callId": "call_05f77920f69d4362afa9f3b39fdaf4e9",
+      "sourceLine": 176,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/test/agent-changes-migration.test.ts"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T07:56:55.094Z",
+      "callId": "call_cf3540312f0b4f93af073a5548244062",
+      "sourceLine": 191,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/src/auth/session.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/src/db/schema.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/src/modules/departments/hire.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/src/types.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/src/i18n/en.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/src/i18n/ru.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/src/ui/AgentCard.tsx",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/test/api-mock.ts"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T08:00:17.482Z",
+      "callId": "call_d3612ca0a6fa4c00a68b9536d054ae12",
+      "sourceLine": 258,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/e2e/agent-history.config.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/e2e/agent-history.spec.ts"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T08:01:51.945Z",
+      "callId": "call_e9d0df72fde044ffaf963e7004edace7",
+      "sourceLine": 302,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/test/head-department-control.test.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server/test/agent-changes-migration.test.ts"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T08:02:27.807Z",
+      "callId": "call_3ea2e2a05f57495688a06f06da824741",
+      "sourceLine": 317,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/src/ui/AgentCard.tsx"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T08:03:03.189Z",
+      "callId": "call_fb5bc65e87d740b18af20d0f4600bdfc",
+      "sourceLine": 324,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/e2e/agent-history.config.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/e2e/agent-history.spec.ts"
+      ]
+    },
+    {
+      "recordedAt": "2026-11-17T08:05:57.673Z",
+      "callId": "call_7b532f3d199f4667b3cbacb4946dd935",
+      "sourceLine": 375,
+      "changedPaths": [
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web/e2e/agent-history.spec.ts",
+        "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/docs/tasks/task-1220-plan.md"
+      ]
+    }
+  ],
+  "failedEarlierAttempt": {
+    "log": "head-migration-green.log",
+    "head": "dd4b7b628f7e08160ca728827542d64f588b7aa5",
+    "sessionId": 92340,
+    "launch": {
+      "recordedAt": "2026-11-17T07:58:02.265Z",
+      "callId": "call_590a9e5da5964dfe832d62d755db1428",
+      "sourceLine": 221,
+      "shell": "npx --no-install vitest run test/head-department-control.test.ts test/agent-changes-migration.test.ts --maxWorkers=1 > ../../.task-1220-evidence/head-migration-green.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/head-migration-green.log; exit \"$task1220_status\"",
+      "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server",
+      "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+    },
+    "completion": {
+      "recordedAt": "2026-11-17T08:00:32.199Z",
+      "callId": "call_2af76f1fe3fb45479c59dea3a836444e",
+      "sourceLine": 268,
+      "receipt": {
+        "chunk_id": "239ed7",
+        "wall_time_seconds": 8.15e-05,
+        "exit_code": 1,
+        "original_token_count": 1426,
+        "output": "\n RUN  v5.0.5 /data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/server\n\n ❯ test/head-department-control.test.ts (10 tests | 2 failed) 24134ms\n   ✓ a department head's tools (1)\n     ✓ run its own department, and no worker has them 7099ms\n   ❯ a department head for a person who runs its department (7)\n     ✓ creates, renames and removes sub-units and adds and removes products of its department 835ms\n     × records the head and its authority person for hiring, changes, reset, team removal and firing 1902ms\n     ✓ moves an employee who holds work into an urgent-only sub-unit 5968ms\n     ✓ uses its named owner without a fresh message, and records the head and whose rights it used 909ms\n     ✓ keeps the orchestrator's own department and staffing changes in its own history 707ms\n     × keeps a human author and ignores author fields sent in the request 430ms\n     ✓ keeps its own owner when another person, assistant or employee writes into the turn 3856ms\n   ✓ a department head refuses (2)\n     ✓ uses the active CEO when no department owner is named, whoever opened the turn 1354ms\n     ✓ anything outside its own department, even on the CEO's word 642ms\n ❯ test/agent-changes-migration.test.ts (2 tests | 1 failed) 6556ms\n   ❯ employee change actor migration (2)\n     ✓ gives a fresh install a nullable acting agent linked to the employee table 3800ms\n     × upgrades without attributing old changes to an agent, and can migrate again 2688ms\n\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  test/agent-changes-migration.test.ts > employee change actor migration > upgrades without attributing old changes to an agent, and can migrate again\nError: Failed query: insert into agents (company_id, name, kind, department_id) values ($1, 'Hana', 'head', $2) returning id\nparams: ee30beae-092f-4567-b9bd-9087441e2104,761c0acf-13d1-494f-9391-768bc6230daf\n ❯ PglitePreparedQuery.queryWithCache ../../node_modules/src/pg-core/session.ts:73:11\n ❯ test/agent-changes-migration.test.ts:31:20\n     29|       values (${company}, 'Dana', 'dana@acme.example', 'active', 'comp…\n     30|     const dept = (await db.execute<{ id: string }>(sql`insert into dep…\n     31|     const agent = (await db.execute<{ id: string }>(sql`insert into ag…\n       |                    ^\n     32|     await db.execute(sql`insert into agent_changes (company_id, agent_…\n     33|       values (${company}, ${agent}, ${person}, 'name', '\"Hana\"'::jsonb…\n\nCaused by: error: null value in column \"model\" of relation \"agents\" violates not-null constraint\n ❯ pe.Oe ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:18162\n ❯ pe.tt ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:15548\n ❯ pe.parse ../../node_modules/@electric-sql/pglite/dist/chunk-74YLKDNW.js:1:14222\n ❯ q.ze ../../node_modules/@electric-sql/pglite/dist/chunk-23XIDXWY.js:5:1759\n ❯ ../../node_modules/@electric-sql/pglite/dist/chunk-23XIDXWY.js:5:1151\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nSerialized Error: { length: 465, severity: 'ERROR', code: '23502', detail: 'Failing row contains (7af0e3e8-f036-44d5-8c91-6e6a7b20147e, ee30beae-092f-4567-b9bd-9087441e2104, head, Hana, null, 761c0acf-13d1-494f-9391-768bc6230daf, null, null, 2026-11-17 07:59:54.865+00, null, [], {}, {}, null, null, null, null, null, null, null, null, null, f, null, null, null).', hint: undefined, position: undefined, internalPosition: undefined, internalQuery: undefined, where: undefined, schema: 'public', table: 'agents', dataType: undefined, constraint: undefined, file: 'execMain.c', routine: 'ReportNotNullViolationError', query: 'insert into agents (company_id, name, kind, department_id) values ($1, 'Hana', 'head', $2) returning id', params: [ 'ee30beae-092f-4567-b9bd-9087441e2104', '761c0acf-13d1-494f-9391-768bc6230daf' ], queryOptions: { rowMode: 'object', parsers: { '1082': 'Function<1082>', '1114': 'Function<1114>', '1115': 'Function<1115>', '1182': 'Function<1182>', '1184': 'Function<1184>', '1185': 'Function<1185>', '1186': 'Function<1186>', '1187': 'Function<1187>', '1231': 'Function<1231>' } } }\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯\n\n FAIL  test/head-department-control.test.ts > a department head for a person who runs its department > records the head and its authority person for hiring, changes, reset, team removal and firing\nAssertionError: expected [ { …(9) }, { …(9) } ] to have a length of 1 but got 2\n\n- Expected\n+ Received\n\n- 1\n+ 2\n\n ❯ test/head-department-control.test.ts:75:21\n     73|     for (const change of changes) expect(change, change.field).toMatch…\n     74|     const applied = await c.db.select().from(agentEvents).where(and(eq…\n     75|     expect(applied).toHaveLength(1);\n       |                     ^\n     76|     expect(applied[0]).toMatchObject({ personId: null, data: { kind: '…\n     77|     await c.db.update(agents).set({ removedAt: new Date() }).where(eq(…\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯\n\n FAIL  test/head-department-control.test.ts > a department head for a person who runs its department > keeps a human author and ignores author fields sent in the request\nAssertionError: expected 400 to be 200 // Object.is equality\n\n- Expected\n+ Received\n\n- 200\n+ 400\n\n ❯ test/head-department-control.test.ts:122:32\n\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯\n\n\n Test Files  2 failed (2)\n      Tests  3 failed | 9 passed (12)\n   Start at  07:58:03\n   Duration  111.12s (tests 59%, import 27%, transform 13%)\n\n"
+      }
+    },
+    "result": "exit 1; 3 failed / 9 passed; not used as PASS",
+    "reason": "Before the recorded 08:01:51 test-fixture repair. Production server/migration code was already final; head test and migration seed were not final."
+  },
+  "changeAuthor": {
+    "recordedAt": "2026-11-17T08:02:27.807Z",
+    "callId": "call_3ea2e2a05f57495688a06f06da824741",
+    "meaning": "Extracted the inline actor ternary into changeAuthor and added a Messages type import; only apps/web/src/ui/AgentCard.tsx changed. During core, before callers and every credited browser part. Earlier full card-green-2.log is not presented as the post-refactor receipt; card-refactor.log and final web-coverage.log cover the extracted helper."
+  },
+  "cardBeforeRefactor": {
+    "log": "card-green-2.log",
+    "headAtLaunch": "dd4b7b628f7e08160ca728827542d64f588b7aa5",
+    "launch": {
+      "recordedAt": "2026-11-17T08:00:30.574Z",
+      "callId": "call_2af76f1fe3fb45479c59dea3a836444e",
+      "sourceLine": 266,
+      "shell": "npx --no-install vitest run test/AgentCard.test.tsx --maxWorkers=1 > ../../.task-1220-evidence/card-green-2.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/card-green-2.log; exit \"$task1220_status\"",
+      "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web",
+      "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+    },
+    "completion": {
+      "recordedAt": "2026-11-17T08:02:10.907Z",
+      "callId": "call_12fd5e410ee04e6a99a6e8832822c384",
+      "sourceLine": 312,
+      "receipt": {
+        "chunk_id": "324c62",
+        "wall_time_seconds": 0.000193541,
+        "exit_code": 0,
+        "original_token_count": 336,
+        "output": "\n RUN  v5.0.5 /data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web\n\n ✓ test/AgentCard.test.tsx (64 tests) 13092ms\n   ✓ AgentCard (40)\n     ✓ names the acting head and whose rights it used, keeping human, old and automatic changes in both languages 766ms\n     ✓ shows nothing under the state when failure is null or omitted, and shows a waiting retry on the state line 348ms\n     ✓ keeps a raw text changed after Save while the prompt was being saved 350ms\n     ✓ sets a timer: how often the employee wakes and what it does each time 742ms\n     ✓ keeps edits made in both views of the prompt 511ms\n     ✓ moves an employee into a sub-unit and back to the pipeline from its card 383ms\n   ✓ the Telegram bot on a head's card (5)\n     ✓ connects a bot by its token from @BotFather, and shows only the bot's name after 617ms\n     ✓ says why Telegram did not take the token, in Russian too 1098ms\n   ✓ AgentCard assignment (12)\n     ✓ round-trips assignment and skill edits through raw text without merging the role into the assignment 466ms\n     ✓ refuses a raw edit of the role identity and keeps it available to correct 320ms\n\n Test Files  1 passed (1)\n      Tests  64 passed (64)\n   Start at  08:00:33\n   Duration  20.46s (tests 66%, environment 23%, transform 6%, setup 4%, import 2%)\n\n"
+      }
+    },
+    "reconstructedWorkingState": "card-before-changeAuthor",
+    "purpose": "This was before helper extraction, not proof of the final helper. Only the targeted card receipt from this multi-action response is exported, excluding unrelated process-list output."
+  },
+  "filteredCardAfterRefactor": {
+    "log": "card-refactor.log",
+    "sessionId": 17245,
+    "launch": {
+      "recordedAt": "2026-11-17T08:04:18.515Z",
+      "callId": "call_f59458cf82ca46328658004d7a1fc72d",
+      "sourceLine": 345,
+      "shell": "npx --no-install vitest run test/AgentCard.test.tsx -t 'names the acting head' --maxWorkers=1 > ../../.task-1220-evidence/card-refactor.log 2>&1; task1220_status=$?; cat ../../.task-1220-evidence/card-refactor.log; exit \"$task1220_status\"",
+      "cwd": "/data/work/agents/8a3de50f-4897-4e27-ab3f-3c95af082d16/hornhoof-task-1220/apps/web",
+      "timestampMeaning": "Start of the enclosing tool call, not a separately recorded shell process start."
+    },
+    "rawLogResult": "1 passed / 63 filtered out",
+    "terminalExitReceipt": "NOT_RETAINED: no completion poll in the contemporaneous trace; the session is no longer available in this audit.",
+    "correction": "The original manifest exitCode 0 for this filtered run was inferred from its green log and wrapper, not a captured terminal completion. Use the final full web-coverage 64 PASS / exit 0 receipt instead."
+  }
+}
