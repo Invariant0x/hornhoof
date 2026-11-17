@@ -11,7 +11,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { PGlite } from '@electric-sql/pglite';
-import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
@@ -39,6 +39,7 @@ import { APP_AUTHORITY, PeerServer } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
 import { fakeLease } from './fake-lease.js';
 import { fixture, setUpCompany, TEST_SECRET, testApp } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
 import { advance, certificate, leaseRound, leaseStep, networkRound, peerTime, registerKeeper, state, step, tunnelRound, until, WALL_TIME } from './keeper-peer-time.js';
 
 /* The keeper's frpc commands are observed, and its child lifecycle is a recorded sample, without waiting on Node or frpc. */
@@ -204,6 +205,7 @@ function send(to: Target, options: http.RequestOptions, body: unknown): Promise<
 const closed = (session: ClientHttp2Session): Promise<void> => new Promise(resolve => (session.closed || session.destroyed ? resolve() : session.once('close', () => resolve())));
 
 describe('the peer link in the keeper', () => {
+  beforeAll(prepareSharedDatabase);
   beforeEach(peerTime);
   it('serves the peer link once its certificate is in, and names each peer to the app by its certificate', async () => {
     const c = await company();
