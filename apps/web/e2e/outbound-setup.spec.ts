@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Measured } from './outbound-setup-edges';
-import { edges, offences, type Words } from './outbound-setup-look';
+import { edges, fits, offences, shooter, small, type Words } from './outbound-setup-look';
 import { serveRoutes } from './routes-api';
 
 /* A department's own outbound setup as the people who run it meet it, in Settings and on the department's screen: every
@@ -12,6 +12,7 @@ import { serveRoutes } from './routes-api';
 test.use({ reducedMotion: 'reduce' });
 const SHOTS = 'e2e/results/outbound-setup-shots';
 mkdirSync(SHOTS, { recursive: true });
+const shot = shooter(SHOTS);
 
 const DEPT = 'd2';
 const POLICY = {
@@ -45,6 +46,11 @@ const LOG = {
     { id: 'l1', kind: 'account_set_up', channel: { id: 'ch1', name: 'Spring letters to partner shops in the northern region' }, subjectId: null, detail: {}, person: { id: 'p1', name: 'Ivan' }, agent: null, at: '2026-01-02T09:00:00.000Z' },
   ],
 };
+/* The addresses on the first channel: a long one that agreed, added by Ivan through Mia, and one whose consent was taken back. */
+const CONTACTS = [
+  { permissionId: 'pm2', channelId: 'ch1', kind: 'email', address: 'purchasing.department.northern-region@partner-shop-with-a-long-name.example', purpose: 'first_contact', source: 'Signup form on the partner portal', status: 'granted', grantedAt: '2026-01-03T09:00:00.000Z', revokedAt: null, doNotContact: false, addedBy: { person: { id: 'p1', name: 'Ivan' }, agent: { id: 'a-mia', name: 'Mia' } } },
+  { permissionId: 'pm1', channelId: 'ch1', kind: 'email', address: 'old.list@shop.example', purpose: 'first_contact', source: 'Signup form', status: 'revoked', grantedAt: '2026-01-02T09:00:00.000Z', revokedAt: '2026-01-02T12:00:00.000Z', doNotContact: false, addedBy: null },
+];
 const OVERVIEW = { channels: CHANNELS, messages: [], escalations: [], approvals: [], departments: [{ id: DEPT, name: 'Development', templateKey: null }] };
 
 async function serve(page: Page, published: string[]) {
@@ -54,6 +60,7 @@ async function serve(page: Page, published: string[]) {
     if (url.pathname === '/api/outbound') return route.fulfill({ json: OVERVIEW });
     if (url.pathname === '/api/outbound/catalog') return route.fulfill({ json: CATALOG });
     if (url.pathname === '/api/outbound/setup-log') return route.fulfill({ json: LOG });
+    if (url.pathname === '/api/outbound/contacts') return route.fulfill({ json: { contacts: CONTACTS } });
     if (url.pathname.endsWith('/publish') && route.request().method() === 'POST') {
       published.push(url.pathname);
       return route.fulfill({ json: { id: 'r2', status: 'published' } });
@@ -79,32 +86,11 @@ async function open(page: Page, { lang, dir, width }: Look) {
   }, { lang, dir });
 }
 
-/* Nothing sideways: the page and the panel take their width, and no line or button sticks out of its card. */
-async function fits(page: Page, panel: Locator) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  expect(await panel.evaluate(el => [...el.querySelectorAll('.imp, .repo-actions, .imp-meta, li, h3, h4, p')].filter(n => (n as HTMLElement).scrollWidth > (n as HTMLElement).clientWidth + 1).length)).toBe(0);
-}
-
-/* Every field, list and button of the part is a touch target of 44px, as in the Settings window: what is smaller. */
-async function small(panel: Locator) {
-  return panel.evaluate(root => [...root.querySelectorAll('input:not([type=checkbox]), select, button')].flatMap(el => {
-    const high = Math.round(el.getBoundingClientRect().height);
-    const fits = el.tagName === 'BUTTON' ? high >= 44 : high === 44;
-    return fits ? [] : [`${el.tagName} ${(el.textContent ?? '').trim()} ${high}`];
-  }));
-}
-
-/* What a person sees with this part of the panel scrolled into view. */
-async function shot(page: Page, what: Locator, file: string) {
-  await what.evaluate(el => el.scrollIntoView({ block: 'start' }));
-  await page.screenshot({ path: `${SHOTS}/${file}.png`, animations: 'disabled' });
-}
-
 for (const look of LOOKS) {
   const t = look.lang === 'en' ? en : ru;
   const name = `${look.lang}-${look.dir}-${look.width}`;
   const statuses = [...Object.values(t.outbound.channelStatuses), ...Object.values(t.outboundSetup.accountStatuses), ...Object.values(t.outboundSetup.statuses)];
-  const words: Words = { statuses, danger: [t.outboundSetup.stop, t.outboundSetup.revoke], entryBlocks: [t.outboundSetup.catalogTitle, t.outboundSetup.logTitle] };
+  const words: Words = { statuses: [...statuses, ...Object.values(t.outboundSetup.contact.statuses)], danger: [t.outboundSetup.stop, t.outboundSetup.revoke, t.outboundSetup.contact.revoke], entryBlocks: [t.outboundSetup.catalogTitle, t.outboundSetup.logTitle] };
   test(`a department's own outbound setup in Settings and on its screen ${name}`, async ({ page, browserName }) => {
     test.setTimeout(0);
     const published: string[] = [];
@@ -122,6 +108,7 @@ for (const look of LOOKS) {
     expect.soft(await offences(part, words)).toEqual([]);
     const measured: Measured[] = [{ browser: browserName, look: name, screen: 'settings', ...(await edges(part)) }];
     await shot(page, block(t.outboundSetup.channelsTitle), `settings-channels-${browserName}-${name}`);
+    await shot(page, part.locator('.outbound-contacts').filter({ has: page.getByRole('list', { name: t.outboundSetup.contact.listTitle(1), exact: true }) }), `settings-addresses-${browserName}-${name}`);
     await shot(page, block(t.outboundSetup.catalogTitle), `settings-catalog-${browserName}-${name}`);
     await shot(page, block(t.outboundSetup.logTitle), `settings-log-${browserName}-${name}`);
 
@@ -140,15 +127,16 @@ for (const look of LOOKS) {
     /* The part reads its catalog and log again after a publish; leaving before that ends cancels them, which WebKit
        reports as a page error. */
     const reread = (path: string) => page.waitForResponse(r => new URL(r.url()).pathname === path);
-    await Promise.all([reread('/api/outbound/catalog'), reread('/api/outbound/setup-log'), part.getByRole('button', { name: t.outboundSetup.publish }).click()]);
+    await Promise.all([reread('/api/outbound/catalog'), reread('/api/outbound/setup-log'), reread('/api/outbound/contacts'), part.getByRole('button', { name: t.outboundSetup.publish }).click()]);
     await expect.poll(() => published).toEqual(['/api/outbound/catalog/r2/publish']);
 
     await page.goto(`/departments/${DEPT}`);
-    await page.getByRole('button', { name: t.dept.about, exact: true }).click();
-    const own = page.getByRole('complementary').getByRole('region', { name: t.settings.groups.messaging });
+    await page.getByRole('button', { name: t.settings.groups.messaging, exact: true }).click();
+    /* The part itself, under the panel's own head and its close button. */
+    const own = page.getByRole('complementary', { name: t.settings.groups.messaging }).locator('.outbound-setup');
     await expect(own.getByRole('heading', { name: t.outboundSetup.channelsTitle })).toBeVisible();
     await fits(page, own);
-    await shot(page, own.getByRole('heading', { name: t.settings.groups.messaging }), `department-${browserName}-${name}`);
+    await shot(page, own.getByRole('heading', { name: t.outboundSetup.channelsTitle }), `department-${browserName}-${name}`);
     expect(await small(own)).toEqual([]);
     expect.soft(await offences(own, words)).toEqual([]);
     measured.push({ browser: browserName, look: name, screen: 'department', ...(await edges(own)) });

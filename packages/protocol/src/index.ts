@@ -1,4 +1,5 @@
 export * from './department-mode.js';
+export * from './tool-privacy.js';
 export * from './external-operations.js';
 export * from './request-materials.js';
 export * from './questions.js';
@@ -11,13 +12,15 @@ export * from './model-check.js';
 export * from './outbound.js';
 export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
-export { mutationResultMatches, MutationResult, mutationSelectionMatches, CandidateMutation, MutationDelta, MutationFunction, MutationSelection, candidateTestUnits, runtimeVersionMatches, requiredTestRuntimes, runsInClass, runtimeClass, supportsTestProfile, EnvironmentProblem, FileNote, FileOutcome, KEPT_BYTES, KeptFiles, PREPARATION_UNIT, UnitFingerprint, UnitFingerprints, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, RuntimePlatform, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
+export { mutationResultMatches, MutationResult, mutationSelectionMatches, CandidateMutation, MutationDelta, MutationFunction, MutationSelection, runtimeVersionMatches, requiredTestRuntimes, runsInClass, runtimeClass, supportsTestProfile, EnvironmentProblem, FileNote, FileOutcome, KEPT_BYTES, KeptFiles, PREPARATION_UNIT, UnitFingerprint, UnitFingerprints, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, RuntimePlatform, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
 import { FileOutcome, KeptFiles, RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
 import { HarnessSynced } from './harness.js';
 export { HarnessClaim, HarnessDone, HarnessFailed, HarnessSynced, HarnessUnit } from './harness.js';
+export * from './phones.js';
+import { PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
@@ -221,7 +224,7 @@ export const ApiConnection = z.object({ baseUrl: ApiBaseUrl, protocol: z.enum(AP
 /* What an agent is doing while a job runs, already shortened by the node for people to watch. */
 export const AgentEvent = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string().max(8000) }),
-  z.object({ kind: z.literal('tool'), name: z.string().max(100), input: z.string().max(300) }),
+  z.object({ kind: z.literal('tool'), name: z.string().max(100), input: z.string().max(300), sensitive: z.literal(true).optional(), issued: z.literal(true).optional() }),
   z.object({ kind: z.literal('tool_result'), ok: z.boolean(), summary: z.string().max(500) }),
   z.object({
     kind: z.literal('todo'),
@@ -482,7 +485,7 @@ export const HELLO_IDS_MAX = 20_000;
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced,
+  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -496,6 +499,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     running: z.array(z.string()).max(HELLO_IDS_MAX),
     models: Models.optional(),
     terminals: z.boolean().optional(),
+    phones: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
@@ -571,6 +575,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
   /* Which of the turns Hornhoof asked about the node still runs, as its hello would list them. */
   z.object({ type: z.literal('jobs.held'), asked: z.array(z.string()).max(100), held: z.array(z.string()).max(100) }),
+  /* The node's last lines of log, as Hornhoof asked for them. */
+  z.object({ type: z.literal('node.log'), requestId: z.uuid(), log: NodeLog }),
   z.object({
     type: z.literal('job.done'),
     jobId: z.string(),
@@ -702,7 +708,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
-  CheckQueueReply,
+  CheckQueueReply, PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
     type: z.literal('job.run'),
     jobId: Id,
@@ -742,6 +748,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ack'), upto: z.number().int().min(0) }),
   /* Hornhoof asks which of these turns the node still runs: one it does not is over. */
   z.object({ type: z.literal('jobs.check'), jobIds: z.array(Id).min(1).max(100) }),
+  /* Hornhoof asks for the node's last lines of log. */
+  z.object({ type: z.literal('node.log.read'), requestId: z.uuid() }),
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('job.ack'), jobId: Id }),
   z.object({ type: z.literal('remove') }),

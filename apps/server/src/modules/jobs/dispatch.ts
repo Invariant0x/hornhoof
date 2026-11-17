@@ -4,8 +4,10 @@ import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import type { Checker } from '../../checker.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { jobs, subscriptions } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { identityOf, ownBuiltin } from '../nodes/hub.js';
 import { nodeHeldFrom } from '../updates/drain.js';
 
@@ -106,7 +108,7 @@ const FromOpenAi = z.object({ model: z.string(), choices: z.tuple([z.object({ me
 type Spoken = { model: string; text: string };
 type Direct = { vendorId: string; url: string; call: (request: FreshModelRequest, key: string) => { headers: Record<string, string>; body: object }; heard: (answer: unknown) => Spoken | null };
 
-const parsedWith = <T>(schema: z.ZodType<T>, read: (value: T) => Spoken) => (answer: unknown): Spoken | null => {
+const parsedWith = <T>(schema: Checker<T>, read: (value: T) => Spoken) => (answer: unknown): Spoken | null => {
   const parsed = schema.safeParse(answer);
   return parsed.success ? read(parsed.data) : null;
 };
@@ -137,7 +139,7 @@ const secretOf = (ctx: Ctx, sub: { secretEnc: string | null }): string | null =>
 
 /* The oldest key of the provider, so the same one answers every time. */
 async function keyOf(ctx: Ctx, provider: ProviderId): Promise<string | null> {
-  const [sub] = await ctx.db.select({ secretEnc: subscriptions.secretEnc }).from(subscriptions).where(and(eq(subscriptions.provider, provider), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt))).orderBy(subscriptions.createdAt).limit(1);
+  const [sub] = await ctx.db.select(only(subscriptions, 'secretEnc')).from(subscriptions).where(and(eq(subscriptions.provider, provider), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt))).orderBy(subscriptions.createdAt).limit(1);
   return sub ? secretOf(ctx, sub) : null;
 }
 

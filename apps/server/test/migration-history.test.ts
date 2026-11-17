@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+import { freshPglite } from './helpers-db.js';
 
 type Entry = { idx: number; version: string; when: number; tag: string; breakpoints: boolean };
 type SnapshotRow = { row: Record<string, unknown> };
@@ -36,8 +37,9 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 
 /* New defaults and the operation id of an open wait, while retaining every preexisting field. */
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
-  /* Migration 0125 gives no subscription an address or protocol of its own: only a compatible API, which none was, names one. */
-  if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null, base_url: null, api_protocol: null } }));
+  /* Migration 0125 gives no subscription an address or protocol of its own: only a compatible API, which none was, names one.
+     Migration 0131 gives every plan no fallbacks of its own. */
+  if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null, base_url: null, api_protocol: null, fallbacks: [] } }));
   /* Every head and member gets the speed skill its role lists, and everyone the machine of a built-in node, empty.
      Migration 0124 gives every card an empty inbox mode of its own, every company the inbox and every turn no inbox wake. */
   if (table === 'agents') return rows.map(({ row }) => ({ row: { ...row, builtin_machine: null, inbox_mode: null, ...(['head', 'worker'].includes(row.kind as string) ? { skills: [...(row.skills as string[]), 'hh-work-fast'] } : {}) } }));
@@ -61,7 +63,7 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
 
 describe('migration histories merged in turn 5', () => {
   it.each(['main', 'turn-5'] as const)('upgrades an existing %s installation with all retained rows and one record per migration', async branch => {
-    const source = new PGlite();
+    const source = await freshPglite();
     onTestFinished(() => source.close());
     const oldDb = drizzle(source);
     await migrate(oldDb, { migrationsFolder: await oldMigrations(branch === 'main' ? mainHistory : turnHistory) });

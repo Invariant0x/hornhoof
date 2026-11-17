@@ -299,7 +299,7 @@ function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: bo
       {state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
       {state.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {!state.limitUntil && state.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
-      {state.machineDrain && state.machineDrain.state !== 'postponed' && <p className="t-why">{t.window.machineDrain}</p>}
+      {state.machineDrain && <p className="t-why">{t.window.machineDrain}</p>}
       {state.memoryWait && <p className="t-why">{t.window.memoryWait}</p>}
     </>
   );

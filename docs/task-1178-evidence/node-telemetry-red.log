@@ -1,0 +1,80 @@
+
+ RUN  v5.0.5 /data/work/agents/8a7756f5-91e6-4685-8700-aa2fe1d8a933/hornhoof/apps/node
+
+ ❯ test/runner.test.ts (32 tests | 2 failed | 30 skipped) 48ms
+   ❯ runJob (23)
+     × hides vault_save inputs, results and raw completion output before sending them 33ms
+     × hides vault_entry inputs, results and raw completion output before sending them 13ms
+     ↓ keeps the last 4096 bytes of output and hides secrets in it and in the result
+     ↓ passes on how hard the agent thinks, and nothing when Hornhoof leaves it to the program
+     ↓ passes on when Claude Code compacts the conversation, and nothing when Hornhoof leaves it to the program
+     ↓ gives up with a timeout when the agent does not finish in time
+     ↓ lets a turn in a live program run past its time, until the program ends it
+     ↓ keeps the session of a turn that ran out of time as its program ends it, so the next turn goes on in it
+     ↓ runs a resumed session in the folder of the job that started it
+     ↓ turns a crash of the adapter into agent_failed
+     ↓ hides what the program held before the run and after it, and the node key
+     ↓ starts a new session in a new folder for a session it never saved, even one named like constructor
+     ↓ starts a new session in an agent's folder when this machine never saved the one the server names
+     ↓ makes the work folder as the agents' user when the program's owner says how, so a root node follows no link of theirs
+     ↓ writes the agent's skills where its program finds them before the program starts, through the agents' own file work
+     ↓ turns a work folder it cannot make into agent_failed
+     ↓ passes the Hornhoof tools only when the job has a token and the node knows the address
+     ↓ lets the agent send pictures for the turn: the address and the token in its environment
+     ↓ hides a token the program refreshed during the run in its live events too
+     ↓ hides a token the program held only in the middle of the run in its result and output
+     ↓ hides secrets in live events and cuts them to size
+     ↓ ends a job that was called off as cancelled
+     ↓ prepares the repository lockfile browser before the turn and records browser-error without failing the agent turn when Chromium cannot start
+   ↓ jobDone (2)
+     ↓ says how the program ended, a signal by its name
+     ↓ says nothing of an end the node did not see
+   ↓ the dependencies of an agent's worktree (7)
+     ↓ go in place for its commit before its program starts, as its user's files, and one line says how it went
+     ↓ say nothing when there was nothing to put in place
+     ↓ are not asked for without the repository's place in the registry, without its repository, or for a program with no user of its own
+     ↓ leave the program to install them itself when they cannot be placed, and say so
+     ↓ give up on them at their deadline whatever holds them there, and the program starts
+     ↓ end a turn stopped while something holds them, before its program starts
+     ↓ end a turn stopped while they were being placed, before its program starts
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/runner.test.ts > runJob > hides vault_save inputs, results and raw completion output before sending them
+AssertionError: expected '{"events":[{"kind":"tool","name":"hor…' not to contain 'private-vault-marker-1178'
+
+Expected: "private-vault-marker-1178"
+Received: "{"events":[{"kind":"tool","name":"hornhoof.vault_save","input":"{\"password\":\"private-vault-marker-1178\"}"},{"kind":"tool_result","ok":true,"summary":"{\"password\":\"private-vault-marker-1178\"}"}],"done":{"type":"job.done","jobId":"job-1","ok":true,"sessionId":"sess-1","result":"private-vault-marker-1178","tail":"private-vault-marker-1178","error":null,"tokens":null,"failure":{"kind":"unknown","text":"private-vault-marker-1178","retryable":false}}}"
+
+ ❯ test/runner.test.ts:62:50
+     60|     const done = await runJob(adapter, job(), mkdtempSync(join(tmpdir(…
+     61|     expect(events).toHaveLength(2);
+     62|     expect(JSON.stringify({ events, done })).not.toContain(marker);
+       |                                                  ^
+     63|     expect(done.tail).toMatch(/hidden/i);
+     64|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/runner.test.ts > runJob > hides vault_entry inputs, results and raw completion output before sending them
+AssertionError: expected '{"events":[{"kind":"tool","name":"hor…' not to contain 'private-vault-marker-1178'
+
+Expected: "private-vault-marker-1178"
+Received: "{"events":[{"kind":"tool","name":"hornhoof.vault_entry","input":"{\"password\":\"private-vault-marker-1178\"}"},{"kind":"tool_result","ok":true,"summary":"{\"password\":\"private-vault-marker-1178\"}"}],"done":{"type":"job.done","jobId":"job-1","ok":true,"sessionId":"sess-1","result":"private-vault-marker-1178","tail":"private-vault-marker-1178","error":null,"tokens":null,"failure":{"kind":"unknown","text":"private-vault-marker-1178","retryable":false}}}"
+
+ ❯ test/runner.test.ts:62:50
+     60|     const done = await runJob(adapter, job(), mkdtempSync(join(tmpdir(…
+     61|     expect(events).toHaveLength(2);
+     62|     expect(JSON.stringify({ events, done })).not.toContain(marker);
+       |                                                  ^
+     63|     expect(done.tail).toMatch(/hidden/i);
+     64|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 30 skipped (32)
+   Start at  23:26:28
+   Duration  6.85s (transform 89%, import 10%, tests 1%)
+

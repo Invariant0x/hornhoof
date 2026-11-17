@@ -49,6 +49,8 @@ type MockReply =
   | { kind: 'text'; status: number; text: string }
   | { kind: 'network' };
 
+const NO_RECORDINGS: MockReply = { kind: 'json', status: 200, data: { recordings: [] } };
+
 function stubFetchRoutes(routes: Record<string, MockReply | ((body: unknown) => MockReply | Promise<MockReply>)>) {
   const calls: { method: string; path: string; body: unknown; credentials?: RequestCredentials }[] = [];
   vi.stubGlobal(
@@ -57,7 +59,9 @@ function stubFetchRoutes(routes: Record<string, MockReply | ((body: unknown) => 
       const method = init.method ?? 'GET';
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
       calls.push({ method, path, body, credentials: init.credentials });
-      const handler = routes[`${method} ${path}`];
+      /* The task panel asks every task for its phone recordings; a task of these tests has none, as mockApi answers too.
+         Unanswered, the panel would show a second alert beside the one a test looks for. */
+      const handler = routes[`${method} ${path}`] ?? (method === 'GET' && /^\/api\/tasks\/[^/]+\/phone-recordings$/.test(path) ? NO_RECORDINGS : undefined);
       const reply: MockReply =
         typeof handler === 'function'
           ? await handler(body)

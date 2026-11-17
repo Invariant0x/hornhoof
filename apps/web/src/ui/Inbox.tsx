@@ -9,11 +9,11 @@ import { PanelFrame } from './SidePanels';
 type Choice = InboxMode | 'rule';
 const CHOICES: Choice[] = ['rule', 'inbox', 'direct'];
 /* A person sees the newest letters first, this many, and as many more each time they ask. */
-export const LETTER_PAGE = 50;
+const LETTER_PAGE = 50;
 /* The most one read brings; more come a page after the last one shown. */
 const READ_AT_ONCE = 200;
 
-export const inboxPath = (agentId: string) => `/api/agents/${agentId}/inbox`;
+const inboxPath = (agentId: string) => `/api/agents/${agentId}/inbox`;
 
 /* How many letters are unread, for the counter on the window's bar: as the employee's card says, again, read with one letter
    only, each time its inbox changes, and as the open inbox last heard it. liveId: the employee's own id, which the live

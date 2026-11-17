@@ -98,6 +98,26 @@ describe("the network's tables and the orchestrator's SQL", () => {
     await expect(rows(`UPDATE machines SET age_key = 'age1mine'`)).rejects.toMatchObject({ code: '42501' });
   });
 
+  it('lets the orchestrator read the rows of these tables but their keys, and change none of them', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const agentSql = app.ctx.agentSql!;
+    const rows = async (text: string) => (await agentSql.run(text, 'write'))[0]!;
+    await rows('SELECT 1');
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    const [machine] = await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'mac-0001-abcd' }).returning();
+    await db.execute(sql`INSERT INTO peer_secrets (kind, secret_enc) VALUES ('app', 'secret')`);
+    await db.execute(sql`INSERT INTO machine_online (machine_id, day, seconds) VALUES (${machine!.id}, '2026-11-10', 20)`);
+    await db.execute(sql`INSERT INTO computer_runs (company_id, machine_id, command, timeout_s) VALUES (${company!.id}, ${machine!.id}, 'true', 300)`);
+    expect((await rows('SELECT kind FROM peer_secrets')).rows).toEqual([{ kind: 'app' }]);
+    expect((await rows('SELECT seconds FROM machine_online')).rows).toEqual([{ seconds: 20 }]);
+    expect((await rows('SELECT command FROM computer_runs')).rows).toEqual([{ command: 'true' }]);
+    await expect(rows('SELECT secret_enc FROM peer_secrets')).rejects.toMatchObject({ code: '42501' });
+    await expect(rows('DELETE FROM computer_runs')).rejects.toMatchObject({ code: '42501' });
+    await expect(rows(`UPDATE machine_online SET seconds = 0`)).rejects.toMatchObject({ code: '42501' });
+  });
+
   it('lets the orchestrator read what a machine is in the network, and change none of it', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);

@@ -51,7 +51,7 @@ export function Fold({ open, onToggle, children }: { open: boolean; onToggle: ()
 
 /* A task in one short line: its state, its title to open it and who has it. The work under it is not unfolded here, and a
    question for the person waits under what waits for them: a link opens the task with that work, or the task that asks. */
-export function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
+function GoalRow({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const t = useT();
   const { task } = goal;
   const asking = askingTask(goal, rows.asksYou);
@@ -76,7 +76,7 @@ export function GoalRows({ goals, rows }: { goals: Goal[]; rows: CardRows }) {
 /* One goal as a card: its title, what it does and why, its state in plain words, where it is, who has it and how many of
    its related tasks are done. A goal whose work waits for the person's answer is framed and marked, with a button to the
    task that asks; the question itself is under what waits for the person. The related tasks stay folded until one click opens them as short lines. */
-export function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
+function GoalCard({ goal, rows }: { goal: Goal; rows: CardRows }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const { task } = goal;

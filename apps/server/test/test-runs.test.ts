@@ -3,11 +3,13 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, departments, jobs, machines, nodes, pendingWakes, people, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { developmentStages } from './templates-once.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { builtinOf, nodeIdentity } from '../src/modules/nodes/hub.js';
+import { hostIdOf } from '../src/modules/network/join.js';
 import { checkTestTimes, placesOf, pumpTests } from '../src/modules/testruns/runs.js';
 import { as, connectNode, TEST_COMMIT, until, type FakeNode } from './helpers.js';
 import { company, done, gets, GIB, idle, nextOf, NODE_KEY } from './test-runs-company.js';
@@ -20,7 +22,7 @@ describe('a test run', () => {
     const c = await company();
     const box = await c.planless(c.ceo, 'build-box');
     const { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { command: 'npm test' })).error).toBe(false);
+    expect((await call('run_tests', { branch: 'main', command: 'npm test' })).error).toBe(false);
     const run = await nextOf(box.node, 'tests.run');
     expect(run).toMatchObject({ command: 'npm test', part: 1, parts: 1 });
     expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'running', nodeId: box.nodeId, machineId: box.machineId, machineName: 'build-box' });
@@ -35,12 +37,12 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
-    const started = await call('run_tests', { command: 'npm test -- --shard={part}/{parts}', parts: 2 });
+    const started = await call('run_tests', { branch: 'main', command: 'npm test -- --shard={part}/{parts}', parts: 2 });
     expect(started.error).toBe(false);
     expect(started.text).toContain('Test run 1');
     const first = await nextOf(ann.node, 'tests.run');
     const second = await nextOf(ivan.node, 'tests.run');
-    expect(first).toMatchObject({ repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789' }, branch: `task-${c.task.number}`, commitSha: TEST_COMMIT, task: c.task.number, command: 'npm test -- --shard=1/2', part: 1, parts: 2, timeoutMs: 30 * 60_000 });
+    expect(first).toMatchObject({ repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789' }, branch: 'main', commitSha: TEST_COMMIT, task: c.task.number, command: 'npm test -- --shard=1/2', part: 1, parts: 2, timeoutMs: 30 * 60_000 });
     expect(second).toMatchObject({ command: 'npm test -- --shard=2/2', part: 2, parts: 2 });
     ann.node.send({ type: 'tests.started', partId: first.partId });
     ann.node.send(done(first, { log: 'ok 12 tests\n' }));
@@ -68,10 +70,10 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test', branch: 'task-1-checkout' });
+    await call('run_tests', { command: 'make test', branch: 'release-checkout' });
     const one = await nextOf(ivan.node, 'tests.run');
-    expect(one.branch).toBe('task-1-checkout');
-    const waits = await call('run_tests', { command: 'make test', branch: 'task-1-checkout' });
+    expect(one.branch).toBe('release-checkout');
+    const waits = await call('run_tests', { command: 'make test', branch: 'release-checkout' });
     expect(waits.text).toMatch(/waits for a free machine/);
     expect(JSON.parse((await call('test_run', { run: 2 })).text)).toMatchObject({ status: 'running', parts: [{ part: 1, status: 'queued', machine: null }] });
     expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
@@ -85,7 +87,7 @@ describe('a test run', () => {
     await c.db.update(departments).set({ repoTestMemoryGb: 8 }).where(eq(departments.id, c.dev.id));
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ memFree: 6 * GIB }));
     const { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
+    expect((await call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/waits for a free machine/);
     expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send({ type: 'load', ...idle({ memFree: 9 * GIB }) });
     expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
@@ -95,7 +97,7 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 7.6 }));
     const { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
+    expect((await call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/waits for a free machine/);
     expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send({ type: 'load', ...idle({ load: 2 }) });
     expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
@@ -108,7 +110,7 @@ describe('a test run', () => {
     const bob = await c.machine(c.bob, 'bob-pc');
     expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${ann.machineId}`, payload: { lendsTests: false }, ...as(c.ann) })).statusCode).toBe(200);
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 3 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 3 });
     expect((await nextOf(ivan.node, 'tests.run')).part).toBe(1);
     expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
     expect(await gets(c.app.ctx, bob.node, 'tests.run')).toBe(false);
@@ -120,7 +122,7 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test', minutes: 5 });
+    await call('run_tests', { branch: 'main', command: 'make test', minutes: 5 });
     const run = await nextOf(ivan.node, 'tests.run');
     expect(run.timeoutMs).toBe(5 * 60_000);
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 4 * 60_000));
@@ -134,7 +136,7 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'queued-machine');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test', minutes: 1 });
+    await call('run_tests', { branch: 'main', command: 'make test', minutes: 1 });
     const run = await nextOf(ivan.node, 'tests.run');
     ivan.node.send({ type: 'tests.waiting', partId: run.partId, position: 2 });
     await until(async () => (await c.db.select().from(testParts).where(eq(testParts.id, run.partId)))[0]?.startedAt === null);
@@ -155,7 +157,7 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
     const run = await nextOf(ivan.node, 'tests.run');
     const stopped = await call('stop_tests', { run: 1 });
     expect(stopped).toEqual({ text: 'Test run 1 is stopped.', error: false });
@@ -173,7 +175,7 @@ describe('a test run', () => {
   it('wakes its agent when another one stopped it', async () => {
     const c = await company();
     await c.machine(c.ceo, 'dev-mac');
-    await (await c.turn(c.bruno)).call('run_tests', { command: 'make test' });
+    await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make test' });
     expect((await (await c.turn(c.head, null)).call('stop_tests', { run: 1 })).error).toBe(false);
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 was stopped by Hana/);
   });
@@ -183,7 +185,7 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac');
     await c.machine(c.ann, 'ann-pc', idle({ memFree: 1 * GIB, memTotal: 1 * GIB }));
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const lost = await nextOf(ivan.node, 'tests.run');
     ivan.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
     const again = await nextOf(ivan.node, 'tests.run');
@@ -196,7 +198,7 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const lost = await nextOf(ann.node, 'tests.run');
     ann.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
     const again = await nextOf(ivan.node, 'tests.run');
@@ -220,7 +222,7 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { job, call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const started = await nextOf(ivan.node, 'tests.run');
     ivan.node.close();
     await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: ivan.nodeId }));
@@ -244,7 +246,7 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     await nextOf(ivan.node, 'tests.run');
     ivan.node.close();
     await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: ivan.nodeId }));
@@ -272,7 +274,7 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac', idle({ load: 6 }));
     const ann = await c.machine(c.ann, 'ann-pc');
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const lost = await nextOf(ann.node, 'tests.run');
     ann.node.close();
     await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: ann.nodeId }));
@@ -297,17 +299,17 @@ describe('a test run', () => {
     const c = await company();
     await c.machine(c.ceo, 'dev-mac');
     const { job, call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, job.id));
     await afterJob(c.app.ctx, job.id);
-    expect((await c.db.select({ silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id)))[0]).toEqual({ silent: 0 });
+    expect((await c.db.select(only(tasks, 'silent')).from(tasks).where(eq(tasks.id, c.task.id)))[0]).toEqual({ silent: 0 });
     expect(await c.wokeWith(c.bruno.id)).toBeNull();
   });
 
   it('goes to the built-in node too, which reaches every repository', async () => {
     const c = await company();
     const node = await c.builtin();
-    await (await c.turn(c.bruno)).call('run_tests', { command: 'make test' });
+    await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make test' });
     const run = await nextOf(node, 'tests.run');
     node.send(done(run));
     await nextOf(node, 'tests.ack');
@@ -335,7 +337,7 @@ describe('a test run', () => {
     /* With the server's own gone, a part goes to the other machine's, and is that node's alone. */
     own.close();
     await own.closed;
-    await (await c.turn(c.bruno)).call('run_tests', { command: 'make test' });
+    await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make test' });
     const run = await nextOf(other, 'tests.run');
     const [part] = await c.db.select().from(testParts).where(eq(testParts.id, run.partId));
     expect(part).toMatchObject({ status: 'running', builtin: true, builtinMachine: MACHINE, machineId: copy!.id, machineName: 'the built-in node on copy-box' });
@@ -352,10 +354,44 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 passed[\s\S]*Part 1 of 1 passed on the built-in node on copy-box/);
   });
 
+  /* A machine taken back from the company's runs lends none of its nodes, its built-in node with them; lent again, it
+     takes parts as before. */
+  it('gives no part to the built-in node of a machine its owner took back, and one again once it is lent', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'dev-mac');
+    const MACHINE = 'd0'.repeat(16);
+    const [row] = await c.db.select({ companyId: machines.companyId, personId: machines.personId }).from(machines).limit(1);
+    const [box] = await c.db.insert(machines).values({ ...row!, machineKey: 'mac-box-0001', hostname: 'mac-box', role: 'worker', networkId: MACHINE, lendsTests: false }).returning();
+    const key = `builtin.${MACHINE}.${createHmac('sha256', NODE_KEY).update(`hornhoof builtin node ${MACHINE}`).digest('hex')}`;
+    const builtin = await connectNode(c.url, key);
+    builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
+    await until(() => c.app.ctx.hub.loadOf(builtinOf(MACHINE)) !== null);
+    expect((await placesOf(c.app.ctx, c.task.companyId)).find(place => place.builtinMachine === MACHINE)).toMatchObject({ machineId: box!.id, lent: false });
+    await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
+    expect((await nextOf(ivan.node, 'tests.run')).part).toBe(1);
+    expect(await gets(c.app.ctx, builtin, 'tests.run')).toBe(false);
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${box!.id}`, payload: { lendsTests: true }, ...as(c.ceo) })).statusCode).toBe(200);
+    expect((await nextOf(builtin, 'tests.run')).part).toBe(2);
+  });
+
+  /* The server's own built-in node runs on a computer of the company too; that computer taken back lends it no more. */
+  it('gives no part to the server’s own built-in node when the computer it runs on is taken back', async () => {
+    const c = await company({ HORNHOOF_HOST_ID: hostIdOf('home-box-0001-abcd') });
+    const home = await c.machine(c.ceo, 'home-box');
+    const ann = await c.machine(c.ann, 'ann-pc');
+    expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${home.machineId}`, payload: { lendsTests: false }, ...as(c.ceo) })).statusCode).toBe(200);
+    const own = await c.builtin();
+    expect((await placesOf(c.app.ctx, c.task.companyId)).find(place => place.builtin)).toMatchObject({ key: 'builtin', lent: false });
+    await (await c.turn(c.bruno)).call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
+    expect((await nextOf(ann.node, 'tests.run')).part).toBe(1);
+    expect(await gets(c.app.ctx, own, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, home.node, 'tests.run')).toBe(false);
+  });
+
   it('ends a part that found no free machine within 2 hours', async () => {
     const c = await company();
     const { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/No machine that may take it is online now/);
+    expect((await call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/No machine that may take it is online now/);
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 60 * 60_000));
     expect(await c.wokeWith(c.bruno.id)).toBeNull();
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 3 * 60 * 60_000));
@@ -368,7 +404,7 @@ describe('a test run', () => {
     const ann = await c.machine(c.ann, 'ann-pc');
     const spare = await c.planless(c.ceo, 'spare-box', idle({ load: 7 }));
     const { call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    await call('run_tests', { branch: 'main', command: 'make test -- {part}', parts: 2 });
     const first = await nextOf(ivan.node, 'tests.run');
     await nextOf(ann.node, 'tests.run');
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${ivan.machineId}/disconnect`, ...as(c.ceo) })).statusCode).toBe(204);
@@ -393,7 +429,7 @@ describe('a test run', () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const { job, call } = await c.turn(c.bruno);
-    await call('run_tests', { command: 'make test' });
+    await call('run_tests', { branch: 'main', command: 'make test' });
     const run = await nextOf(ivan.node, 'tests.run');
     const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
     const taskWake = taskWakeOf(task!, { why: 'go_on' }, routeSnapshot(await routeOf(c.db, task!), task!.assigneeAgentId));
@@ -409,13 +445,13 @@ describe('a test run', () => {
   it('is refused without a repository, without {part} in a split command, past 3 open runs, and without a task', async () => {
     const c = await company();
     const { call } = await c.turn(c.bruno);
-    expect(await call('run_tests', { command: 'make test', parts: 2 })).toMatchObject({ error: true, text: expect.stringContaining('{part}') });
-    for (let i = 0; i < 3; i++) expect((await call('run_tests', { command: 'make test' })).error).toBe(false);
-    expect(await call('run_tests', { command: 'make test' })).toMatchObject({ error: true, text: expect.stringContaining('3') });
-    expect((await (await c.turn(c.sam, null)).call('run_tests', { command: 'make test' })).text).toMatch(/task/);
+    expect(await call('run_tests', { branch: 'main', command: 'make test', parts: 2 })).toMatchObject({ error: true, text: expect.stringContaining('{part}') });
+    for (let i = 0; i < 3; i++) expect((await call('run_tests', { branch: 'main', command: 'make test' })).error).toBe(false);
+    expect(await call('run_tests', { branch: 'main', command: 'make test' })).toMatchObject({ error: true, text: expect.stringContaining('3') });
+    expect((await (await c.turn(c.sam, null)).call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/task/);
     const [own] = await c.db.insert(tasks).values({ companyId: c.task.companyId, number: 99, title: 'Pitch', brief: '', body: '', departmentId: c.sales.id, assigneeAgentId: c.sam.id, status: 'working' }).returning();
     await c.db.transaction(tx => createRoute(tx, own!, {}, developmentStages()));
-    expect((await (await c.turn(c.sam, own!.id)).call('run_tests', { command: 'make test' })).text).toMatch(/repository/);
+    expect((await (await c.turn(c.sam, own!.id)).call('run_tests', { branch: 'main', command: 'make test' })).text).toMatch(/repository/);
   });
 });
 
@@ -445,7 +481,7 @@ async function productDescription(request: Extract<ServerMessage, { type: 'tests
 describe('pinned product environment runs', () => {
   it('requests metadata before parts, retains its snapshot, and runs final checks after the suite', async () => {
     const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
-    const started = await call('run_tests', { suite: 'unit' });
+    const started = await call('run_tests', { branch: 'main', suite: 'unit' });
     expect(started).toMatchObject({ error: false }); expect(started.text).toContain('environment');
     expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ mode: 'product', commitSha: TEST_COMMIT, environmentStatus: 'describing', parts: [] });
     expect((await c.db.select().from(testRuns))[0]!.environmentRequest).toMatchObject({ builtin: true, requestId: expect.any(String) });
@@ -468,7 +504,7 @@ describe('pinned product environment runs', () => {
   });
   it('ignores an answer from an unassigned node and terminates invalid metadata without a successful empty run', async () => {
     const c = await company(), node = await productNode(c), other = await c.machine(c.ceo, 'foreign'), { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { suite: 'unit' })).error).toBe(false);
+    expect((await call('run_tests', { branch: 'main', suite: 'unit' })).error).toBe(false);
     const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request); other.node.send(reply); await pumpTests(c.app.ctx);
     expect((await c.db.select().from(testRuns))[0]!.environmentSnapshot).toBeNull();
     node.send({ ...reply, result: { ...reply.result, description: { ...reply.result.description, manifestHash: 'f'.repeat(64) } } });
@@ -478,7 +514,7 @@ describe('pinned product environment runs', () => {
   });
   it('cancels a pending description and refuses a late snapshot after stop', async () => {
     const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
+    expect((await call('run_tests', { branch: 'main' })).error).toBe(false); const request = await nextOf(node, 'tests.describe');
     expect((await call('stop_tests', { run: 1 })).error).toBe(false);
     expect(await nextOf(node, 'tests.describe.cancel')).toMatchObject({ requestId: request.requestId }); node.send(await productDescription(request)); await pumpTests(c.app.ctx);
     expect((await c.db.select().from(testRuns))[0]).toMatchObject({ status: 'stopped', environmentSnapshot: null }); expect(await c.db.select().from(testParts)).toEqual([]);
@@ -492,7 +528,7 @@ function productDone(part: TestsRun, runtimes = part.environment!.snapshot.descr
 
 it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful product result with %s receipt evidence', async kind => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const request = await nextOf(node, 'tests.describe'); node.send(await productDescription(request));
   const part = await nextOf(node, 'tests.run');
   const message = productDone(part) as ReturnType<typeof productDone> & { environmentReceipt: import('@hornhoof/protocol').TestEnvironmentReceipt };
@@ -527,19 +563,19 @@ it('selects a capable sibling volume, holds no machine to where it ran before as
   };
   await advertise(sibling);
   const { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const request = await nextOf(sibling.node, 'tests.describe'); sibling.node.send(await productDescription(request));
   const first = await nextOf(sibling.node, 'tests.run'); sibling.node.send(productDone(first));
   const final = await nextOf(sibling.node, 'tests.run'); sibling.node.send(productDone(final));
   await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed');
   await advertise(original);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const nextRequest = await nextOf(original.node, 'tests.describe'); original.node.send(await productDescription(nextRequest));
   const next = await nextOf(original.node, 'tests.run');
   expect((await c.db.select().from(testParts).where(eq(testParts.id, next.partId)))[0]!.nodeId).toBe(original.id);
   expect(next.environment!.snapshot.description.commitSha).toBe(TEST_COMMIT);
   await call('stop_tests', { run: 2 }); original.node.close(); await original.node.closed;
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const otherRequest = await nextOf(sibling.node, 'tests.describe'); sibling.node.send(await productDescription(otherRequest));
   const other = await nextOf(sibling.node, 'tests.run');
   expect((await c.db.select().from(testParts).where(eq(testParts.id, other.partId)))[0]!.nodeId).toBe(sibling.id);
@@ -568,11 +604,11 @@ it('gives a part to a node of another build and processor of the class that desc
     await until(() => JSON.stringify(testCapabilities(c.app.ctx, nodeIdentity(entry.id)).testRuntimes) === JSON.stringify(testRuntimes));
   };
   /* The machine gives a run without a snapshot to its first node, so that one describes it. */
-  const order = await c.db.select({ id: nodes.id }).from(nodes).where(inArray(nodes.id, connected.map(entry => entry.id))).orderBy(asc(nodes.createdAt), asc(nodes.id));
+  const order = await c.db.select(idOnly(nodes)).from(nodes).where(inArray(nodes.id, connected.map(entry => entry.id))).orderBy(asc(nodes.createdAt), asc(nodes.id));
   const [describer, other] = order.map(row => connected.find(entry => entry.id === row.id)!) as [typeof connected[number], typeof connected[number]];
   await advertise(describer, x64);
   const { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', { suite: 'unit' })).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main', suite: 'unit' })).error).toBe(false);
   const request = await nextOf(describer.node, 'tests.describe');
   /* The describer, an x64 machine, takes no part now. */
   await advertise(describer, []);
@@ -598,7 +634,7 @@ it('gives a part to a node of another build and processor of the class that desc
 
 it('fails a run at once when the node that described it lacks a runtime its profile needs, as no part could prove it on the described runtimes', async () => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request);
   reply.result.description.manifest.runtimes.push({ id: 'python', version: '3.12' });
   reply.result.description.manifest.suites[0].finalChecks = [];
@@ -613,13 +649,13 @@ it('fails a run at once when the node that described it lacks a runtime its prof
 it('refuses product mode when pinning returns a non-40-character commit before creating a run', async () => {
   const c = await company(), { call } = await c.turn(c.bruno);
   vi.spyOn(c.app.ctx, 'readCommit').mockResolvedValue({ branch: 'task-1', commitSha: 'a'.repeat(64) });
-  const result = await call('run_tests', {});
+  const result = await call('run_tests', { branch: 'main' });
   expect(result.error).toBe(true); expect(result.text).toContain('40'); expect(await c.db.select().from(testRuns)).toEqual([]);
 });
 
 it('resends its persisted describe request after server state is recreated and ignores unknown request IDs', async () => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false); const request = await nextOf(node, 'tests.describe');
   const restarted = { ...c.app.ctx };
   const { noteTestCapabilities } = await import('../src/modules/testruns/describe.js');
   noteTestCapabilities(restarted, BUILTIN, { testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] });
@@ -633,7 +669,7 @@ it('resends its persisted describe request after server state is recreated and i
 
 it('fails an unanswered description once at its queue deadline and never passes an empty product plan', async () => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false); const request = await nextOf(node, 'tests.describe');
   expect((await c.db.select().from(testRuns))[0]).toMatchObject({ status: 'running', parts: 0 });
   await c.db.update(testRuns).set({ createdAt: new Date(Date.now() - 2 * 3_600_000 - 1000) });
   await checkTestTimes(c.app.ctx);
@@ -647,7 +683,7 @@ it('fails an unanswered description once at its queue deadline and never passes 
 it('refuses to dispatch a pinned product snapshot after its repository configuration changes', async () => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
   const { testCapabilities } = await import('../src/modules/testruns/describe.js');
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request);
   /* The node takes no part until the repository changed: it names no runtime for a while. */
   node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [] });
@@ -662,7 +698,7 @@ it('refuses to dispatch a pinned product snapshot after its repository configura
 
 it('retries interrupted metadata under new request IDs at the same pinned commit and fails once after three attempts', async () => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
-  expect((await call('run_tests', {})).error).toBe(false);
+  expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   let request = await nextOf(node, 'tests.describe');
   const first = request;
   for (const code of ['cancelled', 'timeout'] as const) {
@@ -685,7 +721,7 @@ it.each(['lending', 'access'])('rechecks a persisted metadata node after revokin
   const capabilities = { testEnvironmentVersion: 1 as const, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] };
   machine.node.send({ type: 'status', loggedIn: true, limits: null, ...capabilities });
   await until(() => testCapabilities(c.app.ctx, id).testEnvironmentVersion === 1);
-  const { call } = await c.turn(c.bruno); expect((await call('run_tests', {})).error).toBe(false);
+  const { call } = await c.turn(c.bruno); expect((await call('run_tests', { branch: 'main' })).error).toBe(false);
   const request = await nextOf(machine.node, 'tests.describe');
   if (permission === 'lending') expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${machine.machineId}`, payload: { lendsTests: false }, ...as(c.ann) })).statusCode).toBe(200);
   else {

@@ -40,11 +40,24 @@ async function failed(status: number, data: unknown): Promise<ApiFailure> {
   return why;
 }
 
+/* The answer's JSON, null for an answer with no body, and undefined when the body breaks off before its end. */
+async function wholeJson(res: Response): Promise<unknown> {
+  try {
+    const text = await res.text();
+    return text === '' ? null : (JSON.parse(text) as unknown);
+  } catch {
+    return undefined;
+  }
+}
+
+/* A read takes its answer whole or not at all. One whose body breaks off, as Firefox stops it when the page reloads
+   while it comes, met no server the page can go by: it fails as a read that reached none, never with null for data. */
 async function respond<T>(path: string, init: RequestInit): Promise<T> {
   const res = await fetchOrigin(path, init);
   if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw await failed(res.status, data);
+  const data = await wholeJson(res);
+  if (!res.ok) throw await failed(res.status, data ?? null);
+  if (data === undefined) throw new ApiFailure(0, 'network', '');
   return data as T;
 }
 
@@ -139,16 +152,6 @@ function waitOf(res: Response | null): number {
   const said = Number(res?.headers.get('retry-after') ?? '');
   const seconds = res?.headers.get('retry-after') && Number.isFinite(said) ? Math.min(WAIT_S.most, Math.max(WAIT_S.least, said)) : WAIT_S.unsaid;
   return seconds * 1000;
-}
-
-/* The answer's JSON, null for an answer with no body, and undefined when the body breaks off before its end. */
-async function wholeJson(res: Response): Promise<unknown> {
-  try {
-    const text = await res.text();
-    return text === '' ? null : (JSON.parse(text) as unknown);
-  } catch {
-    return undefined;
-  }
 }
 
 /* The server is starting, or could not confirm the change, or a hop before it answered with no words of the server: the

@@ -114,15 +114,14 @@ describe('setting an account up', () => {
   });
 
   it.each([
-    ['setting up', '/api/outbound/accounts', (w: World) => ({ channelId: w.channel.id, label: 'Sales', config: SMTP })],
-    ['rotating', (w: World) => `/api/outbound/accounts/${w.account.id}/rotate`, () => ({ config: SMTP })],
-    ['settling', () => `/api/outbound/attempts/${randomUUID()}/settle`, () => ({ outcome: 'accepted', evidence: 'It left.' })],
-  ])('never takes %s with settings from a model, even in a turn answering the CEO', async (_name, url, payload) => {
+    ['setting up', '/api/outbound/accounts', (w: World) => ({ channelId: w.channel.id, label: 'Sales', config: SMTP }), 200],
+    ['rotating', (w: World) => `/api/outbound/accounts/${w.account.id}/rotate`, () => ({ config: SMTP }), 200],
+    ['settling', () => `/api/outbound/attempts/${randomUUID()}/settle`, () => ({ outcome: 'accepted', evidence: 'It left.' }), 404],
+  ])('takes %s with settings from the orchestrator acting for the CEO, as from the CEO', async (_name, url, payload, status) => {
     const w = await world();
     const target = typeof url === 'string' ? url : url(w);
-    const refused = await w.c.app.inject({ method: 'POST', url: target, payload: payload(w), headers: orchestratorHeaders(w.c.ids.ceo, w.c.orchestrator.id) });
-    expect(refused.statusCode).toBe(403);
-    expect(await bindingsOf(w, w.account.id)).toHaveLength(1);
+    const taken = await w.c.app.inject({ method: 'POST', url: target, payload: payload(w), headers: orchestratorHeaders(w.c.ids.ceo, w.c.orchestrator.id) });
+    expect(taken.statusCode, taken.body).toBe(status);
   });
 
   it('sets one up with the settings of another account, from the orchestrator too, with its own address and no setting in the answer', async () => {

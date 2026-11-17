@@ -131,7 +131,7 @@ export type Taking = {
 /* foreign: for a takeover, another registration of the company's name was seen since the window this copy decided on. */
 export type TakeSample = { now: number; taking: Taking | null; termWritten: boolean; registered: boolean; probed: boolean; appLeads: boolean; foreign?: boolean };
 
-export type TakeAction =
+type TakeAction =
   | { do: 'none' } | { do: 'expire' } | { do: 'register' } | { do: 'probe' } | { do: 'promote' }
   | { do: 'abort'; why: 'no_link' } | { do: 'lead' } | { do: 'done' } | { do: 'forget' };
 

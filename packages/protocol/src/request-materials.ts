@@ -77,20 +77,20 @@ export type MaterialManifest = z.infer<typeof MaterialManifest>;
 /* Private service DTOs. The server seals exact bytes, appends immutable versions and
    validates ownership, current revisions and disclosure provenance. Never accept
    these as caller input or serialize them through a public row projection. */
-export type MaterialDisclosureBinding = {
+type MaterialDisclosureBinding = {
   id: string; materialId: string; fileId: string; sha256: string; sourceRevision: number;
   purpose: 'decision_material'; recipientPersonIds: string[]; routeRevision: number;
   authorityRevision: number; issuerAgentId: string;
 };
 type AttachmentBacking = { kind: 'attachment'; attachmentId: string; sha256: string; size: number; mediaType: string };
 type NativeBacking = { kind: 'native_record'; utf8: string; sha256: string };
-export type SealedMaterial = { id: string; name: string } & (
+type SealedMaterial = { id: string; name: string } & (
   | { kind: 'image' | 'file'; backing: AttachmentBacking }
   | { kind: 'document'; format: 'text'; backing: AttachmentBacking | NativeBacking }
   | { kind: 'document'; format: 'markdown' | 'pdf'; backing: AttachmentBacking }
   | { kind: 'link'; backing: { kind: 'link'; url: string } }
 );
-export type MaterialSnapshot = {
+type MaterialSnapshot = {
   schemaVersion: 1; sourceRef: MaterialSourceRef; sourceRevision: number; requestRevision: number | null;
   materialRevision: number; digest: string; common: SealedMaterial[];
   options: { id: string; materials: SealedMaterial[] }[]; explicitDisclosureBindings: MaterialDisclosureBinding[];

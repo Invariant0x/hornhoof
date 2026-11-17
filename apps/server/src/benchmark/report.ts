@@ -89,22 +89,6 @@ export function compareSnapshots(current: Snapshot, previous: Snapshot | null, t
   return { status: comparisonStatus(regressions, missing), thresholdPercent, regressions, missing };
 }
 
-export function improvementCard(baseline: { turn: number; source: string; wait: string; beforeSeconds: number; events: number; acceptanceSeconds: number | null }, reductionPercent: number) {
-  if (!Number.isFinite(reductionPercent) || reductionPercent < 30 || reductionPercent >= 100) throw new Error('The first target must reduce issue-to-acceptance by at least 30%, below 100%.');
-  if (!Number.isFinite(baseline.beforeSeconds) || baseline.beforeSeconds <= 0) throw new Error('A measured or explicitly approximate positive baseline is required.');
-  return {
-    title: `Reduce ${baseline.wait} relative to turn ${baseline.turn}`,
-    blocking: false,
-    source: baseline.source,
-    baselineTurn: baseline.turn,
-    before: { seconds: baseline.beforeSeconds, events: baseline.events, percentOfBaseline: 100 },
-    targetAfter: { percentOfBaseline: 100 - reductionPercent, reductionPercent },
-    acceptance: { beforeSeconds: baseline.acceptanceSeconds, targetReductionPercent: reductionPercent },
-    measurementBecomesTest: true,
-    text: `Next-turn task: measure and reduce ${baseline.wait}; before = ${baseline.beforeSeconds}s across ${baseline.events} waits (100% of turn ${baseline.turn}); target after <= ${100 - reductionPercent}% of baseline. Establish the final issue-to-acceptance baseline and demonstrate >= ${reductionPercent}% reduction using the same task cohort and measurement. Aggregate wait time may overlap; first submission is not acceptance. Add the repeatable before/after measurement as a regression test. This improvement never blocks the release.`,
-  };
-}
-
 export function requestStats(samples: readonly number[]): { medianMs: number; p95Ms: number } {
   const sorted = [...samples].sort((a, b) => a - b);
   const middle = sorted.length >> 1;

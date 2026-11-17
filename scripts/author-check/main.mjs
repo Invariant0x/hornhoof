@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { exitCodeOf } from './judge.mjs';
 import { allUnavailable } from './stages.mjs';
@@ -48,7 +48,6 @@ export function realPorts(root, write = text => process.stdout.write(text)) {
     log: line => write(`${line}\n`),
     head: () => git(['rev-parse', 'HEAD']).trim(),
     hasCommit: sha => quietly(() => git(['cat-file', '-e', `${sha}^{commit}`]) === '', false),
-    exists: path => existsSync(at(path)),
     read: path => quietly(() => readFileSync(at(path), 'utf8'), null),
     mkdir: path => mkdirSync(at(path), { recursive: true }),
     write: (path, text) => writeFileSync(at(path), text),

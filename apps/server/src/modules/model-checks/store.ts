@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { modelCheckDatasets, modelCheckEvaluations, modelCheckRevisions, modelChecks } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { parseDataset, withLiveMiss, type Dataset, type DatasetProblem, type DatasetRules, type Party } from './dataset.js';
 import { afterChange, afterRun, isOn, weeklyRun } from './lifecycle.js';
 import { evaluateCheck, NO_MODEL_YET, unreadableSet, type Evaluation, type RunModelCheck, type RunOutcome } from './run.js';
@@ -17,7 +18,7 @@ export type { CheckPlace } from './place.js';
 /* Checks made by a model as they stand in the database. Each write goes under a lock on its check, so that a change and the
    end of a run see each other. Whatever changes a binding turns the check off and queues one run in the same transaction. */
 
-export type CheckDefinition = Pick<CheckBinding, 'checkerCodeHash' | 'promptHash' | 'outputSchemaHash' | 'sourceListHash' | 'taxonomyHash' | 'model'>;
+type CheckDefinition = Pick<CheckBinding, 'checkerCodeHash' | 'promptHash' | 'outputSchemaHash' | 'sourceListHash' | 'taxonomyHash' | 'model'>;
 export type SavedSet = { ok: true; version: number; hash: string } | { ok: false; problems: DatasetProblem[] };
 
 type Reader = Pick<Db, 'select'>;
@@ -131,7 +132,7 @@ export async function saveThresholds(ctx: Pick<Ctx, 'db'>, place: CheckPlace, pe
 async function claimNext(db: Db, now: Date): Promise<RunRow | null> {
   const left = new Date(now.getTime() - RUN_LEASE_MS);
   const waiting = or(eq(modelCheckEvaluations.status, 'queued'), and(eq(modelCheckEvaluations.status, 'running'), lt(modelCheckEvaluations.startedAt, left)));
-  const next = db.select({ id: modelCheckEvaluations.id }).from(modelCheckEvaluations).where(waiting).orderBy(modelCheckEvaluations.createdAt).limit(1).for('update', { skipLocked: true });
+  const next = db.select(idOnly(modelCheckEvaluations)).from(modelCheckEvaluations).where(waiting).orderBy(modelCheckEvaluations.createdAt).limit(1).for('update', { skipLocked: true });
   const [run] = await db.update(modelCheckEvaluations).set({ status: 'running', startedAt: now }).where(inArray(modelCheckEvaluations.id, next)).returning();
   return run ?? null;
 }

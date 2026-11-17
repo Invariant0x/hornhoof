@@ -240,7 +240,7 @@ export function removeOldParts(dir: string, log: (line: string) => void): void {
 const within = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`);
 
 /* The branch named after the task, among what ls-remote printed. */
-export function taskBranch(heads: string, task: number): { branch: string } | { problem: string } {
+function taskBranch(heads: string, task: number): { branch: string } | { problem: string } {
   return ownBranch(heads.split('\n').flatMap(line => /\trefs\/heads\/(\S+)$/.exec(line.trim())?.slice(1) ?? []), task);
 }
 
@@ -566,7 +566,7 @@ export type Worktree = {
   fs: Pick<AgentFs, 'entry' | 'readPlain' | 'mkdir' | 'move' | 'remove'>;
 };
 /* slot: the machine's turn for heavy work, which a build waits for. limitMs: how long all of it may take. */
-export type WorktreeOptions = Pick<Options, 'dir' | 'hidden' | 'signal' | 'proc' | 'harness' | 'runtimes'> & {
+type WorktreeOptions = Pick<Options, 'dir' | 'hidden' | 'signal' | 'proc' | 'harness' | 'runtimes'> & {
   slot?: <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>) => Promise<T>; limitMs?: number;
 };
 

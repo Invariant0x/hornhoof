@@ -18,7 +18,7 @@ describe('the test files a run_tests command names', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const asked = tree(c);
     const { call } = await c.turn(c.bruno);
-    const started = await call('run_tests', { command: 'npx vitest run apps/api/test/kept.test.ts apps/api/test/gone.test.ts' });
+    const started = await call('run_tests', { branch: 'main', command: 'npx vitest run apps/api/test/kept.test.ts apps/api/test/gone.test.ts' });
     expect(started.error).toBe(true);
     expect(started.text).toContain('apps/api/test/gone.test.ts');
     expect(started.text).toContain(TEST_COMMIT);
@@ -34,7 +34,7 @@ describe('the test files a run_tests command names', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac');
     tree(c);
     const { call } = await c.turn(c.bruno);
-    const started = await call('run_tests', { command: "npm test -w @acme/api -- test/kept.test.ts && cd tests && python -m pytest './test_cart.py' -k 'cart and not slow'" });
+    const started = await call('run_tests', { branch: 'main', command: "npm test -w @acme/api -- test/kept.test.ts && cd tests && python -m pytest './test_cart.py' -k 'cart and not slow'" });
     expect(started.error).toBe(false);
     expect(await nextOf(ivan.node, 'tests.run')).toMatchObject({ commitSha: TEST_COMMIT });
   });
@@ -44,7 +44,7 @@ describe('the test files a run_tests command names', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac');
     const asked = tree(c);
     const { call } = await c.turn(c.bruno);
-    expect((await call('run_tests', { command: 'npm test -- --shard={part}/{parts} && node scripts/build.mjs' })).error).toBe(false);
+    expect((await call('run_tests', { branch: 'main', command: 'npm test -- --shard={part}/{parts} && node scripts/build.mjs' })).error).toBe(false);
     expect(asked).toEqual([]);
     expect(await nextOf(ivan.node, 'tests.run')).toMatchObject({ commitSha: TEST_COMMIT });
   });
@@ -54,7 +54,7 @@ describe('the test files a run_tests command names', () => {
     const ivan = await c.machine(c.ceo, 'dev-mac');
     tree(c, { complete: false, reason: 'tree-unavailable' });
     const { call } = await c.turn(c.bruno);
-    const started = await call('run_tests', { command: 'npx vitest run apps/api/test/gone.test.ts' });
+    const started = await call('run_tests', { branch: 'main', command: 'npx vitest run apps/api/test/gone.test.ts' });
     expect(started.error).toBe(false);
     expect(started.text).toContain('could not check');
     expect(await nextOf(ivan.node, 'tests.run')).toMatchObject({ commitSha: TEST_COMMIT });

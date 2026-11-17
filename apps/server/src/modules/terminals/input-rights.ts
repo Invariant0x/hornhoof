@@ -1,7 +1,7 @@
 /* What may reach a program from its terminal. Words, a paste and Enter are a message. Keys that steer the program, and a line
    that starts with / or ! for it to run, come only from the owner of its plan. The browser says the same to be polite; this
    decides, on what the frame holds and not on anything it claims. */
-export type InputRights = { control: boolean; message: boolean };
+type InputRights = { control: boolean; message: boolean };
 export type InputRefusal = 'control' | 'message';
 
 const PASTE = /^\x1b\[200~([\s\S]*)\x1b\[201~$/;

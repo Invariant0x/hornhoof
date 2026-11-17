@@ -6,11 +6,13 @@ import http2, { type ClientHttp2Session, type ClientHttp2Stream } from 'node:htt
 import net, { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { performance as observedTime } from 'node:perf_hooks';
 import type { TLSSocket } from 'node:tls';
 import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import type { PGlite } from '@electric-sql/pglite';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
 import { certificates, companies, machines, people, publicLinks } from '../src/db/schema.js';
@@ -25,6 +27,7 @@ import { saveLink } from '../src/modules/link/link.js';
 import { linkClientId } from '../src/modules/link/client.js';
 import { Relay } from '../src/modules/link/relay.js';
 import type { SyncCatalog, SyncControllerOptions } from '../src/modules/keeper/sync.js';
+import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { fakeRelay } from './fake-relay.js';
 import { peerConfigFor, type PeerServices } from '../src/modules/link/peer-client.js';
 import { certFacts, issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
@@ -35,7 +38,24 @@ import type { PeerSessions } from '../src/net/peer-sessions.js';
 import { APP_AUTHORITY, PeerServer } from '../src/net/peer-server.js';
 import type { Target } from '../src/net/proxy.js';
 import { fakeLease } from './fake-lease.js';
-import { setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { fixture, setUpCompany, TEST_SECRET, testApp } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+import { advance, certificate, leaseRound, leaseStep, leaseUntil, networkRound, peerTime, registerKeeper, state as waitForState, tunnelRound, WALL_TIME } from './keeper-peer-time.js';
+
+/* The keeper's frpc commands are observed, and its child lifecycle is a recorded sample, without waiting on Node or frpc. */
+vi.mock('node:child_process', async importOriginal => {
+  const original = await importOriginal<typeof import('node:child_process')>();
+  class RecordedChild extends original.ChildProcess {
+    override kill(signal: NodeJS.Signals | number = 'SIGTERM'): boolean {
+      if (this.exitCode !== null || this.signalCode !== null) return false;
+      const ended = typeof signal === 'string' ? signal : 'SIGTERM';
+      Object.defineProperty(this, 'signalCode', { value: ended });
+      queueMicrotask(() => this.emit('exit', null, ended));
+      return true;
+    }
+  }
+  return { ...original, ChildProcess: RecordedChild, spawn: () => new RecordedChild() };
+});
 
 const MACHINE_ID = `ab12cd34${'0'.repeat(24)}`;
 const ignore = (): void => {};
@@ -54,15 +74,17 @@ const ed25519 = (): MachineKey => {
 /* The company's app, which believes the keeper's address: the test's keeper and the test itself both come from it. */
 async function company(withLink = true) {
   const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID });
-  await setUpCompany(app);
+  await app.ready();
+  const client = (db as unknown as { $client: PGlite }).$client;
+  await fixture(client, `keeper-peer company ${JSON.stringify(config)}`, () => setUpCompany(app), { at: WALL_TIME });
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   if (withLink) await saveLink(db, config, acme!.id, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel: { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' } });
   return { app, db, config, companyId: acme!.id, ownerId: owner!.id };
 }
 
-async function listening(app: FastifyInstance): Promise<Target> {
-  await app.listen({ host: '127.0.0.1', port: 0 });
+async function listening(app: FastifyInstance, port = 0): Promise<Target> {
+  await app.listen({ host: '127.0.0.1', port });
   return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
 }
 
@@ -71,7 +93,7 @@ type Stand = Awaited<ReturnType<typeof company>>;
 async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partial<KeeperOptions> = {}) {
   const lines: string[] = [];
   const offered: { config: string; clientId: string }[] = [];
-  /* A stand-in for the second frpc: the config is the real one, and the child sleeps until it is stopped. */
+  /* The real configuration is kept; the recorded child above owns process liveness. */
   const peerClientFor = (services: PeerServices, clientId: string, local: { data: number; app: number }) => {
     offered.push({ config: peerConfigFor(services, { machineId: MACHINE_ID, local }), clientId });
     return { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] };
@@ -95,9 +117,33 @@ async function keeperBeside(c: Stand, app: Target, dir = folder(), extra: Partia
     peerClientFor,
     ...extra,
   });
-  const ports = await keeper.start();
   onTestFinished(() => keeper.stop());
-  return { keeper, dir, controlDir, lines, ports, offered };
+  const ports = await keeper.start();
+  const round = async () => {
+    await leaseRound(keeper);
+    await networkRound(keeper);
+    if (extra.reportEveryMs !== undefined) await keeper['identity']!['report']();
+    if (extra.backupsEveryMs !== undefined) await keeper['backups']?.round();
+    if (extra.sync?.slots) await keeper['keepSlots']();
+    if (extra.beatEveryMs !== undefined) await keeper['beating'].tick();
+    await tunnelRound(keeper);
+  };
+  const remove = registerKeeper(keeper);
+  const stop = keeper.stop.bind(keeper);
+  let stopped = false;
+  keeper.stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    remove();
+    await stop();
+  };
+  /* Initial certificate replies and the first network read settle once, with no recurring work competing with them. */
+  await certificate(keeper);
+  await networkRound(keeper);
+  /* A stale certificate can be renewed by that answer. Read again only for it, never while native listen is pending. */
+  if (keeper['peers']?.current() && !keeper['peers']['opened']) await networkRound(keeper);
+  await tunnelRound(keeper);
+  return { keeper, dir, controlDir, lines, ports, offered, round };
 }
 
 /* A worker of the company's network: a row with its key, and a certificate of the database's authority for it. */
@@ -159,7 +205,13 @@ function send(to: Target, options: http.RequestOptions, body: unknown): Promise<
 
 const closed = (session: ClientHttp2Session): Promise<void> => new Promise(resolve => (session.closed || session.destroyed ? resolve() : session.once('close', () => resolve())));
 
+/* A prepared database is the input to these scenarios, rather than work under the first scenario's deadline. */
+const preparingDatabase = observedTime.now();
+await prepareSharedDatabase();
+console.info(`keeper-peer database preparation: ${Math.round(observedTime.now() - preparingDatabase)} ms`);
+
 describe('the peer link in the keeper', () => {
+  beforeEach(peerTime);
   it('serves the peer link once its certificate is in, and names each peer to the app by its certificate', async () => {
     const c = await company();
     const { keeper } = await keeperBeside(c, await listening(c.app));
@@ -207,8 +259,10 @@ describe('the peer link in the keeper', () => {
     expect(await toApp(session)).not.toBeNull();
 
     await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.serial, w.serial));
+    await networkRound(keeper);
+    await waitForState(() => keeper['peers']!.revoked().has(w.serial));
     await closed(session);
-    await until(() => (JSON.parse(readFileSync(join(dir, CRL_FILE), 'utf8')) as { serials: string[] }).serials.includes(w.serial));
+    await waitForState(() => (JSON.parse(readFileSync(join(dir, CRL_FILE), 'utf8')) as { serials: string[] }).serials.includes(w.serial));
     const again = sessionOf(peer, w);
     expect(await toApp(again)).toBeNull();
   });
@@ -225,24 +279,27 @@ describe('the peer link in the keeper', () => {
        revoked since. Its app does not answer. */
     await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.serial, w.serial));
     expect((JSON.parse(readFileSync(join(first.dir, CRL_FILE), 'utf8')) as { serials: string[] }).serials).toEqual([]);
-    const down = http.createServer();
-    await new Promise<void>(resolve => down.listen(0, '127.0.0.1', resolve));
-    const away: Target = { host: '127.0.0.1', port: (down.address() as AddressInfo).port };
-    await new Promise(resolve => down.close(resolve));
-    const second = await keeperBeside(c, away, first.dir, { holdMs: 0 });
-    let open = false;
-    void second.keeper.peerPorts().then(() => (open = true));
-    await until(() => second.lines.some(line => line.startsWith("The keeper cannot read the network's state")));
-    expect(open).toBe(false);
-
-    /* The app is back where the keeper asks. */
+    /* Keep the address bound while the app is unavailable, rather than race another process for a closed port. */
+    let available = false;
     const back = http.createServer((req, res) => {
+      if (!available) { req.socket.destroy(); return; }
       void c.app.inject({ method: req.method as 'GET', url: req.url!, headers: { 'x-hornhoof-via': String(req.headers['x-hornhoof-via'] ?? '') }, remoteAddress: '127.0.0.1' }).then(answer => {
         res.writeHead(answer.statusCode, { 'content-type': 'application/json' }).end(answer.body);
       });
     });
-    await new Promise<void>(resolve => back.listen(away.port, '127.0.0.1', resolve));
+    await new Promise<void>(resolve => back.listen(0, '127.0.0.1', resolve));
+    const away: Target = { host: '127.0.0.1', port: (back.address() as AddressInfo).port };
     onTestFinished(() => void back.close());
+    const second = await keeperBeside(c, away, first.dir, { holdMs: 0 });
+    let open = false;
+    void second.keeper.peerPorts().then(() => (open = true));
+    await waitForState(() => second.lines.some(line => line.startsWith("The keeper cannot read the network's state")));
+    expect(open).toBe(false);
+
+    /* The app is back where the keeper asks. */
+    available = true;
+    await networkRound(second.keeper);
+    await second.keeper.peerPorts();
     const ports = await second.keeper.peerPorts();
     expect(await toApp(sessionOf(ports.peer, w))).toBeNull();
   });
@@ -273,7 +330,7 @@ describe('the peer link in the keeper', () => {
     const c = await company();
     const { keeper, offered } = await keeperBeside(c, await listening(c.app));
     const ports = await keeper.peerPorts();
-    await until(() => offered.length > 0);
+    await waitForState(() => offered.length > 0);
     const said = (await c.app.inject({ url: '/api/network/peers', headers: { 'x-hornhoof-via': 'keeper' }, remoteAddress: '127.0.0.1' })).json() as { link: { appSecret: string; dataSecret: string } };
     expect(offered[0]!.clientId).toBe('acme-ab12cd34-peer');
     expect(offered[0]!.config).toContain('clientID = "acme-ab12cd34-peer"');
@@ -297,21 +354,26 @@ describe('the peer link in the keeper', () => {
     const { keeper, controlDir, dir } = await keeperBeside(c, await listening(c.app), folder(), { backupsEveryMs: 20, reportEveryMs: 20, backupKeysRetryMs: 20 });
     const serverRow = async () => (await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID)))[0];
     /* Its key for backups is kept for the keeper alone, and its public half reaches the company. */
-    await until(async () => Boolean((await serverRow())?.ageKey));
+    await waitForState(() => keeper['backups'] !== null);
+    await keeper['identity']!['report']();
+    await waitForState(async () => Boolean((await serverRow())?.ageKey));
     expect((await serverRow())!.ageKey).toMatch(/^age1[0-9a-z]{58}$/);
     expect(statSync(join(dir, AGE_KEY_FILE)).mode & 0o777).toBe(0o600);
     /* It asks the updater for a dump at once; the test dumps in the updater's place. */
     const request = join(controlDir, 'dump.json');
-    await until(() => existsSync(request));
+    await keeper['backups']!.round();
+    await waitForState(() => existsSync(request));
     const { id } = JSON.parse(readFileSync(request, 'utf8')) as { id: string };
     mkdirSync(join(controlDir, 'dumps'));
     writeFileSync(join(controlDir, 'dumps', `${id}.sql.gz`), gzipSync('-- a dump of the hornhoof database\n'));
     writeFileSync(join(controlDir, 'dumps', `${id}.json`), JSON.stringify({ id, reason: 'timer', at: new Date().toISOString(), migrations: 106 }));
-    await until(async () => (await bundleRows(c.db)).length === 1);
+    await keeper['backups']!.round();
+    await waitForState(async () => (await bundleRows(c.db)).length === 1);
     const [row] = await bundleRows(c.db);
     expect(row).toMatchObject({ id, signer: (await serverRow())!.id, recipients: [(await serverRow())!.ageKey], reason: 'timer' });
-    await until(() => !existsSync(request) && readdirSync(join(controlDir, 'dumps')).length === 0);
-    await until(async () => (await serverRow())!.heldBackups.includes(id));
+    await waitForState(() => !existsSync(request) && readdirSync(join(controlDir, 'dumps')).length === 0);
+    await keeper['identity']!['report']();
+    await waitForState(async () => (await serverRow())!.heldBackups.includes(id));
     /* The sealed bundle holds none of the dump in the clear. */
     expect(readFileSync(join(dir, BUNDLES_DIR, `${id}.age`)).includes('a dump of the hornhoof database')).toBe(false);
 
@@ -351,7 +413,9 @@ describe('the peer link in the keeper', () => {
     /* An id of the length older installs have, which is a machine's id as much as today's. */
     const networkId = `77cc${'3'.repeat(28)}`;
     await c.db.update(machines).set({ networkId, uploadState: 'waiting', dataLeftAt: new Date() }).where(eq(machines.id, w.id));
-    await until(async () => (await put(Buffer.from('rows'))) === 201);
+    await networkRound(keeper);
+    await waitForState(() => keeper['peers']!.current()!.uploads.some(one => one.machine === w.id));
+    expect(await put(Buffer.from('rows'))).toBe(201);
     const load = JSON.parse(readFileSync(join(controlDir, 'load.json'), 'utf8')) as { machine: string; file: string; database: string; unpackMax: number };
     expect(load.machine).toBe(w.id);
     expect(load.database).toMatch(/^hornhoof_upload_77cc333333333333_[0-9]{8}t[0-9]{6}$/);
@@ -365,7 +429,8 @@ describe('the peer link in the keeper', () => {
     const best = { 'bbbbbbbb-0000-4000-8000-00000000000b': { mbps: 80, at: '2026-11-11T12:00:00.000Z' } };
     let running = 0;
     const { keeper, controlDir } = await keeperBeside(c, await listening(c.app), folder(), { throughput: { start: () => void (running += 1), stop: () => void (running -= 1), best: () => best } });
-    await until(() => readKeeperState(controlDir)?.throughput !== undefined);
+    keeper['giveWord']();
+    await waitForState(() => readKeeperState(controlDir)?.throughput !== undefined);
     expect(readKeeperState(controlDir)!.throughput).toEqual(best);
     expect(running).toBe(1);
     await keeper.stop();
@@ -377,14 +442,16 @@ describe('the peer link in the keeper', () => {
     const saw = { addresses: ['192.168.1.9'] };
     /* What dials the copies, as far as the report asks it. */
     const dial = { seen: () => saw.addresses, use: () => undefined, close: async () => undefined, reaches: () => false } as unknown as PeerSessions;
-    await keeperBeside(c, await listening(c.app), folder(), { addresses: ['192.168.1.5'], reportEveryMs: 20, copies: { dial } });
+    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { addresses: ['192.168.1.5'], reportEveryMs: 20, copies: { dial } });
     const own = async () => (await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID)))[0]?.addresses ?? [];
     /* Its own address first, then the one a copy saw it come from: a machine that moved is found there. */
-    await until(async () => (await own()).length === 2);
+    await keeper['identity']!['report']();
+    await waitForState(async () => (await own()).length === 2);
     expect(await own()).toEqual(['192.168.1.5', '192.168.1.9']);
     /* What a session through the relay sees is this machine's own loopback, which is no address of it. */
     saw.addresses = ['127.0.0.1'];
-    await until(async () => (await own()).length === 1);
+    await keeper['identity']!['report']();
+    await waitForState(async () => (await own()).length === 1);
     expect(await own()).toEqual(['192.168.1.5']);
   });
 
@@ -398,7 +465,7 @@ describe('the peer link in the keeper', () => {
     await new Promise<void>(resolve => db.listen(0, '127.0.0.1', resolve));
     onTestFinished(() => void db.close());
     const { keeper, controlDir } = await keeperBeside(c, target, folder(), { copies: { doorHost: '127.0.0.1', allowed: async () => ['127.0.0.1'], everyMs: 20, sessions: { everyMs: 20, helloMs: 20 } } });
-    await until(() => keeper.certificate() !== null);
+    await waitForState(() => keeper.certificate() !== null);
     const authority = (await authorityOf(c.db, c.config))!;
     const [row] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: 'copy-1', role: 'data', networkId: copyNetworkId, signKey: key.publicPem }).returning();
     const issued = await issueCertificate(authority, { machineId: row!.id, role: 'data', signKey: key.publicPem });
@@ -418,7 +485,9 @@ describe('the peer link in the keeper', () => {
     expect(doorsSaid()).toEqual({});
 
     c.app.ctx.doorsWanted = async () => [copyNetworkId];
-    await until(() => copyNetworkId in doorsSaid());
+    await networkRound(keeper);
+    await waitForState(() => copyNetworkId in doorsSaid());
+    await waitForState(() => keeper['links']!['dial']!.reaches(row!.id));
     const said = (port: number): Promise<string> =>
       new Promise(resolve => {
         const socket = net.connect({ host: '127.0.0.1', port });
@@ -428,10 +497,11 @@ describe('the peer link in the keeper', () => {
         socket.write('ping');
       });
     const port = doorsSaid()[copyNetworkId]!;
-    await until(async () => (await said(port)) === 'copy: ping');
+    expect(await said(port)).toBe('copy: ping');
     /* Named no more, the door closes and the word forgets it. */
     c.app.ctx.doorsWanted = async () => [];
-    await until(() => Object.keys(doorsSaid()).length === 0);
+    await networkRound(keeper);
+    await waitForState(() => Object.keys(doorsSaid()).length === 0);
     expect(await said(port)).toBe('closed');
   });
 
@@ -448,7 +518,7 @@ describe('the peer link in the keeper', () => {
       lease, beatEveryMs: 20, now: () => ({ wall: Date.now() + skew.ms, mono: performance.now() + skew.ms }),
       copies: { doorHost: '127.0.0.1', allowed: async () => ['127.0.0.1'], everyMs: 20, sessions: { everyMs: 20, helloMs: 20 } },
     });
-    await until(() => keeper.certificate() !== null && keeper.mode() === 'lead');
+    await leaseUntil(keeper, () => keeper.certificate() !== null && keeper.mode() === 'lead');
     const authority = (await authorityOf(c.db, c.config))!;
     const [row] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ownerId, machineKey: 'copy-1', hostname: 'mac', role: 'data', networkId: copyNetworkId, signKey: key.publicPem }).returning();
     const issued = await issueCertificate(authority, { machineId: row!.id, role: 'data', signKey: key.publicPem });
@@ -471,7 +541,10 @@ describe('the peer link in the keeper', () => {
     await c.db.update(machines).set({ addresses: ['127.0.0.1'], peerPort }).where(eq(machines.id, row!.id));
 
     /* It tells the copy each second that it leads, under which term and until when, and that commits wait for no copy. */
-    await until(() => heard.some(beat => beat.body.stance.kind === 'lead'));
+    await networkRound(keeper);
+    await waitForState(() => keeper['links']!['dial']!.reaches(row!.id));
+    await keeper['beating'].tick();
+    await waitForState(() => heard.some(beat => beat.body.stance.kind === 'lead'));
     const [own] = await c.db.select().from(machines).where(eq(machines.networkId, MACHINE_ID));
     const beat = heard.find(one => one.body.stance.kind === 'lead')!;
     expect([beat.from, beat.path]).toEqual([own!.id, '/peer/beat']);
@@ -487,24 +560,31 @@ describe('the peer link in the keeper', () => {
     };
     expect(await hello()).toMatchObject({ lead: true, term: { number: 4, machine: MACHINE_ID, split: false }, sync: null, moving: null });
     /* The copy's answers are kept as what it said last. */
-    await until(() => keeper.beats().answer(copyNetworkId) !== null);
+    await waitForState(() => keeper.beats().answer(copyNetworkId) !== null);
     expect(keeper.beats().last(copyNetworkId)?.beat).toEqual(follows);
 
     /* Its lease ends and none can be taken: it goes on beating, as a keeper that would lead and holds no lease. */
     able.take = false;
     skew.ms = 60_000;
-    await until(() => heard.at(-1)?.body.stance.kind === 'idle');
+    await leaseRound(keeper);
+    await keeper['beating'].tick();
+    await waitForState(() => heard.at(-1)?.body.stance.kind === 'idle');
     expect(heard.at(-1)!.body.stance).toEqual({ kind: 'idle', term: { number: 4, machine: MACHINE_ID, split: false } });
     expect(await hello()).toMatchObject({ lead: false, term: null });
   });
 
-  /* A clock that runs twenty times as fast as the machine's, so the seconds a lease and a window take pass in a moment. */
-  function fastClock() {
+  /* The test's own clocks: its intervals, Date and performance are fake and move only when the test steps them, so the
+     seconds a lease and a window take pass with no real wait, however busy the machine is. */
+  /* A keeper's intervals in the stepped tests' own time: a tick every 400 ms of its clocks, as those tests were written for. */
+  const STEPPED = { everyMs: 400, linkEveryMs: 1_000, peerEveryMs: 400 } as const;
+  function steppedClock() {
     const began = performance.now();
-    return (): { wall: number; mono: number } => {
-      const ms = (performance.now() - began) * 20;
-      return { wall: 1_700_000_000_000 + ms, mono: ms };
+    const now = (): { wall: number; mono: number } => ({ wall: Date.now(), mono: performance.now() - began });
+    const step = leaseStep;
+    const stepUntil = async (check: () => boolean): Promise<void> => {
+      await waitForState(async () => { if (check()) return true; await step(STEPPED.everyMs); return check(); });
     };
+    return { now, step, stepUntil };
   }
   const OWN_CLIENT = linkClientId('acme', MACHINE_ID);
   type Name = { state: 'held' | 'empty'; client: string | null; generation: number };
@@ -521,83 +601,105 @@ describe('the peer link in the keeper', () => {
       ownTerm: async () => null,
       poll: async () => ({ sent: now(), replied: now().mono, route: { known: true, ...said.name, since: 0, relayStarted: 100, evictionBound: 30, sync: { state: 'off', copy: null, epoch: 1, generation: said.name.generation, at: null } }, health: { up: true, relayStarted: 100 } }),
       follow: async () => void did.push('follow'),
-      everyMs: 20,
+      everyMs: STEPPED.everyMs,
     };
     return { proofs, did, probes };
   }
 
-  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async () => {
+  it('renews by itself until a copy finished, then only on a proof, and ends its lease when another machine answers at its link', async ({ signal }) => {
     const c = await company();
-    const now = fastClock();
+    const clock = { wall: Date.now(), mono: 0 };
+    const now = () => ({ ...clock });
     const said = { needed: false, link: 'self' as 'self' | 'other' | 'silent', name: { state: 'held', client: OWN_CLIENT, generation: 7 } as Name };
     const p = proving(now, said);
+    /* A deferred answer, on the event loop rather than a real-time deadline. Machine load cannot age the lease. */
+    const probe = p.proofs.probe;
+    p.proofs.probe = async (nonce, link) => {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      return probe(nonce, link);
+    };
     const lease = fakeLease();
-    const { keeper, lines } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs });
+    const ports = { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 };
+    const { keeper, lines } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs, ports });
+    await waitForState(() => Boolean(keeper['ownLink']()));
+    const step = async (ms = 20) => {
+      clock.wall += ms;
+      clock.mono += ms;
+      vi.setSystemTime(clock.wall);
+      await keeper['readNeeded']();
+      if (said.needed) {
+        if (keeper['holder'].standing()) await keeper['leaseProofs']!.tick();
+        else await keeper['reentry']!.tick();
+      }
+      await keeper['holder'].tick();
+      keeper['giveWord']();
+    };
+    const stepUntil = (check: () => boolean) => waitForState(async () => { signal.throwIfAborted(); await step(); return check(); });
     const renewals = () => lease.calls.filter(call => call.method === 'renew').length;
-    await until(() => keeper.mode() === 'lead' && renewals() > 3);
+    await stepUntil(() => keeper.mode() === 'lead' && renewals() > 3);
     /* Alone with the data it asks nobody: its lease is its own word. */
     expect([p.probes, keeper.linkWanted()]).toEqual([[], true]);
     /* Another machine holds a copy that finished: each renewal now rests on an answer at the company's link. */
     said.needed = true;
-    await until(() => p.probes.length > 3);
+    await stepUntil(() => p.probes.length > 3);
     const before = renewals();
-    await until(() => renewals() > before + 2);
+    await stepUntil(() => renewals() > before + 2);
     expect(keeper.mode()).toBe('lead');
     /* Nobody answers at the link: nothing new is renewed. */
     said.link = 'silent';
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await step(1_200);
     const stopped = renewals();
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await step(2_000);
     expect(renewals()).toBe(stopped);
     /* Another machine answers there: the lease ends at once, and the link's client stops with it. */
     said.link = 'other';
-    await until(() => lease.calls.some(call => call.method === 'fence'));
-    await until(() => keeper.mode() === 'read');
+    await stepUntil(() => lease.calls.some(call => call.method === 'fence'));
+    await stepUntil(() => keeper.mode() === 'read');
     expect(lines.some(line => line.includes('The lease ended (another machine answers at the link)'))).toBe(true);
     expect(keeper.linkWanted()).toBe(false);
     expect(keeper.beats().own().stance.kind).toBe('idle');
     /* The name is another client's now: this machine follows, and takes no term again. */
     const taken = lease.calls.filter(call => call.method === 'take').length;
     said.name = { state: 'held', client: linkClientId('acme', 'b0'.repeat(16)), generation: 8 };
-    await until(() => p.did.includes('follow'));
+    await stepUntil(() => p.did.includes('follow'));
     expect([lease.calls.filter(call => call.method === 'take').length, keeper.linkWanted()]).toEqual([taken, false]);
   });
 
   it("comes back in through the relay's window, on a registration of its own", async () => {
     const c = await company();
-    const now = fastClock();
+    const { now, step, stepUntil } = steppedClock();
     /* A keeper that starts with a finished copy elsewhere, its copy silent: the name is free, and its own client made
        the last registration, at 7. */
     const said = { needed: true, link: 'silent' as 'self' | 'other' | 'silent', name: { state: 'empty', client: OWN_CLIENT, generation: 7 } as Name };
     const p = proving(now, said);
     const lease = fakeLease();
-    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs });
+    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs, ...STEPPED });
     const takes = () => lease.calls.filter(call => call.method === 'take');
     /* It takes no term on its own word, and holds no name, until the name was free long enough. */
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await step(6_000);
     expect([takes(), keeper.linkWanted(), keeper.mode()]).toEqual([[], false, 'read']);
-    await until(() => keeper.linkWanted());
+    await stepUntil(() => keeper.linkWanted());
     expect(now().mono).toBeGreaterThanOrEqual(12_000);
     expect(takes()).toEqual([]);
     /* Its own client holds the name at 8: that is its proof, and it leads under the next term. */
     said.name = { state: 'held', client: OWN_CLIENT, generation: 8 };
     said.link = 'self';
-    await until(() => takes().length === 1);
+    await stepUntil(() => takes().length === 1);
     expect(takes()[0]!.args[3]).toEqual({ number: 1, machine: MACHINE_ID, split: false });
-    await until(() => keeper.mode() === 'lead');
+    await stepUntil(() => keeper.mode() === 'lead');
     expect([keeper.linkWanted(), p.did]).toEqual([true, []]);
   });
 
   it('holds no name on the word of an earlier way in, once a switch took the name away', async () => {
     const c = await company();
-    const now = fastClock();
+    const { now, stepUntil } = steppedClock();
     const said = { needed: true, link: 'silent' as 'self' | 'other' | 'silent', name: { state: 'empty', client: OWN_CLIENT, generation: 7 } as Name };
     const p = proving(now, said);
     let parts: HandingParts | undefined;
     const handing = (given: HandingParts) => ((parts = given), { start: async () => undefined, stop: async () => undefined, holds: () => false });
-    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease: fakeLease(), now, proofs: p.proofs, handing });
+    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease: fakeLease(), now, proofs: p.proofs, handing, ...STEPPED });
     /* The way back in takes the name, with no lease standing yet. */
-    await until(() => keeper.linkWanted());
+    await stepUntil(() => keeper.linkWanted());
     expect(keeper.mode()).toBe('read');
     /* A planned switch stops the link, and the server stays after all: the link may run again, and the way back in
        takes the name anew by itself. */
@@ -605,19 +707,19 @@ describe('the peer link in the keeper', () => {
     expect(keeper.linkWanted()).toBe(false);
     parts!.tunnel.start();
     expect(keeper.linkWanted()).toBe(false);
-    await until(() => keeper.linkWanted());
+    await stepUntil(() => keeper.linkWanted());
   });
 
   it('holds no name before it knows whether its lease takes a proof', async () => {
     const c = await company();
-    const now = fastClock();
+    const { now, step } = steppedClock();
     const said = { needed: true, link: 'silent' as 'self' | 'other' | 'silent', name: { state: 'empty', client: OWN_CLIENT, generation: 7 } as Name };
     const p = proving(now, said);
     /* Its database cannot be asked yet, as while it recovers: whether another machine holds a finished copy is not known. */
     p.proofs.needed = async () => Promise.reject(new Error('the database is starting up'));
     const lease = fakeLease();
-    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs });
-    await new Promise(resolve => setTimeout(resolve, 300));
+    const { keeper } = await keeperBeside(c, await listening(c.app), folder(), { lease, now, proofs: p.proofs, ...STEPPED });
+    await step(6_000);
     /* It takes no lease on a guess, and its link's client does not run either: a keeper with no lease holds no name. */
     expect([lease.calls.filter(call => call.method === 'take'), keeper.linkWanted(), keeper.mode()]).toEqual([[], false, 'read']);
   });
@@ -648,13 +750,43 @@ describe('the peer link in the keeper', () => {
     const { catalog, state } = syncCatalog(null);
     const lease = fakeLease();
     const { keeper, controlDir } = await keeperBeside(c, target, folder(), { lease, sync: { catalog, relay: new Relay(relay.url), everyMs: 20 } });
-    await until(() => keeper.mode() === 'lead');
+    await leaseUntil(keeper, () => keeper.mode() === 'lead');
     /* Alone, as the controller found it: no copy, nothing to tell the relay, no pulse. */
     expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('alone');
-    await until(() => readKeeperState(controlDir)?.copies !== undefined);
+    keeper['giveWord']();
+    await waitForState(() => readKeeperState(controlDir)?.copies !== undefined);
     expect(readKeeperState(controlDir)).toMatchObject({ mode: 'lead', copies: [] });
     expect(state.pulses).toBe(0);
     expect(relay.calls.some(call => call.includes('/sync'))).toBe(false);
+  });
+
+  it('drops at its next sweep the slot of a broken-off table that a copy named to its app, and keeps the one nobody named', async () => {
+    const c = await company(false);
+    const target = await listening(c.app);
+    const relay = await fakeRelay();
+    const { catalog } = syncCatalog(null);
+    const [broken, other] = ['pg_16500_sync_16384_7300000000000000000', 'pg_16500_sync_16390_7300000000000000000'];
+    /* The leader's Postgres as far as the sweep asks it: two slots of tables' first copies that nobody reads. */
+    const slots = [broken, other];
+    const dropped: string[] = [];
+    const sql: Sql = {
+      query: async <R>(text: string, params: unknown[] = []) => {
+        if (text.includes('FROM pg_replication_slots')) return { rows: slots.map(name => ({ name, active: false, pid: null, copying: false })) as R[] };
+        if (text.includes('pg_drop_replication_slot')) {
+          dropped.push(String(params[0]));
+          slots.splice(slots.indexOf(String(params[0])), 1);
+        }
+        return { rows: [] as R[] };
+      },
+    };
+    const { keeper } = await keeperBeside(c, target, folder(), { lease: fakeLease(), sync: { catalog, relay: new Relay(relay.url), everyMs: 20, slots: { sql, diskFree: () => null, everyMs: 20 } } });
+    await leaseUntil(keeper, () => keeper.mode() === 'lead');
+    c.app.ctx.leftSlots.say('cccccccc-0000-4000-8000-00000000000c', [broken]);
+    await networkRound(keeper);
+    await keeper['keepSlots']();
+    await waitForState(() => dropped.length > 0);
+    expect(dropped).toEqual([broken]);
+    expect(slots).toEqual([other]);
   });
 
   it('stops its link when its lease ends with a copy listed, and starts it again to tell the relay', async () => {
@@ -676,23 +808,29 @@ describe('the peer link in the keeper', () => {
       sync: { catalog, relay: new Relay(relay.url), everyMs: 20, routeEveryMs: 0, linkPauseMs: 400 },
     });
     /* Another machine holds the data: it leads only once the relay stored that this one alone has the latest changes. */
-    await until(() => keeper.mode() === 'lead');
+    await leaseUntil(keeper, () => keeper.mode() === 'lead');
     expect(relay.syncs.get('acme')).toMatchObject({ state: 'off' });
     expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('relay_off');
-    await until(() => started === 1);
-    await until(() => state.pulses > 0);
+    await tunnelRound(keeper);
+    await waitForState(() => started === 1);
+    await keeper['sync']!.look();
+    await waitForState(() => state.pulses > 0);
 
     /* Its renewals stop holding, and ten seconds pass: the lease ends. */
     renews.hold = false;
     clock.wall += 11_000;
     clock.mono += 11_000;
-    await until(() => lines.some(line => line.startsWith('The lease ended')));
+    await leaseRound(keeper);
+    await waitForState(() => lines.some(line => line.startsWith('The lease ended')));
     expect(keeper.mode()).toBe('read');
     /* The link's frpc is stopped, so the company's name is free, and comes back by itself a moment later. */
-    await until(() => lines.includes('No public link: the tunnel waits.'));
+    await tunnelRound(keeper);
+    await waitForState(() => lines.includes('No public link: the tunnel waits.'));
     renews.hold = true;
-    await until(() => started === 2);
-    await until(() => keeper.mode() === 'lead');
+    await leaseUntil(keeper, () => keeper.mode() === 'lead');
+    advance(400);
+    await tunnelRound(keeper);
+    await waitForState(() => started === 2);
   });
 
   it('keeps its link when its lease ends while no other machine holds a copy that finished', async () => {
@@ -720,17 +858,19 @@ describe('the peer link in the keeper', () => {
         follow: async () => undefined,
       },
     });
-    await until(() => keeper.mode() === 'lead');
-    await until(() => started === 1);
+    await leaseUntil(keeper, () => keeper.mode() === 'lead');
+    await tunnelRound(keeper);
+    await waitForState(() => started === 1);
 
     /* Its disk holds every renewal back for ten seconds: the lease ends, and the link the company is reached by stays. */
     renews.hold = false;
     clock.wall += 11_000;
     clock.mono += 11_000;
-    await until(() => lines.some(line => line.startsWith('The lease ended')));
+    await leaseRound(keeper);
+    await waitForState(() => lines.some(line => line.startsWith('The lease ended')));
     expect(keeper.linkWanted()).toBe(true);
     renews.hold = true;
-    await until(() => keeper.mode() === 'lead');
+    await leaseUntil(keeper, () => keeper.mode() === 'lead');
     expect([keeper.linkWanted(), started, lines.includes('No public link: the tunnel waits.')]).toEqual([true, 1, false]);
   });
 
@@ -743,33 +883,28 @@ describe('the peer link in the keeper', () => {
     const { catalog, state } = syncCatalog(copy);
     const lease = fakeLease({ othersHoldData: true });
     const { keeper, lines } = await keeperBeside(c, target, folder(), { lease, guardEveryMs: 50, sync: { catalog, relay: new Relay(relay.url), everyMs: 20, routeEveryMs: 0 } });
-    await until(() => lines.some(line => line.startsWith('Could not tell hornhoof.org which machine holds the latest changes')));
+    await waitForState(() => lines.some(line => line.startsWith('Could not tell hornhoof.org which machine holds the latest changes')));
     expect(keeper.mode()).toBe('read');
     expect(lease.calls.some(call => call.method === 'take')).toBe(false);
     /* The copy is gone again: this machine is alone, and leads. */
     state.listed = false;
     lease.othersHold(false);
-    await until(() => keeper.mode() === 'lead');
+    await leaseUntil(keeper, () => keeper.mode() === 'lead');
     expect(lease.calls.find(call => call.method === 'take')!.args[2]).toBe('alone');
   });
 
-  it('keeps mode and the word to the app on lead through four-second relay hiccups every six minutes', async () => {
-    const { vi } = await import('vitest');
+  it('keeps mode and the word to the app on lead through four-second relay hiccups every six minutes', async ({ signal }) => {
     const c = await company(true);
     const target = await listening(c.app);
     const copy = { machine: 'cccccccc-0000-4000-8000-00000000000c', networkId: `99bb2233${'2'.repeat(24)}` };
     const { catalog } = syncCatalog(copy);
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
-    const startMono = performance.now();
+    const clock = { wall: Date.now(), mono: 0 };
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
     let unknownReads = 0;
     const relayClient: NonNullable<KeeperOptions['sync']>['relay'] = {
       route: async () => {
-        const elapsed = performance.now() - startMono;
+        const elapsed = clock.mono;
         if ((elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000)) {
           unknownReads += 1;
           return { known: false, why: 'unreachable' };
@@ -783,7 +918,7 @@ describe('the peer link in the keeper', () => {
     };
     const { keeper, controlDir } = await keeperBeside(c, target, folder(), {
       lease: fakeLease({ othersHoldData: true }),
-      now: () => ({ wall: Date.now(), mono: performance.now() }),
+      now: () => ({ ...clock }),
       throughput: { start: ignore, stop: ignore, best: () => ({}) },
       everyMs: 3000,
       linkEveryMs: 3000,
@@ -793,20 +928,29 @@ describe('the peer link in the keeper', () => {
       copies: { everyMs: 60_000 },
       sync: { catalog, relay: relayClient, everyMs: 1000, routeEveryMs: 1000, linkPauseMs: 30_000 },
     });
-    while (!(keeper.mode() === 'lead' && readKeeperState(controlDir)?.mode === 'lead')) {
-      await vi.advanceTimersByTimeAsync(1000);
-      await new Promise<void>(resolve => setImmediate(resolve));
-    }
+    /* Drive the lease, controller and word directly. Advancing every interval would also reread the unchanged
+       database hundreds of times. Quiet steps keep the original three-second lease cadence. */
+    const step = async (ms: number) => {
+      signal.throwIfAborted();
+      clock.wall += ms;
+      clock.mono += ms;
+      advance(ms);
+      await keeper['sync']!.look();
+      await keeper['holder'].look();
+      await keeper['holder'].tick();
+      keeper['giveWord']();
+    };
+    while (!(keeper.mode() === 'lead' && readKeeperState(controlDir)?.mode === 'lead')) await step(1000);
 
     const modes: string[] = [];
     for (const windowStartMs of [355_000, 715_000]) {
-      await vi.advanceTimersByTimeAsync(windowStartMs - (performance.now() - startMono));
+      while (clock.mono < windowStartMs) await step(Math.min(3000, windowStartMs - clock.mono));
       for (let second = 0; second < 12; second++) {
-        await vi.advanceTimersByTimeAsync(1000);
-        await new Promise<void>(resolve => setImmediate(resolve));
-        modes.push(`${Math.round((performance.now() - startMono) / 1000)}s:${keeper.mode()}/${readKeeperState(controlDir)?.mode}`);
+        await step(1000);
+        modes.push(`${Math.round(clock.mono / 1000)}s:${keeper.mode()}/${readKeeperState(controlDir)?.mode}`);
       }
     }
+    expect(clock.mono).toBe(727_000);
     expect(unknownReads).toBeGreaterThanOrEqual(8);
     expect(modes.filter(entry => entry.includes('read'))).toEqual([]);
   });
@@ -846,7 +990,6 @@ describe('the peer link in the keeper', () => {
       },
     }) as Db;
 
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date', 'performance'] });
     const startMono = performance.now();
     const ownClient = `acme-${MACHINE_ID.slice(0, 8)}-link`;
     let syncRecord = { state: 'off' as 'on' | 'off', copy: null as string | null, epoch: 0, generation: 1, at: null as number | null };
@@ -865,7 +1008,7 @@ describe('the peer link in the keeper', () => {
       },
     };
     let linkStarts = 0;
-    const { keeper, lines, offered } = await keeperBeside({ ...c, db }, target, folder(), {
+    const { keeper, lines, offered, round } = await keeperBeside({ ...c, db }, target, folder(), {
       lease: fakeLease({ othersHoldData: true }),
       now: () => ({ wall: Date.now(), mono: performance.now() }),
       throughput: { start: ignore, stop: ignore, best: () => ({}) },
@@ -878,31 +1021,34 @@ describe('the peer link in the keeper', () => {
       clientFor: () => (linkStarts++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
       sync: { catalog, relay: relayClient, everyMs: 3000, routeEveryMs: 0 },
     });
-    onTestFinished(async () => {
-      await keeper.stop();
-      vi.useRealTimers();
-    });
-
-    const stepUntil = async (stepMs: number, check: () => boolean) => {
-      while (!check()) {
-        await vi.advanceTimersByTimeAsync(stepMs);
-        await new Promise<void>(resolve => setImmediate(resolve));
+    /* Healthy gaps only need lease renewals. Observe the full keeper in and just after each relay outage, and at
+       the requested endpoint, retaining settings failures and tunnel transitions without idle database polling. */
+    const move = async (ms: number) => {
+      while (ms > 0) {
+        const before = performance.now() - startMono;
+        const by = Math.min(3000, ms);
+        advance(by);
+        await leaseRound(keeper);
+        ms -= by;
+        if (ms === 0 || silent(before) || silent(performance.now() - startMono)) await round();
       }
     };
-    return { c, keeper, lines, offered, failOnce, startMono, linkStarts: () => linkStarts, silentReads: () => silentReads, stepUntil };
+    const stepUntil = async (stepMs: number, check: () => boolean) => {
+      await waitForState(async () => { if (check()) return true; await move(stepMs); return check(); });
+    };
+    return { c, keeper, lines, offered, failOnce, startMono, linkStarts: () => linkStarts, silentReads: () => silentReads, stepUntil, move };
   }
 
   it('keeps the leader link and peer tunnel running through six-minute hiccups on virtual clocks, and says why when the link goes', async () => {
     /* Every six virtual minutes the path through hornhoof.org gives no answer for four seconds. */
-    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, stepUntil } = await relaySilenceStand(
+    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, stepUntil, move } = await relaySilenceStand(
       elapsed => (elapsed >= 357_000 && elapsed < 361_000) || (elapsed >= 717_000 && elapsed < 721_000),
     );
     await stepUntil(3000, () => keeper.mode() === 'lead' && offered.length === 1 && linkStarts() === 1);
 
     /* Six virtual minutes in: the relay hiccup drops neither tunnel, and restarts neither frpc. */
     const toSixMin = 360_000 - (performance.now() - startMono);
-    await vi.advanceTimersByTimeAsync(toSixMin + 6_000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await move(toSixMin + 6_000);
     expect(keeper.mode()).toBe('lead');
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
@@ -910,9 +1056,9 @@ describe('the peer link in the keeper', () => {
     /* Twelve virtual minutes in, with a failed settings read at the same mark: ownLink stays known, so leading resumes
        as soon as the relay answers again, and the peer tunnel still never restarts. */
     const toBeforeTwelveMin = 719_500 - (performance.now() - startMono);
-    await vi.advanceTimersByTimeAsync(toBeforeTwelveMin);
+    await move(toBeforeTwelveMin);
     failOnce.on = true;
-    await vi.advanceTimersByTimeAsync(4_000);
+    await move(4_000);
     expect(keeper.mode()).toBe('lead');
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
@@ -928,28 +1074,25 @@ describe('the peer link in the keeper', () => {
     expect(peerWhyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
 
     await keeper.stop();
-    vi.useRealTimers();
   });
 
   it('holds the peer tunnel through one empty read during a one-second relay silence, and says why when the link goes', async () => {
     let silenceFrom = Number.POSITIVE_INFINITY;
-    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, silentReads, stepUntil } = await relaySilenceStand(
+    const { c, keeper, lines, offered, failOnce, startMono, linkStarts, silentReads, stepUntil, move } = await relaySilenceStand(
       elapsed => elapsed >= silenceFrom && elapsed < silenceFrom + 1_000,
     );
     await stepUntil(3000, () => offered.length === 1 && linkStarts() === 1);
 
     /* A one-second relay silence leaves one peer read empty; holdThroughOneEmptyRead keeps the peer frpc running. */
     silenceFrom = performance.now() - startMono + 2_500;
-    await vi.advanceTimersByTimeAsync(9_000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await move(9_000);
     expect(silentReads()).toBeGreaterThan(0);
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
 
     /* A single failed settings read keeps the last settings as well, restarting neither tunnel. */
     failOnce.on = true;
-    await vi.advanceTimersByTimeAsync(3_000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await move(3_000);
     expect([offered.length, linkStarts()]).toEqual([1, 1]);
     expect(lines).not.toContain('No public link: this machine is not offered to its peers through it.');
 
@@ -964,7 +1107,6 @@ describe('the peer link in the keeper', () => {
     expect(peerWhyAt).toBeLessThan(lines.indexOf('No public link: this machine is not offered to its peers through it.'));
 
     await keeper.stop();
-    vi.useRealTimers();
   });
 
   it('offers no peer doors in read mode, stops the public link on the first read after a lease ends, and stops peer doors when leading ends', async () => {
@@ -984,18 +1126,6 @@ describe('the peer link in the keeper', () => {
       },
     };
 
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
-    onTestFinished(() => {
-      vi.restoreAllMocks();
-      vi.useRealTimers();
-    });
-    const stepUntil = async (stepMs: number, check: () => boolean) => {
-      while (!check()) {
-        await vi.advanceTimersByTimeAsync(stepMs);
-        await new Promise<void>(resolve => setImmediate(resolve));
-      }
-    };
-
     /* A keeper in read mode never offers peer doors through hornhoof.org, even when both peer secrets exist. */
     const reader = await keeperBeside(c, target, folder(), {
       lease: null,
@@ -1006,13 +1136,9 @@ describe('the peer link in the keeper', () => {
       beatEveryMs: 60_000,
       guardEveryMs: 60_000,
     });
-    let readerPorts = false;
-    void reader.keeper.peerPorts().then(() => {
-      readerPorts = true;
-    });
-    await stepUntil(3000, () => readerPorts);
-    await vi.advanceTimersByTimeAsync(9000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await reader.keeper.peerPorts();
+    await leaseStep(9000);
+    await tunnelRound(reader.keeper);
     expect(reader.keeper.mode()).toBe('read');
     expect(reader.offered).toEqual([]);
     await reader.keeper.stop();
@@ -1035,38 +1161,39 @@ describe('the peer link in the keeper', () => {
       clientFor: () => (linkStarts++, { program: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }),
       sync: { catalog, relay: relayClient, everyMs: 3000, routeEveryMs: 0, linkPauseMs: 30_000 },
     });
-    let leaderPorts = false;
-    void leader.keeper.peerPorts().then(() => {
-      leaderPorts = true;
-    });
-    await stepUntil(20, () => leaderPorts && leader.keeper.mode() === 'lead' && leader.offered.length === 1 && linkStarts === 1);
+    await leader.keeper.peerPorts();
+    await leaseUntil(leader.keeper, () => leader.keeper.mode() === 'lead');
+    await tunnelRound(leader.keeper);
+    await waitForState(() => leader.offered.length === 1 && linkStarts === 1);
 
     const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+    onTestFinished(() => kill.mockRestore());
     leaderLease.problemsAre(['another machine holds the lease']);
     renews.hold = false;
     clock.wall += 11_000;
     clock.mono += 11_000;
-    await stepUntil(20, () => leader.keeper.mode() === 'read' && !leader.keeper.linkWanted());
+    await leaseRound(leader.keeper);
+    expect(leader.keeper.mode()).toBe('read');
+    expect(leader.keeper.linkWanted()).toBe(false);
     expect(kill).not.toHaveBeenCalled();
 
     /* First 3 s read: the public link is told to stop at once, while the peer tunnel holds through one read. */
-    await vi.advanceTimersByTimeAsync(3000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    advance(3000);
+    await tunnelRound(leader.keeper);
     expect(kill).toHaveBeenCalledTimes(1);
-    await until(() => leader.lines.includes('No public link: the tunnel waits.'));
+    await waitForState(() => leader.lines.includes('No public link: the tunnel waits.'));
     expect(leader.lines).toContain('Stopping the public link while this keeper holds no lease or waits after a lease ended.');
 
     /* Second 3 s read: sustained read mode stops the peer tunnel as well, saying why first. */
-    await vi.advanceTimersByTimeAsync(3000);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    advance(3000);
+    await tunnelRound(leader.keeper);
     expect(kill).toHaveBeenCalledTimes(2);
-    await until(() => leader.lines.includes('No public link: this machine is not offered to its peers through it.'));
+    await waitForState(() => leader.lines.includes('No public link: this machine is not offered to its peers through it.'));
     const peerWhyAt = leader.lines.indexOf('Stopping the peer tunnel: this keeper no longer leads.');
     expect(peerWhyAt).toBeGreaterThanOrEqual(0);
     expect(peerWhyAt).toBeLessThan(leader.lines.indexOf('No public link: this machine is not offered to its peers through it.'));
 
     await leader.keeper.stop();
-    vi.restoreAllMocks();
-    vi.useRealTimers();
+    kill.mockRestore();
   });
 });

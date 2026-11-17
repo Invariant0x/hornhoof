@@ -1,9 +1,10 @@
-import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection, type TestRunFileCache } from '../../db/schema.js';
+import { idOnly } from '../../db/selections.js';
 import { builtinOf, nodeIdentity, ownMachine, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
@@ -20,17 +21,17 @@ import { AWAY_MS, WAIT_MS } from './runs.js';
 export { productReceipt } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision, type RunMode } from './reuse.js';
 
-type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
-export type TestRunMode = { mode: 'manual'; command: string; parts: number } | { mode: 'product'; suite?: string; profile?: string };
+type ModeInput = { command?: string; suite?: string; parts?: number };
+export type TestRunMode = { mode: 'manual'; command: string; parts: number } | { mode: 'product'; suite?: string };
 function manualMode(input: ModeInput & { command: string }): TestRunMode {
-  if (input.suite !== undefined || input.profile !== undefined) throw refuse(400, 'test_mode_conflict', 'test_mode_conflict: choose a manual command or product suite/profile.');
+  if (input.suite !== undefined) throw refuse(400, 'test_mode_conflict', 'test_mode_conflict: choose a manual command or a product suite.');
   if (!input.command.trim()) throw refuse(400, 'task_invalid', 'A manual run needs a nonempty command.');
   return { mode: 'manual', command: input.command, parts: input.parts ?? 1 };
 }
 export function testRunMode(input: ModeInput, kind: RunKind): TestRunMode {
   if (input.command !== undefined) return manualMode({ ...input, command: input.command });
   if (kind === 'work' || input.parts !== undefined) throw refuse(400, 'task_invalid', 'Work needs a command; product test parts come from the pinned suite inventory.');
-  return { mode: 'product', ...(input.suite === undefined ? {} : { suite: input.suite }), ...(input.profile === undefined ? {} : { profile: input.profile }) };
+  return { mode: 'product', ...(input.suite === undefined ? {} : { suite: input.suite }) };
 }
 
 /* The description request each run was last sent, by run id, so one request goes out once per node connection. */
@@ -44,7 +45,7 @@ type Target = { department: typeof departments.$inferSelect | null; repo: NonNul
 type PlanningSources = { open: (companyId: string) => Promise<Place[]>; target: (run: Run) => Promise<Target> };
 type PlanningTransaction = Parameters<Parameters<Ctx['db']['transaction']>[0]>[0];
 /* The canonical repository/history and durable reason store are private integration ports, not cache-owner aliases. */
-export type ProductPlanningPorts = {
+type ProductPlanningPorts = {
   history?: (run: Readonly<Run>, snapshot: EnvironmentSnapshot) => Promise<PlanningHistory | null>;
   record?: (tx: PlanningTransaction, run: Readonly<Run>, plan: ProductPlan) => Promise<void>;
 };
@@ -55,27 +56,13 @@ export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | nu
   const node = request && requestNode(ctx, request);
   if (node && request?.requestId) ctx.hub.send(node, { type: 'tests.describe.cancel', requestId: request.requestId });
 }
-export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, baseCommit?: string): TestEnvironmentRequest {
-  return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...('profile' in mode ? { profile: mode.profile } : {}), ...(baseCommit ? { baseCommit } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
+export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, minutes?: number): TestEnvironmentRequest {
+  return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...(minutes === undefined ? {} : { minutes }), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
 }
-type DescribedReady = Extract<TestsDescribed['result'], { status: 'ready' }>;
-type DescribedBase = DescribedReady['baseFingerprints'];
-function verificationProfile(description: EnvironmentDescription, request: TestEnvironmentRequest): string {
-  const completeProfile = description.manifest.execution?.fullRun?.profile ?? description.manifest.defaultProfile;
-  if (request.baseCommit && request.profile !== undefined && request.profile !== completeProfile) throw new Error('Candidate verification cannot omit checks with a narrower profile.');
-  return request.baseCommit ? completeProfile : request.profile ?? description.manifest.defaultProfile;
-}
-function describedCandidate(request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): EnvironmentSnapshot['candidate'] {
-  if (!request.baseCommit) return undefined;
-  if (request.suite || !base || base.commitSha !== request.baseCommit) throw new Error('Candidate verification needs its bound base and every applicable suite.');
-  return { baseCommit: request.baseCommit, baseFingerprints: base.fingerprints, fingerprints, ...(mutation ? { mutation } : {}) };
-}
-function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase, mutation?: DescribedReady['mutation']): EnvironmentSnapshot {
-  const profile = verificationProfile(description, request);
-  const candidate = describedCandidate(request, fingerprints, base, mutation);
-  const snapshot = EnvironmentSnapshot.parse({ description, profile, ...(candidate ? { candidate } : {}) });
-  if (candidate) candidateTestUnits(snapshot);
-  return snapshot;
+/* A release runs the profile of the manifest's full run, which runs everything; a manifest without one runs its default profile. */
+function snapshotFor(description: EnvironmentDescription): EnvironmentSnapshot {
+  const { manifest } = description;
+  return EnvironmentSnapshot.parse({ description, profile: manifest.execution?.fullRun?.profile ?? manifest.defaultProfile });
 }
 function requestedSuiteIds(snapshot: EnvironmentSnapshot, requested?: string): string[] {
   return requested ? [requested] : snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
@@ -83,7 +70,7 @@ function requestedSuiteIds(snapshot: EnvironmentSnapshot, requested?: string): s
 function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestEnvironmentSelection[] {
   const { manifest } = snapshot.description;
   const inventory = requestedUnits(snapshot, requested);
-  const ids = snapshot.candidate ? [...new Set(inventory.map(unit => unit.suiteId))] : requestedSuiteIds(snapshot, requested);
+  const ids = requestedSuiteIds(snapshot, requested);
   const leaves: TestEnvironmentSelection[] = [];
   for (const suiteId of ids) {
     const selection = { kind: 'suite' as const, suiteId, files: inventory.filter(unit => unit.suiteId === suiteId).map(unit => unit.file) };
@@ -104,7 +91,6 @@ async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnap
   return [...new Set(free.map(computerKey))].sort();
 }
 function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): EnvironmentDescription['inventory'] {
-  if (snapshot.candidate) return candidateTestUnits(snapshot);
   const ids = requestedSuiteIds(snapshot, requested);
   const units = snapshot.description.inventory.filter(unit => ids.includes(unit.suiteId));
   if (ids.some(id => !units.some(unit => unit.suiteId === id))) throw new Error('A requested suite has no canonical files.');
@@ -114,14 +100,22 @@ function planningCosts(history: PlanningHistory | null | undefined) {
   return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: history?.unknownFileMs ?? 30_000,
     ...(history?.preparationMs ? { preparationMs: history.preparationMs } : {}) };
 }
-async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
+/* The full run checks a release, and a part of it that runs into its limit sends all of it again: unless the run asked for a limit, each
+   part has an hour, and the run goes out in two to four parts that each fit in it. */
+export const FULL_RUN_MINUTES = 60;
+const FULL_RUN_PARTS = { min: 2, max: 4 };
+function partLimitMs(run: Run, mode: RunMode): number {
+  return mode?.mode === 'full' && run.environmentRequest?.minutes === undefined ? Math.max(run.timeoutMs, FULL_RUN_MINUTES * 60_000) : run.timeoutMs;
+}
+const spreadFor = (run: Run, mode: RunMode) => mode?.mode === 'full' ? { spread: { ...FULL_RUN_PARTS, ceilingMs: run.timeoutMs } } : {};
+async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision, mode: RunMode): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
   const units = requestedUnits(snapshot, requested);
   const history = await (planningPorts.get(ctx)?.history ?? measuredHistory(ctx))(run, snapshot);
   const free = await freeProductMachines(ctx, run, snapshot);
   const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: runPurpose(snapshot, requested), units, reuse,
-    ...planningCosts(history),
+    ...planningCosts(history), ...spreadFor(run, mode),
     availableMachines: free.length, machines: free.map(key => ({ key, pace: history?.paces?.get(key) ?? 1 })) });
   if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';
   return { leaves: plan.leaves, plan };
@@ -142,22 +136,17 @@ async function addParts(tx: Pick<Ctx['db'], 'insert'>, run: Run, leaves: TestEnv
   if (leaves.length) await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
 }
 async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, snapshot: EnvironmentSnapshot, leaves: TestEnvironmentSelection[], plan: ProductPlan | null, fileCache: TestRunFileCache | null): Promise<boolean> {
+  const { timeoutMs } = run;
   const description = snapshot.description;
   return ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
     if (!locked || locked.environmentRequest?.problem) return false;
     if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
     if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
-    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache }).where(eq(testRuns.id, run.id));
+    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache, timeoutMs }).where(eq(testRuns.id, run.id));
     await addParts(tx, run, leaves);
     return true;
   });
-}
-function runSnapshot(supplied: EnvironmentSnapshot, request: TestEnvironmentRequest, mode: RunMode, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): EnvironmentSnapshot {
-  return supplied.candidate || !mode ? supplied : snapshotFor(supplied.description, { ...request, profile: mode.profile }, prints, base, mutation);
-}
-function candidateReuseMode(mode: RunMode, snapshot: EnvironmentSnapshot): RunMode {
-  return mode && snapshot.candidate ? { ...mode, mode: 'cached', profile: snapshot.profile } : mode;
 }
 /* A part runs only on runtimes of the class that described its run, so a run its describing node could not run itself runs nowhere:
    it ends now with what it lacks, not at its queue deadline. */
@@ -168,18 +157,17 @@ function unrunnable(snapshot: EnvironmentSnapshot): EnvironmentProblem | null {
   const detail = `The node that described this run lacks ${lacks.map(runtime => `${runtime.id} ${runtime.version}`).join(', ')}, which profile ${snapshot.profile} needs. A part runs only on runtimes of the class that described its run, so no node can run it.`;
   return { code: 'runtime_missing', detail: detail.slice(0, 2000) };
 }
-async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<EnvironmentProblem | null> {
+async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[]): Promise<EnvironmentProblem | null> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
-  const supplied = snapshotFor(description, request, prints, base, mutation);
+  const snapshot = snapshotFor(description);
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
-  const snapshot = runSnapshot(supplied, request, mode, prints, base, mutation);
   const problem = unrunnable(snapshot);
   if (problem) return problem;
-  const reuseMode = candidateReuseMode(mode, snapshot);
-  const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints);
-  const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
-  const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
+  const reuse = await reuseFor(ctx, mode, snapshot, mode ? requestedUnits(snapshot, request.suite) : [], prints);
+  const limited = { ...run, timeoutMs: partLimitMs(run, mode) };
+  const { leaves, plan } = await plannedLeaves(ctx, limited, snapshot, reuse.decision, mode);
+  const saved = await storeDescription(ctx, limited, message, snapshot, leaves, plan, reuse.fileCache);
   if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
   return null;
 }
@@ -190,7 +178,7 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     if (await retryDescription(ctx, run, message, message.result.problem)) return;
     return descriptionProblem(ctx, run, message, message.result.problem);
   }
-  const problem = await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [], message.result.baseFingerprints, message.result.mutation)
+  const problem = await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [])
     .catch((): EnvironmentProblem => ({ code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }));
   if (problem) await descriptionProblem(ctx, run, message, problem);
 }
@@ -198,7 +186,7 @@ async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProble
   await ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(pendingDescription(run.id)).for('update');
     if (!locked) return;
-    const [existing] = await tx.select({ id: testParts.id }).from(testParts).where(eq(testParts.runId, run.id));
+    const [existing] = await tx.select(idOnly(testParts)).from(testParts).where(eq(testParts.runId, run.id));
     if (existing) return;
     await tx.update(testRuns).set({ parts: 1, environmentRequest: { ...locked.environmentRequest!, problem } }).where(eq(testRuns.id, run.id));
     await tx.insert(testParts).values({ companyId: run.companyId, runId: run.id, part: 1, status: 'failed', error: problem.code, tail: problem.detail, finishedAt: new Date() });
@@ -242,7 +230,7 @@ function publishDescription(ctx: Ctx, run: Run, request: TestEnvironmentRequest,
   if (!request.requestId || !repo) return;
   const node = requestNode(ctx, request)!, delivered = sent.get(ctx) ?? new Map<string, string>(); sent.set(ctx, delivered);
   if (delivered.get(run.id) === request.requestId) return;
-  if (ctx.hub.send(node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, ...(request.baseCommit ? { baseCommit: request.baseCommit } : {}), repo: { url: repo.url, token: repo.token } })) delivered.set(run.id, request.requestId);
+  if (ctx.hub.send(node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, repo: { url: repo.url, token: repo.token } })) delivered.set(run.id, request.requestId);
 }
 
 export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Promise<Place[]>, target: (run: Run) => Promise<Target>, finish: (id: string) => Promise<void>): Promise<void> {

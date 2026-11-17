@@ -23,6 +23,9 @@ import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
 import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
+import { PhoneAdb, privateAdb } from './phones/adb.js';
+import { PhoneExecutor } from './phones/executor.js';
+import { keyboardApk } from './phones/keyboard.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -295,6 +298,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     for (const s of await (single?.secrets() ?? Promise.resolve([])).catch(() => [])) known.add(s);
   };
   await learn();
+  /* Company phones this node reaches by wireless debugging, through its own adb. */
+  const phones = new PhoneExecutor({ adb: new PhoneAdb(privateAdb('adb', join(dir, 'phone-adb')), keyboardApk(join(dir, 'phone-adb'))), send: m => void send?.(m) });
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
   /* What agents' programs send their tools with no turn running goes on the link as it is now, and waits for no other. */
@@ -395,7 +400,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
       checks.online(true);
       host?.operatorReplay();
@@ -411,7 +416,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     onClose: () => {
       /* A drop stops no part: its leases wait for the node to come back, and end, with what runs under them, if it does not
          within a lease (#1060). */
-      online = false; outside.closed(); checks.online(false); testMessages.cancelDescriptions();
+      online = false; outside.closed(); checks.online(false); testMessages.cancelDescriptions(); phones.close();
     },
     onRefused: () => {
       log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
@@ -443,6 +448,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (m.type === 'programs.update') return programs.update(tellStatus, onMachine);
     if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'jobs.check') return emit(heldJobs(m.jobIds, holds()));
+    if (m.type === 'node.log.read') return emit({ type: 'node.log', requestId: m.requestId, log: life.tail() });
+    if (m.type === 'phone.probe' || m.type === 'phone.open' || m.type === 'phone.action' || m.type === 'phone.renew' || m.type === 'phone.revoke') return phones.handle(m);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       outside.stop(m.jobId);
@@ -690,6 +697,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   function stop(reason: NodeStopReason = 'stopped') {
     stopNode(life, send, boot.startedAt, reason);
     stopped = true;
+    phones.close();
     stopChecks(checks, testing); testMessages.cancelDescriptions();
     clearInterval(timer);
     if (learning) clearInterval(learning);

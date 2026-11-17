@@ -14,6 +14,7 @@ import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
+import { PhoneRecordings } from './PhoneRecordings';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -199,6 +200,7 @@ function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }
           <li key={r.id}>
             <span className="tp-ev">
               {r.agent?.name ?? t.window.hornhoof}: {r.text} <small>{t.tasks.requestStates[r.status] ?? r.status}</small>
+              {r.byOrchestrator && <> <small>{t.tasks.byOrchestrator}</small></>}
             </span>
             {r.answer && <p>{r.answer}</p>}
           </li>
@@ -221,7 +223,7 @@ function LogEntry({ entry, when }: { entry: TaskLogLine; when: (at: string) => s
   return (
     <li className={entry.kind}>
       <span className="tp-ev">
-        {eventTitle(t, entry)} <time dateTime={entry.at}>{when(entry.at)}</time>
+        {eventTitle(t, entry)} {entry.by?.byOrchestrator && <><small>{t.tasks.byOrchestrator}</small> </>}<time dateTime={entry.at}>{when(entry.at)}</time>
       </span>
       <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
       <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
@@ -261,6 +263,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
       )}
       <TaskRelatedSection heading={t.tasks.subtasks} items={task.subtasks} onOpen={onOpen} />
       <TaskFiles files={task.files} />
+      <PhoneRecordings key={task.id} taskId={task.id} />
       <TaskQuestionsSection requests={task.requests} />
       <section>
         <h4>{t.tasks.log}</h4>
