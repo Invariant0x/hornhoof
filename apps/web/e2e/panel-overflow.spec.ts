@@ -255,8 +255,9 @@ for (const lang of ['en', 'ru'] as const) {
 
       test(`A long command and its actions fit the panel: ${look}`, async ({ page }, info) => {
         const errors = await prepareRoutes(page, lang, theme, width);
-        await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [LONG_COMMAND] } }));
         const hidden: string[] = [];
+        /* As the server does, a command once hidden is in no later answer. */
+        await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: hidden.length ? [] : [LONG_COMMAND] } }));
         await page.route('**/api/nodes/commands/cmd1/hide', route => {
           hidden.push(route.request().method());
           return route.fulfill({ json: {} });
