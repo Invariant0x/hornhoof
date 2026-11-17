@@ -1,0 +1,11 @@
+Вопрос,Как проверено,Результат
+Какой tsc запускается,"`ls -l node_modules/.bin/tsc`, `npx --no-install tsc -v`","`../@typescript/native/bin/tsc`, Version 7.0.2"
+Кэш не прячет ошибку в самом файле,"вписал `export const planted: number = ""x""` в apps/node/src/keys.ts, два прогона подряд","оба exit 1, 1 ошибка TS2322; после отката exit 0"
+Кэш видит ошибку в зависимом файле,"сменил сигнатуру `builtinKey` (добавил аргумент), вызовы не трогал, три прогона","все exit 1, 7 ошибок TS2554 в main.ts, commands.test.ts, keys.test.ts; после отката exit 0"
+Честный код выхода,tsc 7 при ошибках типов дает 1 вместо 2 у 5.9; поиск по scripts и apps/node/src,"ничто не ждет именно 2; любой код кроме 0 — провал (`selectedProductCommand`, `exitCodeOf`)"
+137 не становится PASS,"на этой машине под нагрузкой (свободно около 2 ГБ, swap занят) tsc сервера с тестами убит с 137","npx вернул 137, это провал. Первый повтор с `--checkers 1`: exit 0, но без NODE_OPTIONS и с изменением зависимостей в конце; не принят как чистое доказательство. Чистый повтор: NODE_OPTIONS=2048, exit 0, 0 ошибок, пик RSS 1876340 KB, 1:39.80"
+Сборка не меняется,"собрал protocol, node, server на 5.9 и на 7 в разные outDir","29, 108, 534 файла .js, отличий 0"
+Docker на Alpine,"`file` у бинаря tsc 7, поля os/cpu/libc в lockfile","статически собран (Go), ограничения libc нет. Совместимость с node:22-alpine предполагается по бинарю; запуск в Alpine не проверен"
+Остальные проверки типов,"protocol, node, web с тестами под tsc 7","все exit 0, 0 ошибок"
+`npm install` поверх старого node_modules,"вернул ссылку `.bin/tsc` на 5.9, убрал @typescript/native, запустил `npm install`",ссылка снова на tsc 7
+"Тесты, измененные веткой","`apps/server/test/test-run-product-config.test.ts`, `apps/web/test/api.test.ts`",5/5 и 12/12
