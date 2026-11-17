@@ -425,7 +425,8 @@ export async function agentCanReadAttachment(ctx: Pick<Ctx, 'db'>, job: ToolJob,
   const taskId = file?.taskId ?? file?.requestTaskId;
   if (!taskId) return false;
   const task = await companyTaskForAgent(ctx, job, taskId);
-  return Boolean(task && await taskAttachmentForAgent(ctx.db, job.companyId, task.id, id));
+  /* By id alone: a file of the task named like this id is another file, and never vouches for this one. */
+  return Boolean(task) && (await taskAttachmentForAgent(ctx.db, job.companyId, task!.id, id))?.id === id;
 }
 
 /* A file's name, which a file for a task or the chat needs; a picture for a request goes without one. */
