@@ -1,7 +1,7 @@
 import { EnvironmentSnapshot, hashTestEnvironment, parseTestEnvironment, type RepositoryScope, type TestEnvironmentReceipt } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, jobs, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, report } from '../src/modules/tasks/engine.js';
 import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
@@ -147,4 +147,43 @@ export async function releasing() {
   const recordRelease = (args: Record<string, unknown> = {}) => call('release_turn', { task: release!.number, commit: R, ...args });
   const department = async () => (await f.db.select().from(departments).where(eq(departments.id, f.task.departmentId!)))[0]!;
   return { ...f, release: release!, R, fullRun, approve, client, call, recordRelease, department };
+}
+
+type Releasing = Awaited<ReturnType<typeof releasing>>;
+const MADE = '5'.repeat(40);
+const TOP = '6'.repeat(40);
+
+/* Work of task-N after R, as its holder joins it to the turn branch: its commit made on R, then a merge on top. Without stray
+   the merge takes task-N into the turn branch, whose head it is, and task-N stays at made. A stray commit pushed straight to the
+   turn branch on R comes first: taken, the merge takes the turn branch into task-N and the turn branch goes to it by
+   fast-forward; not taken, task-N is made on it and the merge takes task-N into the turn branch as before. own is the commit
+   task-N is at, head the turn branch's. */
+export function joinedAfterR(f: Releasing, task: number, stray?: { sha: string; taken: boolean }): { own: string; head: string } {
+  const under = stray && !stray.taken ? stray.sha : f.R;
+  if (stray) f.repo.holds[stray.sha] = [f.R, BASE];
+  f.repo.holds[MADE] = [...(stray && !stray.taken ? [stray.sha] : []), f.R, BASE];
+  const strayCommit = stray ? [{ sha: stray.sha, parents: [f.R] }] : [];
+  if (stray?.taken) {
+    f.repo.holds[TOP] = [MADE, stray.sha, f.R, BASE];
+    f.repo.between[`${BASE}..${TOP}`] = [{ sha: f.R, parents: [BASE] }, ...strayCommit, { sha: MADE, parents: [f.R] }, { sha: TOP, parents: [MADE, stray.sha] }];
+    f.repo.heads[f.branch] = f.repo.heads[`task-${task}`] = TOP;
+    return { own: TOP, head: TOP };
+  }
+  f.repo.holds[TOP] = [MADE, ...(stray ? [stray.sha] : []), f.R, BASE];
+  f.repo.between[`${BASE}..${TOP}`] = [{ sha: f.R, parents: [BASE] }, ...strayCommit, { sha: MADE, parents: [under] }, { sha: TOP, parents: [under, MADE] }];
+  f.repo.heads[`task-${task}`] = MADE;
+  f.repo.heads[f.branch] = TOP;
+  return { own: MADE, head: TOP };
+}
+
+/* Turnkey work after R: a member of a turnkey team did it whole on task-N with its own review, security check and tests,
+   joined it to the turn branch and closed it with report. */
+export async function turnkeyAfterR(f: Releasing, stray?: { sha: string; taken: boolean }) {
+  const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
+  const holder = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+  await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, holder.id));
+  const { task } = await f.create({ title: 'Turnkey change', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+  const joined = joinedAfterR(f, task.number, stray);
+  await report(f.ctx, holder.id, task.id, { done: true, summary: 'Merged task-N into the turn branch after my own review, security check and tests.' });
+  return { task, holder, ...joined };
 }

@@ -7,7 +7,7 @@ import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
 import { deliverWaitNotices } from '../src/modules/tasks/wait-notices.js';
 import { BASE } from './development-echelons-fixture.js';
 import { as, ownDatabases } from './helpers.js';
-import { releasing } from './turn-release-fixture.js';
+import { releasing, turnkeyAfterR } from './turn-release-fixture.js';
 
 ownDatabases();
 
@@ -15,19 +15,22 @@ const LATER = '4'.repeat(40);
 const OTHER = '3'.repeat(40);
 
 /* A turn whose start the server has seen, its release recorded before main moved, then main moved and tagged. */
-async function released(options: { record?: boolean; tag?: string; at?: string; autonomous?: boolean } = {}) {
+async function released(options: { record?: boolean; tag?: string; at?: string; autonomous?: boolean; turnkey?: boolean } = {}) {
   const f = await releasing();
   const errors: string[] = [];
   const round = () => minuteRound(f.ctx, new Date(), what => () => { errors.push(what); });
   f.repo.tags['v1.6.0'] = BASE;
   await round();
-  const run = await f.fullRun();
+  /* turnkey: the release also brings turnkey work its holder checked itself, joined to the turn branch after R. */
+  const work = options.turnkey ? await turnkeyAfterR(f) : null;
+  const commit = work?.head ?? f.R;
+  const run = await f.fullRun({ commit });
   /* With autonomous release on, a release every commit of which was checked is approved by the log, by no person. */
   if (options.autonomous) await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
-  else await f.approve();
-  if (options.record !== false) expect((await f.recordRelease({ runId: run.id })).isError).toBe(false);
-  f.repo.heads.main = f.R;
-  f.repo.tags[options.tag ?? 'v1.7.0'] = options.at ?? f.R;
+  else await f.approve(commit);
+  if (options.record !== false) expect((await f.recordRelease({ commit, runId: run.id })).isError).toBe(false);
+  f.repo.heads.main = commit;
+  f.repo.tags[options.tag ?? 'v1.7.0'] = options.at ?? commit;
   const departmentTurns = () => f.db.select().from(turns).where(eq(turns.departmentId, f.task.departmentId!)).orderBy(asc(turns.number));
   const open = async () => (await f.db.select().from(turns).where(and(eq(turns.departmentId, f.task.departmentId!), eq(turns.status, 'open'))))[0]!;
   /* Another result of the turn, accepted after its release was recorded. */
@@ -36,7 +39,7 @@ async function released(options: { record?: boolean; tag?: string; at?: string; 
     await f.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, turnId: f.turn.id }).where(eq(tasks.id, task.id));
     return task;
   };
-  return { ...f, round, errors, departmentTurns, open, lateResult, run };
+  return { ...f, round, errors, departmentTurns, open, lateResult, run, work, commit };
 }
 
 describe('the server closes a turn by the tag of its release', () => {
@@ -210,6 +213,22 @@ describe('the server closes a turn by the tag of its release', () => {
     const told = await toldOfTag(f);
     expect(told).toHaveLength(2);
     expect(told.find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: f.R, why: 'stale' });
+  });
+
+  it('closes the turn on the tag of an autonomous release that brings turnkey work its holder checked itself', async () => {
+    const f = await released({ autonomous: true, turnkey: true });
+    await f.round();
+    expect((await f.departmentTurns()).find(row => row.id === f.turn.id)).toMatchObject({ status: 'closed', version: 'v1.7.0', commit: f.commit });
+    expect(await loadTask(f.db, f.work!.task.id)).toMatchObject({ turnId: f.turn.id });
+    expect(await toldOfTag(f)).toEqual([]);
+  });
+
+  it('keeps the turn of an autonomous release of turnkey work open, and tells them, when its holder was switched off before the tag', async () => {
+    const f = await released({ autonomous: true, turnkey: true });
+    await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.work!.holder.id));
+    await f.round();
+    expect(await f.open()).toMatchObject({ id: f.turn.id, status: 'open' });
+    expect((await toldOfTag(f)).find(n => n.personId)!.guard.tag).toEqual({ version: 'v1.7.0', commit: f.commit, why: 'stale' });
   });
 
   it('tells nobody of a tag that releases its turn, of an older one or of one not named as a version', async () => {

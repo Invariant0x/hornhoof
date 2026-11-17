@@ -1047,8 +1047,9 @@ export const turns = pgTable(
 );
 
 /* A release of a turn as its holder asked for it before main moved: the exact commit and main under it, the full run on it,
-   the results it brings with the verdicts on them, and who approved it. Only the tag of a release kept here closes a turn. */
-export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[] };
+   the results it brings with the verdicts on them, or for turnkey work the report its holder closed it with after its own
+   review, security check and tests, and who approved it. Only the tag of a release kept here closes a turn. */
+export type ReleasedTask = { taskId: string; number: number; commit: string; verdicts: string[]; report?: string };
 export const turnReleases = pgTable(
   'turn_releases',
   {

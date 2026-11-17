@@ -97,8 +97,9 @@ Ranked by what they cost. "Fixed" means changed on branch `iv-turn-speed` with t
    0.29.0 was green at 05:15 and approved at 09:41. Development has autonomous release on, but it approves only a release
    whose every commit a checker other than its author passed, and turnkey work, now most of the work, has no such checker,
    so every release still asks a person. Do: let autonomous release count a turnkey holder's own review and security check,
-   as Ivan's rule on turnkey members says. **Not fixed**: it changes the condition of autonomous release itself and needs
-   Ivan's word.
+   as Ivan's rule on turnkey members says. **Fixed** by Ivan's word of 2026-11-17: `release_turn` counts the own review,
+   security check and tests of a turnkey holder still at work as covering its task. A release that brings a commit no task
+   brought, such as a branch merged straight into the turn branch, still waits for a person.
 
 9. **Paused and blocked tasks stand with nothing to show.** 54 task-hours paused (median 10.7 h) and 53 task-hours
    blocked (median 5.8 h, worst 20.9 h on #1092). These are decisions, not conveyor gaps. **Not fixed**: nothing to change
@@ -125,6 +126,11 @@ Ranked by what they cost. "Fixed" means changed on branch `iv-turn-speed` with t
   `release_turn` takes the commit the whole run checked.
 * `hh-task-flow`: logs and proof of checks go into submit or report, never into commits of their own.
 * `dev-release-notes`, `dev-ci-release`: release notes are written once per release, with no note committed per task.
+* `release_turn` (finding 8): autonomous release counts a turnkey holder's own review, security check and tests as
+  covering its task while that holder is at work. Its commits are those down the first parents of its branch to another
+  result or main, with the merge that joined it to the turn branch; what a merge took in from the turn branch is not its
+  own. The autonomous release log names the holder at stage `turnkey`. `dev-lead`, `dev-ci-release` and the hint of the
+  department's switch say so.
 
 ## How it was measured
 
