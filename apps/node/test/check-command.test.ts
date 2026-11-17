@@ -451,6 +451,24 @@ describe('a heavy check in the agent\'s own shell', () => {
     expect(alive(leader)).toBe(false);
   });
 
+  it.runIf(existsSync('/proc/self'))('keeps the group leader until the node has ended what a finished command left in its group', async () => {
+    const alive = (pid: number) => { try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+    let leader = 0, left = 0;
+    const m = machine(true), hook = await m.start();
+    const started = join(m.dir, 'started');
+    /* The command leaves a process in its own group and ends with 0, as a tool with a forgotten helper does. */
+    const leaves = 'const g = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); g.unref(); require("node:fs").writeFileSync(process.argv[1], [process.ppid, g.pid].join(" ")); process.exit(0)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', leaves, started], { uid: user?.uid, gid: user?.gid, cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const done = output(child);
+    onTestFinished(() => { for (const pid of [left, leader]) if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL'); });
+    expect(await done).toBe('0:');
+    [leader, left] = readFileSync(started, 'utf8').split(' ').map(Number) as [number, number];
+    /* The node can end the group only while its original leader still names it; the leader goes last. */
+    await eventually(() => !alive(leader));
+    expect(alive(left)).toBe(false);
+    await eventually(() => m.frames.includes('check.release'));
+  });
+
   it('makes an agent\'s tsc, vitest, eslint, jest and playwright wait for a slot however they start, and nothing else', async () => {
     const m = machine(true), hook = await m.start();
     installCheckCommand(m.dir, cli);

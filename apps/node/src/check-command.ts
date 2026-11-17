@@ -116,9 +116,13 @@ async function localWaited(command: string[], env: NodeJS.ProcessEnv): Promise<n
 }
 
 /* This local leader has no payload until the node owns its identity and grants admission. IPC loss before that
-   admission exits it without starting work. Afterwards it stays alive as the group's identity anchor until cleanup. */
+   admission exits it without starting work. Afterwards it stays alive as the group's identity anchor until cleanup:
+   under a slot also once its payload ended, as the node ends the group only while this leader still names it and kills
+   the leader last. A node that never comes for the group leaves it to the leader, the one that may end it safely. */
+export const ANCHOR_MS = 60_000;
 export const PARKED_CHECK = String.raw`
 const { spawn } = require('node:child_process');
+const ANCHOR_MS = ${ANCHOR_MS};
 let started = false, stopped = null, managed = false;
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { stopped = signal; });
 process.on('disconnect', () => {
@@ -131,7 +135,10 @@ process.on('message', message => {
   const child = spawn(message.command[0], message.command.slice(1), { stdio: 'inherit', env: message.env });
   const tell = result => { if (process.connected) process.send(result, () => {}); };
   child.once('error', () => tell({ code: 127, signal: null }));
-  child.once('exit', (code, signal) => tell({ code: stopped ? null : code, signal: stopped ?? signal }));
+  child.once('exit', (code, signal) => {
+    tell({ code: stopped ? null : code, signal: stopped ?? signal });
+    if (managed) setTimeout(() => process.kill(-process.pid, 'SIGKILL'), ANCHOR_MS);
+  });
 });
 if (!process.connected) process.exit(1);
 `;
