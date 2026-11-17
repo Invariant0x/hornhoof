@@ -15,12 +15,12 @@ import { keepMessageFile, PICTURES_PER_MESSAGE } from '../conversation/pictures.
 import { agentState } from '../conversation/queue.js';
 import { agentRole, departmentParty } from '../events/parties.js';
 import { personView } from '../people/views.js';
-import { FILE_BYTES } from '../tasks/attachments.js';
+import { checkPictureRoom, keepTaken, received } from '../tasks/attachments.js';
 import { AnswerBody, answerRequest } from '../tasks/routes.js';
-import { fileFor } from './files.js';
+import { fileByLink, fileFor } from './files.js';
 import { sendForOwner } from './messages.js';
 import { waitingFor } from './requests.js';
-import { FILES_URL, inOwnersWords } from './words.js';
+import { inOwnersWords } from './words.js';
 
 /* Words of one message. Nothing is cut: longer words are refused. */
 export const Words = z.string().trim().min(1).max(50_000);
@@ -123,12 +123,13 @@ export async function writeFor(ctx: Ctx, me: Person, body: unknown, senderAgentI
 
 /* A file of any kind the assistant sends an agent, to name in its next message to it: kept as its owner's own, as a file
    the owner sends from the agent's window. */
-export async function keepFor(ctx: Ctx, me: Person, query: unknown, body: unknown) {
+export async function keepFor(ctx: Ctx, me: Person, query: unknown, body: unknown, declared: number) {
   const { agentId, name } = FileQuery.parse(query);
   const agent = await addressee(ctx, me, agentId, await ownAgentOf(ctx, me.assistant!.id));
-  const bytes = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
-  if (!bytes.length) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
-  return { file: await keepMessageFile(ctx, me, agent.id, bytes, name ?? '') };
+  await checkPictureRoom(ctx, me.companyId, declared);
+  const taken = await received(ctx.config.filesDir, body);
+  if (!taken.size) throw new ApiError(400, 'validation', 'This file is empty.', 'file_empty');
+  return { file: await keepTaken(ctx.config.filesDir, taken, () => keepMessageFile(ctx, me, agent.id, taken, name ?? '')) };
 }
 
 /* A long poll: the events after a number at once, or the first that comes within the wait, until the asker goes. */
@@ -165,12 +166,12 @@ export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
       return sent;
     });
 
-    /* A file comes as its raw bytes, whatever type the program gives it. */
+    /* A file comes as its raw bytes, whatever type the program gives it, read as they come once the call is checked. */
     void scope.register(async files => {
       files.removeAllContentTypeParsers();
-      files.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: FILE_BYTES }, (_req, body, done) => done(null, body));
-      files.post(FILES_URL, { bodyLimit: FILE_BYTES }, async (req, reply) => {
-        const kept = await keepFor(ctx, await requireAssistant(req, db), req.query, req.body);
+      files.addContentTypeParser('*', (_req, body, done) => done(null, body));
+      files.post('/api/assistant/files', async (req, reply) => {
+        const kept = await keepFor(ctx, await requireAssistant(req, db), req.query, req.body, Number(req.headers['content-length'] ?? 0) || 0);
         reply.code(201);
         return kept;
       });
@@ -188,5 +189,8 @@ export function assistantRoutes(app: FastifyInstance, ctx: Ctx): void {
     scope.post('/api/assistant/requests/:id/answer', async req => answerFor(ctx, await requireAssistant(req, db), req.params, req.body));
 
     scope.get('/api/assistant/attachments/:id', async (req, reply) => fileFor(ctx, await requireAssistant(req, db), req.params, reply));
+
+    /* What a reply links its files with: a person opens one on a phone, with no key and no sign-in. */
+    scope.get('/api/files/*', async (req, reply) => fileByLink(ctx, req.params, reply));
   });
 }

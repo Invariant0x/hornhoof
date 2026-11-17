@@ -6,7 +6,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
-import type { Person } from '../../auth/session.js';
+import { viaOrchestrator, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { computerRuns, machineAccess, machines, people, personKeys, type MachineRole } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
@@ -60,20 +60,21 @@ export type Waited = RunResult | 'running' | 'gone' | 'lost';
 export type Taken = { access: { untilSec: number; until: string; grant: Grant | null } | null; runs: { id: string; command: string; timeout: number }[]; forget: string[] };
 
 type Row = typeof machines.$inferSelect;
-type Opener = Pick<Person, 'id' | 'companyId' | 'status' | 'scopeKind' | 'isOwner' | 'isCeoDelegate' | 'via'>;
+type Opener = Pick<Person, 'id' | 'companyId' | 'status' | 'scopeKind' | 'isOwner' | 'isCeoDelegate' | 'via' | 'viaHead'>;
 
-/* People who see the whole company see each machine's access from their own screens: never the orchestrator acting for
-   the CEO. */
-export const canViewComputer = (me: { scopeKind: string; via?: string }): boolean => me.scopeKind === 'company' && !me.via;
+/* People who see the whole company see each machine's access from their own screens, and the orchestrator acting for the
+   CEO: never a head. */
+export const canViewComputer = (me: { scopeKind: string; viaHead?: true }): boolean => me.scopeKind === 'company' && !me.viaHead;
 
-/* A machine's owner opens it, on their own screen, and nobody else: not the CEO on another person's machine, and not
-   the orchestrator acting for anyone. The server's own machine while it needs no key is the company's, as before
-   machines had keys: the CEO, who owns it, or the CEO delegate opens it. */
+/* A machine's owner opens it, on their own screen, and the orchestrator, which acts as anyone; nobody else: not the CEO on
+   another person's machine, and not a head. The server's own machine while it needs no key is the company's, as before
+   machines had keys: the CEO, who owns it, or the CEO delegate opens it. A machine that needs a key opens only with its
+   owner's signature all the same. */
 export const canOpen = (me: Opener, machine: { personId: string }, key: KeyState): boolean =>
-  !me.via && me.status === 'active' && (me.id === machine.personId || (key === 'not_needed' && actsAsCeo(me)));
+  viaOrchestrator(me) || (!me.via && me.status === 'active' && (me.id === machine.personId || (key === 'not_needed' && actsAsCeo(me))));
 
-/* Closing takes power away, so the CEO and the CEO delegate close any machine besides its owner. */
-export const canClose = (me: Opener, machine: { personId: string }): boolean => !me.via && me.status === 'active' && (me.id === machine.personId || actsAsCeo(me));
+/* Closing takes power away, so the CEO, the CEO delegate and the orchestrator close any machine besides its owner. */
+export const canClose = (me: Opener, machine: { personId: string }): boolean => viaOrchestrator(me) || (!me.via && me.status === 'active' && (me.id === machine.personId || actsAsCeo(me)));
 
 /* What a line in the log says of the machine, when it is known. */
 export const onMachine = (machine: string | null): Record<string, string> => (machine ? { machine } : {});
@@ -264,7 +265,7 @@ export class Computers {
       if (!row) throw noCore();
       const machine = this.machineOf(row);
       const [ownerKey] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, row.personId));
-      const opener = person ? { ...person, via: me.via } : null;
+      const opener = person ? { ...person, via: me.via, viaHead: me.viaHead } : null;
       if (!opener || !canOpen(opener, machine, this.keyOf(row, ownerKey?.publicKey))) throw notOwner(machine.name);
       if (!this.reachable(machineId)) throw unreachable(machine.name);
       const now = this.now();

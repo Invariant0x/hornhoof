@@ -123,6 +123,9 @@ services:
       # What machines share of products' test harnesses: its folder here, and how many MB it may take; 20480 when empty.
       HARNESS_DIR: /harness
       HARNESS_MB: ${HARNESS_MB:-}
+      # Where a file over 50 MB lives on this machine, in no copy of the database and no backup: 30 days, and lost if the
+      # machine goes.
+      FILES_DIR: /files
       # Speech recognition for voice messages that come through the heads' Telegram bots: any service that answers as
       # OpenAI's /v1/audio/transcriptions does, its key and model (whisper-1 when empty). Without it a voice message
       # reaches the agent as its recording alone.
@@ -139,6 +142,7 @@ services:
     volumes:
       - control:/control
       - harness:/harness
+      - files:/files
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -268,4 +272,5 @@ volumes:
   nodedata:
   control:
   harness:
+  files:
   keeper:

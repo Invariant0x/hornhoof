@@ -30,6 +30,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A task's allowed paths can be globs, and test files and folders are always allowed beside them.
 - A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
 - A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
+- Each file in a `reply` comes with a link its owner opens on a phone for 7 days, with no sign-in.
+- Agents and assistants give files of any size. A file over 50 MB lives 30 days on the disk of the machine that took it, outside copies and backups, and is lost if that machine goes; the task card and the chat say so by its name.
+- `hh-attach` and `hh-fetch` pass a file through the node as it is read, so a big file needs the new node.
 - Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 
