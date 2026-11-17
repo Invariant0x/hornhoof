@@ -357,13 +357,16 @@ describe('the keeper of a machine that keeps a copy', () => {
     const c = await company({ dir, beatEveryMs: 20 });
     const sub = { enabled: true, did: [] as string[] };
     let exits = 0;
-    /* A clock on which each round, a millisecond of the test's, is two seconds: below the three after which the watch
-       starts its window over, and few rounds for the half minute and more it watches. And a relay the test plays: the
-       name is free at 7, and its record names this copy as the one that holds every change. */
-    const began = Date.now();
+    /* The keeper's clock, moved by the test's: each round, a millisecond of the test's, is two seconds of it, below
+       the three after which the watch starts its window over. And a relay the test plays: the name is free at 7, and
+       its record names this copy as the one that holds every change. */
+    let perMs = 2000;
+    let mono = 0;
+    let at = Date.now();
     const clocks = () => {
-      const ms = (Date.now() - began) * 2000;
-      return { wall: 1_700_000_000_000 + ms, mono: ms };
+      mono += (Date.now() - at) * perMs;
+      at = Date.now();
+      return { wall: 1_700_000_000_000 + mono, mono };
     };
     const name = { state: 'held' as 'held' | 'empty' };
     let own = '';
@@ -390,9 +393,12 @@ describe('the keeper of a machine that keeps a copy', () => {
     /* The leader says its commits wait for this copy. */
     await until(() => f.keeper.beats().last(HOST_ID)?.beat.stance.kind === 'lead');
     expect(readTaking(f.config.dir)).toBeNull();
-    /* While the leader beats, nothing is taken, whatever the name says. */
+    /* While the leader beats, nothing is taken, whatever the name says: for 35 s, five a round, as no window of the
+       watch counts while it hears the leader. */
     name.state = 'empty';
-    await rounds(18);
+    perMs = 5000;
+    await rounds(7);
+    perMs = 2000;
     expect([readTaking(f.config.dir), exits]).toEqual([null, 0]);
     /* The leader is gone. Its last beats never said that its commits wait for this copy, so this copy may lack
        changes: it asks, and takes nothing by itself. */
