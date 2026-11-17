@@ -416,6 +416,8 @@ export class TerminalHost {
   private readonly viewsClosed = new Set<string>();
   /* Windows opening one agent wait for the same session to be created. */
   private readonly sessionsOpening = new Map<string, Promise<void>>();
+  /* The last launch into each agent's session, which the next one waits for. */
+  private readonly launches = new Map<string, Promise<unknown>>();
   /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
      counts too, since Hornhoof says the view is ready as it asks for it. */
   private readonly wanted = new Map<string, { key: string; size: Size }>();
@@ -523,6 +525,15 @@ export class TerminalHost {
   }
 
   private inputLane<T>(a: Agent, run: () => Promise<T>): Promise<T> { return this.operator?.serial(a.key, run) ?? run(); }
+
+  /* What an agent's session runs changes one launch at a time. A window that opened the waiting screen as a turn started the
+     program found no session, then replaced the program that had started meanwhile: the program went on outside its pane,
+     where no hook of its own could prove it was the agent's any more. */
+  private launching<T>(a: Agent, launch: () => Promise<T>): Promise<T> {
+    const next = (this.launches.get(a.key) ?? Promise.resolve()).then(launch);
+    this.launches.set(a.key, next.catch(() => {}));
+    return next;
+  }
 
   private intentional(a: Agent, why: Parameters<OperatorRuntime['intentional']>[1]): void { this.operator?.intentional(a.key, why); }
 
@@ -942,7 +953,7 @@ export class TerminalHost {
     const scratch = this.opts.tmux.scratch();
     this.operator?.launch(a.key, 'attempt');
     try {
-      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: job.input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
+      await this.inputLane(a, () => this.launching(a, () => this.opts.tmux.launch(a.name, { cwd: job.input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch })));
       this.operator?.launch(a.key, 'started');
     } catch (error) {
       this.operator?.launch(a.key, 'failed');
@@ -2808,7 +2819,7 @@ export class TerminalHost {
     const scratch = this.opts.tmux.scratch();
     this.beginProgramRestart(a, jobId);
     const env = { ...(await this.testShare(a)), ...lasting(job.input.env), ...spec.env };
-    await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: a.workDir, command: this.asAgent(command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
+    await this.inputLane(a, () => this.launching(a, () => this.opts.tmux.launch(a.name, { cwd: a.workDir, command: this.asAgent(command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch })));
     this.operator?.launch(a.key, 'started');
     if (!(await this.ready(a, { ...job, operatorDelivery: undefined }))) throw new Error('The restarted program did not become ready.');
     this.programIs(a, true);
@@ -3086,7 +3097,12 @@ export class TerminalHost {
     return created;
   }
 
-  private async createSession(a: Agent, starts: boolean): Promise<void> {
+  /* Only a session that is not there yet gets the waiting screen: one a program started in meanwhile keeps its program. */
+  private createSession(a: Agent, starts: boolean): Promise<void> {
+    return this.launching(a, () => this.waitingScreen(a, starts));
+  }
+
+  private async waitingScreen(a: Agent, starts: boolean): Promise<void> {
     if (await this.opts.tmux.has(a.name)) return;
     /* The window shows a loader over the empty session while the program starts. */
     const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
