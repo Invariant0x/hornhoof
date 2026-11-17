@@ -424,6 +424,28 @@ describe('a heavy check in the agent\'s own shell', () => {
     expect(await run({ PATH: process.env.PATH })).toBe('3:none');
   });
 
+  it.runIf(existsSync('/proc/self'))('keeps no running group past the slot when its wrapper is killed', async () => {
+    const alive = (pid: number) => { try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+    let leader = 0;
+    const atRelease: boolean[] = [];
+    const m = machine(true, true, () => atRelease.push(alive(leader))), hook = await m.start();
+    const started = join(m.dir, 'started');
+    const payload = 'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', payload, started], { cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    onTestFinished(() => {
+      if (leader > 0 && alive(leader)) process.kill(-leader, 'SIGKILL');
+      if (child.pid && alive(child.pid)) child.kill('SIGKILL');
+    });
+    await eventually(() => existsSync(started) && readFileSync(started, 'utf8') !== '');
+    leader = Number(readFileSync(started, 'utf8'));
+    const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+    child.kill('SIGKILL');
+    await exited;
+    await eventually(() => m.frames.includes('check.release'));
+    expect(atRelease).toEqual([false]);
+    expect(alive(leader)).toBe(false);
+  });
+
   it('makes an agent\'s tsc, vitest, eslint, jest and playwright wait for a slot however they start, and nothing else', async () => {
     const m = machine(true), hook = await m.start();
     installCheckCommand(m.dir, cli);
