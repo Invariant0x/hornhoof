@@ -1,8 +1,6 @@
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, departments, jobs, machines, nodes, subscriptions, tasks, testParts } from '../../db/schema.js';
-import { idOnly, only } from '../../db/selections.js';
-import { enqueueTurn } from '../conversation/queue.js';
+import { agents, jobs, machines, nodes, subscriptions, tasks, testParts } from '../../db/schema.js';
 import { ownBuiltin, ownMachine, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { notStep } from '../tools/steps.js';
@@ -23,40 +21,6 @@ export async function drainWork(ctx: Ctx, node: NodeIdentity) {
 }
 
 type Work = Awaited<ReturnType<typeof drainWork>>;
-
-async function machineName(ctx: Ctx, node: NodeIdentity): Promise<string> {
-  if (node.kind === 'builtin') {
-    if (node.machine === ownMachine(ctx.config)) return 'the built-in node';
-    /* The built-in node of another machine that holds the data goes by that machine's name. */
-    const [machine] = await ctx.db.select(only(machines, 'hostname')).from(machines).where(and(eq(machines.networkId, node.machine), isNull(machines.revokedAt)));
-    return `the built-in node of ${machine?.hostname || 'a machine'}`;
-  }
-  const [machine] = await ctx.db.select(only(machines, 'hostname')).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
-  return machine?.hostname || 'a machine';
-}
-
-async function headOfOperations(ctx: Ctx, companyId: string): Promise<string | null> {
-  const ops = ctx.db.select(idOnly(departments)).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
-  const [head] = await ctx.db.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'head'), inArray(agents.departmentId, ops), isNull(agents.removedAt)));
-  return head?.id ?? null;
-}
-
-function postponedText(name: string, retryAt: string, work: Work, companyId: string): string {
-  const turns = work.turns.filter(t => t.companyId === companyId).map(t => `${t.id}${t.task ? ` (#${t.task})` : ''}`).join(', ') || 'none';
-  const parts = work.parts.filter(t => t.companyId === companyId).map(t => t.id).join(', ') || 'none';
-  return `Hornhoof postponed the planned update of ${name}: its waiting deadline expired. No running work was stopped. Turns: ${turns}. Run parts: ${parts}. It will try again at ${retryAt}.`;
-}
-
-/* Each company with work on the node hears of its own work, and only of that. */
-export async function drainPostponed(ctx: Ctx, node: NodeIdentity, retryAt: string, work: Work): Promise<void> {
-  const name = await machineName(ctx, node);
-  for (const companyId of new Set([...work.turns, ...work.parts].map(t => t.companyId))) {
-    const head = await headOfOperations(ctx, companyId);
-    if (!head) continue;
-    const text = postponedText(name, retryAt, work, companyId);
-    await enqueueTurn(ctx, { companyId, agentId: head, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: name, ru: name } } } });
-  }
-}
 
 /* A node on the server's computer by the name the updater knows it by: builtin, or its plan, which labels its container. */
 export type ServerNode = { name: string; node: NodeIdentity };

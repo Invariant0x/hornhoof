@@ -32,6 +32,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `message_employee` no longer says a message did not reach an employee whose turn could not go out at once.
 - A program's idle connection to its node's bridge lasts 72 s, so tool calls no longer break with ECONNRESET.
 - External messaging keeps each sentence in its own direction in right-to-left languages.
+- A node that waits for an update takes no new turns, so it updates as soon as the turns it runs end.
 
 ### Added
 
@@ -50,6 +51,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Company phones: an owner lends an Android phone to the company's assistants through Wireless debugging.
 - An owner watches a lent phone's live screen and takes it back with Stop; a task keeps its phone recordings.
 - Each channel of a department to its contacts takes an address, with the person's consent to its purpose.
+- A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 
 ### Changed
 
@@ -75,6 +77,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Publishing or taking back a catalog revision acts only on the revision the person was shown.
 - A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
 - Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
+- A node's wait for an update never gives up, and leaders no longer enter a waiting node after three minutes.
+- `NODE_DRAIN_MS` and `NODE_UPDATE_RETRY_MS` are gone.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16

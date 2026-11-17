@@ -1018,14 +1018,13 @@ export const ru: Messages = {
     olderBuild: 'старая',
     browserFailed: 'Браузер не запустился',
     browserFailedNote: reason => `Браузер для проверок не запустился (${reason}). Выполните на этой машине команду установки еще раз без --join или посмотрите журнал ноды.`,
-    drainMark: { waiting: 'Ждет обновления', postponed: 'Обновление отложено', restarting: 'Обновляется' },
-    drainWaiting: (turns, parts, until) => {
+    drainMark: { waiting: 'Ждет обновления', restarting: 'Обновляется' },
+    drainWaiting: (turns, parts, since) => {
       const withTurns = turns > 0 || parts === 0;
       const verb = withTurns ? plural('ru', turns, { one: 'остался', other: 'осталось' }) : plural('ru', parts, { one: 'осталась', other: 'осталось' });
       const left = [withTurns ? `${turns} ${plural('ru', turns, { one: 'ход', few: 'хода', many: 'ходов', other: 'хода' })}` : '', parts > 0 ? `${parts} ${plural('ru', parts, { one: 'часть прогона', few: 'части прогона', many: 'частей прогона', other: 'части прогона' })}` : ''].filter(Boolean).join(' и ');
-      return `Ждет конца работы агентов перед обновлением: ${verb} ${left}, до ${until}`;
+      return `С ${since} ждет конца работы агентов перед обновлением: ${verb} ${left}. До тех пор новой работы не берет`;
     },
-    drainPostponed: at => `Обновление отложено: агенты не успели закончить работу. Следующая попытка в ${at}`,
     drainRestarting: 'Идет обновление: машина перезапустится и сама снова возьмет работу',
   },
   briefing: {
