@@ -3,7 +3,7 @@ import type { NodeLoad } from '@hornhoof/protocol';
 import { ApiFailure, api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, ComputerAccessView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
+import type { BuiltinView, CopiesView, DataView, MachineView, Me, MoveView, SubView, TlsView, Unfit } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar, Share } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -14,7 +14,7 @@ import { AgentsCell, agentAmounts, RunningNow } from '../ui/RunningNow';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { clock, planStateOnMachine, subName } from '../ui/subscription';
-import { cannotOpen, givesLines, isOpen, machineName, useAccess } from '../ui/access';
+import { MachineAccessBlock } from '../ui/MachineAccessBlock';
 import { useNow } from '../ui/reset';
 import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
@@ -157,7 +157,7 @@ function machineColumns(t: Messages, language: Language, priority: boolean): Tab
   const place: TableColumn<MachineRow>[] = priority ? [{ key: 'priority', label: t.cards.priority, direction: 1, className: 'k-prio', lead: true, value: placeOf, cell: m => <PriorityCell row={m} /> }] : [];
   return [
     ...place,
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /></> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OffChecks row={m} /><OtherBuild row={m} /><BrowserIssue row={m} /><CheckIssue row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b><bdi>{t.machines.percent(load(m)!)}</bdi></b></span> },
@@ -238,6 +238,11 @@ function OffChecks({ row }: { row: MachineRow }) {
 function OffChecksNote({ row }: { row: MachineRow }) {
   const t = useT();
   return row.lendsTests === false ? <p className="machine-note">{t.machines.offChecksNote}</p> : null;
+}
+
+function CheckIssue({ row }: { row: MachineRow }) {
+  const t = useT();
+  return row.checkError ? <span className="badge old" title={row.checkError}>{t.machines.checksPaused}</span> : null;
 }
 
 function BrowserIssue({ row }: { row: MachineRow }) {
@@ -605,34 +610,8 @@ function CopiesLine({ copies }: { copies: CopiesView }) {
   </>;
 }
 
-/* Computer access to the machine: that it is open, for everyone who sees the card, and the buttons for who may press
-   them. Its owner opens it for a day, with what their key signs where the machine holds that key; closed, it says
-   nothing to anyone else. */
-function MachineAccess({ view, controls }: { view: ComputerAccessView; controls: MachineControls }) {
-  const t = useT();
-  const { language } = useLanguage();
-  const { answer, prompt } = useAccess(() => void controls.refresh(), controls.fail);
-  const machine = machineName(t, view.machine);
-  if (isOpen(view)) {
-    return (
-      <Part title={t.machines.access}>
-        <p>{t.window.computerOpenUntil(machine, clock(language, view.until) ?? '')}</p>
-        {view.canClose && <div className="entry-actions"><button className="act" type="button" onClick={() => void answer(view, 'close')}>{t.window.computerClose}</button></div>}
-      </Part>
-    );
-  }
-  if (!view.canOpen) return null;
-  const blocked = cannotOpen(t, view);
-  return (
-    <Part title={t.machines.access}>
-      {prompt ?? (blocked ? <p>{blocked}</p> : <div className="entry-actions"><button className="act" type="button" onClick={() => void answer(view, 'open')}>{t.window.computerOpenFor(machine)}</button></div>)}
-      {!blocked && givesLines(t, view).map(line => <p key={line}>{line}</p>)}
-    </Part>
-  );
-}
-
 /* The second block: whose machine it is and what system it runs, where the company opens on it, its agent programs
-   and who may reach the computer. */
+   and its computer access. */
 function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: boolean; controls: MachineControls }) {
   const t = useT();
   const m = row.source;
@@ -642,7 +621,7 @@ function SystemBlock({ row, editable, controls }: { row: MachineRow; editable: b
     <CardBlock title={t.cards.systemBlock}>
       {facts.length > 0 && <Facts items={facts} />}
       <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
-      {row.access && <MachineAccess view={row.access} controls={controls} />}
+      {row.access && <MachineAccessBlock view={row.access} onChanged={() => void controls.refresh()} />}
     </CardBlock>
   );
 }
@@ -659,7 +638,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OffChecks row={row} /><OtherBuild row={row} /><BrowserIssue row={row} /><CheckIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
@@ -669,6 +648,7 @@ function MachineDetails({ row, subs, me, now, order, controls }: { row: MachineR
           <OffChecksNote row={row} />
           <BuildNote row={row} />
           <BrowserNote row={row} />
+          {row.checkError && <p className="machine-note">{row.checkError}</p>}
           <NetworkPlace row={row} />
         </Part>
       </section>
@@ -706,6 +686,11 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const live = useRef(true);
+  /* Each change the person makes to the shown commands counts here, so a look that began before it leaves them alone. */
+  const commandChanges = useRef(0);
+  const commandsChanged = () => {
+    commandChanges.current += 1;
+  };
 
   useEffect(() => {
     live.current = true;
@@ -719,7 +704,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       const [hosts, list] = await Promise.all([
         api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean; move?: MoveView | null; canMove?: boolean }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
-        loadMachineCommands(live, setCommand, setAddCommands, setCoreCommands),
+        loadMachineCommands(live, commandChanges, setCommand, setAddCommands, setCoreCommands),
       ]);
       if (!live.current) return;
       setMachines(hosts.machines);
@@ -751,12 +736,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const machineCommand = () =>
     run(async () => {
       const res = await api.post<{ id?: string; command: string; expiresAt?: string }>('/api/machines/command');
+      commandsChanged();
       setCommand(toActiveCommand(res));
     });
 
   const cancelMachine = (id: string) =>
     run(async () => {
       await hideShownCommand(id);
+      commandsChanged();
       setCommand(null);
     });
 
@@ -764,6 +751,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
     run(async () => {
       const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
       setPicking(null);
+      commandsChanged();
       setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
     });
 
@@ -771,12 +759,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const makeCore = (m: MachineView) =>
     run(async () => {
       const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/core`);
+      commandsChanged();
       setCoreCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
     });
 
   const cancelCore = (machineId: string, id: string) =>
     run(async () => {
       await hideShownCommand(id);
+      commandsChanged();
       setCoreCommands(all => {
         const next = { ...all };
         delete next[machineId];
@@ -787,6 +777,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const cancelAdd = (machineId: string, id: string) =>
     run(async () => {
       await hideShownCommand(id);
+      commandsChanged();
       setAddCommands(all => {
         const next = { ...all };
         delete next[machineId];

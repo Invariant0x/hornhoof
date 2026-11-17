@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentChanges, agents, departments, jobs, teams } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, approvalPolicies, departments, jobs, teams } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { company } from './department-owner-fixture.js';
+import { as } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+
+/* The first copy of the shared database opens as the file is collected: a cold open is no part of the first test's time. */
+await prepareSharedDatabase();
 
 /* A department runs itself: what a person who runs it decides in its head's window, its head carries out at once, as that
    person, with no word of the orchestrator or the CEO. Nothing outside the department comes with it. */
@@ -15,7 +20,6 @@ type Res = { content: { type: string; text: string }[]; isError?: boolean };
 const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
 const text = (r: Res) => r.content[0]!.text;
 const ok = (r: Res) => expect(r.isError, text(r)).toBeFalsy();
-const THEIRS = 'Only the people of this department decide this';
 const OUTSIDE = 'You change only your own department';
 
 const HEAD_TOOLS = ['staffing_options', 'hire', 'change_department', 'set_team_urgent_only', 'change_employee', 'reset_employee', 'fire_employee'];
@@ -39,7 +43,8 @@ describe("a department head's tools", () => {
 describe('a department head for a person who runs its department', () => {
   it('creates, renames and removes sub-units and adds and removes products of its department', async () => {
     const c = await company();
-    const hana = await c.tools(c.head, c.ids.dana);
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    const hana = await c.tools(c.head);
     ok(await call(hana, 'change_department', { teams: ['Mobile', 'Web'], products: ['App'] }));
     expect(await teamNames(c)).toEqual(['Mobile', 'Web']);
     expect(await productNames(c)).toEqual(['App', 'Shop']);
@@ -51,9 +56,10 @@ describe('a department head for a person who runs its department', () => {
     expect((await c.db.select().from(teams).where(eq(teams.id, mobile!.id)))[0]!.urgentOnly).toBe(true);
   });
 
-  it('hires into its department and changes, resets and fires its employees, each kept as that person\'s decision', async () => {
+  it('records the head and its authority person for hiring, changes, reset, team removal and firing', async () => {
     const c = await company();
-    const hana = await c.tools(c.head, c.ids.dana);
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    const hana = await c.tools(c.head);
     const options = JSON.parse(text(await call(hana, 'staffing_options', {}))) as { department: { id: string } };
     expect(options.department.id).toBe(c.dev.id);
     ok(await call(hana, 'hire', { people: [{ role: 'DEV-BE', name: 'Ira' }] }));
@@ -62,59 +68,96 @@ describe('a department head for a person who runs its department', () => {
     const [web] = await c.db.insert(teams).values({ companyId: c.companyId, departmentId: c.dev.id, name: 'Web' }).returning();
     ok(await call(hana, 'change_employee', { employee: c.worker.id, name: 'Bob', team: web!.id }));
     expect(await agentRow(c, c.worker.id)).toMatchObject({ name: 'Bob', teamId: web!.id });
+    ok(await call(hana, 'change_department', { teams: [{ id: web!.id, remove: true }] }));
     ok(await call(hana, 'reset_employee', { employee: c.worker.id }));
     ok(await call(hana, 'fire_employee', { employee: ira!.id }));
     expect((await agentRow(c, ira!.id)).removedAt).not.toBeNull();
     const changes = await c.db.select().from(agentChanges).where(inArray(agentChanges.agentId, [c.worker.id, ira!.id]));
-    expect(changes.map(ch => ch.field).sort()).toEqual(['hired', 'name', 'removed', 'reset', 'team']);
-    for (const change of changes) expect(change, change.field).toMatchObject({ personId: c.ids.dana, byOrchestrator: false });
+    expect(changes.map(ch => ch.field).sort()).toEqual(['hired', 'name', 'removed', 'reset', 'team', 'team']);
+    for (const change of changes) expect(change, change.field).toMatchObject({ actingAgentId: c.head.id, personId: c.ids.dana, byOrchestrator: false });
+    const applied = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.head.id), eq(agentEvents.kind, 'applied')));
+    expect(applied).toHaveLength(2);
+    expect(applied).toContainEqual(expect.objectContaining({ personId: null, data: expect.objectContaining({ kind: 'staff', department: c.dev.id, onBehalfOfPersonId: c.ids.dana, sourceSeq: null }) }));
+    await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.head.id));
+    const card = await c.app.inject({ method: 'GET', url: `/api/agents/${c.worker.id}`, ...as(c.danaToken) });
+    expect(card.statusCode).toBe(200);
+    for (const change of card.json().changes) expect(change).toMatchObject({ actingAgent: { id: c.head.id, name: 'Hana' }, personName: 'Dana', byOrchestrator: false });
   });
 
   it('moves an employee who holds work into an urgent-only sub-unit', async () => {
     const c = await company();
-    const hana = await c.tools(c.head, c.ids.dana);
+    const hana = await c.tools(c.head);
     const [rush] = await c.db.insert(teams).values({ companyId: c.companyId, departmentId: c.dev.id, name: 'Rush', urgentOnly: true }).returning();
     ok(await call(hana, 'change_employee', { employee: c.worker.id, team: rush!.id }));
     expect((await agentRow(c, c.worker.id)).teamId).toBe(rush!.id);
   });
 
-  it('goes by the last person who wrote into its turn, also through their assistant', async () => {
+  it('uses its named owner without a fresh message, and records the head and whose rights it used', async () => {
     const c = await company();
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     const hana = await c.tools(c.head);
-    const refused = await call(hana, 'change_department', { teams: ['Mobile'] });
-    expect(refused.isError).toBe(true);
-    expect(text(refused)).toContain(THEIRS);
+    ok(await call(hana, 'change_department', { teams: ['Mobile'] }));
+    ok(await call(hana, 'set_approval_policy', { department: c.dev.id, channel: 'message', mode: 'every' }));
+    const [policy] = await c.db.select().from(approvalPolicies).where(eq(approvalPolicies.departmentId, c.dev.id));
+    expect(policy).toMatchObject({ updatedBy: c.ids.dana, mode: 'every' });
+    const applied = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'applied'));
+    expect(applied).toHaveLength(1);
+    expect(applied[0]).toMatchObject({ agentId: c.head.id, personId: null, data: { onBehalfOfPersonId: c.ids.dana, sourceSeq: null } });
+    expect(await teamNames(c)).toEqual(['Mobile']);
+  });
+
+  it('keeps the orchestrator\'s own department and staffing changes in its own history', async () => {
+    const c = await company();
+    const orchestrator = await c.tools(c.orchestrator);
+    ok(await call(orchestrator, 'build_structure', { items: [{ department: c.dev.id, teams: ['Mobile'] }] }));
+    ok(await call(orchestrator, 'hire', { department: c.dev.id, people: [{ role: 'DEV-BE', name: 'Ira' }] }));
+    const applied = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'applied'));
+    expect(applied).toHaveLength(2);
+    for (const event of applied) expect(event).toMatchObject({ agentId: c.orchestrator.id, personId: null, data: { onBehalfOfPersonId: c.ids.ceo, sourceSeq: null } });
+    expect(applied).toContainEqual(expect.objectContaining({ data: expect.objectContaining({ kind: 'staff' }) }));
+    expect(await teamNames(c)).toEqual(['Mobile']);
+    const [change] = await c.db.select().from(agentChanges).where(eq(agentChanges.field, 'hired'));
+    expect(change).toMatchObject({ actingAgentId: null, personId: null, byOrchestrator: true });
+  });
+
+  it('keeps a human author and refuses author fields sent in the request', async () => {
+    const c = await company();
+    const forged = await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.worker.id}`, ...as(c.danaToken), payload: { name: 'Bob', actingAgentId: c.head.id, personId: c.ids.ceo, byOrchestrator: true } });
+    expect(forged.statusCode).toBe(400);
+    expect(await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id))).toEqual([]);
+    const changed = await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.worker.id}`, ...as(c.danaToken), payload: { name: 'Bob' } });
+    expect(changed.statusCode).toBe(200);
+    const [change] = await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id));
+    expect(change).toMatchObject({ actingAgentId: null, personId: c.ids.dana, byOrchestrator: false });
+    expect(changed.json().changes).toMatchObject([{ actingAgent: null, personName: 'Dana', byOrchestrator: false }]);
+  });
+
+  it('keeps its own owner when another person, assistant or employee writes into the turn', async () => {
+    const c = await company();
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    const hana = await c.tools(c.head, c.ids.sam);
     const [turn] = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.head.id), eq(jobs.status, 'running')));
     await appendEvent(c.app.ctx, {
-      companyId: c.companyId, agentId: c.head.id, jobId: turn!.id, kind: 'message', personId: c.ids.dana,
+      companyId: c.companyId, agentId: c.head.id, jobId: turn!.id, kind: 'message', personId: c.ids.ceo,
       data: { text: 'Make a Mobile sub-unit.', channel: 'assistant', assistant: { id: randomUUID(), name: 'Ava', message: randomUUID() } },
     });
-    ok(await call(hana, 'change_department', { teams: ['Mobile'] }));
     await appendEvent(c.app.ctx, { companyId: c.companyId, agentId: c.head.id, jobId: turn!.id, kind: 'message', personId: null, data: { text: 'Please hire me a helper.', from: 'agent', name: 'Bruno', by: c.worker.id } });
-    ok(await call(hana, 'change_department', { teams: ['Web'] }));
-    expect(await teamNames(c)).toEqual(['Mobile', 'Web']);
+    ok(await call(hana, 'change_employee', { employee: c.worker.id, name: 'Bob' }));
+    const [change] = await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id));
+    expect(change).toMatchObject({ actingAgentId: c.head.id, personId: c.ids.dana, byOrchestrator: false });
   });
 });
 
 describe('a department head refuses', () => {
-  it('in a turn that answers nobody, or someone who does not run its department, and changes nothing', async () => {
+  it('uses the active CEO when no department owner is named, whoever opened the turn', async () => {
     const c = await company();
     for (const by of [null, c.ids.sam, c.ids.wes]) {
       const hana = await c.tools(c.head, by);
-      for (const [name, args] of [
-        ['change_department', { teams: ['Mobile'] }],
-        ['hire', { people: [{ role: 'DEV-BE', name: 'Ira' }] }],
-        ['change_employee', { employee: c.worker.id, name: 'Bob' }],
-        ['fire_employee', { employee: c.worker.id }],
-      ] as const) {
-        const refused = await call(hana, name, args);
-        expect(refused.isError, `${name} for ${by}`).toBe(true);
-        expect(text(refused), `${name} for ${by}`).toContain(THEIRS);
-      }
+      ok(await call(hana, 'change_employee', { employee: c.worker.id, name: `Bob ${by ?? 'alone'}` }));
     }
-    expect(await teamNames(c)).toEqual([]);
-    expect(await agentRow(c, c.worker.id)).toMatchObject({ name: 'Bruno', removedAt: null });
-    expect(await c.db.select().from(agents).where(eq(agents.name, 'Ira'))).toEqual([]);
+    const changes = await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id));
+    expect(changes).toHaveLength(3);
+    for (const change of changes) expect(change).toMatchObject({ actingAgentId: c.head.id, personId: c.ids.ceo, byOrchestrator: false });
   });
 
   it('anything outside its own department, even on the CEO\'s word', async () => {

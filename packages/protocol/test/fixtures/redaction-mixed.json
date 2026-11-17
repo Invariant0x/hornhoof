@@ -1,0 +1,23 @@
+[
+  {
+    "name": "password label",
+    "text": "Connector refused sk-ant-oat01-abcdefghijklmnop; password: private-secret-123; retry https://fixture:private-secret-123@api.example.test/v1",
+    "knownSecrets": ["sk-ant-oat01-abcdefghijklmnop", "private-secret-123"],
+    "literalExpected": "Connector refused [hidden]; password: [hidden]; retry https://fixture:[hidden]@api.example.test/v1",
+    "diagnosticExpected": "Connector refused [hidden]; password: [hidden]; retry https://[hidden]@api.example.test/v1"
+  },
+  {
+    "name": "Russian password label",
+    "text": "Connector refused sk-ant-oat01-abcdefghijklmnop; пароль=private-secret-123; retry https://fixture:private-secret-123@api.example.test/v1",
+    "knownSecrets": ["sk-ant-oat01-abcdefghijklmnop", "private-secret-123"],
+    "literalExpected": "Connector refused [hidden]; пароль=[hidden]; retry https://fixture:[hidden]@api.example.test/v1",
+    "diagnosticExpected": "Connector refused [hidden]; пароль=[hidden]; retry https://[hidden]@api.example.test/v1"
+  },
+  {
+    "name": "token label",
+    "text": "Connector refused sk-ant-oat01-abcdefghijklmnop; token=private-secret-123; retry https://fixture:private-secret-123@api.example.test/v1",
+    "knownSecrets": ["sk-ant-oat01-abcdefghijklmnop", "private-secret-123"],
+    "literalExpected": "Connector refused [hidden]; token=[hidden]; retry https://fixture:[hidden]@api.example.test/v1",
+    "diagnosticExpected": "Connector refused [hidden]; token=[hidden]; retry https://[hidden]@api.example.test/v1"
+  }
+]

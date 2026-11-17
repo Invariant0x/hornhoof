@@ -1,0 +1,96 @@
+name: Media
+
+# Renders the README's animated pictures from apps/web/media/scenes and keeps them as an artifact to look at and commit. A
+# push to a branch named media-* renders the scenes listed below; a run by hand renders the ones it names, or these when it
+# names none. Where the repository variables BUILD_RUNS_ON and BUILDKIT_ENDPOINT name our own runner and its BuildKit, the
+# scenes render in a build of apps/web/media/Dockerfile there, as our runners have no Docker daemon; otherwise GitHub's
+# machine renders them with run.sh and Docker.
+on:
+  push:
+    branches: ['media-*']
+  workflow_dispatch:
+    inputs:
+      scenes:
+        description: Scene files to render, separated by spaces
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: media-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render:
+    if: ${{ !(vars.BUILD_RUNS_ON && vars.BUILDKIT_ENDPOINT) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SCENES: ${{ inputs.scenes || 'tasks.spec.ts board.spec.ts goals.spec.ts calls.spec.ts skins.spec.ts' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install ffmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+      - name: Render the scenes
+        env:
+          KEEP_MEDIA_RESULTS: '1'
+          MEDIA_ASSETS_DIR: ${{ github.workspace }}/media-out/gifs
+        # SCENES is split into one argument per scene on purpose.
+        run: npm --prefix apps/web run media -- $SCENES
+      - name: Keep the pictures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: media-gifs
+          path: media-out/gifs
+          if-no-files-found: warn
+      - name: Keep the videos, marks and failure shots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: media-results
+          path: apps/web/media/results
+          if-no-files-found: ignore
+
+  render-own:
+    if: ${{ vars.BUILD_RUNS_ON && vars.BUILDKIT_ENDPOINT }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver: remote
+          endpoint: ${{ vars.BUILDKIT_ENDPOINT }}
+      - name: Render the scenes in a build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/web/media/Dockerfile
+          build-args: SCENES=${{ inputs.scenes || 'tasks.spec.ts board.spec.ts goals.spec.ts calls.spec.ts skins.spec.ts' }}
+          outputs: type=local,dest=media-out
+          push: false
+      - name: Show how the render went
+        run: |
+          tail -n 120 media-out/render.log
+          test "$(cat media-out/status)" = 0
+      - name: Keep the pictures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: media-gifs
+          path: media-out/gifs
+          if-no-files-found: warn
+      - name: Keep the videos, marks, failure shots and log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: media-results
+          path: |
+            media-out/results
+            media-out/render.log
+          if-no-files-found: ignore

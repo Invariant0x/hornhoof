@@ -11,6 +11,6 @@ Use this ability to identify and qualify prospects for an assigned customer prof
 2. Use allowed public company sites, directories, job posts, professional profiles, news and company-provided inbound leads. Respect source terms; do not scrape where prohibited.
 3. Score each lead consistently for fit, current reason to act and a relevant work contact. Support each score with evidence, distinguishing strong, partial and absent fit.
 4. Classify assigned inbound leads against the agreed response target and flag urgent opportunities with their evidence.
-5. Before any authorized CRM entry, check duplicates, consent and do-not-contact restrictions. Record source, date, fit and reason; edit only within assigned authority.
+5. Before any authorized CRM entry, check duplicates and "do not write" marks. Record source, date, fit and reason; edit only within assigned authority.
 
-Return a prioritized list with one sentence per lead explaining why it fits now and what remains unknown. Never buy contact lists or infer email addresses from patterns without explicit authorized approval. Prospecting does not authorize sending: any outreach needs the server outbound gateway, published sources and applicable exact approval.
+Return a prioritized list with one sentence per lead explaining why it fits now and what remains unknown. Never buy contact lists or guess email addresses from patterns. Prospecting does not authorize sending: outreach is marked in the department's git, and it waits for nobody's yes unless its department set an approval rule for it.

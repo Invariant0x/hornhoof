@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ru } from '../src/i18n/ru';
 import { Setup } from '../src/screens/Setup';
 import { mockApi, type Call, withKey } from './api-mock';
 import { decl } from './css';
@@ -63,7 +64,7 @@ describe('Setup', () => {
     expect(screen.getByRole('radio', { name: /Start empty/ })).toBeChecked();
     /* A template brings its people, who wait only for a subscription; the card counts the turnkey teams among them. */
     expect(screen.getByText(/departments and their employees right away/)).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Project team/ })).toHaveAccessibleName(expect.stringContaining('11 employees'));
+    expect(screen.getByRole('radio', { name: /Project team/ })).toHaveAccessibleName(expect.stringContaining('13 employees'));
     /* The eight ready-made companies, named by the template, not by the scheme picture. */
     expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
     /* The scheme is a picture only, so a screen reader reads the template name and the "Departments:" line, not "Department scheme". */
@@ -97,6 +98,8 @@ describe('Setup', () => {
     render(<Setup onDone={onDone} />);
     await fillFirstTwoSteps(user);
     expect(screen.getByRole('heading', { name: 'Connect the orchestrator' })).toBeInTheDocument();
+    expect(screen.getByText(/It can do anything in your company and in Hornhoof itself, sees everything, and can change its own system\./)).toBeInTheDocument();
+    expect(ru.setup.orchestratorIntro).toContain('Он может все в вашей компании и в самом Hornhoof, видит все и может менять свою систему.');
     await user.click(screen.getByRole('radio', { name: 'API key' }));
     await user.selectOptions(screen.getByLabelText('Provider'), 'Anthropic');
     await user.type(screen.getByLabelText('Key'), 'sk-ant-xyz12345');

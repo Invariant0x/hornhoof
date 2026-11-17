@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { only } from '../src/db/selections.js';
 import { appendEvent, publishEvent } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
@@ -51,6 +51,15 @@ describe('GET /api/stream', () => {
     expect(JSON.stringify((await db.select(only(agentEvents, 'data')).from(agentEvents)).map(r => r.data))).not.toContain('Ab3_x-9Zq');
   });
 
+  it('keeps a join code hidden when a password label comes before it, in English and in Russian', async () => {
+    const { app, db, orchestrator, companyId } = await company();
+    for (const text of ['password: --join Q7w_e-4Rt', 'пароль=--join Q7w_e-4Rt']) {
+      const event = await appendEvent(app.ctx, { companyId, agentId: orchestrator.id, kind: 'text', data: { text } });
+      expect(JSON.stringify(event.data), text).not.toContain('Q7w_e-4Rt');
+    }
+    expect(JSON.stringify((await db.select(only(agentEvents, 'data')).from(agentEvents)).map(r => r.data))).not.toContain('Q7w_e-4Rt');
+  });
+
   it("keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream", async () => {
     const { app, db, ceo, orchestrator, companyId } = await company();
     const stream = await openStream(app, ceo);
@@ -88,13 +97,19 @@ describe('GET /api/stream', () => {
     await until(() => stream.ended());
   });
 
+  /* Only the ping finds a person disabled where nothing told the stream, as a restore or another server's write does. Its
+     interval goes only as far as the test moves it. */
   it('ends the stream of a person who was disabled, at the next ping', async () => {
-    const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: '50' });
+    const { app, db, ceo, companyId } = await company();
     const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
     const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const stream = await openStream(app, head);
-    const maria = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people.find((p: { name: string }) => p.name === 'Maria');
-    expect((await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { status: 'disabled' }, ...as(ceo) })).statusCode).toBe(200);
+    await db.update(people).set({ status: 'disabled' }).where(eq(people.email, 'maria@acme.com'));
+    await vi.advanceTimersByTimeAsync(app.ctx.config.streamPingMs - 1);
+    expect(stream.ended()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await until(() => stream.ended());
   });
 
@@ -104,7 +119,7 @@ describe('GET /api/stream', () => {
     const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const stream = await openStream(app, head);
     const maria = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people.find((p: { name: string }) => p.name === 'Maria');
-    await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { status: 'disabled' }, ...as(ceo) });
+    expect((await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { status: 'disabled' }, ...as(ceo) })).statusCode).toBe(200);
     await until(() => stream.ended());
   });
 

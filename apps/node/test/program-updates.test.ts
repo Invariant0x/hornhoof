@@ -154,6 +154,49 @@ describe('node-owned program updates', () => {
   });
 });
 
+describe('a program that does not start on the machine', () => {
+  it('keeps known credentials out of the repair snapshot, including credentials learned after the check', () => {
+    const secret = 'private-install-secret';
+    const known: string[] = [];
+    const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => '2.0.0', install: async () => {} }]);
+    updates.watch(() => {}, () => known);
+    updates.repaired('claude', { state: 'broken', line: `Cannot start with ${secret}` });
+    known.push(secret);
+    expect(updates.snapshot()[0]!.reason).toBe('Cannot start with [hidden]');
+    expect(JSON.stringify(updates.snapshot())).not.toContain(secret);
+  });
+
+  it('says it is installed again, then why it still does not start, and nothing once it starts', async () => {
+    writeVersion('@anthropic-ai/claude-code', '2.0.0');
+    const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => readInstalledVersion(tools, 'claude'), install: async () => {} }]);
+    const told: ProgramInfo[][] = [];
+    updates.watch(() => told.push(updates.snapshot()));
+    updates.repaired('claude', { state: 'reinstalling' });
+    updates.repaired('claude', { state: 'broken', line: 'Error: claude native binary not installed.' });
+    updates.repaired('claude', null);
+    expect(told).toEqual([
+      [{ id: 'claude', version: '2.0.0', updating: false, failed: false, repair: 'reinstalling' }],
+      [{ id: 'claude', version: '2.0.0', updating: false, failed: false, repair: 'broken', reason: 'Error: claude native binary not installed.' }],
+      [{ id: 'claude', version: '2.0.0', updating: false, failed: false }],
+    ]);
+  });
+
+  it('says only that it does not start when it printed nothing, and forgets that when an update begins', async () => {
+    const updates = new ProgramUpdates([{ id: 'codex', readVersion: () => null, install: async () => {} }]);
+    updates.repaired('codex', { state: 'broken', line: null });
+    expect(updates.snapshot()).toEqual([{ id: 'codex', version: null, updating: false, failed: false, repair: 'broken' }]);
+    const batch = updates.update();
+    expect(updates.snapshot()).toEqual([{ id: 'codex', version: null, updating: true, failed: false }]);
+    await batch;
+  });
+
+  it('leaves a program it does not manage alone', () => {
+    const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => null, install: async () => {} }]);
+    updates.repaired('agy', { state: 'reinstalling' });
+    expect(updates.snapshot()).toEqual([{ id: 'claude', version: null, updating: false, failed: false }]);
+  });
+});
+
 describe('installed npm versions', () => {
   it.each([
     ['claude', '@anthropic-ai/claude-code'], ['codex', '@openai/codex'], ['kimi', '@moonshot-ai/kimi-code'],

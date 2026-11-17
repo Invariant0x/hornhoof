@@ -1,14 +1,17 @@
 import type { Page } from '@playwright/test';
 import { taskRoute } from '../../test/task-route';
-import type { BacklogItem, Decisions, Me, Org, TaskDepartments, TaskLine, TurnView } from '../../src/types';
+import type { BacklogItem, Decisions, GoalView, Me, Org, Pipeline, TaskDepartments, TaskLine, TurnView } from '../../src/types';
 import { detail, ME, serveApi } from '../api';
 
-/* A company of two departments and the orchestrator's own work, with 138 tasks: Development runs turn 3 with six goals,
-   each with three related tasks of six tasks each, finished turn 2 as release v1.2.0, and has urgent work outside turns that
-   waits for the person's answer; Sales, with no repository, runs turn 5 outside releases. The person has Development of their
-   own, so its list for later turns shows; Sales they only read. */
+/* A company of two departments and the orchestrator's own work, with 138 tasks: Development runs turn 3 with six pieces of
+   work, each with three subtasks of six tasks each, finished turn 2 as release v1.2.0, and has urgent work outside turns that
+   waits for the person's answer; Sales, with no repository, runs turn 5 outside releases. The company aims at 500 shops on card
+   payments, Development at card payments and refunds under it; card payments go through the pipeline "Payments way". Ivan,
+   the person, answers for Development and its work; Maria for Sales. He has Development of his own; Sales he only reads. */
 export const DEV = { id: 'd2', name: 'Development' };
 export const SALES = { id: 'd3', name: 'Sales' };
+const IVAN = { id: ME.person.id, name: ME.person.name };
+const MARIA = { id: 'p2', name: 'Maria' };
 const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: { en: 'Developer', ru: 'Разработчик' } };
 const ROSA = { id: 'b2', name: 'Rosa', kind: 'worker' as const, role: { en: 'Seller', ru: 'Продавец' } };
 const HANA = { id: 'h1', name: 'Hana', kind: 'head' as const, role: { en: 'Head of development', ru: 'Глава разработки' } };
@@ -32,7 +35,21 @@ export const TURNS: TurnView[] = [
   turn(5, 'open', 'Spring sale', 'Tell the shop owners about the sale.', { total: 1, done: 0 }, SALES.id),
 ];
 
-const GOALS = ['Take card payments', 'Refunds on request', 'Receipts by email', 'Gift cards', 'Pay in parts', 'Delivery dates'];
+const WORK = ['Take card payments', 'Refunds on request', 'Receipts by email', 'Gift cards', 'Pay in parts', 'Delivery dates'];
+
+const goal = (id: string, number: number, title: string, over: Partial<GoalView>): GoalView => ({
+  id, number, title, why: '', department: DEV, parentId: 'g1', responsible: IVAN, target: null, current: null, unit: '', dueAt: null, status: 'active', progress: 0, done: 0, total: 0, version: 1, mayEdit: true, ...over,
+});
+export const GOALS: GoalView[] = [
+  goal('g1', 1, '500 shops pay by card', { why: 'Shops that take cards sell twice as much.', department: null, parentId: null, target: 500, current: 212, unit: 'shops', progress: 0.424 }),
+  goal('g2', 2, 'Card payments', { why: 'A shop takes a card in one step.', dueAt: '2026-11-10T00:00:00.000Z' }),
+  goal('g3', 3, 'Refunds', { why: 'A shop gives the money back the same day.' }),
+];
+const SERVES = (g: GoalView) => ({ id: g.id, number: g.number, title: g.title });
+export const PIPELINE: Pipeline = {
+  id: 'pl1', department: DEV, name: 'Payments way', why: 'Every payment change is built, then checked.', archived: false, version: 1, mayEdit: true,
+  stages: [{ id: 's1', parentId: null, name: 'Build', ownerRole: null, owner: null, position: 0 }, { id: 's2', parentId: 's1', name: 'Check', ownerRole: null, owner: null, position: 0 }],
+};
 
 let made = 0;
 const task = (title: string, place: { id: string; name: string } | null, extra: Partial<TaskLine>): TaskLine => {
@@ -40,23 +57,29 @@ const task = (title: string, place: { id: string; name: string } | null, extra: 
   return {
     echelons: taskRoute(), id: `t${number}`, number, title, brief: `${title}: what it does for the shop and why it is needed.`,
     status: 'working', department: place, product: null, assignee: place === SALES ? ROSA : place ? BRUNO : null, turn: 3,
-    parentId: null, waitsFor: [], createdAt: '2026-11-14T08:00:00.000Z', updatedAt: '2026-11-14T09:00:00.000Z', ...extra,
+    parentId: null, waitsFor: [], createdAt: '2026-11-14T08:00:00.000Z', updatedAt: '2026-11-14T09:00:00.000Z',
+    responsible: place === SALES ? MARIA : IVAN, goal: null, why: '', dueAt: null, pipelineId: null, pipelineStageId: null,
+    time: { inStatusSince: '2026-11-14T08:00:00.000Z', workSeconds: 3600, waitsOn: [] }, ...extra,
   };
 };
 
 function company(): TaskLine[] {
   made = 0;
   const all: TaskLine[] = [];
-  for (const title of GOALS) {
-    const goal = task(title, DEV, { assignee: HANA });
-    all.push(goal);
+  for (const [w, title] of WORK.entries()) {
+    const served = w === 0 ? SERVES(GOALS[1]!) : w === 1 ? SERVES(GOALS[2]!) : null;
+    const way = w === 0 ? { pipelineId: PIPELINE.id, pipelineStageId: 's1' } : {};
+    const top = task(title, DEV, { assignee: HANA, goal: served, why: `${title} for every shop.`, dueAt: w === 0 ? '2026-11-20T00:00:00.000Z' : null, ...way });
+    all.push(top);
     ['Plan', 'Build', 'Check'].forEach((step, c) => {
-      const related = task(`${step}: ${title.toLowerCase()}`, DEV, { parentId: goal.id, status: c === 0 ? 'done' : 'working' });
+      const related = task(`${step}: ${title.toLowerCase()}`, DEV, { parentId: top.id, goal: served, status: c === 0 ? 'done' : 'working', ...(w === 0 ? { pipelineId: PIPELINE.id, pipelineStageId: c === 2 ? 's2' : 's1' } : {}) });
       all.push(related);
-      for (let l = 0; l < 6; l++) all.push(task(`Part ${l + 1} of ${step.toLowerCase()}`, DEV, { parentId: related.id, status: c === 0 || l < 3 ? 'done' : 'working', echelons: { ...taskRoute(), stages: [] } }));
+      for (let l = 0; l < 6; l++) all.push(task(`Part ${l + 1} of ${step.toLowerCase()}`, DEV, { parentId: related.id, goal: served, status: c === 0 || l < 3 ? 'done' : 'working', echelons: { ...taskRoute(), stages: [] } }));
     });
   }
-  all.push(task('Fix the sign-in page', DEV, { turn: null, urgent: true, status: 'waiting' }));
+  all.push(task('Fix the sign-in page', DEV, {
+    turn: null, urgent: true, status: 'waiting', time: { inStatusSince: '2026-11-13T08:00:00.000Z', workSeconds: 0, waitsOn: [{ who: { kind: 'person', ...IVAN }, since: '2026-11-13T08:00:00.000Z' }] },
+  }));
   all.push(task('Rename the shop', DEV, { turn: null, status: 'done' }));
   all.push(task('Old checkout', DEV, { turn: 2, status: 'done' }));
   all.push(task('Call the shop owners back', SALES, { turn: 5, status: 'review' }));
@@ -82,7 +105,9 @@ const item = (id: string, title: string, text: string): BacklogItem => ({ id, de
 
 /* Serves the screen to the CEO: every department, Development of their own. reads: the task lists the page asked for. */
 export async function serveTasksBoard(page: Page, me: Me = ME) {
-  const places: TaskDepartments = { whole: me.person.scopeKind === 'company', departments: [{ ...DEV, templateKey: null, mine: true }, { ...SALES, templateKey: null, mine: false }] };
+  /* The CEO plans everywhere; anyone else in their own department only. */
+  const ceo = !!(me.person.isOwner || me.person.isCeoDelegate);
+  const places: TaskDepartments = { whole: me.person.scopeKind === 'company', mayPlanCompany: ceo, departments: [{ ...DEV, templateKey: null, mine: true, mayPlan: true, responsible: IVAN }, { ...SALES, templateKey: null, mine: false, mayPlan: ceo, responsible: MARIA }] };
   const reads: string[] = [];
   await serveApi(page);
   await page.route('**/api/**', route => {
@@ -93,12 +118,16 @@ export async function serveTasksBoard(page: Page, me: Me = ME) {
     if (path === '/api/turns') return route.fulfill({ json: { turns: TURNS } });
     if (path === '/api/task-departments') return route.fulfill({ json: places });
     if (path === '/api/requests') return route.fulfill({ json: DECISIONS });
+    if (path === '/api/goals') return route.fulfill({ json: { goals: GOALS } });
+    if (path === '/api/pipelines') return route.fulfill({ json: { pipelines: [PIPELINE] } });
+    const aim = GOALS.find(g => path === `/api/goals/${g.id}`);
+    if (aim) return route.fulfill({ json: { goal: aim, log: [] } });
     if (path === '/api/tasks') {
       reads.push(url.search);
       return route.fulfill({ json: { tasks: TASKS } });
     }
     const shown = TASKS.find(x => path === `/api/tasks/${x.id}`);
-    if (shown) return route.fulfill({ json: { task: detail(shown) } });
+    if (shown) return route.fulfill({ json: { task: { ...detail(shown), neededFor: [], mayEdit: true, version: 1 } } });
     if (path === `/api/departments/${DEV.id}/backlog`) return route.fulfill({ json: { items: [item('i1', 'Gift cards for shops', 'Sell gift cards to other shops.')] } });
     return route.fallback();
   });

@@ -12,9 +12,17 @@ import { AgentIcon, DeputyIcon, EditIcon, PersonIcon } from '../ui/icons';
 import { AssistantCard, KindSwitch, looksAfter, NewAssistant } from './PeopleAssistant';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 import { guardedResizeObserver } from '../guard';
+import { useDialogClose } from '../ui/use-dialog-close';
+import { useSteady } from './Feedback';
 
 /* assistant: a person without the whole company adds their own assistant. */
-type Panel = { kind: 'invite' } | { kind: 'assistant' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView; titleOnly: boolean; deputy: boolean } | null;
+type Panel =
+  | { kind: 'invite' }
+  | { kind: 'assistant' }
+  | { kind: 'link'; name: string; url: string }
+  | { kind: 'edit'; person: PersonView; titleOnly: boolean; deputy: boolean }
+  | { kind: 'delete'; person: PersonView }
+  | null;
 
 /* The link, shown once: its note, the link right under it, and Copy and Done under the link. */
 function InviteLink({ name, url, onClose }: { name: string; url: string; onClose: () => void }) {
@@ -30,6 +38,38 @@ function InviteLink({ name, url, onClose }: { name: string; url: string; onClose
         <div className="form-foot">
           <CopyButton text={url} className="btn" />
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.done}</button>
+        </div>
+      </div>
+    </Edge>
+  );
+}
+
+/* The CEO deletes a person or an assistant for good: one question that says what ends with them and that it cannot be
+   undone. The focus goes to it, and Escape leaves the person as they are. */
+function DeleteAsk({ person, onYes, onClose }: { person: PersonView; onYes: () => Promise<void>; onClose: () => void }) {
+  const t = useT();
+  const box = useDialogClose(useSteady(onClose));
+  const title = useId();
+  const note = useId();
+  const [busy, setBusy] = useState(false);
+  const yes = async () => {
+    setBusy(true);
+    try {
+      await onYes();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Edge className="panel form-card" cut={12}>
+      <div ref={box} role="alertdialog" aria-labelledby={title} aria-describedby={note} tabIndex={-1}>
+        <div className="form-head">
+          <h2 className="form-title" id={title}>{person.assistant ? <AgentIcon /> : <PersonIcon />}{t.people.deleteAsk(person.name)}</h2>
+        </div>
+        <p className="muted" id={note}>{person.assistant ? t.people.deleteAssistantNote : t.people.deleteNote}</p>
+        <div className="form-foot">
+          <button className="btn" type="button" disabled={busy} onClick={() => void yes()}>{t.people.yesDelete}</button>
+          <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
         </div>
       </div>
     </Edge>
@@ -319,17 +359,18 @@ function NameCell({ p, routed, openPerson }: { p: PersonView; routed: boolean; o
   </div>;
 }
 
-type Row = { p: PersonView; me: Me; org: Org | null; people: PersonView[]; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void> };
+type Row = { p: PersonView; me: Me; org: Org | null; people: PersonView[]; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void>; askDelete: (person: PersonView) => void };
 
-/* What one may do on a row: edit it, send a new invite link, which an assistant never takes, and switch it off or on. */
+/* What one may do on a row: edit it, send a new invite link, which an assistant never takes, switch it off or on, and for
+   the CEO, delete it. */
 function rowRights(me: Me, p: PersonView, people: PersonView[]) {
   const { manageable, titleOnly } = rightsOn(me, p);
-  return { edits: p.assistant ? looksAfter(me, p, people) : manageable || titleOnly, links: manageable && !p.assistant, manageable };
+  return { edits: p.assistant ? looksAfter(me, p, people) : manageable || titleOnly, links: manageable && !p.assistant, manageable, deletes: manageable && me.person.isOwner };
 }
 
-function PersonRow({ p, me, org, people, routed, openPerson, newLink, setStatus }: Row) {
+function PersonRow({ p, me, org, people, routed, openPerson, newLink, setStatus, askDelete }: Row) {
   const t = useT();
-  const { edits, links, manageable } = rowRights(me, p, people);
+  const { edits, links, manageable, deletes } = rowRights(me, p, people);
   return (
     <tr className={p.status}>
       <td data-label={t.people.columns.name}><NameCell p={p} routed={routed} openPerson={openPerson} /></td>
@@ -351,6 +392,7 @@ function PersonRow({ p, me, org, people, routed, openPerson, newLink, setStatus 
               )}
             </>
           )}
+          {deletes && <button className="act danger" type="button" aria-label={t.people.deleteLabel(p.name)} onClick={() => askDelete(p)}>{t.people.delete}</button>}
         </div>
       </td>
     </tr>
@@ -474,6 +516,14 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const setStatus = (person: PersonView, status: 'active' | 'disabled') =>
     run(async () => replace((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, { status })).person));
 
+  const removePerson = (person: PersonView) =>
+    run(async () => {
+      await api.del(`/api/people/${person.id}`);
+      if (selected === person.id) onSelect?.(null);
+      setPeople(list => list?.filter(p => p.id !== person.id) ?? null);
+      setPanel(null);
+    });
+
   const newLink = (person: PersonView) =>
     run(async () => {
       const res = await api.post<{ person: PersonView; inviteUrl: string }>(`/api/people/${person.id}/invite`);
@@ -511,6 +561,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
         }}
         onClose={closePerson}
       />
+      {panel?.kind === 'delete' && <DeleteAsk person={panel.person} onYes={() => removePerson(panel.person)} onClose={() => setPanel(null)} />}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {people && (
@@ -526,7 +577,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
               </tr>
             </thead>
             <tbody>
-              {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} people={people} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
+              {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} people={people} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} askDelete={person => setPanel({ kind: 'delete', person })} />)}
             </tbody>
           </table>
         </div>

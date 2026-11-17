@@ -40,10 +40,10 @@ export async function ownDepartment(db: Pick<Db, 'select'>, companyId: string, i
   return dept;
 }
 
-/* The rule of each channel, those nobody set asking every time. */
+/* The rule of each channel. One nobody set asks nothing for what goes out, as defaultRule says for the rest. */
 export async function departmentRules(db: Pick<Db, 'select'>, departmentId: string) {
   const rows = await db.select().from(approvalPolicies).where(eq(approvalPolicies.departmentId, departmentId));
-  return APPROVAL_CHANNELS.map(channel => ({ channel, ...ruleOf(rows.find(r => r.channel === channel)) }));
+  return APPROVAL_CHANNELS.map(channel => ({ channel, ...ruleOf(rows.find(r => r.channel === channel), channel) }));
 }
 
 /* The active person who owns the department now with their name; null means the CEO. */
@@ -111,7 +111,7 @@ async function ownerToName(ctx: Pick<Ctx, 'db'>, companyId: string, personId: st
 const parseRule = (body: unknown): ApprovalRule => {
   const rule = ApprovalRule.safeParse(body);
   if (rule.success) return rule.data;
-  throw new ApiError(400, 'validation', 'Choose one of the three ways. "Up to a limit" takes a limit of 0 or more, and only that way takes one.', 'policy_invalid');
+  throw new ApiError(400, 'validation', 'Choose one of the four ways. "Up to a limit" takes a limit of 0 or more, and only that way takes one.', 'policy_invalid');
 };
 
 async function checkJournalDepartment(db: Pick<Db, 'select'>, me: Person, access: Awaited<ReturnType<typeof accessOf>>, department?: string) {

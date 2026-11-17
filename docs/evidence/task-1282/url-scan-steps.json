@@ -1,0 +1,42 @@
+{
+  "clockUsed": false,
+  "budget": "fixed-delimiter search spans plus scheme character reads",
+  "records": [
+    {
+      "size": 2048,
+      "url": false,
+      "searches": 1,
+      "searched": 2048,
+      "inspected": 0,
+      "steps": 2048,
+      "outputMatches": true
+    },
+    {
+      "size": 2048,
+      "url": true,
+      "searches": 2,
+      "searched": 2063,
+      "inspected": 2048,
+      "steps": 4111,
+      "outputMatches": true
+    },
+    {
+      "size": 4096,
+      "url": false,
+      "searches": 1,
+      "searched": 4096,
+      "inspected": 0,
+      "steps": 4096,
+      "outputMatches": true
+    },
+    {
+      "size": 4096,
+      "url": true,
+      "searches": 2,
+      "searched": 4111,
+      "inspected": 4096,
+      "steps": 8207,
+      "outputMatches": true
+    }
+  ]
+}

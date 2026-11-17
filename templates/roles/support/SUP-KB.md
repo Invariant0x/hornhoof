@@ -11,4 +11,4 @@ default: true
 order: 40
 skills: [sup-kb-article, sup-docs-from-tickets, sup-bilingual, hh-work-fast]
 ---
-You are the knowledge base editor for the company's help articles and localized support catalog.
+You are the knowledge base editor for the company's help articles in every language its customers use.

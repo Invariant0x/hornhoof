@@ -40,11 +40,34 @@ import { pushStream } from './stream';
 import {
   buildDecisions,
   INITIAL_MOONFERN_REQUESTS,
+  MOONFERN_GOALS,
+  MOONFERN_PIPELINE,
+  MOONFERN_TASK_DEPARTMENTS,
   MOONFERN_TASKS,
   MOONFERN_TURNS,
   moonfernTaskDetail,
 } from './tasks';
 import { buildDevelopmentTreeSnapshots } from './tree';
+
+/* What every page of the app asks on the side, answered with nothing to show: no cards kept, no machine here, the company
+   stays where it runs, no phones, no link certificate, no saved sign-ins. */
+const QUIET: Record<string, unknown> = {
+  '/api/wait-cards': { cards: [], next: null },
+  '/api/machines/access': { views: [] },
+  '/api/machines/here': { machine: null, view: null },
+  '/api/backups/recovery': { recoveryNeeded: false, linkChanged: false },
+  '/api/backups': { last: null, recovery: null, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [] },
+  '/api/network/switch': { self: null, moving: false, from: null, to: null, since: null, cut: false, question: false },
+  '/api/network/switched': { switched: null },
+  '/api/network/question': { question: null, canAnswer: false },
+  '/api/phones': { phones: [] },
+  '/api/link': { link: null, domain: 'hornhoof.org' },
+  '/api/feedback': { inbox: false },
+  '/api/map/layout': { blocks: {} },
+  '/api/repo-host': { host: null },
+  '/api/google-sheets': { google: null },
+  '/api/vault': { entries: [] },
+};
 
 export type MoonfernController = {
   setOrg: (next: Org) => void;
@@ -141,13 +164,22 @@ export async function serveMoonfern(page: Page, opts: ServeMoonfernOptions = {})
       }
     }
 
+    if (pathname in QUIET) return route.fulfill({ json: QUIET[pathname] });
+    if (pathname === '/api/goals') return route.fulfill({ json: { goals: MOONFERN_GOALS } });
+    const goalId = /^\/api\/goals\/([^/]+)$/.exec(pathname)?.[1];
+    const goal = goalId ? MOONFERN_GOALS.find(g => g.id === goalId) : undefined;
+    if (goal) return route.fulfill({ json: { goal, log: [] } });
+    if (pathname === '/api/pipelines') return route.fulfill({ json: { pipelines: [MOONFERN_PIPELINE] } });
+    if (pathname === '/api/task-departments') return route.fulfill({ json: MOONFERN_TASK_DEPARTMENTS });
+    if (/^\/api\/tasks\/[^/]+\/phone-recordings$/.test(pathname)) return route.fulfill({ json: { recordings: [] } });
+    if (/^\/api\/departments\/[^/]+\/backlog$/.test(pathname)) return route.fulfill({ json: { items: [] } });
     if (pathname === '/api/version') {
-      return route.fulfill({ json: { version: '0.7.0', commit: '070f4e2' } });
+      return route.fulfill({ json: { version: '0.32.0', commit: '1d4ec7a' } });
     }
     if (pathname === '/api/updates') {
       return route.fulfill({
         json: {
-          current: { version: '0.7.0', commit: '070f4e2', migrations: 42 },
+          current: { version: '0.32.0', commit: '1d4ec7a', migrations: 141 },
           available: false,
           checkedAt: BASE_ISO,
           latest: null,

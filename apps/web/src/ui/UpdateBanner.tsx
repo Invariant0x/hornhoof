@@ -28,13 +28,13 @@ function store(key: string, value: string): void {
 
 type WaitNote = { waiting: UpdateWaiting } | { calledOff: UpdateCalledOff };
 
-/* An update that waits for the agents, or one its deadline called off, until the person saw that. */
+/* An update that waits for the agents, or one that was called off, until the person saw that. */
 function waitNoteOf({ waiting, calledOff }: UpdatesView['updater']): WaitNote | null {
   if (waiting) return { waiting };
   return calledOff && stored(CALLED_OFF) !== calledOff.at ? { calledOff } : null;
 }
 
-/* Until when an update waits for the agents, with the way to call it off; or that its deadline called it off. */
+/* Until when an update waits for the agents, with the way to call it off; or that it was called off, and why. */
 function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: () => void; onSeen: (at: string) => void }) {
   const t = useT();
   const { language } = useLanguage();
@@ -47,9 +47,10 @@ function WaitNoteBody({ note, onCallOff, onSeen }: { note: WaitNote; onCallOff: 
       </>
     );
   }
+  const why = { deadline: t.updates.calledOff, cancelled: t.updates.cancelled, failed: t.updates.notPassed }[note.calledOff.reason];
   return (
     <>
-      <span>{t.updates.calledOff(versionText(note.calledOff), hour(note.calledOff.at))}</span>
+      <span>{why(versionText(note.calledOff), hour(note.calledOff.at))}</span>
       <button className="btn small ghost" type="button" onClick={() => onSeen(note.calledOff.at)}>{t.updates.ok}</button>
     </>
   );

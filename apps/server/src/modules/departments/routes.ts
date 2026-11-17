@@ -11,9 +11,9 @@ import { ownsPlace, viewerOf } from '../../auth/agent-view.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
-import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { actorOf, employeeChangedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams, turns } from '../../db/schema.js';
+import { agentChanges, agents, companies, departments, goals, personAccess, pipelines, pipelineStages, proposals, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo, repoFolder } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
@@ -29,12 +29,12 @@ import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensur
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { repoHostRoutes } from './repo-hosts.js';
 import { waitPolicyRoutes } from './wait-policy-routes.js';
-import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { checkFolderFree, repoView } from './repository.js';
 import { departmentBranches } from './branches.js';
 import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
+import { nextRevision } from '../tracker/edit.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
@@ -145,7 +145,7 @@ export async function clearTeam(tx: Db | Tx, me: Person, departmentId: string, t
     .where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId), isNull(agents.removedAt)));
   await tx.update(agents).set({ teamId: null }).where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId)));
   if (members.length) {
-    await tx.insert(agentChanges).values(members.map(m => ({ companyId: me.companyId, agentId: m.id, ...changedBy(me), field: 'team' as const, before: teamId, after: null })));
+    await tx.insert(agentChanges).values(members.map(m => ({ companyId: me.companyId, agentId: m.id, ...employeeChangedBy(me), field: 'team' as const, before: teamId, after: null })));
   }
   await tx.delete(personAccess).where(eq(personAccess.teamId, teamId));
   await tx.update(subscriptions).set({ targetKind: 'department', targetId: departmentId }).where(and(eq(subscriptions.targetKind, 'team'), eq(subscriptions.targetId, teamId)));
@@ -239,6 +239,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* Who applied a card: the person, also when the orchestrator applied it for them. */
   const appliedBy = (me: Person, on: Delegation | undefined) => (on ? on.personId : personOf(me));
   const forWhom = (on: Delegation | undefined) => (on ? { onBehalfOfPersonId: on.personId, jobId: on.jobId, sourceSeq: on.sourceSeq } : {});
+  /* The acting agent keeps its own decision; a person's card stays with its author, otherwise the orchestrator. */
+  const appliedTo = (on: Delegation | undefined, proposalAgentId: string | null, orchestrator: { id: string } | null) => on?.agentId ?? proposalAgentId ?? orchestrator?.id;
 
   app.post('/api/departments/build', async (req, reply) => {
     const me = await requirePerson(req, db);
@@ -284,7 +286,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       };
       const hireLines = async (inside: Tx, dept: typeof departments.$inferSelect, lines: HireLine[]): Promise<Hired[]> => {
         const out: Hired[] = [];
-        for (const line of lines) out.push(await hireEmployee(ctx, inside, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
+        for (const line of lines) out.push(await hireEmployee(ctx, inside, { companyId: me.companyId, departmentId: dept.id }, line, employeeChangedBy(me)));
         waiting.push(...lines.filter(line => !line.subscription).map(line => line.name));
         return out;
       };
@@ -316,6 +318,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (!dept) continue;
         if (item.remove) {
           const inside = [dept.id, ...(await tx.select(idOnly(departments)).from(departments).where(eq(departments.parentId, dept.id))).map(d => d.id)];
+          /* Its pipelines before any of its tasks, as every change that puts a task on a stage takes them. */
+          const itsPipelines = (await tx.select(idOnly(pipelines)).from(pipelines).where(inArray(pipelines.departmentId, inside)).orderBy(asc(pipelines.id)).for('update')).map(p => p.id);
           /* Removed employees and staff proposals keep their history without the department; a waiting proposal ends. */
           await tx
             .update(agents)
@@ -327,6 +331,13 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
              the product, so they are found through the department, not among all the tasks there are. */
           await tx.update(tasks).set({ productId: null }).where(and(inPlaces(me.companyId, dept, inside), inArray(tasks.productId, inside)));
           await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
+          /* Its goals stay as the company's, with their history; its pipelines go, and the tasks on them leave them. */
+          await tx.update(goals).set({ departmentId: null }).where(inArray(goals.departmentId, inside));
+          if (itsPipelines.length) {
+            await tx.update(tasks).set({ pipelineId: null, pipelineStageId: null, trackerRevision: nextRevision() }).where(inArray(tasks.pipelineId, itsPipelines));
+            await tx.delete(pipelineStages).where(inArray(pipelineStages.pipelineId, itsPipelines));
+            await tx.delete(pipelines).where(inArray(pipelines.id, itsPipelines));
+          }
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
           /* Its turns end with it and stay in the history without it: its open one as it got its release ready. */
           await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.departmentId, dept.id), ne(turns.status, 'closed')));
@@ -352,7 +363,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (result.hired.length) await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
-    const agentId = result.agentId ?? orchestrator?.id;
+    const agentId = appliedTo(on, result.agentId, orchestrator);
     if (agentId) {
       await appendEvent(ctx, {
         companyId: me.companyId,
@@ -440,7 +451,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         .returning();
       /* The product comes with the people its department's template keeps one of for each product. */
       const serving = await servingSubscriptions({ db: tx }, me.companyId, spotIn(dept));
-      for (const line of productRoster(ctx, dept, row!, serving)) await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me));
+      for (const line of productRoster(ctx, dept, row!, serving)) await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, employeeChangedBy(me));
       return row!;
     });
     ctx.bus.publish(me.companyId, { type: 'org' });
@@ -531,13 +542,13 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
 
       const hired: Hired[] = [];
-      for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
+      for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, employeeChangedBy(me)));
       return { hired, present, agentId };
     }));
     await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
-    const agentId = result.agentId ?? orchestrator?.id;
+    const agentId = appliedTo(on, result.agentId, orchestrator);
     if (agentId) {
       await appendEvent(ctx, {
         companyId: me.companyId,
@@ -562,5 +573,4 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   approvalPolicyRoutes(app, ctx);
   repoHostRoutes(app, ctx);
   waitPolicyRoutes(app, ctx);
-  modelCheckRoutes(app, ctx);
 }

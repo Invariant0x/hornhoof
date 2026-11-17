@@ -23,6 +23,31 @@ describe('where a test run may go', () => {
     expect(await c.db.select().from(testRuns)).toEqual([]);
   });
 
+  it('refuses a name only like a release branch: another case, a longer name, a full ref, or no branch at all', async () => {
+    const c = await company();
+    const { call } = await c.turn(c.bruno);
+    for (const branch of ['Main', 'TURN-31', 'turn-31-foo', 'refs/heads/turn-31', 'refs/heads/main']) {
+      const answer = await call('run_tests', { branch });
+      expect(answer.error).toBe(true);
+      expect(answer.text).toBe(`${branch} is no release branch: shared test runs go only to main, a turn's branch turn-<number> or a release-<name> branch, so check your change with local tests of what it touched.`);
+    }
+    expect((await call('run_tests', {})).error).toBe(true);
+    expect(await c.db.select().from(testRuns)).toEqual([]);
+  });
+
+  /* The repository has a tag release-review and no such branch: git would clone the tag, which no release branch is. */
+  it('refuses a tag named like a release branch with tests_not_release, and starts no run', async () => {
+    const c = await company();
+    c.app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: 'b'.repeat(40), tag: true });
+    const { call, job } = await c.turn(c.bruno);
+    const answer = await call('run_tests', { branch: 'release-review' });
+    expect(answer.error).toBe(true);
+    expect(answer.text).toBe("release-review is a tag of the repository, not a branch: shared test runs go only to the branch main, a turn's branch turn-<number> or a release-<name> branch.");
+    const runJob = { id: job.id, companyId: job.companyId, agentId: c.bruno.id, agentKind: 'employee', departmentId: c.dev.id } as never;
+    await expect(startRun(c.app.ctx, runJob, { task: c.task.id, branch: 'release-review' })).rejects.toMatchObject({ status: 409, reason: 'tests_not_release' });
+    expect(await c.db.select().from(testRuns)).toEqual([]);
+  });
+
   it('takes no task branch of a repository whose results go to its own main line straight either', async () => {
     const c = await company();
     const [product] = await c.db.insert(departments).values({ companyId: c.dev.companyId, parentId: c.dev.id, name: 'Shop app', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop-app.git' }).returning();

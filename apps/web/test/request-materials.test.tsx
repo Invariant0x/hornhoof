@@ -11,7 +11,7 @@ import { extractPdfTextItems, setPdfLoaderForTests } from '../src/ui/MaterialDoc
 import { MaterialViewer } from '../src/ui/MaterialViewer';
 import { readMaterialStamp, type MaterialManifestView } from '../src/ui/RequestMaterials';
 import { Requests, forgetRequestDrafts } from '../src/ui/Requests';
-import { DEV_ORG, ROSTER, TASKS, TURN, decisions, mockApi } from './api-mock';
+import { DEV_ORG, ME, ROSTER, TASKS, TURN, decisions, mockApi } from './api-mock';
 
 const DEV = { id: 'd-dev', name: 'Development' };
 const REQ_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -809,12 +809,14 @@ describe('separate question materials preview and explicit answering', () => {
     renderWithAppShell(
       'en',
       <Tasks
+        me={ME}
+        place={{ show: 'waits' }}
+        onPlace={vi.fn()}
         decisions={decisions([], { proposals })}
         onDecisionsChanged={vi.fn()}
-        personId={null}
-        onClearPerson={vi.fn()}
         selected={null}
         onOpenTask={vi.fn()}
+        onOpenGoal={vi.fn()}
         onOpenAgent={vi.fn()}
         onOpenOrchestrator={vi.fn()}
       />,

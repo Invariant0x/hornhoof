@@ -5,7 +5,6 @@ import type { Db } from '../../db/client.js';
 import { agents, departments, personAccess, subscriptions, tasks, teams } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
-import { outboundRecordsOf } from '../outbound/extension.js';
 
 const Name = z.string().trim().min(1).max(60);
 const Note = z.string().max(160);
@@ -82,7 +81,7 @@ async function checkChangeItem(db: Db, companyId: string, all: DeptRow[], byId: 
     .where(and(inPlaces(companyId, dept, inside), or(inArray(tasks.departmentId, inside), inArray(tasks.productId, inside)), notInArray(tasks.status, ['done', 'cancelled'])))
     .limit(1);
   if (busy) return `${deptName(dept)} has open tasks; finish or cancel them first.`;
-  return outboundRecordsOf(db, inside, deptName(dept));
+  return null;
 }
 
 function checkNewItem(items: StructureItem[], unnamed: Set<string | null>, hasOperations: boolean, item: NewPart): string | null {

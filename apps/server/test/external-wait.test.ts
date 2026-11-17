@@ -511,16 +511,16 @@ describe('external task wait', () => {
     expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
   });
 
-  it.each(['head', 'orchestrator'] as const)('refuses invalid task bindings on a %s message without clearing another wait', async sender => {
+  it.each(['head', 'orchestrator'] as const)('keeps another wait when a %s message names a closed task, which it delivers, or a task that is not there, which it refuses', async sender => {
     const c = await messaging();
     const task = await c.task();
     const closed = await c.task();
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, closed.id));
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     const client = await c.tools(c[sender].id);
-    for (const input of [{ employee: c.worker.id, task: closed.number }, { employee: c.worker.id, task: 9999 }]) {
+    for (const [input, refused] of [[{ employee: c.worker.id, task: closed.number }, undefined], [{ employee: c.worker.id, task: 9999 }, true]] as const) {
       const result = await client.callTool({ name: 'message_employee', arguments: { ...input, text: 'Images are ready.' } });
-      expect(result.isError).toBe(true);
+      expect(result.isError).toBe(refused);
       expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
     }
     const unrelated = await (await c.tools(c.peer.id)).callTool({ name: 'message_employee', arguments: { employee: c.head.id, task: task.number, text: 'Images are ready.' } });

@@ -18,6 +18,7 @@ import { BASE_ISO, BASE_MS, isoMinutes } from './clock';
 import { attachRunningAgents, BASE_MACHINES } from './machines';
 import { LEO_VIEW, MAYA_VIEW, MOONFERN_COMPANY, SAM_VIEW } from './people';
 import { BASE_SUBSCRIPTIONS, subById } from './plans';
+import { employeeTask } from './route';
 
 const L = (en: string): Lang => ({ en, ru: en });
 
@@ -41,14 +42,7 @@ const programOf = (tool: string | null, minutesAgo = 4) => ({
   reportedAt: BASE_MS - 4_000,
 });
 
-const taskRef = (number: number, title: string, stage = 0, gateCount = 3, bounces = 0): EmployeeTask => ({
-  id: `t-${number}`,
-  number,
-  title,
-  stage,
-  gateCount,
-  bounces,
-});
+const taskRef = (number: number, title: string, stage = 0, gateCount = 3, _bounces = 0): EmployeeTask => employeeTask(`t-${number}`, number, title, stage, gateCount);
 
 type Spec = {
   id: string;
@@ -472,6 +466,7 @@ export const MOONFERN_DEPARTMENTS: Department[] = [
           about: 'Profiles cold start, scroll frame pacing and CoreML leaf model memory.',
           stage: 0,
           gate: false,
+          turnkey: false,
         },
       ],
       repository: {
@@ -604,6 +599,8 @@ const MODELS_BY_PROVIDER: Record<ProviderId, ModelOption[]> = {
   antigravity: [{ id: 'gemini-3-pro', name: 'Gemini 3 Pro', efforts: ['low', 'medium', 'high'], defaultEffort: 'high' }],
   anthropic_api: [],
   openai_api: [],
+  openrouter: [],
+  custom_api: [],
 };
 
 export function moonfernAgentCard(agentId: string): AgentCardView | null {
@@ -611,6 +608,7 @@ export function moonfernAgentCard(agentId: string): AgentCardView | null {
     const sub = MOONFERN_SUBSCRIPTIONS[0]!;
     return {
       id: 'agent-orch',
+      canRemove: false,
       currentTask: null,
       kind: 'orchestrator',
       name: 'Orchestrator',
@@ -636,7 +634,7 @@ export function moonfernAgentCard(agentId: string): AgentCardView | null {
         subscription: s,
         models: MODELS_BY_PROVIDER[s.provider],
       })),
-      changes: [{ field: 'subscription', personName: 'Maya Chen', byOrchestrator: false, at: isoMinutes(-240) }],
+      changes: [{ field: 'subscription', personName: 'Maya Chen', actingAgent: null, byOrchestrator: false, at: isoMinutes(-240) }],
       interrupted: [],
       canEdit: true,
       timer: null,
@@ -650,6 +648,7 @@ export function moonfernAgentCard(agentId: string): AgentCardView | null {
   const team = e.teamId ? (dept.teams.find(t => t.id === e.teamId) ?? null) : null;
   return {
     id: e.id,
+    canRemove: false,
     currentTask: e.task ? { id: e.task.id, number: e.task.number, title: e.task.title } : null,
     kind: e.kind,
     name: e.name,
@@ -687,8 +686,8 @@ export function moonfernAgentCard(agentId: string): AgentCardView | null {
       models: MODELS_BY_PROVIDER[s.provider],
     })),
     changes: [
-      { field: 'hired', personName: 'Maya Chen', byOrchestrator: true, at: isoMinutes(-720) },
-      { field: 'model', personName: 'Sam Rivera', byOrchestrator: false, at: isoMinutes(-180) },
+      { field: 'hired', personName: 'Maya Chen', actingAgent: null, byOrchestrator: true, at: isoMinutes(-720) },
+      { field: 'model', personName: 'Sam Rivera', actingAgent: null, byOrchestrator: false, at: isoMinutes(-180) },
     ],
     interrupted: [],
     canEdit: true,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as age from 'age-encryption';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, certificates, computerRuns, departments, invites, machineAccess, machines, peerSecrets, people, personAccess, publicLinks, recoveryKeys, sessions } from '../src/db/schema.js';
@@ -13,8 +13,12 @@ import { applyCarry, knownMigrations, ORDER_MS, RESTORE_CARRY, RESTORE_STATUS, w
 import type { Carry, HolderView, MakerView, RestoreStatus } from '../src/modules/backups/types.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { CHOICE_FILE } from '../src/modules/merge/kept.js';
-import { as, invitePerson, sessionFrom, setUpCompany, SETUP, testApp } from './helpers.js';
+import { appOn, as, invitePerson, sessionFrom, setUpCompany, SETUP, testApp } from './helpers.js';
 import { backupCompany, from, MACHINE_ID, OWN } from './helpers-backups.js';
+import { openTestDb, prepareSharedDatabase } from './helpers-db.js';
+
+/* The embedded database opens as the file is collected, so its cold start is no test's time. */
+await prepareSharedDatabase();
 
 const folder = () => mkdtempSync(join(tmpdir(), 'hh-restore-'));
 type Refusal = { error: { reason: string; message: string } };
@@ -323,8 +327,10 @@ describe('a restore from a backup', () => {
   });
 
   it('applies the carry only after a committed swap', async () => {
+    /* One company for every case, as a second one in this test would open a whole database of its own: each case brings
+       its own machine and certificate, the updater's word on its own swap, or none, and its own carry. */
+    const s = await stand();
     const attempt = randomUUID();
-    const carry: Carry = { people: [], invites: [], machines: [], serials: ['aa01'], recoveryKeys: [] };
     const cases: [Partial<RestoreStatus> | null, string, boolean][] = [
       [{ attempt, state: 'running', step: 'start' }, attempt, true],
       [{ attempt, state: 'done', step: 'start' }, attempt, true],
@@ -333,15 +339,17 @@ describe('a restore from a backup', () => {
       [{ attempt: randomUUID(), state: 'done', step: 'start' }, attempt, false],
       [null, attempt, false],
     ];
-    for (const [status, carried, applies] of cases) {
-      const s = await stand();
+    for (const [n, [status, carried, applies]] of cases.entries()) {
+      const serial = `aa0${n}`;
+      const carry: Carry = { people: [], invites: [], machines: [], serials: [serial], recoveryKeys: [] };
       const machine = await s.worker('mac');
-      await s.db.insert(certificates).values({ serial: 'aa01', machineId: machine, until: new Date(Date.now() + 86_400_000) });
+      await s.db.insert(certificates).values({ serial, machineId: machine, until: new Date(Date.now() + 86_400_000) });
+      rmSync(join(s.control, RESTORE_STATUS), { force: true });
       if (status) s.says(status);
       writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt: carried, carry }));
       await s.app.ctx.restores.afterSwap();
-      const [serial] = await s.db.select().from(certificates).where(eq(certificates.serial, 'aa01'));
-      expect([serial!.revokedAt !== null, existsSync(join(s.control, RESTORE_CARRY))], JSON.stringify(status)).toEqual([applies, false]);
+      const [held] = await s.db.select().from(certificates).where(eq(certificates.serial, serial));
+      expect([held!.revokedAt !== null, existsSync(join(s.control, RESTORE_CARRY))], JSON.stringify(status)).toEqual([applies, false]);
     }
   });
 
@@ -377,37 +385,42 @@ describe('a restore from a backup', () => {
   });
 
   it('marks every restore', async () => {
-    const marks = (s: Awaited<ReturnType<typeof stand>>) => s.db.execute(sql`SELECT attempt, backup, dumped_at, kept FROM net.restores ORDER BY at`).then(answer => (answer as unknown as { rows: { attempt: string; backup: string; dumped_at: string; kept: string | null }[] }).rows);
+    /* One company for every case, as a second one in this test would open a whole database of its own: each case is a
+       restore of an attempt of its own, and the marks of that attempt are its own. */
+    const s = await stand();
+    const marks = (attempt?: string) => s.db.execute(sql`SELECT attempt, backup, dumped_at, kept FROM net.restores ORDER BY at`).then(answer => (answer as unknown as { rows: { attempt: string; backup: string; dumped_at: string; kept: string | null }[] }).rows.filter(row => attempt === undefined || row.attempt === attempt));
+    const marked: string[] = [];
     const dumpedAt = '2026-11-10T08:00:00.000Z';
     /* With something carried over, and with nothing, as after a restore from a recovery file. */
     for (const carried of [true, false]) {
-      const s = await stand();
       const attempt = randomUUID();
       s.says({ attempt, state: 'running', step: 'start', dumpedAt });
       if (carried) writeFileSync(join(s.control, RESTORE_CARRY), JSON.stringify({ attempt, carry: { people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
       await s.app.ctx.restores.afterSwap();
-      const [mark] = await marks(s);
+      const [mark] = await marks(attempt);
       expect([mark!.attempt, mark!.backup, new Date(mark!.dumped_at).toISOString(), mark!.kept], String(carried)).toEqual([attempt, s.made.id, dumpedAt, null]);
       /* Once per attempt, however often the app starts. */
       await s.app.ctx.restores.afterSwap();
-      expect(await marks(s)).toHaveLength(1);
+      expect(await marks(attempt)).toHaveLength(1);
+      marked.push(attempt);
     }
     /* A restore that failed, or did not swap the databases yet, left nothing to mark. */
     for (const status of [{ state: 'failed', step: 'start', dumpedAt }, { state: 'running', step: 'swap', dumpedAt }] as const) {
-      const s = await stand();
-      s.says({ attempt: randomUUID(), ...status });
+      const attempt = randomUUID();
+      s.says({ attempt, ...status });
       await s.app.ctx.restores.afterSwap();
-      expect(await marks(s), JSON.stringify(status)).toEqual([]);
+      expect(await marks(attempt), JSON.stringify(status)).toEqual([]);
     }
     /* An updater from before merges says no time of the dump: its restore is marked all the same, with the time of its
        word, so what waited to go outside when it ran is still told from what was written since. */
-    const old = await stand();
     const attempt = randomUUID();
-    old.says({ attempt, state: 'done', step: 'start' });
-    await old.app.ctx.restores.afterSwap();
-    const [mark] = await marks(old);
-    expect(mark).toMatchObject({ attempt, backup: old.made.id, kept: null });
+    s.says({ attempt, state: 'done', step: 'start' });
+    await s.app.ctx.restores.afterSwap();
+    const [mark] = await marks(attempt);
+    expect(mark).toMatchObject({ attempt, backup: s.made.id, kept: null });
     expect(Number.isNaN(new Date(mark!.dumped_at).getTime())).toBe(false);
+    /* And no case marked anything but its own restore. */
+    expect((await marks()).map(row => row.attempt)).toEqual([...marked, attempt]);
   });
 
   it('serves nobody on a restored database before the carry is applied', async () => {
@@ -433,13 +446,17 @@ describe('a restore from a backup', () => {
   });
 
   it('serves nobody on a restored database that does not lead yet, and everybody on one that was not restored', async () => {
+    /* Each app on the one database the test holds: a second testApp here would open a whole database of its own. */
+    const { client } = await openTestDb();
+    onTestFinished(() => client.close());
+    const appWith = (env: NodeJS.ProcessEnv) => appOn(client, env);
     /* The keeper holds the app in maintenance while the restored company starts, or in read while it has no lease:
        what was carried over waits, so the sessions the bundle brought back open nothing. */
     for (const mode of ['maintenance', 'read'] as const) {
       const control = folder();
       writeFileSync(join(control, RESTORE_CARRY), JSON.stringify({ attempt: randomUUID(), carry: { people: [], invites: [], machines: [], serials: [], recoveryKeys: [] } }));
       writeKeeperState(control, { mode, at: new Date().toISOString(), link: null });
-      const { app } = await testApp({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
+      const { app } = await appWith({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
       for (const url of ['/api/people', '/api/version', '/api/updates/current']) {
         const refused = await app.inject({ url });
         expect([mode, url, refused.statusCode, (refused.json() as Refusal).error.reason]).toEqual([mode, url, 503, 'starting']);
@@ -450,7 +467,7 @@ describe('a restore from a backup', () => {
     /* An app that only reads and was never restored serves what it can read, as before. */
     const control = folder();
     writeKeeperState(control, { mode: 'read', at: new Date().toISOString(), link: null });
-    const plain = await testApp({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
+    const plain = await appWith({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
     expect((await plain.app.inject({ url: '/api/version' })).statusCode).toBe(200);
     expect((await plain.app.inject({ url: '/api/setup' })).statusCode).toBe(200);
   });

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,10 +8,11 @@ import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
 import { StreamMask } from '../src/terminal/mask.js';
-import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi } from '../src/terminal/programs.js';
+import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi, writeClaudeTools } from '../src/terminal/programs.js';
 import { listenIn } from '../../../test-support/ports.mjs';
 
-const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
+const AGENT_SECRET = '5ec7e7f00dc0ffee';
+const URLS = { mcpUrl: `http://127.0.0.1:5000/mcp/${AGENT_SECRET}`, mcpAddress: 'http://127.0.0.1:5000/mcp', secret: AGENT_SECRET, attachUrl: `http://127.0.0.1:5000/attach/${AGENT_SECRET}`, hookUrl: `http://127.0.0.1:5000/hook/${AGENT_SECRET}` };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
 
 describe('program updates managed outside the agent terminal', () => {
@@ -41,6 +42,36 @@ describe('program updates managed outside the agent terminal', () => {
   });
 });
 
+/* Any process of the machine reads every program's command line, as ps shows it. The agent's secret for its tools, which
+   lets a call through the bridge go on with its turn's token, goes in a file only the agent's user reads or in the
+   program's environment, never in an argument. */
+describe("the agent's secret for its tools", () => {
+  const launch = { bin: '/t/program', home: '/h', workDir: '/w', model: 'm', effort: 'high', compactWindow: 1000, instructionsFile: '/w/.hh-instructions.md', urls: URLS };
+  const runs = [claudeProgram, codexProgram, kimiProgram, agyProgram].flatMap(program => [null, 'existing-session'].map(sessionId => ({ program, sessionId })));
+
+  it.each(runs)('stays off the command line of $program.kind with session $sessionId', ({ program, sessionId }) => {
+    const { command } = program.launch({ ...launch, sessionId });
+    expect(command.filter(part => part.includes(AGENT_SECRET))).toEqual([]);
+  });
+
+  it('reaches Claude Code in a file of the agent folder that only its user reads, whatever stood there before', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'hh-claude-tools-'));
+    const file = arg(claudeProgram.launch({ ...launch, workDir: work, sessionId: null }).command, '--mcp-config')!;
+    expect(file).toBe(join(work, '.hh-mcp.json'));
+    writeFileSync(file, '{}', { mode: 0o644 });
+    await writeClaudeTools(work, URLS.mcpUrl);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ mcpServers: { hornhoof: { type: 'http', url: URLS.mcpUrl } } });
+  });
+
+  it.each([null, 'th-9'])('reaches Codex in its environment, which it sends as a bearer token to the address without it, with session %s', sessionId => {
+    const { command, env } = codexProgram.launch({ ...launch, sessionId });
+    expect(command[command.indexOf(`mcp_servers.hornhoof.url=${JSON.stringify(URLS.mcpAddress)}`) - 1]).toBe('-c');
+    expect(command[command.indexOf('mcp_servers.hornhoof.bearer_token_env_var="HH_MCP_SECRET"') - 1]).toBe('-c');
+    expect(env.HH_MCP_SECRET).toBe(AGENT_SECRET);
+  });
+});
+
 /* tmux keeps no history of an alternate screen, so a person's view would have nothing to scroll back to. */
 describe('programs that leave their conversation in the history of the terminal', () => {
   const launch = { bin: '/t/program', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS };
@@ -62,7 +93,7 @@ describe('Claude Code in a terminal', () => {
     expect(arg(command, '--session-id')).toBe(sessionId);
     expect(command).toContain('--dangerously-skip-permissions');
     expect(command).toContain('--strict-mcp-config');
-    expect(JSON.parse(arg(command, '--mcp-config')!)).toEqual({ mcpServers: { hornhoof: { type: 'http', url: URLS.mcpUrl } } });
+    expect(arg(command, '--mcp-config')).toBe('/w/a1/.hh-mcp.json');
     const settings = JSON.parse(arg(command, '--settings')!);
     expect(settings.hooks.Stop[0].hooks[0].command).toBe('hh-hook stop');
     expect(settings.hooks.StopFailure).toEqual([{ hooks: [{ type: 'command', command: 'hh-hook stop' }] }]);
@@ -101,6 +132,15 @@ describe('Claude Code in a terminal', () => {
       expect(command).not.toContain('--plugin-dir');
       const { hooks } = JSON.parse(arg(command, '--settings')!) as { hooks: Record<string, { hooks: { command: string }[] }[]> };
       for (const command of Object.values(hooks).flat().flatMap(entry => entry.hooks.map(h => h.command))) expect(command).toMatch(/^hh-hook [a-z]+$/);
+    }
+  });
+
+  it('names Claude as co-author of no commit or pull request, new or resumed', () => {
+    for (const sessionId of [null, 'abc-1']) {
+      const { command } = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
+      const settings = JSON.parse(arg(command, '--settings')!);
+      expect(settings.attribution).toEqual({ commit: '', pr: '' });
+      expect(settings.includeCoAuthoredBy).toBe(false);
     }
   });
 
@@ -188,7 +228,7 @@ describe('Codex in a terminal', () => {
     const first = codexProgram.launch({ bin: '/t/codex', home: '/h', workDir: '/w/a2', sessionId: null, model: 'gpt-6.1-sol', instructionsFile: null, urls: URLS });
     expect(first.command.slice(0, 2)).toEqual(['/t/codex', '--dangerously-bypass-approvals-and-sandbox']);
     expect(arg(first.command, '-C')).toBe('/w/a2');
-    expect(first.command).toContain(`mcp_servers.hornhoof.url=${JSON.stringify(URLS.mcpUrl)}`);
+    expect(first.command).toContain(`mcp_servers.hornhoof.url=${JSON.stringify(URLS.mcpAddress)}`);
     expect(arg(first.command, '-m')).toBe('gpt-6.1-sol');
     expect(first.sessionId).toBeNull();
     expect(first.env).toMatchObject({ CODEX_HOME: '/h', HH_ATTACH_URL: URLS.attachUrl });

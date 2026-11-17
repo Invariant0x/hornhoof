@@ -93,9 +93,8 @@ describe('tools a skill grants', () => {
     const [orchestrator] = await db.select().from(agents).where(and(eq(agents.companyId, acme.id), eq(agents.kind, 'orchestrator')));
     const client = await mcp(app, TOKEN);
     const write = (employee: string, text: string) => call(client, 'message_employee', { employee, text });
-    /* Nobody wrote to Wendy yet: Development and the orchestrator are out of her reach. */
+    /* Nobody wrote to Wendy yet: Development is out of her reach. */
     expect((await write(bruno.id, 'Your tests are green.')).content[0]!.text).toContain('another department');
-    expect((await write(orchestrator!.id, 'The node is back.')).isError).toBe(true);
     const asks = (from: { from: 'agent'; name: string; by: string } | { from: 'orchestrator' }, text: string) =>
       enqueueTurn(app.ctx, { companyId: acme.id, agentId: wendy.id, prompt: text, createdBy: null, message: { personId: null, text, ...from } });
     await asks({ from: 'agent', name: 'Bruno', by: bruno.id }, 'Which machine runs my tests?');
@@ -107,9 +106,44 @@ describe('tools a skill grants', () => {
     expect(told.map(j => j.prompt)).toContainEqual(expect.stringContaining('> Yes, the node is back.'));
     /* That was the answer: anything more waits until they write again. */
     expect((await write(bruno.id, 'One more thing.')).content[0]!.text).toContain('another department');
-    expect((await write(orchestrator!.id, 'One more thing.')).isError).toBe(true);
     await asks({ from: 'agent', name: 'Bruno', by: bruno.id }, 'And the browsers?');
     expect((await write(bruno.id, 'Chromium only.')).isError).toBeFalsy();
+  });
+
+  it('let any employee and any head write to the orchestrator, which helps everyone, as often as their turn allows', async () => {
+    const { app, db, acme, sub, wendy, hana } = await company([]);
+    const [orchestrator] = await db.select().from(agents).where(and(eq(agents.companyId, acme.id), eq(agents.kind, 'orchestrator')));
+    const headToken = 'tool-token-watch-head-0123456789abcdef';
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(headToken) });
+    const worker = await mcp(app, TOKEN);
+    const head = await mcp(app, headToken);
+    /* Nobody wrote to either of them, and neither has a grant: the orchestrator is in reach of everyone all the same. */
+    for (const [client, text] of [[worker, 'Two members of Development stand free.'], [worker, 'They still stand free.'], [head, 'Development needs a stand for Android.']] as const) {
+      const sent = await call(client, 'message_employee', { employee: orchestrator!.id, text });
+      expect([sent.isError, sent.content[0]!.text]).toEqual([undefined, expect.stringMatching(/^Sent to Orchestrator\./)]);
+    }
+    expect(await messagesFrom(db, wendy.id)).toEqual(['They still stand free.', 'Two members of Development stand free.']);
+    expect(await messagesFrom(db, hana.id)).toEqual(['Development needs a stand for Android.']);
+    const told = await db.select({ text: sql<string>`${agentEvents.data}->>'text'`, by: sql<string>`${agentEvents.data}->>'by'` }).from(agentEvents)
+      .where(and(eq(agentEvents.agentId, orchestrator!.id), eq(agentEvents.kind, 'message')));
+    expect(told).toEqual(expect.arrayContaining([
+      { text: 'Two members of Development stand free.', by: wendy.id },
+      { text: 'They still stand free.', by: wendy.id },
+      { text: 'Development needs a stand for Android.', by: hana.id },
+    ]));
+    expect((await db.select().from(jobs).where(eq(jobs.agentId, orchestrator!.id)))[0]!.prompt).toContain('> Two members of Development stand free.');
+    /* An id that is no employee still says so. */
+    const nobody = randomUUID();
+    const gone = await call(worker, 'message_employee', { employee: nobody, text: 'Hello.' });
+    expect([gone.isError, gone.content[0]!.text]).toEqual([true, `There is no employee with id ${nobody}. Call agents to see the current ids.\nNot delivered: reason recipient_unknown, recipient ${nobody}, task none.`]);
+  });
+
+  it("tell an employee that a person's own assistant serves only that person, and to write to the orchestrator instead", async () => {
+    const { app, db, acme } = await company([]);
+    const [ava] = await db.insert(agents).values({ companyId: acme.id, kind: 'assistant', name: 'Ava', model: '' }).returning();
+    const refused = await call(await mcp(app, TOKEN), 'message_employee', { employee: ava!.id, text: 'Hello Ava.' });
+    expect([refused.isError, refused.content[0]!.text]).toEqual([true, `Ava is a person's own assistant and works only for that person. Write to the orchestrator instead.\nNot delivered: reason personal_assistant, recipient ${ava!.id}, task none.`]);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, ava!.id))).toEqual([]);
   });
 
   it("let a watchdog see every agent with what it holds, and nudge one in its window", async () => {
@@ -420,7 +454,8 @@ describe('tools a skill grants', () => {
     ].join('\n');
     await blocked(app.ctx, bruno.id, task.id, report);
     const heldBy = async (token: string) => (JSON.parse((await call(await mcp(app, token), 'failures', { hours: 6 })).content[0]!.text) as { blocked: { why: string; whyTail: string | null; next: string }[] }).blocked;
-    expect(await heldBy(own)).toEqual([expect.objectContaining({ why: report, whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
+    /* The stored report has already lost its credential; its own department still reads its private path. */
+    expect(await heldBy(own)).toEqual([expect.objectContaining({ why: report.replace(GITHUB_TOKEN, '[hidden]'), whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
     expect(await heldBy(TOKEN)).toEqual([expect.objectContaining({ why: expect.not.stringContaining(HOME), whyTail: null, next: 'the head connects the registry with token=[hidden] from [hidden]' })]);
   });
 
@@ -564,13 +599,15 @@ describe('tools a skill grants', () => {
   it("keeps credentials and private paths out of another department's agent's last failure and the tasks it holds", async () => {
     const c = await company(['ops-failure-review']);
     await failedHolder(c);
-    /* A task of the watchdog's own department that the agent holds is the watchdog's to read as it is. */
+    /* Its own task stays readable, with the credential hidden when the task was created. */
     const [orchestrator] = await c.db.select().from(agents).where(and(eq(agents.companyId, c.acme.id), eq(agents.kind, 'orchestrator')));
     const opsTask = (await createTask(c.app.ctx, { agentId: orchestrator!.id }, { title: `Rotate ${GITHUB_TOKEN}`, brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: c.bruno.id, executor: true })).task;
     const client = await mcp(c.app, TOKEN);
     expect((await call(client, 'task', { task: c.task.number })).isError).toBe(true);
     const own = await call(client, 'task', { task: opsTask.number });
     expect(own.isError, own.content[0]!.text).toBeFalsy();
+    expect(JSON.parse(own.content[0]!.text).title).toBe('Rotate [hidden]');
+    expect(own.content[0]!.text).not.toContain(GITHUB_TOKEN);
     const { tasks: holds, ...bruno } = (JSON.parse((await call(client, 'agents')).content[0]!.text) as Watched).find(a => a.name === 'Bruno')!;
     const closed = holds.find(t => t.number === c.task.number);
     for (const secret of [GITHUB_TOKEN, HOME, 'fixture805']) expect.soft(JSON.stringify([bruno, closed])).not.toContain(secret);
@@ -578,7 +615,7 @@ describe('tools a skill grants', () => {
     expect(holds).toHaveLength(2);
     expect(holds).toEqual(expect.arrayContaining([
       expect.objectContaining({ number: c.task.number, title: 'Checkout API for [hidden]', externalWait: expect.objectContaining({ reason: 'Waits for the bank to read [hidden]' }) }),
-      expect.objectContaining({ number: opsTask.number, title: `Rotate ${GITHUB_TOKEN}` }),
+      expect.objectContaining({ number: opsTask.number, title: 'Rotate [hidden]' }),
     ]));
   });
 

@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ProgramInfo } from '@hornhoof/protocol';
+import type { Repair } from './program-check.js';
+import { lastWords } from './program-exit.js';
 import { NPM_PACKAGES } from './providers/packages.js';
 
 type ProgramId = ProgramInfo['id'];
@@ -28,21 +30,43 @@ async function untilReady(pending: Promise<void>, signal: AbortSignal): Promise<
   }
 }
 
+/* A program's state without what an earlier check said of it. */
+const plain = ({ id, version, updating, failed }: ProgramInfo): ProgramInfo => ({ id, version, updating, failed });
+
 /* One installation at a time in a node's shared npm prefix. Running agent processes are never signalled. */
 export class ProgramUpdates {
   private state: ProgramInfo[];
   private pending: Promise<void> | null = null;
+  private told: () => void = () => {};
+  private masks: () => string[] = () => [];
 
   constructor(private readonly entries: readonly InstalledProgram[]) {
     this.state = entries.map(entry => ({ id: entry.id, version: entry.readVersion(), updating: false, failed: false }));
   }
 
   snapshot(): ProgramInfo[] {
-    return this.state.map(program => ({ ...program }));
+    return this.state.map(program => ({ ...program, ...(program.reason ? { reason: lastWords(program.reason, this.secrets()) ?? undefined } : {}) }));
   }
 
   version(id: string): string | null {
     return this.state.find(program => program.id === id)?.version ?? null;
+  }
+
+  secrets(): string[] {
+    return this.masks();
+  }
+
+  /* Who hears of a program installed again or not starting, which happens outside an update too. */
+  watch(changed: () => void, secrets: () => string[] = () => []): void {
+    this.told = changed;
+    this.masks = secrets;
+  }
+
+  /* What the machine says of a program that did not start; a program this node does not manage is left out. */
+  repaired(id: string, repair: Repair): void {
+    if (!this.state.some(program => program.id === id)) return;
+    this.state = this.state.map(program => program.id === id ? { ...plain(program), ...(repair ? { repair: repair.state } : {}), ...(repair?.state === 'broken' && repair.line ? { reason: repair.line } : {}) } : program);
+    this.told();
   }
 
   ready(signal?: AbortSignal): Promise<void> {
@@ -54,7 +78,7 @@ export class ProgramUpdates {
   update(changed: () => void = () => {}, log: (line: string) => void = () => {}): Promise<void> {
     if (this.pending) return this.pending;
     if (!this.entries.length) return Promise.resolve();
-    this.state = this.state.map(program => ({ ...program, updating: true, failed: false }));
+    this.state = this.state.map(program => ({ ...plain(program), updating: true, failed: false }));
     this.pending = Promise.resolve().then(() => this.installAll(changed, log)).finally(() => { this.pending = null; });
     changed();
     return this.pending;
@@ -70,7 +94,8 @@ export class ProgramUpdates {
         log(`Could not update ${entry.id}: ${err instanceof Error ? err.message : String(err)}`);
       }
       const version = entry.readVersion();
-      this.state = this.state.map(program => program.id === entry.id ? { id: entry.id, version, updating: false, failed } : program);
+      /* What its check said during this install stays. */
+      this.state = this.state.map(program => program.id === entry.id ? { ...program, version, updating: false, failed } : program);
       changed();
     }
   }

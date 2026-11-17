@@ -17,7 +17,7 @@ function renderShell() {
 }
 
 /* A tab of the main navigation, apart from the buttons of the same name inside a page. */
-const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('button', { name });
+const tab = (name: string) => within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name });
 
 afterEach(() => {
   localStorage.clear();
@@ -123,7 +123,7 @@ describe('Shell', () => {
     it('offers its owner to give the orchestrator access to it, and closes the menu once it is open', async () => {
       const { calls, user } = await menu({ machine: closed.machine, view: closed }, { 'POST /api/machines/m1/access/open': [200, { ...closed, until: '2099-01-01T00:00:00.000Z' }] });
       await user.click(await screen.findByRole('button', { name: 'Give the orchestrator access to this machine (dev-laptop)' }));
-      await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m1/access/open', body: {} }));
+      await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m1/access/open', body: { scope: 'orchestrator', duration: '1h' } }));
       await waitFor(() => expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument());
     });
 
@@ -161,7 +161,7 @@ describe('Shell', () => {
   it.each([
     ['who sees the whole company', ME, ['Settings', 'Improvements', 'Versions', 'About', 'Log out']],
     ['who sees only some departments', { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } }, ['Settings', 'About', 'Log out']],
-  ])('keeps the account menu short for a person %s: no themes, language, feedback or outbound', async (_who, me, items) => {
+  ])('keeps the account menu short for a person %s: no themes, language or feedback', async (_who, me, items) => {
     mockApi({ 'GET /api/org': [200, ORG] });
     const user = userEvent.setup();
     render(<LanguageProvider><Shell me={me} onSignOut={() => {}} /></LanguageProvider>);
@@ -169,7 +169,7 @@ describe('Shell', () => {
     await user.click(screen.getByRole('button', { name: 'Account' }));
     const menu = document.querySelector<HTMLElement>('.account-menu')!;
     expect(within(menu).getAllByRole('button').map(button => button.textContent)).toEqual(items);
-    for (const gone of [/theme/i, /^English$/, /^Русский$/, /feedback/i, /outbound/i, /^Company settings$/]) expect(within(menu).queryByRole('button', { name: gone })).not.toBeInTheDocument();
+    for (const gone of [/theme/i, /^English$/, /^Русский$/, /feedback/i, /^Company settings$/]) expect(within(menu).queryByRole('button', { name: gone })).not.toBeInTheDocument();
     expect(within(menu).queryByRole('group')).not.toBeInTheDocument();
   });
 

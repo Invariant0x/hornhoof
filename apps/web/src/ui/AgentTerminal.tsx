@@ -1,7 +1,7 @@
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import { BindViewResponse, decodeViewChallenge, encodeViewSignature, isTestViewReady, TestTerminalClose, TestTerminalServerFrame, ViewProof, type BindViewRequest } from '@hornhoof/protocol';
 import '@xterm/xterm/css/xterm.css';
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { errorText, useT, type Messages } from '../i18n';
 import { usePictureDrop } from './MessagePictures';
 import { fitTerminal, measureGlyphsExactly, observeTerminalFit } from './terminal-fit';
@@ -9,6 +9,7 @@ import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights
 import { uploadTerminalPictures } from './terminal-pictures';
 import { attachTerminalScroll, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
 import { isHidden } from './visibility';
+import { WindowFoot, type WindowNote } from './WindowNotes';
 import { disposeTerminal } from './xterm-release';
 
 /* Dark terminal palette repeated on any page: Claude Code and Codex run their dark theme,
@@ -57,7 +58,9 @@ type TestTerminalLease = {
 export type TestTerminalSession = TestTerminalLease & {
   bindView(request: BindViewRequest): Promise<BindViewResponse>;
 };
-type Props = { path: string; program: string; onGone(reason?: TestTerminalGoneReason): void; watching?: boolean; testSession?: TestTerminalSession };
+/* onNotes: who shows what the terminal has to say, under it and never over it; without one, the notes stand right under
+   the terminal. */
+type Props = { path: string; program: string; onGone(reason?: TestTerminalGoneReason): void; watching?: boolean; testSession?: TestTerminalSession; onNotes?(notes: WindowNote[]): void };
 
 export async function createTestTerminalBrowserKey(lease: TestTerminalLease) {
   const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
@@ -656,25 +659,31 @@ type TerminalNoticesProps = {
   pictureState: 'uploading' | 'uploaded' | null;
 };
 
-const noTerminalNotices = ({ asleep, dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps) =>
-  !asleep && !dropped && !denied && pictureFailure === null && !pictureState;
+/* What the terminal has to say: that its program sleeps, that typed words or a file did not go, or how a file goes. */
+function terminalNotes({ t, asleep, dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps): WindowNote[] {
+  const w = t.window.notes;
+  const notes: (WindowNote | false)[] = [
+    Boolean(asleep) && { id: 'asleep', word: w.asleep, text: t.window.asleep(asleep!), tone: 'quiet' },
+    dropped && { id: 'dropped', word: w.notSent, text: t.window.inputDropped, tone: 'bad', alert: true },
+    Boolean(denied) && { id: 'denied', word: w.notSent, text: refusalText(denied!, t.window.controlDenied, t.window.messageDenied), tone: 'bad', alert: true },
+    pictureFailure !== null && { id: 'picture-failed', word: w.notSent, text: errorText(t, pictureFailure), tone: 'bad', alert: true },
+    Boolean(pictureState) && { id: 'picture', word: w.file, text: pictureState === 'uploading' ? t.window.pictureUploading : t.window.pictureUploaded, tone: 'quiet' },
+  ];
+  return notes.filter(note => note !== false);
+}
 
-function TerminalNotices(props: TerminalNoticesProps) {
-  if (noTerminalNotices(props)) return null;
-  const { t, asleep, dropped, denied, pictureFailure, pictureState } = props;
-  return (
-    <div className="t-menu glass" style={{ left: 12, right: 12, bottom: 8, padding: '2px 0 6px', pointerEvents: 'none' }}>
-      {asleep && <div className="t-why" role="status">{t.window.asleep(asleep)}</div>}
-      {dropped && <div className="t-why" role="alert">{t.window.inputDropped}</div>}
-      {denied && <div className="t-why" role="alert">{refusalText(denied, t.window.controlDenied, t.window.messageDenied)}</div>}
-      {pictureFailure !== null && <div className="t-why" role="alert">{errorText(t, pictureFailure)}</div>}
-      {pictureState && <div className="t-why" role="status">{pictureState === 'uploading' ? t.window.pictureUploading : t.window.pictureUploaded}</div>}
-    </div>
-  );
+/* Hands the terminal's notes to whoever shows them, and takes them back when the terminal goes; with no one to take
+   them, they stand in a foot of its own, under the terminal. */
+function useNotesFoot(label: string, notes: WindowNote[], onNotes?: (notes: WindowNote[]) => void): ReactNode {
+  const tell = useRef(onNotes);
+  tell.current = onNotes;
+  useEffect(() => tell.current?.(notes), [notes]);
+  useEffect(() => () => tell.current?.([]), []);
+  return onNotes ? null : <WindowFoot label={label} notes={notes} />;
 }
 
 /* A live agent terminal or a proof-only standalone test view, both using the same renderer and local history. */
-export function AgentTerminal({ path, program, onGone, watching = false, testSession }: Props) {
+export function AgentTerminal({ path, program, onGone, watching = false, testSession, onNotes }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -745,18 +754,26 @@ export function AgentTerminal({ path, program, onGone, watching = false, testSes
     };
   }, [path, testSession, shows]);
 
+  const notes = useMemo(
+    () => terminalNotes({ t, asleep: asleep ? program : null, dropped, denied, pictureFailure, pictureState }),
+    [t, asleep, program, dropped, denied, pictureFailure, pictureState],
+  );
+  const foot = useNotesFoot(t.window.notes.label, notes, onNotes);
+
   return (
-    <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
-      <div className="t-xterm" ref={box} />
-      <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} pasteLabel={t.common.paste} />
-      {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
-      <TerminalNotices t={t} asleep={asleep ? program : null} dropped={dropped} denied={denied} pictureFailure={pictureFailure} pictureState={pictureState} />
-      {!up && (
-        <div className="t-load" role="status">
-          <span className="spinner" aria-hidden="true" />
-          <span>{t.window.opening(program)}</span>
-        </div>
-      )}
-    </div>
+    <>
+      <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
+        <div className="t-xterm" ref={box} />
+        <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} pasteLabel={t.common.paste} />
+        {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
+        {!up && (
+          <div className="t-load" role="status">
+            <span className="spinner" aria-hidden="true" />
+            <span>{t.window.opening(program)}</span>
+          </div>
+        )}
+      </div>
+      {foot}
+    </>
   );
 }

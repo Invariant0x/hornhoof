@@ -4,6 +4,7 @@ import { MOONFERN_ORG } from '../moonfern/agents';
 import { BASE_MS, isoMinutes } from '../moonfern/clock';
 import { createSceneRecorder, smoothDrag } from '../moonfern/record';
 import { serveMoonfern } from '../moonfern/serve';
+import { employeeTask } from '../moonfern/route';
 import { prepareScenePage, pushStream } from '../moonfern/stream';
 
 type Patch = {
@@ -13,14 +14,7 @@ type Patch = {
   context?: number;
 };
 
-const task = (number: number, title: string, stage = 0, gateCount = 3, bounces = 0): EmployeeTask => ({
-  id: `t-${number}`,
-  number,
-  title,
-  stage,
-  gateCount,
-  bounces,
-});
+const task = (number: number, title: string, stage = 0, gateCount = 3, _bounces = 0): EmployeeTask => employeeTask(`t-${number}`, number, title, stage, gateCount);
 
 function buildDevSnapshot(minutesOffset: number, patches: Record<string, Patch>): Org {
   const nowIso = isoMinutes(minutesOffset);

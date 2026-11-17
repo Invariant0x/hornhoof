@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, PROGRAM_SCREEN_MAX, PROGRAM_STATES, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_OPEN_TASKS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, PROGRAM_SCREEN_MAX, PROGRAM_STATES, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, effortFor as lightEffort } from '../src/efforts.js';
 import * as protocol from '../src/index.js';
 
@@ -296,6 +296,15 @@ describe('job.run', () => {
     expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo, repositoryScope: { ...repositoryScope, repoUrlHash: 'not a digest' } } }))).toBeNull();
   });
 
+  it("may say which of the company's tasks are still open, so the node takes away the worktrees of closed ones", () => {
+    const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: '' };
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo, tasks: { open: [4, 9], upTo: 12 } } }))).toMatchObject({ workspace: { tasks: { open: [4, 9], upTo: 12 } } });
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo, tasks: { open: [0], upTo: 12 } } }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo, tasks: { open: [], upTo: -1 } } }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo, tasks: { open: Array.from({ length: MAX_OPEN_TASKS + 1 }, (_, i) => i + 1), upTo: MAX_OPEN_TASKS + 1 } } }))).toBeNull();
+  });
+
   it("may name the author of the agents' commits, as one plain line and an address", () => {
     const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
     const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: '' };
@@ -370,7 +379,8 @@ describe('company templates', () => {
     expect(Object.keys(others).sort()).toEqual([...COMPANY_TEMPLATE_KEYS].sort());
     for (const template of COMPANY_TEMPLATES) {
       const { staff } = template.departments.find(d => d.template === 'operations')!;
-      expect(staff.map(line => line.role).sort(), template.key).toEqual([...required, ...others[template.key]!].sort());
+      /* The product manager every department of a template hires is in Operations too, though Hornhoof does not require it. */
+      expect(staff.map(line => line.role).sort(), template.key).toEqual([...required, 'OPS-PM', ...others[template.key]!].sort());
       expect(staff.every(line => line.count === 1), template.key).toBe(true);
     }
   });

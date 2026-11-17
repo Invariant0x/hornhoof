@@ -1,0 +1,58 @@
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257-1220/apps/server
+
+ ✓ test/decision-context.test.ts (37 tests) 7909ms
+   ✓ the person an orchestrator turn answers (4)
+     ✓ keeps the CEO as principal after a visible turn fact on the agent and task 1057ms
+   ✓ answer_request in a turn (4)
+     ✓ takes a decision only the CEO takes in a turn that answers the CEO or the delegate, and keeps for whom 320ms
+ ✓ test/agents.test.ts (29 tests) 5896ms
+   ✓ hiring (1)
+     ✓ hires an employee with as many skills as a hire takes, their bodies going as files 936ms
+   ✓ the employee card (28)
+     ✓ keeps current and independent questions when a Review owner moves into a sub-unit (other question: true) 324ms
+ ✓ test/computer-scope.test.ts (18 tests) 3388ms
+   ✓ machine access scope (18)
+     ✓ opens for 1h and names its opener 874ms
+ ✓ test/restore.test.ts (14 tests) 2772ms
+   ✓ a restore from a backup (14)
+     ✓ restores only a bundle its database knows 463ms
+ ✓ test/people-delete.test.ts (8 tests) 2417ms
+   ✓ DELETE /api/people/:id (8)
+     ✓ takes a person off the list and the map for good: their sessions, keys, machines and own plans end 1130ms
+ ✓ test/agent-sql-permissions.test.ts (34 tests) 2614ms
+   ✓ keeps program_instances writes from Operations, and the orchestrator makes them as Hornhoof does 735ms
+ ✓ test/head-department-control.test.ts (10 tests) 3203ms
+   ✓ a department head's tools (1)
+     ✓ run its own department, and no worker has them 1441ms
+   ✓ a department head for a person who runs its department (7)
+     ✓ records the head and its authority person for hiring, changes, reset, team removal and firing 323ms
+ ✓ test/migration-metadata.test.ts (4 tests) 2026ms
+   ✓ merged migration metadata (4)
+     ✓ links snapshots in execution order without a second child of the same predecessor 314ms
+     ✓ describes the columns and regular indexes of a freshly migrated database 1701ms
+ ✓ test/templates-pipeline.test.ts (40 tests) 1421ms
+   ✓ standalone verification planning abilities (40)
+     ✓ reaches a head hired from the roster of each department, as a file and whole on a node that writes none 1299ms
+ ✓ test/merge-rules.test.ts (7 tests) 1556ms
+   ✓ the rule of each table in a merge (7)
+     ✓ has a rule for every table 548ms
+     ✓ never compares what the leader recomputes 540ms
+     ✓ reads the catalog 386ms
+ ✓ test/computer-scope-input.test.ts (2 tests) 1236ms
+   ✓ refuses root after another person presses Enter in the worker terminal, and grants no management decision 992ms
+ ✓ test/network-tables.test.ts (3 tests) 1252ms
+   ✓ the network's tables and the orchestrator's SQL (3)
+     ✓ reads and changes the company's authority, its machines' certificates and the peer secrets 974ms
+ ✓ test/computer-scope-migration.test.ts (1 test) 1041ms
+   ✓ keeps existing machine access restricted to the orchestrator and accepts only the two scopes after upgrade 1040ms
+ ✓ test/agent-changes-migration.test.ts (2 tests) 692ms
+   ✓ employee change actor migration (2)
+     ✓ gives a fresh install a nullable acting agent linked to the employee table 321ms
+     ✓ upgrades without attributing old changes to an agent, and can migrate again 358ms
+ ✓ test/templates.test.ts (315 tests) 209ms
+
+ Test Files  15 passed (15)
+      Tests  524 passed (524)
+   Start at  15:01:01
+   Duration  64.34s (tests 65%, import 33%, transform 1%)

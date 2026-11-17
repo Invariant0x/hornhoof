@@ -42,7 +42,10 @@ export const SETTINGS: Settings[] = (['en', 'ru'] as const).flatMap(lang => (['l
 
 /* The window of the orchestrator with its terminal, and the machines' access as the server keeps it, changed by the
    buttons: each answers for its own machine. */
-export async function openWindow(page: Page, { lang, theme, width }: Settings, first: ComputerAccessView, others: ComputerAccessView[] = [], extra: Record<string, unknown> = {}) {
+/* terminal: what the program says of itself (running, or asleep until its next turn) and what its terminal shows. */
+export type TerminalShows = { program?: Record<string, unknown>; data?: string };
+
+export async function openWindow(page: Page, { lang, theme, width }: Settings, first: ComputerAccessView, others: ComputerAccessView[] = [], extra: Record<string, unknown> = {}, terminal: TerminalShows = {}) {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ lang, theme }) => {
     localStorage.setItem('hh-lang', lang);
@@ -78,8 +81,8 @@ export async function openWindow(page: Page, { lang, theme, width }: Settings, f
   });
   await page.routeWebSocket('**/api/agents/orchestrator/terminal*', ws => {
     ws.send(JSON.stringify({ type: 'ready', write: true }));
-    ws.send(JSON.stringify({ type: 'program', running: true }));
-    ws.send(JSON.stringify({ type: 'data', data: 'The orchestrator is at work.\r\n> ' }));
+    ws.send(JSON.stringify({ type: 'program', ...(terminal.program ?? { running: true }) }));
+    ws.send(JSON.stringify({ type: 'data', data: terminal.data ?? 'The orchestrator is at work.\r\n> ' }));
   });
   await page.goto('/');
   const words = WORDS[lang];

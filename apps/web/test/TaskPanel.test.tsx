@@ -5,7 +5,7 @@ import type { MaterialManifest } from '../src/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { openFromBoard } from './open-task';
+import { openFromTracker } from './open-task';
 import { CARD, decisions, DEV_ORG, MACHINES, ME, mockApi, REQUESTS, RUNNING_AGENTS, SUBS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
@@ -27,11 +27,61 @@ function shell(routes: Record<string, unknown> = {}) {
 
 async function openTask(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-  await openFromBoard(user, /#12/);
+  await openFromTracker(user, 12);
   return screen.findByRole('complementary', { name: '#12 Checkout API' });
 }
 
 describe('a task', () => {
+  it.each([
+    ['en', 'Save passwords in the company vault'],
+    ['ru', 'Сохраняйте пароли в хранилище компании'],
+  ])('offers the vault for masked text in %s without exposing a value', async (language, label) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, body: 'password=[hidden]' } }] });
+    const panel = await openTask(user);
+    expect(within(panel).getByRole('link', { name: label })).toHaveAttribute('href', '/settings/passwords');
+  });
+
+  it('lets an authorized person hide an existing secret, then clears the input', async () => {
+    const user = userEvent.setup();
+    const task = { ...TASK_DETAIL, mayHideSecret: true, body: 'OldMarker1077!' };
+    const calls = shell({
+      'GET /api/tasks/t12': [200, { task }],
+      'POST /api/tasks/t12/hide-secret': [200, { task: { ...task, body: '[hidden]' } }],
+    });
+    const panel = await openTask(user);
+    await user.click(within(panel).getAllByRole('button', { name: 'Hide secret' })[0]!);
+    await user.type(within(panel).getByLabelText('Secret to hide'), 'OldMarker1077!');
+    await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
+    await waitFor(() => expect(calls.some(c => c.path === '/api/tasks/t12/hide-secret')).toBe(true));
+    await waitFor(() => expect(within(panel).queryByLabelText('Secret to hide')).not.toBeInTheDocument());
+  });
+
+  it('does not offer secret hiding without permission from the server', async () => {
+    const user = userEvent.setup();
+    shell();
+    const panel = await openTask(user);
+    expect(within(panel).queryByRole('button', { name: 'Hide secret' })).not.toBeInTheDocument();
+  });
+
+  it('clears a secret after a failed request and lets the person cancel', async () => {
+    const user = userEvent.setup();
+    shell({
+      'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayHideSecret: true } }],
+      'POST /api/tasks/t12/hide-secret': [403, { error: { code: 'forbidden', message: 'Access changed.' } }],
+    });
+    const panel = await openTask(user);
+    await user.click(within(panel).getAllByRole('button', { name: 'Hide secret' })[0]!);
+    const input = within(panel).getByLabelText('Secret to hide');
+    expect(within(panel).getByRole('button', { name: 'Hide everywhere' })).toBeDisabled();
+    await user.type(input, 'OldMarker1077!');
+    await user.click(within(panel).getByRole('button', { name: 'Hide everywhere' }));
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('The secret could not be hidden.');
+    expect(input).toHaveValue('');
+    await user.click(within(panel).getByRole('button', { name: /^Cancel$/ }));
+    expect(within(panel).queryByLabelText('Secret to hide')).not.toBeInTheDocument();
+  });
   afterEach(() => localStorage.removeItem('hh-lang'));
   it.each([
     ['en', { workKind: 'bug', riskClass: 'money' }, 'Bug, risk: money'],
@@ -43,7 +93,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, ...labels } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     expect(within(panel).getByText(line)).toHaveClass('tp-kind');
   });
@@ -64,7 +114,7 @@ describe('a task', () => {
     const log = ['restart', 'merge', 'continue', 'assigned'].map((wake, i) => ({ kind: 'wake_skipped', text: 'Server fallback.', data: { wake, job: i === 0 ? 'abcdefgh-0000' : null }, by: { kind: 'agent' as const, id: 'b1', name: 'Bruno' }, at: '2026-11-03T21:00:00.000Z' }));
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, status: 'done', log } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const lines = within(within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' })).getAllByRole('listitem');
     expect(lines).toHaveLength(4);
@@ -82,7 +132,7 @@ describe('a task', () => {
     const log = [{ kind: 'wake_obsolete', text: 'Server fallback.', data: { wake: 'merge', job: null }, by: { kind: 'agent' as const, id: 'b1', name: 'Bruno' }, at: '2026-11-03T21:00:00.000Z' }];
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, log } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const logList = within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' });
     expect(within(logList).getByRole('listitem')).toHaveTextContent(expected);
@@ -95,7 +145,7 @@ describe('a task', () => {
     const externalWait = { reason: 'Images on the registry', since: '2026-11-03T10:00:00.000Z', until: '2026-11-03T11:30:00.000Z' };
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait } }] });
     await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const clock = new Date(externalWait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
     const text = language === 'ru' ? `ждет: Images on the registry, до ${clock}` : `waits: Images on the registry, until ${clock}`;
@@ -205,8 +255,8 @@ describe('a task', () => {
       log: [...TASK_DETAIL.log, { kind: 'started', text: '#9 is done, so it starts now.', data: {}, by: null, at: '2026-10-30T09:00:00.000Z' }],
     };
     for (const [lang, words] of [
-      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Starts after', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
-      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Начнется после', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
+      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Waits for', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
+      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Ждет', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       const user = userEvent.setup();
@@ -223,7 +273,7 @@ describe('a task', () => {
         </LanguageProvider>,
       );
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       const workflow = within(panel).getByRole('list', { name: words.workflow });
       expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Development');
@@ -261,7 +311,7 @@ describe('a task', () => {
         </LanguageProvider>,
       );
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       expect(panel).toHaveTextContent(line);
       unmount();
@@ -294,11 +344,47 @@ describe('a task', () => {
         </LanguageProvider>,
       );
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       expect(panel).toHaveTextContent(line);
       expect(within(panel).getAllByText(mark)).toHaveLength(2);
       unmount();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('shows each one-shot call in its log, in each language: its brief, input, answer, verdict and how long it took', async () => {
+    const bruno = { kind: 'agent' as const, id: 'b1', name: 'Bruno' };
+    const call = (over: object) => ({ batch: 'aaaaaaaa-0000-4000-8000-000000000001', judge: false, brief: 'Look for unsafe SQL.', input: null, stage: null, error: null, verdict: null, startedAt: '2026-11-17T10:00:00.000Z', finishedAt: '2026-11-17T10:02:00.000Z', ...over });
+    const withCalls = {
+      ...TASK_DETAIL,
+      log: [
+        ...TASK_DETAIL.log,
+        { kind: 'call', text: 'One-shot call 1 of batch aaaa answered: Line 12 builds SQL from a string.', data: call({ number: 1, input: 'src/users.ts', status: 'done', result: 'Line 12 builds SQL from a string.', verdict: { pass: false, reason: 'unsafe SQL on line 12' } }), by: bruno, at: '2026-11-17T10:02:00.000Z' },
+        { kind: 'call', text: 'One-shot call 2 of batch aaaa failed: out of time', data: call({ number: 2, input: 'src/orders.ts', status: 'failed', error: 'timeout', result: 'out of time', finishedAt: '2026-11-17T10:00:30.000Z' }), by: bruno, at: '2026-11-17T10:02:01.000Z' },
+        { kind: 'call', text: 'The judge call of batch aaaa answered: The finding is real.', data: call({ number: 3, judge: true, brief: 'Keep only the real findings.', status: 'done', result: 'The finding is real.', verdict: { pass: false, reason: 'the finding is real' } }), by: bruno, at: '2026-11-17T10:04:00.000Z' },
+      ],
+    };
+    for (const [lang, words] of [
+      ['en', { title: 'Bruno ran a one-shot call', judge: 'Bruno ran a judge call', answered: 'Call 1 answered; it took 2 min.', failed: 'Call 2 failed; it ran less than a minute.', judged: 'The judge answered; it took 2 min.', verdict: 'Verdict: did not pass. unsafe SQL on line 12', brief: 'Brief: Look for unsafe SQL.', input: 'Input: src/users.ts', answer: 'Answer: Line 12 builds SQL from a string.' }],
+      ['ru', { title: 'Bruno запустил разовый вызов', judge: 'Bruno запустил судью вызовов', answered: 'Вызов 1 ответил, это заняло 2 мин.', failed: 'Вызов 2 не справился, он шел менее минуты.', judged: 'Судья ответил, это заняло 2 мин.', verdict: 'Итог: не принято. unsafe SQL on line 12', brief: 'Задание: Look for unsafe SQL.', input: 'Входные данные: src/users.ts', answer: 'Ответ: Line 12 builds SQL from a string.' }],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      const user = userEvent.setup();
+      shell({ 'GET /api/tasks/t12': [200, { task: withCalls }] });
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await openFromTracker(user, 12);
+      const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+      await within(panel).findAllByRole('listitem');
+      const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title) || text.includes(words.judge));
+      expect(lines).toHaveLength(3);
+      for (const said of [words.title, words.answered, words.verdict, words.brief, words.input, words.answer]) expect(lines[0]).toContain(said);
+      expect(lines[1]).toContain(words.failed);
+      expect(lines[1]).toContain('out of time');
+      for (const said of [words.judge, words.judged]) expect(lines[2]).toContain(said);
+      /* The English line kept for the agents is not what a person reads. */
+      expect(panel).not.toHaveTextContent('of batch aaaa');
+      cleanup();
       localStorage.removeItem('hh-lang');
     }
   });
@@ -323,7 +409,7 @@ describe('a task', () => {
       const user = userEvent.setup();
       shell({ 'GET /api/tasks/t12': [200, { task: away }] });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       await within(panel).findAllByRole('listitem');
       const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
@@ -358,7 +444,7 @@ describe('a task', () => {
       const user = userEvent.setup();
       shell({ 'GET /api/tasks/t12': [200, { task: cut }] });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await openFromBoard(user, /#12/);
+      await openFromTracker(user, 12);
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
       await within(panel).findAllByRole('listitem');
       const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
@@ -590,7 +676,7 @@ describe('a task', () => {
     shell();
     await user.click(within(await openTask(user)).getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
-    await openFromBoard(user, /#12/);
+    await openFromTracker(user, 12);
     await screen.findByRole('complementary', { name: '#12 Checkout API' });
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();

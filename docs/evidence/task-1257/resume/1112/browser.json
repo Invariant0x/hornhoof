@@ -1,0 +1,16 @@
+{
+  "commit": "03bce94da105fb537223f14a6690d39ea1369dda",
+  "cwd": "apps/web",
+  "command": [
+    "npx",
+    "--no-install",
+    "playwright",
+    "test",
+    "e2e/approval-policy.spec.ts",
+    "--config=e2e/approval-policy.config.ts"
+  ],
+  "exit": 0,
+  "log": "browser.log",
+  "sha256": "80eb328064dc76a0a507de41584edaa033ab7595203d2f9d0c665c196bcd7083",
+  "originalSha256": "80eb328064dc76a0a507de41584edaa033ab7595203d2f9d0c665c196bcd7083"
+}

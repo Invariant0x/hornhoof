@@ -58,6 +58,12 @@ function stageAbilities(plan: StageRoute): Route['state']['abilities'] {
   return Object.fromEntries(plan.stages.flatMap(step => step.ability ? [[step.stage, step.ability]] : []));
 }
 
+/* The stages the route runs as one-shot calls, kept only where it has some. */
+function oneShotStages(plan: StageRoute): Pick<Route['state'], 'oneShot'> {
+  const marked = plan.stages.flatMap(step => step.oneShot ? [[step.stage, step.oneShot] as const] : []);
+  return marked.length ? { oneShot: Object.fromEntries(marked) } : {};
+}
+
 function developmentOwner(task: Task, resultKind: 'code' | 'document'): string | null {
   return resultKind === 'document' ? (task.executorAgentId ?? task.assigneeAgentId) : task.executorAgentId;
 }
@@ -93,7 +99,7 @@ function stagedState(task: Task, input: RouteInput, cleanup: boolean, plan: Stag
   const hasSecurity = plan.stages.some(step => step.stage === 'security');
   return {
     kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
-    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: stageAbilities(plan),
+    stages: plan.stages.flatMap(step => steps[step.stage] ?? []), abilities: stageAbilities(plan), ...oneShotStages(plan),
     security: hasSecurity ? policy : NO_SECURITY,
   };
 }
@@ -171,11 +177,15 @@ export async function routeSnapshots(db: Db | Tx, rows: Pick<Task, 'id' | 'compa
   }));
 }
 
-/* A cancelled task keeps its stages as they stood, and its phase says the work ended unfinished. */
-export async function cancelRoutes(tx: Tx, companyId: string, taskIds: string[]): Promise<void> {
-  await tx.update(taskRoutes).set({ state: sql`jsonb_set(${taskRoutes.state}, '{phase}', '"cancelled"')`, revision: sql`${taskRoutes.revision} + 1` })
+/* A task closed past its route keeps its stages as they stood, and its phase says only how the record ended: cancelled, the
+   work ended unfinished; done, the orchestrator closed it, which accepts nothing. */
+export async function endRoutes(tx: Tx, companyId: string, taskIds: string[], phase: 'done' | 'cancelled'): Promise<void> {
+  if (!taskIds.length) return;
+  await tx.update(taskRoutes).set({ state: sql`jsonb_set(${taskRoutes.state}, '{phase}', ${JSON.stringify(phase)}::jsonb)`, revision: sql`${taskRoutes.revision} + 1` })
     .where(and(inArray(taskRoutes.taskId, taskIds), eq(taskRoutes.companyId, companyId)));
 }
+
+export const cancelRoutes = (tx: Tx, companyId: string, taskIds: string[]): Promise<void> => endRoutes(tx, companyId, taskIds, 'cancelled');
 
 /* The task version and route revision are changed in the same transaction. */
 export async function changeRoute(tx: Tx, before: Route, state: Route['state'], paths = before.paths): Promise<void> {

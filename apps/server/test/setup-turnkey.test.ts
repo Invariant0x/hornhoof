@@ -10,9 +10,9 @@ const LATER = { ...SETUP, orchestrator: { mode: 'later' } };
 const MAC = { machineId: 'mac-0001-abcd', hostname: 'dev-mac', os: 'darwin', arch: 'arm64' };
 const codeOf = (command: string) => command.split('--join ')[1]!;
 
-/* The project template: Operations with its four, Development with a head, two developers and a reviewer, and the turnkey
-   team of each: two developers in Development, an incident fixer in Operations. */
-const PROJECT = ['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
+/* The project template: Operations with its four, Development with a head, two developers and a reviewer, a product
+   manager in each, and the turnkey team of each: two developers in Development, an incident fixer in Operations. */
+const PROJECT = ['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-PM', 'DEV-REV', 'OPS-BUGS', 'OPS-FIX', 'OPS-HEAD', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH'];
 /* A member of a turnkey team runs the strongest model, as nobody checks after it. */
 const tierOf = (app: FastifyInstance, employee: typeof agents.$inferSelect) => (employee.teamId ? 'top' : app.ctx.templates.roles.get(employee.roleKey!)!.tier);
 
@@ -36,7 +36,7 @@ describe('POST /api/setup staffs the template', () => {
     const staff = await staffOf(app);
     expect(staff.map(a => a.roleKey).sort()).toEqual(PROJECT);
     const dev = (await db.select().from(departments).where(eq(departments.templateKey, 'development')))[0]!;
-    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Code reviewer', 'Developer 1', 'Developer 1 (Turnkey team)', 'Developer 2', 'Developer 2 (Turnkey team)', 'Head of development']);
+    expect(staff.filter(a => a.departmentId === dev.id).map(a => a.name).sort()).toEqual(['Code reviewer', 'Developer 1', 'Developer 1 (Turnkey team)', 'Developer 2', 'Developer 2 (Turnkey team)', 'Head of development', 'Product manager']);
     for (const employee of staff) {
       const role = app.ctx.templates.roles.get(employee.roleKey!)!;
       expect(employee.subscriptionId, employee.name).toBe(key!.id);
@@ -50,9 +50,9 @@ describe('POST /api/setup staffs the template', () => {
     await setUp(app, { ...SETUP, template: 'corporation' });
     const staff = await staffOf(app);
     const ops = (await db.select().from(departments).where(eq(departments.templateKey, 'operations')))[0]!;
-    expect(staff.filter(a => a.departmentId === ops.id).map(a => a.roleKey).sort()).toEqual(['OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PROGRAM', 'OPS-WATCH']);
-    /* The card says 39 employees for the full company: 30 in its departments and 9 in their turnkey teams. */
-    expect(staff).toHaveLength(39);
+    expect(staff.filter(a => a.departmentId === ops.id).map(a => a.roleKey).sort()).toEqual(['OPS-BUGS', 'OPS-FIX', 'OPS-FIX', 'OPS-HEAD', 'OPS-INTEG', 'OPS-PM', 'OPS-PROGRAM', 'OPS-WATCH']);
+    /* The card says 47 employees for the full company: 38 in its departments and 9 in their turnkey teams. */
+    expect(staff).toHaveLength(47);
     /* Each employee works in its department itself, not in one of its products. */
     expect(staff.every(a => a.productId === null)).toBe(true);
   });
@@ -80,7 +80,7 @@ describe('POST /api/setup staffs the template', () => {
     const staff = await staffOf(app);
     /* Kimi runs no deep model, which the head of development and the reviewer need, nor the strongest one of a turnkey team. */
     expect(staff.filter(a => a.subscriptionId === null).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV', 'OPS-FIX']);
-    expect(staff.filter(a => a.subscriptionId === plan!.id)).toHaveLength(6);
+    expect(staff.filter(a => a.subscriptionId === plan!.id)).toHaveLength(8);
   });
 });
 
@@ -183,7 +183,7 @@ describe('a subscription that comes later', () => {
     expect((await addKey(app, ceo, { kind: 'department', id: dev.id })).statusCode).toBe(201);
     const [key] = await plans(app);
     const staff = await staffOf(app);
-    expect(staff.filter(a => a.subscriptionId === key!.id).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-REV']);
+    expect(staff.filter(a => a.subscriptionId === key!.id).map(a => a.roleKey).sort()).toEqual(['DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-ENG', 'DEV-HEAD', 'DEV-PM', 'DEV-REV']);
     expect(staff.filter(a => a.departmentId !== dev.id).every(a => a.subscriptionId === null)).toBe(true);
     expect((await orchestrator(app)).subscriptionId).toBeNull();
   });

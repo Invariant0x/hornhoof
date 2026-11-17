@@ -3,13 +3,11 @@ export * from './tool-privacy.js';
 export * from './external-operations.js';
 export * from './request-materials.js';
 export * from './questions.js';
-export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
+export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, approvalNeeded, defaultRule, kindKey, GOING_OUT_CHANNELS, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
-export * from './model-check.js';
-export * from './outbound.js';
 export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 export { mutationResultMatches, MutationResult, mutationSelectionMatches, CandidateMutation, MutationDelta, MutationFunction, MutationSelection, runtimeVersionMatches, requiredTestRuntimes, runsInClass, runtimeClass, supportsTestProfile, EnvironmentProblem, FileNote, FileOutcome, KEPT_BYTES, KeptFiles, PREPARATION_UNIT, UnitFingerprint, UnitFingerprints, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, RuntimePlatform, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
@@ -270,85 +268,85 @@ export type CompanyTemplate = { key: CompanyTemplateKey; departments: readonly C
 export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'project',
-    departments: [{ template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] }, { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }] }],
+    departments: [{ template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }] }, { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-PM', count: 1 }] }],
   },
   {
     key: 'startup',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
-      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-SEC', count: 1 }] },
-      { template: 'design', staff: [{ role: 'DSN-HEAD', count: 1 }, { role: 'DSN-UI', count: 1 }] },
-      { template: 'marketing', staff: [{ role: 'MKT-HEAD', count: 1 }, { role: 'MKT-WRITE', count: 1 }] },
-      { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }] },
+      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-PM', count: 1 }] },
+      { template: 'design', staff: [{ role: 'DSN-HEAD', count: 1 }, { role: 'DSN-UI', count: 1 }, { role: 'DSN-PM', count: 1 }] },
+      { template: 'marketing', staff: [{ role: 'MKT-HEAD', count: 1 }, { role: 'MKT-WRITE', count: 1 }, { role: 'MKT-PM', count: 1 }] },
+      { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }, { role: 'BIZ-PM', count: 1 }] },
     ],
   },
   {
     key: 'studio',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-PM', count: 1 }] },
       {
         template: 'development',
         products: ['Product 1', 'Product 2', 'Product 3'],
-        staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 3 }, { role: 'DEV-REV', count: 2 }, { role: 'DEV-SEC', count: 1 }],
+        staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 3 }, { role: 'DEV-REV', count: 2 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-PM', count: 1 }],
       },
     ],
   },
   {
     key: 'corporation',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }, { role: 'OPS-PM', count: 1 }] },
       {
         template: 'development',
         products: ['Product 1', 'Product 2'],
-        staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 3 }, { role: 'DEV-REV', count: 2 }, { role: 'DEV-SEC', count: 1 }],
+        staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 3 }, { role: 'DEV-REV', count: 2 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-PM', count: 1 }],
       },
-      { template: 'design', staff: [{ role: 'DSN-HEAD', count: 1 }, { role: 'DSN-UI', count: 1 }, { role: 'DSN-SYS', count: 1 }] },
-      { template: 'marketing', staff: [{ role: 'MKT-HEAD', count: 1 }, { role: 'MKT-WRITE', count: 1 }, { role: 'MKT-SEO', count: 1 }] },
-      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }, { role: 'SAL-SDR', count: 1 }] },
-      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }, { role: 'SUP-T2', count: 1 }] },
-      { template: 'finance', staff: [{ role: 'FIN-HEAD', count: 1 }, { role: 'FIN-BOOK', count: 1 }] },
-      { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-PARTNER', count: 1 }] },
+      { template: 'design', staff: [{ role: 'DSN-HEAD', count: 1 }, { role: 'DSN-UI', count: 1 }, { role: 'DSN-SYS', count: 1 }, { role: 'DSN-PM', count: 1 }] },
+      { template: 'marketing', staff: [{ role: 'MKT-HEAD', count: 1 }, { role: 'MKT-WRITE', count: 1 }, { role: 'MKT-SEO', count: 1 }, { role: 'MKT-PM', count: 1 }] },
+      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }, { role: 'SAL-SDR', count: 1 }, { role: 'SAL-PM', count: 1 }] },
+      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }, { role: 'SUP-T2', count: 1 }, { role: 'SUP-PM', count: 1 }] },
+      { template: 'finance', staff: [{ role: 'FIN-HEAD', count: 1 }, { role: 'FIN-BOOK', count: 1 }, { role: 'FIN-PM', count: 1 }] },
+      { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-PARTNER', count: 1 }, { role: 'BIZ-PM', count: 1 }] },
     ],
   },
   {
     key: 'security',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
-      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-RED', count: 1 }] },
-      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }] },
-      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-PM', count: 1 }] },
+      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-RED', count: 1 }, { role: 'DEV-PM', count: 1 }] },
+      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }, { role: 'SAL-PM', count: 1 }] },
+      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }, { role: 'SUP-PM', count: 1 }] },
     ],
   },
   {
     key: 'opensource',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
-      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-DOCS', count: 1 }] },
-      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-KB', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }] },
+      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-DOCS', count: 1 }, { role: 'DEV-PM', count: 1 }] },
+      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-KB', count: 1 }, { role: 'SUP-PM', count: 1 }] },
     ],
   },
   {
     key: 'agency',
     departments: [
-      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }, { role: 'SAL-SDR', count: 1 }] },
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }] },
-      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }, { role: 'SUP-T2', count: 1 }] },
+      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }, { role: 'SAL-SDR', count: 1 }, { role: 'SAL-PM', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }, { role: 'OPS-PM', count: 1 }] },
+      { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }, { role: 'SUP-T2', count: 1 }, { role: 'SUP-PM', count: 1 }] },
     ],
   },
   {
     key: 'lab',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
-      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-DOCS', count: 1 }] },
-      { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }] },
+      { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-DOCS', count: 1 }, { role: 'DEV-PM', count: 1 }] },
+      { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }, { role: 'BIZ-PM', count: 1 }] },
     ],
   },
   {
     key: 'home',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
-      { template: 'home_devices', staff: [{ role: 'HOM-HEAD', count: 1 }, { role: 'HOM-NET', count: 1 }, { role: 'HOM-SMART', count: 1 }] },
-      { template: 'household', staff: [{ role: 'HHD-HEAD', count: 1 }, { role: 'HHD-SUPPLY', count: 1 }, { role: 'HHD-BILLS', count: 1 }, { role: 'HHD-CAL', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-PM', count: 1 }] },
+      { template: 'home_devices', staff: [{ role: 'HOM-HEAD', count: 1 }, { role: 'HOM-NET', count: 1 }, { role: 'HOM-SMART', count: 1 }, { role: 'HOM-PM', count: 1 }] },
+      { template: 'household', staff: [{ role: 'HHD-HEAD', count: 1 }, { role: 'HHD-SUPPLY', count: 1 }, { role: 'HHD-BILLS', count: 1 }, { role: 'HHD-CAL', count: 1 }, { role: 'HHD-PM', count: 1 }] },
     ],
   },
 ];
@@ -392,12 +390,16 @@ export const LOAD_MS = 20_000;
    Hornhoof starts no new program on a machine short of free memory. A list that is not one counts as none said. */
 const Live = z.array(z.string().regex(/^[A-Za-z0-9-]{1,64}$/)).max(200).optional().catch(undefined);
 
-/* Installed agent programs and an update in progress on the connected node. */
+/* Installed agent programs and an update in progress on the connected node. repair: the program was installed but does
+   not start, so the node installs it again, or it still does not start, with the last line it said (through the node's
+   masks). */
 export const ProgramInfo = z.object({
   id: z.enum(['claude', 'codex', 'kimi']),
   version: z.string().min(1).max(64).nullable(),
   updating: z.boolean(),
   failed: z.boolean(),
+  repair: z.enum(['reinstalling', 'broken']).optional(),
+  reason: z.string().min(1).max(400).optional(),
 });
 export type ProgramInfo = z.infer<typeof ProgramInfo>;
 const Programs = z.array(ProgramInfo).max(3);
@@ -484,6 +486,10 @@ export const HELLO_IDS_MAX = 20_000;
 /* A server that sends no ack drops a hello that lists more than this. */
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
+/* Why the node cannot write its work folder now, so it can take no turn; null once a write there works again. Older nodes
+   send none. */
+const WorkError = z.string().max(2000).nullable().optional();
+
 const NodeMessage = z.discriminatedUnion('type', [
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
@@ -510,6 +516,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     testHarness: z.literal(1).optional(),
     /* Why the Playwright browsers could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
+    workError: WorkError,
     load: Load.optional(),
     live: Live,
     tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
@@ -556,6 +563,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     account: Account.nullable().optional(),
     programs: Programs.optional(),
     browserError: BrowserError.nullable().optional(),
+    workError: WorkError,
     noRuns: z.string().max(300).nullable().optional(),
     testEnvironmentVersion: z.literal(1).optional(),
     testRuntimes: z.array(RuntimeCapability).max(64).optional(),
@@ -571,7 +579,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     n: MessageNumber,
   }),
   /* How the sign-in Hornhoof started on this node ended. */
-  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), n: MessageNumber }),
+  /* code and line: a sign-in whose program ended early, with its exit code and the last line it said, through the node's
+     masks, for its owner to read. */
+  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), code: z.number().int().nullable().optional(), line: z.string().min(1).max(400).nullable().optional(), n: MessageNumber }),
   z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
   /* Which of the turns Hornhoof asked about the node still runs, as its hello would list them. */
   z.object({ type: z.literal('jobs.held'), asked: z.array(z.string()).max(100), held: z.array(z.string()).max(100) }),
@@ -589,6 +599,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     wordsWaiting: z.boolean().optional(),
     /* Set on a failed turn whose program said why; older nodes send none. */
     failure: Failure.optional(),
+    /* The turn ended before its program started; older nodes send none. */
+    unstarted: z.literal(true).optional(),
     /* The tokens the turn used; null when its program told none, left out by older nodes. */
     tokens: TurnTokens.nullable().optional(),
     /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */
@@ -688,7 +700,13 @@ export const Repo = z.object({
 });
 /* repositoryScope: the repository as the company's registry of what is built knows it, so the agent's worktree can take the
    dependencies a machine built for its commit. */
-const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional() });
+/* tasks: the company's task numbers still open and the last number it gave, so the node takes away the agent's worktrees of
+   closed tasks: one on a task-<n> branch of a number up to that one and not open, once nothing in it is lost. A server from
+   before sends none, and a company with more open tasks than a message carries too: then every worktree stays. */
+export const MAX_OPEN_TASKS = 10_000;
+export const TaskStates = z.object({ open: z.array(z.number().int().positive()).max(MAX_OPEN_TASKS), upTo: z.number().int().min(0) });
+export type TaskStates = z.infer<typeof TaskStates>;
+const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional(), tasks: TaskStates.optional() });
 /* As many skills as an agent can have on, each a folder named after it with its SKILL.md. */
 export const MAX_SKILLS = 200;
 const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1).max(1000), body: z.string().max(200_000) });
@@ -740,6 +758,10 @@ const ServerMessage = z.discriminatedUnion('type', [
     workspace: Workspace.nullable().optional(),
     /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */
     skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
+    /* A one-shot call: the program runs once in its mode that answers and exits, in a fresh folder of the call's own with
+       the workspace's repository cloned in it, which the node removes after. It keeps no session, has no inbox and takes
+       its turn by the machine's memory: it starts, and says so, once the machine has memory for its program. */
+    call: z.literal(true).optional(),
   }),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),

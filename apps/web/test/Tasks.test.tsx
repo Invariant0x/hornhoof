@@ -32,7 +32,12 @@ function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
 
 async function openTasks(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
-  return screen.findByRole('heading', { level: 1, name: 'Tasks' });
+  return screen.findByRole('heading', { level: 1, name: 'My tasks' });
+}
+
+/* A place of the tracker's left panel. */
+async function goTo(user: ReturnType<typeof userEvent.setup>, name: RegExp | string) {
+  await user.click(within(await screen.findByRole('navigation', { name: /^(Task lists|Списки задач)$/ })).getByRole('button', { name }));
 }
 
 describe('the tracker', () => {
@@ -60,9 +65,9 @@ describe('the tracker', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/turns': [200, { turns: [] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
     await openTasks(user);
-    expect(await screen.findByText(/Nothing is in progress here/)).toBeInTheDocument();
-    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
-    expect(screen.getByText(/No turns and no tasks yet/)).toBeInTheDocument();
+    expect(await screen.findByText('No open tasks to answer for.')).toBeInTheDocument();
+    await goTo(user, 'Turns and releases');
+    expect(await screen.findByText(/No turns and no tasks yet/)).toBeInTheDocument();
   });
 
   it('answers a question and takes it off the list', async () => {
@@ -169,10 +174,10 @@ describe('the tracker', () => {
     let moved = false;
     shell({ [`GET ${ALL}`]: () => [200, { tasks: moved ? [CHECKING_CART] : TASKS }] });
     await openTasks(user);
+    await goTo(user, /^Development/);
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('Assignee: Rita'));
-    expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('In review');
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ })).toHaveTextContent('Rita'));
   });
 
   it('keeps the newest list when an older answer comes after it', async () => {
@@ -190,23 +195,24 @@ describe('the tracker', () => {
       },
     });
     await openTasks(user);
+    await goTo(user, /^Development/);
     hold = true;
     stream.send({ type: 'task', id: 't11' });
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('Assignee: Rita'));
+    const reviewed = () => within(screen.getByRole('region', { name: 'Review: 1' })).getByRole('listitem', { name: /#11/ });
+    await waitFor(() => expect(reviewed()).toHaveTextContent('Rita'));
     await act(async () => {
       late();
       /* One turn of the event loop: the older answer's promise chain has no timer in it, so it has run its course. */
       await new Promise(r => setImmediate(r));
     });
-    expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('Assignee: Rita');
-    expect(screen.getByRole('article', { name: /#11/ })).toHaveTextContent('In review');
+    expect(reviewed()).toHaveTextContent('Rita');
   });
 });
 
-/* The cards of what a search found, without the related tasks folded in them. */
-const taskRows = (found: HTMLElement) => within(found).getAllByRole('article').filter(card => !card.classList.contains('sub'));
+/* The rows of what a search found, best match first. */
+const taskRows = (found: HTMLElement) => within(found).getAllByRole('listitem');
 
 describe('task search', () => {
   const archived = { ...PLANNED, id: 'abcdef14-1234-4567-8901-123456789abc', status: 'done', turn: 2 };
@@ -217,13 +223,13 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [mention, { ...PLANNED, id: 't114', number: 114 }, archived] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('region', { name: 'Search results' });
+    const results = screen.getByRole('region', { name: 'Found tasks' });
     const matches = taskRows(results);
     expect(matches).toHaveLength(2);
     expect(matches[0]).toHaveAccessibleName('#14 Refund button');
     expect(matches[0]).toBeVisible();
     expect(matches[1]).toHaveAccessibleName('#13 Notes for #14');
-    expect(within(results).queryByRole('article', { name: /#114/ })).not.toBeInTheDocument();
+    expect(within(results).queryByRole('listitem', { name: /#114/ })).not.toBeInTheDocument();
   });
 
   it.each(['abcdef14-1234-4567-8901-123456789abc', 'ABCDEF14'])('finds a task by its id or prefix: %s', async query => {
@@ -231,9 +237,9 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, archived] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('region', { name: 'Search results' });
+    const results = screen.getByRole('region', { name: 'Found tasks' });
     expect(taskRows(results)).toHaveLength(1);
-    expect(within(results).getByRole('article', { name: /#14 Refund button/ })).toBeVisible();
+    expect(within(results).getByRole('listitem', { name: /#14 Refund button/ })).toBeVisible();
   });
 
   it('does not use id prefixes shorter than eight characters', async () => {
@@ -253,9 +259,9 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, russian] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('region', { name: 'Search results' });
+    const results = screen.getByRole('region', { name: 'Found tasks' });
     expect(taskRows(results)).toHaveLength(1);
-    expect(within(results).getByRole('article', { name: new RegExp(title) })).toBeVisible();
+    expect(within(results).getByRole('listitem', { name: new RegExp(title) })).toBeVisible();
   });
 
   it('shows no matches without changing the decisions waiting for the person', async () => {
@@ -264,7 +270,7 @@ describe('task search', () => {
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'Checkout missing');
     expect(screen.getByRole('status')).toHaveTextContent('No tasks found');
-    expect(screen.queryByRole('article', { name: /#12 Checkout API/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('listitem', { name: /#12 Checkout API/ })).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Waiting for you' })).toHaveTextContent('Stripe or Adyen?');
   });
 
@@ -287,7 +293,7 @@ describe('the decisions of one person', () => {
     const user = userEvent.setup();
     shell({ 'GET /api/org': [200, counted({ p1: 1, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!])] });
     await user.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Tasks' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Waits for Dan' })).toBeInTheDocument();
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByText('Decisions for Dan')).toBeInTheDocument();
     expect(within(waiting).getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['#9 Pick a payment provider']);
@@ -328,8 +334,8 @@ describe('the decisions of one person', () => {
     expect(computer).toHaveTextContent('Inspect disk space.');
     /* What opening gives stands under the request: here the company's data, on a system the server did not name. */
     expect(computer).toHaveTextContent("Open access lets the orchestrator change anything on the server's computer, the company's data included.");
-    await user.click(within(computer).getByRole('button', { name: "Open access to the server's computer for a day" }));
-    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} });
+    await user.click(within(computer).getByRole('button', { name: "Open access to the server's computer for 1 hour" }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'orchestrator', duration: '1h' } });
     expect(await screen.findByRole('button', { name: 'Tasks, 3 waiting for you' })).toBeInTheDocument();
     expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
   });
@@ -401,7 +407,7 @@ describe('the decisions of one person', () => {
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('heading', { name: 'Hiring for Development' })).toBeInTheDocument();
     expect(within(waiting).getByText('Hire a reviewer.')).toBeInTheDocument();
-    await user.click(within(waiting).getByRole('button', { name: "Open access to the server's computer for a day" }));
+    await user.click(within(waiting).getByRole('button', { name: "Open access to the server's computer for 1 hour" }));
     expect(await within(waiting).findByRole('alert')).toHaveTextContent('Hornhoof cannot reach this machine now: its core has not answered for a minute.');
   });
 
@@ -458,135 +464,6 @@ describe('decisions read failure', () => {
   });
 });
 
-/* The screen answers at a glance where the person is needed (the Design department's review of the tracker, #889). */
-describe('the tracker at a glance', () => {
-  it.each([
-    ['en', /^Tasks/, 'At a glance', ['1 Waiting for your answer', '1 Going on now', '2 Ready for release']],
-    ['ru', /^Задачи/, 'Коротко', ['1 Ждут вашего ответа', '1 Идут сейчас', '2 Готово к выпуску']],
-  ])('counts under the heading what waits for the answer of the person, what goes on now and what is ready for release (%s)', async (lang, tasks, label, tiles) => {
-    localStorage.setItem('hh-lang', lang);
-    try {
-      const user = userEvent.setup();
-      shell({});
-      await user.click(await screen.findByRole('button', { name: tasks }));
-      const summary = await screen.findByRole('list', { name: label });
-      await waitFor(() => expect(within(summary).getAllByRole('listitem').map(tile => tile.textContent)).toEqual(tiles));
-      expect(within(summary).getAllByRole('listitem')[0]).toHaveClass('you');
-      expect(within(summary).getAllByRole('listitem')[0]).not.toHaveClass('calm');
-    } finally {
-      localStorage.removeItem('hh-lang');
-    }
-  });
-
-  it.each([
-    ['en', /^Tasks/, 'At a glance', '0 Nothing waits for your answer'],
-    ['ru', /^Задачи/, 'Коротко', '0 Вашего ответа ничего не ждет'],
-  ])('says calmly when nothing waits for the answer of the person (%s)', async (lang, tasks, label, calm) => {
-    localStorage.setItem('hh-lang', lang);
-    try {
-      const user = userEvent.setup();
-      shell({ 'GET /api/requests': [200, decisions([])] });
-      await user.click(await screen.findByRole('button', { name: tasks }));
-      const first = within(await screen.findByRole('list', { name: label })).getAllByRole('listitem')[0]!;
-      await waitFor(() => expect(first).toHaveTextContent(calm));
-      expect(first).toHaveClass('calm');
-    } finally {
-      localStorage.removeItem('hh-lang');
-    }
-  });
-
-  it.each([
-    ['en', /^Tasks/, 'Work of the departments', 'Waiting for your answer', 'Open task', 'Waiting for you'],
-    ['ru', /^Задачи/, 'Работа отделов', 'Ждет вашего ответа', 'Открыть задачу', 'Ждут вас'],
-  ])('puts first the goal that waits for the answer of the person, framed and marked, with a way to open it and its question only in what waits for the person (%s)', async (lang, tasks, board, mark, open, waiting) => {
-    localStorage.setItem('hh-lang', lang);
-    try {
-      const user = userEvent.setup();
-      shell({ 'GET /api/tasks/t9': [200, { task: { ...TASK_DETAIL, id: 't9', number: 9, title: 'Pick a payment provider', parentId: null } }] });
-      await user.click(await screen.findByRole('button', { name: tasks }));
-      const work = await screen.findByRole('region', { name: board });
-      const cards = await within(work).findAllByRole('article');
-      expect(cards[0]).toHaveAccessibleName('#9 Pick a payment provider');
-      expect(cards[0]).toHaveClass('you');
-      expect(cards[0]).toHaveTextContent(mark);
-      expect(cards[0]).not.toHaveTextContent('Stripe or Adyen?');
-      expect(within(cards[0]!).queryByRole('group')).not.toBeInTheDocument();
-      expect(screen.getByRole('region', { name: waiting })).toHaveTextContent('Stripe or Adyen?');
-      expect(within(cards[1]!).queryByRole('button', { name: open })).not.toBeInTheDocument();
-      await user.click(within(cards[0]!).getByRole('button', { name: open }));
-      expect(await screen.findByRole('complementary', { name: '#9 Pick a payment provider' })).toBeInTheDocument();
-    } finally {
-      localStorage.removeItem('hh-lang');
-    }
-  });
-
-  it('frames a goal whose related task asks the person, and opens that task to answer', async () => {
-    const user = userEvent.setup();
-    const onSub = { ...REQUESTS[0]!, id: 'r3', text: 'Which card brands?', task: { id: 't13', number: 13, title: 'Card form', department: { id: 'd2', name: 'Development' } } };
-    const calls = shell({ 'GET /api/requests': [200, decisions([onSub])], 'GET /api/tasks/t13': [200, { task: { ...TASK_DETAIL, id: 't13', number: 13, title: 'Card form' } }] });
-    await openTasks(user);
-    const cards = await within(await screen.findByRole('region', { name: 'Work of the departments' })).findAllByRole('article');
-    expect(cards[0]).toHaveAccessibleName('#12 Checkout API');
-    expect(cards[0]).toHaveTextContent('Waiting for your answer');
-    expect(cards[0]).not.toHaveTextContent('Which card brands?');
-    await user.click(within(cards[0]!).getByRole('button', { name: 'Open task' }));
-    await waitFor(() => expect(calls.some(call => call.path === '/api/tasks/t13')).toBe(true));
-  });
-
-  it.each([
-    ['en', /^Tasks/, 'Work of the departments', '0 of 1 done', 'Related tasks: 0 of 1 done', 'Not started yet', 'Assignee: Bruno', 'Open task'],
-    ['ru', /^Задачи/, 'Работа отделов', 'Готово 0 из 1', 'Сопутствующие задачи: 0 из 1 готово', 'Еще не начата', 'Исполнитель: Bruno', 'Открыть задачу'],
-  ])('counts the progress of a goal in its related tasks and unfolds them as short rows, the next level not unfolded (%s)', async (lang, tasks, board, done, related, notStarted, assignee, open) => {
-    localStorage.setItem('hh-lang', lang);
-    try {
-      const user = userEvent.setup();
-      const GRAND = { ...SUBTASK, id: 't15', number: 15, title: 'Card brands', parentId: 't13' };
-      shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, { ...SUBTASK, brief: 'Enter the card.' }, GRAND, PLANNED] }] });
-      await user.click(await screen.findByRole('button', { name: tasks }));
-      const work = await screen.findByRole('region', { name: board });
-      const checkout = await within(work).findByRole('article', { name: '#12 Checkout API' });
-      expect(within(checkout).getByRole('progressbar', { name: done })).toHaveAttribute('aria-valuemax', '1');
-      expect(within(checkout).getByRole('progressbar', { name: done })).toHaveAttribute('aria-valuenow', '0');
-      expect(within(work).queryByText(/%/)).not.toBeInTheDocument();
-      expect(within(within(work).getByRole('article', { name: '#11 Cart page' })).queryByRole('progressbar')).not.toBeInTheDocument();
-      await user.click(within(checkout).getByRole('button', { name: related }));
-      const row = within(checkout).getByRole('listitem', { name: '#13 Card form' });
-      expect(row).toHaveTextContent(notStarted);
-      expect(row).toHaveTextContent(assignee);
-      expect(row).not.toHaveTextContent('Enter the card.');
-      expect(within(row).queryByRole('progressbar')).not.toBeInTheDocument();
-      expect(within(row).queryByRole('button', { name: /Related tasks|Сопутствующие/ })).not.toBeInTheDocument();
-      expect(within(row).getByRole('button', { name: open })).toBeInTheDocument();
-      expect(within(checkout).queryByText('Card brands')).not.toBeInTheDocument();
-    } finally {
-      localStorage.removeItem('hh-lang');
-    }
-  });
-
-  it('picks a department only where the work is grouped by department or by release, not on what is in progress', async () => {
-    const user = userEvent.setup();
-    shell({});
-    await openTasks(user);
-    await screen.findByRole('region', { name: 'Work of the departments' });
-    expect(screen.queryByRole('combobox', { name: 'Department' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('radio', { name: 'By department' }));
-    expect(screen.getByRole('combobox', { name: 'Department' })).toBeInTheDocument();
-    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
-    expect(screen.getByRole('combobox', { name: 'Department' })).toBeInTheDocument();
-  });
-
-  it('folds what is done and cancelled at the bottom of what is in progress', async () => {
-    const user = userEvent.setup();
-    shell({});
-    await openTasks(user);
-    const work = await screen.findByRole('region', { name: 'Work of the departments' });
-    const fold = await within(work).findByRole('button', { name: 'Done and cancelled: 1' });
-    expect(within(work).queryByRole('article', { name: '#8 Login page' })).not.toBeInTheDocument();
-    await user.click(fold);
-    expect(within(work).getByRole('article', { name: '#8 Login page' })).toBeInTheDocument();
-  });
-});
-
 describe('turns as releases', () => {
   const DONE_IN_TURN = { ...TASKS[1]!, id: 't16', number: 16, title: 'Price list', brief: '', status: 'done' as const, turn: 3, parentId: null };
   it.each([
@@ -601,7 +478,7 @@ describe('turns as releases', () => {
         'GET /api/tasks/t9': [200, { task: { ...TASK_DETAIL, id: 't9', number: 9, title: 'Pick a payment provider', parentId: null } }],
       });
       await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
-      await user.click(screen.getByRole('radio', { name: releases }));
+      await goTo(user, releases);
       expect(await screen.findByText(new RegExp(`^${why}`))).toBeInTheDocument();
       const next = screen.getByRole('region', { name: preparing });
       expect(within(next).getByRole('progressbar', { name: goalsDone })).toHaveAttribute('aria-valuenow', '1');
@@ -635,7 +512,7 @@ describe('turns as releases', () => {
       const sales = { ...PLANNED, id: 't17', number: 17, title: 'Spring mailing', department: { id: 'd3', name: 'Sales' } };
       shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, sales] }] });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await user.click(screen.getByRole('radio', { name: releases }));
+      await goTo(user, releases);
       const choice = await screen.findByRole('group', { name: show });
       expect(screen.getByRole('region', { name: preparing })).toBeInTheDocument();
       expect(screen.queryByRole('article', { name: '#17 Spring mailing' })).not.toBeInTheDocument();
@@ -650,19 +527,17 @@ describe('turns as releases', () => {
   });
 
   it.each([
-    ['en', 'Tasks', 'Work of the departments', 'Waiting for your answer', 'Not started yet', 'Not in a release yet'],
-    ['ru', 'Задачи', 'Работа отделов', 'Ждет вашего ответа', 'Еще не начата', 'Еще не в выпуске'],
-  ])('says in plain words that a task waits for the answer of the person and that one has not started (%s)', async (lang, tasks, board, yours, notStarted, outside) => {
+    ['en', 'Tasks', 'Development', 'Waits for your answer: 1', 'Not started: 1'],
+    ['ru', 'Задачи', 'Разработка', 'Ждет вашего ответа: 1', 'Не начата: 1'],
+  ])('says in plain words that a task waits for the answer of the person and that one has not started (%s)', async (lang, tasks, development, yours, notStarted) => {
     localStorage.setItem('hh-lang', lang);
     try {
       const user = userEvent.setup();
       shell({});
       await user.click(await screen.findByRole('button', { name: new RegExp(`^${tasks}`) }));
-      const work = await screen.findByRole('region', { name: board });
-      expect(await within(work).findByRole('article', { name: '#9 Pick a payment provider' })).toHaveTextContent(yours);
-      const planned = within(work).getByRole('article', { name: '#14 Refund button' });
-      expect(planned).toHaveTextContent(notStarted);
-      expect(planned).toHaveTextContent(outside);
+      await goTo(user, new RegExp(`^${development}`));
+      expect(within(await screen.findByRole('region', { name: yours })).getByRole('listitem', { name: '#9 Pick a payment provider' })).toBeInTheDocument();
+      expect(within(screen.getByRole('region', { name: notStarted })).getByRole('listitem', { name: '#14 Refund button' })).toBeInTheDocument();
     } finally {
       localStorage.removeItem('hh-lang');
     }
@@ -673,7 +548,7 @@ describe('turns as releases', () => {
     const launch = { ...TURN, id: 'u5', number: 5, title: 'Spring launch', goal: 'Tell people.', departmentId: 'd3', messages: [] };
     shell({ 'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, launch] }] });
     await openTasks(user);
-    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
+    await goTo(user, 'Turns and releases');
     expect(await screen.findByText(/turn 5/)).toBeInTheDocument();
     expect(screen.getByText(/turn 3/)).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Department' }), 'Development');
@@ -685,7 +560,7 @@ describe('turns as releases', () => {
     const user = userEvent.setup();
     shell({});
     await openTasks(user);
-    await user.click(screen.getByRole('radio', { name: 'Turns and releases' }));
+    await goTo(user, 'Turns and releases');
     await user.click(await screen.findByRole('button', { name: /Turn 2: release v1\.2\.0/ }));
     expect(await screen.findByRole('button', { name: /Login page/ })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'How the turn runs' })).not.toBeInTheDocument();
@@ -704,7 +579,7 @@ describe('turns as releases', () => {
         'POST /api/departments/d2/backlog/schedule': [200, { tasks: [{ id: 't20', number: 20 }] }],
       });
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
-      await user.click(screen.getByRole('radio', { name: lang === 'en' ? 'Turns and releases' : 'Ходы и выпуски' }));
+      await goTo(user, lang === 'en' ? 'Turns and releases' : 'Ходы и выпуски');
       await user.selectOptions(screen.getByRole('combobox', { name: lang === 'en' ? 'Department' : 'Отдел' }), lang === 'en' ? 'Development' : 'Разработка');
       await user.click(await screen.findByRole('checkbox', { name: choose }));
       expect(screen.queryByRole('combobox', { name: lang === 'en' ? 'How the next turn runs' : 'Как пойдет следующий ход' })).not.toBeInTheDocument();

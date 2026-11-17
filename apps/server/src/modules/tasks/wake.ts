@@ -1,5 +1,5 @@
 import { isStaged } from '@hornhoof/protocol/echelons';
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { forgetPrivateTurn } from '../tools/private-turns.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
@@ -24,6 +24,7 @@ import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 import { notStep } from '../tools/steps.js';
 import { releaseJobPhones } from '../phones/queue.js';
+import { callEnded, oneShotStageNote } from '../calls/calls.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -130,6 +131,9 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
     case 'work':
       /* Its text is Hornhoof's account of the run, or who stopped it. */
       return `The work you ran on ${ref} ended${said}Go on with the task. If you cannot go on, ${stuck}.`;
+    case 'calls':
+      /* Its text is Hornhoof's account of the batch: the judge's verdict and every answer. */
+      return `The one-shot calls you started on ${ref} ended${said}Go on with the task. If you cannot go on, ${stuck}.`;
     case 'explain':
       /* Hornhoof writes this turn itself, from the request. */
       return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
@@ -306,11 +310,15 @@ export async function resumeAgent(ctx: Ctx, agentId: string): Promise<void> {
 
 /* Turns on cancelled tasks end: a waiting one at once, a running one through its node. The agent that cancelled keeps its own. */
 export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Promise<void> {
-  if (!taskIds.length) return;
+  if (taskIds.length) await stopJobs(ctx, inArray(jobs.taskId, taskIds), keep);
+}
+
+/* These turns end: a waiting one at once, a running one through its node. The agent named keeps its own. */
+export async function stopJobs(ctx: Ctx, scope: SQL, keep?: string): Promise<void> {
   const open = await ctx.db
     .select({ id: jobs.id, status: jobs.status, agentId: jobs.agentId })
     .from(jobs)
-    .where(and(inArray(jobs.taskId, taskIds), inArray(jobs.status, ['queued', 'running'])));
+    .where(and(scope, inArray(jobs.status, ['queued', 'running'])));
   for (const job of open) {
     if (keep && job.agentId === keep) continue;
     if (job.status === 'running') {
@@ -327,7 +335,7 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 }
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
-const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 'tests', 'work'];
+const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 'tests', 'work', 'calls'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
 const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
@@ -335,7 +343,9 @@ const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblo
 async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake) {
   const notice = await wakeNotice(ctx, task, w);
   const route = routeSnapshot(await routeOf(ctx.db, task), task.assigneeAgentId);
-  const prompt = notice.action + wakePrompt(agent, task, w, route.resultKind) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
+  /* The owner of a one-shot stage hears how the route runs it. */
+  const stageCalls = w.why === 'review' || w.why === 'assigned' ? oneShotStageNote(task, route, w.agentId) : null;
+  const prompt = notice.action + wakePrompt(agent, task, w, route.resultKind) + (stageCalls ? ` ${stageCalls}` : '') + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
   const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }, route.resultKind) : undefined;
   return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w, route), ...notice, reportContext };
 }
@@ -705,10 +715,10 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .where(eq(jobs.id, jobId));
   forgetEndedTurn(ctx, jobId, job);
   await releaseJobPhones(ctx, jobId, job?.status === 'done' ? 'completed' : job?.error === 'cancelled' ? 'cancelled' : 'lost');
+  if (job?.kind === 'call') return callEnded(ctx, jobId);
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
-  /* What a turn that took the inbox showed and did not get through to its program is unread again, for the next one. */
-  if (job.status === 'failed' && job.inboxWake && (await mailBack(ctx.db, job.agentId, jobId))) await inboxChanged(ctx, job.agentId);
+  if (job.status === 'failed') await restoreUnheardInbox(ctx, jobId, { agentId: job.agentId, inboxWake: job.inboxWake });
   const handled = await afterFailure(ctx, jobId);
   if (job.taskId) {
     const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
@@ -718,6 +728,21 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
+}
+
+/* What the program itself says in a turn: only that shows it got the turn's prompt. A typed mark is a person's Enter or
+   words shown again, and proves nothing of it. */
+const PROGRAM_SAID = ['text', 'todo', 'tool', 'tool_result'] as const;
+
+/* Inbox wakes keep their retry policy. An ordinary turn can carry the same summary: until its program answered it, its
+   failed delivery must not consume those letters. Once it answered, they stay read, so they are not given twice. */
+async function restoreUnheardInbox(ctx: Ctx, jobId: string, job: { agentId: string; inboxWake: boolean }): Promise<void> {
+  if (!job.inboxWake) {
+    const [said] = await ctx.db.select(idOnly(agentEvents)).from(agentEvents)
+      .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, [...PROGRAM_SAID]))).limit(1);
+    if (said) return;
+  }
+  if (await mailBack(ctx.db, job.agentId, jobId)) await inboxChanged(ctx, job.agentId);
 }
 
 async function recordFailedTurn(

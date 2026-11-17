@@ -98,7 +98,7 @@ export async function applyCarry(ctx: Ctx, carry: Carry): Promise<void> {
   if (carry.serials.length > 0) await db.update(certificates).set({ revokedAt: now }).where(and(inArray(certificates.serial, carry.serials), isNull(certificates.revokedAt)));
   await carryRecoveryKeys(db, company.id, carry, known, now);
   await db.transaction(async tx => {
-    await tx.update(machineAccess).set({ until: null, grant: null, openedBy: null, openedAt: null, askedReason: null, askedAt: null });
+    await tx.update(machineAccess).set({ scope: 'orchestrator', until: null, grant: null, openedBy: null, openedAt: null, askedReason: null, askedAt: null });
     await tx.update(computerRuns).set({ state: 'lost' }).where(inArray(computerRuns.state, ['waiting', 'sent']));
     await tx.delete(sessions);
   });

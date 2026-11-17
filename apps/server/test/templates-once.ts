@@ -20,6 +20,12 @@ function shipped(): Templates {
   return read;
 }
 
+/* A file may read them while it is collected, as it may prepare its database, so that its first scenario does not spend
+   its deadline on a cold read. */
+export function prepareTemplates(): void {
+  shipped();
+}
+
 export function templatesFor(config: Pick<Config, 'templatesDir'>): Templates | undefined {
   return config.templatesDir === OWN ? copyTemplates(shipped()) : undefined;
 }

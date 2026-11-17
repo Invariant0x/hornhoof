@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { agentRole, HIDDEN, openAgentSql } from '../../src/db/agent-sql.js';
+import { HIDDEN, openAgentSql, readerRole } from '../../src/db/agent-sql.js';
 import { copyName, PASSFILE_THERE } from '../../src/modules/keeper/copy.js';
 import { keeperSql, leaseStore } from '../../src/modules/keeper/lease-store.js';
 import { REPLICA_ROLE } from '../../src/modules/keeper/replica.js';
@@ -108,10 +108,10 @@ describe('a copy of the company on a second Postgres', () => {
     }
   }, 600_000);
 
-  it("gives the agents' roles their rights on a schema that came later", async () => {
+  it("gives Operations' role its rights on a schema that came later", async () => {
     await p.until(() => p.maker.report()?.state === 'ready');
-    /* As the copy's app does when its keeper's first word takes it out of off: the roles did not come with the schema. */
-    const role = agentRole('hornhoof');
+    /* As the copy's app does when its keeper's first word takes it out of off: the role did not come with the schema. */
+    const role = readerRole('hornhoof');
     const admin = await connected(p.copyUrl('hornhoof'));
     try {
       const before = await admin.query<{ may: boolean }>(`SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = $1) AND has_any_column_privilege($1, 'public.tasks', 'SELECT') AS may`, [role]).catch(() => ({ rows: [{ may: false }] }));
@@ -119,11 +119,9 @@ describe('a copy of the company on a second Postgres', () => {
       const agents = await openAgentSql(p.copyUrl('hornhoof'));
       expect(agents).not.toBeNull();
       await agents!.close();
-      /* The role reads a table column by column, so any column it may read counts. */
       const may = async (what: string) => (await admin.query<{ may: boolean }>(`SELECT has_any_column_privilege($1, $2, 'SELECT') AS may`, [role, what])).rows[0]!.may;
       expect(await may('public.tasks')).toBe(true);
       for (const closed of ['public.applied', 'public.tool_calls', 'net.journal', 'net.pulse', 'net_local.lease']) expect([closed, await may(closed)]).toEqual([closed, false]);
-      expect((await admin.query<{ may: boolean }>(`SELECT has_function_privilege($1, 'net.assert_lease(interval, uuid)', 'EXECUTE') AS may`, [role])).rows).toEqual([{ may: true }]);
     } finally {
       await admin.end();
     }

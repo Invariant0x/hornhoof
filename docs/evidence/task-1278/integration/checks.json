@@ -1,0 +1,28 @@
+{
+  "checkedCommit": "ba9c9b97951b9f38aa18dece93b2e019147f24cd",
+  "baseCommit": "94200fd668d90363946cea19aeeccc5e929e9ad8",
+  "runs": [
+    {
+      "command": "npx --no-install vitest run test/tasks-tools.test.ts test/tools.test.ts test/computer-scope.test.ts test/computer.test.ts test/orchestrator-close.test.ts --maxWorkers=1",
+      "cwd": "apps/server",
+      "exitCode": 0,
+      "passed": 98,
+      "log": "tests.log"
+    },
+    {
+      "command": "npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit",
+      "exitCode": 0,
+      "log": "types.log"
+    },
+    {
+      "command": "npx --no-install eslint apps/server/test/tasks-tools.test.ts apps/server/test/tools.test.ts",
+      "exitCode": 0,
+      "log": "lint.log"
+    },
+    {
+      "command": "npm run build -w @hornhoof/server",
+      "exitCode": 0,
+      "log": "build.log"
+    }
+  ]
+}

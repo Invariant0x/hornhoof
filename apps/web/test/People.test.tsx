@@ -163,6 +163,109 @@ describe('People', () => {
   });
 });
 
+describe('deleting a person', () => {
+  const AVA: PersonView = {
+    id: 'h1', name: 'Ava', email: null, title: '', status: 'active', isOwner: false, access: { whole: false, departments: [], teams: [] },
+    assistant: { owner: { id: 'p1', name: 'Ivan' }, program: 'avaclone', eventsUrl: null, skillsUrl: null, key: null, agent: null },
+  };
+  const lists = { 'GET /api/people': [200, { people: [...PEOPLE, AVA] }] as [number, unknown], 'GET /api/org': [200, ORG_WITH_TEAMS] as [number, unknown] };
+  const MARIA: Me = { ...ME, person: { ...ME.person, id: 'p2', name: 'Maria', isOwner: false } };
+
+  it("offers the CEO Delete on everyone's row but the CEO's own, a person or an assistant", async () => {
+    mockApi(lists);
+    render(<People me={ME} />);
+    await screen.findByRole('cell', { name: 'Sasha' });
+    expect(within(rowOf('Ivan')).queryByRole('button', { name: /^Delete/ })).not.toBeInTheDocument();
+    for (const name of ['Maria', 'Sasha', 'Ava']) expect(within(rowOf(name)).getByRole('button', { name: `Delete ${name}` })).toHaveTextContent('Delete');
+  });
+
+  it('is not offered to anyone but the CEO, even the deputy with the whole company', async () => {
+    mockApi(lists);
+    render(<People me={MARIA} />);
+    await screen.findByRole('cell', { name: 'Sasha' });
+    expect(screen.queryByRole('button', { name: /^Delete/ })).not.toBeInTheDocument();
+  });
+
+  it('asks once, in one dialog that says it cannot be undone, then deletes and takes the row away', async () => {
+    const calls = mockApi({ ...lists, 'DELETE /api/people/p3': [204, undefined] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Delete Sasha' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete Sasha for good?' });
+    expect(dialog).toHaveAccessibleDescription(/cannot be undone/);
+    expect(dialog).toHaveFocus();
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Yes, delete' }));
+    expect(calls.filter(c => c.method === 'DELETE')).toEqual([{ method: 'DELETE', path: '/api/people/p3', body: undefined }]);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: 'Sasha' })).not.toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Maria' })).toBeInTheDocument();
+  });
+
+  it("says what goes with an assistant: its key and its own agent", async () => {
+    mockApi(lists);
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Delete Ava' }));
+    expect(screen.getByRole('alertdialog', { name: 'Delete Ava for good?' })).toHaveAccessibleDescription(/key stops working and its own agent leaves the company/);
+  });
+
+  it('leaves the person as they are on Cancel or Escape', async () => {
+    const calls = mockApi({ ...lists, 'DELETE /api/people/p2': [204, undefined] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete Maria' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls.some(c => c.method === 'DELETE')).toBe(false);
+    expect(screen.getByRole('cell', { name: 'Maria' })).toBeInTheDocument();
+  });
+
+  it("closes the person's open card with them, and not someone else's", async () => {
+    mockApi({ ...lists, 'DELETE /api/people/p3': [204, undefined], 'DELETE /api/people/p2': [204, undefined] });
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    render(<People me={ME} selected="p3" onSelect={onSelect} />);
+    await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    expect(screen.queryByRole('cell', { name: 'Maria' })).not.toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Delete Sasha' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    expect(onSelect).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps the row and shows why when the server refuses, as for a person whose machine runs the company's server", async () => {
+    const leader = { error: { code: 'conflict', reason: 'leader', message: 'maria-box runs the company server. Move the server to another machine first.' } };
+    mockApi({ ...lists, 'DELETE /api/people/p2': [409, leader] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Delete Maria' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, delete' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('maria-box runs the company server');
+    expect(screen.getByRole('cell', { name: 'Maria' })).toBeInTheDocument();
+  });
+
+  it('asks in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi(lists);
+    const user = userEvent.setup();
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Удалить Sasha' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Удалить Sasha навсегда?' });
+    expect(dialog).toHaveAccessibleDescription(/Отменить это нельзя/);
+    expect(within(dialog).getByRole('button', { name: 'Да, удалить' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: ru.common.cancel })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Удалить Ava' }));
+    expect(screen.getByRole('alertdialog', { name: 'Удалить Ava навсегда?' })).toHaveAccessibleDescription(/ключ перестанет работать/);
+    localStorage.clear();
+  });
+});
+
 describe('People row actions', () => {
   it('lets routed selection override a local edit and resets the draft only for another person', async () => {
     mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS] });

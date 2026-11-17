@@ -1,0 +1,197 @@
+{
+  "status": "PARTIAL, not a passed browser matrix",
+  "captures": [
+    {
+      "file": "screenshots/approvals-default-en-light-1440-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-en-dark-375-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-ru-dark-1440-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-ru-dark-1440-firefox.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "firefox",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-en-dark-1440-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-en-light-375-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-ru-dark-375-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-ru-light-1440-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-default-ru-light-375-chromium.png",
+      "sourceVersion": "eb28b4e26a17d3b3e53da92a403cd86c29fd7404",
+      "browser": "chromium",
+      "scope": "default copy and geometry; whole matrix interrupted"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-ru-dark-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-ru-dark-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-ru-dark-webkit.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "webkit",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-en-light-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-en-light-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-en-light-webkit.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "webkit",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-en-dark-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-en-dark-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-ru-dark-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-ru-dark-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-ru-dark-webkit.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "webkit",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-ru-light-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-ru-light-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-ru-light-webkit.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "webkit",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-en-dark-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-en-dark-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-1440-en-dark-webkit.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "webkit",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-ru-light-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-ru-light-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-ru-light-webkit.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "webkit",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-en-light-chromium.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "chromium",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-en-light-firefox.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "firefox",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    },
+    {
+      "file": "screenshots/approvals-ceo-375-en-light-webkit.png",
+      "sourceVersion": "c5ab11663b2263f9faa3612781a101f97bb629b6",
+      "browser": "webkit",
+      "scope": "captured before edits; whole flow run had 3 timeouts"
+    }
+  ]
+}

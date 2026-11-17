@@ -241,15 +241,17 @@ type Refusal = { reason: string; text: string };
 
 const nobody = (employee: string): Refusal => ({ reason: 'recipient_unknown', text: `There is no employee with id ${employee}. Call agents to see the current ids.` });
 
-/* The sender and the employee it writes to, or why it may not: the employee is not there, is the sender itself, is out of
-   its reach, or is switched off. */
+/* The sender and the employee it writes to, or why it may not: the employee is not there, is the sender itself, is a
+   person's own assistant, is out of its reach, or is switched off. */
 async function partiesOf(ctx: Pick<Ctx, 'db'>, job: ToolJob, employee: string, reachable: (me: Agent, target: Agent) => Promise<boolean>): Promise<{ me: Agent; target: Agent } | Refusal> {
   const [me] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
   const [target] = await ctx.db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
   if (!me || !target) return nobody(employee);
   if (target.id === me.id) return { reason: 'recipient_is_sender', text: 'That is you. Write to another employee.' };
   if (!(await reachable(me, target)))
-    return target.kind === 'orchestrator' ? nobody(employee) : { reason: 'other_department', text: `${target.name} works in another department. Ask your head, who has the orchestrator pass it on.` };
+    return target.kind === 'assistant'
+      ? { reason: 'personal_assistant', text: `${target.name} is a person's own assistant and works only for that person. Write to the orchestrator instead.` }
+      : { reason: 'other_department', text: `${target.name} works in another department. Ask your head, who has the orchestrator pass it on.` };
   if (target.switchedOffAt) return { reason: 'switched_off', text: `${target.name} is switched off and takes no work until a person switches it on.` };
   return { me, target };
 }
@@ -484,10 +486,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     /* A turn's first message reads what it sent before, which a restart of Hornhoof would otherwise forget. */
     if (!counts.has(job.id)) {
       const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
-      const [before] = await db
-        .select({ n: sql<number>`count(*)` })
+      /* Only the quota matters, even when an older turn already sent more. The literal kind also matches the partial index. */
+      const messages = db
+        .select({ one: sql`1`.as('one') })
         .from(agentEvents)
-        .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${me}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
+        .where(and(eq(agentEvents.companyId, job.companyId), sql`${agentEvents.kind} = 'message'`, sql`${agentEvents.data}->>'by' = ${me}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))))
+        .limit(TURN_NUDGES).as('sent_messages');
+      const [before] = await db.select({ n: sql<number>`count(*)` }).from(messages);
       if (!counts.has(job.id)) counts.set(job.id, Number(before?.n ?? 0));
     }
     /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */
@@ -538,14 +543,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     const [d] = await db.select({ id: departments.id, parentId: departments.parentId }).from(departments).where(eq(departments.id, departmentId));
     return d ? (d.parentId ?? d.id) : null;
   };
+  /* The orchestrator helps everyone, so everyone writes to it; a person's own assistant works only for that person. */
   const inReach = async (me: Agent, target: Agent) =>
-    target.kind !== 'orchestrator' && target.kind !== 'assistant' && (anywhere || (await topOf(target.departmentId)) === (await topOf(me.departmentId)));
-  /* Whoever wrote to me last, the orchestrator too, gets one answer wherever it works: an answer in my window reaches only
-     people, so an agent's question is answered with a message or not at all. Notices Hornhoof passes on ask nothing. */
+    target.kind === 'orchestrator' || (target.kind !== 'assistant' && (anywhere || (await topOf(target.departmentId)) === (await topOf(me.departmentId))));
+  /* Whoever wrote to me last gets one answer wherever it works: an answer in my window reaches only people, so an agent's
+     question is answered with a message or not at all. Notices Hornhoof passes on ask nothing. */
   const owesAnswer = async (me: Agent, target: Agent): Promise<boolean> => {
-    const by = target.kind === 'orchestrator'
-      ? sql`${agentEvents.data}->>'from' = 'orchestrator'`
-      : sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${target.id}`;
+    const by = sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${target.id}`;
     const [asked] = await db.select(only(agentEvents, 'seq')).from(agentEvents)
       .where(and(eq(agentEvents.agentId, me.id), eq(agentEvents.kind, 'message'), by, sql`${agentEvents.data}->'notification' is null`))
       .orderBy(desc(agentEvents.seq)).limit(1);
@@ -564,7 +568,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       description: (anywhere
         ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`
         : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`) +
-        ' It also answers the one who wrote to you last, in any department or the orchestrator, with one message: an answer in your window reaches only people, never an agent.' +
+        ' It also answers the one who wrote to you last, in any department, with one message: an answer in your window reaches only people, never an agent.' +
+        ' Write to the orchestrator with it at any time: it helps every employee.' +
         MESSAGE_TASK_HINT,
       inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: Text.trim().min(1), task: TaskReference.optional() },
     },

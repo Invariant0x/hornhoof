@@ -84,15 +84,18 @@ describe('reading a commit from a repository', () => {
     expect(await readCommit({ url: await host(dir), token: '' }, { branch: 'task-5' })).toEqual({ problem: expect.stringContaining('no branch task-5') });
   });
 
-  it('takes the commit a tag points at, also through an annotated tag', async () => {
+  /* A tag is no branch: what it points at says so, and a shared test run takes no tag for a release branch. */
+  it('takes the commit a tag points at, also through an annotated tag, and says it is a tag', async () => {
     const dir = repository();
     const main = git(dir, 'rev-parse', 'HEAD');
     git(dir, 'tag', 'plain');
     git(dir, 'tag', '-a', 'noted', '-m', 'noted');
+    git(dir, 'tag', 'release-review');
     expect(git(dir, 'rev-parse', 'noted')).not.toBe(main);
     const url = await host(dir);
-    expect(await readCommit({ url, token: '' }, { branch: 'plain' })).toEqual({ branch: 'plain', commitSha: main });
-    expect(await readCommit({ url, token: '' }, { branch: 'noted' })).toEqual({ branch: 'noted', commitSha: main });
+    expect(await readCommit({ url, token: '' }, { branch: 'plain' })).toEqual({ branch: 'plain', commitSha: main, tag: true });
+    expect(await readCommit({ url, token: '' }, { branch: 'noted' })).toEqual({ branch: 'noted', commitSha: main, tag: true });
+    expect(await readCommit({ url, token: '' }, { branch: 'release-review' })).toEqual({ branch: 'release-review', commitSha: main, tag: true });
   });
 
   it('prefers the branch to a tag of the same name, as git clone --branch does', async () => {

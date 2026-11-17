@@ -1,5 +1,6 @@
 import { KeptFiles, PREPARATION_UNIT, runsInClass, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
-import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, lt, ne, notExists, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import { testFileResults, testParts, testRuns, testSuiteMemory, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
@@ -132,12 +133,29 @@ export const keptEverything = (run: Pick<Run, 'parts' | 'fileCache'>): boolean =
 
 const ofRepository = (table: typeof testFileResults | typeof testSuiteMemory, scope: RepositoryScope) => and(eq(table.companyId, scope.companyId), eq(table.repositoryOwnerId, scope.repositoryOwnerId), eq(table.repoUrlHash, scope.repoUrlHash));
 
-/* What was green at these fingerprints in this one repository since a time, with what each result came to. */
+const newerRun = alias(testRuns, 'newer_run'), newerPart = alias(testParts, 'newer_part'), preparation = alias(testParts, 'preparation_part');
+const releaseIs = (cache: SQLWrapper, release: string | null) => sql`${cache}->>'release' = ${release}`;
+
+/* The results a later run of a release may take: those a run of that release left, when that run was not stopped and its preparation
+   did not fail, as such a run checked the release only in part, and of a file no newer run of the release failed, whenever the older
+   result came. */
+function ofItsReleaseRuns(db: Db, scope: RepositoryScope, release: string): SQL {
+  const preparationFailed = db.select({ one: sql`1` }).from(preparation)
+    .where(and(eq(preparation.runId, testRuns.id), eq(preparation.status, 'failed'), sql`${preparation.environmentSelection}->'selection'->>'kind' = 'prepare'`));
+  const failedSince = db.select({ one: sql`1` }).from(newerPart).innerJoin(newerRun, eq(newerRun.id, newerPart.runId))
+    .where(and(eq(newerRun.companyId, scope.companyId), eq(newerRun.departmentId, scope.repositoryOwnerId), releaseIs(newerRun.fileCache, release), gt(newerRun.number, testRuns.number),
+      sql`${newerPart.failedFiles} @> jsonb_build_array(jsonb_build_object('suiteId', ${testFileResults.suiteId}::text, 'file', ${testFileResults.file}::text))`));
+  return and(releaseIs(testRuns.fileCache, release), ne(testRuns.status, 'stopped'), notExists(preparationFailed), notExists(failedSince))!;
+}
+/* What was green at these fingerprints in this one repository since a time, with what each result came to. A later run of a release
+   takes only what its release proved; a full run takes nothing and is compared with every result kept. */
 type GreenSource = Pick<typeof testFileResults.$inferSelect, 'suiteId' | 'file' | 'fingerprint' | 'note' | 'runId' | 'commitSha'>;
-async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], since: Date | null): Promise<Map<string, GreenSource>> {
+async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], { mode, release, since }: NonNullable<RunMode>): Promise<Map<string, GreenSource>> {
   if (!prints.length) return new Map();
-  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha }).from(testFileResults)
-    .where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), since ? gte(testFileResults.createdAt, since) : undefined));
+  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha })
+    .from(testFileResults).innerJoin(testRuns, eq(testRuns.id, testFileResults.runId))
+    .where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), since ? gte(testFileResults.createdAt, since) : undefined,
+      mode === 'cached' ? ofItsReleaseRuns(db, scope, release) : undefined));
   return new Map(rows.map(row => [printKey(row, row.fingerprint), row]));
 }
 /* What the results a run takes over came to. */
@@ -160,11 +178,13 @@ export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: En
   if (!mode) return { decision: NO_REUSE, fileCache: null };
   const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
   const once = policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
-  const green = await greenAt(ctx.db, description.repositoryScope, prints, mode.since);
+  const green = await greenAt(ctx.db, description.repositoryScope, prints, mode);
   return reuseCache(mode, units, prints, green, decideReuse({ units, prints, green, once }));
 }
 
 const printsOf = (cache: TestRunFileCache): Map<string, string> => new Map(cache.fingerprints.map(print => [keyOf(print), print.fingerprint]));
+const keptRun = alias(testRuns, 'kept_run');
+/* A part of an older run may end after a newer run of the same release kept its own result of the file: that one stays. */
 async function keepGreen(db: Db, run: Run, cache: TestRunFileCache, scope: RepositoryScope, green: GreenFile[]): Promise<void> {
   const prints = printsOf(cache);
   const values = green.flatMap(file => {
@@ -175,6 +195,7 @@ async function keepGreen(db: Db, run: Run, cache: TestRunFileCache, scope: Repos
   await db.insert(testFileResults).values(values).onConflictDoUpdate({
     target: [testFileResults.companyId, testFileResults.repositoryOwnerId, testFileResults.repoUrlHash, testFileResults.fingerprint, testFileResults.suiteId, testFileResults.file],
     set: { runId: run.id, commitSha: run.commitSha!, ms: sql`excluded.ms`, note: sql`excluded.note`, createdAt: sql`now()` },
+    setWhere: notExists(db.select({ one: sql`1` }).from(keptRun).where(and(eq(keptRun.id, testFileResults.runId), gt(keptRun.number, run.number), releaseIs(keptRun.fileCache, cache.release ?? null)))),
   });
   await db.delete(testFileResults).where(and(eq(testFileResults.companyId, scope.companyId), lt(testFileResults.createdAt, new Date(Date.now() - KEPT_DAYS * 86_400_000))));
 }

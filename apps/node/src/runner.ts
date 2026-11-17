@@ -9,7 +9,9 @@ import { redact } from './redact.js';
 import { withModel } from './turn-tokens.js';
 import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
 import { placeSkills } from './skills.js';
+import { programFor } from './providers/index.js';
 import { readSessions, rememberSession } from './state.js';
+import { removeClosedCopies } from './task-copies.js';
 import type { Worktree } from './tests.js';
 import { headOf, prepareRepo, type Git } from './workspace.js';
 
@@ -41,8 +43,16 @@ export type RunInput = {
   /* More environment for the program, such as git access to the agent's repository for this turn. */
   env?: Record<string, string>;
 };
-/* tokens: what the turn used, as its program reported it; none when it reports nothing. */
-export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null; sensitive?: boolean; privateValues?: PrivateValues };
+/* tokens: what the turn used, as its program reported it; none when it reports nothing. unstarted: the turn ended before its
+   program started. */
+export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null; sensitive?: boolean; privateValues?: PrivateValues; unstarted?: boolean };
+
+/* What kept an adapter from launching the turn's program at all, so the turn ended before its program started. */
+export class ProgramNotStarted extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
@@ -55,6 +65,9 @@ export interface ProviderAdapter {
   setupNeeded?(): Promise<boolean>;
   setup?(io: LoginIo): Promise<void>;
   run(input: RunInput): Promise<RunResult>;
+  /* One call in the program's mode that answers once and exits, in a session it keeps nowhere: what a one-shot call runs.
+     A program without such a mode has none, and its one-shot calls end at once saying so. */
+  oneCall?(input: RunInput): Promise<RunResult>;
   /* Values that must never leave the node, such as the tokens in the program's credentials file. */
   secrets(): Promise<string[]>;
   /* The models the program can run, when it can tell. Hornhoof falls back to what it knows for the provider. */
@@ -86,6 +99,7 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
     result: privateText(res.result, res, secrets), tail: res.sensitive ? PRIVATE_TOOL_NOTE : lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
     ...(res.wordsWaiting ? { wordsWaiting: true } : {}),
+    ...(res.unstarted && res.error !== 'cancelled' ? { unstarted: true as const } : {}),
     ...(res.failure ? { failure: { ...res.failure, text: privateText(res.failure.text, res, secrets).slice(0, 2000) } } : {}),
     ...(program ? { exit: { code: program.code, signal: signalName(program.signal) } } : {}),
   };
@@ -102,11 +116,21 @@ function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const notStarted = (err: unknown): RunResult => ({ ...failed(message(err), 'agent_failed'), unstarted: true });
+
+/* The folder of a one-shot call, which goes when the call ends. */
+const callFolder = (dir: string, jobId: string) => join(dir, 'work', 'calls', jobId);
+
+/* What a one-shot call ends with when its program runs no call that answers once and exits. */
+export const noOneCall = (msg: Pick<JobRun, 'provider' | 'api'>) =>
+  `${programFor(msg.provider, msg.api).name} has no mode that runs one call and exits, so it takes no one-shot calls. Start them on a subscription whose program has one.`;
 
 /* An agent's turn works in the agent's own folder; a session this node saved in another folder cannot go on there, so
    the turn starts a new one. Other jobs work in the folder of the session they resume, or a new one. Only sessions this
    node saved count: one from another machine, or from before a fresh volume, is not here to resume, so the turn starts a new one. */
 function workDirFor(msg: JobRun, dir: string): { workDir: string; sessionId: string | null } {
+  /* A one-shot call goes on from nothing, in a folder of its own. */
+  if (msg.call) return { workDir: callFolder(dir, msg.jobId), sessionId: null };
   const saved = msg.sessionId ? readSessions(dir) : {};
   const known = msg.sessionId && Object.hasOwn(saved, msg.sessionId) ? saved[msg.sessionId] : undefined;
   if (msg.workspace) {
@@ -168,6 +192,8 @@ type RunOptions = {
   dependencies?: (worktree: Worktree, signal?: AbortSignal) => Promise<string | null>;
   /* How long the program waits for them at most, whatever holds them. */
   dependenciesMs?: number;
+  /* The node's log, which says which worktrees of closed tasks went before the turn and why one stays. */
+  log?: (line: string) => void;
 };
 
 const DEPENDENCIES_MS = 10 * 60_000;
@@ -216,6 +242,16 @@ async function openRepo(repo: JobRepo, workDir: string, owner: { user: JobUser |
   return env;
 }
 
+/* The agent's worktrees of closed tasks go before its turn starts, so their dependencies do not fill the machine's disk.
+   What stays, and why, goes to the node's log; nothing of it keeps the turn from starting. */
+async function removeCopies(adapter: ProviderAdapter, msg: JobRun, workDir: string, git: Git | undefined, log: (line: string) => void): Promise<void> {
+  const repo = msg.workspace?.repo, tasks = msg.workspace?.tasks;
+  if (!repo || !tasks) return;
+  const owner = { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null };
+  const lines = await removeClosedCopies(join(workDir, repoFolder(repo.url)), workDir, tasks, owner, git).catch((err: unknown) => [`The worktrees of closed tasks stay this turn: ${message(err)}`]);
+  for (const line of lines) log(line);
+}
+
 /* An event as people may see it: no secrets, and within the sizes the protocol allows. */
 export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
   const clean = (text: string, max: number) => cut(redact(text, secrets), max);
@@ -232,7 +268,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), dependencies, dependenciesMs }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), dependencies, dependenciesMs, log = console.log }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -251,16 +287,21 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       .catch(() => {});
   };
   let res: RunResult;
+  /* Whether the turn got as far as asking its program to run. */
+  let started = false;
+  const call = msg.call ? adapter.oneCall?.bind(adapter) ?? null : undefined;
+  if (call === null) return jobDone(msg.jobId, failed(noOneCall(msg), 'agent_failed'), [...known]);
   try {
     const place = await placeOfTurn(adapter, msg, dir);
     const repoEnv = repo ? await openRepo(repo, place.workDir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, dir, git, prepareRepoBrowser) : undefined;
+    await removeCopies(adapter, msg, place.workDir, git, log);
     const placed = await placeDependencies(adapter, msg, place, { dependencies, dependenciesMs, git, signal });
     if (placed) emit({ kind: 'text', text: placed });
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
     const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;
     const input: RunInput = {
-      agentKey: msg.workspace?.key ?? null,
+      agentKey: call ? null : (msg.workspace?.key ?? null),
       jobId: msg.jobId,
       prompt: msg.prompt,
       model: msg.model,
@@ -276,12 +317,15 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       ...(env ? { env } : {}),
     };
     await beforeRun();
-    const run = adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed'));
-    res = await (untimed ? run : withTimeout(run, msg.timeoutMs));
-    if (res.sessionId) rememberSession(dir, res.sessionId, place.workDir);
+    started = true;
+    const run = (call ? call(input) : adapter.run(input)).catch((err: unknown) => err instanceof ProgramNotStarted ? notStarted(err) : failed(message(err), 'agent_failed'));
+    res = await (untimed && !call ? run : withTimeout(run, msg.timeoutMs));
+    if (res.sessionId && !call) rememberSession(dir, res.sessionId, place.workDir);
   } catch (err) {
-    res = failed(message(err), 'agent_failed');
+    res = started ? failed(message(err), 'agent_failed') : notStarted(err);
   }
+  /* A call leaves nothing behind: what it was to keep went out in its answer, or in commits it pushed. */
+  if (call) await withOwnFs(adapter, own => own.remove(callFolder(dir, msg.jobId))).catch(() => {});
   await live;
   /* A job Hornhoof called off ends as cancelled, whatever the stopped program said. */
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };

@@ -16,7 +16,7 @@ type Draft = { mode: ApprovalMode; limit: string; unit: string };
 
 const draftOf = (rule: ApprovalRule): Draft => (rule.mode === 'within_limits' ? { mode: rule.mode, limit: String(rule.limit), unit: rule.unit ?? '' } : { mode: rule.mode, limit: '', unit: '' });
 
-const MODES: ApprovalMode[] = ['every', 'new_kinds', 'within_limits'];
+const MODES: ApprovalMode[] = ['every', 'new_kinds', 'within_limits', 'none'];
 
 type RuleBody = { mode: ApprovalMode; limit?: number; unit?: string };
 
@@ -295,6 +295,7 @@ export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
   return (
     <div className="appr">
       {view.canSetOwner ? <OwnerPick view={view} path={departmentPath} onChanged={load} /> : <OwnerWords owner={view.owner} />}
+      <p className="muted">{t.defaultHint}</p>
       <p className="muted">{t.rulesHint}</p>
       <div className="appr-rules">
         {view.rules.map(rule => (

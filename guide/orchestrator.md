@@ -39,21 +39,7 @@ He puts what an employee asks people into plain words. His words are shown above
 
 ## Can he change the database?
 
-Yes, for what no screen reaches, like a stuck row or a wrong field. He reads and changes Hornhoof's database directly, as a database role of his own. That role:
-
-- reaches the rows of every table but sign-ins, invites, install codes and the public link;
-- never reaches the columns with passwords, tokens and keys;
-- cannot change the tables themselves, and reaches nothing outside the database.
-
-Through the database he cannot change any of these:
-
-- people, or what they reach;
-- subscriptions, machines or repositories;
-- an employee's kind, role, skills or subscription;
-- a head's department;
-- a turn, beyond its status.
-
-Those change only through the tools above, with the CEO's checks.
+Yes, for what no screen reaches, like a stuck row or a wrong field. He reads and changes Hornhoof's database directly, as Hornhoof itself: every table, every column and the schema, each call in one transaction.
 
 ## What can the head of Operations see?
 

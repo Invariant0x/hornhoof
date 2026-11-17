@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Notification } from '@hornhoof/protocol';
-import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type OperatorEvidence, type OperatorQuestion, type OperatorReason } from '@hornhoof/protocol/program-operator';
+import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type OperatorEvidence, type OperatorQuestion, type OperatorReason, type ProgramView } from '@hornhoof/protocol/program-operator';
 import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
+import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, type CaseReason } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
@@ -11,20 +11,26 @@ import { insertTurn, limitUntil, pump, takesTurns } from '../conversation/queue.
 import { appendEvent } from '../events/store.js';
 import { nodeHeld } from '../updates/drain.js';
 import { firstOfRun, outcomeOfOperatorTry } from './failure-run.js';
+import { fromStart } from './not-started.js';
 import { currentOperatorQuestion, liveFailureSignals, qualifyingReasons } from './policy.js';
 import { operatorTransaction } from './transactions.js';
 import { operatorNotification } from './notifications.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
+/* A case of what a node saw of a program, which that node holds too. */
+type ProgramCase = Case & { reason: OperatorReason };
+const ofProgram = (row: Case): row is ProgramCase => !fromStart(row);
 type Signal = { agentKey: string; jobId: string | null; instance: string; reason: OperatorReason; evidenceKey: string; deliveryId: string | null };
 type Seen = { frame: OperatorEvidence; png: Buffer | null };
 const scope = (row: { agentId: string; instance: string }) => and(eq(programOperatorCases.agentId, row.agentId), eq(programOperatorCases.instance, row.instance));
-const reasonNames: Record<OperatorReason, { en: string; ru: string }> = {
+const reasonNames: Record<CaseReason, { en: string; ru: string }> = {
   assignment_unrecorded: { en: 'assignment words not recorded for sixty seconds', ru: 'слова поручения не записаны за минуту' },
   recorded_no_activity: { en: 'no first own event for five minutes after the receipt', ru: 'после квитанции нет первого своего события пять минут' },
   live_words_not_taken: { en: 'three consecutive live deliveries not taken', ru: 'три живые доставки подряд не взяты' },
   startup_exit: { en: 'program exited within a minute of launch', ru: 'программа завершилась в первую минуту запуска' },
   question_waiting: { en: 'program question waiting for thirty seconds', ru: 'вопрос программы ждет ответа тридцать секунд' },
+  not_started: { en: 'a turn ended before its program started', ru: 'ход закончился до запуска программы' },
+  node_cannot_work: { en: 'the machine cannot write its work folder', ru: 'машина не может писать в свою рабочую папку' },
 };
 
 /* Called with the agent row locked, inside the same transaction as its new evidence. */
@@ -58,7 +64,7 @@ async function instanceFacts(ctx: Ctx, agentId: string, instance: string): Promi
   });
 }
 
-export async function operatorCaseMode(ctx: Ctx, row: Case): Promise<{ reason: OperatorReason; questionId?: string; question?: OperatorQuestion; readOnly: boolean }> {
+export async function operatorCaseMode<Row extends Case>(ctx: Ctx, row: Row): Promise<{ reason: Row['reason'] | 'question_waiting'; questionId?: string; question?: OperatorQuestion; readOnly: boolean }> {
   const facts = await instanceFacts(ctx, row.agentId, row.instance);
   const signal = qualifyingReasons(facts).find(signal => signal.reason === 'question_waiting' && row.evidence.some(evidence => evidence.reason === signal.reason && evidence.evidenceKey === signal.evidenceKey));
   if (!signal) return { reason: row.reason, readOnly: row.readOnly };
@@ -90,10 +96,15 @@ async function consumeSignal(ctx: Ctx, signal: Signal, now: Date, nodeSaw: Seen)
 async function recordLook(ctx: Ctx, row: Case, signal: Signal, { frame, png }: Seen): Promise<Case> {
   const look = lookOf(frame, signal);
   if (!look) return row;
-  const [picture] = png ? await ctx.db.insert(attachments).values({ companyId: row.companyId, jobId: row.jobId, agentId: row.agentId, operatorCaseId: row.id, mediaType: 'image/png', bytes: png, size: png.length }).returning({ id: attachments.id }) : [];
+  const picture = png ? await casePicture(ctx, row, png) : null;
   const evidence = row.evidence.map(fact => fact.reason === signal.reason && fact.evidenceKey === signal.evidenceKey ? { ...fact, input: look.input } : fact);
-  const [updated] = await ctx.db.update(programOperatorCases).set({ evidence, pictureId: picture?.id ?? row.pictureId }).where(eq(programOperatorCases.id, row.id)).returning();
+  const [updated] = await ctx.db.update(programOperatorCases).set({ evidence, pictureId: picture ?? row.pictureId }).where(eq(programOperatorCases.id, row.id)).returning();
   return updated!;
+}
+
+async function casePicture(ctx: Ctx, row: Case, png: Buffer): Promise<string> {
+  const [picture] = await ctx.db.insert(attachments).values({ companyId: row.companyId, jobId: row.jobId, agentId: row.agentId, operatorCaseId: row.id, mediaType: 'image/png', bytes: png, size: png.length }).returning({ id: attachments.id });
+  return picture!.id;
 }
 
 const lookOf = (frame: OperatorEvidence, signal: Signal) =>
@@ -171,16 +182,37 @@ function noticeMessage(row: Case, text: string, notification: Notification) {
 }
 
 function noticeText(row: Case, name: string, reason: { en: string; ru: string }, escalated: boolean): string {
-  return escalated ? escalationText(row, name, reason.en) : `Program operator case ${row.id} for ${name}: ${reason.en}. Read program_screen for employee ${row.agentId}. Answer it with program_keys after a fresh snapshot: any keys and text, any question, the subscription owner's own too. Follow your permission policy. Report needs_owner, failed or denied with tell_orchestrator. Deadline: ${row.deadlineAt.toISOString()}.`;
+  return escalated ? escalationText(row, name, reason.en) : `Program operator case ${row.id} for ${name}: ${reason.en}. Read program_screen for employee ${row.agentId}. Answer it with program_keys after a fresh snapshot: any keys and text, any question, the subscription owner's own too. Follow your permission policy. Report with tell_orchestrator: cleared once a fresh program_screen shows it at work with no question, which closes the case and tells no one; needs_owner, failed or denied for a screen that stands. Deadline: ${row.deadlineAt.toISOString()}.`;
 }
 
 function escalationText(row: Case, name: string, reason: string): string {
   return `Program operator case ${row.id} for ${name}: ${reason}. Recovery needs attention: ${row.resolution?.outcome ?? 'operator_unavailable'}. ${row.resolution?.text ?? ''} ${row.resolution?.question ? `Request: ${row.resolution.question.text}.` : ''} ${row.pictureId ? `Picture: ${row.pictureId}. Download and inspect it with hh-fetch operator-case:${row.id} ${row.pictureId} program-question.png.` : 'A picture is unavailable; inspect the existing owner terminal.'}`;
 }
 
-async function resolveCase(ctx: Ctx, row: Case, resolution?: NonNullable<Case['resolution']>): Promise<void> {
-  await ctx.db.update(programOperatorCases).set({ status: 'resolved', revision: row.revision + 1, recoveryHold: false, resolution: resolution ?? { outcome: 'received', text: 'The program supplied the required receipt or first own event.', image: row.pictureId } }).where(eq(programOperatorCases.id, row.id));
+/* A case of a waiting question alone: once the question is gone and the program goes on, nothing of it stands. */
+const ofAQuestion = (row: Case) => row.reason === 'question_waiting' && row.evidence.every(fact => fact.reason === 'question_waiting');
+const questionGone = (image: string | null) => ({ outcome: 'question_gone', text: "The program's question went away and the program went on.", image });
+
+/* How a case closes by itself, from the program's own facts. */
+const ownResolution = (row: Case) => ofAQuestion(row) ? questionGone(row.pictureId) : { outcome: 'received', text: 'The program supplied the required receipt or first own event.', image: row.pictureId };
+
+export async function resolveCase(ctx: Ctx, row: Case, resolution?: NonNullable<Case['resolution']>): Promise<void> {
+  await ctx.db.update(programOperatorCases).set({ status: 'resolved', revision: row.revision + 1, recoveryHold: false, resolution: resolution ?? ownResolution(row) }).where(eq(programOperatorCases.id, row.id));
   if (row.operatorJobId) await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program operator case was resolved.', finishedAt: new Date() }).where(and(eq(jobs.id, row.operatorJobId), eq(jobs.status, 'queued')));
+}
+
+/* A fresh screen of the program at work that asks nothing closes its open question cases, whoever looked and whether or not
+   the node's own fact of it has come yet, with that screen as their picture. Called with the agent row locked. */
+export async function settleAnsweredQuestions(ctx: Ctx, agentId: string, seen: Pick<ProgramView, 'state' | 'question' | 'instance'>, png: Buffer): Promise<string[]> {
+  if (seen.state !== 'working' || seen.question || !seen.instance) return [];
+  const open = await ctx.db.select().from(programOperatorCases).where(and(scope({ agentId, instance: seen.instance }), eq(programOperatorCases.status, 'open')));
+  const settled = open.filter(ofAQuestion);
+  for (const row of settled) {
+    const pictureId = await casePicture(ctx, row, png);
+    await ctx.db.update(programOperatorCases).set({ pictureId }).where(eq(programOperatorCases.id, row.id));
+    await resolveCase(ctx, row, questionGone(pictureId));
+  }
+  return settled.map(row => row.id);
 }
 
 export async function escalateCase(ctx: Ctx, row: Case, outcome: string, now: Date, report?: NonNullable<Case['resolution']>): Promise<void> {
@@ -191,7 +223,12 @@ export async function escalateCase(ctx: Ctx, row: Case, outcome: string, now: Da
 }
 
 function canEscalate(row: Case, outcome: string): boolean {
-  return row.status === 'open' || (outcome === 'denied' && row.status === 'resolved' && !row.escalationJobId);
+  return row.status === 'open' || takesLateDenial(row, outcome);
+}
+
+/* A denial the operator made still reaches the head after its case closed by itself, once. */
+export function takesLateDenial(row: Case, outcome: string): boolean {
+  return outcome === 'denied' && row.status === 'resolved' && !row.escalationJobId;
 }
 
 async function needsRecoveryHold(ctx: Ctx, row: Case): Promise<boolean> {
@@ -296,8 +333,10 @@ export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Dat
   const rows = await ctx.db.select().from(programOperatorCases).where(eq(programOperatorCases.agentId, agentId));
   for (const row of rows) {
     const node = nodeIdentity(row.nodeId);
-    const mode = await operatorCaseMode(ctx, row);
-    if (ctx.hub.hasProgramOperator(node)) ctx.hub.send(node, { type: 'program.operator_case', agentKey: row.agentId, jobId: row.jobId, instance: row.instance, case: row.id, capability: row.capability, disposition: row.status === 'open' ? 'open' : 'revoke', remainingMs: Math.min(OPERATOR_CASE_MS, Math.max(0, +row.deadlineAt - +now)), revision: row.revision, reason: mode.reason, questionId: mode.questionId, readOnly: mode.readOnly, closedBecause: row.status !== 'open' ? row.resolution?.outcome : undefined });
+    if (ofProgram(row) && ctx.hub.hasProgramOperator(node)) {
+      const mode = await operatorCaseMode(ctx, row);
+      ctx.hub.send(node, { type: 'program.operator_case', agentKey: row.agentId, jobId: row.jobId, instance: row.instance, case: row.id, capability: row.capability, disposition: row.status === 'open' ? 'open' : 'revoke', remainingMs: Math.min(OPERATOR_CASE_MS, Math.max(0, +row.deadlineAt - +now)), revision: row.revision, reason: mode.reason, questionId: mode.questionId, readOnly: mode.readOnly, closedBecause: row.status !== 'open' ? row.resolution?.outcome : undefined });
+    }
     await pumpCaseNotices(ctx, row);
   }
 }

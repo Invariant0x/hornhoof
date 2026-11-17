@@ -1,0 +1,16 @@
+
+ RUN  v5.0.5 /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257/apps/server
+
+ ❯ test/stored-secrets.test.ts (10 tests | 3 failed) 192416ms
+   ❯ secrets in stored prose (10)
+     × masks tasks and comments before storing their copies 62399ms
+     × keeps code and ordinary words of a task, a comment and a chat as they were written 48583ms
+     × masks nested chat events, letters and queued prompts 31762ms
+     ✓ hides an existing selection from tasks, nested copies, journals and API responses 19255ms
+     ✓ never sends the selected value in SQL text or parameters 2797ms
+     ✓ checks department authority on the server and rejects ordinary readers 13445ms
+     ✓ suppresses a selection only in its company, including journal copies and cached tool answers 7631ms
+     ✓ never changes service state when the selected secret is a common word 3586ms
+     ✓ keeps the mask stable even when the selection occurs within its spelling 746ms
+     ✓ cleans an archived comment and lets a person select its full saved text 1116ms
+[vitest-pool]: Timeout terminating forks worker for test files /data/work/agents/4dc88cc7-213b-4828-9023-e7f5ced48683/hornhoof-task-1257/apps/server/test/stored-secrets.test.ts.

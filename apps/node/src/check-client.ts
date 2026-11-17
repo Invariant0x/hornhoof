@@ -9,6 +9,18 @@ type Pending = { options: SlotOptions; frame: CheckQueueRequest; stop: AbortCont
    and are claimed again once the node is back. One away longer loses them, and what runs under them stops. */
 export class CheckClient {
   private connected = false;
+  private refusal: string | null = null;
+  refusalChanged: (() => void) | undefined;
+  isOnline(): boolean { return this.connected; }
+  refused(): string | null { return this.refusal; }
+  refuse(reason: string | null): void {
+    if (reason === this.refusal) return;
+    this.refusal = reason;
+    if (reason) for (const [id, entry] of this.entries) if (entry.state === 'queued') {
+      this.release(id); entry.reject(new Error(reason));
+    }
+    this.refusalChanged?.();
+  }
   private readonly entries = new Map<string, Pending>();
   /* Leases let go while the node was away, which the server hears of once it is back. */
   private readonly letGo = new Set<string>();
@@ -44,6 +56,7 @@ export class CheckClient {
 
   async acquire(options: SlotOptions = {}): Promise<CheckLease> {
     options.signal?.throwIfAborted();
+    if (this.refusal) throw new Error(this.refusal);
     if (!this.connected) throw new Error('Machine check queue is offline.');
     const id = randomUUID(), frame = this.request(id, options);
     return new Promise((resolve, reject) => {

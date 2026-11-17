@@ -89,9 +89,12 @@ test('a person of part of the company sees every employee and the whole work in 
   await expect(page.locator('.tv-labs .dept-chip')).toHaveCount(12);
   await expect(page.locator('.tv-in')).toContainText('Timur');
   await expect(page.locator('.tv-in')).toContainText('Checkout step 63');
+  /* The tracker (#1152) lists a department's work when the person picks the department among its lists. */
   await page.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
-  await expect(page.locator('.tasks').getByRole('article', { name: `#${OWN_TASK.number} ${OWN_TASK.title}`, exact: true })).toBeVisible();
-  await expect(page.locator('.tasks')).not.toContainText('Hidden task of another agent');
+  await page.getByRole('navigation', { name: 'Task lists' }).getByRole('button', { name: /^Development/ }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Development' })).toBeVisible();
+  await expect(page.locator('.tr-main').getByRole('listitem', { name: `#${OWN_TASK.number} ${OWN_TASK.title}`, exact: true })).toBeVisible();
+  await expect(page.locator('.tr-main')).not.toContainText('Hidden task of another agent');
 });
 
 for (const lang of ['en', 'ru'] as const) {

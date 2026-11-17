@@ -15,7 +15,8 @@ function taskDepartments(routes: Record<string, Route>): Route {
     const org = routes['GET /api/org'];
     const reply = typeof org === 'function' ? await org(undefined) : org;
     const departments = (reply?.[1] as Partial<Org> | undefined)?.departments ?? [];
-    return [200, { whole: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: true })) }];
+    /* The owner, as most tests sign in: the server lets them plan everywhere. */
+    return [200, { whole: true, mayPlanCompany: true, departments: departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey, mine: true, mayPlan: true })) }];
   };
 }
 
@@ -227,7 +228,7 @@ export const CARD: AgentCardView = {
     { subscription: TEAM_KEY, models: [OPUS, SONNET] },
     { subscription: OLEG_CODEX, models: [SOL] },
   ],
-  changes: [{ field: 'hired', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T08:00:00.000Z' }],
+  changes: [{ field: 'hired', personName: 'Ivan', actingAgent: null, byOrchestrator: false, at: '2026-10-30T08:00:00.000Z' }],
   interrupted: [],
   timer: null,
   canEdit: true,

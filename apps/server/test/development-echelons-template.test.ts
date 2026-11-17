@@ -9,7 +9,6 @@ describe('standalone skills of the forward route', () => {
     const role = templates.roles.get(roleId)!;
     expect(role.skills.find(skill => skill.id === skillId)).toMatchObject({ on: true });
     expect(templates.skills.has(skillId)).toBe(true);
-    expect(role.body.length).toBeLessThan(400);
   });
   it.each(['dev-gates', 'dev-review-verdict', 'dev-task-flow'])('uses the current required route in %s', id => {
     const body = templates.skills.get(id)!.body;

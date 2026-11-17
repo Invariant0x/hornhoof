@@ -118,11 +118,11 @@ describe('the deputy CEO on People', () => {
     return { routes: { ...routes(list), 'GET /api/people': listed, [`PATCH /api/people/${start.id}`]: save, [`PUT /api/people/${start.id}/ceo-delegate`]: mark }, person: () => person };
   }
 
-  it('keeps the row to Edit, New link and Disable, with no tick for the deputy', async () => {
+  it("keeps the row to Edit, New link, Disable and the CEO's Delete, with no tick for the deputy", async () => {
     mockApi(routes());
     render(<People me={ME} />);
     const maria = await screen.findByRole('row', { name: /^Maria\b/ });
-    expect(within(maria).getAllByRole('button').map(b => b.textContent)).toEqual(['Edit', 'New link', 'Disable']);
+    expect(within(maria).getAllByRole('button').map(b => b.textContent)).toEqual(['Edit', 'New link', 'Disable', 'Delete']);
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });

@@ -1,11 +1,12 @@
 import { and, eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, jobs, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, tasks, teams, testParts, testRuns, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, report } from '../src/modules/tasks/engine.js';
 import type { Ctx } from '../src/app.js';
 import { testsFixture } from './development-echelons-verification.js';
 import { BASE } from './development-echelons-fixture.js';
 import { listen, mcp } from './helpers.js';
+import { PRODUCT_FILES, partReceipt, partSelection, productSnapshot } from './product-run.js';
 
 /* What a repository says in these tests: where each branch and tag is, and which commit holds which. A commit holds itself
    and whatever holds names for it; the commits between two are what between names. made lists the branches the server made,
@@ -25,12 +26,19 @@ const contains = (repo: Repository, head: string, base: string): boolean => head
 
 /* Serves the readers the server uses from what the test says the repository is. */
 export function serve(ctx: Ctx, repo: Repository): void {
-  ctx.readCommit = async (_at, want) => {
+  serveEach(ctx, () => repo);
+}
+
+/* Serves the readers from the repository each address names, as two departments keep two repositories. */
+export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
+  ctx.readCommit = async (at, want) => {
+    const repo = repoAt(at.url);
     const branch = 'branch' in want ? want.branch : `task-${want.task}`;
     const commitSha = repo.heads[branch] ?? repo.tags[branch];
     return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.` };
   };
-  ctx.readCompare = async (_at, want) => {
+  ctx.readCompare = async (at, want) => {
+    const repo = repoAt(at.url);
     const key = `${want.base}..${want.head}`;
     const commits = repo.between[key] ?? [];
     if (!contains(repo, want.head, want.base)) return { complete: true, baseSha: want.base, headSha: 'f'.repeat(40), paths: [], diff: '', commits: [] };
@@ -38,11 +46,12 @@ export function serve(ctx: Ctx, repo: Repository): void {
     if (repo.cut.has(key)) return { complete: false, reason: 'incomplete-comparison' };
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new', commits };
   };
-  ctx.readMerged = async (_at, want) => contains(repo, want.base, want.head);
-  ctx.readTags = async () => ({ tags: { ...repo.tags } });
-  ctx.readBranches = async () => ({ heads: { ...repo.heads } });
+  ctx.readMerged = async (at, want) => contains(repoAt(at.url), want.base, want.head);
+  ctx.readTags = async at => ({ tags: { ...repoAt(at.url).tags } });
+  ctx.readBranches = async at => ({ heads: { ...repoAt(at.url).heads } });
   /* As a host takes a push with no old value: only where there is no such branch yet, one push at a time. */
   ctx.createBranch = async (at, branch, commit) => {
+    const repo = repoAt(at.url);
     await repo.hold?.();
     if (repo.refusing) return { problem: repo.refusing };
     if (repo.heads[branch]) return { problem: `Hornhoof could not create the branch ${branch} in ${at.url}: it has that branch already.` };
@@ -69,6 +78,8 @@ export async function readyInTurn() {
   return { ...f, turn: turn!, branch, repo, acceptance, accept, openTurn };
 }
 
+type RunOf = { departmentId: string; taskId: string; agentId: string; jobId: string };
+
 /* The release of the open turn: a task its head holds to release it, the full run on the release commit and the person's
    approval of it, asked through the release tool of a head. */
 export async function releasing() {
@@ -82,17 +93,31 @@ export async function releasing() {
   f.repo.between[`${BASE}..${R}`] = [{ sha: R, parents: [BASE] }];
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.head.id, subscriptionId: f.head.subscriptionId!, taskId: release!.id, kind: 'conversation', prompt: 'Release', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken('release-head-tool-token-0123456789abcdef0123') }).returning();
   let runs = 0;
-  /* A run of the turn's branch, as the machines would have finished it. */
-  /* reused: green results it took, of its release unless it is from before releases were kept (ofRelease false). */
-  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number } = {}) => {
-    const commit = options.commit ?? R;
+  const scope = { companyId: f.task.companyId, repositoryOwnerId: f.task.departmentId!, repoUrlHash: 'a'.repeat(64) };
+  /* A run of the turn's branch, as the machines would have finished it: of the product's full profile, each part with its receipt
+     on the commit, unless it ran a command of its own (command), which leaves neither.
+     reused: green results it took, of its release unless it is from before releases were kept (ofRelease false).
+     of: the department of another repository whose release it checks, with its release task, the agent who asked and its job. */
+  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number; command?: string; of?: RunOf } = {}) => {
+    const commit = options.commit ?? R, manual = options.command !== undefined;
+    const of = options.of ?? { departmentId: f.task.departmentId!, taskId: release!.id, agentId: f.head.id, jobId: job!.id };
+    const repositoryScope = { ...scope, repositoryOwnerId: of.departmentId };
+    const snapshot = await productSnapshot(repositoryScope, commit);
     const [run] = await f.db.insert(testRuns).values({
-      companyId: f.task.companyId, number: 9000 + ++runs, taskId: release!.id, agentId: f.head.id, jobId: job!.id, departmentId: f.task.departmentId!,
-      branch: options.branch ?? f.branch, commitSha: commit, command: 'npm test', parts: options.parts ?? 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
-      ...(options.suite ? { environmentRequest: { version: 1 as const, repositoryScope: { companyId: f.task.companyId, repositoryOwnerId: f.task.departmentId!, repoUrlHash: 'a'.repeat(64) }, suite: options.suite, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null } } : {}),
-      fileCache: { mode: options.reused ? 'cached' : 'full', ...(options.ofRelease === false ? {} : { release: options.branch ?? f.branch }), fingerprints: [], reused: options.reused ?? 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
+      companyId: f.task.companyId, number: 9000 + ++runs, taskId: of.taskId, agentId: of.agentId, jobId: of.jobId, departmentId: of.departmentId,
+      branch: options.branch ?? f.branch, commitSha: commit, command: options.command ?? '', parts: options.parts ?? 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
+      ...(manual ? {} : {
+        environmentRequest: { version: 1 as const, repositoryScope, ...(options.suite ? { suite: options.suite } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null },
+        environmentSnapshot: snapshot, environmentHash: snapshot.description.manifestHash,
+        fileCache: { mode: options.reused ? 'cached' as const : 'full' as const, ...(options.ofRelease === false ? {} : { release: options.branch ?? f.branch }), fingerprints: [], reused: options.reused ?? 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
+      }),
     }).returning();
-    if (options.parts !== 0) await f.db.insert(testParts).values([1, 2].map(part => ({ companyId: f.task.companyId, runId: run!.id, part, status: options.failedPart && part === 2 ? 'failed' as const : 'passed' as const, commit, exitCode: options.failedPart && part === 2 ? 1 : 0 })));
+    const failed = (part: number) => options.failedPart === true && part === 2;
+    if (options.parts !== 0) await f.db.insert(testParts).values(PRODUCT_FILES.map((file, index) => {
+      const part = index + 1, selection = partSelection(commit, file);
+      return { companyId: f.task.companyId, runId: run!.id, part, status: failed(part) ? 'failed' as const : 'passed' as const, commit, exitCode: failed(part) ? 1 : 0, finishedAt: new Date(),
+        ...(manual ? {} : { environmentSelection: { selection, after: [] }, environmentReceipt: partReceipt(snapshot, selection, !failed(part)) }) };
+    }));
     return run!;
   };
   const approve = async (commit = R) => {
@@ -110,4 +135,43 @@ export async function releasing() {
   const recordRelease = (args: Record<string, unknown> = {}) => call('release_turn', { task: release!.number, commit: R, ...args });
   const department = async () => (await f.db.select().from(departments).where(eq(departments.id, f.task.departmentId!)))[0]!;
   return { ...f, release: release!, R, fullRun, approve, client, call, recordRelease, department };
+}
+
+type Releasing = Awaited<ReturnType<typeof releasing>>;
+const MADE = '5'.repeat(40);
+const TOP = '6'.repeat(40);
+
+/* Work of task-N after R, as its holder joins it to the turn branch: its commit made on R, then a merge on top. Without stray
+   the merge takes task-N into the turn branch, whose head it is, and task-N stays at made. A stray commit pushed straight to the
+   turn branch on R comes first: taken, the merge takes the turn branch into task-N and the turn branch goes to it by
+   fast-forward; not taken, task-N is made on it and the merge takes task-N into the turn branch as before. own is the commit
+   task-N is at, head the turn branch's. */
+export function joinedAfterR(f: Releasing, task: number, stray?: { sha: string; taken: boolean }): { own: string; head: string } {
+  const under = stray && !stray.taken ? stray.sha : f.R;
+  if (stray) f.repo.holds[stray.sha] = [f.R, BASE];
+  f.repo.holds[MADE] = [...(stray && !stray.taken ? [stray.sha] : []), f.R, BASE];
+  const strayCommit = stray ? [{ sha: stray.sha, parents: [f.R] }] : [];
+  if (stray?.taken) {
+    f.repo.holds[TOP] = [MADE, stray.sha, f.R, BASE];
+    f.repo.between[`${BASE}..${TOP}`] = [{ sha: f.R, parents: [BASE] }, ...strayCommit, { sha: MADE, parents: [f.R] }, { sha: TOP, parents: [MADE, stray.sha] }];
+    f.repo.heads[f.branch] = f.repo.heads[`task-${task}`] = TOP;
+    return { own: TOP, head: TOP };
+  }
+  f.repo.holds[TOP] = [MADE, ...(stray ? [stray.sha] : []), f.R, BASE];
+  f.repo.between[`${BASE}..${TOP}`] = [{ sha: f.R, parents: [BASE] }, ...strayCommit, { sha: MADE, parents: [under] }, { sha: TOP, parents: [under, MADE] }];
+  f.repo.heads[`task-${task}`] = MADE;
+  f.repo.heads[f.branch] = TOP;
+  return { own: MADE, head: TOP };
+}
+
+/* Turnkey work after R: a member of a turnkey team did it whole on task-N with its own review, security check and tests,
+   joined it to the turn branch and closed it with report. */
+export async function turnkeyAfterR(f: Releasing, stray?: { sha: string; taken: boolean }) {
+  const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
+  const holder = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+  await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, holder.id));
+  const { task } = await f.create({ title: 'Turnkey change', assigneeAgentId: holder.id, reviewerAgentId: undefined, securityAgentId: undefined, testsAgentId: undefined });
+  const joined = joinedAfterR(f, task.number, stray);
+  await report(f.ctx, holder.id, task.id, { done: true, summary: 'Merged task-N into the turn branch after my own review, security check and tests.' });
+  return { task, holder, ...joined };
 }

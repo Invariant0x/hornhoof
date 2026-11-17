@@ -20,7 +20,9 @@ const KEEP_ALIVE_MS = 72_000;
 
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
-export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
+/* mcpUrl carries the agent's secret in its path. A program that sends a bearer token from its environment, as Codex does, takes
+   mcpAddress, which carries none, and the secret itself. Neither goes on a command line, which any process of the machine reads. */
+export type AgentUrls = { mcpUrl: string; mcpAddress: string; secret: string; attachUrl: string; hookUrl: string };
 /* Hornhoof's answer to what a program sent its tools with no turn running, as /mcp gave it; null when it cannot be asked. */
 export type OutsideAnswer = { status: number; body: string };
 /* Asks Hornhoof over the node's own link, with the protocol version the program asked with. */
@@ -41,6 +43,11 @@ const READS = new Set(['task', 'tasks', 'test_run', 'work_run', 'briefing', 'com
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
 const FORWARD = ['content-type', 'content-length', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
+
+/* The agent's secret a program sends as a bearer token to the tools address that carries none. */
+function bearerSecret(req: IncomingMessage): string | undefined {
+  return /^Bearer ([0-9a-f]+)$/.exec(req.headers.authorization ?? '')?.[1];
+}
 
 /* Between an agent's long-lived program and Hornhoof, on 127.0.0.1 of the node: the program keeps one address for its tools
    and its hooks, and each call goes on with the token of the turn running now. The secret in the path tells agents apart;
@@ -112,7 +119,7 @@ export class Bridge {
       this.bySecret.set(secret, key);
     }
     const base = `http://127.0.0.1:${this.port}`;
-    return { mcpUrl: `${base}/mcp/${secret}`, attachUrl: `${base}/attach/${secret}`, hookUrl: `${base}/hook/${secret}` };
+    return { mcpUrl: `${base}/mcp/${secret}`, mcpAddress: `${base}/mcp`, secret, attachUrl: `${base}/attach/${secret}`, hookUrl: `${base}/hook/${secret}` };
   }
 
   /* The token of the agent's running turn, or null between turns. */
@@ -225,11 +232,18 @@ export class Bridge {
     reply(res, answer.status, answer.text);
   }
 
+  /* The agent an address names: by the secret in its path, or at the tools address that carries none, by the secret its
+     program sends as a bearer token. */
+  private agentAt(req: IncomingMessage, kind: string | undefined, inPath: string | undefined, event: string | undefined): string | undefined {
+    const secret = inPath || (kind === 'mcp' && event === undefined ? bearerSecret(req) : undefined);
+    return secret ? this.bySecret.get(secret) : undefined;
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const asked = Date.now();
     const [path, query] = (req.url ?? '').split(/\?(.*)/s);
-    const [, kind, secret, event] = path!.split('/');
-    const key = secret ? this.bySecret.get(secret) : undefined;
+    const [, kind, inPath, event] = path!.split('/');
+    const key = this.agentAt(req, kind, inPath, event);
     if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
     const peer = await this.peer(req);
     const owned = this.fromOwner(key, req.socket, peer);
@@ -248,7 +262,7 @@ export class Bridge {
     await this.observeSensitive(key, kind, body);
     /* Only the bridge asks for upload permissions; never hand one back to the program as an MCP response. */
     if (kind === 'mcp' && asks(body, 'attachments/token')) return reply(res, 403, '');
-    if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
+    if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body, peer.pid);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     if (kind === 'mcp' && req.method === 'POST' && !this.tokens.has(key) && (await this.withoutTurn(req, res, key, body, asked))) return;
     const known = kind === 'mcp' && !this.tokens.has(key) ? this.memory.answer(key, body) : null;
@@ -384,8 +398,8 @@ export class Bridge {
     for (const stops of groups) for (const stop of stops) stop.abort();
   }
 
-  private async agentCall(req: IncomingMessage, res: ServerResponse, key: string, kind: 'hook' | 'check', event: string | undefined, body: Buffer): Promise<void> {
-    if (kind === 'check') return this.checkCommand(key, body, res);
+  private async agentCall(req: IncomingMessage, res: ServerResponse, key: string, kind: 'hook' | 'check', event: string | undefined, body: Buffer, callerPid?: number): Promise<void> {
+    if (kind === 'check') return this.checkCommand(key, body, res, callerPid);
     if (!event) return this.refused(req, res, 404, 'unknown hook event');
     let data: unknown = null;
     try { data = JSON.parse(body.toString('utf8') || 'null'); } catch { /* An empty hook still counts. */ }
@@ -393,25 +407,25 @@ export class Bridge {
   }
 
   /* A check command runs in the agent's turn, or with none in a step Hornhoof opens for it as for a tool call. */
-  private async checkCommand(key: string, body: Buffer, res: ServerResponse): Promise<void> {
-    if (this.tokens.has(key)) return void (await this.runCheck(key, body, res, this.checkStops));
+  private async checkCommand(key: string, body: Buffer, res: ServerResponse, callerPid?: number): Promise<void> {
+    if (this.tokens.has(key)) return void (await this.runCheck(key, body, res, this.checkStops, undefined, callerPid));
     const step = (await this.options.checkStep?.(key)) ?? null;
     if (!step) return reply(res, 409, 'No Hornhoof turn is running for this agent.');
     if ('refused' in step) return reply(res, 409, step.refused);
     let ok = false;
-    try { ok = await this.runCheck(key, body, res, this.stepStops, step); }
+    try { ok = await this.runCheck(key, body, res, this.stepStops, step, callerPid); }
     finally { step.end(ok); }
   }
 
   /* It stops when its program goes, and as its turn's token changes or as Hornhoof stops its step. True when it ran to
      its end with code 0. */
-  private async runCheck(key: string, body: Buffer, res: ServerResponse, groups: Map<string, Set<AbortController>>, step?: { jobId: string; signal: AbortSignal }): Promise<boolean> {
+  private async runCheck(key: string, body: Buffer, res: ServerResponse, groups: Map<string, Set<AbortController>>, step?: { jobId: string; signal: AbortSignal }, callerPid?: number): Promise<boolean> {
     const stop = new AbortController(), stops = groups.get(key) ?? new Set<AbortController>();
     groups.set(key, stops); stops.add(stop);
     const closed = () => stop.abort(); res.once('close', closed);
     step?.signal.addEventListener('abort', closed, { once: true });
     if (step?.signal.aborted) stop.abort();
-    try { return await serveCheckCommand(key, body, stop.signal, res, step?.jobId); }
+    try { return await serveCheckCommand(key, body, stop.signal, res, step?.jobId, callerPid); }
     finally { res.removeListener('close', closed); step?.signal.removeEventListener('abort', closed); stops.delete(stop); }
   }
 

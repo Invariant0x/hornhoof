@@ -6,7 +6,7 @@ import http2 from 'node:http2';
 import net, { type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { certificates, machines } from '../src/db/schema.js';
 import type { TunnelSettings } from '../src/modules/link/tunnel.js';
 import { CERT_FILE } from '../src/modules/keeper/certificate.js';
@@ -14,6 +14,7 @@ import { COPY_STATE, copyName } from '../src/modules/keeper/copy.js';
 import { FollowKeeper, OWN_APP_AFTER_MS, type FollowKeeperOptions } from '../src/modules/keeper/follow.js';
 import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
+import { fsyncP99 } from '../src/modules/keeper/measures.js';
 import { RECOVERY_FILE } from '../src/modules/keeper/question.js';
 import { readKeeperState } from '../src/modules/keeper/state.js';
 import { readTaking } from '../src/modules/keeper/taking.js';
@@ -22,10 +23,16 @@ import { PROMISE_MS } from '../src/modules/keeper/update-steps.js';
 import { readWord } from '../src/modules/keeper/updating.js';
 import { LOAD_FILE, UPLOAD_FILE, UPLOADS_DIR, WIPE_FILE } from '../src/modules/keeper/uploads.js';
 import { PEERS_FILE } from '../src/modules/keeper/worker.js';
+import { HOLD } from '../src/net/proxy.js';
 import { issueCertificate, makeAuthority, makeCrl } from '../src/modules/network/authority.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
-import { TEST_SECRET, until } from './helpers.js';
-import { ask, company, folder, heldIn, HOST_ID, hostIdOf, MAC, SLEEPER, worker, type Company } from './worker-keeper-fixture.js';
+import { TEST_SECRET, until as untilState } from './helpers.js';
+import { ask, company, folder, heldIn, HOST_ID, hostIdOf, MAC, prepareCompany, SLEEPER, worker, workerRound, type Company } from './worker-keeper-fixture.js';
+import { controlledTime, fetchApp, manualTime, registerStep, until } from './worker-keeper-time.js';
+
+/* The embedded database opens, and the company's first app is built on it and set up, as the file is collected: their
+   cold start is no test's time. */
+await prepareCompany();
 
 const LOOPBACK = '127.0.0.1';
 
@@ -61,6 +68,31 @@ function emptyCluster() {
   return { run, sql };
 }
 
+/* One round of a keeper that follows, taken by the test instead of its timers: a sample of its disk where the test paces
+   its sampler, its worker's part as any worker's round, then its look after the copy, its beats, its watch over the
+   leader, the CEO's answer and its peer tunnel; and the leader's beats while the leader runs. */
+function followerRound(c: Company, keeper: FollowKeeper, samples: boolean): () => void {
+  return registerStep(async () => {
+    if (samples) await keeper['worker']['measures']['sampleUnlessBusy']();
+    await workerRound(c, keeper['worker']);
+    keeper['look']();
+    await keeper['working'];
+    await keeper['beating'].tick();
+    await keeper['watcher'].tick();
+    await keeper['recovery'].tick();
+    await keeper['tunnel']?.['tick']();
+    if (!c.stopped()) await c.keeper.beats().tick();
+  });
+}
+
+/* Rounds of every keeper the test runs, each msEach later on the test's clock than the one before. */
+async function rounds(count: number, msEach = 1): Promise<void> {
+  for (let round = 0; round < count; round++) {
+    vi.setSystemTime(Date.now() + msEach - 1);
+    await until(() => true);
+  }
+}
+
 /* A machine that joined, was given the data by the server, and whose keeper is started anew as one that follows: as its
    updater leaves it once the settings are written. */
 async function follower(c: Company, over: Partial<FollowKeeperOptions> = {}, before: (dir: string) => void | Promise<void> = () => undefined) {
@@ -90,14 +122,17 @@ async function follower(c: Company, over: Partial<FollowKeeperOptions> = {}, bef
     worker: {
       ports: { front: 0 }, visitClientFor: () => SLEEPER, lookEveryMs: 10, viewEveryMs: 30, reportEveryMs: 30, renewAfterMs: 50, renewEveryMs: 100, holdMs: 400, holdEveryMs: 10, noLeaderPageMs: 50,
       certificate: { retryMs: 20 }, sessions: { everyMs: 10, helloMs: 10, connectMs: 1000, directEveryMs: 50, pingMs: 60_000 }, computer: { openEveryMs: 10, closedEveryMs: 20 },
+      ...(manualTime() ? { fetch: fetchApp, holdMs: 0 } : {}),
       ...over.worker,
     },
   });
   const ports = await keeper.start();
+  const removeRound = manualTime() ? followerRound(c, keeper, over.worker?.sampleMs !== undefined) : () => undefined;
   let stopped = false;
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    removeRound();
     await keeper.stop();
   };
   onTestFinished(stop);
@@ -134,7 +169,11 @@ function askingAt(port: number, certDir: string) {
   };
 }
 
+/* These run the company's server with its keeper and a follower beside it, on the controlled clock: every keeper's round
+   is a step the test takes, so no test waits for a timer of its own, and a busy machine only takes longer per round. */
 describe('the keeper of a machine that keeps a copy', () => {
+  beforeEach(controlledTime);
+
   it('waits for no copy of its own, as a database that led did', async () => {
     const c = await company();
     /* This machine led before, and the name of the copy its commits waited for is still in its database's setting:
@@ -155,7 +194,7 @@ describe('the keeper of a machine that keeps a copy', () => {
     /* Asked of the server's own database: the copy's is not there while it changes places with a new one. */
     expect(asked).toEqual(['postgres: ALTER SYSTEM RESET synchronous_standby_names', 'postgres: SELECT pg_reload_conf()']);
     /* Once, not at each look. */
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await rounds(10);
     expect(asked).toHaveLength(2);
   });
 
@@ -225,7 +264,9 @@ describe('the keeper of a machine that keeps a copy', () => {
     const c = await company();
     const f = await follower(c, { worker: { sampleMs: 1 } });
     await until(async () => (await c.rowOf(f.machine)).copyState === 'making');
-    for (let reports = 0; reports < 3; reports++) {
+    /* Each round its sampler is due and a report goes: as many reports as a p99 needs samples, so one would show. */
+    const fewest = [...Array(100).keys()].find(n => fsyncP99(Array<number>(n).fill(1)) !== null)!;
+    for (let reports = 0; reports < fewest; reports++) {
       const { reportAt } = await c.rowOf(f.machine);
       await until(async () => (await c.rowOf(f.machine)).reportAt!.getTime() > reportAt!.getTime());
     }
@@ -261,18 +302,22 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect([readTaking(f.config.dir)?.phase, sub.did]).toEqual(['go', ['disable']]);
     /* From here its subscription stays stopped: the copy's maker takes no step that would start it again. */
     const steps = f.cluster.run.length;
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await rounds(10);
     expect(f.cluster.run.length).toBe(steps);
   });
 
   it('beats as a copy', async () => {
     const dir = folder();
     const c = await company({ dir, beatEveryMs: 20 });
+    /* Every beat the leader keeps, in turn: within one round the copy beats before it heard the leader, and answers the
+       leader's beat after. */
+    const kept = vi.spyOn(c.keeper.beats()['lasts'], 'set');
     const f = await follower(c, { beatEveryMs: 20 });
+    const firstOfCopy = () => kept.mock.calls.find(([machine]) => machine === f.config.machineId)?.[1].beat;
     await until(() => f.keeper.status().leader !== null);
-    /* The leader hears where the copy stands: it follows, and its copy is not whole yet. */
-    await until(() => c.keeper.beats().last(f.config.machineId) !== null);
-    expect(c.keeper.beats().last(f.config.machineId)!.beat).toMatchObject({ machine: f.config.machineId, stance: { kind: 'follow', term: null }, ready: false, full: false });
+    /* The leader hears where the copy stands: it follows no term yet, and its copy is not whole. */
+    await until(() => firstOfCopy() !== undefined);
+    expect(firstOfCopy()).toMatchObject({ machine: f.config.machineId, stance: { kind: 'follow', term: null }, ready: false, full: false });
     /* And the copy hears the leader, by its answers. */
     await until(() => f.keeper.beats().answer(HOST_ID) !== null);
     expect(f.keeper.beats().last(HOST_ID)!.beat).toMatchObject({ machine: HOST_ID, stance: { kind: 'lead' }, ready: true });
@@ -312,12 +357,16 @@ describe('the keeper of a machine that keeps a copy', () => {
     const c = await company({ dir, beatEveryMs: 20 });
     const sub = { enabled: true, did: [] as string[] };
     let exits = 0;
-    /* A clock that runs fifty times as fast, and a relay the test plays: the name is free at 7, and its record names
-       this copy as the one that holds every change. */
-    const began = performance.now();
+    /* The keeper's clock, moved by the test's: each round, a millisecond of the test's, is two seconds of it, below
+       the three after which the watch starts its window over. And a relay the test plays: the name is free at 7, and
+       its record names this copy as the one that holds every change. */
+    let perMs = 2000;
+    let mono = 0;
+    let at = Date.now();
     const clocks = () => {
-      const ms = (performance.now() - began) * 50;
-      return { wall: 1_700_000_000_000 + ms, mono: ms };
+      mono += (Date.now() - at) * perMs;
+      at = Date.now();
+      return { wall: 1_700_000_000_000 + mono, mono };
     };
     const name = { state: 'held' as 'held' | 'empty' };
     let own = '';
@@ -344,9 +393,12 @@ describe('the keeper of a machine that keeps a copy', () => {
     /* The leader says its commits wait for this copy. */
     await until(() => f.keeper.beats().last(HOST_ID)?.beat.stance.kind === 'lead');
     expect(readTaking(f.config.dir)).toBeNull();
-    /* While the leader beats, nothing is taken, whatever the name says. */
+    /* While the leader beats, nothing is taken, whatever the name says: for 35 s, five a round, as no window of the
+       watch counts while it hears the leader. */
     name.state = 'empty';
-    await new Promise(resolve => setTimeout(resolve, 700));
+    perMs = 5000;
+    await rounds(7);
+    perMs = 2000;
     expect([readTaking(f.config.dir), exits]).toEqual([null, 0]);
     /* The leader is gone. Its last beats never said that its commits wait for this copy, so this copy may lack
        changes: it asks, and takes nothing by itself. */
@@ -376,8 +428,9 @@ describe('the keeper of a machine that keeps a copy', () => {
     const dir = folder();
     const c = await company({ dir });
     const clock = { now: 0 };
-    /* Its copy holds every table, so its app reads. */
-    const f = await follower(c, { ownAppAfterMs: 100, updating: { now: () => clock.now } }, own => writeFileSync(join(own, COPY_STATE), JSON.stringify({ attempt: 1, database: 'hornhoof', phase: 'ready' })));
+    /* Its copy holds every table, so its app reads. Its front door holds a request for the leader, as every machine's
+       does: what it says while the promise holds, it says as it holds one. */
+    const f = await follower(c, { ownAppAfterMs: 100, updating: { now: () => clock.now }, worker: { holdMs: 400 } }, own => writeFileSync(join(own, COPY_STATE), JSON.stringify({ attempt: 1, database: 'hornhoof', phase: 'ready' })));
     await until(() => f.keeper.status().leader !== null);
     await until(() => readKeeperState(f.config.controlDir)?.mode === 'read');
     const ports = await f.keeper.peerPorts();
@@ -394,7 +447,7 @@ describe('the keeper of a machine that keeps a copy', () => {
     /* The leader is gone for far longer than the time after which this machine would read by itself. */
     await c.stop();
     await until(() => f.keeper.status().leader === null);
-    await new Promise(resolve => setTimeout(resolve, 400));
+    await rounds(20, 20);
     const waiting = await ask(f.ports.front, { path: '/api/tasks' });
     expect([waiting.status, waiting.json()]).toMatchObject([503, { error: { reason: 'maintenance' } }]);
     expect([made(), readKeeperState(f.config.controlDir)?.mode]).toEqual([steps, 'maintenance']);
@@ -402,7 +455,8 @@ describe('the keeper of a machine that keeps a copy', () => {
     clock.now = PROMISE_MS;
     await until(() => readKeeperState(f.config.controlDir)?.mode === 'read');
     expect([readWord(f.config.controlDir), f.lines]).toEqual([null, expect.arrayContaining(["The company server's update promise ran out."])]);
-    await until(async () => (await ask(f.ports.front, { path: '/tasks' }).catch(() => null))?.body === "the copy's own app: /tasks");
+    /* Asked to hold for nothing, so no ask waits out a hold while the rounds stand still. */
+    await until(async () => (await ask(f.ports.front, { path: '/tasks', headers: { [HOLD]: '0' } }).catch(() => null))?.body === "the copy's own app: /tasks");
   });
 
   it('gives the leader what it holds once its owner lost the scope, and asks for its wipe only when the leader keeps it', async () => {
@@ -442,7 +496,10 @@ describe('the keeper of a machine that keeps a copy', () => {
     expect(existsSync(join(f.config.dir, COPY_STATE))).toBe(false);
     for (const line of f.lines) expect(line).not.toContain(TEST_SECRET);
   });
+});
 
+/* These start no company: each moves the intervals of its own follower on a fake clock. */
+describe('the keeper of a machine that keeps a copy', () => {
   it('keeps its peer tunnel running through one empty settings read, and says why before stopping on a second', async () => {
     const dir = folder();
     const key = machineKey(dir);
@@ -664,7 +721,7 @@ describe('the keeper of a machine that keeps a copy', () => {
     await vi.advanceTimersByTimeAsync(3000);
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(kill).toHaveBeenCalledWith('SIGTERM');
-    await until(() => lines.includes('No public link: this machine reaches the company server on its local network only.'));
+    await untilState(() => lines.includes('No public link: this machine reaches the company server on its local network only.'));
 
     await keeper.stop();
     vi.restoreAllMocks();

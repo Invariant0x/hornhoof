@@ -7,7 +7,7 @@ sources: [garrytan/gstack document-release/SKILL.md.tmpl]
 ---
 You can write release notes that tell a user what changed and what they must do.
 
-For every release, from the merged changes and their reports, write one short list in the repository's language, with no translation into other languages:
+For every release, from the merged changes and their reports, write one short list in the repository's language, with no translation into other languages. Write it once, as the release is prepared, in one commit: nobody adds a note per task as work lands.
 
 1. **Fixed**: bugs people saw, described as they saw them, not by the code.
 2. **Added**: what people can do now that they could not, starting with the verb.

@@ -4,7 +4,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agentInbox, agents, companies, departments, jobs, people, requests, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { said } from '../src/modules/conversation/live.js';
 import { letterKind, type MailMessage } from '../src/modules/conversation/inbox.js';
-import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { comment, createTask } from '../src/modules/tasks/engine.js';
 import { queueTaskMessage, waitFor } from '../src/modules/tasks/external-wait.js';
@@ -131,6 +131,55 @@ describe('mail from employees in inbox mode', () => {
     await c.ends(work);
     expect((await c.job(asked)).status).toBe('running');
     expect((await c.turnsOf(c.hana.id)).filter(j => j.inboxWake).map(j => j.status)).toEqual(['queued']);
+  });
+
+  it('gives the letters that waited with the next turn on a task, so the turn for the inbox never waits behind newer turns', async () => {
+    const c = await company();
+    const given = await c.given(c.bruno.id);
+    const [working] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'running');
+    await c.letter(c.rita, c.bruno.id, 'I pushed the fixtures.');
+    c.later();
+    await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.hana.id }, given.task.id, 'Mind the rounding.')).wakes);
+    const wake = (await c.turnsOf(c.bruno.id)).find(j => j.inboxWake)!;
+    const [onTask] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued' && !j.inboxWake);
+    expect(+wake.createdAt).toBeLessThan(+onTask!.createdAt);
+
+    await c.ends(working!.id);
+
+    expect((await c.job(onTask!.id)).status).toBe('running');
+    const prompt = c.runs().find(r => r.jobId === onTask!.id)!.prompt;
+    expect(prompt).toContain('Mind the rounding.');
+    expect(prompt).toMatch(/1 unread letter\b/);
+    expect(prompt).toContain('I pushed the fixtures.');
+    expect(await c.job(wake.id)).toMatchObject({ status: 'done', result: GONE_ALONG });
+    expect((await c.inboxOf(c.bruno.id)).find(m => m.text === 'I pushed the fixtures.')).toMatchObject({ status: 'read', jobId: onTask!.id });
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+  });
+
+  it('gives every message that waited on the same task in one turn, and keeps a message on another task and a person\'s words apart', async () => {
+    const c = await company();
+    const checkout = await c.task(c.bruno.id);
+    const refunds = await c.task(c.bruno.id);
+    const talk = await c.ivanWrites(c.bruno.id, 'How is it going?');
+    c.refuseLiveWords();
+    await c.letter(c.hana, c.bruno.id, 'Use the new totals.', checkout.number);
+    c.later();
+    await c.letter(c.hana, c.bruno.id, 'And round down.', checkout.number);
+    c.later();
+    await c.letter(c.hana, c.bruno.id, 'Refunds can wait.', refunds.number);
+    c.later();
+    const asked = await c.ivanWrites(c.bruno.id, 'Answer me later.');
+    const [first, second, other] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued' && j.taskId);
+
+    await c.ends(talk);
+
+    expect((await c.job(first!.id)).status).toBe('running');
+    const prompt = c.runs().find(r => r.jobId === first!.id)!.prompt;
+    expect(prompt).toContain('Use the new totals.');
+    expect(prompt).toContain('And round down.');
+    expect(prompt).not.toContain('Refunds can wait.');
+    expect(await c.job(second!.id)).toMatchObject({ status: 'done', result: GONE_ALONG });
+    expect([(await c.job(other!.id)).status, (await c.job(asked)).status]).toEqual(['queued', 'queued']);
   });
 
   it('wakes a holder whose task waits with a turn on that task that has the letter whole, and ends the wait as before', async () => {

@@ -4,11 +4,16 @@ set -eu
 MEDIA_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$MEDIA_DIR/../../.." && pwd)"
 RESULTS_DIR="$MEDIA_DIR/results"
-ASSETS_DIR="$REPO_ROOT/.github/assets"
+# MEDIA_ASSETS_DIR sends the pictures elsewhere, as the render in apps/web/media/Dockerfile does.
+ASSETS_DIR="${MEDIA_ASSETS_DIR:-$REPO_ROOT/.github/assets}"
 DOCKER_IMAGE="mcr.microsoft.com/playwright:v1.64.1-noble"
 DOCKER_VOLUME="hornhoof-media-work"
 
-if ! command -v docker >/dev/null 2>&1; then
+# MEDIA_IN_CONTAINER=1: this already is the Playwright image with the repository installed, as in
+# apps/web/media/Dockerfile, so the scenes run here and no Docker is needed.
+IN_CONTAINER="${MEDIA_IN_CONTAINER:-0}"
+
+if [ "$IN_CONTAINER" != "1" ] && ! command -v docker >/dev/null 2>&1; then
   echo "error: docker is required to run media scenes ($DOCKER_IMAGE)" >&2
   exit 1
 fi
@@ -21,6 +26,16 @@ fi
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR" "$ASSETS_DIR"
 
+# A scene that fails leaves the others to be converted; the run still fails at the end.
+render_status=0
+if [ "$IN_CONTAINER" = "1" ]; then
+  echo "==> Rendering scenes in this container..."
+  (
+    cd "$REPO_ROOT"
+    npm run build -w @hornhoof/protocol
+    npx --prefix apps/web playwright test -c apps/web/media/playwright.media.config.ts "$@"
+  ) || render_status=$?
+else
 echo "==> Rendering scenes in Docker ($DOCKER_IMAGE)..."
 docker run --rm --ipc=host \
   -v "$REPO_ROOT:/src:ro" \
@@ -56,16 +71,21 @@ docker run --rm --ipc=host \
     fi
 
     npm run build -w @hornhoof/protocol
-    npx --prefix apps/web playwright test -c apps/web/media/playwright.media.config.ts "$@"
+    status=0
+    npx --prefix apps/web playwright test -c apps/web/media/playwright.media.config.ts "$@" || status=$?
 
+    # A failed scene still leaves its video, marks and failure shots to look at.
     cp -R /work/apps/web/media/results/. /results/
-  ' -- "$@"
+    exit "$status"
+  ' -- "$@" || render_status=$?
+fi
 
 echo "==> Converting videos to GIFs in .github/assets/..."
 
 rm -f "$ASSETS_DIR/machines.png" "$ASSETS_DIR/subscriptions.png"
 
 MAX_GIF_BYTES=6000000
+check_status=0
 
 for mark in "$RESULTS_DIR"/marks/*.json; do
   [ -e "$mark" ] || continue
@@ -123,11 +143,16 @@ for mark in "$RESULTS_DIR"/marks/*.json; do
       console.error(`error: ${name}.gif size ${bytes} bytes exceeds 6 MB limit`);
       process.exit(1);
     }
-  ' "$name" "$gif_dur" "$gif_bytes" "$MAX_GIF_BYTES"
+  ' "$name" "$gif_dur" "$gif_bytes" "$MAX_GIF_BYTES" || check_status=1
 done
 
 if [ "${KEEP_MEDIA_RESULTS:-0}" != "1" ]; then
   rm -rf "$RESULTS_DIR"
+fi
+
+if [ "$render_status" -ne 0 ] || [ "$check_status" -ne 0 ]; then
+  echo "error: a scene failed to render or its GIF is outside its limits" >&2
+  exit 1
 fi
 
 echo "==> Done. GIF assets written to .github/assets/"

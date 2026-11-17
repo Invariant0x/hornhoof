@@ -32,20 +32,30 @@ const holdText = (row: Case, name: string, to: Agent) =>
 
 const watchDue = (row: Case, now: Date) => Boolean(row.escalatedAt) && +now - +row.escalatedAt! > HOLD_WATCH_MS && !row.resolution?.holdCall?.operations;
 
+/* What the one who can release a hold is told of it: the words of its turn, and the line people see. */
+export type HoldWords = { text: (row: Case, name: string, to: Agent) => string; detail: (name: string) => { en: string; ru: string } };
+const wordsOnHold: HoldWords = { text: holdText, detail: name => ({ en: `${name}: words on hold for more than five minutes`, ru: `${name}: слова ждут дольше пяти минут` }) };
+
 /* Called with the agent row locked, once a round for a case on hold. It calls Operations once, and the orchestrator once
    while Operations cannot take it: the turn it queues is no case of its own. */
-export async function callOperationsOnHold(ctx: Ctx, row: Case, now: Date): Promise<void> {
-  if (!watchDue(row, now)) return;
-  const to = await holdRecipient(ctx, row);
-  if (!to || (row.resolution?.holdCall && to.kind === 'orchestrator')) return;
-  const job = await tellOfHold(ctx, row, to);
-  await ctx.db.update(programOperatorCases).set({ resolution: { ...(row.resolution ?? { outcome: 'held', text: '', image: row.pictureId }), holdCall: { job, to: to.id, at: now.toISOString(), operations: to.kind !== 'orchestrator' } } }).where(eq(programOperatorCases.id, row.id));
+export async function callOperationsOnHold(ctx: Ctx, row: Case, now: Date, words = wordsOnHold): Promise<void> {
+  if (watchDue(row, now)) await callOperations(ctx, row, now, words);
 }
 
-async function tellOfHold(ctx: Ctx, row: Case, to: Agent): Promise<string> {
+/* Tells of a hold the one who can release it, in these words, and notes the call on its case. The turn it queued, or none
+   when nobody can hear now. Called with the agent row locked. */
+export async function callOperations(ctx: Ctx, row: Case, now: Date, words: HoldWords): Promise<string | null> {
+  const to = await holdRecipient(ctx, row);
+  if (!to || (row.resolution?.holdCall && to.kind === 'orchestrator')) return null;
+  const job = await tellOfHold(ctx, row, to, words);
+  await ctx.db.update(programOperatorCases).set({ resolution: { ...(row.resolution ?? { outcome: 'held', text: '', image: row.pictureId }), holdCall: { job, to: to.id, at: now.toISOString(), operations: to.kind !== 'orchestrator' } } }).where(eq(programOperatorCases.id, row.id));
+  return job;
+}
+
+async function tellOfHold(ctx: Ctx, row: Case, to: Agent, words: HoldWords): Promise<string> {
   const [target] = await ctx.db.select({ name: agents.name, taskId: jobs.taskId }).from(agents).innerJoin(jobs, eq(jobs.id, row.jobId)).where(eq(agents.id, row.agentId));
   const name = target?.name ?? row.agentId;
-  const text = holdText(row, name, to);
-  const notification = await operatorNotification(ctx, { companyId: row.companyId, taskId: target?.taskId ?? null }, { en: `${name}: words on hold for more than five minutes`, ru: `${name}: слова ждут дольше пяти минут` });
+  const text = words.text(row, name, to);
+  const notification = await operatorNotification(ctx, { companyId: row.companyId, taskId: target?.taskId ?? null }, words.detail(name));
   return insertTurn(ctx, { companyId: row.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification } });
 }

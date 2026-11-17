@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -29,6 +29,48 @@ for (const [why, code, output] of [
 test('the fast tests of each package run from that package', () => {
   assert.equal(testCommand(['apps/node/test/a.test.ts', 'apps/node/test/deep/b.test.ts']), 'npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root apps/node test/a.test.ts test/deep/b.test.ts');
   assert.equal(testCommand(['apps/node/test/a.test.ts', 'apps/server/test/b.test.ts']), 'npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root apps/node test/a.test.ts && npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root apps/server test/b.test.ts');
+});
+
+test('the tool judges mutants by the counts of the mutation config, and the baseline keeps the full report', () => {
+  const args = mutatorArgs('apps/node/src/a.ts', ['apps/node/test/a.test.ts'], false);
+  assert.doesNotMatch(args[args.indexOf('--test-command') + 1], /--reporter/);
+  assert.equal(testCommand(['apps/node/test/a.test.ts'], new Map()), 'npx --no-install vitest run --config ../../scripts/mutation/vitest.config.mjs --root apps/node --reporter=default test/a.test.ts');
+});
+
+/* The tool takes words like "Cannot find module" in its output for a broken runner, and Vitest prints the names of the
+   passing tests of a failed file only where it sees no AI agent. What a mutant prints must be the same for both. */
+test('a killed mutant reads the same with or without an agent, and no test names or data reach the tool', t => {
+  const folder = mkdtempSync(join(tmpdir(), 'hh-mutation-words-'));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const repository = fileURLToPath(new URL('../..', import.meta.url));
+  const write = (path, text) => { mkdirSync(join(folder, path, '..'), { recursive: true }); writeFileSync(join(folder, path), text); };
+  write('package.json', '{"private":true}');
+  mkdirSync(join(folder, 'scripts/mutation'), { recursive: true });
+  for (const file of ['vitest.config.mjs', 'counts-reporter.mjs']) if (existsSync(join(repository, 'scripts/mutation', file))) copyFileSync(join(repository, 'scripts/mutation', file), join(folder, 'scripts/mutation', file));
+  symlinkSync(join(repository, 'node_modules'), join(folder, 'node_modules'));
+  write('apps/a/test/words.test.ts', `import { describe, expect, it } from 'vitest';
+describe('words', () => {
+  it("leaves ordinary words as they are: Error: Cannot find module '/data/tools/cli.js'", () => expect(1).toBe(1));
+  it('hides a token', () => expect('key=sk-fixture-secret').toBe('key=[hidden]'));
+});
+`);
+  write('apps/a/src/broken.ts', "export const words = 'Cannot find module' || || 'sk-fixture-secret';\n");
+  write('apps/a/test/broken.test.ts', "import { expect, it } from 'vitest';\nimport { words } from '../src/broken.js';\nit('reads words', () => expect(words).toBe(''));\n");
+  const run = (file, extra = {}) => {
+    try { execFileSync('sh', ['-c', testCommand([file])], { cwd: folder, env: { PATH: process.env.PATH, HOME: folder, npm_config_update_notifier: 'false', ...extra }, encoding: 'utf8', stdio: 'pipe' }); }
+    catch (error) { return { code: error.status, output: `${error.stdout}${error.stderr}` }; }
+    return { code: 0, output: '' };
+  };
+  const runner = run('apps/a/test/words.test.ts'), agent = run('apps/a/test/words.test.ts', { CLAUDECODE: '1', AI_AGENT: 'fixture' });
+  assert.equal(runner.code, 1, runner.output);
+  assert.equal(runner.output, agent.output);
+  assert.match(runner.output, /Tests {2}1 failed \| 1 passed \(2\)/);
+  assert.match(runner.output, /AssertionError/);
+  assert.doesNotMatch(runner.output, /Cannot find module|ordinary words|hides a token|sk-fixture-secret/i);
+  const broken = run('apps/a/test/broken.test.ts');
+  assert.equal(broken.code, 1, broken.output);
+  assert.match(broken.output, /Tests {2}no tests\n.*Transform failed/s, 'a mutant that does not parse stays a compile error, not a kill');
+  assert.doesNotMatch(broken.output, /Cannot find module|sk-fixture-secret|reads words/i);
 });
 
 test('a path reaches the shell as one word', () => {

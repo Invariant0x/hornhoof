@@ -1,3 +1,4 @@
+import { hideCredentialsIn } from '@hornhoof/protocol/redaction';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
@@ -18,7 +19,6 @@ import { builtinOf, identityOf, nodeIdentity, ownBuiltin, ownMachine, sameNode, 
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { holdsBuiltin, holdsMachine, machineInstalls, nextToInstallHolds } from '../network/follow.js';
 import { pickBuiltin } from '../nodes/builtin.js';
-import { cameBack } from '../nodes/connections.js';
 import { shownAway } from '../nodes/machine-away.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
@@ -27,6 +27,7 @@ import { instructionsOf } from '../agents/instructions.js';
 import { repoAt, repoFor, turnPlaces } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork, type Tx } from '../tasks/engine.js';
+import { openTaskNumbers } from '../tasks/open-numbers.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
@@ -44,6 +45,7 @@ import { cancelUnsentDelivery, reserveDelivery } from '../program-operator/deliv
 import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from '../program-operator/input.js';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
+import { nodesOnHold } from '../program-operator/not-started.js';
 import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 import { fallbackMove } from '../subscriptions/fallback.js';
 import { claimMail, inboxChanged, inboxModeOf, isMail, keepMail, mailShown, mailSummary, mailWentOut, takesInsteadOfTurn, unreadMail, type InboxStatus } from './inbox.js';
@@ -350,6 +352,7 @@ const peopleTurns = and(isNull(jobs.taskId), eq(jobs.inboxWake, false));
 
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
+  t = hideCredentialsIn(t);
   const combined = t.message?.report ? await combineReport(ctx, t) : null;
   const id = combined ?? (await insertFreshTurn(ctx, t));
   await keepLetter(ctx, t, id, 'unread');
@@ -450,6 +453,7 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent, li
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
    turn that took a message of the CEO or the CEO delegate answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
+  t = hideCredentialsIn(t);
   const jobId = await withInputLock(ctx, t.agentId, () => insertOrDeliverTurn(ctx, t));
   await pump(ctx, t.agentId);
   return jobId;
@@ -827,8 +831,11 @@ async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 
     return !nodeHeldFrom(ctx, node, agent.roleKey, isLeader(agent)) && roomy(node) ? { node, nodeId: null, builtinMachine: machine, moves: agent.nodeId !== null || agent.builtinMachine !== machine } : null;
   }
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need, roomy)));
+  /* A node that cannot write its work folder takes no turn until Operations or the node itself lifts its hold. */
+  const onHold = await nodesOnHold(ctx, all.map(n => n.id));
+  const open = all.filter(n => !onHold.has(n.id));
+  const able = open.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, open, need, roomy)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, builtinMachine: null, moves: pick.id !== agent.nodeId } : null;
 }
 
@@ -878,27 +885,35 @@ async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
   return able.reduce((best, n) => (better(n, best) ? n : best));
 }
 
-const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';
-const BACKLOG = 'These wake-ups on your task waited in line until your machine was connected again. Go through them together in this turn:';
-/* What a task's turn that went out inside another one ended with: its own result is the other turn's. */
+const ALONG = 'Several things waited for you in line and go out together in this turn. Go through each of them:';
+/* What a turn that went out inside another one ended with: its own result is the other turn's. */
 export const GONE_ALONG = 'Went out with the turn before it.';
 
-/* The other task turns waiting for the agent that are due, oldest first; only narrows them down further. */
-function alongWith(ctx: Ctx, agentId: string, jobId: string, only?: SQL) {
+/* The agent's other waiting turns that are due, of those which, oldest first. */
+function alongWith(ctx: Ctx, agentId: string, jobId: string, which: SQL | undefined) {
   return ctx.db
-    .select({ id: jobs.id, prompt: jobs.prompt, taskId: jobs.taskId, continueOf: jobs.continueOf })
+    .select({ id: jobs.id, prompt: jobs.prompt, taskId: jobs.taskId, continueOf: jobs.continueOf, inboxWake: jobs.inboxWake })
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), or(isNull(jobs.notBefore), lte(jobs.notBefore, new Date(Date.now()))), isNotNull(jobs.taskId), ne(jobs.id, jobId), only))
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), or(isNull(jobs.notBefore), lte(jobs.notBefore, new Date(Date.now()))), ne(jobs.id, jobId), which))
     .orderBy(asc(jobs.createdAt));
 }
 
-/* What goes out inside a task's turn. A head reads everything that moved on its tasks while it was busy in one turn, instead
-   of one turn per task. Anyone else takes in one turn what waits on the same task when this turn waited until the node it
-   goes to came back: what a machine that was away kept would otherwise go out turn after turn, each out of date. */
-async function goingAlong(ctx: Ctx, agent: { id: string; kind: string }, job: Pick<typeof jobs.$inferSelect, 'id' | 'taskId' | 'createdAt'>, nodeId: string | null): Promise<Along[]> {
-  if (!job.taskId) return [];
-  if (agent.kind === 'head') return alongWith(ctx, agent.id, job.id);
-  return (await cameBack(ctx.db, nodeId, job.createdAt)) ? alongWith(ctx, agent.id, job.id, eq(jobs.taskId, job.taskId)) : [];
+/* A turn that only brings the agent words: what an employee or Hornhoof wrote, or the turn that takes its inbox. Not a
+   person's own turn or one that answers the CEO, whose answer goes to them, nor one that goes on from another turn or says
+   again words its program did not hear, which go on in a session of their own. */
+const onlyWords = and(isNull(jobs.createdBy), eq(jobs.answersCeo, false), isNull(jobs.continueOf), isNull(jobs.retryOf), ne(jobs.prompt, ''), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.kind = 'typed')`);
+
+/* What goes out inside a turn. A turn that only brings words takes every other one that does, on no task or on its own
+   task: the agent reads them all at once, instead of one turn each while newer ones go first. A head also reads
+   everything that moved on its tasks while it was busy. An assistant's program builds its own message, and a switched-off
+   agent's inbox waits until it is on. */
+async function goingAlong(ctx: Ctx, agent: { id: string; kind: string; switchedOffAt: Date | null }, job: Pick<typeof jobs.$inferSelect, 'id' | 'taskId'>): Promise<Along[]> {
+  const tasks = job.taskId && agent.kind === 'head' ? isNotNull(jobs.taskId) : undefined;
+  const [words] = agent.kind === 'assistant' ? [] : await ctx.db.select(idOnly(jobs)).from(jobs).where(and(eq(jobs.id, job.id), onlyWords));
+  const others = words
+    ? and(onlyWords, job.taskId ? or(isNull(jobs.taskId), eq(jobs.taskId, job.taskId)) : isNull(jobs.taskId), agent.switchedOffAt ? peopleTurns : undefined)
+    : undefined;
+  return tasks || others ? alongWith(ctx, agent.id, job.id, or(tasks, others)) : [];
 }
 
 /* A waiting turn that went out inside another: over, with its task taken up as its own turn would have. */
@@ -962,7 +977,7 @@ async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { e
 }
 
 /* A turn that waited for the agent and goes out inside its turn. */
-type Along = Pick<typeof jobs.$inferSelect, 'id' | 'prompt' | 'taskId' | 'continueOf'>;
+type Along = Pick<typeof jobs.$inferSelect, 'id' | 'prompt' | 'taskId' | 'continueOf' | 'inboxWake'>;
 type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId' | 'prompt'>;
 /* What a turn goes out with: where it runs and what it says. */
 type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'builtinMachine' | 'prompt' | 'sessionId' | 'toolTokenHash' | 'instructionsHash'>;
@@ -1131,7 +1146,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!due) return (await inboxTurnDue(ctx, agent)) ? sendNext(ctx, agentId) : undefined;
   if (await heldBack(ctx, due)) return sendNext(ctx, agentId);
   /* The turn that takes the inbox asks what is unread in it when it goes, or goes nowhere when nothing is. */
-  const mail = due.inboxWake ? await unreadMail(db, agentId) : [];
+  let mail = due.inboxWake ? await unreadMail(db, agentId) : [];
   if (due.inboxWake && !mail.length) {
     await db.update(jobs).set({ status: 'done', result: NOTHING_UNREAD, finishedAt: new Date() }).where(and(eq(jobs.id, due.id), eq(jobs.status, 'queued')));
     return sendNext(ctx, agentId);
@@ -1147,8 +1162,11 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
      their limit. */
   if (await machineInstalls(db, place.nodeId)) return;
   if (await nextToInstallHolds(ctx, place.nodeId, isLeader(agent))) return;
-  const along: Along[] = [];
-  for (const j of await goingAlong(ctx, agent, job, place.nodeId)) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
+  const going: Along[] = [];
+  for (const j of await goingAlong(ctx, agent, job)) if (!(await heldBack(ctx, { ...j, agentId }))) going.push(j);
+  /* The turn that takes the inbox goes along with what is unread in it now; while nothing is, it stays and ends unsent. */
+  if (!mail.length && going.some(j => j.inboxWake)) mail = await unreadMail(db, agentId);
+  const along = going.flatMap(j => (!j.inboxWake ? [j] : mail.length ? [{ ...j, prompt: mailSummary(mail) }] : []));
 
   /* A node from before skill files gets every skill in the instructions. */
   const files = ctx.hub.takesSkillFiles(place.node);
@@ -1164,7 +1182,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const on = { subscriptionId: sub.id, nodeId: place.nodeId, builtinMachine: place.builtinMachine, own: ownMachine(ctx.config) };
   const { sessionId, catchUp, originalPrompt, prompts } = await queuedSession(ctx, agent, on, runHash, job, along);
-  const asked = along.length ? [agent.kind === 'head' ? ALONG : BACKLOG, job.prompt, ...prompts].join('\n\n---\n\n') : job.prompt;
+  const asked = along.length ? [ALONG, job.prompt, ...prompts].join('\n\n---\n\n') : job.prompt;
   const said = withOriginal(asked, originalPrompt);
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before goes with its
      instructions instead. Where the agent works it reads with its briefing tool, so no message carries it. */
@@ -1189,6 +1207,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   let deliveries: { operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery } = {};
   try {
     deliveries = await turnOperatorDeliveries(ctx, agent, job, place.node, prompt);
+    const tasksNow = repo ? await openTaskNumbers(db, agent.companyId) : null;
     await publishWorking(ctx, job.companyId);
     sent = await dispatchJob(ctx, {
       id: job.id,
@@ -1209,8 +1228,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       ...deliveries,
       context: job.prompt ? null : catchUp,
       /* Each agent keeps one folder on the node, with its repository's clone inside, which gets the dependencies the
-         company's machines built for its commit. */
-      workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}) },
+         company's machines built for its commit. Which tasks are still open lets the node take away its worktrees of the
+         closed ones. */
+      workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}), ...(tasksNow ? { tasks: tasksNow } : {}) },
       ...(files ? { skills: instructions.skills } : {}),
     });
   } catch (err) {
@@ -1219,8 +1239,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   }
   if (sent) {
     turnSent(ctx, place.node, agentId);
-    const read = await mailWentOut(db, agentId, [job.id, ...along.map(j => j.id)]);
-    if (job.inboxWake) await mailShown(db, agentId, mail.map(m => m.id), job.id);
+    /* What the inbox showed is read with this turn; a letter that came for the inbox meanwhile waits for the next one. */
+    const read = await mailWentOut(db, agentId, [job.id, ...along.filter(j => !j.inboxWake).map(j => j.id)]);
+    if (mail.length) await mailShown(db, agentId, mail.map(m => m.id), job.id);
     if (read || mail.length) await inboxChanged(ctx, agentId);
     if (agent.kind === 'assistant') await forgetFresh(ctx, job.id);
     return wentOut(ctx, job, along, taken.lines);

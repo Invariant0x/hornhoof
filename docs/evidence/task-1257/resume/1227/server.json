@@ -1,0 +1,28 @@
+{
+  "commit": "3f950b174115a6b471ebe13c3360bb75a7622f34",
+  "cwd": "apps/server",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/events.test.ts",
+    "test/stored-secrets.test.ts",
+    "test/orchestrator-sql-secrets.test.ts",
+    "test/secret-redaction-scan.test.ts",
+    "test/secret-redaction-merge.test.ts",
+    "test/secret-redaction-migration.test.ts",
+    "test/secret-redaction-rights.test.ts",
+    "test/migration-metadata.test.ts",
+    "test/tasks-engine.test.ts",
+    "test/tasks-routes.test.ts",
+    "test/tracker-task-routes.test.ts",
+    "test/agent-sql-permissions.test.ts",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "exit": 0,
+  "log": "server.log",
+  "sha256": "24784480de56822d9a440925a5890e972ed57e3e5fe188174a6e2c2b03b49849",
+  "originalSha256": "bb51a446d693b1b94ad568968745e7c2b1df48f8b7f6f319a715fcd0729ba69c"
+}

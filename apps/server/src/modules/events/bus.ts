@@ -22,6 +22,8 @@ export type StreamMessage =
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   /* A task changed; people who reach its place fetch it again. */
   | { type: 'task'; id: string; spot: Spot }
+  /* The company's goals or a department's pipelines changed; everyone of it reads them, as they read its tasks. */
+  | { type: 'tracker' }
   /* What waits for people changed in this place. */
   | { type: 'requests'; spot: Spot }
   /* A machine's card came or closed; each person asks for what is theirs, so it holds no place and nothing else. */
@@ -41,7 +43,7 @@ export type StreamMessage =
   /* The orchestrator's request for the computer the server runs on, or its access, changed; only the CEO hears it. */
   | { type: 'computer' }
   /* How a plan's sign-in on one of its machines ended; it goes to the plan's owner alone. */
-  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code: number | null; line: string | null; owner: string };
 
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {

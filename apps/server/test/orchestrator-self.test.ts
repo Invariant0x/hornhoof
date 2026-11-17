@@ -33,6 +33,21 @@ describe('the orchestrator looks at Hornhoof from outside', () => {
     expect((await call('source', { path: '../../../etc/passwd' })).error).toBe(true);
   });
 
+  it("runs any command in the server's own container, with its output and how it ended", async () => {
+    const c = await company();
+    const call = await orchestrator(c);
+    const ran = await call('shell', { command: 'cd "$(mktemp -d)" && echo patched > file && cat file && echo warned >&2 && exit 3' });
+    expect(ran.error).toBe(true);
+    expect(ran.text).toMatch(/^Exit code 3\.\n/);
+    expect(ran.text).toContain('patched');
+    expect(ran.text).toContain('warned');
+    expect(await call('shell', { command: 'node --version' })).toEqual({ error: false, text: `Exit code 0.\n${process.version}\n` });
+    const long = await call('shell', { command: 'yes | head -c 100000' });
+    expect(long.text).toContain('[cut at 30000 characters]');
+    const slow = await call('shell', { command: 'sleep 30', timeoutSeconds: 1 });
+    expect([slow.error, slow.text]).toEqual([true, 'Stopped after 1 second.\n']);
+  });
+
   it("reads the server's last lines of log", async () => {
     const c = await company();
     const call = await orchestrator(c);

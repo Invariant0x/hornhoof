@@ -71,6 +71,7 @@ const agent = (over: Partial<AgentRow> = {}): AgentRow => ({
   timerOrder: null,
   timerAt: null,
   timerForWork: false,
+  timerNudgedAt: null,
   inboxMode: null,
   removedAt: null,
   createdAt: new Date(),
@@ -303,6 +304,28 @@ describe('renderInstructions', () => {
     }
   });
 
+  /* Claude Code refuses such a removal by itself after two minutes, and the step is lost (#1246). */
+  /* An assistant's own agent runs shell commands too, hh-attach among them, and hh-assistant is the only skill it gets. */
+  it('tells employees, the orchestrator and an assistant\'s own agent to write a path from a variable as "${VAR:?}" or literally in a command that deletes or overwrites', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const told = [renderInstructions(shipped, agent(), PLACE).text, renderInstructions(shipped, agent({ kind: 'head', roleKey: 'SAL-HEAD' }), PLACE).text, orchestratorSteady(shipped).text, shipped.skills.get('hh-assistant')?.body ?? ''];
+    for (const text of told) {
+      expect(text).toContain('In rm, mv, cp and any other command that deletes or overwrites, write a path from a variable as "${VAR:?}/..." or as a literal path, never $VAR/* unchecked: Claude Code refuses such a command, and only a person can allow it.');
+    }
+  });
+
+  /* Ivan's word: instructions and skills have no size limit, so no test holds them to one (#1262). */
+  it('tells developers and reviewers never to hold instructions or skills to a size in a test, and a reviewer to report such a test', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const rule = 'Never add a byte, character or line budget for instructions or skills to tests, and never shorten an instruction or skill text to fit such a budget.';
+    const fileOf = (roleKey: string, name: string) => {
+      const role = shipped.roles.get(roleKey)!;
+      return renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE).skills.find(s => s.name === name)?.body ?? '';
+    };
+    for (const roleKey of ['DEV-BE', 'DEV-FE', 'DEV-ENG', 'DEV-TEST']) expect(fileOf(roleKey, 'dev-tdd'), roleKey).toContain(rule);
+    expect(fileOf('DEV-REV', 'dev-review-diff')).toContain(`${rule} Such an assertion in a test is a finding.`);
+  });
+
   it('keeps every skill whole in the text for a node that writes no skill files, as before', () => {
     const { parts, whole } = renderInstructions(T, agent(), PLACE);
     expect(whole.startsWith('You are Bruno')).toBe(true);
@@ -364,7 +387,6 @@ describe('renderInstructions', () => {
       expect(rendered.text, roleKey).toContain('\n- dev-frontend-ui: User interface engineering.');
       const uiSkill = rendered.skills.find(s => s.name === 'dev-frontend-ui');
       expect(uiSkill, roleKey).toBeDefined();
-      expect(Buffer.byteLength(uiSkill!.body), roleKey).toBeLessThan(22_000);
       const browserSkill = rendered.skills.find(s => s.name === 'dev-browser-check');
       expect(browserSkill, roleKey).toBeDefined();
       for (const delivered of [uiSkill!.body, rendered.whole]) {
@@ -428,7 +450,7 @@ describe('renderInstructions', () => {
     expect(workerPacket.text).toContain(canonicalChecks);
     expect(workerPacket.text).not.toContain('Run npm test locally.');
     expect(workerPacket.parts.find(p => p.id === 'hh-run-checks')!.overridden).toBe(false);
-    expect(workerPacket.skills.map(s => s.name)).toEqual(['dev-tdd']);
+    expect(workerPacket.skills.map(s => s.name)).toEqual(['hh-one-shot-calls', 'dev-tdd']);
 
     const rolelessWorker = renderInstructions(
       shipped,
@@ -502,7 +524,6 @@ describe('renderInstructions', () => {
     expect(rendered.text).toContain('\n- dev-review-verdict: Review verdict.');
     const files = new Map(rendered.skills.map(s => [s.name, s.body]));
     const verdict = files.get('dev-review-verdict')!;
-    expect(Buffer.byteLength(verdict)).toBeLessThan(22_000);
     expect(verdict).toContain('mechanical');
     expect(verdict).toMatch(/provably cannot change[^.!?]*behaviour/i);
     expect(verdict).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
@@ -517,7 +538,6 @@ describe('renderInstructions', () => {
     expect(steady.text).toMatch(/external service failure never prolongs a general hold once the service recovers/i);
     const troubleFile = steady.skills.find(s => s.name === 'orch-trouble');
     expect(troubleFile).toBeDefined();
-    expect(Buffer.byteLength(troubleFile!.body)).toBeLessThan(22_000);
     for (const delivered of [troubleFile!.body, steady.whole]) {
       expect(delivered).toMatch(/external service failure (?:never prolongs|does not keep) a general hold[^.!?]*(?:recovers|recovery)/i);
       expect(delivered).toMatch(/communicate (?:a lifted hold|[^.!?]*lifting)[^.!?]*at once in one action[^.!?]*every affected holder/i);
@@ -618,8 +638,6 @@ describe('renderInstructions', () => {
       const files = new Map(rendered.skills.map(s => [s.name, s.body]));
       const impl = files.get('dev-implement')!;
       const policy = files.get('dev-testing-policy')!;
-      expect(Buffer.byteLength(impl), `${roleKey} dev-implement`).toBeLessThan(22_000);
-      expect(Buffer.byteLength(policy), `${roleKey} dev-testing-policy`).toBeLessThan(22_000);
       expect(impl, roleKey).toMatch(/run affected checks in your own workspace right away/i);
       expect(impl, roleKey).toMatch(/project's explicit selector[\s\S]*new tests and callers/i);
       expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact[\s\S]*named local tests of the touched area/i);
@@ -640,7 +658,6 @@ describe('renderInstructions', () => {
       PLACE,
     );
     const headPolicy = headRendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
-    expect(Buffer.byteLength(headPolicy)).toBeLessThan(22_000);
     expect(headPolicy).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
     expect(headPolicy).toMatch(/unavailable rather than zero for an absent full-suite comparator/i);
     expect(headRendered.whole).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
@@ -707,7 +724,7 @@ describe('work a department did before', () => {
   });
 });
 
-describe('one run of every test per release and DEV-HEAD inline byte budget', () => {
+describe('one run of every test per release', () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const renderRole = (roleId: string) => {
     const role = shipped.roles.get(roleId)!;
@@ -718,19 +735,11 @@ describe('one run of every test per release and DEV-HEAD inline byte budget', ()
     );
   };
 
-  it('keeps DEV-HEAD and every shipped role within a 24000-byte inline instruction packet without raising MAX_INSTRUCTIONS', () => {
+  it('keeps MAX_INSTRUCTIONS at 200000', () => {
     expect(MAX_INSTRUCTIONS).toBe(200_000);
-    const devHead = renderRole('DEV-HEAD');
-    expect(Buffer.byteLength(devHead.text)).toBeLessThanOrEqual(24_000);
-    for (const role of shipped.roles.values()) {
-      const packet = renderRole(role.id);
-      expect(Buffer.byteLength(packet.text), role.id).toBeLessThanOrEqual(24_000);
-    }
   });
 
-  it('reserves inline byte headroom in DEV-HEAD for combined release branches and starts employee hh-* skills with You can', () => {
-    const devHead = renderRole('DEV-HEAD');
-    expect(Buffer.byteLength(devHead.text)).toBeLessThanOrEqual(23_500);
+  it('starts employee hh-* skills with You can', () => {
     for (const skill of shipped.skills.values()) {
       if (skill.id.startsWith('hh-') && skill.id !== 'hh-assistant') {
         expect(skill.body.startsWith('You can '), skill.id).toBe(true);

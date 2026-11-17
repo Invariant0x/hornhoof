@@ -2,10 +2,11 @@ import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption, type RoleEffo
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { requireDepartmentChanger, runsDepartment } from '../../auth/departments.js';
-import { actorOf, changedBy, type Person } from '../../auth/session.js';
+import { actorOf, employeeChangedBy, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, telegramBots, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
@@ -64,7 +65,7 @@ export type AgentCard = FailureState & {
   /* How long the text every turn sends is, and the most it may be. */
   instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
-  changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string; before: unknown; after: unknown }[];
+  changes: { field: string; personName: string | null; actingAgent: { id: string; name: string } | null; byOrchestrator: boolean; at: string; before: unknown; after: unknown }[];
   /* Its latest turns a node restart cut off: why, when, on which node (none for the built-in one) and task, and whether the
      turn was a retry already. */
   interrupted: { job: string; at: string; cause: RestartCause; node: string | null; task: { id: string; number: number } | null; retry: boolean }[];
@@ -260,10 +261,12 @@ async function card(ctx: Ctx, agent: AgentRow, me: Person): Promise<AgentCard> {
   const told = await instructionsOf(ctx, agent);
   const { parts, raw } = agent.kind === 'orchestrator' ? told : renderInstructions(ctx.templates, agent, await placeOf(db, agent));
   const offered = offeredSkills(agent, role);
+  const actingAgent = alias(agents, 'acting_agent');
   const changes = await db
-    .select({ field: agentChanges.field, personName: people.name, byOrchestrator: agentChanges.byOrchestrator, at: agentChanges.createdAt, before: agentChanges.before, after: agentChanges.after })
+    .select({ field: agentChanges.field, personName: people.name, actingAgent: { id: actingAgent.id, name: actingAgent.name }, byOrchestrator: agentChanges.byOrchestrator, at: agentChanges.createdAt, before: agentChanges.before, after: agentChanges.after })
     .from(agentChanges)
     .leftJoin(people, eq(people.id, agentChanges.personId))
+    .leftJoin(actingAgent, eq(actingAgent.id, agentChanges.actingAgentId))
     .where(eq(agentChanges.agentId, agent.id))
     .orderBy(desc(agentChanges.createdAt))
     .limit(CHANGES_SHOWN);
@@ -349,7 +352,7 @@ function patchTimerValues(next: AgentRow, body: PatchBody): void {
 function patchTimer(agent: AgentRow, next: AgentRow, body: PatchBody): void {
   if (body.timer !== undefined) {
     patchTimerValues(next, body);
-    if (next.timerMinutes !== agent.timerMinutes) next.timerAt = body.timer ? new Date() : null;
+    if (next.timerMinutes !== agent.timerMinutes) Object.assign(next, { timerAt: body.timer ? new Date() : null, timerNudgedAt: null });
   }
 }
 
@@ -457,10 +460,11 @@ async function savePatch(db: Ctx['db'], me: Person, agent: AgentRow, next: Agent
           timerMinutes: next.timerMinutes,
           timerOrder: next.timerOrder,
           timerAt: next.timerAt,
+          timerNudgedAt: next.timerNudgedAt,
           timerForWork: next.timerForWork,
         })
         .where(eq(agents.id, agent.id));
-      await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), ...c })));
+      await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), ...c })));
     });
   }
 }
@@ -527,7 +531,7 @@ async function resetAgent(ctx: Ctx, { me, agent: found }: AgentRequest): Promise
     const templateHashes = Object.fromEntries([[role.id, role.hash], ...skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
     await db.transaction(async tx => {
       await tx.update(agents).set({ skills, overrides, templateHashes, effort: null }).where(eq(agents.id, agent.id));
-      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'reset', before: { skills: agent.skills, overrides: agent.overrides, effort: agent.effort }, after: { skills, overrides, effort: null } });
+      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'reset', before: { skills: agent.skills, overrides: agent.overrides, effort: agent.effort }, after: { skills, overrides, effort: null } });
     });
     return { ...agent, skills, overrides, templateHashes, effort: null };
   });
@@ -565,7 +569,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
         .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
         .where(and(eq(jobs.agentId, agent.id), or(eq(jobs.status, 'queued'), and(eq(jobs.status, 'running'), eq(jobs.kind, 'tools')))))
         .returning({ id: jobs.id, kind: jobs.kind, subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, builtinMachine: jobs.builtinMachine });
-      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'removed', before: null, after: null });
+      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'removed', before: null, after: null });
       return failed;
     });
     await stopSteps(ctx, ended.filter(job => job.kind === 'tools'));

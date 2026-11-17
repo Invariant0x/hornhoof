@@ -215,7 +215,11 @@ export type Department = {
   /* The results accepted into its open turn, the next release, as far as this person sees them; none while it runs no turn
      or out of reach. */
   turnProgress?: DepartmentTurnProgress | null;
+  /* Its one-shot calls that wait or run now; startedAt: none while one waits for its turn on the machine. */
+  calls?: CallMark[];
 };
+
+export type CallMark = { id: string; number: number; judge: boolean; task: number; by: string; stage: string | null; startedAt: string | null };
 
 export type { ApprovalChannel, ApprovalMode };
 /* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
@@ -357,7 +361,7 @@ export type AgentCardView = {
   /* How long the text every turn sends is, and the most it may be. */
   instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
-  changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string }[];
+  changes: { field: string; personName: string | null; actingAgent: { id: string; name: string } | null; byOrchestrator: boolean; at: string }[];
   /* Its latest turns a node restart cut off, the latest first; node: none for the built-in node. */
   interrupted: { job: string; at: string; cause: RestartCause; node: string | null; task: { id: string; number: number } | null; retry: boolean }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
@@ -437,6 +441,8 @@ export type StreamMessage =
   | { type: 'notebook'; spot: { departmentId: string | null } }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string; spot: { departmentId: string | null; parentId?: string | null } }
+  /* A goal or a pipeline changed. */
+  | { type: 'tracker' }
   | { type: 'requests' }
   /* The orchestrator's request for the computer changed; only the CEO's screen hears it. */
   | { type: 'computer' }
@@ -447,11 +453,17 @@ export type StreamMessage =
   | { type: 'backlog'; spot: { departmentId: string | null } }
   | { type: 'context'; agentId: string; used: number }
   /* A plan's owner finished or gave up a sign-in on one of its machines; only the owner hears it. */
-  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; code?: number | null; line?: string | null; owner: string };
 
 export type TaskStatus = 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker' | 'assistant'; role: Lang | null };
 export type TaskPlace = { id: string; name: string } | null;
+export type PersonRef = { id: string; name: string };
+/* What a task's time says, worked out on the server: since when it is in its status, how long its turns ran, and whom it
+   waits for since when. */
+export type TimeFacts = { inStatusSince: string; workSeconds: number; waitsOn: { who: { kind: 'person' | 'agent'; id: string; name: string } | null; since: string }[] };
+/* A task another one comes after, or that comes after it, and where it stands. */
+export type TaskLink = { id: string; number: number; title: string; status: TaskStatus };
 
 /* A task as lists show it, with its required current route. */
 export type TaskLine = {
@@ -472,11 +484,22 @@ export type TaskLine = {
   department: TaskPlace;
   product: TaskPlace;
   assignee: AgentRef | null;
+  /* The employee who writes it, when one does; the assignee holds it now, a reviewer at a gate among them. */
+  executor?: AgentRef | null;
   turn: number | null;
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
   waitsFor: number[];
   independentPart?: ({ title: string; brief: string; body: string; executor: AgentRef; task: { id: string; number: number; title: string; status: TaskStatus } } | { reason: string }) | null;
+  /* What the tracker keeps: the goal it serves (a subtask, that of the task at the top of its work), who answers for it, why
+     it exists, by when, its time, and the pipeline and stage it stands on. An older server sends none. */
+  goal?: { id: string; number: number; title: string } | null;
+  responsible?: PersonRef | null;
+  why?: string;
+  dueAt?: string | null;
+  time?: TimeFacts;
+  pipelineId?: string | null;
+  pipelineStageId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -491,10 +514,18 @@ export type TaskDetail = TaskLine & {
   echelonFindings: EchelonFindingsView;
   /* The person reading it may pause and resume it. */
   mayPause?: boolean;
+  mayHideSecret?: boolean;
   body: string;
   parent: { id: string; number: number; title: string } | null;
   /* The tasks of its turn it comes after, and where each stands. */
-  after: { id: string; number: number; title: string; status: TaskStatus }[];
+  after: TaskLink[];
+  /* The tasks that wait for this one, of those the reader sees. */
+  neededFor?: TaskLink[];
+  /* The person reading it acts on its work and may change what the tracker keeps of it; version and revision: what such a
+     change names, the version of its work and the revision of what the tracker keeps. */
+  mayEdit?: boolean;
+  version?: number;
+  revision?: number;
   executor: AgentRef | null;
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
   subtasks: TaskLine[];
@@ -696,8 +727,39 @@ export type TurnView = {
 };
 
 /* The departments whose tasks a person reads, and whether they have the whole company. mine: a department of the person's
-   own, whose work and list for later turns they change. */
-export type TaskDepartments = { whole: boolean; departments: { id: string; name: string | null; templateKey: TemplateKey | null; mine: boolean }[] };
+   own, whose work and list for later turns they change. mayPlan: the person gives the department work and sets its goals
+   and pipelines; mayPlanCompany: the company's goals. The server decides both; none said is no. */
+export type TaskDepartments = { whole: boolean; mayPlanCompany?: boolean; departments: { id: string; name: string | null; templateKey: TemplateKey | null; mine: boolean; mayPlan?: boolean; responsible?: PersonRef | null }[] };
+
+/* A goal: of the company with no department, or of one; it may be part of a bigger one. progress from 0 to 1: the number
+   target when there is one, else the share of its tasks done; none while there is nothing to count. */
+export type GoalStatus = 'active' | 'reached' | 'dropped';
+export type GoalView = {
+  id: string;
+  number: number;
+  title: string;
+  why: string;
+  department: PersonRef | null;
+  parentId: string | null;
+  responsible: PersonRef;
+  target: number | null;
+  current: number | null;
+  unit: string;
+  dueAt: string | null;
+  status: GoalStatus;
+  progress: number | null;
+  done: number;
+  total: number;
+  version: number;
+  /* The reader may change it, reach it or drop it, as the server decides; none said is no. */
+  mayEdit?: boolean;
+};
+
+/* A department's pipeline: who hands work to whom, as a tree of stages in tree order. A stage's owner is a role of the
+   department, or one of its employees. */
+export type PipelineStage = { id: string; parentId: string | null; name: string; ownerRole: string | null; owner: PersonRef | null; position: number };
+/* mayEdit: the reader may change it, as the server decides; none said is no. */
+export type Pipeline = { id: string; department: PersonRef; name: string; why: string; archived: boolean; version: number; mayEdit?: boolean; stages: PipelineStage[] };
 
 /* What people of a department keep for a later turn: not work yet, until it goes into a turn. */
 export type BacklogItem = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };
@@ -807,6 +869,7 @@ export type MachineView = {
   otherBuild?: { server: string; nodes: (string | null)[] } | null;
   /* Why Playwright's browser failed to start on the machine, or null when it is ready. */
   browserError?: string | null;
+  checkError?: string | null;
   /* Older servers omit it; null while no update waits on the machine. */
   drain?: MachineDrain | null;
   /* The company's core on it: where the company opens on that machine, and how the machine reaches the server; null
@@ -905,14 +968,25 @@ export type ComputerAccessView = {
   canOpen: boolean;
   canClose: boolean;
   key: 'not_needed' | 'held' | 'not_held';
+  /* Who it is open to (#1119): the orchestrator alone, or every agent of the company; null while closed. Who opened it
+     and when. Older servers omit them: what they open is the orchestrator's. */
+  scope?: AccessScope | null;
+  openedBy?: { id: string; name: string } | null;
+  openedAt?: string | null;
 };
+/* Who a machine opens to, and for how long its owner opens it (#1119): the first duration is what opens when nothing
+   else is chosen, and the owner's signature spans exactly the chosen seconds. */
+export type AccessScope = 'orchestrator' | 'all_agents';
+export const ACCESS_DURATIONS = ['1h', '8h', '24h'] as const;
+export type AccessDuration = (typeof ACCESS_DURATIONS)[number];
+export const DURATION_S: Record<AccessDuration, number> = { '1h': 3600, '8h': 28_800, '24h': 86_400 };
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'core'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
 /* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
    connections it did not take. Older servers omit both. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; checkError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[]; access?: ComputerAccessView | null };
 
 export type JobView = {
   id: string;
@@ -935,8 +1009,10 @@ export type NamedTurn = { agent: string; task: number | null };
 /* An update that waits for the agents: until is when it is called off unless they finished. lost: the turns it does not
    wait for, as their node said nothing of their program for ten minutes. */
 export type UpdateWaiting = { version: string; commit?: string; since: string; until: string; turns: NamedTurn[]; lost: NamedTurn[] };
-/* An update called off as the agents had not finished by its deadline, with the turns that still ran. */
-export type UpdateCalledOff = { version: string; commit?: string; at: string; reason: 'deadline'; turns: NamedTurn[] };
+/* An update that went to nobody, with the turns that still ran and until when it waited. deadline: the agents had not
+   finished by then. cancelled: a person or the orchestrator called it off. failed: Hornhoof could not pass it to the
+   updater, error says why. */
+export type UpdateCalledOff = { version: string; commit?: string; at: string; until: string; reason: 'deadline' | 'cancelled' | 'failed'; turns: NamedTurn[]; error?: string };
 
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };

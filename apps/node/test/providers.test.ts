@@ -185,13 +185,16 @@ function loginIo() {
   return { io: { input: new PassThrough(), output, urlFile: join(dir, 'login-url') }, printed: () => printed };
 }
 
+/* What every Claude Code run is given so that no commit or pull request of it names Claude as co-author. */
+const UNSIGNED = JSON.stringify({ includeCoAuthoredBy: false, attribution: { commit: '', pr: '' } });
+
 describe('Claude Code', () => {
   it('starts a new session with its own id and the prompt after --', async () => {
     const res = await adapter('claude').run(input({ prompt: '-rf looks like a flag' }));
     const { argv, cwd } = lastRun();
     expect(argv).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--session-id', expect.stringMatching(/^[0-9a-f-]{36}$/),
-      '--permission-mode', 'bypassPermissions', '--', '-rf looks like a flag',
+      '--permission-mode', 'bypassPermissions', '--settings', UNSIGNED, '--', '-rf looks like a flag',
     ]);
     expect(cwd).toBe(work);
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION, error: null });
@@ -201,9 +204,15 @@ describe('Claude Code', () => {
     const res = await adapter('claude').run(input({ sessionId: CLAUDE_SESSION, model: 'opus' }));
     expect(lastRun().argv).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--resume', CLAUDE_SESSION,
-      '--permission-mode', 'bypassPermissions', '--model', 'opus', '--', 'say ready',
+      '--permission-mode', 'bypassPermissions', '--settings', UNSIGNED, '--model', 'opus', '--', 'say ready',
     ]);
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION });
+  });
+
+  it('names Claude as co-author of no commit or pull request it makes', async () => {
+    await adapter('claude').run(input());
+    const { argv } = lastRun();
+    expect(JSON.parse(argv[argv.indexOf('--settings') + 1]!)).toEqual({ includeCoAuthoredBy: false, attribution: { commit: '', pr: '' } });
   });
 
   it('compacts the conversation at the window Hornhoof set, or at its own when none is set', async () => {
@@ -891,6 +900,42 @@ describe('Antigravity CLI', () => {
     sha512 = '0'.repeat(128);
     await expect(installAgy(tools, base, 'linux_arm64')).rejects.toThrow(/does not match/);
     expect(existsSync(join(tools, 'bin', 'agy'))).toBe(false);
+  });
+});
+
+describe('one-shot calls', () => {
+  it('run Claude Code once in print mode in a session it keeps nowhere, whatever session the input names', async () => {
+    const res = await adapter('claude').oneCall!(input({ sessionId: CLAUDE_SESSION, model: 'opus' }));
+    expect(lastRun().argv).toEqual([
+      '-p', '--output-format', 'stream-json', '--verbose', '--session-id', expect.stringMatching(/^[0-9a-f-]{36}$/), '--no-session-persistence',
+      '--permission-mode', 'bypassPermissions', '--settings', UNSIGNED, '--model', 'opus', '--', 'say ready',
+    ]);
+    expect(lastRun().cwd).toBe(work);
+    expect(res).toMatchObject({ ok: true, result: 'ready', error: null });
+  });
+
+  it('run Codex once with exec in a thread it keeps nowhere, in the work folder', async () => {
+    const res = await adapter('codex').oneCall!(input({ sessionId: CODEX_THREAD, model: 'gpt-5.5' }));
+    expect(lastRun().argv).toEqual(['exec', '--ephemeral', ...FLAGS, '-C', work, '-m', 'gpt-5.5', '--', 'say ready']);
+    expect(lastRun().cwd).toBe(work);
+    expect(res).toMatchObject({ ok: true, result: 'ready', error: null });
+  });
+
+  it('run Kimi Code once in its print mode, which its output format needs', async () => {
+    const res = await adapter('kimi').oneCall!(input({ sessionId: KIMI_SESSION }));
+    expect(lastRun().argv).toEqual(['--print', '--prompt=say ready', '--output-format', 'stream-json']);
+    expect(res).toMatchObject({ ok: true, result: 'ready' });
+  });
+
+  it('run Antigravity once in print mode in a new conversation', async () => {
+    const res = await adapter('antigravity').oneCall!(input({ sessionId: AGY_NEW }));
+    expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS]);
+    expect(res).toMatchObject({ ok: true, sessionId: AGY_NEW });
+  });
+
+  it('report a failed call as agent_failed, as a turn', async () => {
+    process.env.FAKE_MODE = 'fail';
+    for (const provider of ['claude', 'codex'] as const) expect(await adapter(provider).oneCall!(input())).toMatchObject({ ok: false, error: 'agent_failed' });
   });
 });
 

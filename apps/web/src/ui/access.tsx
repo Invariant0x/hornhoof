@@ -2,10 +2,14 @@ import { useCallback, type ReactNode } from 'react';
 import { api } from '../api';
 import type { Messages } from '../i18n';
 import { canMakeKey } from '../owner-key';
-import type { AccessMachine, ComputerAccessView, DecidedBy } from '../types';
+import { DURATION_S, type AccessDuration, type AccessMachine, type AccessScope, type ComputerAccessView, type DecidedBy } from '../types';
 import { useOwnerKey } from './PasswordPrompt';
 
 export type AccessAnswer = 'open' | 'close' | 'decline';
+/* What its owner chose before opening a machine: for whom and for how long. Every agent of the company is opened only
+   after the owner said yes once more, which confirm carries. Nothing chosen: the orchestrator, for the first duration. */
+export type AccessChoice = { scope: AccessScope; duration: AccessDuration; confirm?: true };
+const FIRST: AccessChoice = { scope: 'orchestrator', duration: '1h' };
 
 /* A machine by the name its computer told; the server's own with none is "the server's computer". */
 export const machineName = (t: Messages, machine: AccessMachine): string => machine.hostname || (machine.data ? t.window.computerServer : machine.name);
@@ -36,19 +40,19 @@ export const decidesAccess = (view: ComputerAccessView): DecidedBy => ({ kind: v
 
 /* Opening, closing and saying no, each to its machine. A machine that holds its owner's key opens with what the owner
    signs here: the password is asked once on a device, and whoever leaves that question opens nothing. The caller shows
-   prompt where the buttons were. */
-export function useAccess(onChange: (next: ComputerAccessView) => void, onFailure: (err: unknown) => void): { answer(view: ComputerAccessView, action: AccessAnswer): Promise<void>; prompt: ReactNode } {
+   prompt where the buttons were. What the owner signs spans exactly the chosen duration, as the server requires. */
+export function useAccess(onChange: (next: ComputerAccessView) => void, onFailure: (err: unknown) => void): { answer(view: ComputerAccessView, action: AccessAnswer, choice?: AccessChoice): Promise<void>; prompt: ReactNode } {
   const { sign, prompt } = useOwnerKey();
   const answer = useCallback(
-    async (view: ComputerAccessView, action: AccessAnswer): Promise<void> => {
+    async (view: ComputerAccessView, action: AccessAnswer, choice: AccessChoice = FIRST): Promise<void> => {
       try {
-        let body: { grant?: { payload: string; signature: string } } | undefined;
+        let body: (Partial<AccessChoice> & { grant?: { payload: string; signature: string } }) | undefined;
         if (action === 'open') {
-          body = {};
+          body = { ...choice };
           if (view.key === 'held') {
-            const grant = await sign(view.machine.networkId);
+            const grant = await sign(view.machine.networkId, DURATION_S[choice.duration]);
             if (!grant) return;
-            body = { grant };
+            body = { ...body, grant };
           }
         }
         onChange(await api.post<ComputerAccessView>(`/api/machines/${view.machine.id}/access/${action}`, body));

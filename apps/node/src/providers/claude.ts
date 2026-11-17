@@ -10,6 +10,7 @@ import { readAccount } from '../account.js';
 import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
+import { CLAUDE_UNSIGNED } from './claude-attribution.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
 import { anthropicTokens, claudeModel, withModel } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
@@ -146,68 +147,10 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       await interactiveLogin(bin, ['auth', 'login'], env(null), io, user);
     },
 
-    async run(input: RunInput): Promise<RunResult> {
-      const session = input.sessionId ? ['--resume', input.sessionId] : ['--session-id', randomUUID()];
-      const args = ['-p', '--output-format', 'stream-json', '--verbose', ...session, '--permission-mode', 'bypassPermissions'];
-      /* In a file of the agent's folder, as the live terminal gives them: Linux holds one argument to 128 KiB. */
-      if (input.instructions) {
-        const file = join(input.workDir, '.hh-instructions.md');
-        writePrivate(file, input.instructions + '\n', user);
-        args.push('--append-system-prompt-file', file);
-      }
-      /* The token sits in a file only the node reads, for this run alone, never on the command line. */
-      const mcpFile = input.tools ? join(ensureDir(home), `mcp-${randomUUID()}.json`) : null;
-      if (mcpFile && input.tools) {
-        const server = { type: 'http', url: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
-        writePrivate(mcpFile, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
-        args.push('--mcp-config', mcpFile, '--strict-mcp-config');
-      }
-      if (input.model) args.push('--model', input.model);
-      if (input.effort) args.push('--effort', input.effort);
-      args.push('--', input.prompt);
-      /* Hornhoof's window for this agent, or Claude Code's own when it sets none. */
-      const compact: Record<string, string> = input.compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(input.compactWindow) } : {};
+    run: input => runClaude(input, false),
 
-      let result: Outcome | null = null;
-      let sessionId: string | null = input.sessionId;
-      let limits: Limits | null = null;
-      let signedOut = false;
-      let model: string | null = null;
-      const done = await runProgram({
-        bin,
-        args,
-        env: { ...env(input.secret, input.model), ...input.env, ...compact },
-        cwd: input.workDir,
-        timeoutMs: input.timeoutMs,
-        signal: input.signal,
-        user,
-        onLine(line) {
-          const ev = objectLine(line);
-          if (!ev) return;
-          if (typeof ev.session_id === 'string') sessionId = ev.session_id;
-          model = claudeModel(ev, model);
-          if (ev.type === 'assistant' && ev.error === 'authentication_failed') signedOut = true;
-          if (ev.type === 'rate_limit_event' && ev.rate_limit_info) limits = limitsFrom(ev.rate_limit_info as RateInfo);
-          /* A finished background task adds an empty result after the real one, which must not replace it. */
-          const text = String(ev.result ?? '');
-          if (ev.type === 'result' && (text || ev.is_error === true || !result)) result = { text, isError: ev.is_error === true, sessionId, tokens: withModel(anthropicTokens(ev.usage), model) };
-          for (const event of claudeEvents(ev)) input.onEvent?.(event);
-        },
-      }).finally(() => {
-        if (mcpFile) rmSync(mcpFile, { force: true });
-      });
-
-      /* Assigned in onLine, which TypeScript does not follow. */
-      const final = result as Outcome | null;
-      const ended = withProgramExit(done.output, done);
-      const tokens = final?.tokens ?? null;
-      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits, tokens };
-      if (final && !final.isError && done.code === 0) return { ok: true, sessionId, result: final.text, output: done.output, error: null, limits, tokens };
-      const out = signedOut || SIGNED_OUT.test(final?.text ?? '');
-      /* A GLM key Z.ai rejects is dropped, so the status says signed out and the next sign-in asks for a new key. */
-      if (out && mode === 'glm') rmSync(keyFile, { force: true });
-      return { ok: false, sessionId, result: final?.text ?? '', ...ended, error: out ? 'not_logged_in' : 'agent_failed', limits, tokens };
-    },
+    /* Print mode is Claude Code's one call; it keeps the session nowhere, so the next call remembers nothing of it. */
+    oneCall: input => runClaude({ ...input, sessionId: null }, true),
 
     async secrets() {
       if (mode === 'api_key') return secret ? [secret] : [];
@@ -215,4 +158,67 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       return [...tokensIn(join(home, '.credentials.json')), ...credentialSecrets(home)];
     },
   };
+
+  async function runClaude(input: RunInput, once: boolean): Promise<RunResult> {
+    const session = input.sessionId ? ['--resume', input.sessionId] : ['--session-id', randomUUID()];
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', ...session, ...(once ? ['--no-session-persistence'] : []), '--permission-mode', 'bypassPermissions', '--settings', JSON.stringify(CLAUDE_UNSIGNED)];
+    /* In a file of the agent's folder, as the live terminal gives them: Linux holds one argument to 128 KiB. */
+    if (input.instructions) {
+      const file = join(input.workDir, '.hh-instructions.md');
+      writePrivate(file, input.instructions + '\n', user);
+      args.push('--append-system-prompt-file', file);
+    }
+    /* The token sits in a file only the node reads, for this run alone, never on the command line. */
+    const mcpFile = input.tools ? join(ensureDir(home), `mcp-${randomUUID()}.json`) : null;
+    if (mcpFile && input.tools) {
+      const server = { type: 'http', url: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
+      writePrivate(mcpFile, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
+      args.push('--mcp-config', mcpFile, '--strict-mcp-config');
+    }
+    if (input.model) args.push('--model', input.model);
+    if (input.effort) args.push('--effort', input.effort);
+    args.push('--', input.prompt);
+    /* Hornhoof's window for this agent, or Claude Code's own when it sets none. */
+    const compact: Record<string, string> = input.compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(input.compactWindow) } : {};
+
+    let result: Outcome | null = null;
+    let sessionId: string | null = input.sessionId;
+    let limits: Limits | null = null;
+    let signedOut = false;
+    let model: string | null = null;
+    const done = await runProgram({
+      bin,
+      args,
+      env: { ...env(input.secret, input.model), ...input.env, ...compact },
+      cwd: input.workDir,
+      timeoutMs: input.timeoutMs,
+      signal: input.signal,
+      user,
+      onLine(line) {
+        const ev = objectLine(line);
+        if (!ev) return;
+        if (typeof ev.session_id === 'string') sessionId = ev.session_id;
+        model = claudeModel(ev, model);
+        if (ev.type === 'assistant' && ev.error === 'authentication_failed') signedOut = true;
+        if (ev.type === 'rate_limit_event' && ev.rate_limit_info) limits = limitsFrom(ev.rate_limit_info as RateInfo);
+        /* A finished background task adds an empty result after the real one, which must not replace it. */
+        const text = String(ev.result ?? '');
+        if (ev.type === 'result' && (text || ev.is_error === true || !result)) result = { text, isError: ev.is_error === true, sessionId, tokens: withModel(anthropicTokens(ev.usage), model) };
+        for (const event of claudeEvents(ev)) input.onEvent?.(event);
+      },
+    }).finally(() => {
+      if (mcpFile) rmSync(mcpFile, { force: true });
+    });
+
+    /* Assigned in onLine, which TypeScript does not follow. */
+    const final = result as Outcome | null;
+    const ended = withProgramExit(done.output, done);
+    const tokens = final?.tokens ?? null;
+    if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits, tokens };
+    if (final && !final.isError && done.code === 0) return { ok: true, sessionId, result: final.text, output: done.output, error: null, limits, tokens };
+    const out = signedOut || SIGNED_OUT.test(final?.text ?? '');
+    /* A GLM key Z.ai rejects is dropped, so the status says signed out and the next sign-in asks for a new key. */
+    if (out && mode === 'glm') rmSync(keyFile, { force: true });
+    return { ok: false, sessionId, result: final?.text ?? '', ...ended, error: out ? 'not_logged_in' : 'agent_failed', limits, tokens };
+  }
 }

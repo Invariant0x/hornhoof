@@ -118,13 +118,28 @@ describe('updates', () => {
     expect(await screen.findByText(`Hornhoof will update to 0.4.1 (bbbbbbb) when the agents finish. If they have not finished by ${until}, the update is called off and nothing stops.`)).toBeInTheDocument();
     unmount();
 
-    view = updates({}, { waiting: null, calledOff: { version: '0.4.1', commit: 'b'.repeat(40), at: WAITS.until, reason: 'deadline', turns: [{ agent: 'Zed', task: 1032 }] } });
+    view = updates({}, { waiting: null, calledOff: { version: '0.4.1', commit: 'b'.repeat(40), at: WAITS.until, until: WAITS.until, reason: 'deadline', turns: [{ agent: 'Zed', task: 1032 }] } });
     render(<Shell me={ME} onSignOut={() => {}} />);
     expect(await screen.findByText(`The update to 0.4.1 (bbbbbbb) was called off at ${until}: the agents had not finished. Nothing was stopped.`)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'OK' }));
     /* Seen once, it is not said again; the banner goes back to the build on offer. */
     expect(screen.queryByText(/was called off/)).not.toBeInTheDocument();
     expect(screen.getByText('Hornhoof 0.4.1 (bbbbbbb) is out: Hire from the staff card')).toBeInTheDocument();
+  });
+
+  it('says an update was called off by a person, or because Hornhoof could not pass it to the updater, never that the agents had not finished', async () => {
+    const at = '2026-11-16T01:12:00.000Z';
+    const calledOff = { version: '0.4.1', commit: 'b'.repeat(40), at, until: WAITS.until, turns: [{ agent: 'Zed', task: 1032 }] };
+    let view = updates({}, { calledOff: { ...calledOff, reason: 'cancelled' } });
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
+    const { unmount } = render(<Shell me={ME} onSignOut={() => {}} />);
+    expect(await screen.findByText(`The update to 0.4.1 (bbbbbbb) was called off at ${hourOf(at)}. Nothing was stopped.`)).toBeInTheDocument();
+    unmount();
+
+    view = updates({}, { calledOff: { ...calledOff, reason: 'failed', error: 'the updater cannot take it, as another update runs.' } });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    expect(await screen.findByText(`The update to 0.4.1 (bbbbbbb) was called off at ${hourOf(at)}: Hornhoof could not pass it to the updater. Nothing was stopped.`)).toBeInTheDocument();
+    expect(screen.queryByText(/the agents had not finished/)).not.toBeInTheDocument();
   });
 
   it('asks for one update however fast Update is clicked again', async () => {

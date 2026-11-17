@@ -4,6 +4,7 @@ import { agentTaskDetail } from './agent-sight.js';
 import { Verification } from './echelons-tests.js';
 import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { ECHELON_STAGES } from '@hornhoof/protocol/echelons';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
@@ -12,7 +13,7 @@ import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type AgentKind, type DecisionTopic } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, closeTask, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { tryAutonomousCommitApproval } from './autonomous-release.js';
@@ -39,6 +40,9 @@ import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings
 import { echelonsFor } from './turnkey.js';
 import { listBacklog } from '../backlog/store.js';
 import { deptName } from '../departments/templates.js';
+import { requireTaskHead } from './echelons-update.js';
+import { editTask, seenOf, trackerSet } from '../tracker/edit.js';
+import { hasTrackerFields, TrackerFields, trackerInputOf } from '../tracker/tools.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: AgentKind; departmentId: string | null };
 type Agent = typeof agents.$inferSelect;
@@ -110,7 +114,7 @@ async function autoCommitReply(ctx: Ctx, task: Task, agentId: string, question: 
   return auto ? { text: auto.text, moved: auto.moved } : null;
 }
 
-const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+const TurnItem = z.object({ department: z.uuid().optional().describe('Its department; a head may leave it out.'), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO, or the owner of its department, says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.'), ...TrackerFields });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -119,6 +123,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
 
 export function registerHolderTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   new TaskTools(server, ctx, job).registerHolderTools();
+}
+
+/* What a close did beyond the task: the open work cancelled under it, and the tasks its closer made that wait for that work,
+   which nobody else is told of. */
+export function closedBeyond(moved: { closed: string[]; waiting: Pick<Task, 'number'>[] }): string {
+  const cancelled = moved.closed.length > 1 ? ` Open tasks cancelled under it: ${moved.closed.length - 1}.` : '';
+  const waiting = moved.waiting.length ? ` Still waiting for work cancelled under it: ${listed(moved.waiting)}. Give each what to wait for with update_task, or cancel it.` : '';
+  return cancelled + waiting;
 }
 
 class TaskTools {
@@ -171,6 +183,7 @@ class TaskTools {
   private registerManagementTools(): void {
     this.registerUpdateTask();
     this.registerCancelTask();
+    if (this.boss) this.registerCloseTask();
     this.registerPause();
   }
 
@@ -440,7 +453,8 @@ class TaskTools {
           'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
           'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
           'An approval tells you and the person which passed test run checked that very commit, or that none did; when its department enabled autonomousRelease and that commit has a green whole run of its release with proves: true, an independent non-author PASS verdict and a fast-forward path from main, Hornhoof records the automatic approval without opening a card. ' +
-          `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
+          `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself. ` +
+          'A person is asked only for an irreversible deletion (the CEO says yes to it) or for what only they know: their own password or account, their taste in a text the first time, a real choice between directions. Never ask anyone to do, add or confirm what you or your department can do, and nothing that goes out of the company waits for a yes.',
         inputSchema: {
           task: Ref,
           question: z.string().trim().min(1).max(2000),
@@ -553,7 +567,8 @@ class TaskTools {
           await this.underCap(await this.me(), input.tasks.length + (input.backlog?.length ?? 0));
           const scope = await this.turnScope();
           await this.urgentFromCeo(input.tasks.map(t => ({ ...t, department: t.department ?? scope ?? '' })));
-          const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input.tasks, input.improvement, input.backlog, scope);
+          const items = await Promise.all(input.tasks.map(async ({ goal, responsible, why, due, pipeline, stage, ...item }) => ({ ...item, ...(await trackerInputOf(this.ctx, this.job.companyId, { goal, responsible, why, due, pipeline, stage })) })));
+          const given = await giveTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, items, input.improvement, input.backlog, scope);
           return { text: given.text, moved: { wakes: given.wakes } };
         }),
     );
@@ -595,9 +610,9 @@ class TaskTools {
       'release_turn',
       {
         description:
-          "Records the release of your department's open turn before main moves, on the release task you hold: commit is the head of the turn branch turn-<number>, runId a passed whole run of it: the first run of its release, or a later one that took only what its release proved; and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked needs none, and its entry in the autonomous release log approves it. " +
-          'It says what the release brings and whether each of its commits was checked. Then fast-forward main to the commit and tag it vX.Y.Z: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
-        inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact head commit of the turn branch.'), runId: z.uuid().describe('A passed whole run of that commit.') },
+          "Records the release of your department's open turn before main moves, on the release task you hold: commit is a commit of the turn branch turn-<number>, its head or one the branch went past while it was checked, runId a passed whole run of it with run_tests, of the product's tests and asked for by an agent of your department or the orchestrator: the first run of its release, or a later one that took only what its release proved, never a run of a command of its own; and the task needs a person's approval of exactly that commit (ask_person, kind approval); with autonomous release on, a release every commit of which was checked, by an independent checker or, for turnkey work, by its holder's own review, security check and tests, needs none, and its entry in the autonomous release log approves it. " +
+          'It says what the release brings, whether each of its commits was checked, and which results of the turn it leaves out because they joined the branch after the commit. The turn branch never stops for a release: keep taking finished work into it. Then fast-forward main to the commit and tag it vX.Y.Z, the next version of your department\'s repository after its own last version tag, which the answer names, or its first version tag where it has none: the tag closes the turn, and what the release left out goes into the next turn, whose branch you create from the head of this one.',
+        inputSchema: { task: Ref, commit: z.string().regex(/^[a-f0-9]{40}$/).describe('The exact commit of the turn branch that the whole run checked.'), runId: z.uuid().describe('A passed whole run of that commit.') },
       },
       async input =>
         this.run(async () => {
@@ -613,7 +628,7 @@ class TaskTools {
       'create_task',
       {
         description: 'Assigns one whole result in your department. Code follows Architecture (unless small or shared with its Development owner), Development, mandatory Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and the product whose repository it changes when that is not the department\'s own; one task changes one repository, so a change across repositories is a task per repository. checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate. A document is files, not code, even where the department keeps a repository: no paths and no commit, its holder attaches the files and hands them in with submit, and the head closes it with report. A task given to a member of a turnkey team goes through no echelons, whatever its text says: its holder does it end to end alone and closes it with report, with no checker, Cleanup or paths; everybody else\'s goes through the route of its department. No task is in a turn until its result is accepted into the open turn\'s branch. Never write the echelons into a task\'s text: the route is the server\'s.',
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), architectAgentId: z.uuid().optional().describe('Optional distinct Architecture owner; when omitted or equal to executor, Architecture collapses into Development.'), resultKind: z.enum(['code', 'document', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: Product.optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
       },
       async input =>
         this.run(async () => {
@@ -626,7 +641,7 @@ class TaskTools {
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
           await this.checkCreatedScope(agent, executor, input);
-          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
+          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, architectAgentId: architect?.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small, ...(await trackerInputOf(this.ctx, this.job.companyId, input)) });
           return { text: await this.createdTaskText(moved.task, executor, architect), moved };
         }),
     );
@@ -634,12 +649,22 @@ class TaskTools {
 
   private registerUpdateTask(): void {
     this.server.registerTool('update_task', {
-      description: 'The department head revises the current task or checking owner without returning it to the author. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
-      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
-    }, async ({ task: ref, after, afterPlans, ...changes }) => this.run(async () => {
+      description: 'The department head revises the current task or checking owner without returning it to the author. With echelonStage and ownerAgentId, assigns an eligible owner to a future pending echelon stage without moving or waking the current owner; producer, model capability, ability and scope rules still apply. stage is the stage of the tracker pipeline, not an echelon stage. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
+      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), echelonStage: z.enum(ECHELON_STAGES).optional().describe('A future pending echelon stage of this task to give ownerAgentId in advance.'), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional(), ...TrackerFields },
+    }, async ({ task: ref, after, afterPlans, goal, responsible, why, due, pipeline, stage, ...changes }) => this.run(async () => {
       const { agent, task } = await this.find(ref);
-      const moved = await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) });
-      return { text: `Updated. ${await this.where(moved.task)}`, moved };
+      const tracker = { goal, responsible, why, due, pipeline, stage };
+      /* What the tracker keeps changes on its own, waking nobody; the work changes as before. Both are checked before
+         either is written, so a refused part leaves the other as it was. With a change of the work, what the tracker
+         keeps is written in the same move, checked again there: both are in, or neither. */
+      const works = after !== undefined || Object.values(changes).some(v => v !== undefined);
+      const edit = hasTrackerFields(tracker) ? await trackerInputOf(this.ctx, this.job.companyId, tracker) : null;
+      if (!works) await requireTaskHead(this.ctx, task, agent.id);
+      if (edit) await trackerSet(this.ctx, task, edit);
+      const moved = works ? await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) }, edit ?? undefined) : undefined;
+      let row = moved?.task ?? task;
+      if (edit && !works) row = await editTask(this.ctx, { agentId: agent.id }, row, edit, seenOf(row));
+      return { text: `Updated. ${await this.where(row)}`, moved };
     }));
   }
 
@@ -680,11 +705,29 @@ class TaskTools {
     );
   }
 
+  /* The orchestrator closes a task its route cannot close, in whatever state it stands. */
+  private registerCloseTask(): void {
+    this.server.registerTool(
+      'close_task',
+      {
+        description: 'Closes any task in any state, past its route: status done or cancelled, why goes into its log as your act. Open work under it is cancelled with it. Done closes only the record: it accepts no result and puts nothing into a turn, a release or main. Use it when a task cannot close through its own moves, such as one whose work was closed outside Hornhoof.',
+        inputSchema: { task: Ref, status: z.enum(['done', 'cancelled']), why: z.string().trim().min(1).max(1000) },
+      },
+      async ({ task: ref, status, why }) =>
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          const moved = await closeTask(this.ctx, { agentId: this.job.agentId }, task.id, { status, why });
+          await stopTurns(this.ctx, moved.closed, this.job.agentId);
+          return { text: `Closed #${task.number} as ${status}.${closedBeyond(moved)}`, moved };
+        }),
+    );
+  }
+
   private registerSubmit(): void {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, its owner merges the main line into the candidate branch and submits the merge with review.baseCommit naming the main commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
+        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, submit a new test-only repair on the same branch and base: the delta from the current candidate may change only test, tests or e2e directories, or *.test.* and *.spec.* files. Source repairs use report with done false and verification.delta, preserving the task and candidate history. When the candidate\'s own change passed and it only needs the main line, or the open turn branch of its department that went on (the turn takes a candidate only by fast-forward), its owner merges that line into the candidate branch and submits the merge with review.baseCommit naming the commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
       },
       async ({ task: ref, summary, evidence, review, operationId }) =>

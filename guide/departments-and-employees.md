@@ -23,7 +23,7 @@ On the map, a department's card has one square per employee, in the same colors.
 
 ## Where are a department's tasks and people?
 
-"Department tasks", "About the department" and "Speed" open at the same place on the left. Task details and employee settings also open on the left. The right side is for the employee's window.
+"Department tasks" opens the Tasks tab at this department, with its goals, pipelines and work. "About the department" and "Speed" open at the same place on the left. Task details and employee settings also open on the left. The right side is for the employee's window.
 
 ## Hire employees
 
@@ -174,16 +174,16 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 
 | Department | xhigh | high | medium |
 | --- | --- | --- | --- |
-| Business development | - | Business analyst, Research reviewer | Head of business development, Partnerships manager |
-| Design | - | Design system designer, Product UI designer | Design QA, Head of design |
-| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Technical writer |
-| Finance | - | Finance auditor, Financial planning analyst | Bookkeeper, Controller |
-| Home devices | - | Home network helper | Head of home devices, Smart home helper |
-| Household | - | - | Bills helper, Calendar helper, Head of household, Supplies helper |
-| Marketing | - | Copywriter, Editor | Head of marketing, Search specialist, Social media manager |
-| Operations | - | Integrations engineer, Reliability engineer, Weak point collector | Accounts administrator, Head of operations, Program operator, Task watchdog |
-| Sales | - | Account executive, Sales reviewer | Head of sales, Sales development representative, Sales operations analyst |
-| Support | - | Second-line support, Support quality reviewer | First-line support, Head of support, Knowledge base editor |
+| Business development | - | Business analyst, Research reviewer | Head of business development, Partnerships manager, Product manager |
+| Design | - | Design system designer, Product UI designer | Design QA, Head of design, Product manager |
+| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Product manager, Technical writer |
+| Finance | - | Finance auditor, Financial planning analyst | Bookkeeper, Controller, Product manager |
+| Home devices | - | Home network helper | Head of home devices, Product manager, Smart home helper |
+| Household | - | - | Bills helper, Calendar helper, Head of household, Product manager, Supplies helper |
+| Marketing | - | Copywriter, Editor | Head of marketing, Product manager, Search specialist, Social media manager |
+| Operations | - | Integrations engineer, Reliability engineer, Weak point collector | Accounts administrator, Head of operations, Product manager, Program operator, Task watchdog |
+| Sales | - | Account executive, Sales reviewer | Head of sales, Product manager, Sales development representative, Sales operations analyst |
+| Support | - | Second-line support, Support quality reviewer | First-line support, Head of support, Knowledge base editor, Product manager |
 
 Each role asks for a strength of model, and an employee hired without a model named runs the one of that strength its plan has, by name. When the plan has none of that strength it takes the nearest stronger one, else the nearest weaker.
 
@@ -191,7 +191,7 @@ Top roles, the strongest model there is, for work nobody checks after: Architect
 
 Deep roles, a strong model, for whoever checks the work of others or leads risky work: Code reviewer, Controller, Design QA, Editor, Finance auditor, Head of business development, Head of development, Red team, Research reviewer, Sales reviewer, Support quality reviewer.
 
-Fast roles, the lightest model, for simple work that comes in a stream: Calendar helper, First-line support, Sales development representative, Social media manager, Supplies helper, Task watchdog.
+Fast roles, the lightest model, for simple work that comes in a stream: Calendar helper, First-line support, Product manager, Sales development representative, Social media manager, Supplies helper, Task watchdog.
 
 Every other role takes the middle one: its work is checked after.
 
@@ -215,7 +215,7 @@ A kind with no rule asks every time. The rules stay as they are when the owner c
 
 The CEO and the CEO delegate can always answer any request themselves, but a department's approvals no longer add to the CEO's count once it has an owner. The head brings the CEO in when the department misses a goal or its plan.
 
-To approve an exact commit for a release, an employee always asks, whatever the rules say. Only autonomous release, which the CEO alone turns on, lets such a commit go in without asking: [Tasks and turns](tasks-and-turns.md#who-approves-what-reaches-the-main-branch) says when.
+To approve an exact commit for a release, an employee always asks, whatever the rules say. Only the department's autonomous release, which the people who run it or the CEO turn on, lets such a commit go in without asking: [Tasks and turns](tasks-and-turns.md#who-approves-what-reaches-the-main-branch) says when.
 
 ## Who sees which departments?
 

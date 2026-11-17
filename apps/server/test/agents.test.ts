@@ -84,7 +84,7 @@ describe('the employee card', () => {
     const res = await patch(app, ceo, 'orchestrator', { base: assignment });
     expect(res.statusCode).toBe(200);
     const card = res.json();
-    expect(card.parts.find((p: { kind: string }) => p.kind === 'base')).toMatchObject({ text: 'You are the Orchestrator who runs the company with its CEO.', overridden: false });
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'base')).toMatchObject({ text: 'You are the Orchestrator who runs the company with its CEO, can do anything in the company and in Hornhoof itself, sees everything and can change its own system.', overridden: false });
     expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain(assignment);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect((await instructionsOf(app.ctx, orchestrator!)).text).toContain(assignment);
@@ -118,7 +118,7 @@ describe('the employee card', () => {
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(card.runsOn.map((r: { subscription: { id: string } }) => r.subscription.id)).toEqual([codex, orchestrator!.subscriptionId, teamKey]);
     expect(card.runsOn.find((r: { subscription: { id: string } }) => r.subscription.id === teamKey).models).toEqual(API_MODELS.anthropic_api);
-    expect(card.changes).toMatchObject([{ field: 'hired', personName: 'Ivan' }]);
+    expect(card.changes).toMatchObject([{ field: 'hired', personName: 'Ivan', actingAgent: null }]);
   });
 
   it('moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default', async () => {

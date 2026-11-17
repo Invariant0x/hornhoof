@@ -17,15 +17,18 @@ import { withCheckSlot } from './check-queue.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
 import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, type readTestEnvironment, type TestCapabilities } from './test-environment.js';
 import { machineLoad } from './load.js';
+import { CallRoom, type CallSeat } from './call-room.js';
 import { removalWatch } from './removal.js';
 import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } from './outbox.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
+import { workFolderError } from './work-folder.js';
 import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { PhoneAdb, privateAdb } from './phones/adb.js';
 import { PhoneExecutor } from './phones/executor.js';
 import { keyboardApk } from './phones/keyboard.js';
+import { CheckedInstalls } from './program-check.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -92,6 +95,8 @@ const NO_RUNS = 'This node has no user of its own for runs, which it gets only w
 /* Agents of a personal Claude Code, Codex or Kimi Code plan run in tmux sessions people can watch and type into. */
 export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; owner?: OwnerFactory; user?: JobUser | null; fs?: AgentFs };
 
+type JobDone = Awaited<ReturnType<typeof runJob>>;
+
 type RunOptions = {
   dir: string;
   terminal?: TerminalSetup;
@@ -123,6 +128,10 @@ type RunOptions = {
   /* Verifies that the Playwright browsers launch before Hornhoof hands tasks or runs to this node. */
   checkBrowser?: () => Promise<string | null>;
   browserCheckMs?: number;
+  /* Why the node cannot write its work folder now, or null when it can; tests pass their own. */
+  checkWork?: () => Promise<string | null>;
+  /* The memory a new program can get on the machine now, which one-shot calls start by; tests pass their own. */
+  freeMemory?: () => number;
 };
 
 const MODEL_WEEK = /^seven_day_[a-z]+$/;
@@ -199,7 +208,7 @@ function sealedFor(known: CodexSealed | null, version: number, recipients: Recip
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS, checkWork = () => workFolderError(dir), freeMemory }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -216,6 +225,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* The node's own keys never leave in a job's output. */
   const hidden = [state.key, keyPair.identity];
   const known = new Set(hidden);
+  /* An install can finish before the node is ready to report status; its diagnostic already uses the node's masks. */
+  programs.watch(() => {}, () => [...known]);
   const life = nodeLifecycle({ dir, startedAt: boot.startedAt, secrets: () => [...known], write: writeLog });
   const log = life.log;
   /* For a program's own words, which may hold what Hornhoof must not keep: the machine's output only, secrets hidden,
@@ -355,22 +366,45 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let browserError = await checkBrowser().catch(err => message(err));
   writeBrowserError(dir, browserError);
   if (browserError) log(`Playwright browsers could not start: ${browserError}`);
+  /* Why the node cannot write its work folder, as it last told Hornhoof; null once it can. A write that fails at the start
+     tells nothing yet: the first turn that ends before its program started tells it, and Operations hear of it then. */
+  const workAtStart = await checkWork().catch(err => message(err));
+  if (workAtStart) log(`This machine cannot write its work folder: ${workAtStart}`);
+  let workError: string | null | undefined = workAtStart === null ? null : undefined;
   const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: { has: partId => outbox.doneParts().includes(partId) }, run: testOne, harness: syncOne, emit });
-  const noRunsNow = () => noRunsBecause(testUser, browserError);
+  const noRunsNow = () => checks.refused() ?? noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
-    emit({ type: 'status', ...testCapabilities, loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+    emit({ type: 'status', ...testCapabilities, loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, workError, noRuns: noRunsNow() });
+  };
+  checks.refusalChanged = () => {
+    log(checks.refused() ?? 'Check group cleanup finished. The machine takes new checks again.');
+    tellStatus();
   };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
     tellStatus();
   };
+  const lookAtWork = async () => {
+    const now = await checkWork().catch(err => message(err));
+    if (now === workError) return;
+    workError = now;
+    log(now ? `This machine cannot write its work folder, so it takes no turn: ${now}` : 'This machine writes its work folder again and takes turns.');
+  };
+  /* While it cannot, each load report looks again, and the first write that works lets turns come again. */
+  const recheckWork = async () => {
+    if (stopped || workError === null) return;
+    await lookAtWork();
+    if (workError === null) await status();
+  };
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
   const load = (): NodeLoad => ({ ...machineLoad({ dir }), tests: testing.size, jobs: running.size });
+  /* One-shot calls start as the machine's memory holds their programs. */
+  const calls = new CallRoom(freeMemory ?? (() => machineLoad({ dir }).memFree));
   /* The agents whose programs run in its terminals, as of the last look, for Hornhoof starts no new one on a machine short
      of free memory. A node without terminals names none. */
   let live = terminal ? await terminal.tmux.livePrograms() : null;
@@ -400,7 +434,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
       checks.online(true);
       host?.operatorReplay();
@@ -423,6 +457,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       removal.refused();
     },
   });
+  programs.watch(tellStatus, () => [...known]);
   void programs.update(tellStatus, onMachine).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
@@ -601,8 +636,33 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     : undefined;
 
   async function runOne(m: JobRun, signal: AbortSignal) {
+    /* A one-shot call starts once the machine has memory for its program, and says it started only then; one stopped while
+       it waits ends there. */
+    const seat = m.call ? await calls.enter(signal).catch(() => null) : null;
+    const done: JobDone = m.call && !seat ? { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: 'Stopped.', tail: '', error: 'cancelled' } : await runStarted(m, signal, seat);
+    seat?.leave();
+    /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
+    outbox.hold(done);
+    running.delete(m.jobId);
+    /* A turn that ended before its program started may have met a work folder the node cannot write: Hornhoof hears it with
+       the status below, before the end of the turn, and gives the node no turn until a write there works again. */
+    if (done.unstarted) await lookAtWork();
+    /* A first setup the turn met, which only the plan's owner may pass, and the limits the turn brought go first, so
+       Hornhoof knows of a plan that waits for its owner or is at its limit when it hears the job ended. */
+    setup.met(done.failure);
+    await status();
+    sendHeld(m.jobId);
+    await renewedCodex().catch(() => {});
+    /* The program may end on the sign-in or fail on it: either way its provider refused it. */
+    if (done.error === 'not_logged_in' || done.failure?.kind === 'auth') {
+      loggedIn = false;
+      if (credKind) refused = signInNow();
+      void status();
+    }
+  }
+
+  async function runStarted(m: JobRun, signal: AbortSignal, seat: CallSeat | null): Promise<JobDone> {
     emit({ type: 'job.started', jobId: m.jobId });
-    let done: Awaited<ReturnType<typeof runJob>>;
     try {
       await programs.ready(signal);
       const chosen = pick(m);
@@ -613,7 +673,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         try {
           await install?.();
         } catch (err) {
-          return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
+          return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null, unstarted: true };
         }
         const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
         return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery, freshPrompt: m.freshPrompt });
@@ -626,27 +686,22 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           planLimits.read(res.limits ?? (host && terminal && input.agentKey ? null : await readLimits()));
           return res;
         },
+        oneCall: chosen.oneCall && (async input => {
+          const res = await runUnlessStopped(input, () => chosen.oneCall!(input));
+          planLimits.read(res.limits ?? await readLimits());
+          return res;
+        }),
       };
       let seq = 0;
-      const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
-      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, beforeRun: () => programs.ready(signal), untimed: Boolean(host && terminal && m.workspace?.key), ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
+      const onEvent = (event: AgentEvent) => {
+        /* A call's program that says something is up, and the memory it takes shows from now on. */
+        seat?.settled();
+        emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
+      };
+      const run = (granted: AbortSignal) => runJob(tracked, m, dir, { hidden, signal: granted, toolsUrl, onEvent, beforeRun: () => programs.ready(granted), untimed: Boolean(host && terminal && m.workspace?.key), log, ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
+      return await run(signal);
     } catch (err) {
-      done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
-    }
-    /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
-    outbox.hold(done);
-    running.delete(m.jobId);
-    /* A first setup the turn met, which only the plan's owner may pass, and the limits the turn brought go first, so
-       Hornhoof knows of a plan that waits for its owner or is at its limit when it hears the job ended. */
-    setup.met(done.failure);
-    await status();
-    sendHeld(m.jobId);
-    await renewedCodex().catch(() => {});
-    /* The program may end on the sign-in or fail on it: either way its provider refused it. */
-    if (done.error === 'not_logged_in' || done.failure?.kind === 'auth') {
-      loggedIn = false;
-      if (credKind) refused = signInNow();
-      void status();
+      return { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed', unstarted: true };
     }
   }
 
@@ -691,7 +746,12 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const checkingBrowser = setInterval(() => void recheckBrowser(), browserCheckMs);
   checkingBrowser.unref();
   /* An old figure says nothing, so one that cannot go out now is not kept for later. */
-  const reporting = setInterval(() => void lookLive().then(() => send?.({ type: 'load', ...load(), ...liveNow() })), loadMs);
+  const reporting = setInterval(() => {
+    /* Calls that wait for memory look again as the node looks at its machine. */
+    calls.look();
+    void recheckWork();
+    void lookLive().then(() => send?.({ type: 'load', ...load(), ...liveNow() }));
+  }, loadMs);
   reporting.unref();
 
   function stop(reason: NodeStopReason = 'stopped') {
@@ -761,44 +821,40 @@ function personal(dir: string, provider: ProviderId, user: JobUser | null = null
   return user ? { ...adapter, owner: { user, home, prepare: () => {}, mkdir: path => fs.mkdir(path), fs } } : adapter;
 }
 
-/* Each program is installed the first time something needs it. A failed install is tried again next time. */
-const installing = new Map<string, Promise<void>>();
-function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null): Promise<void> {
-  const path = join(tools, 'bin', programFor(provider, api).bin);
-  if (existsSync(path)) return Promise.resolve();
-  return updateInstalled(tools, provider, adapter, api);
-}
-
-function updateInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null): Promise<void> {
-  const path = join(tools, 'bin', programFor(provider, api).bin);
-  let pending = installing.get(path);
-  if (!pending) {
-    pending = adapter.install().finally(() => installing.delete(path));
-    installing.set(path, pending);
-  }
-  return pending;
+/* Each program is installed the first time something needs it. Claude Code, Codex and Kimi have a confirmed version
+   command and are checked after an update too. A failed install is tried again next time. agy comes as one file the node
+   writes itself, and is not asked its version. */
+const installs = new CheckedInstalls();
+function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter, api?: ApiEndpoint | null, programs?: ProgramUpdates): Promise<void> {
+  const { bin } = programFor(provider, api);
+  const path = join(tools, 'bin', bin);
+  if (bin === 'agy') return existsSync(path) ? Promise.resolve() : adapter.install();
+  return installs.ensure(path, () => adapter.install(), repair => programs?.repaired(bin, repair), () => programs?.secrets() ?? []);
 }
 
 function managedUpdates(tools: string, programs: { provider: ProviderId; adapter: ProviderAdapter }[]): ProgramUpdates {
-  return new ProgramUpdates(programs.flatMap(({ provider, adapter }) => {
+  const updates: ProgramUpdates = new ProgramUpdates(programs.flatMap(({ provider, adapter }) => {
     const id = programFor(provider).bin;
-    return id === 'agy' ? [] : [{ id, install: () => updateInstalled(tools, provider, adapter), readVersion: () => readInstalledVersion(tools, id) }];
+    return id === 'agy' ? [] : [{ id, install: () => installs.update(join(tools, 'bin', id), () => adapter.install(), repair => updates.repaired(id, repair), () => updates.secrets()), readVersion: () => readInstalledVersion(tools, id) }];
   }));
+  return updates;
 }
 
 /* api: an API by the token at an address runs in the program of its protocol. */
-function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId, api?: ApiEndpoint | null): ProviderAdapter {
+function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId, api?: ApiEndpoint | null, programs?: ProgramUpdates): ProviderAdapter {
+  const installed = async (run: () => Promise<RunResult>): Promise<RunResult> => {
+    try {
+      await ensureInstalled(tools, provider, adapter, api, programs);
+    } catch (err) {
+      const output = `Could not install ${programFor(provider, api).name}: ${message(err)}`;
+      return { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null };
+    }
+    return run();
+  };
   return {
     ...adapter,
-    async run(input): Promise<RunResult> {
-      try {
-        await ensureInstalled(tools, provider, adapter, api);
-      } catch (err) {
-        const output = `Could not install ${programFor(provider, api).name}: ${message(err)}`;
-        return { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null };
-      }
-      return adapter.run(input);
-    },
+    run: input => installed(() => adapter.run(input)),
+    oneCall: adapter.oneCall && (input => installed(() => adapter.oneCall!(input))),
   };
 }
 
@@ -986,8 +1042,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     const fs = user ? agentFs(user) : ownFs;
     const adapter = personal(dir, provider, user, fs);
     const programs = managedUpdates(tools, [{ provider, adapter }]);
-    const install = () => ensureInstalled(tools, provider, adapter);
-    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install, programs, log, testUser, build, checkBrowser, ...terminalFor(dir, provider, user, fs) });
+    const install = () => ensureInstalled(tools, provider, adapter, null, programs);
+    return runNode({ dir, adapter: withInstall(adapter, tools, provider, null, programs), install, programs, log, testUser, build, checkBrowser, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;
@@ -998,13 +1054,14 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   }
   /* Each API key gets its own home and, as root, its own user, so two keys never share settings or files. */
   const builtinPick = builtinAdapters(dir, tools);
-  const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider, job.api);
   const managed = (['anthropic_api', 'openai_api'] as const).map(provider => ({ provider, adapter: adapterFor(provider, { home: dir, tools }) }));
+  const programs = managedUpdates(tools, managed);
+  const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider, job.api, programs);
   const testUser = userFor(dir, 'tests');
   const verifyUser = testUser || agentUser();
   const checkBrowser = () => startupBrowserCheck(dir, verifyUser);
   const signIn = builtinKey(key, process.env.HORNHOOF_MACHINE_ID || null);
-  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key: signIn }, log, testUser, build, checkBrowser });
+  return runNode({ dir, adapter: pick, programs, builtin: { server, key: signIn }, log, testUser, build, checkBrowser });
 }
 
 /* What the node's updater and its machine's setup call, or the usage for anything else. */

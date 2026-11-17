@@ -1,7 +1,117 @@
-import { describe, expect, it } from 'vitest';
-import { CREDENTIALS, cleanDiagnostic, HIDDEN, hiddenBy, PRIVATE_PATHS } from '../src/redaction.js';
+import { describe, expect, it, vi } from 'vitest';
+import { CREDENTIALS, cleanDiagnostic, HIDDEN, hideCredentials, hiddenBy, MIN_SECRET_LENGTH, PRIVATE_PATHS } from '../src/redaction.js';
+import mixed from './fixtures/redaction-mixed.json' with { type: 'json' };
+
+describe('stored prose, masked as it is written', () => {
+  it('hides labelled passwords and credentials of a known format', () => {
+    const cases: [string, string][] = [
+      ['пароль: taskBody987! и Password qwerty123!', `пароль: ${HIDDEN} и Password ${HIDDEN}`],
+      ['password = "two words" then', `password = ${HIDDEN} then`],
+      ['token ghp_abcDEF0123456789abcdef0123 refused', `token ${HIDDEN} refused`],
+      ['https://bruno:pa55word@github.com/acme/app.git', `https://${HIDDEN}@github.com/acme/app.git`],
+      ['-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY----- done', `${HIDDEN} done`],
+    ];
+    for (const [text, clean] of cases) expect(hideCredentials(text), text).toBe(clean);
+  });
+
+  it('keeps code, headers, flags, links and ordinary words as they are written', () => {
+    for (const plain of [
+      'const token = getToken(req);',
+      'Pass { key: c.ids.dana } to the helper.',
+      'secret: z.string().min(1),',
+      'Authorization: Bearer header is checked in auth/session.ts',
+      'Review checks correctness, simplicity and basic security.',
+      'Run hh-node --join CODE on the machine',
+      'OAuth returns to /callback?code=XYZ&state=1',
+      'Reset the password 2 times before release',
+      'In the password #267 task, hide it',
+      'The primary key: id, unique per company',
+      'Сменить пароль завтра, задача #267',
+    ]) expect(hideCredentials(plain), plain).toBe(plain);
+  });
+
+  it('hides an exact value only from eight characters on', () => {
+    expect(MIN_SECRET_LENGTH).toBe(8);
+  });
+
+  it('keeps a maximum-size assistant conversation and masks a following URL password', () => {
+    const conversation = 'f'.repeat(200_000);
+    const text = `${conversation}\nhttps://bruno:pa55word@github.com/acme/app.git`;
+    const expected = `${conversation}\nhttps://${HIDDEN}@github.com/acme/app.git`;
+    expect(hideCredentials(text)).toBe(expected);
+    expect(cleanDiagnostic(text)).toBe(expected);
+  });
+
+  it('masks URL passwords beside scheme characters, with their prefixes and public addresses preserved', () => {
+    for (const prefix of ['', '0', '+.-', '10+.-', '_', '/', '(', 'text:']) {
+      const address = `${prefix}git+ssh://bruno:pa55word@host.example/repo`;
+      const expected = `${prefix}git+ssh://${HIDDEN}@host.example/repo`;
+      expect(hideCredentials(address), address).toBe(expected);
+      expect(cleanDiagnostic(address), address).toBe(expected);
+    }
+  });
+
+  it('leaves incomplete URL credentials alone and still hides later nested or separate URLs', () => {
+    for (const plain of [
+      '://user:pass@host', '123://user:pass@host', 'a://:pass@host', 'a://user:@host',
+      'a://user:pass/part@host', 'a://user name:pass@host', 'a://user:pass word@host',
+    ]) expect(hideCredentials(plain), plain).toBe(plain);
+    expect(hideCredentials('a://a://user:pass@host')).toBe(`a://a://${HIDDEN}@host`);
+    expect(hideCredentials('a://user:one:two@host b://other:pass@next')).toBe(`a://${HIDDEN}@host b://${HIDDEN}@next`);
+  });
+
+  it('uses bounded URL searches on long words at two input sizes', () => {
+    const find = String.prototype.indexOf;
+    const read = String.prototype.charAt;
+    const measured = (text: string) => {
+      let searches = 0, searched = 0, inspected = 0;
+      const searching = vi.spyOn(String.prototype, 'indexOf').mockImplementation(function (this: string, needle: string, from = 0) {
+        const at = find.call(this, needle, from);
+        if (this === text && needle === '://') {
+          searches += 1;
+          searched += (at < 0 ? text.length : at + needle.length) - from;
+        }
+        return at;
+      });
+      const reading = vi.spyOn(String.prototype, 'charAt').mockImplementation(function (this: string, at: number) {
+        if (this === text) inspected += 1;
+        return read.call(this, at);
+      });
+      try {
+        return { text: hideCredentials(text), searches, steps: searched + inspected };
+      } finally {
+        searching.mockRestore();
+        reading.mockRestore();
+      }
+    };
+    const sizes = [2048, 4096];
+    const plain = sizes.map(size => measured('f'.repeat(size)));
+    for (const [i, result] of plain.entries()) {
+      expect(result.text).toBe('f'.repeat(sizes[i]!));
+      expect(result.searches).toBe(1);
+      expect(result.steps).toBe(sizes[i]);
+    }
+    const urls = sizes.map(size => measured(`${'f'.repeat(size)}://user:pass@host.example`));
+    for (const [i, result] of urls.entries()) {
+      expect(result.text).toBe(`${'f'.repeat(sizes[i]!)}://${HIDDEN}@host.example`);
+      expect(result.searches).toBe(2);
+      expect(result.steps).toBeLessThanOrEqual(2 * sizes[i]! + 32);
+    }
+    expect(urls[1]!.steps).toBeLessThanOrEqual(2 * urls[0]!.steps);
+  });
+});
 
 describe('a diagnostic cleaned for a reader who may not read where it comes from', () => {
+  it.each(mixed)('hides an auth token and a labelled secret beside URL credentials: $name', ({ text, diagnosticExpected }) => {
+    expect(cleanDiagnostic(text)).toBe(diagnosticExpected);
+  });
+
+  it('hides labelled Russian passwords and keeps ordinary prose and identifiers', () => {
+    expect(hiddenBy('пароль: "two words"; password = test123!\nПароль qwerty123!', CREDENTIALS)).toBe('пароль: [hidden]; password = [hidden]\nПароль [hidden]');
+    for (const plain of ['Change the password tomorrow', 'Сменить пароль завтра', 'Reset password', 'task #267', 'd44ecb8c7d3d0b6d7ce690e01c25046f0404b212', 'e5cd054b-2620-421c-b07b-546bfbcdbedf']) {
+      expect(hiddenBy(plain, CREDENTIALS)).toBe(plain);
+    }
+  });
   it('hides credentials by their shape', () => {
     const cases: [string, string][] = [
       ['token ghp_abcDEF0123456789abcdef0123 refused', `token ${HIDDEN} refused`],

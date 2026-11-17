@@ -79,17 +79,17 @@ type Unlocking = { server: StoredKey; settle(key: CryptoKey | null): void };
    browser can make none. sign: the owner's word that opens a machine for a day, signed with their key; a device that
    does not keep the key asks for the password once and keeps it from then on. Null when the person leaves the
    question, has no key, or this page can sign nothing. The caller renders prompt. */
-export function useOwnerKey(): { publicKey(password?: string): Promise<string | null>; sign(machine: string): Promise<Grant | null>; prompt: ReactNode } {
+export function useOwnerKey(): { publicKey(password?: string): Promise<string | null>; sign(machine: string, seconds?: number): Promise<Grant | null>; prompt: ReactNode } {
   const [mine, setMine] = useState<Asked | null>(null);
   const [unlocking, setUnlocking] = useState<Unlocking | null>(null);
 
-  const sign = useCallback(async (machine: string): Promise<Grant | null> => {
+  const sign = useCallback(async (machine: string, seconds = GRANT_S): Promise<Grant | null> => {
     const server = await serverKey();
     if (!server || !canMakeKey()) return null;
     const key = (await deviceKey(server)) ?? (await new Promise<CryptoKey | null>(settle => setUnlocking({ server, settle })));
     if (!key) return null;
     const now = Math.floor(Date.now() / 1000);
-    return signGrant(key, machine, now + GRANT_S, now);
+    return signGrant(key, machine, now + seconds, now);
   }, []);
 
   /* A screen that goes away takes its question with it. */

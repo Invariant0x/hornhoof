@@ -1,274 +1,296 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { LANGUAGES, type Language, type Messages } from '../../src/i18n';
 import { en } from '../../src/i18n/en';
 import { ru } from '../../src/i18n/ru';
-import { collectionText } from '../../src/skins/collection';
-import { BUILTIN_SKINS, builtinSkin } from '../../src/skins/registry';
-import type { Skin } from '../../src/skins/roles';
-import { builtinFile } from '../../src/skins/validate';
+import { BUILTIN_SKINS } from '../../src/skins/registry';
+import { NODE } from '../../src/tracker';
 import { captureWith } from '../capture';
-import { QUESTION, serveTasksBoard, TASKS } from './api';
+import { DEV, GOALS, QUESTION, serveTasksBoard, TASKS } from './api';
 
-/* The tracker as a person meets it: three numbers at a glance, the goals of every department with the one that waits for the
-   person's answer first and their related tasks folded under them as short lines, three views to switch, a department to
-   pick by department and by release, a search, and what is over folded apart. 138 tasks never spill into one long list.
-   Shots of every built-in skin and one of a person's own, at a desk and on a phone, also mirrored right to left, go to
-   HH_SCREENSHOT_DIR when it is set. */
+/* The tracker as a person meets it: the left panel of lists, where the person is, three views of the same work with their
+   filters, the graph on a canvas like the map's, and the card at the end side. 138 tasks, every shipped language, a light and
+   a dark skin, at a desk and on a phone, also mirrored right to left. Shots go to HH_SCREENSHOT_DIR when it is set. */
 
 const MESSAGES: Record<Language, Messages> = { en, ru };
 const capture = captureWith('tasks-board', process.env.HH_SCREENSHOT_DIR);
-const CYBERPUNK = builtinSkin('cyberpunk')!;
-const OWN: Skin = { ...builtinFile(CYBERPUNK, { ru: 'Сумерки', en: 'Dusk' }), cut: 1.5 };
-const SKINS = [...BUILTIN_SKINS.map(skin => skin.id), 'custom-1'];
+/* One built-in skin of each scheme. */
+const SKINS = (['light', 'dark'] as const).map(scheme => BUILTIN_SKINS.find(skin => skin.scheme === scheme)!.id);
+const LOOKS = LANGUAGES.flatMap(({ id }) => SKINS.map(skin => ({ lang: id, skin })));
 
-async function open(page: Page, lang: Language, width: number, skin = 'cyberpunk') {
+async function open(page: Page, lang: Language, width: number, path: string, skin: string = SKINS[1]!) {
   await page.setViewportSize({ width, height: 900 });
-  await page.addInitScript(({ language, skin, collection }) => {
+  await page.addInitScript(({ language, skin }) => {
     localStorage.setItem('hh-lang', language);
     localStorage.setItem('hh-theme', skin);
-    localStorage.setItem('hh-skins', collection);
-  }, { language: lang, skin, collection: collectionText([{ id: 'custom-1', skin: OWN }]) });
-  await page.goto('/tasks');
-  await expect(page.getByRole('heading', { level: 1, name: MESSAGES[lang].tasks.heading })).toBeVisible();
+  }, { language: lang, skin });
+  await page.goto(path);
+  await expect(page.locator('.tr-where h1')).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
 
-const board = (page: Page, t: Messages) => page.getByRole('region', { name: t.tasks.board.label });
-/* Cards at the top of what shows, and the short lines of related tasks unfolded under them. */
-const goals = (page: Page) => page.locator('article.goal');
-const related = (page: Page) => page.locator('.goal-subs > .goal-row');
-const row = (page: Page, number: number) => page.getByRole('listitem', { name: `#${number} ${TASKS.find(x => x.number === number)!.title}`, exact: true });
-/* A goal's card on the board, not the card of a question about the same task in what waits for the person. */
-const card = (page: Page, number: number) => page.locator('article.goal').and(page.getByRole('article', { name: `#${number} ${TASKS.find(x => x.number === number)!.title}`, exact: true }));
-const sideways = (page: Page) => page.getByRole('main').evaluate(el => el.scrollWidth - el.clientWidth);
-const goalOf = (title: string) => TASKS.find(x => x.title === title)!;
+const numbered = (title: string) => TASKS.find(x => x.title === title)!;
+const named = (title: string) => `#${numbered(title).number} ${title}`;
+const sideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-/* Every card and every control of the board stays inside the board, from its start edge to its end edge. */
-async function inside(page: Page, t: Messages) {
-  const frame = (await board(page, t).boundingBox())!;
-  for (const box of await page.locator('article.goal, .goal button').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
-    expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
-    expect(box.right).toBeLessThanOrEqual(frame.x + frame.width + 1);
+/* Every row, card, column and control of the main area stays inside it, from its start edge to its end edge, and no text
+   is cut short with an ellipsis anywhere in the tracker. A closed select shows its choice on one line, as every select of
+   the app does; its list shows each choice whole. */
+async function inside(page: Page, what: string) {
+  const frame = (await page.locator('.tr-main').boundingBox())!;
+  const boxes = await page.locator('.tr-main :is(.tr-row, .tr-card, .tr-col, .tr-chip, .tr-views, .tr-canvas, button:not(.tr-node))').evaluateAll(els =>
+    els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })));
+  expect(boxes.length, what).toBeGreaterThan(0);
+  for (const box of boxes) {
+    expect(box.x, what).toBeGreaterThanOrEqual(frame.x - 1);
+    expect(box.right, what).toBeLessThanOrEqual(frame.x + frame.width + 1);
   }
+  expect(await page.locator('.tracker :not(select)').evaluateAll(els => els.filter(e => getComputedStyle(e).textOverflow === 'ellipsis').map(e => `${e.tagName.toLowerCase()}.${e.getAttribute('class')}`)), what).toEqual([]);
+  expect(await sideways(page), what).toBeLessThanOrEqual(0);
+}
+
+/* What a finger presses is at least 44 px high. */
+async function touchable(page: Page, what: string) {
+  const links = '.tr-title, .tr-card-title .linkish, .tr-goals .linkish, .tr-crumbs .linkish, .tp-path .linkish, .tr-people .linkish';
+  for (const height of await page.locator(`.tr-item, .tr-views label, .tr-chip, .tr-menu:visible, .tr-canvas .zbtn, ${links}`).evaluateAll(els =>
+    els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height))) {
+    expect(height, what).toBeGreaterThanOrEqual(43.5);
+  }
+}
+
+async function view(page: Page, t: Messages, name: string) {
+  await page.getByRole('group', { name: t.tracker.views.label }).getByText(name, { exact: true }).click();
+  await expect(page.getByRole('region', { name, exact: true })).toBeVisible();
+}
+
+for (const { lang, skin } of LOOKS) for (const width of [1440, 375]) {
+  test(`shows a department as a list, a board and a graph inside the screen: ${lang} ${skin} ${width}`, async ({ page }, info) => {
+    const t = MESSAGES[lang];
+    await serveTasksBoard(page);
+    await open(page, lang, width, `/tasks?department=${DEV.id}`, skin);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(DEV.name);
+
+    /* The list: groups by state in words, the task that waits for the person first; each row names who does it, who answers
+       for it, its goal and its due day. */
+    const list = page.getByRole('region', { name: t.tracker.views.list, exact: true });
+    await expect(list.getByRole('heading', { level: 2 }).first()).toHaveText(`${t.tracker.groups.waitingYou}: 1`);
+    const payments = list.getByRole('listitem', { name: named('Take card payments'), exact: true });
+    await expect(payments).toContainText('Hana');
+    await expect(payments).toContainText(GOALS[1]!.title);
+    await expect(payments).toContainText(t.tracker.list.subtasks(1, 3));
+    await inside(page, `list ${lang} ${skin} ${width}`);
+    await touchable(page, `list ${lang} ${skin} ${width}`);
+    await capture(page, info, `list-${lang}-${skin}-${width}`);
+
+    /* The board: the pipeline's stages when one is chosen, columns by status otherwise, as many side by side as fit. */
+    await view(page, t, t.tracker.views.board);
+    const board = page.getByRole('region', { name: t.tracker.views.board, exact: true });
+    await expect(board.locator('.tr-col').first()).toBeVisible();
+    await inside(page, `board ${lang} ${skin} ${width}`);
+    await capture(page, info, `board-${lang}-${skin}-${width}`);
+
+    /* The graph: the department's goals with their work as a tree; no node cuts its words short. */
+    await view(page, t, t.tracker.views.graph);
+    const canvas = page.getByRole('region', { name: t.tracker.graph.canvas });
+    await expect(canvas.getByRole('button', { name: new RegExp(GOALS[1]!.title) })).toBeVisible();
+    expect(await canvas.locator('.tr-node').evaluateAll(els => els.filter(e => e.scrollHeight > e.clientHeight + 1 || e.scrollWidth > e.clientWidth + 1).length)).toBe(0);
+    await inside(page, `graph ${lang} ${skin} ${width}`);
+    await touchable(page, `graph ${lang} ${skin} ${width}`);
+    await capture(page, info, `graph-${lang}-${skin}-${width}`);
+  });
+}
+
+test('pans and zooms the graph with a drag and the zoom bar, and opens a card from a node', async ({ page }) => {
+  const t = MESSAGES.en;
+  await serveTasksBoard(page);
+  await open(page, 'en', 1440, `/tasks?department=${DEV.id}&view=graph`);
+  const canvas = page.getByRole('region', { name: t.tracker.graph.canvas });
+  const world = canvas.locator('.world');
+  const percent = page.locator('.tr-canvas .zv');
+  const transform = () => world.evaluate(el => new DOMMatrix(getComputedStyle(el).transform));
+  await expect(canvas.locator('.tr-node').first()).toBeVisible();
+  const fitted = await transform();
+  const shown = await percent.textContent();
+  /* A tree too big for the canvas opens at a size its words read at, on its first goal, not shrunk to dots. */
+  expect(fitted.a).toBeGreaterThanOrEqual(0.6);
+  const frame = (await canvas.boundingBox())!;
+  const goal = (await canvas.getByRole('button', { name: new RegExp(GOALS[1]!.title) }).boundingBox())!;
+  expect(goal.y).toBeGreaterThanOrEqual(frame.y);
+  expect(goal.y + goal.height).toBeLessThanOrEqual(frame.y + frame.height);
+
+  await page.getByRole('button', { name: t.map.zoomIn, exact: true }).click();
+  await expect(percent).not.toHaveText(shown!);
+  expect((await transform()).a).toBeGreaterThan(fitted.a);
+  await page.getByRole('button', { name: t.map.zoomOut, exact: true }).click();
+  await expect(percent).toHaveText(shown!);
+
+  /* A drag on the dots between the first two levels moves the tree, and no card opens for it. */
+  const before = await transform();
+  const [x, y] = [frame.x + before.e + (NODE.w + (NODE.dx - NODE.w) / 2) * before.a, frame.y + frame.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 80, y - 40, { steps: 8 });
+  await page.mouse.up();
+  const moved = await transform();
+  expect(Math.round(moved.e - before.e)).toBe(80);
+  expect(Math.round(moved.f - before.f)).toBe(-40);
+  await expect(page).toHaveURL(/\/tasks\?department=d2&view=graph$/);
+
+  /* Show everything draws the whole tree as small as the canvas allows. */
+  await page.getByRole('button', { name: t.map.showAll, exact: true }).click();
+  await expect.poll(async () => (await transform()).a).toBeLessThan(fitted.a);
+
+  /* A click on a node opens its card at the end side, and from it the graph grows again from that task. */
+  const payments = numbered('Take card payments');
+  await canvas.getByRole('button', { name: new RegExp(`^#${payments.number} Take card payments`) }).click();
+  await expect(page).toHaveURL(new RegExp(`/tasks/${payments.id}$`));
+  const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
+  await card.getByRole('button', { name: t.tracker.card.graphFromHere, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/tasks\\?root=${payments.id}&view=graph$`));
+  const crumbs = page.getByRole('navigation', { name: t.tracker.graph.path });
+  await expect(crumbs.locator('[aria-current]')).toHaveText(named('Take card payments'));
+  await crumbs.getByRole('button', { name: GOALS[1]!.title, exact: true }).click();
+  await expect(page).toHaveURL(/\/tasks\?goal=g2&view=graph$/);
+});
+
+for (const dir of ['ltr', 'rtl'] as const) {
+  test(`puts the card at the end side, beside the work and not over it: ${dir}`, async ({ page }, info) => {
+    const t = MESSAGES.en;
+    await serveTasksBoard(page);
+    await open(page, 'en', 1440, `/tasks?department=${DEV.id}`);
+    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
+    await row.locator('.tr-title').click();
+    const card = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
+    await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[0]!.title);
+    await expect(card.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
+    const [panel, main] = [(await card.boundingBox())!, (await page.locator('.tr-main').boundingBox())!];
+    if (dir === 'ltr') {
+      expect(Math.round(1440 - (panel.x + panel.width))).toBe(16);
+      expect(main.x + main.width).toBeLessThanOrEqual(panel.x);
+    } else {
+      expect(Math.round(panel.x)).toBe(16);
+      expect(main.x).toBeGreaterThanOrEqual(panel.x + panel.width);
+    }
+    expect(await sideways(page)).toBeLessThanOrEqual(0);
+    await capture(page, info, `card-${dir}-1440`);
+  });
+}
+
+/* The colour a role of the skin gives words, as the engine computes it. */
+const roleColor = (page: Page, role: string) => page.evaluate(r => {
+  const probe = document.body.appendChild(document.createElement('i'));
+  probe.style.color = `var(${r})`;
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}, role);
+
+/* Design's rules for the tracker (#1150), in the light skin: a chip in focus has the app's ring, its choice is as wide and as
+   high in every engine with the arrow at the end side, the left panel keeps no room for a bar, a chosen chip and the chosen
+   view read clearly, and a card's facts keep their words in order right to left. */
+for (const dir of ['ltr', 'rtl'] as const) {
+  test(`keeps the chips, the left panel and the card's facts alike in every engine: ${dir}`, async ({ page }, info) => {
+    const t = MESSAGES.en;
+    const shot = (name: string) => capture(page, info, `design-${name}-${dir}-${info.project.name.replace('tasks-', '')}`);
+    await serveTasksBoard(page);
+    await open(page, 'en', 1440, `/tasks?department=${DEV.id}`, SKINS[0]);
+    await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    const chips = page.getByRole('group', { name: t.tracker.filters.label });
+    const status = chips.getByLabel(t.tracker.filters.status);
+    await status.focus();
+    const ring = await status.evaluate(el => { const s = getComputedStyle(el); return [s.outlineStyle, s.outlineWidth, s.outlineOffset, s.outlineColor]; });
+    expect(ring).toEqual(['solid', '2px', '2px', await roleColor(page, '--cyan-ink')]);
+    await shot('chip-focus');
+    const box = (await status.boundingBox())!;
+    expect(Math.abs(box.width - 160)).toBeLessThanOrEqual(1);
+    expect(Math.abs(box.height - 40)).toBeLessThanOrEqual(1);
+    const arrow = await status.evaluate(el => { const s = getComputedStyle(el); return [s.paddingInlineEnd, s.backgroundPositionX]; });
+    expect(arrow[0]).toBe('28px');
+    if (dir === 'rtl') expect(arrow[1]).toBe('10px, 15px');
+    else expect(arrow[1]).not.toBe('10px, 15px');
+    const side = await page.locator('.tr-side').evaluate((el: HTMLElement) => { const s = getComputedStyle(el); return [el.clientWidth, el.offsetWidth - parseFloat(s.borderInlineStartWidth) - parseFloat(s.borderInlineEndWidth)]; });
+    expect(side[0]).toBe(side[1]);
+    await status.selectOption({ label: t.tracker.statuses.working });
+    await status.evaluate(el => (el as HTMLSelectElement).blur());
+    await expect(page.locator('.tr-chip.on')).toHaveCount(1);
+    expect(await page.locator('.tr-chip.on').evaluate(el => getComputedStyle(el).borderTopColor)).toBe(await roleColor(page, '--cyan-ink'));
+    expect(await page.locator('.tr-views label.on').evaluate(el => getComputedStyle(el).color)).toBe(await roleColor(page, '--ink'));
+    await shot('light-chips');
+    await view(page, t, t.tracker.views.board);
+    const card = page.getByRole('region', { name: t.tracker.views.board, exact: true }).getByRole('article', { name: named('Take card payments'), exact: true });
+    for (const fact of await card.locator('.tr-card-facts li').all()) await expect(fact).toHaveAttribute('dir', 'auto');
+    expect(await card.locator('.tr-card-facts li').first().evaluate(el => getComputedStyle(el).direction)).toBe('ltr');
+    await card.locator('.tr-card-title .linkish').click();
+    const panel = page.getByRole('complementary', { name: named('Take card payments'), exact: true });
+    await expect(panel.getByRole('navigation', { name: t.tracker.card.path })).toContainText(GOALS[1]!.title);
+    await shot('card');
+  });
 }
 
 for (const lang of LANGUAGES.map(l => l.id)) {
-  test(`folds 138 tasks to their goals, unfolds one in a click, and switches views and departments: ${lang}`, async ({ page }, info) => {
-    const t = MESSAGES[lang];
-    const served = await serveTasksBoard(page);
-    await open(page, lang, 1440);
-    const view = page.getByRole('group', { name: t.tasks.board.view });
-    await expect(view.getByRole('radio', { name: t.tasks.board.views.active })).toBeChecked();
-
-    /* At a glance: one goal waits for the person's answer, seven go on now, nothing is ready for release yet. */
-    const summary = page.getByRole('list', { name: t.tasks.board.summary.label });
-    await expect(summary.getByRole('listitem')).toHaveText([`1 ${t.tasks.board.summary.you}`, `7 ${t.tasks.board.summary.running}`, `0 ${t.tasks.board.summary.ready}`]);
-
-    /* In progress: the goals alone, the related tasks folded, the one that waits for the person first, marked, its question
-       only in what waits for the person. */
-    await expect(goals(page)).toHaveCount(9);
-    await expect(related(page)).toHaveCount(0);
-    const signIn = card(page, goalOf('Fix the sign-in page').number);
-    await expect(goals(page).first()).toHaveAttribute('aria-label', `#${goalOf('Fix the sign-in page').number} Fix the sign-in page`);
-    await expect(signIn).toContainText(t.tasks.board.statuses.waitingYou);
-    await expect(signIn).not.toContainText(QUESTION);
-    await expect(signIn.getByRole('button', { name: t.tasks.board.openTask })).toBeVisible();
-    await expect(page.getByRole('region', { name: t.tasks.waiting })).toContainText(QUESTION);
-    await expect(signIn).toContainText(t.tasks.board.urgent);
-    await expect(signIn).toContainText(t.tasks.board.outsideTurns);
-    const payments = card(page, goalOf('Take card payments').number);
-    await expect(payments).toContainText('Take card payments: what it does for the shop and why it is needed.');
-    await expect(payments).toContainText(t.tasks.board.statuses.working);
-    await expect(payments).toContainText('Development');
-    await expect(payments).toContainText(t.tasks.board.assignee('Hana'));
-    await expect(payments.getByRole('progressbar', { name: t.tasks.board.progress(1, 3) })).toHaveAttribute('aria-valuemax', '3');
-    await expect(payments.getByRole('button', { name: t.tasks.board.openTask })).toHaveCount(0);
-    /* A department names where a goal is, in the neutral colour, not in the colour of attention. */
-    const badge = payments.locator('.badge.goal-place');
-    expect(await badge.evaluate(el => getComputedStyle(el).color)).toBe(await page.locator('.goal-no').first().evaluate(el => getComputedStyle(el).color));
-    await expect(page.getByRole('combobox', { name: t.tasks.department })).toHaveCount(0);
-    await capture(page, info, `active-${lang}`);
-    await signIn.evaluate(el => el.scrollIntoView({ block: 'center' }));
-    await capture(page, info, `active-goal-${lang}`);
-
-    /* One click opens the related tasks of a goal as short lines; the work under one of them is not unfolded here, a link
-       opens its task. Another click folds them again. */
-    const fold = payments.getByRole('button', { name: t.tasks.board.related(1, 3) });
-    await expect(fold).toHaveAttribute('aria-expanded', 'false');
-    await fold.click();
-    await expect(related(page)).toHaveCount(3);
-    const build = row(page, goalOf('Build: take card payments').number);
-    await expect(build).toContainText(t.tasks.board.statuses.working);
-    await expect(build).toContainText(t.tasks.board.assignee('Bruno'));
-    await expect(build).not.toContainText('what it does for the shop');
-    await expect(build.getByRole('progressbar')).toHaveCount(0);
-    await expect(build.getByRole('button', { name: /^Related tasks|^Сопутствующие/ })).toHaveCount(0);
-    await expect(build.getByRole('button', { name: t.tasks.board.openTask })).toBeVisible();
-    await payments.locator('.goal-subs').evaluate(el => el.scrollIntoView({ block: 'center' }));
-    await capture(page, info, `unfolded-${lang}`);
-    await fold.click();
-    await expect(related(page)).toHaveCount(0);
-
-    /* What is over waits folded under the goals. */
-    await board(page, t).getByRole('button', { name: t.tasks.board.closed(2) }).click();
-    await expect(goals(page)).toHaveCount(11);
-    await expect(card(page, goalOf('Old checkout').number)).toContainText(t.tasks.board.statuses.done);
-
-    /* By department: every department under its own name, with what is in progress in it; one department at a time, the
-       orchestrator's own work among them for someone with the whole company. */
-    await view.getByRole('radio', { name: t.tasks.board.views.departments }).check({ force: true });
-    const sections = board(page, t).getByRole('heading', { level: 2 });
-    await expect(sections).toHaveText(['Development', 'Sales', t.tasks.board.orchestrator]);
-    await expect(board(page, t).getByRole('region', { name: 'Development' })).toContainText(t.tasks.board.inProgress(7));
-    await capture(page, info, `departments-${lang}`);
-    const department = page.getByRole('combobox', { name: t.tasks.department });
-    await department.selectOption({ label: 'Sales' });
-    await expect(goals(page)).toHaveCount(1);
-    await expect(card(page, goalOf('Call the shop owners back').number)).toContainText(t.tasks.board.statuses.review);
-    await department.selectOption({ label: t.tasks.board.orchestrator });
-    await expect(goals(page)).toHaveCount(1);
-    await department.selectOption({ label: t.tasks.board.allDepartments });
-
-    /* Turns and releases: the next release of Development getting ready with its goals counted, the release out already
-       folded to a line, and on its own choice the work outside releases. */
-    await view.getByRole('radio', { name: t.tasks.board.views.releases }).check({ force: true });
-    await expect(board(page, t).getByText(t.tasks.board.relsWhy)).toBeVisible();
-    await expect(sections).toHaveText([t.tasks.board.preparing(3, 'v1.2.0'), t.tasks.board.closedReleases]);
-    const next = board(page, t).getByRole('region', { name: t.tasks.board.preparing(3, 'v1.2.0') });
-    await expect(next.getByRole('progressbar', { name: t.tasks.board.goalsDone(0, 7) })).toHaveAttribute('aria-valuemax', '7');
-    await expect(next.getByRole('listitem')).toHaveCount(7);
-    const closed = board(page, t).getByRole('region', { name: t.tasks.board.closedReleases });
-    const released = closed.getByRole('button', { name: new RegExp(`${t.tasks.board.released(2, 'v1.2.0')}.*${t.tasks.board.relCount(1)}`) });
-    await expect(released).toHaveAttribute('aria-expanded', 'false');
-    await expect(closed.getByRole('listitem')).toHaveCount(0);
-    await released.click();
-    await expect(released).toHaveAttribute('aria-expanded', 'true');
-    await expect(row(page, goalOf('Old checkout').number)).toContainText(t.tasks.board.statuses.done);
-    await expect(board(page, t).getByText(t.tasks.board.pickDepartment)).toBeVisible();
-    await department.selectOption({ label: 'Development' });
-    await expect(page.getByRole('table', { name: t.backlog.heading })).toContainText('Gift cards for shops');
-    await capture(page, info, `releases-${lang}`);
-    await department.selectOption({ label: t.tasks.board.allDepartments });
-    const show = board(page, t).getByRole('group', { name: t.tasks.board.show });
-    await show.getByText(t.tasks.board.showOutside, { exact: true }).click();
-    await expect(show.getByRole('radio', { name: t.tasks.board.showOutside, exact: true })).toBeChecked();
-    await expect(goals(page)).toHaveCount(2);
-    await expect(card(page, goalOf('Call the shop owners back').number)).toBeVisible();
-    await expect(next).toHaveCount(0);
-    await show.getByText(t.tasks.board.showReleases, { exact: true }).click();
-    await expect(next).toBeVisible();
-
-    /* A search looks through every task, the related ones too, by number or words. */
-    const deep = goalOf('Part 4 of build');
-    await page.getByRole('searchbox', { name: t.tasks.search }).fill(`#${deep.number}`);
-    await expect(board(page, t).getByRole('heading', { name: t.tasks.searchResults })).toBeVisible();
-    await expect(card(page, deep.number)).toBeVisible();
-    await card(page, deep.number).getByRole('button', { name: deep.title, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/tasks/${deep.id}$`));
-    await page.keyboard.press('Escape');
-
-    expect(await sideways(page)).toBeLessThanOrEqual(0);
-    /* One read of all the tasks the person reads, whatever view or department shows. */
-    expect([...new Set(served.reads)]).toEqual(['?status=all']);
-  });
-
-  /* On a phone the three views stand as three equal tabs in one row, a long name wrapping inside its own tab. */
-  test(`shows what is in progress on a phone, the three views as equal tabs: ${lang} 375`, async ({ page }, info) => {
+  test(`opens the lists as a drawer on a phone and closes it on a choice: ${lang} 375`, async ({ page }, info) => {
     const t = MESSAGES[lang];
     await serveTasksBoard(page);
-    await open(page, lang, 375);
-    await expect(goals(page).first()).toHaveAttribute('aria-label', `#${goalOf('Fix the sign-in page').number} Fix the sign-in page`);
-    const tabs = await page.getByRole('group', { name: t.tasks.board.view }).locator('label').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ y: r.y, width: r.width })));
-    expect(tabs).toHaveLength(3);
-    /* Each tab after the first reaches 1 px back over its neighbour, so they share one border line. */
-    for (const [i, tab] of tabs.entries()) {
-      expect(Math.abs(tab.y - tabs[0]!.y)).toBeLessThanOrEqual(0.5);
-      expect(Math.abs(tab.width - (i ? 1 : 0) - tabs[0]!.width)).toBeLessThanOrEqual(0.5);
-    }
-    expect(await sideways(page)).toBeLessThanOrEqual(0);
-    await inside(page, t);
-    await capture(page, info, `active-${lang}-375`);
-    /* Clear of the header, which stays over the top of the page. */
-    await goals(page).first().evaluate(el => { el.style.scrollMarginTop = '80px'; el.scrollIntoView({ block: 'start' }); });
-    await capture(page, info, `active-goal-${lang}-375`);
+    await open(page, lang, 375, '/tasks');
+    const side = page.getByRole('navigation', { name: t.tracker.side.label });
+    await expect(side).toBeHidden();
+    await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
+    await expect(side).toBeVisible();
+    const box = (await side.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(16);
+    expect(box.x + box.width).toBeLessThanOrEqual(375 - 16);
+    /* It runs to the bottom of the screen, so nothing of the page shows under it. */
+    expect(box.y + box.height).toBe(page.viewportSize()!.height);
+    expect(await page.evaluate(() => [16, 187, 358].every(x => !!document.elementFromPoint(x, innerHeight - 1)?.closest('.tr-side')))).toBe(true);
+    await touchable(page, `drawer ${lang}`);
+    await capture(page, info, `drawer-${lang}-375`);
+    await side.getByRole('button', { name: new RegExp(`^${t.tracker.side.working}`) }).click();
+    await expect(side).toBeHidden();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.working);
+    await inside(page, `working ${lang}`);
   });
 }
 
-test('keeps every card and control inside the board in every skin, at a desk and on a phone, and mirrored right to left', async ({ page }, info) => {
-  const t = MESSAGES.en;
+/* What waits for the person: the question on the urgent task, and the cards Hornhoof kept, inside the page in every
+   language, at a desk and on a phone, and mirrored right to left. */
+test('shows what waits for the person and the cards kept for them inside the page', async ({ page }, info) => {
   await serveTasksBoard(page);
-  for (const skin of SKINS) for (const width of [1440, 375]) {
-    await open(page, 'en', width, skin);
-    await card(page, goalOf('Take card payments').number).getByRole('button', { name: t.tasks.board.related(1, 3) }).click();
-    await expect(related(page)).toHaveCount(3);
-    expect(await sideways(page), `${skin} ${width}`).toBeLessThanOrEqual(0);
-    await inside(page, t);
-    await capture(page, info, `${skin}-${width}`);
-  }
-  await open(page, 'en', 1440);
-  /* The bar of a goal keeps its own width whatever width each engine gives the words beside it: 360 px less the gap
-     and the 8em of words, so the engines differ by at most 1 px (style book, section 9). */
-  const bar = (await card(page, goalOf('Take card payments').number).getByRole('progressbar').boundingBox())!;
-  expect(Math.abs(bar.width - 250)).toBeLessThanOrEqual(0.5);
-  await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
-  const payments = card(page, goalOf('Take card payments').number);
-  const frame = (await board(page, t).boundingBox())!;
-  const box = (await payments.boundingBox())!;
-  const title = (await payments.getByRole('button', { name: 'Take card payments', exact: true }).boundingBox())!;
-  /* The title starts at the right edge of its card. */
-  expect(Math.abs(box.x + box.width - (title.x + title.width))).toBeLessThanOrEqual(box.width / 4);
-  expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
-  await inside(page, t);
-  await capture(page, info, 'rtl-1440');
-});
-
-test('shows a clean empty board and says what to do', async ({ page }) => {
-  const t = MESSAGES.en;
-  await serveTasksBoard(page);
-  await page.route('**/api/tasks?*', route => route.fulfill({ json: { tasks: [] } }));
-  await page.route('**/api/turns', route => route.fulfill({ json: { turns: [] } }));
-  await open(page, 'en', 1440);
-  await expect(board(page, t).getByText(t.tasks.board.noneActive)).toBeVisible();
-  const view = page.getByRole('group', { name: t.tasks.board.view });
-  await view.getByRole('radio', { name: t.tasks.board.views.releases }).check({ force: true });
-  await expect(board(page, t).getByText(t.tasks.board.nothingYet)).toBeVisible();
-  const found: Locator = board(page, t);
-  await page.getByRole('searchbox', { name: t.tasks.search }).fill('anything');
-  await expect(found.getByRole('status')).toHaveText(t.tasks.noSearchResults);
-});
-
-/* The cards Hornhoof kept for the person: a version marked in the code that released nothing, and a turn that is over. */
-test('shows the cards kept for the person inside the page, at a desk and on a phone, in every language and mirrored right to left', async ({ page }, info) => {
-  await serveTasksBoard(page);
-  const goal = TASKS.find(x => x.turn !== null && !x.parentId)!;
-  const kept = { taskId: goal.id, number: goal.number, kind: null, level: null, at: '2026-11-14T10:00:00.000Z' };
+  const top = TASKS.find(x => x.turn !== null && !x.parentId)!;
+  const kept = { taskId: top.id, number: top.number, kind: null, level: null, at: '2026-11-14T10:00:00.000Z' };
   const cards = [
     { ...kept, id: 'c1', about: 'release_tag', turn: { number: 24, version: null }, tag: { version: 'v1.7.0', why: 'unrecorded' } },
     { ...kept, id: 'c2', about: 'turn_summary', turn: { number: 23, version: 'v1.6.0' }, tag: null },
   ];
   await page.route('**/api/wait-cards', route => route.fulfill({ json: { cards, next: null } }));
-  const within = async (t: Messages) => {
-    const frame = (await page.getByRole('region', { name: t.tasks.waiting }).boundingBox())!;
-    for (const box of await page.locator('.wait-card, .wait-card button').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, right: r.right })))) {
-      expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
-      expect(box.right).toBeLessThanOrEqual(frame.x + frame.width + 1);
-    }
-  };
   for (const lang of LANGUAGES.map(l => l.id)) for (const width of [1440, 375]) {
     const t = MESSAGES[lang];
-    await open(page, lang, width);
+    await open(page, lang, width, '/tasks?show=waits');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(t.tracker.where.waits);
+    const waiting = page.getByRole('region', { name: t.tasks.waiting });
+    await expect(waiting).toContainText(QUESTION);
     await expect(page.getByRole('region', { name: t.tasks.cards.tagTitle })).toContainText(t.tasks.cards.tag('v1.7.0', 24, 'unrecorded'));
-    await expect(page.getByRole('region', { name: t.tasks.cards.summaryTitle(23) })).toContainText(t.tasks.cards.summary(23, 'v1.6.0', t.tasks.board.views.releases));
-    expect(await sideways(page), `${lang} ${width}`).toBeLessThanOrEqual(0);
-    await within(t);
-    await capture(page, info, `cards-${lang}-${width}`);
+    await expect(page.getByRole('region', { name: t.tasks.cards.summaryTitle(23) })).toContainText(t.tasks.cards.summary(23, 'v1.6.0', t.tracker.side.turns));
+    await inside(page, `waits ${lang} ${width}`);
+    await capture(page, info, `waits-${lang}-${width}`);
   }
-  await open(page, 'en', 375);
+  await open(page, 'en', 375, '/tasks?show=waits');
   await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
   const tag = page.getByRole('region', { name: MESSAGES.en.tasks.cards.tagTitle });
   /* Its edge line moves to the right, where the text starts. */
   expect(await tag.evaluate(el => getComputedStyle(el).borderRightWidth)).toBe('2px');
-  expect(await sideways(page)).toBeLessThanOrEqual(0);
-  await within(MESSAGES.en);
-  await capture(page, info, 'cards-rtl-375');
+  await inside(page, 'waits rtl');
+  await capture(page, info, 'waits-rtl-375');
+});
+
+test('says what to do when there is no work yet, and when a search finds nothing', async ({ page }) => {
+  const t = MESSAGES.en;
+  await serveTasksBoard(page);
+  await page.route('**/api/tasks?*', route => route.fulfill({ json: { tasks: [] } }));
+  await page.route('**/api/turns', route => route.fulfill({ json: { turns: [] } }));
+  await open(page, 'en', 1440, '/tasks');
+  await expect(page.getByText(t.tracker.noMine)).toBeVisible();
+  await page.getByRole('navigation', { name: t.tracker.side.label }).getByRole('button', { name: t.tracker.side.turns, exact: true }).click();
+  await expect(page.getByText(t.tasks.board.nothingYet)).toBeVisible();
+  await page.getByRole('searchbox', { name: t.tasks.search }).fill('anything');
+  await expect(page.locator('.tr-found').getByRole('status')).toHaveText(t.tasks.noSearchResults);
 });

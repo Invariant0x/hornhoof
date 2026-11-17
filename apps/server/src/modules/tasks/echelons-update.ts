@@ -4,11 +4,12 @@ import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { checkerFor, populateSecurityOwner } from './echelons-assign.js';
 import { checkedProducer, currentHanded } from './echelons-candidates.js';
-import { isStaged } from '@hornhoof/protocol/echelons';
+import { isStaged, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { changeRoute, checkedScopePaths, routeOf, type Route } from './echelons-store.js';
 import { CLOSED, note, published, refuse, type Task, type TaskChange, type Tx, type Wake } from './engine.js';
 import { turnkeyTeamOf, turnkeyWork } from './turnkey.js';
 import { openTurnOf, workOfOpenTurn } from './turn-department.js';
+import { futureOwner } from './echelons-future.js';
 
 export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, agentId: string): Promise<void> {
   const [actor] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
@@ -33,6 +34,7 @@ const changedPaths = (route: Route, change: TaskChange): string[] => checkedScop
 /* Work with no echelons is done by its holder alone and takes no stage, Cleanup or checker. It stays with a member of a
    turnkey team, as the team of who does a task is what takes it past the echelons. */
 async function turnkeyChange(ctx: Ctx, task: Task, route: Route, change: TaskChange): Promise<RouteChange> {
+  if (change.echelonStage) throw refuse(409, 'task_invalid', 'A turnkey task has no future echelon stage.');
   if (change.cleanup !== undefined) throw turnkeyWork(task);
   const paths = changedPaths(route, change);
   const ownerId = change.ownerAgentId ?? change.executor;
@@ -51,10 +53,29 @@ export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, age
     const producer = route.state.candidateId ? await checkedProducer(ctx.db, task, route, await currentHanded(ctx.db, task, route)) : null;
     state = await populateSecurityOwner(ctx.db, task, state, producer);
   }
+  if (change.echelonStage) return { ...await changedFutureOwner(ctx, task, route, state, change), paths };
   requireProducerChange(state, change.executor);
   const ownerId = change.ownerAgentId ?? change.executor;
   const owner = ownerId ? await changedOwner(ctx, task, route, state, ownerId, change.executor) : { state, set: {} };
   return { ...owner, paths };
+}
+
+function futureStep(state: Route['state'], stage: EchelonStage | undefined): Route['state']['stages'][number] {
+  const at = state.stages.findIndex(step => step.stage === state.stage);
+  const index = state.stages.findIndex(step => step.stage === stage);
+  const step = state.stages[index];
+  if (at < 0 || index <= at || step?.status !== 'pending') throw refuse(409, 'task_invalid', 'Only a future pending stage can be assigned in advance.');
+  return step;
+}
+
+async function changedFutureOwner(ctx: Ctx, task: Task, route: Route, state: Route['state'], change: TaskChange): Promise<Pick<RouteChange, 'state' | 'set'>> {
+  if (!change.ownerAgentId || change.executor) throw refuse(400, 'task_invalid', 'A future stage assignment needs ownerAgentId and cannot also change executor.');
+  const step = futureStep(state, change.echelonStage);
+  await requireAvailableOwner(ctx, task, change.ownerAgentId);
+  const ownerAgentId = await futureOwner(ctx, task, { ...route, state }, step.stage, change.ownerAgentId);
+  if (!ownerAgentId) throw refuse(409, 'task_invalid', 'The proposed future owner must be outside teams and have the required ability and known model capability.');
+  return { state: { ...state, stages: state.stages.map(item => item.stage === step.stage ? { ...item, ownerAgentId, reason: null } : item) },
+    set: step.stage === 'development' && !state.candidateId ? { executorAgentId: ownerAgentId } : {} };
 }
 
 function requireProducerChange(state: Route['state'], executor: TaskChange['executor']): void {

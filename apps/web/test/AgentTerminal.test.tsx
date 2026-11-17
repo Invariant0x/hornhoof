@@ -319,6 +319,16 @@ const socket = async () => {
   return FakeSocket.all.at(-1)!;
 };
 
+/* A note of the window stands at its foot, under the terminal and never over it (#1115): its words, and the note that
+   says them to a screen reader with the role it has. */
+async function note(says: string | RegExp, role: 'status' | 'alert' = 'status') {
+  const foot = await screen.findByRole('group', { name: 'Notes' });
+  const words = await within(foot).findByText(says);
+  expect(words.closest('.t-term')).toBeNull();
+  expect(words.closest('.t-note')).toHaveAttribute('role', role);
+  return words;
+}
+
 /* The view connects again after a pause of its own, 500 ms once a socket it had opened is lost; a fake clock lets that pause
    pass at once. lost: what closes the socket, and what the person does while the view is away. */
 function reconnects(lost: () => void) {
@@ -381,12 +391,12 @@ describe("an agent's live terminal in its window", () => {
     const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
     ws.opened();
     ws.program(false, true);
-    await waitFor(() => expect(terminal.getByRole('status')).toHaveTextContent("The Claude program sleeps until this agent's next task. Scroll up to see what it did."));
-    expect(terminal.queryByText('Opening the Claude terminal…')).not.toBeInTheDocument();
+    await note("The Claude program sleeps until this agent's next task. Scroll up to see what it did.");
+    expect(terminal.queryByRole('status')).not.toBeInTheDocument();
     /* A turn starts it: the loader shows until it is up. */
     ws.program(false);
     await waitFor(() => expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…'));
-    expect(terminal.queryByText(/sleeps until/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/sleeps until/)).not.toBeInTheDocument());
     ws.program(true);
     await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
   });
@@ -560,9 +570,7 @@ describe("an agent's live terminal in its window", () => {
     ['unknown_words', /Hornhoof could not tell who wrote/],
   ] as const)('says at once in the window why a turn could not open: %s', async (turnRefused, says) => {
     open(true, { turnRefused });
-    const why = await screen.findByText(says);
-    expect(why).toHaveClass('t-why');
-    expect(why).toBeVisible();
+    expect(await note(says)).toBeVisible();
   });
 
   it.each([
@@ -574,7 +582,7 @@ describe("an agent's live terminal in its window", () => {
     [{ machineDrain: { state: 'waiting', since: '2026-11-05T15:00:00Z', turnsLeft: 1, partsLeft: 0 } as const }, /finishing its work before an update/],
   ])('says what keeps the agent from answering: %j', async (state, says) => {
     open(true, state);
-    expect(await screen.findByText(says)).toHaveClass('t-why');
+    await note(says);
   });
 
   it('leaves the share of the plan out while the plan is at its limit', async () => {
@@ -688,7 +696,7 @@ describe("an agent's live terminal in its window", () => {
     terms[0]!.type('old\r');
     clock.mockReturnValue(now + 60_000);
     for (let i = 0; i < 300; i++) terms[0]!.type('k');
-    expect(await screen.findByText('Not sent: too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.')).toHaveAttribute('role', 'alert');
+    await note('Too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.', 'alert');
     ws.opened();
     clock.mockRestore();
     expect(ws.sent).toHaveLength(255);
@@ -1062,7 +1070,7 @@ describe("an agent's live terminal in its window", () => {
     expect(ws.sent).toEqual([{ type: 'input', data: 'hello\r' }]);
     term.type('/login');
     expect(ws.sent).toHaveLength(1);
-    expect(await screen.findByText("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.")).toHaveAttribute('role', 'alert');
+    await note("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.", 'alert');
     term.type('!rm');
     term.type('\x03');
     term.type('\x1b[A');
@@ -1071,7 +1079,9 @@ describe("an agent's live terminal in its window", () => {
     term.type('\x1b[I');
     term.type('\x1b[>0;276;0c');
     expect(ws.sent).toHaveLength(1);
-    expect(within(container.querySelector<HTMLElement>('.t-term')!).getAllByRole('alert')).toHaveLength(1);
+    /* One note says it, at the foot, however many keys were refused. */
+    expect(within(screen.getByRole('group', { name: 'Notes' })).getAllByRole('alert')).toHaveLength(1);
+    expect(within(container.querySelector<HTMLElement>('.t-term')!).queryAllByRole('alert')).toHaveLength(0);
   });
 
   it('shows a refusal the server sends when access changed', async () => {
@@ -1079,7 +1089,7 @@ describe("an agent's live terminal in its window", () => {
     const ws = await socket();
     act(() => ws.opened(false, true));
     ws.refused('message');
-    expect(await screen.findByText('You cannot write to this agent. Ask someone who has access to its department.')).toHaveAttribute('role', 'alert');
+    await note('You cannot write to this agent. Ask someone who has access to its department.', 'alert');
   });
 
   it('checks input kept during reconnect against the rights the new view grants', async () => {
@@ -1094,7 +1104,7 @@ describe("an agent's live terminal in its window", () => {
     expect(FakeSocket.all).toHaveLength(2);
     FakeSocket.all[1]!.opened(false, true);
     expect(FakeSocket.all[1]!.sent).toEqual([{ type: 'input', data: 'hello\r' }]);
-    expect(await screen.findByText("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.")).toHaveAttribute('role', 'alert');
+    await note("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.", 'alert');
   });
 });
 
@@ -1113,7 +1123,7 @@ describe('pictures directly in the live terminal', () => {
     act(() => ws.opened(false, true));
     fireEvent.paste(container.querySelector<HTMLElement>('.t-xterm')!, copied([png()]));
     await waitFor(() => expect(pictureUploads(calls)).toHaveLength(1));
-    expect(await screen.findByText('The file path is in the terminal. Press Enter to send it.')).toHaveAttribute('role', 'status');
+    await note('The file path is in the terminal. Press Enter to send it.');
     expect(ws.sent).toEqual([{ type: 'input', data: "'/home/agent/screen.png' " }]);
     expect(pictureUploads(calls)).toHaveLength(1);
   });
@@ -1152,7 +1162,7 @@ describe('pictures directly in the live terminal', () => {
     const ws = await socket();
     act(() => ws.opened(false, true));
     fireEvent.drop(container.querySelector<HTMLElement>('.t-xterm')!, dragged(png()));
-    expect(await screen.findByText('No access.')).toHaveAttribute('role', 'alert');
+    await note('No access.', 'alert');
     expect(ws.sent).toEqual([]);
   });
 });

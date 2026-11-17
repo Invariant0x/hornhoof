@@ -1,0 +1,28 @@
+{
+  "commit": "6e33b3a4d03c87fe81cf278ac12f7727fa59279e",
+  "cwd": ".",
+  "command": [
+    "npx",
+    "--no-install",
+    "eslint",
+    "apps/server/src/modules/conversation/decision-context.ts",
+    "apps/server/src/modules/departments/routes.ts",
+    "apps/server/src/modules/tools/approval-policy.ts",
+    "apps/server/src/modules/tools/department-control.ts",
+    "apps/server/test/approval-policy.test.ts",
+    "apps/server/test/decision-context.test.ts",
+    "apps/server/test/department-owner-control.test.ts",
+    "apps/server/test/head-department-control.test.ts",
+    "apps/server/test/prompt.test.ts",
+    "apps/web/e2e/approval-policy.config.ts",
+    "apps/web/e2e/approval-policy.spec.ts",
+    "apps/web/src/i18n/en.ts",
+    "apps/web/src/i18n/ru.ts",
+    "apps/web/src/ui/ApprovalPolicy.tsx",
+    "apps/web/test/ApprovalPolicy.test.tsx"
+  ],
+  "exit": 0,
+  "log": "lint.log",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

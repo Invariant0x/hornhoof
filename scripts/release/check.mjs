@@ -32,8 +32,24 @@ function checkTurn(project, supplied) {
   if (turn !== expected) throw new Error(`Release turn ${turn} differs from expected turn ${expected}.`);
 }
 
+/* No commit that goes to a turn branch or main names Claude as its co-author, in any case. Each such commit over origin/main is
+   named, so its author can word it again; what main already holds stays as it is. A clone that has no origin/main, as a shallow
+   one, has no range to read: the release check before main always has one. */
+const CLAUDE_CO_AUTHOR = /co-authored-by:\s*claude/i;
+function checkCoAuthors(project) {
+  try {
+    gitValue(project.root, ['rev-parse', '--verify', '--quiet', 'origin/main^{commit}']);
+  } catch {
+    return;
+  }
+  const log = gitValue(project.root, ['log', '--format=%H%x00%B%x1e', 'origin/main..HEAD']);
+  const signed = log.split('\x1e').map(entry => entry.trim().split('\0')).filter(([sha, message]) => sha && CLAUDE_CO_AUTHOR.test(message ?? '')).map(([sha]) => sha);
+  if (signed.length) throw new Error(`These commits name Claude as co-author, which no commit may: ${signed.join(', ')}. Word them again without that line.`);
+}
+
 export function checkRelease(project, options) {
   checkManifests(project);
+  checkCoAuthors(project);
   const section = changelogSections(project.root)[0];
   if (!(options.local && section?.version === 'Unreleased')) requireNotes(section, project.version);
   if (!options.local) {

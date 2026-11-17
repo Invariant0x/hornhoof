@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROLE_EFFORTS, TEMPLATE_KEYS, type RoleEffort, type TemplateKey } from '@hornhoof/protocol';
-import { ECHELON_STAGES, type EchelonStage } from '@hornhoof/protocol/echelons';
+import { ECHELON_STAGES, type EchelonOneShot, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Checker } from '../../checker.js';
@@ -13,8 +13,8 @@ export type Lang = { en: string; ru: string };
 export type SkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
 export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKind; body: string; hash: string; sources: string[]; grants: Grant[] };
 
-/* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, restarting a program, putting what to improve under Improvements, and writing to employees of other departments. */
-export const GRANTS = ['agents', 'failures', 'message_employee', 'restart_program', 'improvements'] as const;
+/* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, restarting a program, putting what to improve under Improvements, writing to employees of other departments, and keeping the department's goals, pipelines and task texts in the tracker. */
+export const GRANTS = ['agents', 'failures', 'message_employee', 'restart_program', 'improvements', 'tracker'] as const;
 export type Grant = (typeof GRANTS)[number];
 export type RoleSkill = { id: string; on: boolean; locked: boolean };
 /* How often, in minutes, an employee may wake on its timer, and how long its order may be; a role's timer keeps to them too. */
@@ -60,7 +60,8 @@ export type Role = {
 export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; description: Lang; turnkey: boolean; urgentOnly: boolean; members: { role: string; count: number }[]; skills: string[] };
 /* The stages a department's work goes through in a turn run in echelons, in their order, and the skill whoever checks
    at a stage must carry. */
-export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null }[] };
+/* oneShot: its owner runs the stage as one-shot calls, so many at once and a judge. */
+export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null; oneShot?: EchelonOneShot }[] };
 export type Templates = {
   roles: Map<string, Role>; skills: Map<string, Skill>; teams: Map<string, TeamTemplate>; echelons: Map<TemplateKey, StageRoute>;
   roster(key: TemplateKey): Role[]; teamsOf(key: TemplateKey): TeamTemplate[];
@@ -69,7 +70,7 @@ export type Templates = {
 };
 
 /* Every employee has these, locked on: what working in Hornhoof takes, whatever the department. */
-export const CORE_SKILLS = ['hh-hornhoof', 'hh-tasks', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-questions', 'hh-stay-in-scope', 'hh-run-checks', 'hh-web-pages', 'hh-tables'] as const;
+export const CORE_SKILLS = ['hh-hornhoof', 'hh-tasks', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-questions', 'hh-stay-in-scope', 'hh-run-checks', 'hh-web-pages', 'hh-tables', 'hh-one-shot-calls'] as const;
 /* Every member has these too, locked on. */
 export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
 /* Every head has these too, locked on; what a department knows comes with its own skills. */
@@ -253,7 +254,17 @@ function loadTeams(dir: string, roles: ReadonlyMap<string, Role>, skills: Readon
 const RouteHead = z
   .object({
     department: z.enum(TEMPLATE_KEYS),
-    stages: z.array(z.object({ stage: z.enum(ECHELON_STAGES), ability: z.string().optional() }).strict()).min(1),
+    stages: z
+      .array(
+        z
+          .object({
+            stage: z.enum(ECHELON_STAGES),
+            ability: z.string().optional(),
+            oneShot: z.object({ fanOut: z.number().int().min(1), judge: z.string().trim().min(1).optional() }).strict().optional(),
+          })
+          .strict(),
+      )
+      .min(1),
   })
   .strict();
 /* Whoever works at these stages makes the result; at every other stage somebody else checks it. */
@@ -270,7 +281,10 @@ function parseRouteFile(file: string, key: TemplateKey, skills: ReadonlyMap<stri
     if (MAKING.includes(step.stage) ? step.ability !== undefined : !step.ability) throw new Error(`${file}: ${step.stage} ${MAKING.includes(step.stage) ? 'takes no ability' : 'needs the ability of its checker'}.`);
     if (step.ability && !skills.has(step.ability)) throw new Error(`${file} names the skill ${step.ability}, which does not exist.`);
   }
-  return { department: key, stages: route.stages.map(step => ({ stage: step.stage, ability: step.ability ?? null })) };
+  return {
+    department: key,
+    stages: route.stages.map(step => ({ stage: step.stage, ability: step.ability ?? null, ...(step.oneShot ? { oneShot: { fanOut: step.oneShot.fanOut, judge: step.oneShot.judge ?? null } } : {}) })),
+  };
 }
 
 function loadRoutes(dir: string, skills: ReadonlyMap<string, Skill>): Map<TemplateKey, StageRoute> {

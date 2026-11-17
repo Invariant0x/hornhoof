@@ -12,8 +12,17 @@ describe('managed program snapshots', () => {
       .toEqual({ id: 'kimi', version: null, updating: true, failed: false });
   });
 
+  it('says a program that is installed again, or one that still does not start and why', () => {
+    expect(ProgramInfo.parse({ id: 'claude', version: '2.0.0', updating: false, failed: false, repair: 'reinstalling' }))
+      .toEqual({ id: 'claude', version: '2.0.0', updating: false, failed: false, repair: 'reinstalling' });
+    const reason = 'Error: claude native binary not installed.';
+    expect(ProgramInfo.parse({ id: 'claude', version: null, updating: false, failed: true, repair: 'broken', reason }))
+      .toEqual({ id: 'claude', version: null, updating: false, failed: true, repair: 'broken', reason });
+  });
+
   it.each([
     { id: 'other' }, { version: '' }, { version: 'x'.repeat(65) }, { version: 2 }, { updating: 'yes' }, { failed: null },
+    { repair: 'fixed' }, { repair: 'broken', reason: 'x'.repeat(401) },
   ])('rejects invalid program state %j', wrong => {
     expect(ProgramInfo.safeParse({ id: 'codex', version: '1.0.0', updating: false, failed: false, ...wrong }).success).toBe(false);
   });

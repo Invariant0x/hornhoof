@@ -94,8 +94,8 @@ describe('the agent roles', () => {
       'SELECT * FROM net_local.lease',
       'SELECT * FROM net.journal',
       `INSERT INTO net.journal (xact, tbl, op, key, cols) VALUES (gen_random_uuid(), 'x', 'insert', '{}', '{}')`,
-      'SELECT * FROM applied',
-      'SELECT * FROM tool_calls',
+      'DELETE FROM applied',
+      'DELETE FROM tool_calls',
       'SELECT net.attach_journal()',
       'SELECT pg_cancel_backend(1)',
       `SELECT lo_from_bytea(0, '\\x00')`,
@@ -104,6 +104,8 @@ describe('the agent roles', () => {
       `SELECT ts_rewrite('x'::tsquery, 'SELECT ''x''::tsquery, ''y''::tsquery')`,
     ];
     for (const text of denied) expect(await failureOf(agents.run(text, 'write')), text).toMatchObject({ code: DENIED });
+    /* The orchestrator reads where changes came from, column by column, and changes none of it. */
+    for (const text of ['SELECT * FROM applied', 'SELECT * FROM tool_calls']) await expect(agents.run(text, 'write'), text).resolves.toHaveLength(1);
     await expect(agents.run(`SELECT net.assert_lease('2 s', NULL)`, 'write')).resolves.toHaveLength(1);
     expect(await failureOf(agents.run(`SELECT net.assert_lease('2 s', NULL)`, 'read'))).toMatchObject({ code: DENIED });
   });
