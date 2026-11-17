@@ -60,7 +60,7 @@ npx tsc -p apps/node/tsconfig.json --noEmit
 
 `npm run lint` gives each part its own eslint process. To lint one part, run `npm run build -w @hornhoof/protocol` and `npm run lint:part -w apps/server`. The server is linted in five runs, one after another, since its sources and tests together need more memory than one run has; the runs stop at the first that finds something, and an option added after `--` reaches only the last of them, so to fix or filter name the files to `npx eslint` yourself. Avoid `npx eslint` over the whole repository: eslint keeps the types of every part in memory until it exits, and together they need more than the 2 GB node allows by default on a machine with less than 15 GB of memory.
 
-Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
+Run `tsc` for each part you changed. `tsc` is TypeScript 7 (`@typescript/native` in the root `package.json`), several times faster than 5.9; the `typescript` package stays 5.9, since typescript-eslint and the node read its API, which TypeScript 7 does not have yet. The checks with tests (each `tsconfig.eslint.json` and `apps/web/tsconfig.json`) keep what they found in `node_modules/.cache/tsc`, so a part nothing changed in takes under a second. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
 
 `npm run test:real` needs Docker and runs the tests against Pebble and against Postgres 17.11, the image compose's `db` runs.
 
