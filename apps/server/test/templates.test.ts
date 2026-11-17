@@ -31,6 +31,12 @@ describe('templates', () => {
     }
   });
 
+  it('loads the connected phone procedure for Operations', () => {
+    expect(templates.roles.get('OPS-HEAD')!.skills).toContainEqual({ id: 'ops-phone-readiness', on: true, locked: true });
+    expect(templates.roles.get('OPS-FIX')!.skills).toContainEqual({ id: 'ops-phone-readiness', on: true, locked: true });
+    expect(templates.skills.get('ops-phone-readiness')?.body).toMatch(/Company phones[\s\S]*after an update/);
+  });
+
   it('keeps role identities to one sentence and procedure-free across every department', () => {
     for (const role of roles) {
       expect(role.body, role.id).toMatch(/^You are [^\n.!?]+\.$/);
@@ -382,7 +388,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(186);
+    expect(skills).toHaveLength(187);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);

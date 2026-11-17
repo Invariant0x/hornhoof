@@ -228,6 +228,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/ops-intake.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-mcp-config-review.md` | Written for Hornhoof | affaan-m/ECC skills/mcp-dependency-review/SKILL.md | Hornhoof |
 | `skills/ops-node-health.md` | Written for Hornhoof | affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
+| `skills/ops-phone-readiness.md` | Written for Hornhoof | Hornhoof's own procedure for checking and restoring connected phone settings | Hornhoof |
 | `skills/ops-postmortem.md` | Written for Hornhoof | wshobson/agents plugins/incident-response/skills/postmortem-writing/SKILL.md | Hornhoof |
 | `skills/ops-program-operator.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-runbook.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/runbook/SKILL.md | Hornhoof |

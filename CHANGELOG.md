@@ -12,6 +12,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 ### Added
 - The orchestrator greets new people with practical offers for their starter kit, including Telegram and a personal assistant, and starts the work they pick.
 - Everyone can write to the orchestrator from the company Telegram bot or through their personal assistant.
+- Connected company phones have their working settings restored automatically, and Machines shows anything that still needs attention.
 - People and agents can set task priority, which appears on the task card and orders tasks within each list group.
 - The map uses squares for employees, diamonds for generalists and ghost outlines for one-shot calls, with a legend for all three.
 - Declared one-shot stages show their places before a call begins and distinguish running calls from waiting calls.

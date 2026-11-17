@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LANGUAGES, LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Machines } from '../src/screens/Machines';
@@ -43,6 +43,17 @@ const meter = (node: HTMLElement, label: string) => within(node).getByText(label
 const fact = (within_: HTMLElement, label: string) => within(within_).getByText(label, { selector: 'dt' }).nextElementSibling?.textContent;
 
 afterEach(() => localStorage.clear());
+
+it.each(LANGUAGES)('shows phone settings that need attention in $name', async ({ id }) => {
+  localStorage.setItem('hh-lang', id);
+  const words = { en, ru }[id].phones;
+  lists({ 'GET /api/phones': [200, { phones: [{ id: 'p1', name: 'Phone', owner: { id: ME.person.id, name: ME.person.name }, machineId: MACHINES[0]!.id, lending: true, online: true, state: 'available', queued: 0, stopping: false, readiness: ['lock'] }] }] });
+  render(<LanguageProvider><Machines me={ME} onHome={() => {}} /></LanguageProvider>);
+  const phones = await screen.findByRole('region', { name: words.heading });
+  const phone = await within(phones).findByRole('article', { name: 'Phone' });
+  expect(within(phone).getByText(words.readiness.lock)).toBeInTheDocument();
+  expect(within(phone).queryByText(words.readiness.brightness)).not.toBeInTheDocument();
+});
 
 const DAY = 24 * 3600_000;
 const endsIn = (days: number) => new Date(Date.now() + days * DAY).toISOString();

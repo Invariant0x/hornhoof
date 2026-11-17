@@ -18,7 +18,7 @@ import { FileOutcome, KeptFiles, RepositoryScope, RuntimeCapability, ProductComm
 import { HarnessSynced } from './harness.js';
 export { HarnessClaim, HarnessDone, HarnessFailed, HarnessSynced, HarnessUnit } from './harness.js';
 export * from './phones.js';
-import { PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
+import { PhoneProbe, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke, PhoneReply, PhoneFrame } from './phones.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { API_PROTOCOLS, PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
@@ -509,6 +509,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     models: Models.optional(),
     terminals: z.boolean().optional(),
     phones: z.boolean().optional(),
+    phoneBaseline: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
@@ -729,7 +730,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
-  CheckQueueReply, PhoneProbe, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
+  CheckQueueReply, PhoneProbe, PhoneBaseline, PhoneOpen, PhoneAction, PhoneRenew, PhoneRevoke,
   z.object({
     type: z.literal('job.run'),
     jobId: Id,
