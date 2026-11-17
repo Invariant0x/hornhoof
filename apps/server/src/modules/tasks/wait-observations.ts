@@ -7,7 +7,7 @@ import { CLOSED, openAfter, type Task } from './engine.js';
 import { waitingCycles } from './wait-graph.js';
 import { workOfOpenTurn } from './turn-department.js';
 
-export const QUIET_DEPARTMENT_MS = 15 * 60_000;
+const QUIET_DEPARTMENT_MS = 15 * 60_000;
 export const waitKey = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const taskVersions = (rows: Task[]) => rows.map(t => ({ id: t.id, version: t.version })).sort((a, b) => a.id.localeCompare(b.id));
 

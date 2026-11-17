@@ -34,6 +34,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - External messaging keeps each sentence in its own direction in right-to-left languages.
 - A node that waits for an update takes no new turns, so it updates as soon as the turns it runs end.
 - A session between machines stays open while bytes arrive and ends after 30 s of silence, so slow links keep copies.
+- A program that slept starts again for the next turn instead of waiting on turns from its old log.
+- Right-to-left: isolated phrases follow their block's alignment, and short sentences keep their period at the end.
 
 ### Added
 
@@ -53,6 +55,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An owner watches a lent phone's live screen and takes it back with Stop; a task keeps its phone recordings.
 - Each channel of a department to its contacts takes an address, with the person's consent to its purpose.
 - Who runs a department sees its channels' addresses and takes back consent on the web, logged without the address.
+- Each file in a `reply` comes with a link its owner opens on a phone for 7 days, with no sign-in.
+- Agents and assistants give files of any size; one over 50 MB stays 30 days on the disk of the machine that took it.
+- Such a file is outside copies and backups and is lost with its machine; the task card and the chat say so by name.
+- The orchestrator finds and calls any Hornhoof tool with `find_tool` and `use_tool`, and any route with `api`.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 
 ### Changed
@@ -83,6 +89,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `NODE_DRAIN_MS` and `NODE_UPDATE_RETRY_MS` are gone.
 - Type checks run TypeScript 7, several times faster; the `typescript` package stays 5.9 for its API.
 - A turnkey task's independent parts run in parallel with the program's helpers, and heavy checks run one at a time.
+- `hh-attach` and `hh-fetch` pass a file through the node as it is read, so a big file needs the new node.
+- The orchestrator acting for the owner is refused nothing the CEO or an employee may do; heads keep their limits.
 - The build's types and release checks get 4096 MB of memory instead of 2048, so they no longer run out of it.
 
 ## [0.29.2] - 2026-11-16

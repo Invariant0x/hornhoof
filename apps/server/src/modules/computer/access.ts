@@ -6,7 +6,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
-import type { Person } from '../../auth/session.js';
+import { viaOrchestrator, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { computerRuns, machineAccess, machines, people, personKeys, type MachineRole } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
@@ -16,7 +16,7 @@ import { readGrant, type Grant } from './grant.js';
 import { keyPrint } from './owner-key.js';
 
 /* How long one click keeps access to a machine open where no grant says so: the server's own machine with no key. */
-export const ACCESS_MS = 24 * 60 * 60 * 1000;
+const ACCESS_MS = 24 * 60 * 60 * 1000;
 /* A command runs this many seconds unless the orchestrator gives its own time, never longer than the most. */
 export const RUN_DEFAULT_S = 300;
 export const RUN_MAX_S = 1800;
@@ -25,7 +25,7 @@ export const WAIT_MS = 45_000;
 /* A machine is reachable when its keeper asked, with its updater alive, within this. */
 export const SEEN_MS = 60_000;
 /* Commands that ended, and ones that were lost, go after this long. */
-export const RUN_KEEP_MS = 24 * 3_600_000;
+const RUN_KEEP_MS = 24 * 3_600_000;
 /* A command its keeper took and does not hold this long after is lost: what it did is not known. */
 export const HELD_GRACE_S = 30;
 /* A command its keeper holds past the time it was given, and this much more, is lost all the same: its updater would
@@ -36,7 +36,7 @@ export const WAITING_MS = 10 * 60_000;
 /* How often the commands of long ago are cleared away. */
 const CLEAR_EVERY_MS = 3_600_000;
 /* The end of a command's output that is kept. */
-export const OUTPUT_MAX = 30_000;
+const OUTPUT_MAX = 30_000;
 /* What an app from before access was per machine left in the control folder, set aside until this app leads. */
 export const LEGACY_FILE = 'computer.legacy.json';
 const POLL_MS = 250;
@@ -50,7 +50,7 @@ export type Asked = { reason: string; at: string };
 export type AccessMachine = { id: string; networkId: string; name: string; hostname: string; personId: string; role: MachineRole | null; os: 'linux' | 'darwin' | null; data: boolean };
 /* not_needed: the server's own machine while its keeper holds no key, which takes the app's word. held: the machine
    holds the key its owner has now. not_held: it holds none, or another, so nothing its owner signs opens it. */
-export type KeyState = 'not_needed' | 'held' | 'not_held';
+type KeyState = 'not_needed' | 'held' | 'not_held';
 export type AccessState = { machine: AccessMachine; reachable: boolean; until: string | null; asked: Asked | null; key: KeyState };
 export type AccessView = AccessState & { canOpen: boolean; canClose: boolean };
 export type RunResult = { exit: number; output: string };
@@ -60,20 +60,21 @@ export type Waited = RunResult | 'running' | 'gone' | 'lost';
 export type Taken = { access: { untilSec: number; until: string; grant: Grant | null } | null; runs: { id: string; command: string; timeout: number }[]; forget: string[] };
 
 type Row = typeof machines.$inferSelect;
-type Opener = Pick<Person, 'id' | 'companyId' | 'status' | 'scopeKind' | 'isOwner' | 'isCeoDelegate' | 'via'>;
+type Opener = Pick<Person, 'id' | 'companyId' | 'status' | 'scopeKind' | 'isOwner' | 'isCeoDelegate' | 'via' | 'viaHead'>;
 
-/* People who see the whole company see each machine's access from their own screens: never the orchestrator acting for
-   the CEO. */
-export const canViewComputer = (me: { scopeKind: string; via?: string }): boolean => me.scopeKind === 'company' && !me.via;
+/* People who see the whole company see each machine's access from their own screens, and the orchestrator acting for the
+   CEO: never a head. */
+export const canViewComputer = (me: { scopeKind: string; viaHead?: true }): boolean => me.scopeKind === 'company' && !me.viaHead;
 
-/* A machine's owner opens it, on their own screen, and nobody else: not the CEO on another person's machine, and not
-   the orchestrator acting for anyone. The server's own machine while it needs no key is the company's, as before
-   machines had keys: the CEO, who owns it, or the CEO delegate opens it. */
+/* A machine's owner opens it, on their own screen, and the orchestrator, which acts as anyone; nobody else: not the CEO on
+   another person's machine, and not a head. The server's own machine while it needs no key is the company's, as before
+   machines had keys: the CEO, who owns it, or the CEO delegate opens it. A machine that needs a key opens only with its
+   owner's signature all the same. */
 export const canOpen = (me: Opener, machine: { personId: string }, key: KeyState): boolean =>
-  !me.via && me.status === 'active' && (me.id === machine.personId || (key === 'not_needed' && actsAsCeo(me)));
+  viaOrchestrator(me) || (!me.via && me.status === 'active' && (me.id === machine.personId || (key === 'not_needed' && actsAsCeo(me))));
 
-/* Closing takes power away, so the CEO and the CEO delegate close any machine besides its owner. */
-export const canClose = (me: Opener, machine: { personId: string }): boolean => !me.via && me.status === 'active' && (me.id === machine.personId || actsAsCeo(me));
+/* Closing takes power away, so the CEO, the CEO delegate and the orchestrator close any machine besides its owner. */
+export const canClose = (me: Opener, machine: { personId: string }): boolean => viaOrchestrator(me) || (!me.via && me.status === 'active' && (me.id === machine.personId || actsAsCeo(me)));
 
 /* What a line in the log says of the machine, when it is known. */
 export const onMachine = (machine: string | null): Record<string, string> => (machine ? { machine } : {});
@@ -264,7 +265,7 @@ export class Computers {
       if (!row) throw noCore();
       const machine = this.machineOf(row);
       const [ownerKey] = await tx.select(only(personKeys, 'publicKey')).from(personKeys).where(eq(personKeys.personId, row.personId));
-      const opener = person ? { ...person, via: me.via } : null;
+      const opener = person ? { ...person, via: me.via, viaHead: me.viaHead } : null;
       if (!opener || !canOpen(opener, machine, this.keyOf(row, ownerKey?.publicKey))) throw notOwner(machine.name);
       if (!this.reachable(machineId)) throw unreachable(machine.name);
       const now = this.now();

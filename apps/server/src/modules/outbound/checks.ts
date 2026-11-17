@@ -115,7 +115,7 @@ const valueOf = <K extends CatalogValue['kind']>(source: Source, kind: K): Extra
 export { valueOf as catalogValue };
 
 type PriceAt = { place: Place; now: Date; locale: string };
-export type PriceChecked = { ok: true; money: Money; terms: Source | null; sources: Source[] } | { ok: false; reasonCodes: GateCode[] };
+type PriceChecked = { ok: true; money: Money; terms: Source | null; sources: Source[] } | { ok: false; reasonCodes: GateCode[] };
 const refused = (code: GateCode): PriceChecked => ({ ok: false, reasonCodes: [code] });
 
 const priceInTime = (price: PriceValue, now: Date): boolean => Date.parse(price.validFrom) <= now.getTime() && (price.validUntil === null || now.getTime() < Date.parse(price.validUntil));

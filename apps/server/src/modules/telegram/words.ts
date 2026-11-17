@@ -1,3 +1,5 @@
+import { LINK_DAYS } from '../assistants/files.js';
+
 /* What a bot says on its own, in the language of the person's Telegram: Russian for Russian, English for everyone else. */
 export type BotLang = 'en' | 'ru';
 
@@ -15,6 +17,7 @@ export const WORDS = {
     unreadable: 'I cannot read this kind of message. Send words, a file, a photo, a video or a voice message.',
     fileLost: (name: string) => `${name} did not come through. Send it again in a little while.`,
     fileTooBig: (name: string, limit: number) => `${name} is too big: a bot gets files of up to ${limit} MB from Telegram. Send it as a link, or in parts.`,
+    bigFile: (name: string, url: string) => `${name} is a big file: it lives 30 days on one machine and is lost if that machine goes. Its link downloads it for ${LINK_DAYS} days: ${url}`,
     noRoom: (name: string) => `${name} did not come through: Hornhoof has no room left for the company's files. Ask the company's owner about it.`,
     notReady: (agent: string) => `${agent} cannot answer right now. Open Hornhoof to see why, or write again later.`,
     failed: 'Your message did not go through. Please write it again in a little while.',
@@ -28,6 +31,7 @@ export const WORDS = {
     unreadable: 'Такое сообщение я прочитать не могу. Пришлите текст, файл, фото, видео или голосовое.',
     fileLost: (name: string) => `Файл ${name} не дошел. Пришлите его, пожалуйста, еще раз чуть позже.`,
     fileTooBig: (name: string, limit: number) => `Файл ${name} слишком большой: бот получает из Telegram файлы до ${limit} МБ. Пришлите ссылку или разбейте на части.`,
+    bigFile: (name: string, url: string) => `Файл ${name} большой: он хранится 30 дней на одной машине и пропадет, если этой машины не станет. По ссылке его можно скачать ${LINK_DAYS} дней: ${url}`,
     noRoom: (name: string) => `Файл ${name} не дошел: в Hornhoof закончилось место для файлов компании. Спросите об этом владельца компании.`,
     notReady: (agent: string) => `${agent} сейчас не может ответить. Откройте Hornhoof, чтобы узнать почему, или напишите позже.`,
     failed: 'Ваше сообщение не дошло. Напишите его, пожалуйста, еще раз чуть позже.',
