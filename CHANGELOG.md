@@ -27,6 +27,9 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A plan's sign-in note says why a sign-in ended early, with the program's exit code and last line.
 - A check whose machine check slot ends stops with all of its processes before the slot goes to the next check, and fails with 128 plus the signal instead of passing.
 - Letters taken into an agent's turn that failed go back to its inbox unread, unless its program had already worked in that turn.
+- Every employee reaches the orchestrator with `message_employee`, with no false `recipient_unknown`, and a message to a person's own assistant is refused with that reason and a word to write to the orchestrator.
+- A message about a task closed moments ago is delivered, naming the task and waking no work on it, instead of being refused with `task_invalid`.
+- A turn that ends before its program starts holds the agent's next turns in one case for the program operator instead of failing them one after another, and a node that cannot write its work folder takes no turns until a write works again.
 
 ### Added
 
@@ -71,6 +74,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - `release_turn` names the version tag of the department's own repository that the next version follows, and a version scheme tied to turn numbers belongs only to the repository it was approved for.
 - Agents' commits never name Claude as co-author, and the release check stops a commit that does before it reaches a turn or main.
 - Agents write a path they delete as "${VAR:?}" or literally, so Claude Code's own check does not stop the command for a person's approval.
+- The README shows release 0.32.0, with moving pictures of the tracker, one-shot calls and skins, and the ways of working with an example each.
 - The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
 - A company or department notebook takes any number of notes and characters; each note is still 300 characters at most, and an agent's instructions carry as much of the notebook as its program reads and say where they cut it.
 - An agent's waiting messages and its unread inbox come to it in one turn, and turns that waited for a busy machine go as soon as it has room for them.
