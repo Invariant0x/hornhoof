@@ -354,3 +354,31 @@ for (const width of [375, 1280]) {
     }
   }
 }
+
+/* The checks above count every failed request as an error of the card, except the page ending its own stream. Here the
+   page ends a stream the fixture holds, at a moment the test chooses, and a stream the server refuses must still count. */
+test('the page ending its stream is no error of the card, a refused stream is', async ({ page }) => {
+  const state = freshState();
+  const errors: string[] = [];
+  const isStream = (url: string) => new URL(url).pathname === '/api/stream';
+  const held = () => state.apiRequests.filter(request => request.path === '/api/stream').length;
+  await openFixture(page, 1280, 'light', state, errors);
+  await openCard(page, 'en', await messagesFor('en'));
+
+  const before = held();
+  const opening = page.waitForRequest(request => isStream(request.url()));
+  await page.evaluate(() => { Object.assign(window, { ownStream: new EventSource('/api/stream') }); });
+  const own = await opening;
+  await expect.poll(held).toBe(before + 1);
+  const ended = page.waitForEvent('requestfailed', request => request === own);
+  await page.evaluate(() => (window as unknown as { ownStream: EventSource }).ownStream.close());
+  await ended;
+  expect(errors).toEqual([]);
+
+  await page.route('**/api/stream', route => route.abort('connectionrefused'));
+  const refusing = page.waitForEvent('requestfailed', request => isStream(request.url()));
+  await page.evaluate(() => { Object.assign(window, { refusedStream: new EventSource('/api/stream') }); });
+  const refused = await refusing;
+  await page.evaluate(() => (window as unknown as { refusedStream: EventSource }).refusedStream.close());
+  expect(errors).toContain(`GET ${refused.url()}: ${refused.failure()?.errorText ?? 'Unknown failure'}`);
+});
