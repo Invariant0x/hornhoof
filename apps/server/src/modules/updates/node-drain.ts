@@ -2,14 +2,16 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MachineDrain, type NodeWait } from '@hornhoof/protocol';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
+import { and, eq, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { nodes } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { identityOfKey, keyOf, ownBuiltin, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
 import { hasLiveDrainWork } from './drain-live.js';
-import { drainPostponed, drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
+import { drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
 
 /* heldAt: when this hold of the node began. A wait saved before this began when the server read it. */
 const Saved = z.object({ key: z.string(), boot: z.string().nullable(), view: MachineDrain, touched: z.number(), heldAt: z.number().default(() => Date.now()) });
@@ -20,17 +22,17 @@ const states = new WeakMap<Ctx['config'], NodeDrains>();
 /* An installer that disappeared must not hold a node forever. Restarting gets longer for image/container startup. */
 const REQUEST_LEASE_MS = 2 * 60_000;
 const RESTART_LEASE_MS = 10 * 60_000;
-
-/* Since when the orchestrator and the heads wait for a held node: a wait from when this hold began, a restart from when an
-   updater was told the node is free. So the limit starts over with a restart, whose stop begins long before it. */
-const limitFrom = (record: Saved): number => (record.view.state === 'restarting' ? Date.parse(record.view.since) : record.heldAt);
+/* How often the server looks at the nodes that wait. */
+const ROUND_MS = 1000;
 
 class NodeDrains {
   private readonly records = new Map<string, Saved>();
   private readonly boots = new Map<string, string>();
   private readonly pending = new Map<string, Promise<void>>();
-  /* The nodes whose hold ran past what the orchestrator and the heads wait, for which they were woken. */
+  /* The nodes whose restart ran past what the orchestrator and the heads wait, for which they were woken. */
   private readonly woken = new Set<string>();
+  /* The last write of the nodes' records, which the next one follows. */
+  private recorded: Promise<void> = Promise.resolve();
   private readonly path: string;
 
   constructor(private readonly ctx: Ctx) {
@@ -64,8 +66,10 @@ class NodeDrains {
     return record ? this.overHold(record) : false;
   }
 
+  /* A node that waits for an update takes no turn of theirs, however long it waits. One an updater was told is free
+     restarts within the limit, from when it was told; past it, see nodeHeldFrom. */
   private overHold(record: Saved): boolean {
-    return record.view.state !== 'postponed' && Date.now() - limitFrom(record) >= this.ctx.config.nodeLeaderHoldMs;
+    return record.view.state === 'restarting' && Date.now() - Date.parse(record.view.since) >= this.ctx.config.nodeLeaderHoldMs;
   }
 
   async request(node: NodeIdentity): Promise<MachineDrain> {
@@ -73,10 +77,11 @@ class NodeDrains {
     const at = Date.now();
     let record = this.records.get(key);
     if (!record) {
-      record = { key, boot: this.boots.get(key) ?? null, view: { state: 'waiting', turnsLeft: 0, partsLeft: 0, until: new Date(at + this.ctx.config.nodeDrainMs).toISOString() }, touched: at, heldAt: at };
+      record = { key, boot: this.boots.get(key) ?? null, view: { state: 'waiting', turnsLeft: 0, partsLeft: 0, since: new Date(at).toISOString() }, touched: at, heldAt: at };
       this.records.set(key, record);
       try { this.save(); }
       catch (err) { this.records.delete(key); throw err; }
+      this.record();
     }
     record.touched = at;
     await this.check(record, true);
@@ -94,6 +99,7 @@ class NodeDrains {
     if (!this.records.delete(keyOf(node))) return;
     this.woken.delete(keyOf(node));
     this.save();
+    this.record();
     this.wake();
   }
 
@@ -106,7 +112,7 @@ class NodeDrains {
     }
   }
 
-  /* Once, at the limit: nothing else starts the turns of the orchestrator and the heads that the node kept waiting. */
+  /* Once, at the limit: nothing else starts the turns of the orchestrator and the heads that the restart kept waiting. */
   private wakeLeaders(record: Saved): void {
     if (this.woken.has(record.key) || !this.overHold(record)) return;
     this.woken.add(record.key);
@@ -123,39 +129,17 @@ class NodeDrains {
   }
 
   private async advance(record: Saved, asked: boolean): Promise<void> {
-    if (this.records.get(record.key) !== record || record.view.state === 'restarting') return;
+    if (this.records.get(record.key) !== record || record.view.state !== 'waiting') return;
     const now = Date.now();
-    if (record.view.state === 'postponed') {
-      if (Date.parse(record.view.retryAt) > now) return;
-      record.view = { state: 'waiting', turnsLeft: 0, partsLeft: 0, until: new Date(now + this.ctx.config.nodeDrainMs).toISOString() };
-      record.heldAt = now;
-      this.woken.delete(record.key);
-      this.save();
-    }
-    const node = this.nodeOf(record.key);
-    const found = await this.workOf(record, node, now);
+    const found = await this.workOf(record, this.nodeOf(record.key), now);
     if (!found) return;
     const { work, live } = found;
-    const counts = { turnsLeft: work.turnsLeft, partsLeft: work.partsLeft };
-    /* A node restarts only for an updater told it is free. Until one asks, the node waits with nothing left on it, so the
-       orchestrator and the heads come back past their limit and the hold ends with the lease of a wait: an updater that
-       went away never restarts it. */
-    if (!live) {
-      record.view = asked ? { state: 'restarting', since: new Date(now).toISOString() } : { ...record.view, turnsLeft: 0, partsLeft: 0 };
-      if (asked) this.woken.delete(record.key);
-      this.save();
-      return;
-    }
-    if (Date.parse(record.view.until) > now) {
-      record.view = { ...record.view, ...counts };
-      this.save();
-      return;
-    }
-    const retryAt = new Date(now + this.ctx.config.nodeUpdateRetryMs).toISOString();
-    record.view = { state: 'postponed', ...counts, retryAt };
+    /* A node restarts only for an updater told it is free. Until one asks, the node waits with nothing left on it, and the
+       hold ends with the lease of a wait: an updater that went away never restarts it. However long its work runs, the
+       node takes no new turn meanwhile, so it ends. */
+    if (!live) record.view = asked ? { state: 'restarting', since: new Date(now).toISOString() } : { ...record.view, turnsLeft: 0, partsLeft: 0 };
+    else record.view = { ...record.view, turnsLeft: work.turnsLeft, partsLeft: work.partsLeft };
     this.save();
-    this.wake();
-    await drainPostponed(this.ctx, node, retryAt, work);
   }
 
   /* The work that holds the node and whether any of it is live, or null when this hold ended meanwhile. */
@@ -173,8 +157,25 @@ class NodeDrains {
     renameSync(next, this.path);
   }
 
+  /* In the record of each node, since when it waits for an update: the database says why a node is not updated yet. Each
+     write sets them all as they are when it runs, after the one before, so the last one stands. A built-in node has no
+     record; the screens say it. */
+  record(): void {
+    this.recorded = this.recorded.then(() => this.writeRecords()).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not record which nodes wait for an update.'));
+  }
+
+  private async writeRecords(): Promise<void> {
+    const waits = [...this.records.values()].flatMap(r => {
+      const node = this.nodeOf(r.key);
+      return node.kind === 'node' ? [{ id: node.nodeId, since: new Date(r.heldAt) }] : [];
+    });
+    const others = waits.length ? notInArray(nodes.id, waits.map(w => w.id)) : undefined;
+    await this.ctx.db.update(nodes).set({ updateWaitSince: null }).where(and(isNotNull(nodes.updateWaitSince), others));
+    for (const { id, since } of waits) await this.ctx.db.update(nodes).set({ updateWaitSince: since }).where(and(eq(nodes.id, id), or(isNull(nodes.updateWaitSince), ne(nodes.updateWaitSince, since))));
+  }
+
   private wake(): void {
-    void Promise.all([pumpWaiting(this.ctx), pumpTests(this.ctx)]).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not resume work after postponing an update.'));
+    void Promise.all([pumpWaiting(this.ctx), pumpTests(this.ctx)]).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not resume work after a node stopped waiting for an update.'));
   }
 }
 
@@ -185,7 +186,9 @@ export function startNodeDrains(ctx: Ctx): void {
   let timer: NodeJS.Timeout | null = null;
   ctx.mode.whenLead(
     () => {
-      timer = setInterval(() => drains.tick(), Math.min(1000, ctx.config.nodeDrainMs, ctx.config.nodeUpdateRetryMs));
+      /* The records may say less or more than the file, as after a damaged one: they follow it. */
+      drains.record();
+      timer = setInterval(() => drains.tick(), ROUND_MS);
       timer.unref();
     },
     () => {
@@ -196,25 +199,22 @@ export function startNodeDrains(ctx: Ctx): void {
 }
 
 export const nodeDrain = (ctx: Ctx, node: NodeIdentity): MachineDrain | null => states.get(ctx.config)?.view(node) ?? null;
-export const nodeHeld = (ctx: Ctx, node: NodeIdentity): boolean => {
-  const state = nodeDrain(ctx, node)?.state;
-  return state === 'waiting' || state === 'restarting';
-};
-/* Whether the node has held new turns for longer than the orchestrator and the heads wait. */
+/* Whether the node waits for an update: it takes no new turn and no test part. */
+export const nodeHeld = (ctx: Ctx, node: NodeIdentity): boolean => nodeDrain(ctx, node) !== null;
+/* Whether the node restarts for longer than the orchestrator and the heads wait, since an updater was told it is free. */
 export const nodeHeldLong = (ctx: Ctx, node: NodeIdentity): boolean => states.get(ctx.config)?.heldLong(node) ?? false;
-/* Whether a new turn of this role stays off the node. A program operator's goes in while the node waits, since a program
-   there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer. So does the
-   orchestrator's or a head's past the limit: nothing else can take it, the company waits for it, and the work that runs on
-   the node goes on either way. A node that restarts takes nothing once its stop began: a node closes its link as it
-   stops, and one that comes back with a new boot ends the restart in its hello. While its link is ready, its stop has not
-   begun, as when the updater told it is free went away: the orchestrator and the heads come in past the limit then too. */
+/* Whether a new turn of this role stays off the node. While the node waits, only a program operator's goes in, since a
+   program there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer.
+   Every other turn, the orchestrator's and the heads' too, goes to another node or waits for this one to come back, so
+   the work on it ends however long it runs. A node that restarts takes nothing once its stop began: a node closes its
+   link as it stops, and one that comes back with a new boot ends the restart in its hello. While its link is ready, its
+   stop has not begun, as when the updater told it is free went away: the orchestrator and the heads come in past the
+   limit then. */
 export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader = false): boolean => {
   const state = nodeDrain(ctx, node)?.state;
-  if (state === 'waiting') return !entersWaitingNode(ctx, node, role, leader);
+  if (state === 'waiting') return role !== PROGRAM_OPERATOR_ROLE;
   return state === 'restarting' && !(leader && ctx.hub.isReady(node) && nodeHeldLong(ctx, node));
 };
-const entersWaitingNode = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader: boolean): boolean =>
-  role === PROGRAM_OPERATOR_ROLE || (leader && nodeHeldLong(ctx, node));
 export const requestNodeDrain = (ctx: Ctx, node: NodeIdentity): Promise<MachineDrain> => states.get(ctx.config)!.request(node);
 export const cancelNodeDrain = (ctx: Ctx, node: NodeIdentity): void => states.get(ctx.config)?.cancel(node);
 export const nodeDrainHello = (ctx: Ctx, node: NodeIdentity, boot: string | undefined): void => states.get(ctx.config)?.hello(node, boot);
@@ -222,7 +222,7 @@ export const nodeDrainHello = (ctx: Ctx, node: NodeIdentity, boot: string | unde
 export function machineDrain(ctx: Ctx, nodes: NodeIdentity[]): MachineDrain | null {
   const views = nodes.map(n => nodeDrain(ctx, n)).filter((v): v is MachineDrain => v !== null);
   const waiting = views.filter(v => v.state === 'waiting');
-  if (waiting.length) return { state: 'waiting', turnsLeft: waiting.reduce((n, v) => n + v.turnsLeft, 0), partsLeft: waiting.reduce((n, v) => n + v.partsLeft, 0), until: waiting.map(v => v.until).sort()[0]! };
+  if (waiting.length) return { state: 'waiting', turnsLeft: waiting.reduce((n, v) => n + v.turnsLeft, 0), partsLeft: waiting.reduce((n, v) => n + v.partsLeft, 0), since: waiting.map(v => v.since).sort()[0]! };
   return views.find(v => v.state === 'restarting') ?? views[0] ?? null;
 }
 
