@@ -1,0 +1,8 @@
+Commit: 8797456d19be31f7385c8e5c25f0b7c34dbd6bc9
+Command: npm run build -w @hornhoof/server
+Exit: 0
+
+
+> @hornhoof/server@0.31.0 build
+> tsc -p tsconfig.json && node -e "require('node:fs').cpSync('src/modules/program-operator/fonts', 'dist/modules/program-operator/fonts', { recursive: true })"
+
