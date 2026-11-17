@@ -4,7 +4,7 @@ import dns from 'node:dns';
 import { EventEmitter, once } from 'node:events';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
-import type { Duplex, Writable } from 'node:stream';
+import type { Duplex, Readable, Writable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -547,17 +547,20 @@ describe('neither dropped nor doubled', () => {
       finished.resolve(hash.digest('hex'));
       res.end('ok');
     });
+    const { server, proxy } = await servedThrough(target);
+    /* Holding the upload back is the hop's pipe pausing its read of the client, as the target's side is full. */
+    const held = new Promise<void>(resolve => server.once('request', (req: http.IncomingMessage) => req.once('pause', resolve)));
     const chunk = randomBytes(MiB);
     const times = 128;
     const out = http.request({
-      ...(await through(target)),
+      ...proxy,
       agent: false,
       method: 'POST',
       headers: { 'content-length': String(times * MiB) },
     });
     const poured = { bytes: 0 };
-    void pour(out, chunk, times, poured);
-    await sleep(1000);
+    const pouring = pour(out, chunk, times, poured);
+    await Promise.race([held, pouring]);
     expect(poured.bytes).toBeLessThan(times * MiB);
     reading.resolve();
     const sent = createHash('sha256');
@@ -570,12 +573,20 @@ describe('neither dropped nor doubled', () => {
   it('holds an answer back while the client does not read it', async () => {
     const times = 128;
     const poured = { bytes: 0 };
-    const target = await answering((_, res) => void pour(res, Buffer.alloc(MiB), times, poured));
-    const out = http.request({ ...(await through(target)), agent: false });
+    let pouring!: Promise<void>;
+    const target = await answering((_, res) => (pouring = pour(res, Buffer.alloc(MiB), times, poured)));
+    const { server, proxy } = await servedThrough(target);
+    /* Holding the answer back is the hop's pipe pausing its read of the target, as the client's side is full. */
+    const held = new Promise<void>(resolve =>
+      server.once('request', (_: http.IncomingMessage, atHop: http.ServerResponse) =>
+        atHop.once('pipe', (up: Readable) => up.once('pause', resolve)),
+      ),
+    );
+    const out = http.request({ ...proxy, agent: false });
     out.end();
     const [res] = (await once(out, 'response')) as [http.IncomingMessage];
     res.pause();
-    await sleep(1000);
+    await Promise.race([held, pouring]);
     expect(poured.bytes).toBeLessThan(times * MiB);
     let arrived = 0;
     res.on('data', chunk => (arrived += chunk.length));
