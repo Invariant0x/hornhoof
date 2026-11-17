@@ -28,14 +28,16 @@ export const hideShownCommand = async (id: string): Promise<void> => {
 
 const fetchShownCommands = () => api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
 
+/* fresh says whether the screen still wants this look's commands: it does not once it unmounted, or once the person changed
+   its commands after the look began. */
 export async function loadMachineCommands(
-  live: { current: boolean },
+  fresh: () => boolean,
   setCommand: (cmd: ActiveCommand | null) => void,
   setAddCommands: (cmds: Record<string, ActiveCommand>) => void,
   setCoreCommands: (cmds: Record<string, ActiveCommand>) => void = () => undefined,
 ): Promise<void> {
   const res = await fetchShownCommands();
-  if (!live.current || !res) return;
+  if (!res || !fresh()) return;
   const found = res.commands.findLast(c => c.kind === 'machine');
   setCommand(found ? toActiveCommand(found) : null);
   const adds: Record<string, ActiveCommand> = {};

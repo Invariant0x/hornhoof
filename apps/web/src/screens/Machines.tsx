@@ -706,6 +706,13 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const live = useRef(true);
+  /* Each change the person makes to the shown commands counts here. A look that began before the latest change leaves the
+     commands as they are: the server may have read it before a Cancel or a new command, and its answer can reach the page
+     after them. The next look brings what the server holds then. */
+  const commandChanges = useRef(0);
+  const commandsChanged = () => {
+    commandChanges.current += 1;
+  };
 
   useEffect(() => {
     live.current = true;
@@ -715,11 +722,12 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   }, []);
 
   const load = useCallback(async () => {
+    const since = commandChanges.current;
     try {
       const [hosts, list] = await Promise.all([
         api.get<{ machines: MachineView[]; builtin?: BuiltinView | null; copies?: CopiesView | null; priority?: boolean; move?: MoveView | null; canMove?: boolean }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
-        loadMachineCommands(live, setCommand, setAddCommands, setCoreCommands),
+        loadMachineCommands(() => live.current && commandChanges.current === since, setCommand, setAddCommands, setCoreCommands),
       ]);
       if (!live.current) return;
       setMachines(hosts.machines);
@@ -751,12 +759,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const machineCommand = () =>
     run(async () => {
       const res = await api.post<{ id?: string; command: string; expiresAt?: string }>('/api/machines/command');
+      commandsChanged();
       setCommand(toActiveCommand(res));
     });
 
   const cancelMachine = (id: string) =>
     run(async () => {
       await hideShownCommand(id);
+      commandsChanged();
       setCommand(null);
     });
 
@@ -764,6 +774,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
     run(async () => {
       const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
       setPicking(null);
+      commandsChanged();
       setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
     });
 
@@ -771,12 +782,14 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const makeCore = (m: MachineView) =>
     run(async () => {
       const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/core`);
+      commandsChanged();
       setCoreCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
     });
 
   const cancelCore = (machineId: string, id: string) =>
     run(async () => {
       await hideShownCommand(id);
+      commandsChanged();
       setCoreCommands(all => {
         const next = { ...all };
         delete next[machineId];
@@ -787,6 +800,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const cancelAdd = (machineId: string, id: string) =>
     run(async () => {
       await hideShownCommand(id);
+      commandsChanged();
       setAddCommands(all => {
         const next = { ...all };
         delete next[machineId];
