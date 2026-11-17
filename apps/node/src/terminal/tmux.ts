@@ -108,14 +108,17 @@ export class Tmux {
   }
 
   async protectOutput(name: string, jobId: string | null = null): Promise<void> {
-    this.recordings.protect(name, jobId);
     try {
-      await this.run(['pipe-pane', '-t', name]);
-    } catch {
-      if (await this.has(name)) throw new Error('Sensitive terminal recording could not be stopped.');
+      this.recordings.protect(name, jobId);
+      await this.stopPrivateRecorder(name);
     } finally {
       this.recordings.remove(name);
     }
+  }
+
+  private async stopPrivateRecorder(name: string): Promise<void> {
+    try { await this.run(['pipe-pane', '-t', name]); }
+    catch { if (await this.has(name)) throw new Error('Sensitive terminal recording could not be stopped.'); }
   }
 
   /* The arguments that reach this server; viewers attach with them too. */
