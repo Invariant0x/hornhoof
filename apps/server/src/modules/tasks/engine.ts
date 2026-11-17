@@ -430,12 +430,20 @@ function inNewTaskScope(agent: typeof agents.$inferSelect, input: NewTask): bool
   return agent.departmentId === input.departmentId && (!agent.productId || agent.productId === input.productId);
 }
 
+async function stagedArchitect(ctx: Ctx, assignee: typeof agents.$inferSelect, architect: typeof agents.$inferSelect): Promise<typeof agents.$inferSelect | null> {
+  if (!(await wouldGoThroughEchelons(ctx.db, { companyId: assignee.companyId, holderId: assignee.id }))) return null;
+  if (!(await wouldGoThroughEchelons(ctx.db, { companyId: assignee.companyId, holderId: architect.id }))) {
+    throw refuse(409, 'task_invalid', 'A member of a turnkey team takes only their own whole result, never a separate Architecture stage.');
+  }
+  return architect;
+}
+
 async function resolveArchitect(ctx: Ctx, assignee: typeof agents.$inferSelect, input: NewTask, plan: StageRoute): Promise<typeof agents.$inferSelect | null> {
   if (!input.architectAgentId) return null;
   const architect = await workingAgent(ctx.db, assignee.companyId, input.architectAgentId);
   if (!inNewTaskScope(architect, input)) throw refuse(400, 'task_invalid', 'Architecture needs an employee in the task scope.');
   const separate = architect.id !== assignee.id && !input.small && input.resultKind !== 'coordination' && plan.stages.some(step => step.stage === 'architecture');
-  return separate && (await wouldGoThroughEchelons(ctx.db, { companyId: assignee.companyId, holderId: assignee.id })) ? architect : null;
+  return separate ? stagedArchitect(ctx, assignee, architect) : null;
 }
 
 async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<NewTaskSetup> {
