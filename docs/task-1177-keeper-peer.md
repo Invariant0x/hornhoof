@@ -19,3 +19,20 @@ Every original assertion remains; successful upload and copy response, read mode
 ## Commit provenance
 
 Merge `6a0522420770ae21ff1c3072f9c971dbf90d57e5` was pushed without the requested sign-off trailer by mistake. Its author's DCO attestation is recorded explicitly in this documentation commit's message. The task branch has not been rewritten or force-pushed. Subsequent commits, including later merges, carry the sign-off trailer.
+
+## Verification findings before the final series
+
+At `3410fd979dbce6bc4ffc801a98f962a1b0a4b740`, author lint passed on all five files (exit 0, 314 s). Types found a cleanup callback returning `VitestUtils`; the callback now returns void. The interrupted author check is preserved in `task-1177-author-before.txt` and is not a passing receipt.
+
+The first selected caller file, `migrations.test.ts`, completed 41 cases with eight timeouts. It imports `freshPglite` and `ownDatabases`, whose bodies this task did not change, and never calls `fixture` or `prepareSharedDatabase`. No migration implementation or assertion was changed to address those findings. The other 39 selected files were not all executed. The observed failures were:
+
+- Migration 0112, command states, times and whole requests: 20,433 ms.
+- Migration 0116, pulse, fences and merge sources: 32,419 ms.
+- Migration 0118, one move: 23,825 ms.
+- Migration 0118, the handover a state ended with: 31,162 ms.
+- Migration 0119, each handover's kind: 47,790 ms.
+- Migration 0119, parked job messages: 56,510 ms.
+- Migration 0119, kept led term, hidden link and saved copy: 37,806 ms.
+- Migration 0131, fallback lists while preserving plans and cards: 41,640 ms.
+
+Oracle also reported an earlier 60-second timeout of “carries computer access over the peer link” under load 25 to 30. On this branch that case is in `worker-keeper.test.ts:628`, outside task 1177's current file. The attempted acknowledgement to Oracle hit Hornhoof's ten-message limit; no delivery is claimed. The shared worker clock and the `f5171f05` production app-call mechanism remain unchanged.
