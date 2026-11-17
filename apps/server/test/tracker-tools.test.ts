@@ -100,15 +100,17 @@ describe('tracker tools', () => {
   });
 
   it('wake the product manager soon after a task of its department is made or changes status, once for many', async () => {
-    const { db, pia, work } = await company();
-    const hourAgo = new Date(Date.now() - 3_600_000);
+    const { ctx, db, pia, work } = await company();
+    /* The clock the server counts on, which only the test moves. */
+    let now = Date.parse('2026-03-02T09:00:00.000Z');
+    ctx.clock = () => now;
+    const hourAgo = new Date(now - 3_600_000);
     await db.update(agents).set({ timerMinutes: 240, timerOrder: 'Go over the tracker.', timerAt: hourAgo }).where(eq(agents.id, pia.id));
     await work();
     const [first] = await db.select({ at: agents.timerNudgedAt, last: agents.timerAt }).from(agents).where(eq(agents.id, pia.id));
-    const dueIn = (at: Date) => at.getTime() - Date.now();
-    expect(dueIn(first!.at!)).toBeGreaterThan(4 * 60_000);
-    expect(dueIn(first!.at!)).toBeLessThanOrEqual(5 * 60_000);
+    expect(first!.at!.getTime()).toBe(now + 5 * 60_000);
     expect(first!.last).toEqual(hourAgo);
+    now += 60_000;
     await work();
     const [second] = await db.select({ at: agents.timerNudgedAt }).from(agents).where(eq(agents.id, pia.id));
     expect(second!.at!.getTime()).toBe(first!.at!.getTime());
