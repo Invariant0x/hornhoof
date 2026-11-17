@@ -143,6 +143,7 @@ export class PhoneAdb {
       case 'tap': return `input tap ${op.x} ${op.y}\n`;
       case 'swipe': return `input swipe ${op.x} ${op.y} ${op.toX} ${op.toY} ${op.ms}\n`;
       case 'text': return textScript(op.text) ?? this.keyboardScript(serial, op.text, signal);
+      case 'key': return `input keyevent KEYCODE_${op.key.toUpperCase()}\n`;
       case 'url': return `am start -a android.intent.action.VIEW -d ${shellWord(op.url)} -p com.android.chrome\n`;
       case 'app': {
         const out = await this.call(serial, ['shell', 'cmd', 'package', 'resolve-activity', '--brief', '-c', 'android.intent.category.LAUNCHER', op.package], signal);
