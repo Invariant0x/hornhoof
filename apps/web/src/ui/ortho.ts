@@ -268,7 +268,7 @@ function legWays(a: Rect, b: Rect, others: readonly Rect[], given: Point[][]): L
 /* What a line with bends knows of its own way: the points it is drawn along without them; home, it is the way the map lays
    it out, which it keeps between the bends that stand on it in order; across, it leaves its start along the hub's middle
    line. */
-export type OwnWay = { pts: Point[]; home: boolean; across?: boolean };
+type OwnWay = { pts: Point[]; home: boolean; across?: boolean };
 
 /* A way from block a through each bend in turn to block b, made only of runs across and down. Where the line is at home and
    two stops in a row stand on its own way, it keeps that stretch, so a bend put on a line changes nothing. Elsewhere each

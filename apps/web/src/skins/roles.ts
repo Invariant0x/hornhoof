@@ -55,7 +55,7 @@ export const SCHEMES = ['dark', 'light'] as const;
 export type Scheme = (typeof SCHEMES)[number];
 
 export type SkinColors = Readonly<Record<ColorRole, string>>;
-export type SkinFonts = Readonly<Record<FontRole, readonly string[]>>;
+type SkinFonts = Readonly<Record<FontRole, readonly string[]>>;
 export type SkinLook = { scheme: Scheme; colors: SkinColors; fonts: SkinFonts; cut: number; shape: CutShape };
 /* The name of a person's own skin in each language Hornhoof speaks. */
 export type SkinNames = Readonly<{ ru: string; en: string }>;
@@ -66,7 +66,7 @@ export type Skin = { base: string; name: SkinNames; scheme: Scheme; colors: Skin
 /* Families a browser knows by a keyword: they go out without quotes, and a font list always ends with one. */
 export const GENERIC_FONTS = ['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'math', 'emoji', 'fangsong'];
 /* Keywords of system fonts that work only without quotes; a list never ends with one. */
-export const SYSTEM_FONTS = ['-apple-system', 'BlinkMacSystemFont'];
+const SYSTEM_FONTS = ['-apple-system', 'BlinkMacSystemFont'];
 
 const isKeyword = (font: string) => GENERIC_FONTS.includes(font) || SYSTEM_FONTS.includes(font);
 const fontStack = (fonts: readonly string[]) => fonts.map(font => (isKeyword(font) ? font : `'${font}'`)).join(', ');
