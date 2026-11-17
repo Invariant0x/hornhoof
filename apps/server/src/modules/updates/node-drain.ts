@@ -21,6 +21,10 @@ const states = new WeakMap<Ctx['config'], NodeDrains>();
 const REQUEST_LEASE_MS = 2 * 60_000;
 const RESTART_LEASE_MS = 10 * 60_000;
 
+/* Since when the orchestrator and the heads wait for a held node: a wait from when this hold began, a restart from when an
+   updater was told the node is free. So the limit starts over with a restart, whose stop begins long before it. */
+const limitFrom = (record: Saved): number => (record.view.state === 'restarting' ? Date.parse(record.view.since) : record.heldAt);
+
 class NodeDrains {
   private readonly records = new Map<string, Saved>();
   private readonly boots = new Map<string, string>();
@@ -61,7 +65,7 @@ class NodeDrains {
   }
 
   private overHold(record: Saved): boolean {
-    return record.view.state !== 'postponed' && Date.now() - record.heldAt >= this.ctx.config.nodeLeaderHoldMs;
+    return record.view.state !== 'postponed' && Date.now() - limitFrom(record) >= this.ctx.config.nodeLeaderHoldMs;
   }
 
   async request(node: NodeIdentity): Promise<MachineDrain> {
@@ -138,6 +142,7 @@ class NodeDrains {
        went away never restarts it. */
     if (!live) {
       record.view = asked ? { state: 'restarting', since: new Date(now).toISOString() } : { ...record.view, turnsLeft: 0, partsLeft: 0 };
+      if (asked) this.woken.delete(record.key);
       this.save();
       return;
     }
@@ -200,10 +205,13 @@ export const nodeHeldLong = (ctx: Ctx, node: NodeIdentity): boolean => states.ge
 /* Whether a new turn of this role stays off the node. A program operator's goes in while the node waits, since a program
    there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer. So does the
    orchestrator's or a head's past the limit: nothing else can take it, the company waits for it, and the work that runs on
-   the node goes on either way. A node that restarts takes nothing. */
+   the node goes on either way. A node that restarts takes nothing once its stop began: a node closes its link as it
+   stops, and one that comes back with a new boot ends the restart in its hello. While its link is ready, its stop has not
+   begun, as when the updater told it is free went away: the orchestrator and the heads come in past the limit then too. */
 export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader = false): boolean => {
   const state = nodeDrain(ctx, node)?.state;
-  return state === 'waiting' ? !entersWaitingNode(ctx, node, role, leader) : state === 'restarting';
+  if (state === 'waiting') return !entersWaitingNode(ctx, node, role, leader);
+  return state === 'restarting' && !(leader && ctx.hub.isReady(node) && nodeHeldLong(ctx, node));
 };
 const entersWaitingNode = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader: boolean): boolean =>
   role === PROGRAM_OPERATOR_ROLE || (leader && nodeHeldLong(ctx, node));

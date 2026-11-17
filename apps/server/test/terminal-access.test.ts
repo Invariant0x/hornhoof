@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agents, jobs, people } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { as, invitePerson, until } from './helpers.js';
 import { company, ended, handled, moved, next, onPlan, open, opened, state, turnOn, type Company, type Screen } from './terminal-company.js';
 
@@ -127,9 +128,9 @@ describe('the program a terminal really shows', () => {
 
   it('moves nobody when the person who asks does not see the agent', async () => {
     const c = await company();
-    const [before] = await c.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, c.crew.other.id));
+    const [before] = await c.db.select(only(agents, 'nodeId')).from(agents).where(eq(agents.id, c.crew.other.id));
     expect(await open(c.url, c.tokens.ann, c.crew.other.id)).toMatchObject({ status: 403 });
-    const [after] = await c.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, c.crew.other.id));
+    const [after] = await c.db.select(only(agents, 'nodeId')).from(agents).where(eq(agents.id, c.crew.other.id));
     expect(after).toEqual(before);
   });
 });

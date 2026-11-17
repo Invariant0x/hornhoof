@@ -11,7 +11,7 @@ import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { linkOf, publicUrl } from '../link/link.js';
@@ -105,7 +105,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [code] = await db.select().from(nodeCodes).where(eq(nodeCodes.codeHash, codeHash));
     if (!code) throw new ApiError(404, 'not_found', 'This install command is not valid. Copy it again from Hornhoof.', 'code_unknown');
     /* A person who was disabled after getting the command cannot connect machines with it. */
-    const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, code.personId));
+    const [owner] = await db.select(only(people, 'status')).from(people).where(eq(people.id, code.personId));
     if (owner?.status !== 'active') throw codeUsed();
     /* A command to add plans to one machine is left unused on any other. */
     if (code.machineId) {
@@ -269,7 +269,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
        within the last day that they could not reach it there. */
     const refusing = () =>
       db
-        .select({ hostname: machines.hostname })
+        .select(only(machines, 'hostname'))
         .from(machines)
         .where(and(eq(machines.companyId, me.companyId), live, eq(machines.role, 'worker'), eq(machines.directFails, true), gt(machines.reportAt, new Date(Date.now() - CORE_OFFER_MS))))
         .orderBy(machines.createdAt);

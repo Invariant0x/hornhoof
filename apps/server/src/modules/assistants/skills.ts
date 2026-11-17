@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { assistantReplies, assistants } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 
 /* How long the program has for one skill, and how much of its answer an agent reads. */
 export const SKILL_WAIT_MS = 120_000;
@@ -18,14 +19,22 @@ const Answer = z.object({ ok: z.boolean(), text: z.string(), data: z.unknown().o
 /* Whether the assistant whose own agent this is has a skills address now: only then is persona_call among its agent's tools
    and in its instructions. */
 export async function hasSkills(db: Ctx['db'], agentId: string): Promise<boolean> {
-  const [row] = await db.select({ agentId: assistants.agentId }).from(assistants).where(and(eq(assistants.agentId, agentId), isNotNull(assistants.skillsUrl), ne(assistants.skillsUrl, '')));
+  const [row] = await db.select(only(assistants, 'agentId')).from(assistants).where(and(eq(assistants.agentId, agentId), isNotNull(assistants.skillsUrl), ne(assistants.skillsUrl, '')));
   return row !== undefined;
 }
 
 type Called = { ok: boolean; text: string };
-const failed = (text: string): Called => ({ ok: false, text });
+const failed = (text: string): Called => ({
+  ok: false,
+  text: `The skill did not complete successfully. Do not report success. Tell your owner what failed and why; for a refused file delivery, say that the file did not arrive.\n\nReason: ${text}`,
+});
 const timedOut = (err: unknown) => err instanceof Error && err.name === 'TimeoutError';
 const late = `The assistant's program did not answer within ${SKILL_WAIT_MS / 1000} seconds.`;
+
+function skillAnswer(parsed: z.infer<typeof Answer>): Called {
+  const text = parsed.data === undefined ? parsed.text : `${parsed.text}\n\n${JSON.stringify(parsed.data)}`;
+  return parsed.ok ? { ok: true, text } : failed(text);
+}
 
 /* The answer's text, or null past the most an agent reads. */
 async function capped(res: Response): Promise<string | null> {
@@ -54,7 +63,7 @@ export async function callSkill(ctx: Ctx, job: { id: string; agentId: string }, 
   if (!to?.url) return failed("This assistant has no skills address, so its program's skills cannot be asked: its owner sets one on the assistant's card in People.");
   if (!to.secret) return failed("This assistant has no key yet, so its program's skills cannot be asked: its owner makes one on the assistant's card in People.");
   const [started] = await ctx.db
-    .select({ messageId: assistantReplies.messageId })
+    .select(only(assistantReplies, 'messageId'))
     .from(assistantReplies)
     .where(and(eq(assistantReplies.jobId, job.id), eq(assistantReplies.assistantId, to.assistantId)))
     .orderBy(desc(assistantReplies.createdAt))
@@ -91,5 +100,5 @@ export async function callSkill(ctx: Ctx, job: { id: string; agentId: string }, 
   } catch {
     return failed("The assistant's program answered without ok and text in JSON.");
   }
-  return { ok: parsed.ok, text: parsed.data === undefined ? parsed.text : `${parsed.text}\n\n${JSON.stringify(parsed.data)}` };
+  return skillAnswer(parsed);
 }

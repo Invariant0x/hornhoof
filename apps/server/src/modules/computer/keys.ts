@@ -9,6 +9,7 @@ import { signInTry, signInWorked } from '../../auth/sign-in-limit.js';
 import { clientAddress } from '../../auth/tunnel.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { people, personKeys } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { isP256, KEY_ITERATIONS } from './owner-key.js';
 
@@ -56,7 +57,7 @@ export function keyRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (me.email === null) throw wrongPassword();
     const attempt = await signInTry(db, me.email, await clientAddress(req, config));
     if (!attempt.allowed) refuse(reply, attempt.retryAfterS, attempt.windowMs);
-    const [row] = await db.select({ passwordHash: people.passwordHash }).from(people).where(eq(people.id, me.id));
+    const [row] = await db.select(only(people, 'passwordHash')).from(people).where(eq(people.id, me.id));
     if (!row?.passwordHash || !(await verifyPassword(password, row.passwordHash))) throw wrongPassword();
     await signInWorked(db, attempt.id);
     try {

@@ -133,7 +133,7 @@ export function registerOutboundTools(server: McpServer, ctx: Ctx, job: ToolJob)
     {
       description:
         'Proposes a revision of a catalog entry: a template, price, link, claim and so on. No message may use it until it is published: by your department\'s head with outbound_publish, ' +
-        'or by a person who runs the department, under Department catalog: in Settings under External messaging, or on the department\'s screen under About the department. Say in your task what you proposed and why. ' +
+        'or by a person who runs the department, under Department catalog: in Settings under External messaging, or on the department\'s screen under External messaging. Say in your task what you proposed and why. ' +
         'entryId: the entry this is the next revision of, left out for a new one. Words with a link, markup, a secret or someone\'s address are refused.',
       inputSchema: ProposalInput,
     },
