@@ -7,7 +7,7 @@ import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { Machines } from '../src/screens/Machines';
-import type { BuiltinView, Me } from '../src/types';
+import type { BuiltinView, ComputerAccessView, Me } from '../src/types';
 import { makeKey } from '../src/owner-key';
 import { keyDefaults } from '../src/owner-key-store';
 import { accessView, fixedAt, MACHINES, ME, mockApi, SUBS, withKey } from './api-mock';
@@ -1241,62 +1241,167 @@ describe("computer access on a machine's card", () => {
     return calls;
   };
 
-  it("opens the server's own machine on a click, and says what that gives", async () => {
-    const calls = show([mac()], server(), { 'POST /api/machines/m-server/access/open': [200, accessView('debian', { until: UNTIL })] });
-    const card_ = await openCard('debian');
-    expect(within(card_).getByText("Open access lets the orchestrator change anything on debian, the company's data included.")).toBeInTheDocument();
-    await userEvent.setup().click(within(card_).getByRole('button', { name: 'Open access to debian for a day' }));
-    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} }));
+  /* The server's machine as the server answers a change of its access, and its list that follows each change. */
+  const ofServer = (over: Parameters<typeof accessView>[1] = {}) => server(over).access!;
+  type Answer = () => [number, unknown];
+  const showLive = (machines: ReturnType<typeof mac>[], builtin: BuiltinView, answers: Partial<Record<'open' | 'close' | 'decline', Answer>>) => {
+    let now = builtin;
+    const routes: Parameters<typeof mockApi>[0] = { 'GET /api/machines': () => [200, { machines: [...machines, box()], builtin: now }] };
+    for (const [action, answer] of Object.entries(answers) as [string, Answer][]) {
+      routes[`POST /api/machines/m-server/access/${action}`] = () => {
+        const [status, data] = answer();
+        if (status === 200) now = { ...now, access: data as ComputerAccessView };
+        return [status, data];
+      };
+    }
+    return show(machines, builtin, routes);
+  };
+  /* The access part of a card (#1115): its owner opens it after choosing for whom and for how long. */
+  const part = (card_: HTMLElement) => within(card_).getByRole('region', { name: /^(Computer access|Доступ к машинам)$/ });
+
+  it("opens the server's own machine for the orchestrator for an hour, and says what that gives before", async () => {
+    const calls = showLive([mac()], server(), { open: () => [200, ofServer({ until: UNTIL, scope: 'orchestrator' })] });
+    const access = part(await openCard('debian'));
+    expect(within(access).getByText('Access closed')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(within(access).getByRole('button', { name: 'Open access' }));
+    expect(within(access).getByText("Open access lets the orchestrator change anything on debian, the company's data included.")).toBeInTheDocument();
+    expect(within(access).getByRole('button', { name: '1 hour' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(access).getByRole('button', { name: 'Orchestrator' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'orchestrator', duration: '1h' } }));
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+    expect(await within(access).findByText('Access open')).toBeInTheDocument();
   });
 
-  it("opens a machine that holds its owner's key with what the owner signs", async () => {
+  it("opens a machine that holds its owner's key with what the owner signs, for exactly the chosen time", async () => {
     /* Their key as the server keeps it, made on another device with this password. */
     const made = mockApi({ 'GET /api/me/key': [200, { key: null }] });
     await makeKey('right');
     const sent = made.find(call => call.method === 'PUT')!.body as { publicKey: string; wrapped: string; salt: string; iv: string; iterations: number };
     await keyDefaults.store.clear();
     const stored = { publicKey: sent.publicKey, wrapped: sent.wrapped, salt: sent.salt, iv: sent.iv, iterations: sent.iterations };
-    const calls = show([mac()], server(), { 'GET /api/me/key': [200, { key: stored }], 'POST /api/machines/m1/access/open': [200, accessView('dev-laptop', { until: UNTIL })] });
-    const card_ = await openCard('dev-laptop');
-    /* On a Mac the access reaches Docker's own system. */
-    expect(within(card_).getByText("On a Mac this reaches Docker's Linux system, not macOS itself.")).toBeInTheDocument();
+    const calls = show([mac()], server(), { 'GET /api/me/key': [200, { key: stored }], 'POST /api/machines/m1/access/open': [200, accessView('dev-laptop', { until: UNTIL, scope: 'orchestrator' })] });
+    const access = part(await openCard('dev-laptop'));
     const user = userEvent.setup();
-    await user.click(within(card_).getByRole('button', { name: 'Open access to dev-laptop for a day' }));
-    await user.type(await within(card_).findByLabelText('Password'), 'right{Enter}');
+    await user.click(within(access).getByRole('button', { name: 'Open access' }));
+    /* On a Mac the access reaches Docker's own system. */
+    expect(within(access).getByText("On a Mac this reaches Docker's Linux system, not macOS itself.")).toBeInTheDocument();
+    await user.click(within(access).getByRole('button', { name: '8 hours' }));
+    await user.click(within(access).getByRole('button', { name: 'Orchestrator' }));
+    await user.type(await within(access).findByLabelText('Password'), 'right{Enter}');
     await vi.waitFor(() => expect(calls.some(call => call.path === '/api/machines/m1/access/open')).toBe(true));
-    const body = calls.find(call => call.path === '/api/machines/m1/access/open')!.body as { grant: { payload: string } };
-    expect(JSON.parse(body.grant.payload)).toMatchObject({ v: 1, machine: 'n-dev-laptop' });
+    const body = calls.find(call => call.path === '/api/machines/m1/access/open')!.body as { scope: string; duration: string; grant: { payload: string } };
+    expect(body).toMatchObject({ scope: 'orchestrator', duration: '8h' });
+    const signed = JSON.parse(body.grant.payload) as { v: number; machine: string; until: number; at: number };
+    expect(signed).toMatchObject({ v: 1, machine: 'n-dev-laptop' });
+    expect(signed.until - signed.at).toBe(28_800);
   });
 
-  it('says until when a machine is open to everyone who sees its card, and lets only who may close it', async () => {
-    const calls = show([mac({ until: UNTIL, canOpen: false, canClose: false })], server({ until: UNTIL }), { 'POST /api/machines/m-server/access/close': [200, accessView('debian')] });
-    const others = await openCard('dev-laptop');
-    expect(within(others).getByText(/^Access to dev-laptop is open until .+\.$/)).toBeInTheDocument();
+  it('says to whom and until when a machine is open to everyone who sees its card, and lets only who may close it', async () => {
+    const opened = { until: UNTIL, scope: 'orchestrator' as const, openedBy: { id: 'p1', name: 'Ivan' }, openedAt: new Date().toISOString() };
+    const calls = showLive([mac({ ...opened, scope: 'all_agents', canOpen: false, canClose: false })], server(opened), { close: () => [200, ofServer()] });
+    const others = part(await openCard('dev-laptop'));
+    expect(within(others).getByText('Full access for the team')).toBeInTheDocument();
+    expect(within(others).getByText('Every company agent')).toBeInTheDocument();
+    expect(within(others).getByText(/^Until .+/)).toBeInTheDocument();
+    expect(within(others).getByText('Opened by: Ivan')).toBeInTheDocument();
     expect(within(others).queryByRole('button', { name: 'Close access' })).not.toBeInTheDocument();
-    const own = card('debian');
+    const own = part(card('debian'));
+    expect(within(own).getByText('For the orchestrator')).toBeInTheDocument();
     await userEvent.setup().click(within(own).getByRole('button', { name: 'Close access' }));
     await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/close', body: undefined }));
+    expect(await within(own).findByText('Access closed')).toBeInTheDocument();
+  });
+
+  /* The orchestrator may open access for the owner, and then the server names no person (#1119). */
+  it('says the orchestrator opened access when the server names no person for an open machine', async () => {
+    show([mac()], server({ until: UNTIL, scope: 'orchestrator', openedBy: null, openedAt: new Date().toISOString() }));
+    const own = part(await openCard('debian'));
+    expect(within(own).getByText('For the orchestrator')).toBeInTheDocument();
+    expect(within(own).getByText('Opened by: the orchestrator')).toBeInTheDocument();
+    /* A closed machine and an older server that sends no scope name no opener at all. */
+    const closed = part(await openCard('dev-laptop'));
+    expect(within(closed).queryByText(/^Opened by/)).not.toBeInTheDocument();
   });
 
   it('gives no button for a machine that is not theirs, cannot be reached, or holds no key of theirs', async () => {
     show([mac({ canOpen: false, canClose: false })], server({ reachable: false }));
-    const others = await openCard('dev-laptop');
-    expect(within(others).queryByText('Computer access')).not.toBeInTheDocument();
+    const others = part(await openCard('dev-laptop'));
+    expect(within(others).getByText('Access closed')).toBeInTheDocument();
     expect(within(others).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
-    const own = card('debian');
-    expect(within(own).getByText('Hornhoof cannot reach debian now.')).toBeInTheDocument();
+    const own = part(card('debian'));
+    expect(within(own).getByText('The machine is not responding. Access can be opened when it is online.')).toBeInTheDocument();
     expect(within(own).queryByRole('button', { name: /Open access/ })).not.toBeInTheDocument();
+  });
+
+  it('opens access for every agent only after its owner says yes once more, and Escape opens nothing', async () => {
+    const calls = showLive([mac()], server(), { open: () => [200, ofServer({ until: UNTIL, scope: 'all_agents' })] });
+    const access = part(await openCard('debian'));
+    const user = userEvent.setup();
+    await user.click(within(access).getByRole('button', { name: 'Open access' }));
+    expect(within(access).getByRole('heading', { name: 'Who gets access?' })).toHaveFocus();
+    await user.click(within(access).getByRole('button', { name: 'Every company agent' }));
+    expect(within(access).getByRole('heading', { name: 'Open full access for the whole team?' })).toHaveFocus();
+    expect(within(access).getByText('Who: every company agent')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(within(access).queryByText('Open full access for the whole team?')).not.toBeInTheDocument();
+    expect(within(access).getByRole('button', { name: 'Open access' })).toHaveFocus();
+    expect(calls.some(call => call.method === 'POST')).toBe(false);
+    await user.click(within(access).getByRole('button', { name: 'Open access' }));
+    await user.click(within(access).getByRole('button', { name: 'Every company agent' }));
+    await user.click(within(access).getByRole('button', { name: 'Open full access' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'all_agents', duration: '1h', confirm: true } }));
+    expect(await within(access).findByText('Full access for the team')).toBeInTheDocument();
+  });
+
+  it("answers the orchestrator's request on the card, for the time chosen there", async () => {
+    const asked = { asked: { reason: 'Clean Docker images.', at: new Date().toISOString() } };
+    const calls = showLive([mac()], server(asked), { open: () => [200, ofServer({ until: UNTIL, scope: 'orchestrator' })] });
+    const own = part(await openCard('debian'));
+    expect(within(own).getByText('Asks for access')).toBeInTheDocument();
+    expect(within(own).getByText('The orchestrator asks: Clean Docker images.')).toBeInTheDocument();
+    const user = userEvent.setup();
+    expect(within(own).getByRole('button', { name: 'Open for 1 hour' })).toBeInTheDocument();
+    await user.click(within(own).getByRole('button', { name: '1 day' }));
+    await user.click(within(own).getByRole('button', { name: 'Open for a day' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'orchestrator', duration: '24h' } }));
+    expect(await within(own).findByText('Access open')).toBeInTheDocument();
+  });
+
+  it("says not now to the orchestrator's request", async () => {
+    const asked = { asked: { reason: 'Clean Docker images.', at: new Date().toISOString() } };
+    const calls = showLive([mac()], server(asked), { decline: () => [200, ofServer()] });
+    const own = part(await openCard('debian'));
+    await userEvent.setup().click(within(own).getByRole('button', { name: 'Not now' }));
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/decline', body: undefined }));
+    expect(await within(own).findByText('Access closed')).toBeInTheDocument();
+  });
+
+  it('keeps a change that failed beside its machine, and tries it again on Retry', async () => {
+    let answers = 0;
+    const calls = showLive([mac()], server(), {
+      open: () => (++answers === 1 ? [409, { error: { code: 'machine_unreachable', message: 'Unreachable.' } }] : [200, ofServer({ until: UNTIL, scope: 'orchestrator' })]),
+    });
+    const own = part(await openCard('debian'));
+    const user = userEvent.setup();
+    await user.click(within(own).getByRole('button', { name: 'Open access' }));
+    await user.click(within(own).getByRole('button', { name: 'Orchestrator' }));
+    expect(await within(own).findByRole('alert')).toHaveTextContent('Access could not be changed. Check your connection and try again.');
+    await user.click(within(own).getByRole('button', { name: 'Retry' }));
+    expect(await within(own).findByText('Access open')).toBeInTheDocument();
+    expect(calls.filter(call => call.path === '/api/machines/m-server/access/open').map(call => call.body)).toEqual([{ scope: 'orchestrator', duration: '1h' }, { scope: 'orchestrator', duration: '1h' }]);
+    expect(within(own).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('tells its owner in Russian what stands in the way, and what opening gives', async () => {
     localStorage.setItem('hh-lang', 'ru');
     show([mac({ key: 'not_held' })], server({ machine: { os: null } }));
-    const mine = await openCard('dev-laptop');
+    const mine = part(await openCard('dev-laptop'));
     expect(within(mine).getByText('Машина dev-laptop пока не хранит ваш ключ. Выполните на ней новую команду из «Подключить машину»: ключ она берет только оттуда.')).toBeInTheDocument();
     expect(within(mine).queryByRole('button', { name: /Открыть доступ/ })).not.toBeInTheDocument();
-    const own = card('debian');
-    expect(within(own).getByRole('button', { name: 'Открыть доступ к машине debian на сутки' })).toBeInTheDocument();
+    const own = part(card('debian'));
+    await userEvent.setup().click(within(own).getByRole('button', { name: 'Открыть доступ' }));
+    expect(within(own).getByText('Кому открыть доступ?')).toBeInTheDocument();
     expect(within(own).getByText('Открытый доступ позволяет оркестратору изменить на машине debian что угодно, включая данные компании.')).toBeInTheDocument();
     expect(within(own).getByText('Если на машине debian стоит macOS, этот доступ открывает только Linux внутри Docker, а не саму macOS.')).toBeInTheDocument();
   });

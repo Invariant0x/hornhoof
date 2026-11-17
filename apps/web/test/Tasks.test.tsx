@@ -334,8 +334,8 @@ describe('the decisions of one person', () => {
     expect(computer).toHaveTextContent('Inspect disk space.');
     /* What opening gives stands under the request: here the company's data, on a system the server did not name. */
     expect(computer).toHaveTextContent("Open access lets the orchestrator change anything on the server's computer, the company's data included.");
-    await user.click(within(computer).getByRole('button', { name: "Open access to the server's computer for a day" }));
-    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} });
+    await user.click(within(computer).getByRole('button', { name: "Open access to the server's computer for 1 hour" }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: { scope: 'orchestrator', duration: '1h' } });
     expect(await screen.findByRole('button', { name: 'Tasks, 3 waiting for you' })).toBeInTheDocument();
     expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
   });
@@ -407,7 +407,7 @@ describe('the decisions of one person', () => {
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('heading', { name: 'Hiring for Development' })).toBeInTheDocument();
     expect(within(waiting).getByText('Hire a reviewer.')).toBeInTheDocument();
-    await user.click(within(waiting).getByRole('button', { name: "Open access to the server's computer for a day" }));
+    await user.click(within(waiting).getByRole('button', { name: "Open access to the server's computer for 1 hour" }));
     expect(await within(waiting).findByRole('alert')).toHaveTextContent('Hornhoof cannot reach this machine now: its core has not answered for a minute.');
   });
 

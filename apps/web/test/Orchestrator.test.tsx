@@ -31,6 +31,7 @@ const ev = (seq: number, kind: EventView['kind'], data: unknown, extra: Partial<
 const line = (seq: number) => ev(seq, 'text', { kind: 'text', text: `Line ${seq}` });
 const lines = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => line(from + i));
 const IVAN = { id: 'p1', name: 'Ivan' };
+const ASKS_SERVER = "The orchestrator asks for access to the server's computer: Restart the nodes outside AppArmor.";
 
 const LOG: EventView[] = [
   ev(1, 'message', { text: 'We make characters for schools' }, { person: IVAN }),
@@ -52,12 +53,13 @@ function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
     ...(routes as Record<string, [number, unknown]>),
   });
   const onClose = vi.fn();
+  const onOpenMachine = vi.fn();
   const view = render(
     <LanguageProvider>
-      <AgentWindow me={ME} org={org} agentId="orchestrator" onClose={onClose} />
+      <AgentWindow me={ME} org={org} agentId="orchestrator" onClose={onClose} onOpenMachine={onOpenMachine} />
     </LanguageProvider>,
   );
-  return { calls, onClose, ...view };
+  return { calls, onClose, onOpenMachine, ...view };
 }
 
 describe('AgentWindow', () => {
@@ -340,15 +342,13 @@ describe('AgentWindow', () => {
     }
   });
 
-  it('asks for no machine commands for someone who is not the CEO, and shows them the request for the computer without its buttons', async () => {
+  it('asks for no machine commands for someone who is not the CEO, and shows them the request for the computer as a note', async () => {
     const asked = ofServer({ asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' }, canOpen: false, canClose: false });
     const calls = mockApi({ [`GET ${EVENTS}?last=300`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'GET /api/machines/access': [200, { views: [asked] }] });
     const zed: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false }, canDecideCompany: false };
     render(<AgentWindow me={zed} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
-    const card = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
-    expect(within(card).getByText('Restart the nodes outside AppArmor.')).toBeInTheDocument();
-    expect(within(card).getByText('Decided by the CEO or the CEO delegate.')).toBeInTheDocument();
-    expect(within(card).queryByRole('button', { name: 'Open for a day' })).not.toBeInTheDocument();
+    expect(await screen.findByText(ASKS_SERVER)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open access|Not now/ })).not.toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/nodes/commands')).toBe(false);
   });
 
@@ -377,65 +377,63 @@ describe('AgentWindow', () => {
       vi.useRealTimers();
     });
 
-    it("shows the CEO the orchestrator's request next to his terminal and opens access for a day with one click", async () => {
+    /* Access is answered in Machines (#1115): the window keeps a note of each request and of what is open, under the
+       terminal, with the way to the machine's card, and no button that opens or closes. */
+    const notes = () => screen.findByRole('group', { name: 'Notes' });
+
+    it("shows the CEO the orchestrator's request as a note that leads to its machine in Machines", async () => {
       const user = userEvent.setup();
-      const { calls } = open({
+      const { calls, onOpenMachine } = open({
         [`GET ${EVENTS}?last=300`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
         'GET /api/machines/access': [200, { views: [ASKED] }],
-        'POST /api/machines/m-server/access/open': [200, OPEN],
       });
-      const card = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
-      expect(within(card).getByText('Restart the nodes outside AppArmor.')).toBeInTheDocument();
-      expect(within(card).queryByText(/as root on the server's computer/)).not.toBeInTheDocument();
-      await user.click(within(card).getByRole('button', { name: "More about access to the server's computer" }));
-      expect(within(card).getByText(/as root on the server's computer/)).toBeInTheDocument();
-      await user.click(within(card).getByRole('button', { name: 'Open for a day' }));
-      expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/open', body: {} });
-      const opened = await screen.findByRole('region', { name: "Access to the server's computer" });
-      await user.click(within(opened).getByRole('button', { name: "More about access to the server's computer" }));
-      expect(within(opened).getByText(/^Access to the server's computer is open until .+\.$/)).toBeInTheDocument();
-      expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument();
+      const foot = await notes();
+      expect(await within(foot).findByText(ASKS_SERVER)).toBeInTheDocument();
+      expect(within(foot).getByText('Asks for access')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Open access|Not now|Close access/ })).not.toBeInTheDocument();
+      const answer = within(foot).getByRole('link', { name: 'Answer in Machines' });
+      expect(answer).toHaveAttribute('href', '/machines/m-server');
+      await user.click(answer);
+      expect(onOpenMachine).toHaveBeenCalledWith('m-server');
+      expect(calls.some(c => c.method === 'POST' && c.path.startsWith('/api/machines/'))).toBe(false);
     });
 
-    it('closes access when the CEO takes it back', async () => {
-      const user = userEvent.setup();
-      const { calls } = open({ 'GET /api/machines/access': [200, { views: [OPEN] }], 'POST /api/machines/m-server/access/close': [200, CLOSED] });
-      await user.click(within(await screen.findByRole('region', { name: "Access to the server's computer" })).getByRole('button', { name: 'Close access' }));
-      expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/close', body: undefined });
-      await vi.waitFor(() => expect(screen.queryByRole('region', { name: "Access to the server's computer" })).not.toBeInTheDocument());
+    it('says until when access is open, and leads to Machines to close it', async () => {
+      open({ 'GET /api/machines/access': [200, { views: [OPEN] }] });
+      const foot = await notes();
+      expect(await within(foot).findByText(/^Access to the server's computer is open until .+\.$/)).toBeInTheDocument();
+      expect(within(foot).getByRole('link', { name: 'Manage access in Machines' })).toHaveAttribute('href', '/machines/m-server');
+      expect(screen.queryByRole('button', { name: 'Close access' })).not.toBeInTheDocument();
+    });
+
+    it('counts the machines open at once in one note', async () => {
+      open({ 'GET /api/machines/access': [200, { views: [OPEN, named({ ...OPEN, machine: { ...OPEN.machine, id: 'm-box' } }, 'debian-box')] }] });
+      expect(await within(await notes()).findByText('Access is open on 2 machines.')).toBeInTheDocument();
     });
 
     it('shows no open access once its day is over', async () => {
       open({ 'GET /api/machines/access': [200, { views: [{ ...OPEN, until: new Date(Date.now() - 60_000).toISOString() }] }], 'GET /api/nodes/commands': [200, { commands: [] }] });
       expect(await screen.findByRole('textbox')).toBeInTheDocument();
-      await vi.waitFor(() => expect(screen.queryByRole('region', { name: "Access to the server's computer" })).not.toBeInTheDocument());
-    });
-
-    it('says no to a request', async () => {
-      const user = userEvent.setup();
-      const { calls } = open({ 'GET /api/machines/access': [200, { views: [ASKED] }], 'POST /api/machines/m-server/access/decline': [200, CLOSED] });
-      await user.click(within(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).getByRole('button', { name: 'Not now' }));
-      expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/decline', body: undefined });
-      await vi.waitFor(() => expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(screen.queryByText(/is open until/)).not.toBeInTheDocument());
     });
 
     it('follows a request the CEO answered on another screen, or a new one, without waiting for the log', async () => {
       const stream = fakeStream();
       let view: ComputerAccessView = ASKED;
       open({ 'GET /api/machines/access': () => [200, { views: [view] }], 'GET /api/nodes/commands': [200, { commands: [] }] });
-      expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
+      expect(await screen.findByText(ASKS_SERVER)).toBeInTheDocument();
       view = CLOSED;
       stream.send({ type: 'computer' });
-      await vi.waitFor(() => expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(screen.queryByText(ASKS_SERVER)).not.toBeInTheDocument());
       view = ASKED;
       stream.send({ type: 'computer' });
-      expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
+      expect(await screen.findByText(ASKS_SERVER)).toBeInTheDocument();
     });
 
-    it('keeps the line below the conversation, not in it, when the window shows the log', async () => {
+    it('keeps the note below the conversation, not in it, when the window shows the log', async () => {
       open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }], 'GET /api/machines/access': [200, { views: [ASKED] }] });
-      const line = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
-      expect(screen.getByRole('log')).not.toContainElement(line);
+      const note = await screen.findByText(ASKS_SERVER);
+      expect(screen.getByRole('log')).not.toContainElement(note);
     });
 
     it('writes each step in the log', async () => {
@@ -461,22 +459,30 @@ describe('AgentWindow', () => {
       expect(screen.getByText('office-pc did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
     });
 
-    /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its line names it. */
-    it('names the machine the access is to, in its line and in the log', async () => {
-      const user = userEvent.setup();
+    /* The server names no person when the orchestrator opened it for the owner, and none when its time ran out (#1119). */
+    it('says the orchestrator opened access when no person did, and that access ended when its time ran out', async () => {
+      open({
+        [`GET ${EVENTS}?last=300`]: [
+          200,
+          {
+            events: [ev(1, 'computer', { state: 'opened', until: OPEN.until, machine: 'debian-box' }), ev(2, 'computer', { state: 'expired', machine: 'debian-box' })],
+            state: READY,
+          },
+        ],
+      });
+      expect(await screen.findByText(/^The orchestrator opened access to debian-box until .+$/)).toBeInTheDocument();
+      expect(screen.getByText('Access to debian-box closed: its time ran out')).toBeInTheDocument();
+      expect(screen.queryByText(/Hornhoof/)).not.toBeInTheDocument();
+    });
+
+    /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its note names it. */
+    it('names the machine the access is to, in its note and in the log', async () => {
       open({
         [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until, machine: 'debian-box' }, { person: IVAN })], state: READY }],
         'GET /api/machines/access': [200, { views: [named(ASKED, 'debian-box')] }],
-        'POST /api/machines/m-server/access/open': [200, named(OPEN, 'debian-box')],
       });
-      const card = await screen.findByRole('region', { name: 'The orchestrator asks for access to debian-box' });
-      await user.click(within(card).getByRole('button', { name: 'More about access to debian-box' }));
-      expect(within(card).getByText(/as root on debian-box/)).toBeInTheDocument();
+      expect(await screen.findByText('The orchestrator asks for access to debian-box: Restart the nodes outside AppArmor.')).toBeInTheDocument();
       expect(screen.getByText(/^Ivan opened access to debian-box until .+$/)).toBeInTheDocument();
-      await user.click(within(card).getByRole('button', { name: 'Open for a day' }));
-      const opened = await screen.findByRole('region', { name: 'Access to debian-box' });
-      await user.click(within(opened).getByRole('button', { name: 'More about access to debian-box' }));
-      expect(within(opened).getByText(/^Access to debian-box is open until .+\.$/)).toBeInTheDocument();
     });
 
     it('asks and answers in Russian', async () => {
@@ -486,10 +492,22 @@ describe('AgentWindow', () => {
           [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN })], state: READY }],
           'GET /api/machines/access': [200, { views: [ASKED] }],
         });
-        const card = await screen.findByRole('region', { name: 'Оркестратор просит доступ к машине сервера' });
-        expect(within(card).getByRole('button', { name: 'Открыть на сутки' })).toBeInTheDocument();
-        expect(within(card).getByRole('button', { name: 'Не сейчас' })).toBeInTheDocument();
+        const foot = await screen.findByRole('group', { name: 'Заметки' });
+        expect(await within(foot).findByText('Оркестратор просит доступ к машине сервера: Restart the nodes outside AppArmor.')).toBeInTheDocument();
+        expect(within(foot).getByText('Просит доступ')).toBeInTheDocument();
+        expect(within(foot).getByRole('link', { name: 'Ответить в «Машинах»' })).toBeInTheDocument();
         expect(screen.getByText(/^Ivan: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
+      } finally {
+        localStorage.removeItem('hh-lang');
+      }
+    });
+
+    it('says in Russian that the orchestrator opened access and that its time ran out', async () => {
+      localStorage.setItem('hh-lang', 'ru');
+      try {
+        open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until }), ev(2, 'computer', { state: 'expired' })], state: READY }] });
+        expect(await screen.findByText(/^Оркестратор: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
+        expect(screen.getByText('Доступ к машине сервера закрыт: срок истек')).toBeInTheDocument();
       } finally {
         localStorage.removeItem('hh-lang');
       }

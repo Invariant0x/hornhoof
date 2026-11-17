@@ -123,7 +123,7 @@ describe('Shell', () => {
     it('offers its owner to give the orchestrator access to it, and closes the menu once it is open', async () => {
       const { calls, user } = await menu({ machine: closed.machine, view: closed }, { 'POST /api/machines/m1/access/open': [200, { ...closed, until: '2099-01-01T00:00:00.000Z' }] });
       await user.click(await screen.findByRole('button', { name: 'Give the orchestrator access to this machine (dev-laptop)' }));
-      await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m1/access/open', body: {} }));
+      await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m1/access/open', body: { scope: 'orchestrator', duration: '1h' } }));
       await waitFor(() => expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument());
     });
 

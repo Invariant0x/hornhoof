@@ -25,6 +25,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Every department and company template has a product manager who keeps titles, whys, goals, the people who answer and pipelines clear, and never gives out or moves work.
 - Agents read `goals`, set goals and pipelines with `set_goal` and `set_pipeline`, a product manager tidies a task of its department with `tidy_task`, and task tools take a goal, the person who answers, why, due date, pipeline and stage.
 - People's routes for goals and pipelines, `PATCH /api/tasks/:id` on the task's version, `GET /api/tasks?responsible=`, and `parent` in `POST /api/tasks`.
+- Each machine's card in Machines opens access to the orchestrator or to every agent of the company for 1 hour, 8 hours or a day, after a separate confirmation for every agent, says who opened it and until when, and closes it; an agent's window keeps only its terminals, with its notes stacked at its foot.
 
 ### Changed
 

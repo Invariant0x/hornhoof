@@ -1,7 +1,7 @@
 import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { BuiltinSkinId } from '../skins/registry';
 import type { SkinErrorCode } from '../skins/validate';
-import type { EmployeeStatus, FailureKind, LetterKind } from '../types';
+import type { AccessDuration, EmployeeStatus, FailureKind, LetterKind } from '../types';
 import { plural } from './plural';
 
 const STATUS_ORDER: EmployeeStatus[] = ['working', 'waiting', 'queued', 'handed', 'idle', 'off'];
@@ -870,6 +870,46 @@ export const en = {
     runOn: (host: string) => `Run this in a terminal on ${host}. It starts the plan there and opens its sign-in link. The plan keeps running on its other machines too.`,
     openHere: 'Open here',
     access: 'Computer access',
+    /* Computer access in a machine's card (#1115, Design #1102): its state in a framed word, who it is open to, until
+       when and who opened it; the owner's choice of how long and for whom, and once more for every agent. */
+    computer: {
+      closed: 'Access closed',
+      open: 'Access open',
+      full: 'Full access for the team',
+      asks: 'Asks for access',
+      offline: 'Offline',
+      closedText: 'Access to this machine is closed.',
+      offlineText: 'The machine is not responding. Access can be opened when it is online.',
+      forOrchestrator: 'For the orchestrator',
+      forTeam: 'Every company agent',
+      openText: 'The orchestrator can run commands with full permissions.',
+      fullText: 'Every company agent can run commands with full permissions.',
+      asksText: (reason: string) => `The orchestrator asks: ${reason}`,
+      until: (at: string) => `Until ${at}`,
+      openedBy: (name: string) => `Opened by: ${name}`,
+      openedByOrchestrator: 'Opened by: the orchestrator',
+      choose: 'Open access',
+      who: 'Who gets access?',
+      whoText: (machine: string) => `Choose who gets access to ${machine} and for how long.`,
+      duration: 'Access duration',
+      durations: { '1h': '1 hour', '8h': '8 hours', '24h': '1 day' } as Record<AccessDuration, string>,
+      openFor: { '1h': 'Open for 1 hour', '8h': 'Open for 8 hours', '24h': 'Open for a day' } as Record<AccessDuration, string>,
+      byDefault: 'Default: 1 hour.',
+      orchestrator: 'Orchestrator',
+      team: 'Every company agent',
+      cancel: 'Cancel',
+      confirm: 'Open full access for the whole team?',
+      confirmText: (machine: string) => `Every company agent will be able to run commands with full permissions on ${machine}. This allows changes to the machine's files and settings.`,
+      confirmMachine: (machine: string) => `Machine: ${machine}`,
+      confirmWho: 'Who: every company agent',
+      confirmDuration: (duration: string) => `Selected duration: ${duration}`,
+      confirmFoot: 'You can close access here at any time.',
+      fullButton: 'Open full access',
+      opening: 'Opening access…',
+      closing: 'Closing access…',
+      failed: 'Access could not be changed. Check your connection and try again.',
+      retry: 'Retry',
+    },
     refuses: (server: string, name: string) =>
       `${server} does not take connections from ${name}. If ${server} is a Mac with its firewall on, allow incoming connections there for Docker (com.docker.backend), or for ssh when it runs Colima.`,
     makeCore: (host: string) => `Make ${host} a full machine of the company`,
@@ -1184,14 +1224,12 @@ export const en = {
     /* Access to the computer the server runs on, which the orchestrator asks for and the CEO opens for a day. The machine
        is its name when that computer joined as a machine, else computerServer. */
     computerServer: "the server's computer",
-    computerServerName: "The server's computer",
     computerAsks: (machine: string) => `The orchestrator asks for access to ${machine}`,
     computerWhat: (machine: string) => `For a day it runs commands as root on ${machine}, and each one shows in this window. Access closes by itself after a day, or when you close it.`,
-    computerOpen: 'Open for a day',
     computerNotNow: 'Not now',
     machineAccess: (machine: string) => `Access to ${machine}`,
     computerOpenUntil: (machine: string, at: string) => `Access to ${machine} is open until ${at}.`,
-    computerOpenFor: (machine: string) => `Open access to ${machine} for a day`,
+    computerOpenFor: (machine: string) => `Open access to ${machine} for 1 hour`,
     computerGives: (machine: string) => `Open access lets the orchestrator change anything on ${machine}.`,
     computerGivesData: (machine: string) => `Open access lets the orchestrator change anything on ${machine}, the company's data included.`,
     computerMac: "On a Mac this reaches Docker's Linux system, not macOS itself.",
@@ -1201,14 +1239,13 @@ export const en = {
     computerKeyNotHeld: (machine: string) => `${machine} does not hold your key yet. Run a new command from Connect a machine on it: it takes your key only from there.`,
     computerNoSigning: 'This page is open at an address without https, where a browser cannot sign with your key. Open Hornhoof at its https link, or on the machine the server runs on, to open access.',
     computerClose: 'Close access',
-    computerUntil: (at: string) => `access until ${at}`,
-    computerMore: (machine: string) => `More about access to ${machine}`,
-    computerOthers: (count: number) => `Other machines with access: ${count}`,
-    computerOthersCount: (count: number) => `${count} more`,
     computerAsked: (reason: string, machine: string) => `Asked for access to ${machine}: ${reason}`,
     computerOpened: (who: string, at: string, machine: string) => `${who} opened access to ${machine} until ${at}`,
     computerClosed: (who: string, machine: string) => `${who} closed access to ${machine}`,
     computerDeclined: (who: string, machine: string) => `${who} did not open access to ${machine}`,
+    /* Who opened it when no person did: the orchestrator, for its owner (#1119); and an access its time closed. */
+    computerByOrchestrator: 'The orchestrator',
+    computerExpired: (machine: string) => `Access to ${machine} closed: its time ran out`,
     computerRefused: (machine: string) => `${machine} did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.`,
     failedEmployee: {
       timeout: 'The employee did not finish within 15 minutes.',
@@ -1223,12 +1260,27 @@ export const en = {
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
     memoryWait: 'The machine is busy: it is low on free memory or its processors are loaded. Turns wait and go on by themselves, one by one, once it has room. Nothing that already runs there is stopped.',
+    /* The notes at the foot of an agent's window, each led by a word in a frame that says what kind of note it is. */
+    notes: {
+      label: 'Notes',
+      wait: 'Waiting',
+      asleep: 'Asleep',
+      notSent: 'Not sent',
+      file: 'File',
+      heads: 'Note',
+      asks: 'Asks for access',
+      asksFor: (machine: string, reason: string) => `The orchestrator asks for access to ${machine}: ${reason}`,
+      access: 'Access',
+      openOn: (n: number) => `Access is open on ${n} ${plural('en', n, { one: 'machine', other: 'machines' })}.`,
+      answer: 'Answer in Machines',
+      manage: 'Manage access in Machines',
+    },
     inputLeft: {
       kept: 'These words were left unsent in the program\'s input. Hornhoof took them out so the next assignment could go in, kept them here and did not run them. To send them, type them again.',
       by: (name: string) => `${name} typed in this terminal last.`,
       nobody: 'Hornhoof cannot tell who wrote them.',
     },
-    inputDropped: 'Not sent: too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.',
+    inputDropped: 'Too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.',
     turnRefused: {
       busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
       unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',
