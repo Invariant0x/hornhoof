@@ -35,7 +35,7 @@ export function privateToolCall(name: string, input: unknown, resolve = toolPriv
 /* Routing and typed discriminants are identities, not report text. A one-character password must not change a task
    reference or turn an event's kind into a different protocol message. */
 const IDENTITY = /^(?:id|task|employee|agent|department|product|request|candidate|machine|run|subscription|commit|branch|kind|type|state|status|provider|wait)$|(?:Id|Ids|Sha|Commit|Kind|Class|Type|State|Status)$/;
-const PROSE = new Set(['text', 'freshText', 'subject', 'summary', 'evidence', 'question', 'answer', 'why', 'reason', 'title', 'brief', 'body', 'description', 'note', 'label', 'message', 'prompt', 'command', 'sql', 'caption', 'comment']);
+const PROSE = new Set(['text', 'freshText', 'subject', 'summary', 'evidence', 'question', 'answer', 'why', 'reason', 'title', 'brief', 'body', 'description', 'note', 'label', 'message', 'prompt', 'command', 'sql', 'caption', 'comment', 'delta']);
 const opaqueMedia = (value: unknown): boolean => Boolean(value && typeof value === 'object' && 'type' in value && (value.type === 'image' || value.type === 'audio'));
 
 /* Values live only in the current turn's memory, for text that must still reach people. Short passwords and OTPs count
