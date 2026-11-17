@@ -269,7 +269,7 @@ function OwnGoals({ goals, label, onOpenGoal }: { goals: GoalView[]; label: stri
         <ul>
           {goals.map(g => (
             <li key={g.id}>
-              <button className="linkish" type="button" onClick={() => onOpenGoal(g.id)}>{g.title}</button>
+              <button className="linkish" type="button" dir="auto" onClick={() => onOpenGoal(g.id)}>{g.title}</button>
               {g.target !== null ? <Progress done={Math.min(g.current ?? 0, g.target)} total={g.target} label={t.tracker.card.target(g.current ?? 0, g.target, g.unit)} />
                 : g.total > 0 && <Progress done={g.done} total={g.total} label={t.tracker.card.tasksDone(g.done, g.total)} />}
             </li>
@@ -461,7 +461,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
           <button className="btn ghost tr-menu" type="button" aria-expanded={drawer} aria-controls={sideId} onClick={() => setDrawer(!drawer)}>{t.tracker.side.open}</button>
           <div className="tr-where">
             <h1 id={`${sideId}-where`}>{where.title}</h1>
-            {where.about && <p className="muted">{where.about}</p>}
+            {where.about && <p className="muted" dir="auto">{where.about}</p>}
           </div>
           <div className="tr-tools">
             {viewAs && (

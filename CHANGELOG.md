@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Fixed
+
+- Right to left, the tracker keeps the order of a goal's name and of its progress in words, of a person's task in the left panel, of the line under the heading, and of each value with its name in a narrow list, "Executor: Hana".
+
 ## [0.32.1] - 2026-11-17
 
 ### Fixed

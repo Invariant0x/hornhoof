@@ -394,6 +394,111 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
   });
 }
 
+/* Where the parts of an element's words stand on the screen: the box of the first letter of each part, looked for in order
+   in one of its texts; null where they are not there in that order. */
+const partsAt = (locator: Locator, parts: string[]) => locator.evaluate((el, parts) => {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent!;
+    const at: number[] = [];
+    for (const part of parts) {
+      const i = text.indexOf(part, at.length ? at[at.length - 1]! + parts[at.length - 1]!.length : 0);
+      if (i < 0) break;
+      at.push(i);
+    }
+    if (at.length < parts.length) continue;
+    return at.map(i => { const range = document.createRange(); range.setStart(node!, i); range.setEnd(node!, i + 1); const r = range.getBoundingClientRect(); return { x: r.x, y: r.y, height: r.height }; });
+  }
+  return null;
+}, parts);
+
+/* A phrase reads in its own order in both directions: each part of it stands right of the part before on the same line, or
+   on a line below it where the phrase wraps. */
+async function readsInOrder(locator: Locator, parts: string[], what: string) {
+  const at = await partsAt(locator, parts);
+  expect(at, `${what}: ${parts.join(' ')}`).not.toBeNull();
+  for (let i = 1; i < at!.length; i++) {
+    const [before, part] = [at![i - 1]!, at![i]!];
+    const why = `${what}: "${parts[i]}" after "${parts[i - 1]}"`;
+    if (Math.abs(part.y - before.y) < before.height / 2) expect(part.x, why).toBeGreaterThan(before.x);
+    else expect(part.y, why).toBeGreaterThan(before.y);
+  }
+}
+
+/* An element's words stand at the start edge of its box, as the page's words do: at the right right to left. */
+async function atStart(locator: Locator, dir: 'ltr' | 'rtl', what: string) {
+  const [box, words] = await locator.evaluate(el => {
+    const s = getComputedStyle(el), r = el.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const w = range.getBoundingClientRect();
+    return [[r.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft), r.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight)], [w.left, w.right]];
+  });
+  if (dir === 'rtl') expect(Math.abs(words[1]! - box[1]!), `${what}: right edge`).toBeLessThanOrEqual(1);
+  else expect(Math.abs(words[0]! - box[0]!), `${what}: left edge`).toBeLessThanOrEqual(1);
+}
+
+/* What Design found reading the tracker right to left after #1300 (#1303), and that it reads the same left to right: a goal
+   and its progress in words, a person's task in the left panel, the line under where the person is, and on a phone each
+   value of a row with its name, "Executor: Hana", at the start side. */
+for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
+  test(`reads goals, people's tasks, the line under the heading and a row's names and values in order: ${dir} ${width}`, async ({ page }, info) => {
+    const t = MESSAGES.en;
+    const look = `${dir}-${width}-${info.project.name.replace('tasks-', '')}`;
+    const shot = (name: string) => capture(page, info, `order-${name}-${look}`);
+    const visit = async (path: string) => {
+      await open(page, 'en', width, path, SKINS[0]);
+      await page.evaluate(d => { document.documentElement.dir = d; }, dir);
+    };
+    await page.clock.setFixedTime(new Date('2026-11-16T12:00:00Z'));
+    await serveTasksBoard(page);
+    await serveShortNames(page);
+
+    /* The person's own tasks: the line under the heading ends with its dot, and a goal reads with its number and its
+       progress in words. */
+    await visit('/tasks');
+    const about = page.locator('.tr-where p');
+    await expect(about).toHaveText(t.tracker.where.mineAbout);
+    await readsInOrder(about, ['Open', 'waits', 'you', '.'], `line under the heading ${look}`);
+    await atStart(about, dir, `line under the heading ${look}`);
+    const goals = page.getByRole('region', { name: t.tracker.yourGoals, exact: true });
+    const big = goals.getByRole('listitem').filter({ hasText: GOALS[0]!.title });
+    await readsInOrder(big.locator('.linkish'), ['500', 'shops', 'card'], `goal ${look}`);
+    await readsInOrder(big.locator('.goal-progress small'), ['212', 'of', '500', 'shops'], `goal's progress ${look}`);
+    await atStart(big.locator('.goal-progress small'), dir, `goal's progress ${look}`);
+    await shot('goals');
+
+    /* A person's task in the left panel: its number, then its name. */
+    await visit(`/tasks?department=${DEV.id}`);
+    if (width === 375) await page.getByRole('button', { name: t.tracker.side.open, exact: true }).click();
+    const task = page.locator('.tr-people .linkish').first();
+    await task.scrollIntoViewIfNeeded();
+    await readsInOrder(task, ['#', SHORT], `person's task ${look}`);
+    await shot('people');
+    if (width === 375) await page.getByRole('button', { name: t.tracker.side.close, exact: true }).click();
+
+    /* A row of the list: where it is narrow each value with its name before it, "Executor: Hana", at the start side; where
+       it is wide the names stand above the list and each value at the start side of its column. */
+    const row = page.getByRole('region', { name: t.tracker.views.list, exact: true }).getByRole('listitem', { name: named('Take card payments'), exact: true });
+    await row.scrollIntoViewIfNeeded();
+    const cells = row.locator('.tr-cells > .tr-cell');
+    await expect(cells).toHaveCount(4);
+    for (const cell of await cells.all()) {
+      const value = (await cell.locator('.tr-v').textContent())!;
+      const parts = await cell.evaluate(el => [...el.children].map(c => { const r = c.getBoundingClientRect(); return { left: r.left, right: r.right, shown: getComputedStyle(c).position !== 'absolute' }; }));
+      const box = await cell.evaluate(el => { const r = el.getBoundingClientRect(); return [r.left, r.right]; });
+      const [name, words] = parts as [typeof parts[0], typeof parts[0]];
+      if (name.shown) {
+        expect(name.right, `${value}: its name before it ${look}`).toBeLessThanOrEqual(words.left);
+        if (dir === 'rtl') expect(Math.abs(words.right - box[1]!), `${value}: at the right ${look}`).toBeLessThanOrEqual(1);
+        else expect(Math.abs(name.left - box[0]!), `${value}: at the left ${look}`).toBeLessThanOrEqual(1);
+      } else if (dir === 'rtl') expect(Math.abs(words.right - box[1]!), `${value}: at the right of its column ${look}`).toBeLessThanOrEqual(1);
+      else expect(Math.abs(words.left - box[0]!), `${value}: at the left of its column ${look}`).toBeLessThanOrEqual(1);
+    }
+    await shot('list');
+  });
+}
+
 for (const lang of LANGUAGES.map(l => l.id)) {
   test(`opens the lists as a drawer on a phone and closes it on a choice: ${lang} 375`, async ({ page }, info) => {
     const t = MESSAGES[lang];

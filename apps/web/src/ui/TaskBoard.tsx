@@ -27,14 +27,15 @@ function StateChip({ status }: { status: HumanStatus }) {
   );
 }
 
-/* How much of a whole is done, in whole goals or tasks, as a bar and in words. */
+/* How much of a whole is done, in whole goals or tasks, as a bar and in words; the words in their own direction, so "212 of
+   500 shops" reads in that order right to left too. */
 export function Progress({ done, total, label, wide = false }: { done: number; total: number; label: string; wide?: boolean }) {
   return (
     <div className={`goal-progress${wide ? ' wide' : ''}`}>
       <span className="turn-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
         <i style={{ inlineSize: `${total ? (done / total) * 100 : 0}%` }} />
       </span>
-      <small aria-hidden="true">{label}</small>
+      <small aria-hidden="true" dir="auto">{label}</small>
     </div>
   );
 }

@@ -1813,6 +1813,8 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .tr-head { display: none; }
   .tr-cells { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .tr-cell { display: flex; flex-wrap: wrap; gap: 0 6px; font-size: 12.5px; }
+  /* A name and its value in their own direction stand where the page's words start, as an isolated phrase does. */
+  .tr-cells:dir(rtl) > .tr-cell:dir(ltr) { justify-content: flex-end; }
   .tr-cell:has(.tr-v:empty) { display: none; }
   .tr-k { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; color: var(--muted); }
   .tr-k::after { content: ':'; }
