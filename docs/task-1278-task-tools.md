@@ -3,9 +3,14 @@
 Kind: bug. Risk: test expectations only; no runtime permission change.
 Branch: `task-1278`, from fresh `origin/turn-32` at
 `cf64981ca64e5fa3e6dad5ad4171007534651e2c`.
-Current integration base: `94200fd668d90363946cea19aeeccc5e929e9ad8`.
-Checked implementation: `ba9c9b97951b9f38aa18dece93b2e019147f24cd`.
-Commits after that implementation change documents and logs only.
+Current integration base: `ffb944f22b09b205bcbea3e86ab4144bfbcfba2d`.
+Named test/build/lint receipts: `ba9c9b97951b9f38aa18dece93b2e019147f24cd`.
+Final source integration: `424fe1692b879a17fb43f393440bdd67d4148f99`.
+The final integration only takes in #1279's release-test fixtures; all server
+sources, the five named test files, their used helpers and build inputs retain
+the checked versions. Server/test types were repeated on this integration,
+exit 0. The exact comparison and receipt are in `integration/continuation.json`.
+Commits after this integration change documents and logs only.
 
 The reproduced failure is the head's list at `tasks-tools.test.ts:99`,
 not the orchestrator's list. The worker expectation has the same omission.
