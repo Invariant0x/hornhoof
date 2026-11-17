@@ -222,7 +222,9 @@ describe("a machine's limit of turns at once", () => {
   it('keeps the field a touch high, its colours from the theme and its sides logical, so it reads the same right to left', () => {
     expect(decl('.turn-limit input', 'min-block-size')).toBe('44px');
     expect(decl('.turn-limit input', 'inline-size')).toBe('7em');
-    expect(decl('.turn-limit input', 'background-color')).toBe('var(--surface)');
+    expect(decl('.turn-limit input', 'background-color')).toBe('var(--surface2)');
+    expect(decl('.turn-limit input', 'border')).toBe('1px solid var(--line2)');
+    expect(decl('.turn-limit input', 'padding-inline')).toBe('12px');
     expect(decl('.turn-limit input', 'color')).toBe('var(--ink)');
     expect(decl('.turn-limit .bad', 'color')).toBe('var(--pink-ink)');
     expect(decl('.turn-limit input', 'width')).toBeUndefined();

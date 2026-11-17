@@ -2280,7 +2280,9 @@ th.k-prio .sorth { white-space: nowrap; }
 .mc-blk .facts dd > .muted { font-size: 13px; }
 /* How many turns the machine runs at once: a short number at a touch's height, the hint or the problem under it. */
 .turn-limit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; margin: 0; }
-.turn-limit input { inline-size: 7em; max-inline-size: 100%; min-block-size: 44px; box-sizing: border-box; background-color: var(--surface); color: var(--ink); }
+.turn-limit input { inline-size: 7em; max-inline-size: 100%; min-block-size: 44px; box-sizing: border-box; padding-inline: 12px; border: 1px solid var(--line2); background-color: var(--surface2); color: var(--ink); }
+.turn-limit input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+.turn-limit input[aria-invalid='true'] { border-color: var(--pink-ink); }
 .turn-limit .hint, .turn-limit .muted { flex-basis: 100%; min-width: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .turn-limit .bad { flex-basis: 100%; min-width: 0; font-size: 12.5px; color: var(--pink-ink); overflow-wrap: anywhere; }
 @media (min-width: 421px) {
