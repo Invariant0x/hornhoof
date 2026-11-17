@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requirePerson } from '../../auth/session.js';
+import { requirePerson, viaOrchestrator } from '../../auth/session.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
@@ -36,7 +36,7 @@ function unsupported(machines: string[], command: string) {
 }
 
 /* A plan's owner signs it in from Hornhoof: in a terminal on one of their machines that is online, which nobody else
-   opens or watches, the CEO neither. Never the orchestrator for them: a fresh sign-in signs the program out first. */
+   opens or watches, the CEO neither. The orchestrator may, for any plan: a fresh sign-in signs the program out first. */
 export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub } = ctx;
 
@@ -44,7 +44,7 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const [sub] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, IdParams.parse(req.params).id), isNull(subscriptions.removedAt)));
     if (!sub) throw unknown();
-    if (me.via || sub.ownerPersonId !== me.id) throw notOwner();
+    if (!viaOrchestrator(me) && (me.via || sub.ownerPersonId !== me.id)) throw notOwner();
     return { me, sub };
   }
 

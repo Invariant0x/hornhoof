@@ -7,7 +7,9 @@ import { decryptSecret } from '../../crypto/secrets.js';
 import { agentEvents, agents, jobs, people, telegramBots, telegramReplies } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
+import { fileLink } from '../assistants/files.js';
 import { turnGoingOn } from '../conversation/queue.js';
+import { publicUrl } from '../link/link.js';
 import { attachmentBytesForPerson } from '../tasks/attachments.js';
 import { downloadFile, getUpdates, sendDocument, sendText, splitForTelegram, TelegramError, type TelegramUpdate } from './api.js';
 import { transcribe } from './transcribe.js';
@@ -185,7 +187,9 @@ class Listener {
       }
       const file = await attachmentBytesForPerson(this.ctx.db, person, pic.id);
       if (!file) continue;
-      await sendDocument(
+      /* A bot sends no file over 50 MB: a big one goes as its link. */
+      if (file.big) await this.say(row.chatId, WORDS[row.lang].bigFile(file.name, fileLink(this.ctx.config.secret, await publicUrl(this.ctx.db, this.ctx.config), file.id)));
+      else await sendDocument(
         this.ctx.config.telegramApiUrl,
         this.token,
         row.chatId,

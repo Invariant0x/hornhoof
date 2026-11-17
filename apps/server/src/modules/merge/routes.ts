@@ -21,11 +21,11 @@ const PickBody = z
 const SHOWN = 500;
 
 /* What a merge left for the CEO: the conflicts about people, access, plans, machines and protected records, which
-   only he settles, on his own session. Nobody else reads them, the orchestrator acting for him neither. */
+   only he settles, by himself or through the orchestrator. Nobody else reads them. */
 export function mergeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
   function ceo(me: Person): Person {
-    if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO settles these, from his own session.', 'not_owner_session');
+    if (!me.isOwner || me.viaHead) throw new ApiError(403, 'forbidden', 'Only the CEO settles these, by himself or through the orchestrator.', 'not_owner_session');
     return me;
   }
 

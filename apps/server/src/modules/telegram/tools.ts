@@ -7,6 +7,8 @@ import { personColumns, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, telegramBots } from '../../db/schema.js';
+import { fileLink, LINK_DAYS } from '../assistants/files.js';
+import { publicUrl } from '../link/link.js';
 import { attachmentBytesForPerson } from '../tasks/attachments.js';
 import type { ToolJob } from '../tools/job.js';
 import { sendDocument, TELEGRAM_CAPTION_MAX, TelegramError } from './api.js';
@@ -136,6 +138,10 @@ export function registerTelegramTools(server: McpServer, ctx: Ctx, job: ToolJob)
       }
       const file = await attachmentBytesForPerson(ctx.db, person, attachment);
       if (!file) return say('That file does not exist or that person is not allowed to see it.', true);
+      if (file.big) {
+        const link = fileLink(ctx.config.secret, await publicUrl(ctx.db, ctx.config), file.id);
+        return say(`${file.name} is over 50 MB, more than a Telegram bot sends. Give ${person.name} its link instead, which opens it for ${LINK_DAYS} days with no sign-in, and say that a big file lives 30 days on one machine and is lost if that machine goes: ${link}`, true);
+      }
       const bots = await authorizedBots(ctx.db, job.companyId, sender, person);
       if (!bots.length) {
         return say(

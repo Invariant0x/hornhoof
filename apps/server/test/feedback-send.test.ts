@@ -86,13 +86,13 @@ describe('sending feedback to Hornhoof developers', () => {
     expect(relay.calls).toEqual([]);
   });
 
-  it('refuses an orchestrator call even when it has a valid digest', async () => {
+  it('sends what the orchestrator saw for the owner, with its digest', async () => {
     const { app, db, ivan, relay, preview } = await installation();
     const { digest } = (await preview(BUG)).json();
     const [agent] = await db.select().from(agents);
     const sent = await app.inject({ method: 'POST', url: '/api/feedback', payload: { ...BUG, digest }, headers: orchestratorHeaders(ivan.id, agent!.id) });
-    expect(sent.statusCode).toBe(403);
-    expect(relay.calls).toEqual([]);
+    expect([sent.statusCode, sent.json()]).toEqual([200, { sent: true }]);
+    expect(relay.calls).toEqual(['POST /api/v1/feedback']);
   });
 
   it('lets anyone in the company send, not only who sees all of it', async () => {

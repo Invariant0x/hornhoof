@@ -4,8 +4,10 @@
 // hh-fetch message ID [WHERE] does the same for a picture a person sent this agent with a message. The node puts the
 // address and the turn's token into HH_ATTACH_URL and HH_ATTACH_PASS for each turn.
 'use strict';
-const { statSync, writeFileSync } = require('node:fs');
+const { createWriteStream, statSync } = require('node:fs');
 const { basename, join } = require('node:path');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 
 async function main() {
   const url = process.env.HH_ATTACH_URL;
@@ -27,7 +29,8 @@ async function main() {
   }
   const folder = where !== undefined && statSync(where, { throwIfNoEntry: false })?.isDirectory();
   const path = where === undefined ? name : folder ? join(where, name) : where;
-  writeFileSync(path, Buffer.from(await res.arrayBuffer()));
+  /* Written as it comes, so a file of any size passes. */
+  await pipeline(res.body ? Readable.fromWeb(res.body) : Readable.from([]), createWriteStream(path));
   process.stdout.write(`${path}\n`);
 }
 
