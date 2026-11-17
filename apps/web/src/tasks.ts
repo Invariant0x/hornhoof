@@ -4,7 +4,7 @@ import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { refetcher } from './refetch';
 import { deptLabel, type Messages } from './i18n';
-import type { AgentRef, DepartmentTree, Decisions, GoalView, Improvement, Lang, Org, Pipeline, TaskDepartments, TaskDetail, TaskLine, TaskLogLine, TaskPlace, TurnView, WaitCard } from './types';
+import type { DepartmentTree, Decisions, GoalView, Improvement, Org, Pipeline, TaskDepartments, TaskDetail, TaskLine, TaskLogLine, TaskPlace, TurnView, WaitCard } from './types';
 import { everyVisible } from './guard';
 
 const hasBody = <B,>(body: B | null | undefined, fresh: () => boolean): body is B => body !== null && body !== undefined && fresh();
@@ -136,12 +136,6 @@ export function placeName(t: Messages, org: Org | null | undefined, place: TaskP
   if (!place) return '';
   const dept = org?.departments.find(d => d.id === place.id);
   return dept ? deptLabel(t, dept) : place.name;
-}
-
-/* ", role" after an agent's name, or nothing when it has none or is called after it. */
-export function roleAfter(a: Pick<AgentRef, 'name' | 'role'>, language: keyof Lang): string {
-  const role = a.role?.[language];
-  return role && role !== a.name ? `, ${role}` : '';
 }
 
 /* Only an open tree or Speed drawer keeps the department clock fresh. */
