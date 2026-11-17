@@ -208,6 +208,22 @@ describe('the sender of a Telegram file', () => {
     expect(c.tg.sentDocuments).toEqual([]);
   });
 
+  it('never lets its own file, named after another file of the task, vouch for that file', async () => {
+    const c = await sender();
+    const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Share file', brief: '', body: '', departmentId: null, assigneeAgentId: c.worker.id, executor: true });
+    /* A file an assistant left on the task, such as its archived text: hh-fetch gives it to no other agent. */
+    const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Personal assistant', status: 'active', isAgent: true, assistantOf: c.ceo.id, scopeKind: 'company' }).returning();
+    const [assistant] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Personal assistant', model: '', subscriptionId: c.orchestrator.subscriptionId }).returning();
+    await c.db.insert(assistants).values({ personId: person!.id, companyId: c.companyId, program: 'avaclone', agentId: assistant!.id });
+    const [theirs] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: assistant!.id, taskId: task.id, name: 'assistant.bin', mediaType: 'application/octet-stream', bytes: ZIP, size: ZIP.length }).returning();
+    const read = await c.app.inject({ url: `/api/attachments/file?task=${task.number}&file=${theirs!.id}`, headers: { authorization: `Bearer ${c.token}` } });
+    expect(read.statusCode).toBe(404);
+    await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.worker.id, taskId: task.id, name: theirs!.id, mediaType: 'application/octet-stream', bytes: Buffer.from('mine'), size: 4 });
+    const absent = await c.send('12140000-0000-4000-8000-000000000000');
+    expect(await c.send(theirs!.id)).toEqual(absent);
+    expect(c.tg.sentDocuments).toEqual([]);
+  });
+
   it.each(['small', 'big'] as const)('still shares a %s company task file that the sender may read', async size => {
     const c = await sender();
     const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Share file', brief: '', body: '', departmentId: null, assigneeAgentId: c.worker.id, executor: true });
