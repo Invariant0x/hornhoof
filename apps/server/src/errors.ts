@@ -123,6 +123,7 @@ export type ErrorReason =
   | 'pipeline_changed'
   | 'pipeline_invalid'
   | 'responsible_invalid'
+  | 'view_as_ceo_only'
   | 'urgent_not_allowed'
   | 'urgent_follows_parent'
   | 'urgent_only_team'

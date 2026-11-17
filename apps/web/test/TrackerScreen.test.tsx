@@ -87,6 +87,23 @@ describe('My tasks and View as', () => {
     expect(screen.queryByRole('combobox', { name: 'View as' })).not.toBeInTheDocument();
   });
 
+  it("shows a person who may not use View as their own screen, whoever's the address names", async () => {
+    shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
+    const list = await main();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('My tasks');
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#24 Fix the login page', '#23 Refund button']));
+    expect(screen.getByRole('region', { name: 'Your goals' })).toHaveTextContent('500 subscribers');
+    expect(screen.queryByRole('region', { name: 'Goals of Maria' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
+  });
+
+  it("opens another person's screen from the address for the CEO delegate", async () => {
+    shell('/tasks?person=p2', {}, { ...ME, person: { ...ME.person, isOwner: false, isCeoDelegate: true } });
+    const list = await main();
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments']));
+    expect(screen.getByRole('region', { name: 'Goals of Maria' })).toHaveTextContent('Card payments');
+  });
+
   it('counts the work going on now and lists it, and what waits for the person', async () => {
     const user = userEvent.setup();
     shell();

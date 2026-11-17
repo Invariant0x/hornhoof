@@ -265,6 +265,15 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return task;
   }
 
+  /* Whose tasks and decisions a list shows: the person's own, or with View as another person's of the company, which only
+     the CEO and the CEO delegate look at. */
+  async function lookAt(me: Person, person: string | undefined): Promise<void> {
+    if (!person || person === me.id) return;
+    if (!actsAsCeo(me)) throw refuse(403, 'view_as_ceo_only', "Only the CEO or the CEO delegate looks at another person's tasks and decisions.");
+    const [known] = await db.select({ id: people.id }).from(people).where(and(eq(people.id, person), eq(people.companyId, me.companyId)));
+    if (!known) throw refuse(404, 'person_unknown', 'This person does not exist.');
+  }
+
   /* The same, for a person who changes it: the work of an agent they open, or one they gave. */
   async function changed(me: Person, id: string): Promise<Task> {
     const task = await shown(me, id);
@@ -303,6 +312,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/tasks', async req => {
     const me = await requirePerson(req, db);
     const q = ListQuery.parse(req.query);
+    await lookAt(me, q.responsible);
     const whole = (await accessOf(db, me)).whole;
     if (q.department === 'none' && !whole) throw refuse(403, 'not_your_department', 'Only people with the whole company read the work given to the orchestrator itself.');
     if (q.department && q.department !== 'none' && !(await departmentOf(db, me.companyId, q.department))) throw refuse(404, 'department_unknown', 'This department does not exist.');
@@ -467,6 +477,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/requests', async req => {
     const me = await requirePerson(req, db);
     const { person } = DecisionsQuery.parse(req.query);
+    await lookAt(me, person);
     const viewer = await viewerOf(db, me);
     /* Counts come from everything the person sees; the filter only picks what the lists show. */
     const decisions = await visibleDecisions(ctx, me);
