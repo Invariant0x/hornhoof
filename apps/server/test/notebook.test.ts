@@ -90,17 +90,23 @@ describe("the company's notebook", () => {
     expect((await write(app, dana, 'Mine.')).statusCode).toBe(403);
   });
 
-  it('keeps notes short and the notebook small enough for the instructions', async () => {
-    const { app, ceo } = await company();
-    const long = await write(app, ceo, 'x'.repeat(301));
-    expect(long.statusCode).toBe(400);
-    for (let i = 0; i < 13; i++) expect((await write(app, ceo, `${i} ${'y'.repeat(295)}`)).statusCode).toBe(201);
-    const full = await write(app, ceo, 'z'.repeat(200));
-    expect([full.statusCode, full.json().error.reason]).toEqual([409, 'notebook_full']);
-    /* 3864 characters so far; a short note still fits, and growing it past 4000 does not. */
-    expect((await write(app, ceo, 'v'.repeat(130))).statusCode).toBe(201);
-    const longer = await app.inject({ method: 'PATCH', url: '/api/notebook/14', payload: { text: 'w'.repeat(140) }, ...as(ceo) });
-    expect([longer.statusCode, longer.json().error.reason]).toEqual([409, 'notebook_full']);
+  /* A note is one fact of 300 characters at most. The notebook itself has no cap of its own: what a program reads bounds
+     it, and the instructions say where they cut it. */
+  it('keeps each note short, and takes a 31st note and more than 4000 characters, all of it in the instructions', async () => {
+    const { app, db, ceo } = await company();
+    expect((await write(app, ceo, 'x'.repeat(301))).statusCode).toBe(400);
+    for (let i = 1; i <= 31; i++) expect((await write(app, ceo, `Rule ${i} ${'y'.repeat(200)}.`)).statusCode, `note ${i}`).toBe(201);
+    const grown = await app.inject({ method: 'PATCH', url: '/api/notebook/31', payload: { text: `Rule 31 ${'w'.repeat(290)}` }, ...as(ceo) });
+    expect(grown.statusCode).toBe(200);
+    const tooLong = await app.inject({ method: 'PATCH', url: '/api/notebook/31', payload: { text: 'w'.repeat(301) }, ...as(ceo) });
+    expect(tooLong.statusCode).toBe(400);
+    const kept = await notes(app, ceo);
+    expect(kept).toHaveLength(31);
+    expect(kept.reduce((n: number, note: { text: string }) => n + note.text.length, 0)).toBeGreaterThan(4000);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const { text } = await instructionsOf(app.ctx, orchestrator!, true);
+    for (let i = 1; i <= 31; i++) expect(text, `note ${i}`).toContain(`[#${i}] Rule ${i} `);
+    expect(text).not.toContain('did not fit');
   });
 
   it('says on the stream that it changed, to people who see the whole company', async () => {
@@ -148,6 +154,17 @@ describe("a department's notebook", () => {
   const book = (id: string) => `/api/departments/${id}/notebook`;
   const add = (app: FastifyInstance, token: string, id: string, text: string) => app.inject({ method: 'POST', url: book(id), payload: { text }, ...as(token) });
   const texts = async (app: FastifyInstance, token: string, id: string) => (await app.inject({ url: book(id), ...as(token) })).json().notes.map((n: { text: string }) => n.text);
+
+  it("takes a 31st note and more than 4000 characters, all of it in its head's instructions", async () => {
+    const { app, db, ceo, acme, dev } = await withDepartments();
+    const [sub] = await db.select().from(subscriptions);
+    const [head] = await db.insert(agents).values({ companyId: acme.id, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning();
+    for (let i = 1; i <= 31; i++) expect((await add(app, ceo, dev.id, `Dev rule ${i} ${'d'.repeat(200)}.`)).statusCode, `note ${i}`).toBe(201);
+    expect((await add(app, ceo, dev.id, 'd'.repeat(301))).statusCode).toBe(400);
+    const { text } = await instructionsOf(app.ctx, head!);
+    for (let i = 1; i <= 31; i++) expect(text, `note ${i}`).toContain(`[#${i}] Dev rule ${i} `);
+    expect(text).not.toContain('did not fit');
+  });
 
   it('keeps numbered notes of its own, apart from the company notebook and other departments', async () => {
     const { app, ceo, dev, ops } = await withDepartments();

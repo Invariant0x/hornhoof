@@ -2425,7 +2425,6 @@ export const en = {
     model_unknown: 'This subscription cannot run that model. Pick another one.',
     fallback_invalid: 'This fallback plan does not fit: pick another plan of the company, and a model it runs.',
     effort_unknown: 'This model does not take that effort. Pick another one.',
-    notebook_full: 'The notebook is full: 30 notes and 4000 characters at most. Change or remove a note first.',
     note_unknown: 'This note is gone already.',
     skill_unknown: 'This skill no longer exists. Reload the page.',
     skill_locked: 'This skill stays on for every employee.',

@@ -80,7 +80,6 @@ export type ErrorReason =
   | 'model_unknown'
   | 'fallback_invalid'
   | 'effort_unknown'
-  | 'notebook_full'
   | 'note_unknown'
   | 'skill_unknown'
   | 'skill_locked'
