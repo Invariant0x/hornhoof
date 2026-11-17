@@ -1,5 +1,5 @@
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
-import { countOnly, idOnly } from '../../db/selections.js';
+import { countOnly, idOnly, only } from '../../db/selections.js';
 import { refusePaused } from '../tasks/pause.js';
 import { and, asc, eq, inArray, isNotNull, isNull, like, max, notExists, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
@@ -448,7 +448,7 @@ async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'pas
       .returning();
     if (!ended) return null;
     const run = await closeFileCache(tx, ended);
-    const files = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
+    const files = await tx.select(only(attachments, 'name')).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
     const marked = await keepMark(tx, run, task, mark);
     return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))) + marked, true);
   });
@@ -628,7 +628,7 @@ export type RunInput = { task?: number | string; branch?: string; command?: stri
 /* The task a run is for: the one named, else the one the turn is on. */
 export async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
   if (ref === undefined) {
-    const [turn] = await ctx.db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, job.id));
+    const [turn] = await ctx.db.select(only(jobs, 'taskId')).from(jobs).where(eq(jobs.id, job.id));
     const [task] = turn?.taskId ? await ctx.db.select().from(tasks).where(eq(tasks.id, turn.taskId)) : [];
     if (!task) throw refuse(400, 'task_invalid', `This turn is on no task: name the task ${kind === 'work' ? 'the work is for' : 'whose branch to test'} with task.`);
     return task;
@@ -669,7 +669,7 @@ async function runRepository(ctx: Ctx, task: Task, input: RunInput, kind: RunKin
 async function workFiles(ctx: Ctx, task: Task, input: RunInput, kind: RunKind): Promise<string[]> {
   const files = kind === 'work' ? [...new Set(input.files ?? [])] : [];
   if (files.length) {
-    const had = await ctx.db.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, task.id), inArray(attachments.name, files)));
+    const had = await ctx.db.select(only(attachments, 'name')).from(attachments).where(and(eq(attachments.taskId, task.id), inArray(attachments.name, files)));
     const missing = files.find(f => !had.some(h => h.name === f));
     if (missing) throw refuse(404, 'attachment_unknown', `#${task.number} has no file ${missing}. Put it on the task with hh-attach --task ${task.number} first.`);
   }
@@ -779,8 +779,8 @@ async function runOf(ctx: Ctx, job: ToolJob, number: number, kind: RunKind): Pro
 export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: RunKind = 'tests'): Promise<object> {
   const { run, task } = await runOf(ctx, job, number, kind);
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  const files = await ctx.db.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
-  const [stopper] = run.stoppedByAgentId ? await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, run.stoppedByAgentId)) : [];
+  const files = await ctx.db.select(only(attachments, 'name')).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
+  const [stopper] = run.stoppedByAgentId ? await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, run.stoppedByAgentId)) : [];
   const has = new Set(files.map(l => l.name));
   const work = run.kind === 'work';
   return {
@@ -820,7 +820,7 @@ function requireRunning(run: Run): void {
 }
 
 async function stopperName(ctx: Ctx, job: ToolJob, other: boolean): Promise<string> {
-  const [me] = other ? await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId)) : [];
+  const [me] = other ? await ctx.db.select(only(agents, 'name')).from(agents).where(eq(agents.id, job.agentId)) : [];
   return other ? (me?.name ?? 'another agent') : 'you';
 }
 

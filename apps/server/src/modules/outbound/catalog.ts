@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { departments, outboundCatalogRevisions, outboundChannels } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf, scanText, unsafeLink } from './checks.js';
@@ -61,7 +61,7 @@ export async function requireProductOf(db: Pick<Db, 'select'>, at: { companyId: 
 async function placeOf(tx: Tx, p: Proposal): Promise<Place> {
   await requireProductOf(tx, p);
   if (!p.channelId) return { departmentId: p.departmentId, productId: p.productId ?? null, channelId: null };
-  const [channel] = await tx.select({ productId: outboundChannels.productId }).from(outboundChannels).where(and(eq(outboundChannels.id, p.channelId), eq(outboundChannels.companyId, p.companyId), eq(outboundChannels.departmentId, p.departmentId)));
+  const [channel] = await tx.select(only(outboundChannels, 'productId')).from(outboundChannels).where(and(eq(outboundChannels.id, p.channelId), eq(outboundChannels.companyId, p.companyId), eq(outboundChannels.departmentId, p.departmentId)));
   if (!channel || (p.productId && channel.productId !== p.productId)) throw noSuch('channel');
   return { departmentId: p.departmentId, productId: channel.productId, channelId: p.channelId };
 }

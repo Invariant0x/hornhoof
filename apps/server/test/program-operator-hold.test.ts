@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
 import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorCases, subscriptions, tasks } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
@@ -24,7 +24,7 @@ const MINUTE = 60_000;
 
 /* Whom Hornhoof answers for: the person the words of a turn stand for, who has that turn's rights. */
 const principalOf = async (c: { db: Awaited<ReturnType<typeof operatorCompany>>['db'] }, jobId: string) =>
-  (await c.db.select({ personId: agentEvents.personId }).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed'])))).map(word => word.personId);
+  (await c.db.select(only(agentEvents, 'personId')).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed'])))).map(word => word.personId);
 
 /* Words the program never recorded: their case escalated at once with nobody to take it, and they wait on a hold. */
 async function held(options: { before?: (c: Awaited<ReturnType<typeof operatorCompany>>) => Promise<void>; failed?: boolean } = {}) {

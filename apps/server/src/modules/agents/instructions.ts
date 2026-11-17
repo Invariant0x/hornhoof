@@ -3,6 +3,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import { assistants, companies, departments, people, type agents } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
 import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
@@ -146,7 +147,7 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
 
 /* The names an employee's header uses: its company, department and product. */
 export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
-  const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, agent.companyId));
+  const [company] = await db.select(only(companies, 'name')).from(companies).where(eq(companies.id, agent.companyId));
   const ids = [agent.departmentId, agent.productId].filter((id): id is string => Boolean(id));
   const depts = ids.length ? await db.select().from(departments).where(inArray(departments.id, ids)) : [];
   const nameOf = (id: string | null) => {
