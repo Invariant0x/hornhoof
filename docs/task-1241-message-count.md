@@ -1,76 +1,55 @@
 # Task 1241: bounded recovery of the message quota
 
-Bug, assigned risk class none. Branch: `task-1241`, based on
-`11aa5777c4a5f74a550c0e53570ec35ebae39f53` from `turn-31`. This task is for
-0.31.1; it does not integrate into `turn-31`, `turn-32` or `main` itself.
-Checked implementation: `8797456d19be31f7385c8e5c25f0b7c34dbd6bc9`.
-Status: DONE_WITH_CONCERNS. The assigned named checks pass; the broader author
-selection was interrupted and is not a complete or passed check.
+Branch: `task-1241`, prepared for the authorized fast-forward into `turn-32`.
+Released base: `82d62a6bebb3ffde6c21ae89274d85ece89b5685`.
+Checked implementation: `d91cd873ba13a60974cd12138e6f46833c73d232`.
+The final evidence commit changes documents only. The task records the actual
+integration receipt after the push.
+
+The six task commits were rebased onto the rewritten main history, using the
+old merge base `11aa5777c4a5f74a550c0e53570ec35ebae39f53` only as the cut point.
+No old turn-31 branch was merged. The task range contains no forbidden
+co-author trailer; no push to main or turn-31 was made.
 
 The first send in a turn restores its persisted count in `tools/watch.ts`.
-Its existing company, sender and inclusive start-time filters remain. Recovery
-now counts a subquery capped by `TURN_NUDGES`, the same constant as the refusal
-check. The kind is a fixed SQL literal matching the partial index predicate.
-The synchronous in-memory reservation, shared quota for `message_employee` and
-`tell_orchestrator`, and concurrent-send protection are unchanged.
+The company, sender and inclusive start-time filters remain. Recovery counts a
+subquery capped by `TURN_NUDGES`, the same constant as the refusal check. The
+fixed message-kind predicate matches the partial index. In-memory reservation,
+shared quota for employee messages and reports to the orchestrator, and
+concurrent-send protection are unchanged.
 
-Migration `0137_message_sender_window`, journal index 136, adds
+The first free migration in the observed turn-32 journal is still
+`0137_message_sender_window`, idx 136, immediately after 0136 / idx 135.
+Renumbering was therefore unnecessary. The migration adds
 `agent_events_message_sender_window` on `(company_id, (data->>'by'), created_at)`
-where `kind = 'message'`. The head selected 0137 and owns renumbering when the
-pending 0137/0138/0139 branches join 0.31.1. Drizzle generated the SQL and snapshot;
-the snapshot differs from 0136 only in identity, predecessor and this index.
-Earlier migrations are unchanged. No compatibility or data-conversion path was
-added. The extra index leaves old queries' columns and rows intact; a full
-application-binary rollback was not executed.
-There is no supported down-migration runner. The ordinary transactional index
-build can hold writes while it runs; no production build duration was measured.
+where `kind = 'message'`. Drizzle generated its SQL and snapshot. The snapshot
+adds only the index and its new identity/predecessor; earlier migrations and
+rows are unchanged. This is an additive index, with no compatibility path or
+new access grant. A transactional index build can hold writes while it runs;
+production build duration and a full binary rollback were not measured. There
+is no supported down-migration runner.
 
-Requirement -> test: `message-count.test.ts` calls the real `message_employee`
-handler and captures its executed, parameterized counter query for EXPLAIN.
-With 30,000 unrelated events, RED on
-`5c163ea5680bb98b1b6611a85e378cbede72afaa` shows Aggregate -> Seq Scan and a
-recovered count of 11 instead of the quota 10. Four cases fail for the missing
-index and unbounded count; the existing window behavior passes. GREEN uses
-Aggregate -> Limit -> Index Scan on the new index, with all three conditions in
-Index Cond and no sequential event scan. No elapsed-time assertion or real wait
-was added; the message scenarios use a fixed virtual Date.
+After the rebase, the named message-count, watch-tools, message-routing,
+task-messages and migration-metadata files passed: 100 of 100, exit 0. These
+include N-1/N/N+1, inclusive window boundaries, start-time preference and
+creation-time fallback, other senders and companies, other event kinds,
+outgoing mirrors, concurrent sends, the shared quota, and recovery after a
+restart. Fresh installation and upgrade from 0136 applied twice passed with
+stored messages intact. Server/test types, lint of all touched TypeScript and
+the server build passed, exit 0. Full commands, commits and outputs are in
+`docs/evidence/task-1241/turn-32/`.
 
-The tests preserve N-1/N/N+1 behavior, exact window boundaries, start-time
-preference and creation-time fallback, other senders, other companies, other
-event kinds and outgoing mirrors. They also verify a fresh installation and an
-upgrade from 0136 applied twice, with stored messages unchanged.
+EXPLAIN of the actual parameterized handler query is now Aggregate -> Limit ->
+Index Scan on the new index, with all three keys in Index Cond and no sequential
+event scan. The original RED and before/after plans remain in
+`docs/evidence/task-1241/`: RED showed Seq Scan and an unbounded count of 11
+instead of quota 10. No elapsed-time assertion, real pause or timeout change
+was added; the new message cases use a fixed virtual Date.
 
-Named checks on `db7eddda8c84dba3a18fe51810df73698faafc65`: message-count,
-watch-tools, message-routing, task-messages and migration-metadata, 100 of 100,
-exit 0. The final implementation changes only the new test's driver type;
-production and the other four test files are identical. On the final checked
-implementation, message-count passed 5 of 5 again, and server/test types,
-ESLint of all touched TypeScript files and the server build passed, exit 0.
-
-The RED/GREEN commands, exact commits, exit codes and full outputs, together
-with EXPLAIN before and after, are in `docs/evidence/task-1241/`. The project
-selector chooses 330 named server files and leaves another 240 to the release
-owner. The author command ran on the checked implementation with two workers.
-It was stopped after 63 completed file summaries, including two failing cases:
-`restore.test.ts` / `applies the carry only after a committed swap` and
-`merge-peer.test.ts` / `asks no old copy of a machine that left the data`.
-The selected-test process exited 130 and the author command exited 1. No full
-counts or completed coverage were produced. Its automatic CRAP pass is not
-valid completed-coverage proof; lint, types and independent dryer (no duplicates)
-did finish. There is no formatter. The unfinished selection remains for the
-release owner, and there is no overall author-check PASS.
-
-Both named failing cases were then executed together, with one worker, on clean
-base `11aa5777c4a5f74a550c0e53570ec35ebae39f53` and on the checked implementation:
-2 passed in each run, exit 0; the other 35 cases were excluded by the name
-selector, not executed. This does not reproduce or explain the earlier failures,
-and does not prove either whole file. The interrupted runner did not emit their
-complete failure stacks. Restore, merge and backup code and their test files
-are unchanged. No full profile or `run_tests` was started. No timeout, test case
-or assertion was weakened.
-
-Own diff and security inspection: filters and message permissions remain intact,
-the limit comes from one constant, SQL values remain parameterized, and the index
-adds no data, access grant or uniqueness rule.
-The migration follows Drizzle's generated SQL format; there is no separate SQL
-language-rule folder installed on this machine.
+The historical extra author run remains interrupted, not a PASS. Its coverage
+and CRAP output are not completed-coverage proof. The two cases it flagged in
+restore and merge-peer passed separately on the original base and candidate;
+those receipts execute only the named cases, not either whole file. The head
+accepted the task evidence and assigned those cases separately. In accordance
+with note 29, this resumed work ran only the named files, types, lint and build.
+No broad author run, full profile or run_tests was started again.
