@@ -31,11 +31,11 @@ const columns = {
 
 type Row = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; personId: string | null; personName: string | null; createdAt: Date };
 
-/* Conversation events keep their older join-code guard as well as the shared prose mask. */
+/* Conversation events keep their older join-code guard as well as the shared prose mask. The join code goes first: a
+   password label in front of it would otherwise take the flag alone and leave the code open. */
 function hideEventSecrets(data: unknown): unknown {
-  const masked = hideCredentialsIn(data);
-  const text = JSON.stringify(masked);
-  return text?.includes('--join ') ? JSON.parse(hideJoinCodes(text)) : masked;
+  const text = JSON.stringify(data);
+  return hideCredentialsIn(text?.includes('--join ') ? JSON.parse(hideJoinCodes(text)) : data);
 }
 
 const view = (r: Row): EventView => ({
