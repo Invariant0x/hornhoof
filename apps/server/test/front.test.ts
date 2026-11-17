@@ -5,7 +5,7 @@ import net, { type AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { startFront } from '../src/net/front.js';
 import { firstForwarded, passThrough, serve, startingAnswer, type Target } from '../src/net/proxy.js';
@@ -261,22 +261,130 @@ describe('through front and the next hop', () => {
   });
 });
 
+describe('the front entry, in this process', () => {
+  /* Front's grace for what is still open when it is told to stop: half of the 10 s Docker waits after its signal. */
+  const GRACE_MS = 5000;
+
+  type Entry = { door: Target; stop: (signal: 'SIGINT' | 'SIGTERM') => void; exits: unknown[]; exited: Promise<unknown> };
+
+  /* The entry point as it is, run in this process, so its grace can run on the test's clock. Its front is real, on a
+     port of the test's own and with the test's keeper; the stop signals it waits for come from the test, and its exit
+     is noted instead of taken. */
+  async function entry(keeper: Target): Promise<Entry> {
+    const heard = new Map<string | symbol, (...args: unknown[]) => void>();
+    const waits = vi.spyOn(process, 'once').mockImplementation((event, listener) => {
+      heard.set(event, listener);
+      return process;
+    });
+    const exits: unknown[] = [];
+    const exited = deferred<unknown>();
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number | string | null) => {
+      exits.push(code);
+      exited.resolve(code);
+    }) as typeof process.exit);
+    let server: http.Server | null = null;
+    vi.doMock('../src/net/front.js', async importOriginal => {
+      const real = await importOriginal<typeof import('../src/net/front.js')>();
+      return { startFront: async (opts: Parameters<typeof real.startFront>[0]) => (server = await real.startFront({ ...opts, port: 0, host: '127.0.0.1', keeper })) };
+    });
+    vi.resetModules();
+    try {
+      await import('../src/front.js');
+    } finally {
+      waits.mockRestore();
+      vi.doUnmock('../src/net/front.js');
+    }
+    const started = server as http.Server | null;
+    if (!started) throw new Error('The entry started no front.');
+    const sockets = new Set<net.Socket>();
+    started.on('connection', socket => {
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
+    });
+    let closed = false;
+    started.once('close', () => (closed = true));
+    /* The entry exits once its front has closed, so the noted exit stays in place until it has. */
+    onTestFinished(async () => {
+      vi.useRealTimers();
+      for (const socket of sockets) socket.destroy();
+      started.close();
+      if (!closed) await once(started, 'close');
+      exit.mockRestore();
+    });
+    const stop = (signal: 'SIGINT' | 'SIGTERM') => {
+      const listener = heard.get(signal);
+      if (!listener) throw new Error(`The entry does not stop on ${signal}.`);
+      listener(signal);
+    };
+    return { door: { host: '127.0.0.1', port: (started.address() as AddressInfo).port }, stop, exits, exited: exited.promise };
+  }
+
+  it.each(['SIGINT', 'SIGTERM'] as const)('exits 0 on %s at once when nothing is open, with no wait for the grace', async signal => {
+    const { door, stop, exits, exited } = await entry(await listening(echoHeaders()));
+    expect((await send(door)).status).toBe(200);
+    /* The clock never moves: only the close of the front can end it. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stop(signal);
+    expect(await exited).toBe(0);
+    expect(exits).toEqual([0]);
+  });
+
+  it('keeps a socket that stays open through the grace, then exits 0', async () => {
+    const app = http.createServer();
+    const sockets = new WebSocketServer({ server: app });
+    const { door, stop, exits } = await entry(await listening(app));
+    const client = new WebSocket(`ws://127.0.0.1:${door.port}/socket`);
+    client.on('error', () => {});
+    onTestFinished(() => client.terminate());
+    const arrived = once(sockets, 'connection') as Promise<[WebSocket]>;
+    await once(client, 'open');
+    const [atApp] = await arrived;
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stop('SIGTERM');
+    await vi.advanceTimersByTimeAsync(GRACE_MS - 1);
+    expect(exits).toEqual([]);
+    const up = once(atApp, 'message');
+    client.send('still here');
+    expect(String((await up)[0])).toBe('still here');
+    const down = once(client, 'message');
+    atApp.send('so am I');
+    expect(String((await down)[0])).toBe('so am I');
+    expect(exits).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exits).toEqual([0]);
+  });
+});
+
 describe('the front container', () => {
   const SERVER_DIR = fileURLToPath(new URL('..', import.meta.url));
 
   /* The entry point has its port and its keeper written in. This keeps them from reaching anything real on this
-     machine: it runs the entry point as it is, says what it asked for, and goes to the test's own target instead. */
+     machine: it runs the entry point as it is, says what it asked for, and goes to the test's own target instead. It
+     also says when the process has acted on a stop signal, and when its server began to close. */
   const PRELOAD = `
     import http from 'node:http';
     import net from 'node:net';
     const { connect } = net;
     net.connect = () => connect(Number(process.env.FRONT_TEST_TARGET), '127.0.0.1');
-    const { listen } = http.Server.prototype;
+    const { listen, close } = http.Server.prototype;
     http.Server.prototype.listen = function (port, host, done) {
       return listen.call(this, 0, '127.0.0.1', () => {
         console.log(JSON.stringify({ asked: { port, host }, port: this.address().port }));
         done();
       });
+    };
+    http.Server.prototype.close = function (...args) {
+      const server = close.apply(this, args);
+      console.log(JSON.stringify({ closing: true }));
+      return server;
+    };
+    const { emit } = process;
+    process.emit = function (event, ...args) {
+      const heard = emit.call(this, event, ...args);
+      if (event === 'SIGINT' || event === 'SIGTERM') console.log(JSON.stringify({ told: event }));
+      return heard;
     };
     const { request } = http;
     http.request = options => {
@@ -285,7 +393,16 @@ describe('the front container', () => {
     };
   `;
 
-  type Container = { child: ChildProcess; door: Target; said: Record<string, unknown>[]; exit: Promise<unknown[]> };
+  type Container = {
+    child: ChildProcess;
+    door: Target;
+    said: Record<string, unknown>[];
+    /* The process ran what it does on a stop signal. */
+    told: Promise<void>;
+    /* Its server began to close. */
+    closing: Promise<void>;
+    exit: Promise<unknown[]>;
+  };
 
   async function container(target: Target): Promise<Container> {
     const child = spawn(
@@ -297,13 +414,17 @@ describe('the front container', () => {
     const exit = once(child, 'exit');
     const said: Record<string, unknown>[] = [];
     const listeningOn = deferred<number>();
+    const told = deferred();
+    const closing = deferred();
     createInterface({ input: child.stdout as NodeJS.ReadableStream }).on('line', line => {
       const word = JSON.parse(line) as Record<string, unknown>;
       said.push(word);
       if (word.port) listeningOn.resolve(word.port as number);
+      if (word.told) told.resolve();
+      if (word.closing) closing.resolve();
     });
     const port = await listeningOn.promise;
-    return { child, door: { host: '127.0.0.1', port }, said, exit };
+    return { child, door: { host: '127.0.0.1', port }, said, told: told.promise, closing: closing.promise, exit };
   }
 
   it.each(['SIGINT', 'SIGTERM'] as const)('serves 8080, passes to the keeper on 7080 and exits 0 on %s', async signal => {
@@ -312,56 +433,45 @@ describe('the front container', () => {
     expect(JSON.parse(answer.body)['x-forwarded-for']).toBe('127.0.0.1');
     expect(said[0].asked).toEqual({ port: 8080, host: '0.0.0.0' });
     expect(said[1].target).toEqual({ host: 'keeper', port: 7080 });
-    const started = Date.now();
     child.kill(signal);
     expect(await exit).toEqual([0, null]);
-    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   it('finishes a request in flight before it exits', async () => {
-    const arrived = deferred<void>();
+    const arrived = deferred();
+    const answerNow = deferred();
     const keeper = await answering(async (_, res) => {
       arrived.resolve();
-      await sleep(500);
+      await answerNow.promise;
       res.end('whole');
     });
-    const { child, door, exit } = await container(keeper);
+    const { child, door, closing, exit } = await container(keeper);
     const answer = send(door);
     await arrived.promise;
     child.kill('SIGTERM');
+    /* The keeper answers only once front began to close, or once it is gone without that. */
+    await Promise.race([closing, exit]);
+    answerNow.resolve();
     expect(await answer).toMatchObject({ status: 200, body: 'whole' });
     expect(await exit).toEqual([0, null]);
   });
 
   it('takes no new request once it was told to stop', async () => {
-    const arrived = deferred<void>();
+    const arrived = deferred();
+    const answerNow = deferred();
     const keeper = await answering(async (_, res) => {
       arrived.resolve();
-      await sleep(500);
+      await answerNow.promise;
       res.end('whole');
     });
-    const { child, door, exit } = await container(keeper);
+    const { child, door, told, exit } = await container(keeper);
     const answer = send(door);
     await arrived.promise;
     child.kill('SIGTERM');
-    await sleep(200);
+    await Promise.race([told, exit]);
     await expect(send(door)).rejects.toThrow('ECONNREFUSED');
+    answerNow.resolve();
     await answer;
     await exit;
-  });
-
-  it('exits 0 in about 5 seconds with a socket that stays open', async () => {
-    const app = http.createServer();
-    new WebSocketServer({ server: app });
-    const { child, door, exit } = await container(await listening(app));
-    const client = new WebSocket(`ws://127.0.0.1:${door.port}/socket`);
-    client.on('error', () => {});
-    onTestFinished(() => client.terminate());
-    await once(client, 'open');
-    const started = Date.now();
-    child.kill('SIGTERM');
-    expect(await exit).toEqual([0, null]);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(4500);
-    expect(Date.now() - started).toBeLessThan(7000);
   });
 });
