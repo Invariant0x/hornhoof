@@ -10,6 +10,7 @@ import { seesTask } from '../tasks/sight.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { finishPhoneSession } from './queue.js';
 import { phoneById, phoneDenied, phoneMissing, phoneOwner, type PhoneSession } from './store.js';
+import { idOnly, only } from '../../db/selections.js';
 
 const MAX_SESSION_FRAMES = 2000;
 
@@ -25,7 +26,7 @@ export async function recordPhoneFrame(ctx: Ctx, node: NodeIdentity, frame: Phon
       const [phone] = await tx.select().from(companyPhones).where(eq(companyPhones.id, known.phoneId)).for('update');
       const [held] = await tx.select({ session: phoneSessions, status: jobs.status, error: jobs.error, task: tasks }).from(phoneSessions).innerJoin(jobs, eq(jobs.id, phoneSessions.jobId)).innerJoin(tasks, eq(tasks.id, phoneSessions.taskId)).where(eq(phoneSessions.id, frame.sessionId));
       if (!phone?.lending || phone.nodeId !== node.nodeId || !held || held.status !== 'running' || held.error === 'cancelled' || held.session.status !== 'active' || held.session.generation !== frame.generation || phone.generation !== frame.generation || !held.session.leaseUntil || held.session.leaseUntil.getTime() <= ctx.clock()) return;
-      const [duplicate] = await tx.select({ id: phoneFrames.id }).from(phoneFrames).where(and(eq(phoneFrames.sessionId, frame.sessionId), eq(phoneFrames.sequence, frame.sequence)));
+      const [duplicate] = await tx.select(idOnly(phoneFrames)).from(phoneFrames).where(and(eq(phoneFrames.sessionId, frame.sessionId), eq(phoneFrames.sequence, frame.sequence)));
       if (duplicate) return;
       const [amount] = await tx.select({ count: sql<string>`count(*)` }).from(phoneFrames).where(eq(phoneFrames.sessionId, frame.sessionId));
       if (Number(amount!.count) >= MAX_SESSION_FRAMES) { full = true; return; }
@@ -81,14 +82,14 @@ export async function taskRecordings(ctx: Ctx, me: Person, taskId: string) {
 
 export async function recordingImage(ctx: Ctx, me: Person, id: string, sequence: number): Promise<string | null> {
   await recordingAccess(ctx, me, id);
-  const [frame] = await ctx.db.select({ attachmentId: phoneFrames.attachmentId }).from(phoneFrames).where(and(eq(phoneFrames.sessionId, id), eq(phoneFrames.sequence, sequence)));
+  const [frame] = await ctx.db.select(only(phoneFrames, 'attachmentId')).from(phoneFrames).where(and(eq(phoneFrames.sessionId, id), eq(phoneFrames.sequence, sequence)));
   if (!frame) throw phoneMissing();
   return frame.attachmentId;
 }
 
 export async function imageBytes(ctx: Ctx, companyId: string, id: string | null): Promise<Buffer> {
   if (!id) throw phoneMissing();
-  const [file] = await ctx.db.select({ bytes: attachments.bytes }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, companyId), isNull(attachments.operatorCaseId)));
+  const [file] = await ctx.db.select(only(attachments, 'bytes')).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, companyId), isNull(attachments.operatorCaseId)));
   if (!file) throw phoneMissing();
   return Buffer.from(file.bytes);
 }

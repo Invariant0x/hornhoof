@@ -8,6 +8,7 @@ import { companies, companyPhones, machines, nodes, people, phoneSessions } from
 import { ApiError } from '../../errors.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { phoneCapable, phoneRequest } from './rpc.js';
+import { idOnly } from '../../db/selections.js';
 
 export type CompanyPhone = typeof companyPhones.$inferSelect;
 export type PhoneSession = typeof phoneSessions.$inferSelect;
@@ -36,7 +37,7 @@ export async function nodeForPhone(ctx: Ctx, companyId: string, machineId: strin
   const [machine] = await ctx.db.select().from(machines).where(eq(machines.id, machineId));
   if (!machine || machine.companyId !== companyId) throw phoneDenied();
   if (machine.revokedAt) throw phoneOffline();
-  const found = await ctx.db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.machineId, machineId), eq(nodes.companyId, companyId), isNotNull(nodes.keyHash))).orderBy(asc(nodes.createdAt), asc(nodes.id));
+  const found = await ctx.db.select(idOnly(nodes)).from(nodes).where(and(eq(nodes.machineId, machineId), eq(nodes.companyId, companyId), isNotNull(nodes.keyHash))).orderBy(asc(nodes.createdAt), asc(nodes.id));
   const node = found.find(row => phoneCapable(ctx, nodeIdentity(row.id)));
   if (!node) throw phoneOffline();
   return node.id;
@@ -66,7 +67,7 @@ export async function addPhone(ctx: Ctx, me: Person, input: z.infer<typeof NewPh
   const hardwareKey = devices.find(d => d.serial === input.endpoint && d.status === 'device')?.hardwareKey;
   if (!hardwareKey) throw phoneOffline();
   return ctx.db.transaction(async tx => {
-    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, me.companyId)).for('update');
+    await tx.select(idOnly(companies)).from(companies).where(eq(companies.id, me.companyId)).for('update');
     const [machine] = await tx.select().from(machines).where(eq(machines.id, input.machineId)).for('update');
     if (!machine || machine.companyId !== me.companyId || machine.revokedAt) throw phoneDenied();
     const [physical] = await tx.select().from(companyPhones).where(and(eq(companyPhones.hardwareKey, hardwareKey), isNull(companyPhones.removedAt))).for('update');
@@ -77,7 +78,7 @@ export async function addPhone(ctx: Ctx, me: Person, input: z.infer<typeof NewPh
       if (existing.hardwareKey !== hardwareKey) throw alreadyHeld();
       const same = existing.machineId === input.machineId && existing.nodeId === nodeId && existing.serial === input.endpoint;
       if (same) return existing;
-      const [held] = await tx.select({ id: phoneSessions.id }).from(phoneSessions).where(and(eq(phoneSessions.phoneId, existing.id), inArray(phoneSessions.status, ['queued', 'starting', 'active', 'revoking']))).limit(1);
+      const [held] = await tx.select(idOnly(phoneSessions)).from(phoneSessions).where(and(eq(phoneSessions.phoneId, existing.id), inArray(phoneSessions.status, ['queued', 'starting', 'active', 'revoking']))).limit(1);
       if (held) throw alreadyHeld();
       const [changed] = await tx.update(companyPhones).set({ machineId: input.machineId, nodeId, serial: input.endpoint, name: input.name, generation: existing.generation + 1 }).where(eq(companyPhones.id, existing.id)).returning();
       return changed!;
