@@ -1,145 +1,94 @@
-# Вердикт Security #1210: отдельный одноразовый контейнер для codex review (для #1157)
+# #1210: отдельная одноразовая среда codex review для #1157
 
-Проверяющий: Architect (Claude Opus 5.5), только чтение. Дата: 17.11.2026, UTC.
-Кандидат: `task-1157-isolated-plan.txt` v1, вложение 0646d688-ba27-41c2-bbf4-2cf75fdf2e76 в #1157, SHA-256 `dc2c9fa78c59581368a512a14731df79328afa78ae612c4b4c096ca81c641470` (скачан, сумма совпала).
+Автор исходного заключения: Architect (Claude Opus). Проверка и исправления документа: Code reviewer (Codex), 17.11.2026 UTC. Это Review документа перед независимой Security.
 
-## Решение: ДОПУСТИТЬ С ГРАНИЦАМИ — архитектуру, не запуск
+**Решение: допустить с границами архитектуру отдельной среды. Запуск не разрешен.**
 
-Отдельный одноразовый контейнер без общего `/data`, со своим PID и сетевым пространством, своим UID, home и снимком кода закрывает все четыре канала, из-за которых v2 отклонил контейнер тарифа: чужие рабочие папки, окружение чужих процессов, адреса моста и git-токены. Это верно при условиях раздела «Условия допуска». План верно отказывается от расширения 606af686.
+Проверен план #1157 v1, task-1157-isolated-plan.txt, вложение 0646d688-ba27-41c2-bbf4-2cf75fdf2e76, SHA-256 `dc2c9fa78c59581368a512a14731df79328afa78ae612c4b4c096ca81c641470`. Сумма скачанного файла совпала. Исходный документ этого Review: кандидат `85408027-0600-4275-a169-646b33223a18`, reports/task-1210/verdict.md из `33863f5e2b1e8e8a7709e3680926ae2008ed69bd`, SHA-256 `c721aa7c90bf2335246ccc0f209a3153f031043206ae59b2928a44dd6904c103`.
 
-**Запуск этим вердиктом не разрешен.** Сами Операции пишут, что v1 — проект: образ, UID, сеть, авторизация и запас ресурсов не закреплены. Нужна v2 плана с закрепленными значениями из таблицы ниже, и ее точная версия должна пройти Security. Затем — фаза A (без сети и без учетных данных), и только после нее фаза B.
+Отдельный контейнер позволяет устранить общие папки, PID, окружение и каналы Hornhoof, из-за которых отклонена среда тарифа. Это вывод об архитектуре при выполнении условий ниже, не доказательство установленной изоляции. Свои учетные данные Codex остаются отдельным риском. У v1 нет точного образа, профиля, mapping UID, схемы авторизации, сетевой политики и подтвержденного запаса ресурсов. Runtime остается **NOT_READY** до новой версии пакета, ее независимой Security и выполнения условий владельцем #1157.
 
-В плане есть пробел, который надо закрыть в v2 (находка 1 ниже): учетные данные Codex внутри контейнера по умолчанию доступны командам, которые выбирает модель. Есть и противоречие, из-за которого план в нынешнем виде, скорее всего, остановится на шаге 4 (находка 2): песочница Codex, скорее всего, не сможет создать namespace в этом же контейнере.
+Запрет v1 на danger-full-access, запрет менять контейнер тарифа и требование окна без ходов сохранены. Само заключение не отменяет ограничений Операций и не разрешает новые аккаунты, оплату, права или запуск.
 
-## Что прочитано и на каком коде
+## Опора и пределы чтения
 
-- План v1 полностью. Verdict v2 из #1162 (файл `verdict.md`, SHA-256 `fbd16de1…a3ba5a`), его ограничения перенесены. Факты оркестратора от 17.11 02:53 UTC — из тела #1210: сама #1157 мне не видна.
-- Код Hornhoof на закрепленном `f4fb7eff1840c17bacd6826c109e341a35d076ba` (origin/main; тот же SHA, что в v2), через `git show`, без checkout и запуска. В turn-31 `359c2efa` из этих файлов изменены `bridge.ts`, `runner.ts` и `credentials.ts` (токен вложений через мост, приватность вывода хода). Выводы ниже это не меняет.
-- Официальная документация Codex (developers.openai.com/codex перенаправляет на learn.chatgpt.com/docs): sandboxing, agent-approvals-security, auth, config-reference, environment-variables, non-interactive-mode, developer-commands, agents-md. Цитаты ниже дословные. Где документ молчит, стоит NOT FOUND.
-- На Маке ничего не запускал, ходы не трогал, значений секретов не читал.
+Прочитан полный план v1 и прежний verdict.md v2 #1162, SHA-256 `fbd16de1211d32806a77827d40cd1310d5983c1e791f05062505b4a4c8a3ba5a`. Общий контейнер hornhoof-codex-606af686 в нем отклонен. Факты оркестратора от 17.11 02:53 UTC взяты из тела #1210: 038c67748414, общий RW /data, uid 1000 и папки 755, нет docker socket и лимитов. Эти факты не измерялись заново.
 
-### Опора в коде (f4fb7eff)
+Код прочитан через git show на `f4fb7eff1840c17bacd6826c109e341a35d076ba`. Это версия источника для анализа, не доказательство build на Маке:
 
-- Папка агента `/data/work/agents/<ключ>` (`apps/node/src/runner.ts:112`). Права 0700 у пользователя тарифа (`isolation.ts:63-69`). Один UID на подписку (`isolation.ts:18-35`, первый UID 20000). По фактам оркестратора, в 606af686 агенты фактически идут под uid 1000, а папки принадлежат node, права 755. Отсюда вывод: `/data` нельзя монтировать даже частично.
-- В окружении агента: `HH_BRIDGE`, `HH_ATTACH_URL`, `HH_ATTACH_PASS` (`terminal/programs.ts:42-48`); MCP Hornhoof и хуки `hh-hook` через `-c` (`programs.ts:99-104`); `CODEX_HOME` тарифа (`programs.ts:104`). Git-токен хода — `GIT_ASKPASS=/app/git-askpass` и `HH_GIT_PASSWORD` (`workspace.ts:10-12, 74-76`).
-- Мост слушает 127.0.0.1 узла (`terminal/bridge.ts:86`). Из другого сетевого пространства он недостижим.
-- Вход Codex тарифа — `auth.json` в home тарифа. Тариф Codex работает на одной машине за раз (`credentials.ts:7-11`).
-- Контейнер тарифа: root, `CHOWN DAC_OVERRIDE FOWNER KILL SETGID SETUID SYS_PTRACE`, `apparmor=unconfined`, `--restart unless-stopped`, без `--memory`, `--cpus`, `--pids-limit` (`scripts/install.sh:603-605`). Это источник риска общего OOM, не новый контейнер.
-- Наш собственный запуск `codex exec` уже держится принципа «граница — контейнер»: «The container is the sandbox, so Codex's own approvals and sandbox are off» (`providers/codex.ts:33-34`).
+- [runner.ts:112](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/runner.ts#L112) задает `work/agents/<key>`. [isolation.ts:18](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/isolation.ts#L18) назначает UID по подписке; [prepareFolder:63](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/isolation.ts#L63) ставит 0700 только при наличии отдельного user. Это не опровергает сообщенный общий UID конкретного контейнера.
+- [programs.ts:42](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/terminal/programs.ts#L42) задает HH_BRIDGE/HH_ATTACH_*, [строка 99](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/terminal/programs.ts#L99) добавляет MCP и hooks, строка 104 задает CODEX_HOME. [workspace.ts:75](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/workspace.ts#L75) передает GIT_ASKPASS и HH_GIT_PASSWORD.
+- [bridge.ts:86](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/terminal/bridge.ts#L86) слушает loopback узла. Свой network namespace убирает прямое совпадение loopback, но не доказывает отсутствие остальных маршрутов.
+- [credentials.ts:10](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/credentials.ts#L10) определяет auth.json, строка 11 объясняет аренду входа Codex на одной машине. Это ограничение Hornhoof, а не доказательство поведения второй независимой сессии у OpenAI.
+- [install.sh:603](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/scripts/install.sh#L603) запускает узловой контейнер root с дополнительными capabilities и общим /data, без перечисленных resource caps. [Dockerfile:163](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/Dockerfile#L163) кладет git-askpass и hh-* в образ.
+- [providers/codex.ts:33](https://github.com/Invariant0x/hornhoof/blob/f4fb7eff1840c17bacd6826c109e341a35d076ba/apps/node/src/providers/codex.ts#L33) и строка 34 действительно отключают sandbox/approvals для существующего provider. Этот код описывает действующий запуск и не дает допуска новому review.
 
-## Ответы на шесть вопросов
+Официальные страницы OpenAI и Docker прочитаны 17.11.2026. Ниже ссылки ведут к конкретным разделам. Текущая документация не доказывает поддержку всех ключей неизвестным образом или наблюдавшимся ранее Codex 0.169.0. Совместимость закрепленной версии, effective config и CLI argv проверяются отдельно до опыта. Отсутствие найденного описания не считается доказательством отсутствия функции.
 
-### 1. Чужие папки, окружение, адреса моста, git-токены — закрыто при условиях
+## Семь находок: подтверждение и исправленные выводы
 
-| Канал в 606af686 | Чем закрывает новый контейнер | Условие |
-|---|---|---|
-| `/data/work/agents/*` (755, uid 1000) | `/data` не монтируется | Никаких `-v`/`--mount`, кроме `/input` RO и tmpfs; `docker inspect … .Mounts` до старта |
-| `/proc/PID/environ` чужих агентов | свое PID-пространство | Без `--pid=host`/`container:` |
-| `HH_BRIDGE` (127.0.0.1 узла) | свое сетевое пространство | Без `--network host`/`container:`; во внутренней сети только сам review и шлюз |
-| `HH_GIT_PASSWORD`, `/app/git-askpass` | нет в окружении и образе | Окружение задано списком; образ не узловой Hornhoof (в узловом есть `/app/git-askpass` и `hh-*`) |
-| MCP Hornhoof, `hh-hook` | нет в новом CODEX_HOME | Свой config.toml без `mcp_servers`, `hooks`, `notify` |
-| Сервер Hornhoof и службы Mac | шлюз выхода | Запрет `host.docker.internal`, `gateway.docker.internal`, 192.168.65.0/24 и частных диапазонов (п. 5) |
+1. **Высокая: учетные данные внутри среды могут попасть в команды и вывод.** [Настройки окружения](https://learn.chatgpt.com/docs/config-file/config-basic#command-environment) описывает сохранение переменных с KEY/SECRET/TOKEN по умолчанию; inherit/core и автоматическое исключение уменьшают наследование. Они не доказывают недоступность файла auth или окружения родительского процесса. Утверждение исходника «песочница вообще не ограничивает чтение» снято: [permissions](https://learn.chatgpt.com/docs/permissions#define-and-select-a-profile) описывает правила deny/read. Фактическая защита конкретного credential path и /proc остается NOT_CHECKED. Нужна отдельная схема авторизации v2; проверка текста и отзыв не отменяют уже произошедшую передачу секрета.
 
-Совпадение UID с соседями без общих томов и без общего PID-пространства доступа не дает. Отдельное отображение UID (userns-remap) поэтому **не обязательно**. Требование плана «при отсутствии штатного способа — NOT_READY» можно ослабить до «записать». Достаточно числового UID:GID не 0, не 1000 и вне диапазона 20000+ из `isolation.ts`, без `--group-add`.
+2. **Высокая для исполнимости: вложенная песочница может не запуститься.** [OpenAI: Linux sandbox](https://learn.chatgpt.com/docs/agent-approvals-security#os-level-sandbox) прямо предупреждает о несовместимой конфигурации контейнера. Однако [Docker seccomp](https://docs.docker.com/engine/security/seccomp/#significant-syscalls-blocked-by-the-default-profile) содержит исключение для unshare --user: нельзя объявлять любой default profile заведомым запретом. Профиль и виновный syscall нового контейнера не установлены. Ошибка или предупреждение о неработающей песочнице при preflight означают остановку. Совет заменить песочницу danger-full-access из допуска убран: [описание режимов](https://learn.chatgpt.com/docs/sandboxing#configure-defaults) говорит о снятии файловых и сетевых границ, а не только сетевого запрета. Документация допускает внешний контейнер как границу, но также предупреждает об утечке credentials и доверенных репозиториях. Это не разрешение обойти запрет v1.
 
-### 2. Вход и выход без обратного канала
+3. **Средняя: квота writable storage не задана механизмом.** Одного слова «том» недостаточно, чтобы подтвердить лимит. [tmpfs](https://docs.docker.com/engine/storage/tmpfs/#options-for---tmpfs) поддерживает size; его память входит в memory cgroup, данные могут попадать в swap. В v2 нужны размеры и владельцы всех writable путей, включая home, CODEX_HOME, /tmp и журналы. Размер scratch не добавляется сверху к 2 GiB RAM.
 
-- **Вход.** `/input` только RO. Снимок делает упаковщик отдельным шагом из объектов git точных SHA (например, `git archive`), не из рабочих деревьев агентов: там бывают неотслеживаемые файлы и секреты. Без `.git` remotes, hooks, submodules, ссылок наружу, `.env`, `.codex/` и `AGENTS.md` (см. находку 4). Manifest SHA-256 до и после. Копия для `codex review` — в tmpfs scratch. Для v1 — только искусственный пример Операций.
-- **Выход.** Итог review — stdout и stderr процесса. Снимать через `docker logs <полный ID>` или `docker cp` из tmpfs до удаления. Никаких writable bind-томов на хост, общих томов или записей в `/data` и базу Hornhoof.
-- Перед выдачей оператор ищет в тексте строку учетных данных и маркеры canary. Итог review — недоверенные данные: модель читала недоверенный diff. В задачу Hornhoof он кладется как файл-данные, не как указания.
+4. **Средняя: инструкции и конфигурация не становятся данными только по промпту.** [AGENTS.md discovery](https://learn.chatgpt.com/docs/agent-configuration/agents-md#how-codex-discovers-guidance) включает AGENTS.override.md, AGENTS.md и fallback names из CODEX_HOME и проекта. Категорический вывод «выключателя нет» не подтвержден. Для синтетического входа исключить все эти источники; свежий home и пустой fallback зафиксировать. [Config basics](https://learn.chatgpt.com/docs/config-file/config-basic#configuration-precedence) объясняет, что untrusted проект не загружает project-local config/hooks/rules, но user/system/managed слои остаются. Проверять нужно effective config, включая MCP, apps, plugins и hooks. Один plugins._default.enabled=false недостаточен при явных или управляемых переопределениях.
 
-### 3. Лимиты CPU и памяти — для review хватает, запас VM не доказан
+5. **Средняя: отдельная сеть еще не является разрешенным списком выхода.** [Docker Desktop](https://docs.docker.com/desktop/features/networking/networking-how-tos/#connect-a-container-to-a-service-on-the-host) документирует host.docker.internal и gateway.docker.internal; [внутренние адреса изменяемы](https://docs.docker.com/desktop/features/networking/networking-how-tos/#changing-internal-ip-addresses). 192.168.65.0/24 не объявляется фактом этой VM. Нужны фактические подсети и запрет прямого пути мимо шлюза, DNS/redirect/IPv6 обходов, host/private/link-local/metadata и соседей. Переменная proxy сама этого не обеспечивает. Точные сервисы и порты Codex для выбранной авторизации остаются NOT_CHECKED и закрепляются до фазы B, не открываются по догадке во время нее.
 
-- `--cpus 1`, `--memory 2g`, `--memory-swap 2g` (без подкачки), `--pids-limit 128`, `--restart no` достаточны для одного review искусственного diff: Codex — нативный бинарь, команды review короткие. Фактическое потребление — NOT_CHECKED, измерить в фазе A через `docker stats --no-stream`.
-- **«1 GiB scratch» на томе не ограничить**: у local-тома Docker нет квоты. Scratch и `/tmp` — только tmpfs с `size=`. Страницы tmpfs учитываются в памяти контейнера, так что 2 GiB — общий потолок вместе со scratch. Предлагаю `/scratch` tmpfs 512m и `/tmp` tmpfs 64m.
-- `--oom-score-adj 1000`: при общем OOM VM ядро первым завершит review, а не агентов. У контейнеров тарифа лимитов нет (`install.sh:603-605`), и общий OOM уже был (#1198). Свой лимит review не защищает VM от чужого роста.
-- Правило старта вместо drain: непосредственно перед запуском свободная память VM не меньше 4 GiB (2 × лимит), подкачка занята меньше чем наполовину, за последние 24 часа не было OOM. Иначе не запускать. Отдельный drain ходов для изоляции не нужен: контейнер не касается узла и тарифа. Нужен только запас ресурсов. Запрет останавливать живые ходы сохраняется.
+6. **Низкая: узловой образ содержит лишние каналы Hornhoof.** Подтверждено Dockerfile и workspace.ts выше. Нужен отдельный минимальный образ без /app/git-askpass, hh-*, общих git credential settings, auth и конфигурации Hornhoof. Переиспользование образа узла не входит в этот допуск.
 
-### 4. Учетные данные без общего auth — минимум и где хранить
+7. **Условие допуска: окно и ресурсы не доказаны.** Изоляция не гарантирует отсутствие влияния на общую VM. [Docker resource constraints](https://docs.docker.com/engine/containers/resource_constraints/#understand-the-risks-of-running-out-of-memory) требует оценивать потребление и доступные ресурсы; общий OOM может затронуть другие процессы. Значения 1 CPU / 2 GiB / 128 PID являются проектными потолками, не доказательством достаточности. oom-score-adj не гарантирует, что review погибнет первым. Утверждения «drain не нужен», «4 GiB достаточно» и произвольные пороги swap/24 часов сняты. Сохранены окно без running/starting ходов и частей, штатный drain без остановки живого, измерение запаса и отдельный учет шлюза/упаковщика из v1.
 
-По документации:
-- «`ephemeral` keeps credentials in memory only for the current process».
-- `CODEX_API_KEY` «Provides an API key to a non-interactive Codex process», используется в «Exec, review, …».
-- `codex logout` — «clear the current credentials». Отзыв на сервере — NOT FOUND.
-- Вход по коду устройства — «(beta)»; его надо включить в настройках безопасности ChatGPT.
+## Условия новой версии пакета
 
-Чтение файлов песочница не ограничивает (NOT FOUND, документ описывает только ограничение записи). Значит, учетные данные, видимые review UID, могут прочитать и команды модели.
+Все пункты ниже обязательны и сейчас NOT_CHECKED в реализации. Их проверяемая матрица находится также в conditions.csv.
 
-Минимум: **одни учетные данные только для вызова модели Codex, на одну попытку**. Они не попадают в образ, том, задачу или журнал, живут в tmpfs `CODEX_HOME` (0600, review UID) или в окружении одного процесса codex и отзываются сразу после попытки. Два штатных пути:
-- **A. Отдельный ключ API через `CODEX_API_KEY`** плюс `cli_auth_credentials_store = "ephemeral"`. Это новые учетные данные и, возможно, оплата: решает владелец подписки или CEO, план сам их не разрешает.
-- **B. Вход по коду устройства владельца подписки** в свежий tmpfs `CODEX_HOME` (режим `file`). Это отдельная сессия, не копия auth.json тарифа. Копировать `auth.json` тарифа нельзя: Codex обновляет вход сам, и тариф работает на одной машине за раз (`credentials.ts:10-11`). Влияет ли вторая сессия на сессию тарифа — NOT_CHECKED. После попытки — `codex logout`, затем завершение сессии в настройках аккаунта: logout чистит только локальное.
+1. **Версия и владельцы.** Закрепить digest arm64-образа, version/hash Codex и bwrap, версию Docker и эталон default seccomp; для собственного профиля нужны JSON, SHA-256, diff к эталону и отдельная Security. Назначенные model/effort и полный argv также закрепить. Назвать исполнителя, наблюдателя, окно и запись допуска точного пакета. Установок и самовольной смены модели во время review нет.
+2. **UID и полномочия.** Числовые непривилегированные UID:GID на попытку, проверенные на совпадения в доступной области; отсутствие supplementary groups, фактические uid_map/gid_map и способ запуска подтверждены. Условие v1 NOT_READY при неустановленном mapping не снимается. Без cap-add, privileged, SYS_ADMIN/SYS_PTRACE, devices, host/container namespaces и runtime sockets. Документация [userns-remap](https://docs.docker.com/engine/security/userns-remap/) поясняет различие отображения ID и пользователя процесса; менять daemon ради этой проверки нельзя.
+3. **Файлы и вход.** Read-only rootfs и /input; writable только заранее перечисленные одноразовые пути с квотой. Нет /data, чужих home, /proc хоста, SSH-agent и общих томов. Доверенный упаковщик берет только заранее прочитанный искусственный base/head из git objects, сохраняет их происхождение и manifest, не запускает код. Не копирует рабочие деревья, remotes, hooks, submodules, внешние ссылки, secrets или проектные настройки. Git archive сам по себе не доказывает отсутствие отслеживаемого секрета.
+4. **Команда review.** В scratch подготовить отдельный git input для точного согласованного diff без обратного пути в исходный репозиторий. В v2 записать соответствие source base/head и подготовленного входа, рабочую папку и argv закрепленного CLI. Продуктовый diff и повтор попытки в v1 не входят.
+5. **Конфигурация.** Проверенная конфигурация без секретов с SHA-256 и перечнем всех загружаемых слоев. MCP, hooks, notify, apps/plugins и web search выключены фактически; нет наследования HH_*, GIT_ASKPASS, git/company credentials. Shell environment задан разрешенным списком с исключением секретов. Выбрать одну поддерживаемую схему permissions: [современные profiles и старые sandbox settings не складываются](https://learn.chatgpt.com/docs/permissions). Не смешивать их в надежде усилить защиту.
+6. **Сеть.** A: network none, без auth. B: отдельная internal network только для review и назначенного шлюза; проверенная сетевая политика запрещает обход шлюза всеми процессами. Закрепить destination/ports, DNS, redirects и обе IP families, фактические host/VM/private ranges, запрет Docker/MCP/company сервисов. Сеть существующих контейнеров не меняется.
+7. **Авторизация.** Только доступ к выбранному сервису модели; никаких credentials тарифа. [Non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode#authenticate-in-automation) поддерживает CODEX_API_KEY для review и предупреждает о совместном окружении с недоверенным кодом. [Auth storage](https://learn.chatgpt.com/docs/auth#credential-storage) различает file/keyring/auto/ephemeral; ephemeral хранит данные в памяти процесса, что само по себе не изолирует их от его инструментов. В v2 назвать способ выдачи, место хранения, границу от команд модели и способ отзыва. API key либо отдельный вход владельца выбирается в его полномочиях; здесь выбор не сделан. Влияние отдельной сессии на тариф и серверный отзыв после logout не доказаны. Копировать auth.json или создавать ключ сейчас нельзя.
+8. **Ресурсы и окно.** Не превышать проектные 1 CPU / 2 GiB RAM / 128 PID / 1 GiB writable storage, один опыт до 10 минут, restart no. Обеспечить и проверить поддержку лимитов, отдельные caps шлюза и контролируемый размер логов. По [memory-swap](https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details) равные RAM/swap limits отключают swap контейнера при поддержке этой функции; это не гарантия отсутствия подкачки всей VM. Операции записывают измеренный бюджет всей попытки и запас. Старт только после #1151, вне конфликта 0.31.0, в подтвержденном окне без running/starting ходов и частей; если drain/запас не подтвержден или начался новый ход, не запускать.
 
-В обоих путях обязательно (находка 1): `shell_environment_policy.inherit = "core"` и `shell_environment_policy.ignore_default_excludes = false`. По умолчанию переменные с KEY, SECRET, TOKEN в имени **передаются** командам: «Keep variables containing KEY, SECRET, or TOKEN before other filters run (default: true)». И проверка выхода на строку учетных данных.
+## Проверка и возврат результата
 
-Выбор между A и B — решение владельца подписки. Вопрос идет через главу Разработки.
+После независимой Security точного v2 и назначения исполнителя проводится фаза A без сети и без учетных данных: сверка ограниченных inspect metadata, UID/groups/maps/caps, mounts и пространств; искусственные canary проверки недоступных данных и отказа записи; отдельные безопасные маркеры на местах будущих credentials для проверки границы чтения команд; preflight штатной песочницы закрепленного Codex. Эти проверки здесь только перечислены, не выполнены. Настоящие чужие файлы и environ не читать. Неизвестное и ошибка preflight означают остановку, а не расширение профиля.
 
-### 5. Что закрепить до запуска
+Фаза B возможна только после A и подтверждения авторизации/сети: один заранее согласованный синтетический review. Отказы сетевой политики проверяются на согласованных безопасных адресах/фикстурах без сканирования рабочих служб. При любом обходе, namespace error, превышении лимита или неполном review результат FAIL.
 
-| Значение | Требование |
-|---|---|
-| Образ | Минимальный arm64 (codex, git; bwrap — только для варианта «а» ниже), не узловой образ Hornhoof. Закрепить `@sha256:` digest, версию codex и SHA-256 его бинаря. Установок во время review нет. |
-| Пользователь | `--user <UID>:<GID>` числом, не 0, не 1000, не 20000+; без `--group-add`; образ не root |
-| Файловая система | `--read-only`; `--tmpfs /scratch:size=512m,mode=0700,uid=<UID>,gid=<GID>`; `--tmpfs /tmp:size=64m,noexec,nosuid,nodev`; `/input` RO; других томов нет |
-| Права | `--cap-drop ALL`, `--security-opt no-new-privileges`; seccomp по умолчанию (без `seccomp=`); нет `--privileged`, `--device`, `apparmor=unconfined`; нет docker socket |
-| Пространства | Без `--pid`, `--ipc`, `--uts`, `--network host`/`container:`; `--init` |
-| Ресурсы | `--cpus 1 --memory 2g --memory-swap 2g --pids-limit 128 --oom-score-adj 1000 --restart no`; таймаут 10 мин снаружи (`timeout` у исполнителя), затем `docker stop` по полному ID |
-| Окружение | Только списком: `HOME=/scratch/home`, `CODEX_HOME=/scratch/codex`, `PATH`, `LANG`, при варианте A — `CODEX_API_KEY`. Ни `--env-file` родителя, ни `HH_*`, ни `GIT_ASKPASS` |
-| config.toml Codex | Без `mcp_servers`, `hooks`, `notify`; `plugins._default.enabled = false`; `shell_environment_policy` как в п. 4; `projects."/scratch/review".trust_level = "untrusted"`; модель и effort — назначенные; `cli_auth_credentials_store` по выбранному пути. Файл с SHA-256 |
-| Сеть, фаза A | `--network none` |
-| Сеть, фаза B | Своя `docker network create --internal` (IPv6 выключен), в ней только review и шлюз. Шлюз пускает только к хостам Codex, остальное запрещает и пишет в журнал. Запрет `host.docker.internal`, `gateway.docker.internal`, 192.168.65.0/24, 10/8, 172.16/12, 192.168/16, 127/8, 169.254/16, 100.64/10, IPv6 ULA и link-local. Проверка IP после DNS (против rebinding) и после переадресаций |
-| Хосты Codex | В документации списка нет (NOT FOUND). Кандидаты `api.openai.com`, `chatgpt.com`, `auth.openai.com` — только предположение; подтвердить по журналу шлюза в фазе B, лишнее не открывать |
+Выход снимает доверенный оператор в отдельное закрытое хранилище через stdout/stderr или копирование заранее названного файла. Нет writable bind в /data и нет агентского обратного канала. Сохранить полную команду, идентичности входа/образа/config, полный вывод, фактические exit/signal/cancel/deadline и manifest до/после. Exit 0 без завершенного review не считается успехом. Оператор проверяет вывод на credentials/canary и только очищенный отчет прикладывает к задаче. Поиск буквальной строки не доказывает отсутствия кодированной утечки; вывод остается недоверенными данными.
 
-### 6. Проверка на безопасном примере и откат
+Откат ограничен заранее записанными полными ID новой попытки: остановить review, снять закрытые доказательства, удалить только его контейнер, шлюз, сеть и одноразовые данные после проверки, что они не общие. Отозвать отдельный credential штатным способом; logout очищает локальные данные и не принят как доказательство серверного отзыва. Проверить исходные metadata тарифа и очередь, снять штатный drain. Не использовать prune/pkill, не пересоздавать тариф и не удалять общие логи/auth. Удаление контейнера не отменяет утечку или побочный эффект; такой факт сохраняется для Security.
 
-План это уже содержит. Добавить:
-- **Фаза A**, без сети и без учетных данных:
-  - `docker inspect` выбранных полей против таблицы выше.
-  - Внутри контейнера: `id`, `/proc/self/status` (Uid, Gid, Groups, CapEff, NoNewPrivs, Seccomp), `findmnt`, `ls /proc` (видны только свои PID).
-  - Маркер canary вне scratch недоступен; запись в `/input` и в rootfs отказана.
-  - `codex --version` и SHA-256 бинаря; список MCP пуст (команда по `codex mcp --help` закрепленной версии).
-  - Пробник песочницы: команда `codex sandbox` (точная форма по `codex sandbox --help` закрепленной версии) с безвредной командой, полный вывод и exit. Плюс отказ записи вне рабочей папки внутри пробника.
-- **Фаза B**: отказы шлюза к запрещенным адресам по согласованному списку (без сканирования служб). Затем ровно один `codex review` искусственного diff. Exit записывается сразу после процесса, без `head` или `tee`.
-- **Откат**: остановить и удалить только записанные полные ID (контейнер review, шлюз, внутренняя сеть); tmpfs исчезает с контейнером. Отозвать учетные данные (ключ API или сессию; `codex logout` недостаточно). Сравнить `docker inspect` 606af686 до и после. Никаких `prune`, `pkill` или пересоздания тарифа.
+## NOT_CHECKED и только читающие запросы Операциям
 
-## Находки к плану
-
-1. **Высокая. Учетные данные доступны командам модели.** Чтение песочница не ограничивает (NOT FOUND в документации). По умолчанию `ignore_default_excludes = true` оставляет переменные с KEY, SECRET, TOKEN в окружении команд. Процессы одного UID внутри контейнера могут читать `/proc/<pid codex>/environ`. Сценарий: инструкция в diff заставляет команду напечатать `auth.json` или ключ, и они уходят в текст review, а оттуда в задачи и журналы. Условия: настройка окружения из п. 4, учетные данные одной попытки, проверка выхода на строку учетных данных, отзыв после попытки. Полностью исключить чтение изнутри нельзя. Поэтому отзыв обязателен всегда, даже при чистом выходе.
-2. **Высокая для исполнимости. Песочница Codex против seccomp по умолчанию.** Документация: «the sandbox may not work if the host or container configuration blocks the namespace, setuid `bwrap`, or `seccomp` operations that Codex needs». Профиль seccomp Docker по умолчанию (moby) с `--cap-drop ALL` пускает `unshare` и `clone` с флагами namespace только при `CAP_SYS_ADMIN`, то есть не дает создать user namespace, а `no-new-privileges` выключает setuid `bwrap`. Это тот же отказ, что в 606af686. Что делает Codex при отказе — только «startup warning», fail-closed — NOT FOUND. Значит, шаг 4 плана, скорее всего, даст BLOCKED. Предупреждение или ошибка песочницы — остановка, а не повод продолжать. Выходы:
-   - **а) Свой seccomp-профиль**, разрешающий `unshare`/`clone` с `CLONE_NEWUSER`. Для этой VM **не рекомендую**: user namespace расширяет поверхность ядра в VM, где живут все контейнеры тарифов.
-   - **б) Режим, который документация называет для контейнеров**: «configure your Docker container to provide the isolation you need, then run `codex` with `--sandbox danger-full-access`». Внутри этого одноразового контейнера, при всех границах таблицы и выходе только через шлюз. Так же устроен наш `providers/codex.ts:33`. По сравнению с «а» команды модели теряют только сетевой запрет Codex, а его заменяет шлюз. Запрет v2 касался общего контейнера тарифа и сюда не переносится.
-
-   Сейчас план запрещает danger-full-access, поэтому вариант «б» — только через v2 плана Операций и новую проверку Security. До этого допустим лишь вариант с песочницей Codex, если пробник фазы A пройдет на seccomp по умолчанию.
-3. **Средняя. Квота scratch.** «1 GiB scratch» на томе не обеспечивается. Решение — tmpfs с `size=` внутри общего лимита памяти (п. 3).
-4. **Средняя. AGENTS.md читается всегда.** «Codex reads `AGENTS.md` files before doing any work», выключателя нет (NOT FOUND). Неуказанный проект: загружает ли он свой `.codex/` — NOT FOUND. Условие: в снимке нет `AGENTS.md` и `.codex/`, CODEX_HOME свежий, проект явно `untrusted`. Для будущих продуктовых diff `AGENTS.md` нашего репозитория станет указаниями для review — это решать отдельно, в v1 не входит.
-5. **Средняя. Сеть Docker Desktop.** Встроенный DNS резолвит `host.docker.internal` и имена контейнеров той же сети, а хост VM доступен по 192.168.65.0/24. Поэтому во внутренней сети только review и шлюз, а запреты из п. 5 — в правилах шлюза, не в переменной `HTTPS_PROXY`. Поддержка `HTTPS_PROXY` в документации не найдена. Без маршрута наружу запросы просто не пройдут — это безопасный отказ.
-6. **Низкая. Образ.** Узловой образ Hornhoof тянет `/app/git-askpass` и `hh-*`. Нужен минимальный образ без настроек git credential.
-7. **Низкая. Drain.** Для изоляции не нужен; его место занимает правило запаса ресурсов (п. 3).
-
-## Чего нельзя
-
-- Монтировать `/data`, home или `CODEX_HOME` тарифа, docker socket, SSH-agent, `/proc` хоста; копировать `auth.json` или окружение тарифа.
-- `--privileged`, `SYS_ADMIN`, `seccomp=unconfined`, `apparmor=unconfined`, host-пространства, `--restart` кроме `no`.
-- Менять 606af686, его seccomp, сеть или права; останавливать живые ходы.
-- Запуск при свободной памяти VM меньше 4 GiB или при подкачке, занятой больше чем наполовину.
-- Выдавать итог review наружу без проверки на учетные данные; считать exit 0 успехом без завершенного review.
-- Продуктовый diff в v1; повтор попытки без нового решения.
-- Новые аккаунты или оплату без решения владельца подписки.
-
-## NOT_CHECKED и команды только для чтения для Операций
-
-Не проверено мной: фактический образ и его digest, версия codex на Маке, запас памяти VM, сети Docker Desktop, поведение Codex при отказе песочницы, хосты Codex, влияние второй сессии на тариф.
-
-Только чтение, на Docker-хосте Мака, без вывода Env и Cmd:
+Остаются неизвестны: образ/digest/version, effective config закрепленного CLI, mapping, конкретный syscall/profile, реальная сеть/egress/auth, ресурсы и окно, выполнение preflight и восстановление review. Для уточнения Операции могут собрать только уже разрешенные метаданные. Следующие команды мной не выполнялись на Маке; они не разрешают запуск, docker exec или повышение прав. REVIEW_IMAGE_DIGEST и REVIEW_NETWORK_ID заменить только известными идентификаторами кандидата.
 
 ```sh
 docker info --format '{{.ServerVersion}} {{.OperatingSystem}} {{.KernelVersion}} cpus={{.NCPU}} mem={{.MemTotal}} cgroup={{.CgroupVersion}} sec={{json .SecurityOptions}}'
 docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} pids={{.PIDs}}'
-docker network ls --format '{{.ID}} {{.Name}} {{.Driver}} internal={{.Internal}} ipv6={{.IPv6}}'
-docker network inspect bridge --format '{{json .IPAM.Config}}'
-docker inspect --format 'id={{.Id}} user={{json .Config.User}} mem={{.HostConfig.Memory}} cpus={{.HostConfig.NanoCpus}} pids={{json .HostConfig.PidsLimit}} oom={{.HostConfig.OomScoreAdj}} restart={{.HostConfig.RestartPolicy.Name}}' 038c67748414
-docker image inspect <кандидат образа> --format '{{.Id}} {{json .RepoDigests}} {{.Architecture}} user={{json .Config.User}}'
+docker inspect --format 'id={{.Id}} image={{.Image}} user={{json .Config.User}} readonly={{.HostConfig.ReadonlyRootfs}} capAdd={{json .HostConfig.CapAdd}} capDrop={{json .HostConfig.CapDrop}} securityOpt={{json .HostConfig.SecurityOpt}} pidMode={{.HostConfig.PidMode}} ipcMode={{.HostConfig.IpcMode}} networkMode={{.HostConfig.NetworkMode}} usernsMode={{json .HostConfig.UsernsMode}} memory={{.HostConfig.Memory}} swap={{.HostConfig.MemorySwap}} cpus={{.HostConfig.NanoCpus}} pids={{json .HostConfig.PidsLimit}}' 038c67748414
+docker inspect --format '{{range .Mounts}}{{printf "%s -> %s rw=%t\n" .Type .Destination .RW}}{{end}}' 038c67748414
+docker image inspect 'REVIEW_IMAGE_DIGEST' --format '{{.Id}} {{json .RepoDigests}} {{.Architecture}} user={{json .Config.User}}'
+docker network inspect 'REVIEW_NETWORK_ID' --format 'id={{.Id}} driver={{.Driver}} internal={{.Internal}} ipv6={{.EnableIPv6}} ipam={{json .IPAM.Config}}'
 ```
 
-## Пределы этого вердикта
+В уже доступной разрешенной оболочке Linux VM, не в shell macOS, можно прочитать только показатели памяти:
 
-Это вердикт по архитектуре и условиям, а не runtime PASS. Изменен только этот документ. Тестов, сетевых проб и запуска контейнеров не было. Восстановление review — NOT_CHECKED.
+```sh
+awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/' /proc/meminfo
+```
+
+Если такой оболочки нет, не создавать ее через новый контейнер/exec ради этого документа: измерение остается NOT_CHECKED. Docker MemTotal сообщает размер, а не достаточный свободный запас.
+
+Вывод Env, Cmd, auth/config values, ps args, сырых MCP URL и секретов не нужен. Если метаданные или штатный доступ недоступны, оставить NOT_CHECKED и передать условие владельцу среды.
+
+## Проверка самого документа
+
+Исходные находки 1-7 сверены с перечисленным кодом и первичными страницами. Исправлены: абсолютный вывод о чтении; неизбежность отказа default seccomp; утверждение о потере только сетевой границы; безусловные достаточность памяти и первый OOM victim; отсутствие выключателя AGENTS; фиксированная подсеть; снятие условий drain/mapping; недостаточная опора на свежий home и один plugin flag. Добавлены точные ссылки, граница версий и проверяемые условия.
+
+Статус подготовки: DONE_WITH_CONCERNS. Concerns относятся к будущей реализации и явно закрывают запуск, а не маскируются как PASS. Код, контейнеры и постоянные настройки не менялись; на Маке ничего не запускалось, секреты не читались. Нативный codex review, тесты, сетевые пробы и установка пакетов не выполнялись: задача разрешает только чтение документа и источников. Проверка файла: ручная сверка ссылок и требований, сравнение SHA-256 исходников, git diff --check. Далее обязательная независимая Security этого исправленного документа; runtime остается у владельца #1157 и требует отдельного точного пакета.

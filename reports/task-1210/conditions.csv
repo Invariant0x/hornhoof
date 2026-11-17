@@ -1,0 +1,16 @@
+id,value_to_pin,required_evidence_before_run,status
+C1,Image and CLI identity,arm64 digest; codex/bwrap version and binary hash; allowed exact argv/model/effort,NOT_CHECKED
+C2,Owner and window,Named executor/observer; no running or starting agent/run parts; drain without stopping live work,NOT_CHECKED
+C3,UID boundary,Per-attempt numeric UID/GID; groups; uid_map/gid_map; no inferred mapping,NOT_CHECKED
+C4,Privileges and namespaces,No added caps/devices/sockets/host or container namespace sharing; selected inspect metadata,NOT_CHECKED
+C5,Input provenance,Fixed synthetic base/head; trusted packager; sanitized manifest; no shared worktree or credentials,NOT_CHECKED
+C6,Filesystem,Readonly rootfs/input; all writable paths temporary and bounded; no shared data/home/proc,NOT_CHECKED
+C7,Sandbox profile,Engine/default identity; preflight evidence; exact custom profile/hash/diff and Security if needed; no danger-full-access,NOT_CHECKED
+C8,Effective Codex config,Version-compatible schema; all source layers; no MCP/hooks/apps/plugins/search; instructions removed from synthetic fixture,NOT_CHECKED
+C9,Command environment,Explicit safe variable allowlist; no company/bridge/git credentials; credential read boundary demonstrated with safe markers,NOT_CHECKED
+C10,Network A,Network none and no auth,NOT_CHECKED
+C11,Network B,Only review/gateway; enforced deny bypass policy; pinned hosts/ports/DNS/redirects/IPv4/IPv6/actual subnet boundaries,NOT_CHECKED
+C12,Authentication,Separate owner-approved method; storage/read boundary; no shared auth; precise revocation receipt,NOT_CHECKED
+C13,Resource budget,Review caps no greater than 1 CPU/2 GiB/128 PIDs/1 GiB writable/10 min/no restart; gateway/log caps and measured VM headroom,NOT_CHECKED
+C14,Success receipt,Complete synthetic review; full command/output/exit/signal/cancel/deadline; no sandbox errors or boundary bypass,NOT_CHECKED
+C15,Rollback,Only recorded new IDs; revoke separate credential; compare original state and queue; release drain; retain incident evidence,NOT_CHECKED

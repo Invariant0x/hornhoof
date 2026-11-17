@@ -1,0 +1,26 @@
+{
+  "readAt": "2026-11-17 UTC",
+  "codeCommit": "f4fb7eff1840c17bacd6826c109e341a35d076ba",
+  "inputCandidate": "85408027-0600-4275-a169-646b33223a18",
+  "inputDocumentCommit": "33863f5e2b1e8e8a7709e3680926ae2008ed69bd",
+  "inputDocumentSHA256": "c721aa7c90bf2335246ccc0f209a3153f031043206ae59b2928a44dd6904c103",
+  "planSHA256": "dc2c9fa78c59581368a512a14731df79328afa78ae612c4b4c096ca81c641470",
+  "priorVerdictSHA256": "fbd16de1211d32806a77827d40cd1310d5983c1e791f05062505b4a4c8a3ba5a",
+  "primaryPages": [
+    "https://learn.chatgpt.com/docs/config-file/config-basic#command-environment",
+    "https://learn.chatgpt.com/docs/config-file/config-reference",
+    "https://learn.chatgpt.com/docs/permissions",
+    "https://learn.chatgpt.com/docs/agent-approvals-security#os-level-sandbox",
+    "https://learn.chatgpt.com/docs/sandboxing#configure-defaults",
+    "https://learn.chatgpt.com/docs/agent-configuration/agents-md#how-codex-discovers-guidance",
+    "https://learn.chatgpt.com/docs/config-file/config-basic#configuration-precedence",
+    "https://learn.chatgpt.com/docs/non-interactive-mode#authenticate-in-automation",
+    "https://learn.chatgpt.com/docs/auth#credential-storage",
+    "https://docs.docker.com/engine/security/seccomp/#significant-syscalls-blocked-by-the-default-profile",
+    "https://docs.docker.com/engine/storage/tmpfs/",
+    "https://docs.docker.com/desktop/features/networking/networking-how-tos/",
+    "https://docs.docker.com/engine/containers/resource_constraints/",
+    "https://docs.docker.com/engine/security/userns-remap/"
+  ],
+  "runtimeChecks": "NOT_CHECKED; no operations on Mac; no test or Codex review process started"
+}
