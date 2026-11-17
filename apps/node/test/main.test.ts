@@ -486,6 +486,25 @@ describe('runNode', () => {
     expect(server.received[3]).toMatchObject({ jobId: 'j1', ok: true, result: 'ready', sessionId: 'sess-9' });
   });
 
+  it("runs a one-shot call in its program's one-call mode only once the machine's check queue gives it a slot", async () => {
+    const server = await fakeServer({ grantChecks: false });
+    const asked: string[] = [];
+    const calling: ProviderAdapter = { ...adapter, oneCall: async input => { asked.push(input.prompt); return { ok: true, sessionId: null, result: 'two findings', output: '', error: null, limits: null }; } };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: calling, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'c1', subscriptionId: 's1', provider: 'claude', prompt: 'review this', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null, call: true });
+    await server.wait(() => server.received.some(m => m.type === 'check.acquire'));
+    await server.barrier('before-slot');
+    expect(asked).toEqual([]);
+    const ask = server.received.find(m => m.type === 'check.acquire')!;
+    expect(ask).toMatchObject({ label: 'A one-shot call' });
+    server.send({ type: 'check.state', id: ask.id, state: 'running', position: 0 });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(asked).toEqual(['review this']);
+    expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'c1', ok: true, result: 'two findings' });
+  });
+
   it('sends a finished job again after the connection drops before Hornhoof confirms it, and stops once Hornhoof does', async () => {
     const server = await fakeServer(), logs: string[] = [];
     fakeClock();

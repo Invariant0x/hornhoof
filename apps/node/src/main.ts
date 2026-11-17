@@ -626,10 +626,17 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           planLimits.read(res.limits ?? (host && terminal && input.agentKey ? null : await readLimits()));
           return res;
         },
+        oneCall: chosen.oneCall && (async input => {
+          const res = await runUnlessStopped(input, () => chosen.oneCall!(input));
+          planLimits.read(res.limits ?? await readLimits());
+          return res;
+        }),
       };
       let seq = 0;
       const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
-      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, beforeRun: () => programs.ready(signal), untimed: Boolean(host && terminal && m.workspace?.key), ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
+      const run = (granted: AbortSignal) => runJob(tracked, m, dir, { hidden, signal: granted, toolsUrl, onEvent, beforeRun: () => programs.ready(granted), untimed: Boolean(host && terminal && m.workspace?.key), ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
+      /* A one-shot call takes its turn in the machine's check queue, as any other work that runs by itself does. */
+      done = m.call ? await withCheckSlot(run, { signal, label: 'A one-shot call' }) : await run(signal);
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }
@@ -788,17 +795,19 @@ function managedUpdates(tools: string, programs: { provider: ProviderId; adapter
 
 /* api: an API by the token at an address runs in the program of its protocol. */
 function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId, api?: ApiEndpoint | null): ProviderAdapter {
+  const installed = async (run: () => Promise<RunResult>): Promise<RunResult> => {
+    try {
+      await ensureInstalled(tools, provider, adapter, api);
+    } catch (err) {
+      const output = `Could not install ${programFor(provider, api).name}: ${message(err)}`;
+      return { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null };
+    }
+    return run();
+  };
   return {
     ...adapter,
-    async run(input): Promise<RunResult> {
-      try {
-        await ensureInstalled(tools, provider, adapter, api);
-      } catch (err) {
-        const output = `Could not install ${programFor(provider, api).name}: ${message(err)}`;
-        return { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null };
-      }
-      return adapter.run(input);
-    },
+    run: input => installed(() => adapter.run(input)),
+    oneCall: adapter.oneCall && (input => installed(() => adapter.oneCall!(input))),
   };
 }
 
