@@ -1972,6 +1972,7 @@ export const en = {
   /* The tracker: lists on the left, where the person is on top, the work as a list, a board or a graph, and one card. */
   tracker: {
     side: {
+      title: 'Tasks', people: 'Company people', dates: 'Due dates', withoutPipeline: 'Without a pipeline',
       label: 'Task lists',
       open: 'Lists',
       close: 'Close the lists',
@@ -1986,7 +1987,7 @@ export const en = {
       answersFor: (places: string) => `answers for ${places}`,
       workingCount: (n: number) => `working now: ${n}`,
       unfold: (name: string) => `Show what is in ${name}`,
-      goals: 'Goals',
+      goals: 'Department goals',
       pipelines: 'Pipelines',
       products: 'Products',
       employees: 'Employees',
@@ -2015,7 +2016,7 @@ export const en = {
     },
     viewAs: 'View as',
     viewAsSelf: 'Myself',
-    views: { label: 'View', list: 'List', board: 'Board', graph: 'Graph' },
+    views: { label: 'View', list: 'List', board: 'Board', graph: 'Graph', due: 'Due dates', goals: 'Goals' },
     filters: { label: 'Filters', status: 'Status', executor: 'Executor', responsible: 'Responsible', goal: 'Goal', any: 'Any' },
     statuses: { notStarted: 'Not started', working: 'In work', review: 'Review', waits: 'Waits', done: 'Done', cancelled: 'Cancelled' },
     /* The list's groups, by what a task needs now. */
@@ -2026,6 +2027,7 @@ export const en = {
     yourGoals: 'Your goals',
     goalsOf: (name: string) => `Goals of ${name}`,
     noGoals: 'No goals to answer for.',
+    noDates: 'No tasks here have a due date.',
     noTasks: 'No tasks here.',
     noMine: 'No open tasks to answer for.',
     nothingWorking: 'Nobody works on a task at this moment.',

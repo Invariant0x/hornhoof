@@ -1717,19 +1717,25 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 @media (min-width: 761px) {
   .body.tracker-page ~ .acard.at-end { inset-inline-start: auto; inset-inline-end: 16px; }
 }
-.tr-side { position: sticky; top: 84px; display: grid; gap: 8px; align-content: start; min-width: 0; max-height: calc(100vh - 100px); overflow: auto; scrollbar-width: none; padding: 12px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); }
-/* The panel scrolls with no bar of its own, so every engine leaves its content the same width (style book section 9). */
-.tr-side::-webkit-scrollbar { display: none; }
+.tr-side { position: sticky; inset-block-start: 84px; display: grid; gap: 8px; align-content: start; min-inline-size: 0; max-block-size: calc(100vh - 100px); overflow: auto; scrollbar-gutter: stable; padding: 12px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); }
+.tr-side-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; font: 600 18px var(--f-display); overflow-wrap: anywhere; }
+.tr-new { margin-inline-start: auto; }
 .tr-side > h2 { margin: 10px 0 0; padding-inline: 10px; font-size: 12px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
-.tr-side-close { display: none; justify-content: flex-end; }
+.tr-side .tr-side-close { display: none; margin-inline-start: auto; }
 .tr-items, .tr-dept-body ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .tr-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; width: 100%; min-height: 44px; margin: 0; padding: 6px 10px; box-sizing: border-box; border: 0; border-inline-start: 3px solid transparent; background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
 .tr-item:hover { background: var(--surface2); }
 .tr-item.on { border-inline-start-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); font-weight: 600; }
 .tr-item:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: -2px; }
-.tr-item-name { min-width: 0; overflow-wrap: anywhere; }
-.tr-item small { grid-column: 1 / -1; font-size: 12px; font-weight: 400; color: var(--muted); overflow-wrap: anywhere; }
+.tr-item-name { display: flex; align-items: center; gap: 8px; min-inline-size: 0; overflow-wrap: anywhere; }
+.tr-item-name > .ic, .tr-side-caption > .ic { color: var(--muted); }
+.tr-item.on .tr-item-name > .ic { color: currentColor; }
 .tr-count { font-family: var(--f-display); font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-badge { min-inline-size: 20px; padding-inline: 4px; border: 1px solid var(--line2); border-radius: 1em; text-align: center; }
+.tr-badge.attention { border-color: var(--pink); background: var(--pink); color: var(--on-pink); }
+.tr-side-caption { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.tr-dept-body .tr-pipelines { padding-inline-start: 12px; }
+.tr-dept-body summary { padding: 4px 10px; color: var(--muted); cursor: pointer; overflow-wrap: anywhere; }
 .tr-dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; }
 .tr-unfold .chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform .15s; }
 .tr-unfold[aria-expanded="true"] .chev { transform: rotate(90deg); }
@@ -1961,7 +1967,7 @@ button.tr-node:focus-visible { outline: 2px solid var(--cyan-ink); outline-offse
   /* The lists as a drawer down to the bottom of the screen, so nothing of the page shows under it. */
   .tr-side { display: none; position: fixed; z-index: 8; inset-block: 68px 0; inset-inline: 16px; max-height: none; border-block-end: 0; box-shadow: 0 24px 60px var(--shadow); }
   .tr-side.open { display: grid; }
-  .tr-side-close { display: flex; }
+  .tr-side .tr-side-close { display: inline-grid; }
   .tr-top { grid-template-columns: minmax(0, 1fr); }
   .tr-write { grid-row: auto; grid-column: auto; }
   .tr-menu { display: inline-flex; justify-self: start; min-height: 44px; }

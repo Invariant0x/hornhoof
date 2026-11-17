@@ -1969,6 +1969,7 @@ export const ru: Messages = {
   },
   tracker: {
     side: {
+      title: 'Задачи', people: 'Люди компании', dates: 'Сроки', withoutPipeline: 'Без пайплайна',
       label: 'Списки задач',
       open: 'Списки',
       close: 'Закрыть списки',
@@ -1983,7 +1984,7 @@ export const ru: Messages = {
       answersFor: (places: string) => `отвечает за ${places}`,
       workingCount: (n: number) => `сейчас в работе: ${n}`,
       unfold: (name: string) => `Показать, что есть в разделе ${name}`,
-      goals: 'Цели',
+      goals: 'Цели отдела',
       pipelines: 'Конвейеры',
       products: 'Продукты',
       employees: 'Сотрудники',
@@ -2012,7 +2013,7 @@ export const ru: Messages = {
     },
     viewAs: 'Смотреть как',
     viewAsSelf: 'Я сам',
-    views: { label: 'Вид', list: 'Список', board: 'Доска', graph: 'Граф' },
+    views: { label: 'Вид', list: 'Список', board: 'Доска', graph: 'Граф', due: 'Сроки', goals: 'Цели' },
     filters: { label: 'Фильтры', status: 'Статус', executor: 'Исполнитель', responsible: 'Ответственный', goal: 'Цель', any: 'Любой' },
     statuses: { notStarted: 'Не начата', working: 'В работе', review: 'На проверке', waits: 'Ждет', done: 'Готово', cancelled: 'Отменена' },
     groups: {
@@ -2022,6 +2023,7 @@ export const ru: Messages = {
     yourGoals: 'Ваши цели',
     goalsOf: (name: string) => `Цели: ${name}`,
     noGoals: 'Целей, за которые нужно отвечать, нет.',
+    noDates: 'У этих задач пока нет сроков.',
     noTasks: 'Задач здесь нет.',
     noMine: 'Открытых задач, за которые нужно отвечать, нет.',
     nothingWorking: 'Сейчас никто не работает над задачами.',

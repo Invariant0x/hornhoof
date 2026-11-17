@@ -5,7 +5,7 @@ import type { Employee, GoalView, Org, PersonRef, Pipeline, PipelineStage, TaskL
 export type { TaskTree };
 
 /* Three ways to look at the same work. */
-export const TRACKER_VIEWS = ['list', 'board', 'graph'] as const;
+export const TRACKER_VIEWS = ['list', 'board', 'due', 'goals', 'graph'] as const;
 export type TrackerView = (typeof TRACKER_VIEWS)[number];
 
 /* The columns of the status board, and what the status filter picks: waits holds whatever stands still, a person's answer
@@ -116,7 +116,7 @@ export function filterTasks(tasks: TaskLine[], f: WorkFilter, goals: GoalView[],
     if (served && !(task.goal && served.has(task.goal.id))) return false;
     if (f.department && (task.department?.id ?? 'none') !== f.department) return false;
     if (f.product && task.product?.id !== f.product) return false;
-    return !f.pipeline || task.pipelineId === f.pipeline;
+    return !f.pipeline || (task.pipelineId ?? 'none') === f.pipeline;
   });
 }
 

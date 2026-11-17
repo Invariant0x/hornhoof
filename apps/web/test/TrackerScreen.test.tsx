@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -122,6 +122,30 @@ describe('My tasks and View as', () => {
     const list = await main();
     await waitFor(() => expect(within(list).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['#21 Take card payments']));
     expect(screen.getByRole('region', { name: 'Goals of Maria' })).toHaveTextContent('Card payments');
+  });
+
+  it('shows people with wait counts and opens department goals, dates and tasks without a pipeline', async () => {
+    const user = userEvent.setup();
+    shell('/tasks?department=d2', { 'GET /api/tasks?status=all': [200, { tasks: [
+      ...TASKS, line({ id: 'dated', number: 42, title: 'Deliver the list', dueAt: '2026-12-01T00:00:00.000Z' }),
+    ] }] });
+    const side = await screen.findByRole('navigation', { name: 'Task lists' });
+    expect(within(side).getByRole('heading', { name: 'Company people' })).toBeInTheDocument();
+    await act(async () => {});
+    const ivan = within(side).getByRole('button', { name: 'Ivan 1' });
+    expect(ivan.querySelector('.tr-avatar')).toBeInTheDocument();
+    expect(ivan.querySelector('.tr-count')).toHaveClass('attention');
+    expect(within(side).getByRole('button', { name: /^My tasks / }).querySelector('.tr-count')).not.toHaveClass('attention');
+    const dept = within(side).getByRole('button', { name: 'Development' });
+    expect(dept.querySelector('.tr-dept-mark')).toBeInTheDocument();
+    await user.click(within(side).getByRole('button', { name: 'Department goals' }));
+    expect(screen.getByRole('region', { name: 'Department goals' })).toHaveTextContent('Card payments');
+    await user.click(within(side).getByRole('button', { name: 'Without a pipeline' }));
+    const list = screen.getByRole('region', { name: 'List' });
+    expect(within(list).getByRole('listitem', { name: '#42 Deliver the list' })).toBeInTheDocument();
+    expect(within(list).queryByRole('listitem', { name: '#21 Take card payments' })).toBeNull();
+    await user.click(within(side).getByRole('button', { name: 'Due dates' }));
+    expect(screen.getByRole('region', { name: 'Due dates' })).toHaveTextContent('Deliver the list');
   });
 
   it('counts the work going on now and lists it, and what waits for the person', async () => {

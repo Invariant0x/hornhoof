@@ -418,7 +418,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
       case 'waits': return { title: recipient === me.person.id ? t.tracker.where.waits : t.tracker.where.waitsFor(people.find(p => p.id === recipient)?.name ?? t.tasks.someone), about: '' };
       case 'working': return { title: t.tracker.where.working, about: t.tracker.where.workingAbout };
       case 'turns': return { title: t.tracker.where.turns, about: '' };
-      case 'company': return { title: t.tracker.where.company, about: '' };
+      case 'company': return { title: view === 'due' ? t.tracker.views.due : t.tracker.where.company, about: '' };
       case 'responsible': return { title: t.tracker.where.responsible(people.find(p => p.id === section.id)?.name ?? t.tasks.someone), about: '' };
       case 'root': {
         const task = all.find(x => x.id === section.id);
@@ -463,17 +463,16 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
         place={place}
         onPlace={onPlace}
         onOpenTask={onOpenTask}
-        viewer={me.person.id}
         org={org}
         places={places}
-        goals={goals}
         pipelines={pipelines}
         tasks={all}
-        counts={{ waits: countOf(shownOf(decisions, decisionsOf), waitsOnWho), working: working.length }}
+        counts={{ waits: countOf(shownOf(decisions, decisionsOf), waitsOnWho), mine: own.tasks.length, working: working.length }}
+        onAddTask={addInGroup}
         open={drawer}
         onClose={() => setDrawer(false)}
       />
-      <section className="tr-main" aria-labelledby={`${sideId}-where`}>
+      <div className="tr-main">
         <header className="tr-top">
           <button className="btn ghost tr-menu" type="button" aria-expanded={drawer} aria-controls={sideId} onClick={() => setDrawer(!drawer)}>{t.tracker.side.open}</button>
           <div className="tr-where">
@@ -512,7 +511,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
               {(section.kind === 'mine' || section.kind === 'department' || section.kind === 'company') && (
                 <MakeHere places={places} org={org} department={section.kind === 'department' ? section.id : other ? 'none' : null} pipeline={pipeline} making={making} setMaking={setMaking} onOpenTask={onOpenTask} />
               )}
-              {section.kind === 'mine' && <OwnGoals goals={own.goals} label={other ? t.tracker.goalsOf(whoName) : t.tracker.yourGoals} onOpenGoal={onOpenGoal} />}
+              {section.kind === 'mine' && view !== 'goals' && <OwnGoals goals={own.goals} label={other ? t.tracker.goalsOf(whoName) : t.tracker.yourGoals} onOpenGoal={onOpenGoal} />}
               <div className="tr-bar">
                 <ViewTabs value={view} onChange={next => onPlace({ ...place, view: next })} />
                 <FilterChips chips={chips} onChange={setChips} tasks={chipTasks} goals={goals} />
@@ -520,12 +519,19 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
               {tasks && (
                 view === 'list' ? <TrackerList tasks={work} all={all} rows={rows} empty={empty} onAddTask={addInGroup} />
                 : view === 'board' ? <TrackerBoard tasks={work} all={all} pipeline={pipeline} cancelled={chips.status === 'cancelled'} rows={rows} />
-                : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStages } : undefined} />
+                : view === 'due' ? (
+                  <section aria-label={t.tracker.views.due}>
+                    {work.some(task => task.dueAt) ? <TrackerFound tasks={work.filter(task => task.dueAt).sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))} all={all} rows={rows} /> : <p className="muted">{t.tracker.noDates}</p>}
+                  </section>
+                ) : view === 'goals' ? (
+                  <OwnGoals goals={section.kind === 'department' ? goals.filter(g => g.department?.id === section.id && g.status !== 'dropped') : section.kind === 'mine' ? own.goals : goals.filter(g => g.status !== 'dropped')}
+                    label={section.kind === 'department' ? t.tracker.side.goals : t.tracker.views.goals} onOpenGoal={onOpenGoal} />
+                ) : <TrackerGraph forest={forest} crumbs={crumbs} top={section.kind === 'department' ? departmentName : t.tracker.graph.all} onCrumb={toCrumb} rows={rows} onOpenGoal={onOpenGoal} stages={pipeline ? { on: stages, onChange: setStages } : undefined} />
               )}
               {section.kind === 'mine' && waiting}
             </>
           )}
-      </section>
+      </div>
     </div>
   );
 }

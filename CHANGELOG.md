@@ -23,6 +23,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 
 - Task lists distinguish status, priority, people, departments and executor programs by shape and color.
 
+- The task sidebar shows company people and wait counts, with shortcuts to due dates, department goals and work outside a pipeline.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed
