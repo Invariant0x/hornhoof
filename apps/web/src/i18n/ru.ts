@@ -881,7 +881,7 @@ export const ru: Messages = {
     addPlanAsk: host => `Какая из ваших подписок должна работать и на ${host}?`,
     addPlanTo: (name, host) => `Добавить ${name} на ${host}`,
     openHere: 'Открыть здесь',
-    access: 'Доступ к компьютерам',
+    access: 'Доступ к машинам',
     computer: {
       closed: 'Доступ закрыт',
       open: 'Доступ открыт',
@@ -897,6 +897,7 @@ export const ru: Messages = {
       asksText: reason => `Оркестратор просит: ${reason}`,
       until: at => `До ${at}`,
       openedBy: name => `Открыл: ${name}`,
+      openedByOrchestrator: 'Открыл оркестратор',
       choose: 'Открыть доступ',
       who: 'Кому открыть доступ?',
       whoText: machine => `Выберите, кому открыть доступ к ${machine} и на какой срок.`,
@@ -1245,6 +1246,8 @@ export const ru: Messages = {
     computerOpened: (who, at, machine) => `${who}: доступ к машине ${machine} открыт до ${at}`,
     computerClosed: (who, machine) => `${who}: доступ к машине ${machine} закрыт`,
     computerDeclined: (who, machine) => `${who}: доступ к машине ${machine} не открыт`,
+    computerByOrchestrator: 'Оркестратор',
+    computerExpired: machine => `Доступ к машине ${machine} закрыт: срок истек`,
     computerRefused: machine => `Машина ${machine} не приняла подпись, которая ее открывает, поэтому доступ к ней закрыт. Проверьте, что на ней верные часы, и откройте доступ снова.`,
     failedEmployee: {
       timeout: 'Сотрудник не закончил за 15 минут.',

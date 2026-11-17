@@ -459,6 +459,22 @@ describe('AgentWindow', () => {
       expect(screen.getByText('office-pc did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.')).toBeInTheDocument();
     });
 
+    /* The server names no person when the orchestrator opened it for the owner, and none when its time ran out (#1119). */
+    it('says the orchestrator opened access when no person did, and that access ended when its time ran out', async () => {
+      open({
+        [`GET ${EVENTS}?last=300`]: [
+          200,
+          {
+            events: [ev(1, 'computer', { state: 'opened', until: OPEN.until, machine: 'debian-box' }), ev(2, 'computer', { state: 'expired', machine: 'debian-box' })],
+            state: READY,
+          },
+        ],
+      });
+      expect(await screen.findByText(/^The orchestrator opened access to debian-box until .+$/)).toBeInTheDocument();
+      expect(screen.getByText('Access to debian-box closed: its time ran out')).toBeInTheDocument();
+      expect(screen.queryByText(/Hornhoof/)).not.toBeInTheDocument();
+    });
+
     /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its note names it. */
     it('names the machine the access is to, in its note and in the log', async () => {
       open({
@@ -481,6 +497,17 @@ describe('AgentWindow', () => {
         expect(within(foot).getByText('Просит доступ')).toBeInTheDocument();
         expect(within(foot).getByRole('link', { name: 'Ответить в «Машинах»' })).toBeInTheDocument();
         expect(screen.getByText(/^Ivan: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
+      } finally {
+        localStorage.removeItem('hh-lang');
+      }
+    });
+
+    it('says in Russian that the orchestrator opened access and that its time ran out', async () => {
+      localStorage.setItem('hh-lang', 'ru');
+      try {
+        open({ [`GET ${EVENTS}?last=300`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until }), ev(2, 'computer', { state: 'expired' })], state: READY }] });
+        expect(await screen.findByText(/^Оркестратор: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
+        expect(screen.getByText('Доступ к машине сервера закрыт: срок истек')).toBeInTheDocument();
       } finally {
         localStorage.removeItem('hh-lang');
       }

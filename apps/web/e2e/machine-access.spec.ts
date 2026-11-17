@@ -32,7 +32,7 @@ const WORDS = {
     openHour: 'Open for 1 hour', notNow: 'Not now', offline: 'The machine is not responding. Access can be opened when it is online.', owner: "Decided by the machine's owner alone.",
   },
   ru: {
-    machines: 'Машины', block: 'Доступ к компьютерам', closed: 'Доступ закрыт', open: 'Доступ открыт', full: 'Полный доступ для команды', asks: 'Просит доступ',
+    machines: 'Машины', block: 'Доступ к машинам', closed: 'Доступ закрыт', open: 'Доступ открыт', full: 'Полный доступ для команды', asks: 'Просит доступ',
     forOrchestrator: 'Для оркестратора', forTeam: 'Все агенты компании', openedBy: 'Открыл: Ivan', until: /^До /,
     openCard: 'Открыть карточку ', choose: 'Открыть доступ', close: 'Закрыть доступ', who: 'Кому открыть доступ?', duration: 'Срок доступа', hour: '1 ч', hours: '8 ч', day: 'Сутки',
     orchestrator: 'Оркестратору', team: 'Всем агентам компании', cancel: 'Отмена', confirm: 'Открыть полный доступ всей команде?', fullButton: 'Открыть полный доступ',

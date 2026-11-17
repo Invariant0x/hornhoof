@@ -186,7 +186,8 @@ function personWords(e: LogEvent): boolean {
 /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
 const messageAuthor = (t: Messages, from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
 
-/* What the orchestrator asked of a machine, what its owner did about it, and what the machine itself refused. */
+/* What the orchestrator asked of a machine, what its owner did about it, what the machine itself refused, and an access
+   its time closed. An opening no person made is the orchestrator's, for the owner (#1119). */
 function computerLine(t: Messages, language: Language, e: EventView): string {
   const who = e.person?.name ?? t.window.hornhoof;
   const machine = field(e.data, 'machine') || t.window.computerServer;
@@ -194,7 +195,9 @@ function computerLine(t: Messages, language: Language, e: EventView): string {
     case 'asked':
       return t.window.computerAsked(field(e.data, 'reason'), machine);
     case 'opened':
-      return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '', machine);
+      return t.window.computerOpened(e.person?.name ?? t.window.computerByOrchestrator, clock(language, field(e.data, 'until')) ?? '', machine);
+    case 'expired':
+      return t.window.computerExpired(machine);
     case 'closed':
       return t.window.computerClosed(who, machine);
     case 'refused':

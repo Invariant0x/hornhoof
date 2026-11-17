@@ -1257,7 +1257,7 @@ describe("computer access on a machine's card", () => {
     return show(machines, builtin, routes);
   };
   /* The access part of a card (#1115): its owner opens it after choosing for whom and for how long. */
-  const part = (card_: HTMLElement) => within(card_).getByRole('region', { name: /^(Computer access|Доступ к компьютерам)$/ });
+  const part = (card_: HTMLElement) => within(card_).getByRole('region', { name: /^(Computer access|Доступ к машинам)$/ });
 
   it("opens the server's own machine for the orchestrator for an hour, and says what that gives before", async () => {
     const calls = showLive([mac()], server(), { open: () => [200, ofServer({ until: UNTIL, scope: 'orchestrator' })] });
@@ -1311,6 +1311,17 @@ describe("computer access on a machine's card", () => {
     await userEvent.setup().click(within(own).getByRole('button', { name: 'Close access' }));
     await vi.waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m-server/access/close', body: undefined }));
     expect(await within(own).findByText('Access closed')).toBeInTheDocument();
+  });
+
+  /* The orchestrator may open access for the owner, and then the server names no person (#1119). */
+  it('says the orchestrator opened access when the server names no person for an open machine', async () => {
+    show([mac()], server({ until: UNTIL, scope: 'orchestrator', openedBy: null, openedAt: new Date().toISOString() }));
+    const own = part(await openCard('debian'));
+    expect(within(own).getByText('For the orchestrator')).toBeInTheDocument();
+    expect(within(own).getByText('Opened by: the orchestrator')).toBeInTheDocument();
+    /* A closed machine and an older server that sends no scope name no opener at all. */
+    const closed = part(await openCard('dev-laptop'));
+    expect(within(closed).queryByText(/^Opened by/)).not.toBeInTheDocument();
   });
 
   it('gives no button for a machine that is not theirs, cannot be reached, or holds no key of theirs', async () => {

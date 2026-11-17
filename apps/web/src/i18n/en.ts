@@ -887,6 +887,7 @@ export const en = {
       asksText: (reason: string) => `The orchestrator asks: ${reason}`,
       until: (at: string) => `Until ${at}`,
       openedBy: (name: string) => `Opened by: ${name}`,
+      openedByOrchestrator: 'Opened by: the orchestrator',
       choose: 'Open access',
       who: 'Who gets access?',
       whoText: (machine: string) => `Choose who gets access to ${machine} and for how long.`,
@@ -1242,6 +1243,9 @@ export const en = {
     computerOpened: (who: string, at: string, machine: string) => `${who} opened access to ${machine} until ${at}`,
     computerClosed: (who: string, machine: string) => `${who} closed access to ${machine}`,
     computerDeclined: (who: string, machine: string) => `${who} did not open access to ${machine}`,
+    /* Who opened it when no person did: the orchestrator, for its owner (#1119); and an access its time closed. */
+    computerByOrchestrator: 'The orchestrator',
+    computerExpired: (machine: string) => `Access to ${machine} closed: its time ran out`,
     computerRefused: (machine: string) => `${machine} did not take the signature that opens it, so access to it is closed. Check that its clock is right, then open it again.`,
     failedEmployee: {
       timeout: 'The employee did not finish within 15 minutes.',
