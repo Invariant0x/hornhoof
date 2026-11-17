@@ -13,7 +13,7 @@ const PNG = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d4948445200000438
 const tree = (clock: string) => `<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node text="${clock}" content-desc="" resource-id="clock" class="android.widget.TextView" package="com.linkedin.android" password="false" focused="false" bounds="[0,0][1080,80]"/><node text="••••••••" content-desc="" resource-id="password" class="android.widget.EditText" package="com.linkedin.android" password="true" focused="true" bounds="[40,900][1040,1000]"/></hierarchy>`;
 
 /* A fake adb: answers from records and keeps every call our code made. */
-function phone() {
+function phone(png = PNG) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
   const calls: AdbCall[] = [];
@@ -27,7 +27,7 @@ function phone() {
     if (a.endsWith('getprop ro.product.manufacturer')) return Buffer.from('Samsung\n');
     if (a.endsWith('getprop ro.kernel.qemu')) return Buffer.from('0\n');
     if (a.endsWith('uiautomator dump /dev/tty')) return Buffer.from(tree(`12:0${ticks++}`));
-    if (a.endsWith('screencap -p')) return PNG;
+    if (a.endsWith('screencap -p')) return png;
     return Buffer.alloc(0);
   });
   const out: (PhoneReply | PhoneFrame)[] = [];
@@ -68,6 +68,16 @@ describe('phone messages on the execution node', () => {
     expect(capture?.png).toBe(PNG.toString('base64'));
     expect([capture?.width, capture?.height]).toEqual([1080, 2400]);
     expect(capture?.elements[1]).toMatchObject({ text: '••••••••', password: true, focused: true, bounds: [40, 900, 1040, 1000] });
+    p.phones.close();
+  });
+
+  it('gives the agent the screen\'s elements when its picture is too large to send, as a photo on the home screen', async () => {
+    const p = phone(Buffer.concat([PNG, Buffer.alloc(3 * 1024 * 1024)]));
+    await p.open();
+    await p.act(6, { kind: 'capture' });
+    const capture = p.reply(6)?.capture;
+    expect(capture?.png).toBeNull();
+    expect(capture?.elements.map(e => e.resource)).toEqual(['clock', 'password']);
     p.phones.close();
   });
 
