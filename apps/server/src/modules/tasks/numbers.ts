@@ -10,7 +10,8 @@ export async function lastTaskNumber(tx: Tx, companyId: string): Promise<number>
   return Math.max(row?.n ?? 0, company?.used ?? 0);
 }
 
-/* The last turn number a company gave, the same way: the middle number of a version is the turn's, so it never repeats. */
+/* The last turn number a company gave, the same way, so a branch turn-N never names two turns. A version is its repository's
+   own and goes on from that repository's last tag; a turn's number goes into it only where that repository's scheme says so. */
 export async function lastTurnNumber(tx: Tx, companyId: string): Promise<number> {
   const [row] = await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, companyId));
   const [company] = await tx.select({ used: companies.turnNumbersUsed }).from(companies).where(eq(companies.id, companyId));

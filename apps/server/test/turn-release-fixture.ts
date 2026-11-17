@@ -26,12 +26,19 @@ const contains = (repo: Repository, head: string, base: string): boolean => head
 
 /* Serves the readers the server uses from what the test says the repository is. */
 export function serve(ctx: Ctx, repo: Repository): void {
-  ctx.readCommit = async (_at, want) => {
+  serveEach(ctx, () => repo);
+}
+
+/* Serves the readers from the repository each address names, as two departments keep two repositories. */
+export function serveEach(ctx: Ctx, repoAt: (url: string) => Repository): void {
+  ctx.readCommit = async (at, want) => {
+    const repo = repoAt(at.url);
     const branch = 'branch' in want ? want.branch : `task-${want.task}`;
     const commitSha = repo.heads[branch] ?? repo.tags[branch];
     return commitSha ? { branch, commitSha } : { problem: `The repository has no branch ${branch}.` };
   };
-  ctx.readCompare = async (_at, want) => {
+  ctx.readCompare = async (at, want) => {
+    const repo = repoAt(at.url);
     const key = `${want.base}..${want.head}`;
     const commits = repo.between[key] ?? [];
     if (!contains(repo, want.head, want.base)) return { complete: true, baseSha: want.base, headSha: 'f'.repeat(40), paths: [], diff: '', commits: [] };
@@ -39,11 +46,12 @@ export function serve(ctx: Ctx, repo: Repository): void {
     if (repo.cut.has(key)) return { complete: false, reason: 'incomplete-comparison' };
     return { complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new', commits };
   };
-  ctx.readMerged = async (_at, want) => contains(repo, want.base, want.head);
-  ctx.readTags = async () => ({ tags: { ...repo.tags } });
-  ctx.readBranches = async () => ({ heads: { ...repo.heads } });
+  ctx.readMerged = async (at, want) => contains(repoAt(at.url), want.base, want.head);
+  ctx.readTags = async at => ({ tags: { ...repoAt(at.url).tags } });
+  ctx.readBranches = async at => ({ heads: { ...repoAt(at.url).heads } });
   /* As a host takes a push with no old value: only where there is no such branch yet, one push at a time. */
   ctx.createBranch = async (at, branch, commit) => {
+    const repo = repoAt(at.url);
     await repo.hold?.();
     if (repo.refusing) return { problem: repo.refusing };
     if (repo.heads[branch]) return { problem: `Hornhoof could not create the branch ${branch} in ${at.url}: it has that branch already.` };
@@ -95,6 +103,8 @@ const partReceipt = (snapshot: EnvironmentSnapshot, selection: ReturnType<typeof
   dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 },
 });
 
+type RunOf = { departmentId: string; taskId: string; agentId: string; jobId: string };
+
 /* The release of the open turn: a task its head holds to release it, the full run on the release commit and the person's
    approval of it, asked through the release tool of a head. */
 export async function releasing() {
@@ -111,15 +121,18 @@ export async function releasing() {
   const scope = { companyId: f.task.companyId, repositoryOwnerId: f.task.departmentId!, repoUrlHash: 'a'.repeat(64) };
   /* A run of the turn's branch, as the machines would have finished it: of the product's full profile, each part with its receipt
      on the commit, unless it ran a command of its own (command), which leaves neither.
-     reused: green results it took, of its release unless it is from before releases were kept (ofRelease false). */
-  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number; command?: string } = {}) => {
+     reused: green results it took, of its release unless it is from before releases were kept (ofRelease false).
+     of: the department of another repository whose release it checks, with its release task, the agent who asked and its job. */
+  const fullRun = async (options: { commit?: string; reused?: number; ofRelease?: boolean; suite?: string; failedPart?: boolean; status?: 'passed' | 'failed'; branch?: string; parts?: number; command?: string; of?: RunOf } = {}) => {
     const commit = options.commit ?? R, manual = options.command !== undefined;
-    const snapshot = await productSnapshot(scope, commit);
+    const of = options.of ?? { departmentId: f.task.departmentId!, taskId: release!.id, agentId: f.head.id, jobId: job!.id };
+    const repositoryScope = { ...scope, repositoryOwnerId: of.departmentId };
+    const snapshot = await productSnapshot(repositoryScope, commit);
     const [run] = await f.db.insert(testRuns).values({
-      companyId: f.task.companyId, number: 9000 + ++runs, taskId: release!.id, agentId: f.head.id, jobId: job!.id, departmentId: f.task.departmentId!,
+      companyId: f.task.companyId, number: 9000 + ++runs, taskId: of.taskId, agentId: of.agentId, jobId: of.jobId, departmentId: of.departmentId,
       branch: options.branch ?? f.branch, commitSha: commit, command: options.command ?? '', parts: options.parts ?? 2, timeoutMs: 600000, status: options.status ?? 'passed', finishedAt: new Date(),
       ...(manual ? {} : {
-        environmentRequest: { version: 1 as const, repositoryScope: scope, ...(options.suite ? { suite: options.suite } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null },
+        environmentRequest: { version: 1 as const, repositoryScope, ...(options.suite ? { suite: options.suite } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null },
         environmentSnapshot: snapshot, environmentHash: snapshot.description.manifestHash,
         fileCache: { mode: options.reused ? 'cached' as const : 'full' as const, ...(options.ofRelease === false ? {} : { release: options.branch ?? f.branch }), fingerprints: [], reused: options.reused ?? 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] },
       }),
