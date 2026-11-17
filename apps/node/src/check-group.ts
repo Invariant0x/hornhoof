@@ -86,7 +86,7 @@ export async function cleanCheckGroup(group: CheckGroup, uid: number, cleanup: C
       if (members?.length === 0) return;
       const safe = members !== null && members.some(member => member.pid === group.pid && member.started === group.started) && members.every(member => member.uid === uid && member.session === group.pid && BigInt(member.started) >= BigInt(group.started))
         && !members.some(member => member.pid === group.pid && member.started !== group.started);
-      if (safe) {
+      if (safe && members) {
         const signal = !term ? 'SIGTERM' : !killed && (elapsed >= 5000 || members.every(member => member.pid === group.pid)) ? 'SIGKILL' : null;
         if (signal) {
           let sent = false;

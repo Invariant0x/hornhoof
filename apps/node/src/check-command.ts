@@ -117,10 +117,10 @@ async function localWaited(command: string[], env: NodeJS.ProcessEnv): Promise<n
 
 /* This local leader has no payload until the node owns its identity and grants admission. IPC loss before that
    admission exits it without starting work. Afterwards it stays alive as the group's identity anchor until cleanup. */
-const PARKED_CHECK = String.raw`
+export const PARKED_CHECK = String.raw`
 const { spawn } = require('node:child_process');
-let started = false, stopped = false, managed = false;
-for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { stopped = true; });
+let started = false, stopped = null, managed = false;
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { stopped = signal; });
 process.on('disconnect', () => {
   if (!started) process.exit(1);
   if (!managed) process.kill(-process.pid, 'SIGKILL');
@@ -131,7 +131,7 @@ process.on('message', message => {
   const child = spawn(message.command[0], message.command.slice(1), { stdio: 'inherit', env: message.env });
   const tell = result => { if (process.connected) process.send(result, () => {}); };
   child.once('error', () => tell({ code: 127, signal: null }));
-  child.once('exit', (code, signal) => tell({ code, signal }));
+  child.once('exit', (code, signal) => tell({ code: stopped ? null : code, signal: stopped ?? signal }));
 });
 if (!process.connected) process.exit(1);
 `;
