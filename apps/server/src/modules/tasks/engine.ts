@@ -16,7 +16,7 @@ import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
 import { openTurnOf } from './turn-department.js';
-import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, skippedData, type Route } from './echelons-store.js';
+import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, endRoutes, skippedData, type Route } from './echelons-store.js';
 import { isStaged } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
@@ -208,8 +208,9 @@ export const taskSpot = (t: Pick<Task, 'departmentId' | 'productId'>): Spot =>
 
 const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.agentId ?? null });
 
-/* returned: the agent gives its work back to the one above it with this move, which the map shows on their line. */
-type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true; returned?: true; automatic?: NotificationSource };
+/* returned: the agent gives its work back to the one above it with this move, which the map shows on their line.
+   endsWorkUnder: what goes with the move closes the open work under the task before it is done. */
+type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true; returned?: true; automatic?: NotificationSource; endsWorkUnder?: true };
 
 export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note, config?: Pick<Ctx['config'], 'taskFilesBytes'>): Promise<{ id: number; createdAt: Date }> {
   n = hideCredentialsIn(n);
@@ -282,11 +283,12 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
-    if (set.status === 'done') await refuseOpenUnder(tx, task);
+    if (set.status === 'done' && !n.endsWorkUnder) await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
     const event = await note(tx, row, statusNoted(n, task.status, row.status), ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
+    if (set.status === 'done' && n.endsWorkUnder) await refuseOpenUnder(tx, task);
     if (CLOSED.includes(row.status)) unstuck = await letStuckGo(tx, row.id);
     await keepWaitsWithMove(tx, task, row, { kind: n.kind, actor: n.actor, eventId: event.id });
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
@@ -784,6 +786,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
 /* Open tasks that come after any of the cancelled ones keep waiting, and whoever made each hears so: its agent, or the
    orchestrator for a person's. waiting: those whose maker cancelled, who hears it in the answer instead. */
 async function afterCancelled(tx: Tx, actor: Actor, cancelled: Task[]): Promise<{ wakes: Wake[]; waiting: Task[] }> {
+  if (!cancelled.length) return { wakes: [], waiting: [] };
   const left = await tx.select().from(tasks).where(comingAfter(cancelled, holdsAny(tasks.after, cancelled.map(t => t.id)))).orderBy(asc(tasks.number));
   const [orchestrator] = left.some(t => !t.createdByAgentId)
     ? await tx.select(idOnly(agents)).from(agents).where(and(eq(agents.companyId, cancelled[0]!.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)))
@@ -799,46 +802,87 @@ async function afterCancelled(tx: Tx, actor: Actor, cancelled: Task[]): Promise<
   return { wakes, waiting };
 }
 
+/* Cancels every open task under the task, level by level, each saying why in its log; questions waiting on the task and
+   on them are withdrawn. The cancelled tasks, in the order they ended. */
+async function endUnder(tx: Tx, task: Task, actor: Actor, why: string): Promise<Task[]> {
+  const ended: Task[] = [];
+  let level = [task.id];
+  while (level.length) {
+    const was = new Map((await tx.select({ id: tasks.id, status: tasks.status }).from(tasks).where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED]))).for('update')).map(t => [t.id, t.status]));
+    const below = await tx
+      .update(tasks)
+      .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, externalWait: null, paused: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
+      .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
+      .returning();
+    for (const t of below) {
+      const event = await note(tx, t, statusNoted({ kind: 'cancelled', actor, text: why }, was.get(t.id) ?? t.status, t.status));
+      await keepWaitsWithMove(tx, t, t, { kind: 'cancelled', actor, eventId: event.id });
+      /* Work cancelled with the task above it needs none of the turns kept for it. */
+      await dropEarlierWakes(tx, t.id);
+    }
+    ended.push(...below);
+    level = below.map(t => t.id);
+  }
+  await tx
+    .update(requests)
+    .set({ status: 'withdrawn', answeredAt: new Date() })
+    .where(and(inArray(requests.taskId, [task.id, ...ended.map(t => t.id)]), eq(requests.status, 'open')));
+  await cancelRoutes(tx, task.companyId, ended.map(t => t.id));
+  return ended;
+}
+
+/* What follows a close for the work cancelled under it: each of them shown again, and the trackers of other departments told. */
+async function endedUnder(ctx: Live, task: Task, actor: Actor, ended: Task[]): Promise<void> {
+  for (const t of ended) published(ctx, t);
+  /* The task's own department heard of it with the move; work under it elsewhere is heard of in its own. */
+  for (const departmentId of new Set(ended.map(t => t.departmentId).filter(d => d !== task.departmentId))) await nudgeTrackerKeepers(ctx, { companyId: task.companyId, departmentId }, actor.agentId);
+  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+}
+
+type Closed = Moved & { closed: string[]; waiting: Task[] };
+
 /* Ends the task and every open task under it; questions waiting on them are withdrawn. Whoever gave it out hears why.
    closed names every task that ended, for their turns to stop; waiting the open tasks that came after them, which the
    one who cancelled made. */
-export async function cancel(ctx: Live, actor: Actor, taskId: string, why: string): Promise<Moved & { closed: string[]; waiting: Task[] }> {
+export async function cancel(ctx: Live, actor: Actor, taskId: string, why: string): Promise<Closed> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   const ended: Task[] = [];
   let waiting: Task[] = [];
   const wakes = giver(task, 'cancelled', actor.agentId, why.trim());
   const row = await move(ctx, task, { status: 'cancelled', closedAt: new Date(), assigneeAgentId: null }, { kind: 'cancelled', actor, text: why }, async (tx, row) => {
-    let level = [taskId];
-    while (level.length) {
-      const was = new Map((await tx.select({ id: tasks.id, status: tasks.status }).from(tasks).where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED]))).for('update')).map(t => [t.id, t.status]));
-      const below = await tx
-        .update(tasks)
-        .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, externalWait: null, paused: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
-        .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
-        .returning();
-      for (const t of below) {
-        const event = await note(tx, t, statusNoted({ kind: 'cancelled', actor, text: `#${task.number} was cancelled.` }, was.get(t.id) ?? t.status, t.status));
-        await keepWaitsWithMove(tx, t, t, { kind: 'cancelled', actor, eventId: event.id });
-        /* Work cancelled with the task above it needs none of the turns kept for it. */
-        await dropEarlierWakes(tx, t.id);
-      }
-      ended.push(...below);
-      level = below.map(t => t.id);
-    }
-    await tx
-      .update(requests)
-      .set({ status: 'withdrawn', answeredAt: new Date() })
-      .where(and(inArray(requests.taskId, [taskId, ...ended.map(t => t.id)]), eq(requests.status, 'open')));
-    await cancelRoutes(tx, task.companyId, [taskId, ...ended.map(t => t.id)]);
+    ended.push(...(await endUnder(tx, task, actor, `#${task.number} was cancelled.`)));
+    await cancelRoutes(tx, task.companyId, [taskId]);
     const after = await afterCancelled(tx, actor, [row, ...ended]);
     wakes.push(...after.wakes);
     waiting = after.waiting;
   }, wakes);
-  for (const t of ended) published(ctx, t);
-  /* The task's own department heard of it with the move; work under it elsewhere is heard of in its own. */
-  for (const departmentId of new Set(ended.map(t => t.departmentId).filter(d => d !== task.departmentId))) await nudgeTrackerKeepers(ctx, { companyId: task.companyId, departmentId }, actor.agentId);
-  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  await endedUnder(ctx, task, actor, ended);
+  return { task: row, wakes, closed: [taskId, ...ended.map(t => t.id)], waiting };
+}
+
+/* The orchestrator closes a task in any state it stands in, past its route: done or cancelled, with its reason in the log as
+   its own act. Done closes the record and nothing else: the work nobody finished under it is cancelled with it, its result
+   is accepted by nobody and joins no turn, so no release or main takes it on this. Questions and waits on it end with it. */
+export async function closeTask(ctx: Live, actor: Actor, taskId: string, close: { status: 'done' | 'cancelled'; why: string }): Promise<Closed> {
+  const task = await loadTask(ctx.db, taskId);
+  const why = close.why.trim();
+  const [closer] = actor.agentId ? await ctx.db.select(only(agents, 'kind')).from(agents).where(and(eq(agents.id, actor.agentId), eq(agents.companyId, task.companyId), isNull(agents.removedAt))) : [];
+  if (closer?.kind !== 'orchestrator') throw notYours(task, 'is closed past its route only by the orchestrator: close it through its own moves, or cancel it');
+  stillOpen(task);
+  if (!why) throw refuse(400, 'task_invalid', `Say why #${task.number} closes.`);
+  if (close.status === 'cancelled') return cancel(ctx, actor, taskId, why);
+  const ended: Task[] = [];
+  let waiting: Task[] = [];
+  const wakes = giver(task, 'reported', actor.agentId, `The orchestrator closed it: ${why}`);
+  const row = await move(ctx, task, { status: 'done', closedAt: new Date(), assigneeAgentId: null, silent: 0 }, { kind: 'done', actor, text: why, data: { byOrchestrator: true }, endsWorkUnder: true }, async (tx, row) => {
+    ended.push(...(await endUnder(tx, row, actor, `#${task.number} was closed by the orchestrator.`)));
+    await endRoutes(tx, task.companyId, [taskId], 'done');
+    const after = await afterCancelled(tx, actor, ended);
+    wakes.push(...after.wakes);
+    waiting = after.waiting;
+  }, wakes);
+  await endedUnder(ctx, task, actor, ended);
   return { task: row, wakes, closed: [taskId, ...ended.map(t => t.id)], waiting };
 }
 
