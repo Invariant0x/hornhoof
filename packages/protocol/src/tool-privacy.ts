@@ -1,11 +1,12 @@
 import type { AgentEvent } from './index.js';
 
-export type ToolPrivacyPolicy = { sensitive?: boolean; secretInput?: readonly string[]; secretOutput?: readonly string[]; secretCommand?: boolean; secretExecution?: boolean };
+export type ToolPrivacyPolicy = { sensitive?: boolean; secretInput?: readonly string[]; secretOutput?: readonly string[]; secretCommand?: boolean; secretExecution?: boolean; delegatesTool?: boolean };
 /* Registration and telemetry use the same definitions. No secret value belongs to replay or a transcript. */
 export const PRIVATE_TOOLS = {
   entry: { name: 'vault_entry', _meta: { sensitive: true, secretInput: [], secretOutput: ['password', 'code'] } },
   save: { name: 'vault_save', _meta: { sensitive: true, secretInput: ['password', 'code'], secretOutput: [] } },
   phone: { name: 'phone_action', _meta: { secretExecution: true, secretInput: [], secretOutput: [] } },
+  delegate: { name: 'use_tool', _meta: { delegatesTool: true } },
 } as const;
 
 export const PRIVATE_TOOL_NOTE = 'Sensitive tool data and raw terminal output hidden.';
@@ -18,6 +19,19 @@ export function toolPrivacy(name: string): ToolPrivacyPolicy | undefined {
 }
 export const isSensitiveTool = (name: string): boolean => toolPrivacy(name)?.sensitive === true;
 
+/* A dispatching tool has no data policy of its own: the named target owns its input and reply. */
+export function privateToolCall(name: string, input: unknown, resolve = toolPrivacy): { name: string; input: unknown; policy: ToolPrivacyPolicy | undefined } {
+  let policy = resolve(name);
+  for (let depth = 0; depth < 8 && policy?.delegatesTool; depth++) {
+    const call = input as { name?: unknown; arguments?: unknown } | null;
+    if (!call || typeof call.name !== 'string') break;
+    name = call.name;
+    input = call.arguments;
+    policy = resolve(name);
+  }
+  return { name, input, policy };
+}
+
 /* Routing and typed discriminants are identities, not report text. A one-character password must not change a task
    reference or turn an event's kind into a different protocol message. */
 const IDENTITY = /^(?:id|task|employee|agent|department|product|request|candidate|machine|run|subscription|commit|branch|kind|type|state|status|provider|wait)$|(?:Id|Ids|Sha|Commit|Kind|Class|Type|State|Status)$/;
@@ -27,6 +41,9 @@ const PROSE = new Set(['text', 'freshText', 'subject', 'summary', 'evidence', 'q
    too. JSON-escaped forms cover text nested in tool replies without putting a value in a persistent redactor. */
 export class PrivateValues {
   private readonly values = new Set<string>();
+
+  /* An upper bound on UTF-8 bytes to withhold while examining a streamed attachment. */
+  get retainedBytes(): number { return Math.max(0, ...[...this.values].map(value => value.length * 4)); }
 
   remember(value: unknown, fields?: readonly string[]): void {
     if (fields) {
@@ -84,7 +101,7 @@ const parsed = (value: string): unknown => { try { return JSON.parse(value); } c
 /* Results have no call identity. After a sensitive call, subsequent inputs and results can contain it, including
    commands that type it into a form. Text and reports still reach people, with exact values hidden. */
 export function privateToolEvent(event: AgentEvent, sensitive: boolean, untracked = false): AgentEvent {
-  if (!sensitive && !(event.kind === 'tool' && (event.sensitive || isSensitiveTool(event.name)))) return event;
+  if (!sensitive && !(event.kind === 'tool' && (event.sensitive || privateToolCall(event.name, parsed(event.input)).policy?.sensitive))) return event;
   if (event.kind === 'tool') return { ...event, input: PRIVATE_TOOL_NOTE, sensitive: true };
   if (event.kind === 'tool_result') return { ...event, summary: PRIVATE_TOOL_NOTE };
   if (untracked && event.kind === 'text') return { ...event, text: PRIVATE_TOOL_NOTE };
@@ -122,10 +139,10 @@ export class ToolPrivacy {
     this.values.remember(result, policy?.secretOutput);
   }
 
-  event(event: AgentEvent, policy?: ToolPrivacyPolicy): AgentEvent {
+  event(event: AgentEvent, policy?: ToolPrivacyPolicy, resolve = toolPrivacy): AgentEvent {
     if (event.kind === 'tool') {
-      policy ??= toolPrivacy(event.name);
-      if (event.sensitive || policy?.sensitive) this.input(event.name, parsed(event.input), { ...policy, sensitive: true });
+      const call = privateToolCall(event.name, parsed(event.input), name => name === event.name && policy ? policy : resolve(name));
+      if (event.sensitive || call.policy?.sensitive) this.input(call.name, call.input, { ...call.policy, sensitive: true });
     }
     if (this.sensitive && event.kind === 'tool_result') this.result(parsed(event.summary), { secretOutput: this.plainOutput ? undefined : [...this.outputFields] });
     return this.values.hide(privateToolEvent(event, this.sensitive));

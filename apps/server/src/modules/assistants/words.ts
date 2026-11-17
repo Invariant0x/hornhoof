@@ -2,8 +2,8 @@ import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ApiError, errorAnswer, type ErrorReason } from '../../errors.js';
 import { FILE_BYTES } from '../tasks/attachments.js';
 import { langOf, type BotLang } from '../telegram/words.js';
+import { LINK_DAYS } from './files.js';
 
-export const FILES_URL = '/api/assistant/files';
 const MB = FILE_BYTES / 1024 / 1024;
 
 /* Why a call was refused, for the assistant's owner, in Russian or English as the program's Accept-Language asks: one
@@ -26,17 +26,19 @@ export const WORDS: Partial<Record<ErrorReason, Record<BotLang, string>>> = {
   request_closed: { en: 'this request is answered already.', ru: 'на этот запрос уже ответили.' },
   decision_not_allowed: { en: 'this decision is not yours to take in Hornhoof.', ru: 'в Hornhoof это решение принимаете не вы.' },
   task_invalid: { en: 'this answer does not fit the request.', ru: 'такой ответ не подходит к запросу.' },
-  attachment_unknown: { en: 'there is no such file in Hornhoof, or you cannot open it there.', ru: 'такого файла в Hornhoof нет, или вам его там не открыть.' },
+  attachment_unknown: { en: 'there is no such file in Hornhoof, it was deleted after its 30 days, or you cannot open it there.', ru: 'такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть.' },
   file_empty: { en: 'the file is empty.', ru: 'файл пустой.' },
   file_too_big: { en: `the file is bigger than ${MB} MB.`, ru: `файл больше ${MB} МБ.` },
+  file_lost: {
+    en: 'a big file lives only on the machine that took it, and Hornhoof cannot reach it there now.',
+    ru: 'большой файл хранится только на машине, которая его приняла, и сейчас Hornhoof не может его оттуда взять.',
+  },
+  file_link_expired: { en: `the link to the file worked for ${LINK_DAYS} days, and they are over.`, ru: `ссылка на файл работала ${LINK_DAYS} дней, и они прошли.` },
   attachment_invalid: { en: "Hornhoof has no room left for the company's files.", ru: 'в Hornhoof закончилось место для файлов компании.' },
 };
 
-/* A refusal of an assistant's call, in its owner's words where there are some. A file over the most Hornhoof keeps is
-   turned away before its bytes are read. */
+/* A refusal of an assistant's call, in its owner's words where there are some. */
 export function inOwnersWords(err: FastifyError | Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
-  const tooBig = (err as FastifyError).code === 'FST_ERR_CTP_BODY_TOO_LARGE' && req.routeOptions.url === FILES_URL;
-  const refused = tooBig ? new ApiError(413, 'validation', err.message, 'file_too_big') : err;
-  const words = refused instanceof ApiError && refused.reason ? WORDS[refused.reason]?.[langOf(req.headers['accept-language'])] : undefined;
-  return errorAnswer(words && refused instanceof ApiError ? new ApiError(refused.status, refused.code, words, refused.reason, refused.details) : refused, req, reply);
+  const words = err instanceof ApiError && err.reason ? WORDS[err.reason]?.[langOf(req.headers['accept-language'])] : undefined;
+  return errorAnswer(words && err instanceof ApiError ? new ApiError(err.status, err.code, words, err.reason, err.details) : err, req, reply);
 }

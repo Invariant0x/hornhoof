@@ -1,5 +1,4 @@
 import type { Ctx } from '../../app.js';
-import { orchestratorWrites } from '../../db/agent-sql.js';
 import type { Db } from '../../db/client.js';
 import { ApiError, loggable } from '../../errors.js';
 import { UnitWriter, type Unit } from './apply.js';
@@ -136,19 +135,15 @@ async function unitOf(q: Query, facts: Facts, conflict: ConflictRow, take: 'ther
 }
 
 /* Everything a pick must hold to before it writes; it throws why not. */
-function allowed(who: Picker, conflict: ConflictRow, take: Take, value?: Record<string, unknown>): void {
+function allowed(conflict: ConflictRow, take: Take, value?: Record<string, unknown>): void {
   if (conflict.picked) throw new NotTaken('Already settled.');
   const own = TABLE_RULES[conflict.tbl]?.hereOnly ?? [];
   const written = take === 'value' ? Object.keys(value ?? {}) : take === 'there' && conflict.op === 'update' ? (conflict.cols.length > 0 ? conflict.cols : own) : [];
   if (written.some(column => own.includes(column))) throw new NotTaken(OWNERS_ALONE);
-  if (who.kind === 'orchestrator' && ceos(conflict.tbl)) throw new NotTaken(`This one is the CEO's (${conflict.topic}); it waits on his screen.`);
   if (take !== 'value') return;
   if (conflict.kind !== 'differs' || !value || Object.keys(value).length === 0) throw new NotTaken('A value of your own settles only a row that differs, in its own columns.');
   const foreign = Object.keys(value).find(column => !conflict.cols.includes(column));
   if (foreign) throw new NotTaken(`This conflict is not about ${foreign}.`);
-  /* What only Hornhoof's own routes write, the orchestrator writes no value of his own into: he takes a side. */
-  const kept = who.kind === 'orchestrator' ? Object.keys(value).find(column => !orchestratorWrites(conflict.tbl, column)) : undefined;
-  if (kept) throw new NotTaken(`Hornhoof keeps ${kept} of ${conflict.tbl} to its own routes: keep here or take there.`);
 }
 
 /* Settles conflicts: one, a list, or every open one of a merge, a table or a time range. Each settles in a transaction
@@ -171,7 +166,7 @@ export async function pick(ctx: Ctx, who: Picker, f: PickFilter, take: Take, val
   for (const conflict of found) {
     if (done.has(conflict.id)) continue;
     try {
-      const settled = await db.transaction(async tx => settle(queryOf(tx as unknown as Db), facts, who, by, conflict, take, value));
+      const settled = await db.transaction(async tx => settle(queryOf(tx as unknown as Db), facts, by, conflict, take, value));
       for (const one of settled) {
         done.add(one.id);
         result.settled += 1;
@@ -197,7 +192,7 @@ export async function pick(ctx: Ctx, who: Picker, f: PickFilter, take: Take, val
 }
 
 /* One conflict, or the group a refused one hangs together with, inside one transaction. The conflicts it settled. */
-async function settle(q: Query, facts: Facts, who: Picker, by: string, asked: ConflictRow, take: Take, value?: Record<string, unknown>): Promise<ConflictRow[]> {
+async function settle(q: Query, facts: Facts, by: string, asked: ConflictRow, take: Take, value?: Record<string, unknown>): Promise<ConflictRow[]> {
   const [fresh] = await q<ConflictRow>(`${SELECT} WHERE c.id = $1::uuid FOR UPDATE OF c`, [asked.id]);
   if (!fresh) throw new NotTaken('There is no such conflict any more.');
   let group = [fresh];
@@ -205,7 +200,7 @@ async function settle(q: Query, facts: Facts, who: Picker, by: string, asked: Co
     const refused = await q<ConflictRow>(`${SELECT} WHERE c.merge = $1::uuid AND c.kind = 'refused' AND c.picked IS NULL AND c.id <> $2::uuid ${ORDER} FOR UPDATE OF c`, [fresh.merge, fresh.id]);
     group = groupOf(facts, fresh, refused);
   }
-  for (const conflict of group) allowed(who, conflict, take, value);
+  for (const conflict of group) allowed(conflict, take, value);
   if (take !== 'here') await write(q, facts, group, take, value);
   await q(
     `UPDATE net.merge_conflicts SET picked = $2, value = $3::jsonb, picked_by = $4, picked_at = now() WHERE id IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb))`,

@@ -47,6 +47,13 @@ describe('sensitive tool telemetry', () => {
     expect(privacy.event({ kind: 'text', text: 'Ready with private-result-marker.' })).toEqual({ kind: 'text', text: 'Ready with [hidden].' });
   });
 
+  it('protects a sensitive tool called through the orchestrator shelf', () => {
+    const privacy = new ToolPrivacy();
+    const input = JSON.stringify({ name: 'vault_save', arguments: { password: 'private-shelf-marker' } });
+    expect(privacy.event({ kind: 'tool', name: 'hornhoof.use_tool', input })).toMatchObject({ input: PRIVATE_TOOL_NOTE });
+    expect(privacy.event({ kind: 'text', text: 'Saved private-shelf-marker.' })).toEqual({ kind: 'text', text: 'Saved [hidden].' });
+  });
+
   it('uses a registered policy for telemetry and keeps an explicit sensitive event private', () => {
     const privacy = new ToolPrivacy();
     const policy = { sensitive: true, secretInput: ['value'], secretOutput: ['value'] };
