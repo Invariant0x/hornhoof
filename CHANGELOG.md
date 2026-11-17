@@ -39,6 +39,8 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - An agent still gets a phone screen's elements when its picture is too large to send.
 - `npm run deps` and the author check install again when `node_modules` came from another lockfile.
 - A closed operator case no longer fails a turn whose program took later words, so a working program keeps its turn.
+- The map's agent count reads as one phrase right to left, and on a phone its hint stands above the bottom buttons.
+- An address whose consent was taken back says it gets no more messages, and the heading counts only consent in force.
 
 ### Added
 
