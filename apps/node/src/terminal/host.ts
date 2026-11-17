@@ -15,7 +15,7 @@ import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
 import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { machineLoad, programWorkers, type MachineLoad } from '../load.js';
-import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
+import { jobDone, ProgramNotStarted, tidy, type RunInput, type RunResult } from '../runner.js';
 import { TurnTally } from '../turn-tokens.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
@@ -698,7 +698,7 @@ export class TerminalHost {
     await this.waitForTurn(a, job);
     if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
     a.signedOut = job.signedOut;
-    const launch = await this.launchFor(a, job);
+    const launch = await this.launchFor(a, job).catch((err: unknown) => { throw new ProgramNotStarted(err); });
     if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
     this.toolsLost(a, job);
     const goesOn = await this.goesOn(a, job, launch.hash);
@@ -1024,8 +1024,13 @@ export class TerminalHost {
   /* Starts the program for the turn. One that never shows it is ready ends the turn with its screen, which says why. */
   private async startProgram(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<RunResult | null> {
     this.programIs(a, false);
-    await this.prepareLaunch(a, job, spec, hash, urls);
-    await this.launchAttempt(a, job, spec);
+    try {
+      await this.prepareLaunch(a, job, spec, hash, urls);
+      await this.launchAttempt(a, job, spec);
+    } catch (err) {
+      /* Nothing of the program ran: the turn ends before it started. */
+      throw new ProgramNotStarted(err);
+    }
     /* The program starts as its launch ends, once the one before it is gone: what it does counts from then. */
     a.startedAt = Date.now();
     this.watch(a);

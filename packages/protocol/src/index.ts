@@ -486,6 +486,10 @@ export const HELLO_IDS_MAX = 20_000;
 /* A server that sends no ack drops a hello that lists more than this. */
 export const HELLO_IDS_BEFORE_ACKS = 100;
 
+/* Why the node cannot write its work folder now, so it can take no turn; null once a write there works again. Older nodes
+   send none. */
+const WorkError = z.string().max(2000).nullable().optional();
+
 const NodeMessage = z.discriminatedUnion('type', [
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced, PhoneReply, PhoneFrame,
   /* terminals: the node runs agents in sessions people can watch and type into. */
@@ -512,6 +516,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     testHarness: z.literal(1).optional(),
     /* Why the Playwright browsers could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
+    workError: WorkError,
     load: Load.optional(),
     live: Live,
     tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
@@ -558,6 +563,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     account: Account.nullable().optional(),
     programs: Programs.optional(),
     browserError: BrowserError.nullable().optional(),
+    workError: WorkError,
     noRuns: z.string().max(300).nullable().optional(),
     testEnvironmentVersion: z.literal(1).optional(),
     testRuntimes: z.array(RuntimeCapability).max(64).optional(),
@@ -593,6 +599,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     wordsWaiting: z.boolean().optional(),
     /* Set on a failed turn whose program said why; older nodes send none. */
     failure: Failure.optional(),
+    /* The turn ended before its program started; older nodes send none. */
+    unstarted: z.literal(true).optional(),
     /* The tokens the turn used; null when its program told none, left out by older nodes. */
     tokens: TurnTokens.nullable().optional(),
     /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */

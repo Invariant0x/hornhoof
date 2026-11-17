@@ -3,7 +3,7 @@ import type { Notification } from '@hornhoof/protocol';
 import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type OperatorEvidence, type OperatorQuestion, type OperatorReason, type ProgramView } from '@hornhoof/protocol/program-operator';
 import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
+import { agentEvents, agents, attachments, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, type CaseReason } from '../../db/schema.js';
 import { idOnly, only } from '../../db/selections.js';
 import { nodeIdentity, ownBuiltin } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
@@ -11,20 +11,26 @@ import { insertTurn, limitUntil, pump, takesTurns } from '../conversation/queue.
 import { appendEvent } from '../events/store.js';
 import { nodeHeld } from '../updates/drain.js';
 import { firstOfRun, outcomeOfOperatorTry } from './failure-run.js';
+import { fromStart } from './not-started.js';
 import { currentOperatorQuestion, liveFailureSignals, qualifyingReasons } from './policy.js';
 import { operatorTransaction } from './transactions.js';
 import { operatorNotification } from './notifications.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
+/* A case of what a node saw of a program, which that node holds too. */
+type ProgramCase = Case & { reason: OperatorReason };
+const ofProgram = (row: Case): row is ProgramCase => !fromStart(row);
 type Signal = { agentKey: string; jobId: string | null; instance: string; reason: OperatorReason; evidenceKey: string; deliveryId: string | null };
 type Seen = { frame: OperatorEvidence; png: Buffer | null };
 const scope = (row: { agentId: string; instance: string }) => and(eq(programOperatorCases.agentId, row.agentId), eq(programOperatorCases.instance, row.instance));
-const reasonNames: Record<OperatorReason, { en: string; ru: string }> = {
+const reasonNames: Record<CaseReason, { en: string; ru: string }> = {
   assignment_unrecorded: { en: 'assignment words not recorded for sixty seconds', ru: 'слова поручения не записаны за минуту' },
   recorded_no_activity: { en: 'no first own event for five minutes after the receipt', ru: 'после квитанции нет первого своего события пять минут' },
   live_words_not_taken: { en: 'three consecutive live deliveries not taken', ru: 'три живые доставки подряд не взяты' },
   startup_exit: { en: 'program exited within a minute of launch', ru: 'программа завершилась в первую минуту запуска' },
   question_waiting: { en: 'program question waiting for thirty seconds', ru: 'вопрос программы ждет ответа тридцать секунд' },
+  not_started: { en: 'a turn ended before its program started', ru: 'ход закончился до запуска программы' },
+  node_cannot_work: { en: 'the machine cannot write its work folder', ru: 'машина не может писать в свою рабочую папку' },
 };
 
 /* Called with the agent row locked, inside the same transaction as its new evidence. */
@@ -58,7 +64,7 @@ async function instanceFacts(ctx: Ctx, agentId: string, instance: string): Promi
   });
 }
 
-export async function operatorCaseMode(ctx: Ctx, row: Case): Promise<{ reason: OperatorReason; questionId?: string; question?: OperatorQuestion; readOnly: boolean }> {
+export async function operatorCaseMode<Row extends Case>(ctx: Ctx, row: Row): Promise<{ reason: Row['reason'] | 'question_waiting'; questionId?: string; question?: OperatorQuestion; readOnly: boolean }> {
   const facts = await instanceFacts(ctx, row.agentId, row.instance);
   const signal = qualifyingReasons(facts).find(signal => signal.reason === 'question_waiting' && row.evidence.some(evidence => evidence.reason === signal.reason && evidence.evidenceKey === signal.evidenceKey));
   if (!signal) return { reason: row.reason, readOnly: row.readOnly };
@@ -327,8 +333,10 @@ export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Dat
   const rows = await ctx.db.select().from(programOperatorCases).where(eq(programOperatorCases.agentId, agentId));
   for (const row of rows) {
     const node = nodeIdentity(row.nodeId);
-    const mode = await operatorCaseMode(ctx, row);
-    if (ctx.hub.hasProgramOperator(node)) ctx.hub.send(node, { type: 'program.operator_case', agentKey: row.agentId, jobId: row.jobId, instance: row.instance, case: row.id, capability: row.capability, disposition: row.status === 'open' ? 'open' : 'revoke', remainingMs: Math.min(OPERATOR_CASE_MS, Math.max(0, +row.deadlineAt - +now)), revision: row.revision, reason: mode.reason, questionId: mode.questionId, readOnly: mode.readOnly, closedBecause: row.status !== 'open' ? row.resolution?.outcome : undefined });
+    if (ofProgram(row) && ctx.hub.hasProgramOperator(node)) {
+      const mode = await operatorCaseMode(ctx, row);
+      ctx.hub.send(node, { type: 'program.operator_case', agentKey: row.agentId, jobId: row.jobId, instance: row.instance, case: row.id, capability: row.capability, disposition: row.status === 'open' ? 'open' : 'revoke', remainingMs: Math.min(OPERATOR_CASE_MS, Math.max(0, +row.deadlineAt - +now)), revision: row.revision, reason: mode.reason, questionId: mode.questionId, readOnly: mode.readOnly, closedBecause: row.status !== 'open' ? row.resolution?.outcome : undefined });
+    }
     await pumpCaseNotices(ctx, row);
   }
 }

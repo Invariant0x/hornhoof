@@ -43,8 +43,16 @@ export type RunInput = {
   /* More environment for the program, such as git access to the agent's repository for this turn. */
   env?: Record<string, string>;
 };
-/* tokens: what the turn used, as its program reported it; none when it reports nothing. */
-export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null; sensitive?: boolean; privateValues?: PrivateValues };
+/* tokens: what the turn used, as its program reported it; none when it reports nothing. unstarted: the turn ended before its
+   program started. */
+export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; failure?: Failure; wordsWaiting?: boolean; tokens?: TurnTokens | null; sensitive?: boolean; privateValues?: PrivateValues; unstarted?: boolean };
+
+/* What kept an adapter from launching the turn's program at all, so the turn ended before its program started. */
+export class ProgramNotStarted extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
@@ -91,6 +99,7 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
     result: privateText(res.result, res, secrets), tail: res.sensitive ? PRIVATE_TOOL_NOTE : lastBytes(redact(output, secrets)), error: res.error, tokens: res.tokens ?? null,
     ...(res.wordsWaiting ? { wordsWaiting: true } : {}),
+    ...(res.unstarted && res.error !== 'cancelled' ? { unstarted: true as const } : {}),
     ...(res.failure ? { failure: { ...res.failure, text: privateText(res.failure.text, res, secrets).slice(0, 2000) } } : {}),
     ...(program ? { exit: { code: program.code, signal: signalName(program.signal) } } : {}),
   };
@@ -107,6 +116,7 @@ function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const notStarted = (err: unknown): RunResult => ({ ...failed(message(err), 'agent_failed'), unstarted: true });
 
 /* The folder of a one-shot call, which goes when the call ends. */
 const callFolder = (dir: string, jobId: string) => join(dir, 'work', 'calls', jobId);
@@ -277,6 +287,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       .catch(() => {});
   };
   let res: RunResult;
+  /* Whether the turn got as far as asking its program to run. */
+  let started = false;
   const call = msg.call ? adapter.oneCall?.bind(adapter) ?? null : undefined;
   if (call === null) return jobDone(msg.jobId, failed(noOneCall(msg), 'agent_failed'), [...known]);
   try {
@@ -305,11 +317,12 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       ...(env ? { env } : {}),
     };
     await beforeRun();
-    const run = (call ? call(input) : adapter.run(input)).catch((err: unknown) => failed(message(err), 'agent_failed'));
+    started = true;
+    const run = (call ? call(input) : adapter.run(input)).catch((err: unknown) => err instanceof ProgramNotStarted ? notStarted(err) : failed(message(err), 'agent_failed'));
     res = await (untimed && !call ? run : withTimeout(run, msg.timeoutMs));
     if (res.sessionId && !call) rememberSession(dir, res.sessionId, place.workDir);
   } catch (err) {
-    res = failed(message(err), 'agent_failed');
+    res = started ? failed(message(err), 'agent_failed') : notStarted(err);
   }
   /* A call leaves nothing behind: what it was to keep went out in its answer, or in commits it pushed. */
   if (call) await withOwnFs(adapter, own => own.remove(callFolder(dir, msg.jobId))).catch(() => {});

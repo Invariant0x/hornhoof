@@ -1368,6 +1368,37 @@ describe('runNode', () => {
     expect(lines).toEqual(['This node was removed in Hornhoof.']);
   });
 
+  it('tells Hornhoof it cannot take work when its work folder fails a write after a turn that never started, and lifts that once a write works', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const lines: string[] = [];
+    const eio = "EIO: i/o error, open '/data/work/agents/a1/.claude/skills/x/SKILL.md.hh-52'";
+    let writeError: string | null = null;
+    fakeRounds();
+    const node = await runNode({ dir, adapter, log: line => lines.push(line), checkWork: async () => writeError, loadMs: 40 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received.find(m => m.type === 'hello')).toMatchObject({ workError: null });
+
+    /* The agent's folder cannot be made, so its program never starts, and the folder answers the write check with EIO. */
+    writeFileSync(join(dir, 'work', 'agents'), 'not a folder');
+    writeError = eio;
+    server.send({ type: 'job.run', jobId: 'j-broken', subscriptionId: 's1', provider: 'claude', prompt: 'hello', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null, workspace: { key: 'a1', repo: null } });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-broken'));
+    const done = server.received.findIndex(m => m.type === 'job.done' && m.jobId === 'j-broken');
+    expect(server.received[done]).toMatchObject({ ok: false, unstarted: true });
+    expect(server.received.slice(0, done).findLast(m => m.type === 'status')).toMatchObject({ workError: eio });
+    expect(lines).toContain(`This machine cannot write its work folder, so it takes no turn: ${eio}`);
+
+    /* A load report still finds it broken and says nothing new; one that finds a write working lifts it. */
+    await vi.advanceTimersByTimeAsync(40);
+    expect(server.received.filter(m => m.type === 'status' && m.workError === null)).toEqual([]);
+    writeError = null;
+    await vi.advanceTimersByTimeAsync(40);
+    await server.wait(() => server.received.some(m => m.type === 'status' && m.workError === null));
+    expect(lines).toContain('This machine writes its work folder again and takes turns.');
+  });
+
   it('checks Playwright Chromium before greeting Hornhoof, logs and reports a named failure, and clears it once healthy', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);

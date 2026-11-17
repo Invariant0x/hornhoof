@@ -12,6 +12,7 @@ import { logTurnFact } from '../tasks/turn-log.js';
 import { authorizeAccess } from './access.js';
 import { operatorRefused, type OperatorCaller } from './authorization.js';
 import { syncOperatorCases } from './cases.js';
+import { fromStart, releaseStartHold } from './not-started.js';
 import { continueRecovery, runsATurn } from './recovery.js';
 import { requestRecoveryState } from './rpc.js';
 import { operatorTransaction } from './transactions.js';
@@ -48,6 +49,7 @@ export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, inpu
   const me = await authorizeAccess(ctx, caller);
   const found = await caseToRelease(ctx, me, input.case);
   if (!found.recoveryHold) return noHold(found);
+  if (fromStart(found)) return await releaseStartHold(ctx, me, found, input.reason, await agentParty(ctx, found.companyId, me.id)) ? { result: 'released', continuation: found.continuationJobId } : noHold(found);
   const state = await requestRecoveryState(ctx, found);
   const result = await operatorTransaction(ctx, async (tx, inside) => {
     await tx.select(idOnly(agents)).from(agents).where(eq(agents.id, found.agentId)).for('update');
@@ -99,7 +101,7 @@ const text = (value: unknown, isError = false) => ({ content: [{ type: 'text' as
 
 export function registerReleaseTool(server: McpServer, ctx: Ctx, caller: OperatorCaller): void {
   server.registerTool('program_recovery_release', {
-    description: "Release one program operator case's recovery hold and deliver the agent's saved words once: the only way to lift a recovery hold. Hornhoof asks the node what the program shows now and refuses while it asks a question, runs a tool, retries or holds words a person typed, or when the agent has no plan to run them. Words Hornhoof typed and never sent do not stop it: the saved words replace them. Read program_screen first and answer or clear what stops it. Say why: the reason goes in the turn's log with your name. Repeating it changes nothing.",
+    description: "Release one program operator case's recovery hold and deliver the agent's saved words once: the only way to lift a recovery hold. Hornhoof asks the node what the program shows now and refuses while it asks a question, runs a tool, retries or holds words a person typed, or when the agent has no plan to run them. Words Hornhoof typed and never sent do not stop it: the saved words replace them. A hold of a turn that ended before its program started has no program to ask: it lifts at once, and the turns that wait go on. Read program_screen first and answer or clear what stops it. Say why: the reason goes in the turn's log with your name. Repeating it changes nothing.",
     inputSchema: { case: z.uuid(), reason: z.string().trim().min(1).max(500) },
   }, async input => {
     try { return text(await releaseRecoveryHold(ctx, caller, input)); }

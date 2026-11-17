@@ -22,6 +22,7 @@ import { removalWatch } from './removal.js';
 import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } from './outbox.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
+import { workFolderError } from './work-folder.js';
 import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
 import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { PhoneAdb, privateAdb } from './phones/adb.js';
@@ -127,6 +128,8 @@ type RunOptions = {
   /* Verifies that the Playwright browsers launch before Hornhoof hands tasks or runs to this node. */
   checkBrowser?: () => Promise<string | null>;
   browserCheckMs?: number;
+  /* Why the node cannot write its work folder now, or null when it can; tests pass their own. */
+  checkWork?: () => Promise<string | null>;
   /* The memory a new program can get on the machine now, which one-shot calls start by; tests pass their own. */
   freeMemory?: () => number;
 };
@@ -205,7 +208,7 @@ function sealedFor(known: CodexSealed | null, version: number, recipients: Recip
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS, freeMemory }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS, checkWork = () => workFolderError(dir), freeMemory }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -363,13 +366,18 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let browserError = await checkBrowser().catch(err => message(err));
   writeBrowserError(dir, browserError);
   if (browserError) log(`Playwright browsers could not start: ${browserError}`);
+  /* Why the node cannot write its work folder, as it last told Hornhoof; null once it can. A write that fails at the start
+     tells nothing yet: the first turn that ends before its program started tells it, and Operations hear of it then. */
+  const workAtStart = await checkWork().catch(err => message(err));
+  if (workAtStart) log(`This machine cannot write its work folder: ${workAtStart}`);
+  let workError: string | null | undefined = workAtStart === null ? null : undefined;
   const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: { has: partId => outbox.doneParts().includes(partId) }, run: testOne, harness: syncOne, emit });
   const noRunsNow = () => checks.refused() ?? noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
-    emit({ type: 'status', ...testCapabilities, loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+    emit({ type: 'status', ...testCapabilities, loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, workError, noRuns: noRunsNow() });
   };
   checks.refusalChanged = () => {
     log(checks.refused() ?? 'Check group cleanup finished. The machine takes new checks again.');
@@ -379,6 +387,18 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
     tellStatus();
+  };
+  const lookAtWork = async () => {
+    const now = await checkWork().catch(err => message(err));
+    if (now === workError) return;
+    workError = now;
+    log(now ? `This machine cannot write its work folder, so it takes no turn: ${now}` : 'This machine writes its work folder again and takes turns.');
+  };
+  /* While it cannot, each load report looks again, and the first write that works lets turns come again. */
+  const recheckWork = async () => {
+    if (stopped || workError === null) return;
+    await lookAtWork();
+    if (workError === null) await status();
   };
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
@@ -414,7 +434,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, stream: outbox.stream, loggedIn, ...setup.field(), running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), phones: true, work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, workError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       /* The leases it held are claimed again once Hornhoof knows the parts it still runs. */
       checks.online(true);
       host?.operatorReplay();
@@ -624,6 +644,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
     outbox.hold(done);
     running.delete(m.jobId);
+    /* A turn that ended before its program started may have met a work folder the node cannot write: Hornhoof hears it with
+       the status below, before the end of the turn, and gives the node no turn until a write there works again. */
+    if (done.unstarted) await lookAtWork();
     /* A first setup the turn met, which only the plan's owner may pass, and the limits the turn brought go first, so
        Hornhoof knows of a plan that waits for its owner or is at its limit when it hears the job ended. */
     setup.met(done.failure);
@@ -650,7 +673,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         try {
           await install?.();
         } catch (err) {
-          return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
+          return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null, unstarted: true };
         }
         const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
         return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery, freshPrompt: m.freshPrompt });
@@ -678,7 +701,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const run = (granted: AbortSignal) => runJob(tracked, m, dir, { hidden, signal: granted, toolsUrl, onEvent, beforeRun: () => programs.ready(granted), untimed: Boolean(host && terminal && m.workspace?.key), log, ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
       return await run(signal);
     } catch (err) {
-      return { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
+      return { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed', unstarted: true };
     }
   }
 
@@ -726,6 +749,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const reporting = setInterval(() => {
     /* Calls that wait for memory look again as the node looks at its machine. */
     calls.look();
+    void recheckWork();
     void lookLive().then(() => send?.({ type: 'load', ...load(), ...liveNow() }));
   }, loadMs);
   reporting.unref();
