@@ -8,12 +8,12 @@ import { refusal } from '../../errors.js';
 import { acquirePhone, finishPhoneSession, phoneAction, reconcilePhone, sessionFor, sessionView, type PhoneAgent } from './queue.js';
 import { phoneView } from './store.js';
 
-type ToolAnswer = { value: unknown; png?: string | null };
+type ToolAnswer = { value: unknown; jpeg?: string | null };
 async function answer(work: () => Promise<ToolAnswer>) {
   try {
     const result = await work();
     const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: JSON.stringify(result.value) }];
-    if (result.png) content.push({ type: 'image', data: result.png, mimeType: 'image/png' });
+    if (result.jpeg) content.push({ type: 'image', data: result.jpeg, mimeType: 'image/jpeg' });
     return { content };
   }
   catch (error) {
@@ -43,12 +43,12 @@ export function registerPhoneTools(server: McpServer, ctx: Ctx, me: PhoneAgent):
     return { value: await sessionView(ctx, await sessionFor(ctx, me, input.session)) };
   }));
   server.registerTool('phone_action', {
-    description: 'Work on the real Android phone you hold as a person would, one screen and one app or site at a time, never bulk messages. capture gives the screen as PNG and its element tree; tap and swipe use screen coordinates; text types into the focused field, a login and password you hold too, printable ASCII only; app opens an installed app; url opens a page in Chrome. If a site\'s robot check stops you, do not bypass it: stop and write in the task what did not pass. A lost reply has an unknown outcome: capture before the next action.',
+    description: 'Work on the real Android phone you hold as a person would, one screen and one app or site at a time, never bulk messages. capture gives the screen as a picture and its element tree; tap and swipe use coordinates on that picture; key presses back or home; text types any text into the field you tapped, Russian and emoji too, a login and password you hold as well; app opens an installed app; url opens a page in Chrome. If a site\'s robot check stops you, do not bypass it: stop and write in the task what did not pass. A lost reply has an unknown outcome: capture before the next action.',
     inputSchema: { session: z.uuid(), operation: PhoneOperation },
   }, input => answer(async () => {
     const reply = await phoneAction(ctx, me, input.session, input.operation);
     if (!reply.capture) return { value: { status: reply.status, capture: null } };
-    const { png, ...capture } = reply.capture;
-    return { value: { status: reply.status, capture }, png };
+    const { jpeg, ...capture } = reply.capture;
+    return { value: { status: reply.status, capture }, jpeg };
   }));
 }
