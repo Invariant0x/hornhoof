@@ -11,7 +11,7 @@ const TITLE_MAX = 256;
 
 export type NewIssue = { repo: string; title: string; body: string };
 /* The issue's number and its page; or why it was not created. */
-export type OpenedIssue = { number: number; url: string } | { problem: string };
+type OpenedIssue = { number: number; url: string } | { problem: string };
 export type IssueCreator = (key: HostKey, issue: NewIssue) => Promise<OpenedIssue>;
 
 const Created = z.object({ number: z.number().int().positive(), html_url: z.string() });
@@ -61,7 +61,7 @@ export const openIssueOnGitHub =
   };
 
 /* The card an issue is made of. */
-export type IssueCard = {
+type IssueCard = {
   kind: 'bug' | 'improvement' | 'idea';
   title: string;
   text: string;

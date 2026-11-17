@@ -163,6 +163,7 @@ describe('Department view', () => {
       'GET /api/outbound?department=d2': [200, overview],
       'GET /api/outbound/catalog?department=d2': [200, { departmentId: 'd2', entries: [] }],
       'GET /api/outbound/setup-log?department=d2': [200, { departmentId: 'd2', entries: [] }],
+      'GET /api/outbound/contacts?department=d2': [200, { departmentId: 'd2', contacts: [] }],
     }, { ...DEV_ORG, people: [...DEV_ORG.people, max] }, listed('p7', 'Max'));
     await flyIn(user);
     await user.click(await screen.findByRole('button', { name: 'External messaging' }));

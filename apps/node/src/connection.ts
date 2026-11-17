@@ -30,7 +30,7 @@ export const DEFAULT_CLOCK_JUMP_MS = 15_000;
 
 const DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL', 'ENODATA', 'ESERVFAIL']);
 
-export type ConnectOptions = {
+type ConnectOptions = {
   url: string;
   key: string;
   log?(line: string): void;

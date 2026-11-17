@@ -3,9 +3,9 @@ import type { RepoAddress } from './refs.js';
 import { bodyWithin } from './bounded.js';
 
 /* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
-export type OmittedPatch = { path: string; additions: number; deletions: number };
+type OmittedPatch = { path: string; additions: number; deletions: number };
 /* A commit between the two, with the commits it was made on: a merge has two or more. */
-export type ComparedCommit = { sha: string; parents: string[] };
+type ComparedCommit = { sha: string; parents: string[] };
 export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[]; commits?: ComparedCommit[] } | { complete: false; reason: string };
 export type CompareReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<CompareResult>;
 const Sha = z.string().regex(/^[a-f0-9]{40}$/);
@@ -65,7 +65,7 @@ function parsedComparison(body: unknown): CompareResult {
 }
 
 /* GitHub's answers are read no further than this, as a repository's refs are: a larger one is too large to take. */
-export const GITHUB_MAX_BYTES = 32 * 1024 * 1024;
+const GITHUB_MAX_BYTES = 32 * 1024 * 1024;
 class TooLarge extends Error {}
 
 /* Why an answer could not be taken: too large, or not there at all. */
@@ -132,7 +132,7 @@ export const readMerged: MergeReader = async (repo, refs, timeoutMs = 10_000) =>
 };
 
 /* The files of a commit, every one: GitHub cuts a long list short and says so, and a cut list is no list. */
-export type TreeAt = { complete: true; paths: string[] } | { complete: false; reason: string };
+type TreeAt = { complete: true; paths: string[] } | { complete: false; reason: string };
 export type TreeReader = (repo: RepoAddress, commitSha: string, timeoutMs?: number) => Promise<TreeAt>;
 const Tree = z.object({ truncated: z.boolean(), tree: z.array(z.object({ path: z.string().min(1), type: z.string() })) });
 

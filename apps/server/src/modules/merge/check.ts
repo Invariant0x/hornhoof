@@ -124,7 +124,7 @@ export async function complete(db: Db, mergeId: string, source: MergeSource): Pr
 /* How the old database of a copy, or what a machine uploaded, is dealt with. fast: it never wrote and holds nothing the
    leader lacks, so it is merged by its ids alone. left_out: it holds nothing but what a database the CEO left out held.
    whole: it is compared row by row, as any database that came back. */
-export type FastWay = 'fast' | 'left_out' | 'whole';
+type FastWay = 'fast' | 'left_out' | 'whole';
 
 /* Decides that from a few columns alone, so it runs before the two shapes are compared and a copy of an older schema
    merges. A copy that never held a term wrote nothing of its own: every row it holds came from the leader, with its

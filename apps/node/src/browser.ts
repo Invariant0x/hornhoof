@@ -5,8 +5,8 @@ import { agentUser, ensurePasswd, FIRST_UID, isRootUser, type JobUser, type Syst
 import { runProgram, stripEscapes, withTrustedInstall } from './providers/process.js';
 import { currentCheckSignal } from './check-queue.js';
 
-export const SEED_BROWSERS_PATH = '/opt/ms-playwright';
-export const GLOBAL_PLAYWRIGHT_DIR = '/usr/local/lib/node_modules/playwright';
+const SEED_BROWSERS_PATH = '/opt/ms-playwright';
+const GLOBAL_PLAYWRIGHT_DIR = '/usr/local/lib/node_modules/playwright';
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const VERIFY_TIMEOUT_MS = 30_000;
@@ -52,10 +52,10 @@ const LAUNCH_CHECK_SCRIPT = [
   '});',
 ].join('\n');
 
-export type CommandResult = { code: number | null; output: string; timedOut: boolean };
+type CommandResult = { code: number | null; output: string; timedOut: boolean };
 export type CommandRunner = (bin: string, args: string[], env: NodeJS.ProcessEnv, user?: JobUser | null, cwd?: string) => Promise<CommandResult>;
 
-export type PrepareBrowserOptions = {
+type PrepareBrowserOptions = {
   dir: string;
   repoDir?: string;
   seedDir?: string;
@@ -65,21 +65,21 @@ export type PrepareBrowserOptions = {
   runCommand?: CommandRunner;
 };
 
-export type PrepareBrowserResult =
+type PrepareBrowserResult =
   | { status: 'not_needed' }
   | { status: 'ready'; version: string; playwrightDir: string; downloaded: boolean };
 
-export type VerifyBrowserResult =
+type VerifyBrowserResult =
   | { ok: true; browserVersion: string }
   | { ok: false; error: string };
 
-export type PrepareAndVerifyResult =
+type PrepareAndVerifyResult =
   | { ok: true; status: 'not_needed' }
   | { ok: true; status: 'ready'; version: string; browserVersion: string; downloaded: boolean }
   | { ok: false; error: string };
 
 export const browsersDir = (dir: string): string => join(dir, 'browsers');
-export const browserErrorFile = (dir: string): string => join(dir, 'browser-error');
+const browserErrorFile = (dir: string): string => join(dir, 'browser-error');
 
 export function browserEnv(dir: string): Record<string, string> {
   return { PLAYWRIGHT_BROWSERS_PATH: browsersDir(dir), PLAYWRIGHT_SKIP_BROWSER_GC: '1' };
@@ -145,7 +145,7 @@ export function playwrightVersionIn(repoDir: string): string | null {
   );
 }
 
-export function readPackageVersion(pkgDir: string): string | null {
+function readPackageVersion(pkgDir: string): string | null {
   return safeVersion(readJsonRecord(join(pkgDir, 'package.json'))?.version);
 }
 

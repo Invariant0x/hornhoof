@@ -15,7 +15,7 @@ export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, a
   if (!actor || (actor.kind !== 'orchestrator' && !(actor.kind === 'head' && actor.departmentId === task.departmentId))) throw refuse(403, 'task_not_yours', 'Only this department head or the orchestrator may revise the route.');
 }
 
-export function withCleanup(route: Route, enabled: boolean): Route['state'] {
+function withCleanup(route: Route, enabled: boolean): Route['state'] {
   if (route.state.resultKind === 'coordination') return route.state;
   const review = route.state.stages.findIndex(step => step.stage === 'review');
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
