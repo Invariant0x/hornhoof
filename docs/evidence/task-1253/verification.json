@@ -63,5 +63,11 @@
     "force": false,
     "observedRemoteTaskBranch": "a58f10b7fe6e345600a8694095b8ccd150d68eb0",
     "observedRemoteTurnBranch": "a58f10b7fe6e345600a8694095b8ccd150d68eb0"
+  },
+  "taskClosure": {
+    "status": "pending",
+    "reason": "report requires turn-31 contrary to the head-authorized turn-32 route",
+    "owner": "Head of development",
+    "next": "Switch task closure route to turn-32, then repeat report done; no further integration required."
   }
 }

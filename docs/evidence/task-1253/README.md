@@ -56,3 +56,5 @@ Final code a58f10b7fe6e345600a8694095b8ccd150d68eb0 passed the author checks (27
 Normal fast-forward from 4aef2458406a0706567a921b7083195686c70e65 to the exact final code succeeded on turn-32 with no force. integration.txt contains the command, result and remote readback. No main push or turn-31 integration was made. All required self-review and security checks are complete; no external checker was called.
 
 Status: DONE_WITH_CONCERNS. The delivered read API behaviour is proved and integrated. The earlier neighbouring timeout and its clean-base reproduction remain an existing reliability concern, with the exact cause of slow preparation not established. The task neither repairs that separate behaviour nor claims that a later passing result erased the failures. Whole release validation remains with the release owner.
+
+Task registration is pending: report done rejected the authorized turn-32 integration and demanded turn-31. See ../task-1253-closure-pending.md for the exact rejection and request sent to the head. The code delivery status above is separate from the unregistered task closure.
