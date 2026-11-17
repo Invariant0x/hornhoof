@@ -1008,12 +1008,11 @@ export const en = {
     browserFailed: 'Browser failed',
     browserFailedNote: (reason: string) => `The browser for checks did not start (${reason}). Run the install command on this machine again without --join, or check the node logs.`,
     /* A machine that waits for its work to end before an update restarts it. */
-    drainMark: { waiting: 'Waiting to update', postponed: 'Update postponed', restarting: 'Updating' },
-    drainWaiting: (turns: number, parts: number, until: string) => {
+    drainMark: { waiting: 'Waiting to update', restarting: 'Updating' },
+    drainWaiting: (turns: number, parts: number, since: string) => {
       const left = [turns > 0 || parts === 0 ? `${turns} ${plural('en', turns, { one: 'turn', other: 'turns' })}` : '', parts > 0 ? `${parts} ${plural('en', parts, { one: 'run part', other: 'run parts' })}` : ''].filter(Boolean).join(' and ');
-      return `Waiting for agents to finish before the update: ${left} left, until ${until}`;
+      return `Waiting since ${since} for agents to finish before the update: ${left} left. It takes no new work until then`;
     },
-    drainPostponed: (at: string) => `The update is postponed: agents did not finish in time. Next try at ${at}`,
     drainRestarting: 'Updating now: the machine restarts and takes work again by itself',
   },
   briefing: {
@@ -2414,6 +2413,10 @@ export const en = {
       suppressed: 'This person asked not to get messages. Their address cannot be added again.',
       added: (address: string) => `${address} can get messages of this channel now.`,
       known: (address: string) => `${address} was already on the list of this channel.`,
+      listTitle: 'Addresses on this channel',
+      none: 'No address was added to this channel yet.',
+      statuses: { granted: 'agreed', revoked: 'consent taken back', refused: 'asked not to be written to' },
+      revoke: 'Take back consent',
     },
     by: (person: string) => `by ${person}`,
     byVia: (person: string, agent: string) => `by ${agent} on the word of ${person}`,
@@ -2456,6 +2459,8 @@ export const en = {
       account_revoked: 'Account taken out of use',
       account_bound: 'Author of an account named',
       account_released: 'Account left to nobody',
+      contact_added: 'Address added',
+      consent_revoked: 'Consent of an address taken back',
     },
   },
   outbound: {

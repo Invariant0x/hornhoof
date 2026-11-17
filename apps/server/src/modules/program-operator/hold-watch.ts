@@ -6,7 +6,7 @@ import { operationsStaff } from './access.js';
 import { operatorNotification } from './notifications.js';
 import { operatorRecoveryHolds } from './recovery.js';
 
-export const HOLD_WATCH_MS = 5 * 60_000;
+const HOLD_WATCH_MS = 5 * 60_000;
 
 type Case = typeof programOperatorCases.$inferSelect;
 type Agent = typeof agents.$inferSelect;

@@ -23,7 +23,7 @@ import type { Actor } from './engine.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { onTask, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 
-export const EXTERNAL_WAIT_MS = 2 * 3_600_000;
+const EXTERNAL_WAIT_MS = 2 * 3_600_000;
 export const TaskReference = z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.');
 export const MESSAGE_TASK_HINT = ' With task, the message concerns that task and ends its external wait. Without task, it leaves waits unchanged.';
 export const WaitInput = z.object({
@@ -232,7 +232,7 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
 type AgentNow = Awaited<ReturnType<typeof agentState>>;
 
 /* The update its machine gets ready for, which a turn waits out. */
-const updating = (state: AgentNow): boolean => Boolean(state.machineDrain && state.machineDrain.state !== 'postponed');
+const updating = (state: AgentNow): boolean => Boolean(state.machineDrain);
 
 /* What its plan holds a turn back for, which the sender should not wait out: its limit, or the share set for tasks. */
 const planHold = (state: AgentNow, onTask: boolean): string | null => (state.limitUntil ? 'plan_at_limit' : state.budgetUntil && onTask ? 'plan_budget' : null);
@@ -343,7 +343,7 @@ export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Pr
 const ownsRunTask = (task: Task | undefined, agentId: string): task is Task => Boolean(task && OPEN.has(task.status) && task.assigneeAgentId === agentId);
 const runEndUpdate = (task: Task, bound: boolean) => ({ version: task.version + 1, updatedAt: new Date(), ...(bound ? { externalWait: null, silent: 0 } : {}) });
 
-export type RunEnding = { waited: boolean; goesOn: ExternalWait | null };
+type RunEnding = { waited: boolean; goesOn: ExternalWait | null };
 
 export async function endWaitForRun(tx: Tx, taskId: string, agentId: string, run: { id: string; label: string }): Promise<RunEnding> {
   const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for('update');

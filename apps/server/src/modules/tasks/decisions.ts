@@ -91,7 +91,7 @@ function counted(viewer: AgentViewer, owners: { ownerPersonId: string; agentId: 
 }
 
 /* Whether a person reads a request with the work around it: the task and the agent who asks, both seen. */
-export const knowsRequest = (viewer: AgentViewer, request: Pick<Request, 'agentId'>, task: TaskPlace): boolean => seesTask(viewer, task) && seesAgentId(viewer, request.agentId);
+const knowsRequest = (viewer: AgentViewer, request: Pick<Request, 'agentId'>, task: TaskPlace): boolean => seesTask(viewer, task) && seesAgentId(viewer, request.agentId);
 
 /* Whether a person opens what shows with a request: when they read it with its work, or while it is open and theirs to
    answer, and then this and nothing around it. */

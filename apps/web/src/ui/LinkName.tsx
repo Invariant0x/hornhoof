@@ -30,7 +30,7 @@ type Props = {
 const PAUSE_MS = 350;
 
 /* What is known about a name before anyone is asked: nothing, the link now, a name a link can have, or one it cannot. */
-export const nameStateOf = (name: string, current?: string): NameState =>
+const nameStateOf = (name: string, current?: string): NameState =>
   !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
 
 const answerState = (found: NameCheck): NameState => (found.free ? 'free' : (found.reason ?? 'taken'));

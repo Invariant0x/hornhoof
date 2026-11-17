@@ -18,7 +18,7 @@ export function runScope({ profile, manifest }: ScopeSource, suite: string | nul
   const ran = suite ? [suite] : manifest.profiles.find(item => item.id === profile)?.requiredSuiteIds ?? [];
   return { profile, leftOut: manifest.suites.map(item => item.id).filter(id => !ran.includes(id)), kept };
 }
-export const ranEverything = (scope: RunScope): boolean => !scope.leftOut.length && !scope.kept;
+const ranEverything = (scope: RunScope): boolean => !scope.leftOut.length && !scope.kept;
 
 const listed = (items: string[]): string => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items[0] ?? '');
 /* The same in words, after "with profile ...". */

@@ -18,7 +18,7 @@ export type TaskWait = typeof taskWaits.$inferSelect;
 
 export const waitForSourceKey = (operation: string) => `wait_for:${operation}`;
 export const operationSourceKey = (operation: string) => `operation:${operation}`;
-export const runSourceKey = (run: string) => `run:${run}`;
+const runSourceKey = (run: string) => `run:${run}`;
 export const afterSourceKey = (task: string) => `task:${task}`;
 export const requestSourceKey = (request: string) => `request:${request}`;
 export const reviewSourceKey = (task: string, stage: string, candidate: string, reviewer: string) => `review:${task}:${stage}:${candidate}:${reviewer}`;
@@ -364,7 +364,7 @@ export async function setWaitStage(tx: Tx, input: { taskId: string; kind: WaitSo
   return kept!;
 }
 
-export type FinalReviewStep = { wait: TaskWait; ordinal: number; skipped: number };
+type FinalReviewStep = { wait: TaskWait; ordinal: number; skipped: number };
 
 /* The final review due now, once: whoever holds this step writes its one notice in the same transaction. The sequence goes on
    from its anchor and no promise moves. A source that signals once stands at the top level after it, with none left. */
