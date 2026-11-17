@@ -51,6 +51,15 @@ describe('GET /api/stream', () => {
     expect(JSON.stringify((await db.select(only(agentEvents, 'data')).from(agentEvents)).map(r => r.data))).not.toContain('Ab3_x-9Zq');
   });
 
+  it('keeps a join code hidden when a password label comes before it, in English and in Russian', async () => {
+    const { app, db, orchestrator, companyId } = await company();
+    for (const text of ['password: --join Q7w_e-4Rt', 'пароль=--join Q7w_e-4Rt']) {
+      const event = await appendEvent(app.ctx, { companyId, agentId: orchestrator.id, kind: 'text', data: { text } });
+      expect(JSON.stringify(event.data), text).not.toContain('Q7w_e-4Rt');
+    }
+    expect(JSON.stringify((await db.select(only(agentEvents, 'data')).from(agentEvents)).map(r => r.data))).not.toContain('Q7w_e-4Rt');
+  });
+
   it("keeps an assistant's whole conversation out of a message with no envelope, in the window and in the stream", async () => {
     const { app, db, ceo, orchestrator, companyId } = await company();
     const stream = await openStream(app, ceo);

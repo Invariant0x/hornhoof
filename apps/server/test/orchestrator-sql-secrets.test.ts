@@ -44,3 +44,24 @@ it('keeps secrets closed through expressions and older grants while ordinary rea
     await expect(run(text), text).rejects.toThrow(/permission denied/);
   }
 });
+
+/* A hidden value's fingerprint is its sha256 with no salt; with its length, a weak password is found again by trying. The
+   orchestrator reads who hid what and when, never these two, nor the window's hash, a key by its name. */
+it('keeps the fingerprint and the length of a hidden value from the orchestrator', async () => {
+  const { role, run, client } = await access();
+  for (const text of [
+    'SELECT fingerprint FROM secret_redactions',
+    'SELECT characters FROM secret_redactions',
+    'SELECT window_hash FROM secret_redactions',
+    'SELECT r.* FROM secret_redactions r',
+    'SELECT to_jsonb(r) FROM secret_redactions r',
+    "SELECT id FROM secret_redactions WHERE fingerprint = 'x'",
+    'SELECT id FROM secret_redactions WHERE characters > 7',
+  ]) await expect(run(text), text).rejects.toThrow(/permission denied/);
+  expect((await run('SELECT id, company_id, person_id, created_at FROM secret_redactions'))[0]!.rows).toEqual([]);
+  const { rows } = await client.query<{ column_name: string }>(`
+    SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'secret_redactions'
+      AND has_column_privilege('${role}', 'secret_redactions', column_name, 'SELECT') ORDER BY column_name
+  `);
+  expect(rows.map(row => row.column_name)).toEqual(['company_id', 'created_at', 'id', 'person_id']);
+});

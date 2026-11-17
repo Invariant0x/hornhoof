@@ -149,11 +149,13 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
    column whose name ends in _enc or _hash. */
 export const KEY_NAMES = ['sealed', 'wrapped', 'salt', 'iv', 'grant', 'machine_key', 'capability', 'bytes'];
 /* These payloads hold signed download links; the delivery addresses may themselves carry a program's key. Their
-   ordinary column names do not make those bearer credentials safe to read. */
+   ordinary column names do not make those bearer credentials safe to read. A hidden value's fingerprint is its sha256
+   with no salt, and with its length a weak password is found again by trying, so both are keys too. */
 export const KEY_FIELDS: Record<string, string[]> = {
   assistant_events: ['data'],
   tool_calls: ['answer'],
   assistants: ['events_url', 'skills_url'],
+  secret_redactions: ['fingerprint', 'characters'],
 };
 const KEY_END = '(_enc|_hash)$';
 export const isKey = (column: string) => new RegExp(KEY_END).test(column) || KEY_NAMES.includes(column);
