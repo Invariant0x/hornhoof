@@ -173,6 +173,8 @@ export type ErrorReason =
   | 'attachment_unknown'
   | 'file_empty'
   | 'file_too_big'
+  | 'file_link_expired'
+  | 'file_lost'
   | 'relay_unreachable'
   | 'link_taken'
   | 'link_reserved'

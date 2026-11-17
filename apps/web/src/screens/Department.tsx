@@ -103,7 +103,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
             <AgentIcon />
             <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
           </span>
-          <span className="hn">{t.dept.noHead}</span>
+          <span className="hn" dir="auto">{t.dept.noHead}</span>
           <span className="meta">{stats}</span>
         </Edge>
       </div>
@@ -589,7 +589,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           ))}
 
         </div>
-        {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass">{t.dept.noMembers}</p>}
+        {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass" dir="auto">{t.dept.noMembers}</p>}
       </div>
 
       )}
