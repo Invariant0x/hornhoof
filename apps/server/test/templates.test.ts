@@ -352,11 +352,11 @@ describe('templates', () => {
 
   it('releases only an exact authorized candidate with real evidence and a tested rollback', () => {
     const release = body('dev-ci-release');
-    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
+    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /approve the exact 40-character commit where required/, /Move main to the exact checked commit/, /Prove rollback first/, /Build and publish artifacts from that commit/, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
     expect(release).toMatch(RELEASE_RULE);
-    expect(release).toMatch(/ask with commit before pushing[\s\S]*push only after the answer says no card is needed, or after the person's yes/i);
+    expect(release).toMatch(/ask with commit before pushing when the rule requires approval/i);
     expect(release).toMatch(/autonomous release[\s\S]*without sending a human (?:approval )?card/i);
-    expect(body('dev-task-flow')).toMatch(/autonomous release[\s\S]*auto-approval/i);
+    expect(body('dev-task-flow')).toMatch(/recorded auto-approval under the department's autonomous release/i);
     expect(release).not.toMatch(/live (?:node |program )?checks?|one idle node at a time|actual program's request receipt/i);
     expect(readFileSync(join(DIR, 'SOURCES.md'), 'utf8')).not.toMatch(/dryer and live checks/);
     expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
@@ -2144,7 +2144,7 @@ describe('work joins the turn at once and leaves no record-only commits', () => 
   });
 
   it("counts a turnkey holder's own checks as covering its work under autonomous release, in the lead and release skills", () => {
-    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/release_turn[^.]*autonomous release[^.]*turnkey work[^.]*its holder's own review, security check and tests/);
+    for (const id of ['dev-lead', 'dev-ci-release']) expect(skill(id), id).toMatch(/release_turn[\s\S]*autonomous release[^.]*turnkey work[^.]*its holder's own review, security check and tests/);
   });
 
   /* One rule on proof, beside the rule that everything made goes into the repository: an agent reads no exception into

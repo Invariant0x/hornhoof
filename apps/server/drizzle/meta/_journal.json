@@ -1009,6 +1009,13 @@
       "when": 1794951097149,
       "tag": "0145_person_deletion_decision",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1794953551858,
+      "tag": "0146_release_approval_optional",
+      "breakpoints": true
     }
   ]
 }

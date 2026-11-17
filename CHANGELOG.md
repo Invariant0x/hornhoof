@@ -17,9 +17,14 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The orchestrator can read and settle ordinary merge conflicts, and only a direct CEO choice can pick a permanent deletion.
 - A department head can enable a skill that grants only department tracker work.
 - The orchestrator receives machine setup commands and can read the same pending cards and machine requests as the owner.
+- Restoring a backup keeps permanently removed people and their assistants off the company lists and clears sign-in details that the backup still held.
 
 ### Changed
 
+- Work needs no approval when its department has set no rule, including commits, spending and new kinds of work.
+- Main acceptance and releases follow the department's commit rule and keep the checks on the exact commit.
+- Department heads can change autonomous release for the people they answer to, and the orchestrator can change it for the owner.
+- The approval and release guides explain when to ask and which checks prove the exact commit.
 - Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
 
 ## [0.32.1] - 2026-11-17

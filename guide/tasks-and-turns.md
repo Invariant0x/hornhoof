@@ -1,6 +1,6 @@
 # Tasks and turns
 
-> In short: you write to the orchestrator, and he lays the work out as tasks under goals, each with one person who answers for it. The Tasks tab shows that work as a list, a board and a graph. Each department releases its work in turns, and different departments run theirs side by side. Each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit, unless the people who run the department have turned on its autonomous release.
+> In short: you write to the orchestrator, and he lays the work out as tasks under goals, each with one person who answers for it. The Tasks tab shows that work as a list, a board and a graph. Each department releases its work in turns, and different departments run theirs side by side. Each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. The department's commit rule says when main or a release needs approval. The checks still apply to the exact commit.
 
 ![The task tracker: a list, a task's card and the board](../.github/assets/tasks.gif)
 
@@ -104,7 +104,7 @@ The orchestrator can close any task in any state, done or cancelled, with its re
 2. When it cannot go on, it marks the task blocked, which asks its head. The head answers with a comment, and that opens the task again once. If the task comes back blocked after that, the head writes the answer into the task, which opens it again.
 3. It hands the task in, with evidence.
 4. The current stage owner checks and repairs the same branch, records its findings and exact candidate, then passes the task forward.
-5. Tests verifies that final candidate. The authorized head accepts the exact checked result through the task's integration route. Main and release still require the authorized person's approval of the exact commit.
+5. Tests verifies that final candidate. The authorized head accepts the exact checked result through the task's integration route. For main acceptance and release, follow the department's commit rule. Any required approval names the exact commit.
 
 Review and Security keep their own repairs, and nothing goes back to an earlier stage. Work that solves the wrong problem is escalated to the head. A failed applicable check stays visible; an old receipt cannot certify a newer repair. When the candidate's own change passed and it only needs the main line taken in, it stays at Tests: Tests takes the main line in and checks again.
 
@@ -213,8 +213,10 @@ Anyone whose access lists a department can give it a task in the tracker. It goe
 
 ## Who approves what reaches the main branch?
 
-Nothing reaches the main branch until someone who sees the whole company, or the orchestrator, approves the exact commit. The department's people see it waiting.
+The department's commit rule says whether main acceptance or a release needs approval. With no rule set, neither needs an approval card. When approval is required, the person responsible for the department can approve the exact commit on the task, as can the orchestrator acting for the owner.
 
-The one exception is autonomous release. Each department has its own, with the switch among its approvals, and only a person who runs that department, or the CEO, turns it on or off, never an agent. While it is on, an exact commit for the main branch goes in without that approval when a whole test run of its release passed on it, on the main branch or a release branch, each change in it was checked, by another employee with a PASS or, in the release of a turn, by the turnkey team member who did that task whole and checked it, and there is a fast-forward path from the main branch. The "Autonomous release log" next to the switch lists each such commit.
+The head still accepts the exact checked candidate and Hornhoof verifies it is included in the observed main commit. To release a turn, record the release before main moves. A whole test run must have passed on the exact commit of the turn branch. Main must be able to fast-forward to it, and the version tag must name that same commit.
+
+The people who run the department can enable autonomous release, including through the department's head acting for its people or through the orchestrator. When enabled, it can satisfy a rule that requires approval. For main acceptance, it records proof before the push from a whole green run on main or a release branch, an independent PASS verdict on the exact commit and a verified fast-forward path. For a turn release it also checks that the release covers only work with evidence from another employee or, for turnkey work, from the employee who did and checked it. The **Autonomous release log** lists the proof it recorded.
 
 [Back to the guide](README.md)

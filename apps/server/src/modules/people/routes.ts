@@ -211,30 +211,48 @@ async function deletionTarget(tx: Db, me: Person, id: string) {
   return target;
 }
 
-/* First, put the target and its assistants out of reach in one commit with the CEO's decision. The retained rows
-   continue to name them in old work. An unfinished row remains available to this operation after a restart. */
+/* Put a person and their assistants out of reach in one commit. The retained rows continue to name them in old work. */
+async function outOfReach(tx: Db, ctx: Ctx, id: string, companyId: string, now: Date): Promise<string[]> {
+  const helpers = await tx.select(idOnly(people)).from(people)
+    .where(and(eq(people.assistantOf, id), eq(people.companyId, companyId), isNull(people.deletionCompletedAt)));
+  const ids = [...helpers.map(h => h.id), id];
+  const theirs = await tx.select(idOnly(machines)).from(machines).where(and(inArray(machines.personId, ids), isNull(machines.revokedAt)));
+  await refuseLeader(tx, ctx.config, theirs.map(m => m.id));
+  await tx.update(people).set({
+    removedAt: sql`coalesce(${people.removedAt}, ${now.toISOString()}::timestamptz)`,
+    status: 'disabled', isCeoDelegate: false, email: null, passwordHash: null, telegramUsername: null, telegramUserId: null,
+  }).where(inArray(people.id, ids));
+  await tx.update(invites).set({ usedAt: now }).where(and(inArray(invites.personId, ids), isNull(invites.usedAt)));
+  await tx.delete(sessions).where(inArray(sessions.personId, ids));
+  await tx.delete(personKeys).where(inArray(personKeys.personId, ids));
+  await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(inArray(assistants.personId, ids));
+  return ids;
+}
+
+/* First, put the target and its assistants out of reach in one commit with the CEO's decision. An unfinished row
+   remains available to this operation after a restart. */
 async function beginDeletion(ctx: Ctx, id: string, by: Person): Promise<string[]> {
   return ctx.db.transaction(async tx => {
     const target = await deletionTarget(tx, by, id);
     const recorded = target.deletionApprovedBy === by.id && target.deletionApprovedAt;
     if (!recorded && !humanCeo(by)) throw deletionNeedsCeo();
-    const helpers = await tx.select(idOnly(people)).from(people)
-      .where(and(eq(people.assistantOf, id), eq(people.companyId, by.companyId), isNull(people.deletionCompletedAt)));
-    const ids = [...helpers.map(h => h.id), id];
-    const theirs = await tx.select(idOnly(machines)).from(machines).where(and(inArray(machines.personId, ids), isNull(machines.revokedAt)));
-    await refuseLeader(tx, ctx.config, theirs.map(m => m.id));
     const now = new Date();
-    await tx.update(people).set({
-      removedAt: sql`coalesce(${people.removedAt}, ${now.toISOString()}::timestamptz)`,
-      status: 'disabled', isCeoDelegate: false, email: null, passwordHash: null, telegramUsername: null, telegramUserId: null,
-    }).where(inArray(people.id, ids));
+    const ids = await outOfReach(tx, ctx, id, by.companyId, now);
     if (!recorded) await tx.update(people).set({ deletionApprovedBy: by.id, deletionApprovedAt: now }).where(eq(people.id, id));
-    await tx.update(invites).set({ usedAt: now }).where(and(inArray(invites.personId, ids), isNull(invites.usedAt)));
-    await tx.delete(sessions).where(inArray(sessions.personId, ids));
-    await tx.delete(personKeys).where(inArray(personKeys.personId, ids));
-    await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(inArray(assistants.personId, ids));
     return ids;
   });
+}
+
+/* A restore carries over that a person left for good after its backup was made. The CEO's yes was taken when it
+   happened, so this asks for none: it repeats the deletion at the time it happened, and does nothing once it is done. */
+export async function carryRemoval(ctx: Ctx, personId: string, by: Person, removedAt: Date): Promise<void> {
+  const ids = await ctx.db.transaction(async tx => {
+    const [target] = await tx.select({ isOwner: people.isOwner, done: people.deletionCompletedAt }).from(people)
+      .where(and(eq(people.id, personId), eq(people.companyId, by.companyId))).for('update');
+    if (!target || target.isOwner || target.done) return [];
+    return outOfReach(tx, ctx, personId, by.companyId, removedAt);
+  });
+  for (const id of ids) await finishDeletion(ctx, id, by);
 }
 
 /* Every cleanup can be repeated until it finishes. Only then is the removal marked complete. */

@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agents, departments, tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
+import { agents, approvalPolicies, departments, tasks, testRuns, turnSnapshots, turns, waitNotices } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { loadTask } from '../src/modules/tasks/engine.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
@@ -15,7 +15,7 @@ const LATER = '4'.repeat(40);
 const OTHER = '3'.repeat(40);
 
 /* A turn whose start the server has seen, its release recorded before main moved, then main moved and tagged. */
-async function released(options: { record?: boolean; tag?: string; at?: string; autonomous?: boolean; turnkey?: boolean } = {}) {
+async function released(options: { approval?: boolean; record?: boolean; tag?: string; at?: string; autonomous?: boolean; turnkey?: boolean } = {}) {
   const f = await releasing();
   const errors: string[] = [];
   const round = () => minuteRound(f.ctx, new Date(), what => () => { errors.push(what); });
@@ -26,8 +26,10 @@ async function released(options: { record?: boolean; tag?: string; at?: string; 
   const commit = work?.head ?? f.R;
   const run = await f.fullRun({ commit });
   /* With autonomous release on, a release every commit of which was checked is approved by the log, by no person. */
-  if (options.autonomous) await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
-  else await f.approve(commit);
+  if (options.autonomous) {
+    await f.db.insert(approvalPolicies).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, channel: 'commit', mode: 'every' });
+    await f.db.update(departments).set({ autonomousRelease: true }).where(eq(departments.id, f.task.departmentId!));
+  } else if (options.approval !== false) await f.approve(commit);
   if (options.record !== false) expect((await f.recordRelease({ commit, runId: run.id })).isError).toBe(false);
   f.repo.heads.main = commit;
   f.repo.tags[options.tag ?? 'v1.7.0'] = options.at ?? commit;
@@ -43,6 +45,12 @@ async function released(options: { record?: boolean; tag?: string; at?: string; 
 }
 
 describe('the server closes a turn by the tag of its release', () => {
+  it('closes a recorded release without an approval card when the department has no commit rule', async () => {
+    const f = await released({ approval: false });
+    await f.round();
+    expect(await f.departmentTurns()).toContainEqual(expect.objectContaining({ id: f.turn.id, status: 'closed', commit: f.R }));
+  });
+
   it('takes the newest tag as where a turn starts on its first look, and closes nothing', async () => {
     const f = await releasing();
     f.repo.tags['v1.5.0'] = '2'.repeat(40);

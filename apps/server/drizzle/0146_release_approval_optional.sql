@@ -1,0 +1,2 @@
+ALTER TABLE "turn_releases" DROP CONSTRAINT "turn_releases_approved_once";--> statement-breakpoint
+ALTER TABLE "turn_releases" ADD CONSTRAINT "turn_releases_approved_once" CHECK ("turn_releases"."approval_request_id" IS NULL OR "turn_releases"."autonomous_release_id" IS NULL);

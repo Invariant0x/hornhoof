@@ -111,7 +111,7 @@ const POINTS: Record<string, RegExp[]> = {
     /Self-review does not replace this gate/i,
     /one pinned commit[\s\S]*full candidate validation is assigned/i,
     /collected graph[\s\S]*not execution evidence/i,
-    /neither creates a tester handoff nor waives a human release approval/i,
+    /neither creates a tester handoff nor changes the department's release approval policy/i,
   ],
 };
 
