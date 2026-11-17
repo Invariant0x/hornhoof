@@ -10,6 +10,11 @@ import { acceptDescription, newEnvironmentRequest, noteTestCapabilities, reposit
 import { keptEverything, keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
 import { partDone, pumpTests, runState } from '../src/modules/testruns/runs.js';
 import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
+import { prepareSharedDatabase } from './helpers-db.js';
+import { prepareTemplates } from './templates-once.js';
+
+await prepareSharedDatabase();
+prepareTemplates();
 
 const NODE_KEY = 'file-results-node-0123456789abcdef';
 const runtimes = [{ id: 'node', version: '22.23.4', fingerprint: 'b'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'd'.repeat(64) }];
