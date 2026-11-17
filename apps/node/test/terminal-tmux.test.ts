@@ -44,6 +44,27 @@ afterEach(() => {
 });
 
 describe('starting a program in tmux', () => {
+  it('reads a published ordinary cursor and refuses a private recording cursor', async () => {
+    const { tmux, home } = recorded();
+    const recording = tmux['recordings'].create('a-cursor', home);
+    writeFileSync(recording.file, 'hello');
+    const position = Buffer.alloc(24);
+    [2, 5, 5].forEach((value, index) => position.writeDoubleBE(value, index * 8));
+    writeFileSync(recording.position, position);
+    expect(await tmux.programCursor('a-cursor')).toEqual({ file: recording.file, offset: 5 });
+    await tmux.protectOutput('a-cursor');
+    expect(await tmux.programCursor('a-cursor')).toBeNull();
+  });
+
+  it('bounds an unpublished cursor by its controlled clock', async () => {
+    vi.useFakeTimers();
+    const { tmux, home } = recorded();
+    tmux['recordings'].create('a-cursor', home);
+    const cursor = tmux.programCursor('a-cursor');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await cursor).toBeNull();
+  });
+
   it.each([true, false])('cleans a failed recorder stop and refuses a secret only while its session still exists: %s', async exists => {
     const { tmux, home } = recorded(args => {
       if (args[0] === 'pipe-pane') return new Error('pipe control failed');
