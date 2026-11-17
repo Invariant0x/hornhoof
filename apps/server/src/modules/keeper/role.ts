@@ -24,7 +24,7 @@ function phaseOf(dir: string, file: string): unknown {
   }
 }
 
-export type KeeperRole = 'worker' | 'follow' | 'lead' | 'taking' | 'handing';
+type KeeperRole = 'worker' | 'follow' | 'lead' | 'taking' | 'handing';
 
 /* Which keeper a machine runs, chosen when the keeper starts. A machine that joined and keeps none of the company's
    data runs a worker's. One that took the go of a planned switch is taking the server over, and one that wrote down

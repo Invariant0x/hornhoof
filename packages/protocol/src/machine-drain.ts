@@ -2,9 +2,10 @@ import { z } from 'zod';
 
 const remaining = { turnsLeft: z.number().int().nonnegative(), partsLeft: z.number().int().nonnegative() };
 
+/* waiting: the node takes no new turn and waits, however long, for the work that runs on it, since it was first asked.
+   restarting: its work ended and the updater replaces it, since then. */
 export const MachineDrain = z.discriminatedUnion('state', [
-  z.object({ state: z.literal('waiting'), ...remaining, until: z.iso.datetime() }),
-  z.object({ state: z.literal('postponed'), ...remaining, retryAt: z.iso.datetime() }),
+  z.object({ state: z.literal('waiting'), ...remaining, since: z.iso.datetime() }),
   z.object({ state: z.literal('restarting'), since: z.iso.datetime() }),
 ]);
 export type MachineDrain = z.infer<typeof MachineDrain>;

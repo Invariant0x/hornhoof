@@ -19,7 +19,7 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 /* The tunnel's settings in the control folder: the updater keeps a copy with each backup, and the installer reads the
    link's address from it. frpc itself goes by what the keeper reads from the database. */
-export const TUNNEL_FILE = 'tunnel.json';
+const TUNNEL_FILE = 'tunnel.json';
 
 /* The company's link as people have it. A hidden name, which Hornhoof took by itself so the company's machines can
    keep copies, is no link to anyone: no page is served under it, and Settings offers to turn a link on. */

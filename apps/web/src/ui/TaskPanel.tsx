@@ -17,6 +17,7 @@ import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
+import { PhoneRecordings } from './PhoneRecordings';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -380,6 +381,7 @@ function TaskBody({ task, onOpen, onChanged, waiting, leads }: { task: TaskDetai
       )}
       <TaskRelatedSection heading={t.tasks.subtasks} items={task.subtasks} onOpen={onOpen} />
       <Materials task={task} />
+      <PhoneRecordings key={task.id} taskId={task.id} />
       <TaskQuestionsSection requests={task.requests} />
       <section>
         <h4>{t.tasks.log}</h4>

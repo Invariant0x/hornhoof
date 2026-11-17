@@ -25,7 +25,7 @@ function taskDepartments(routes: Record<string, Route>): Route {
 export const TEST_KEY = { publicKey: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE'.padEnd(122, 'k'), wrapped: 'd3JhcHBlZA', salt: 'c2FsdA', iv: 'aXY', iterations: 600_000 };
 /* A join command as the screens show it: with the viewer's key on it. */
 export const withKey = (command: string): string => `${command} --owner-key ${TEST_KEY.publicKey}`;
-const KEY_ROUTES: Record<string, Route> = { 'GET /api/me/key': [200, { key: TEST_KEY }], 'PUT /api/me/key': [204] };
+const KEY_ROUTES: Record<string, Route> = { 'GET /api/me/key': [200, { key: TEST_KEY }], 'PUT /api/me/key': [204], 'GET /api/phones': [200, { phones: [] }] };
 
 export function mockApi(routes: Record<string, Route>): Call[] {
   const calls: Call[] = [];
@@ -33,7 +33,7 @@ export function mockApi(routes: Record<string, Route>): Call[] {
     const method = init.method ?? 'GET';
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     calls.push({ method, path, body });
-    const route = routes[`${method} ${path}`] ?? KEY_ROUTES[`${method} ${path}`] ?? (path === '/api/task-departments' ? taskDepartments(routes) : undefined);
+    const route = routes[`${method} ${path}`] ?? KEY_ROUTES[`${method} ${path}`] ?? (path === '/api/task-departments' ? taskDepartments(routes) : method === 'GET' && /^\/api\/tasks\/[^/]+\/phone-recordings$/.test(path) ? [200, { recordings: [] }] as Reply : undefined);
     const [status, data] = typeof route === 'function' ? await route(body) : route ?? [404, { error: { code: 'not_found', message: 'Not found.' } }];
     return new Response(data === undefined ? null : JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
   }));

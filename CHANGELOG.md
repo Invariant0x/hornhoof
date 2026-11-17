@@ -19,6 +19,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Feedback, Machines and the line about where Hornhoof runs no longer break when a page reloads during a read.
 - The glow and focus ring of a card follow its cut corner, with no dark triangle there.
 - The map's zoom label, such as 115%, is no longer cut off.
+- A node that waits for an update takes no new turns, so it updates as soon as the turns it runs end.
 
 ### Added
 
@@ -30,6 +31,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A personal assistant sends agents files of any type with `POST /api/assistant/files` and a message's `files`.
 - A `reply` to an assistant carries the files the agent attached, and the assistant downloads any file its owner sees.
 - Settings, Passwords keeps the company's site sign-ins; agents take the login, password and current one-time code with `vault_entry` and save one with `vault_save`.
+- A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 - Goals split into department goals and smaller goals, each with a why, a person who answers for it, a date and a target; progress comes from the target or from the tasks done under it.
 - Every task has one person who answers for it, a short why and a due date; when that person leaves, their open tasks and goals pass to the one who decides for the department.
 - Every status change of a task is kept, and its card shows how long it stands, how long it was worked on and whom it waits for.
@@ -60,8 +62,10 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - The assistant API is contract 3: `byOwnAgent` in `reply` and `reply_end` says whether its own agent sent the message.
 - A refusal tells an assistant's owner why in plain words, in Russian or English as `Accept-Language` asks.
 - Agents answer an assistant as one person to another, and its own agent says plainly when a file did not arrive.
+- A node's wait for an update never gives up, and leaders no longer enter a waiting node after three minutes.
+- `NODE_DRAIN_MS` and `NODE_UPDATE_RETRY_MS` are gone.
 - The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
-- Migration 0134 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
+- Migration 0137 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
 
 ## [0.29.3] - 2026-11-16
 

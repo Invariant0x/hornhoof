@@ -2,6 +2,21 @@ import { summary, type Messages } from './en';
 import { plural } from './plural';
 
 export const ru: Messages = {
+  phones: {
+    heading: 'Телефоны компании', intro: 'Ассистенты компании могут работать на вашем Android-телефоне по очереди. Кнопка «Стоп» возвращает телефон вам.',
+    add: 'Добавить телефон', find: 'Найти телефон', cancel: 'Отмена', name: 'Название телефона', computer: 'Машина', chooseComputer: 'Выберите машину', address: 'Адрес телефона',
+    networkHint: 'Телефон и машина должны быть в одной сети. Скопируйте адрес из раздела «Беспроводная отладка». При первом подключении также введите адрес и код из пункта подключения по коду.',
+    pairingAddress: 'Адрес для подключения по коду, если нужен', pairingCode: 'Код подключения, если нужен', pairingHint: 'Код используется один раз и не сохраняется.',
+    nameProblem: 'Дайте телефону название.', computerProblem: 'Выберите машину в сети.', addressProblem: 'Введите адрес и порт, показанные на телефоне.', codeProblem: 'Введите шесть цифр и адрес подключения, показанные на телефоне.',
+    loading: 'Загружаем телефоны…', working: 'Подключаем…', saving: 'Добавляем телефон…', retry: 'Попробовать снова', empty: 'Телефонов пока нет.', emptyHint: 'Добавьте телефон через машину, подключенную к компании.', noComputers: 'Сначала подключите машину к компании.', noDevices: 'Телефон с разрешенным доступом не найден. Разблокируйте телефон, проверьте подключение и подтвердите эту машину, затем попробуйте снова.',
+    device: (model: string | null, serial: string) => `${model ?? 'Android'} (${serial})`, owner: (name: string) => `Владелец: ${name}`, waiting: (n: number) => `В очереди: ${n}`,
+    devices: { device: 'Готов', unauthorized: 'Подтвердите на телефоне', offline: 'Не подключен', unverified: 'Не удалось проверить телефон' },
+    states: { available: 'Доступен ассистентам', busy: 'Работает ассистент', owner: 'В ваших руках', offline: 'Машина не в сети' },
+    control: 'Экран и управление', watch: 'Смотреть экран', hide: 'Скрыть экран', stop: 'Стоп', resume: 'Передать ассистентам', stopping: 'Стоп запрошен. Ждем подтверждения машины.',
+    live: 'Живой экран', waitingFrame: 'Ждем экран. Запись начнется с сеансом ассистента.', paused: 'Экран на паузе. Телефон в ваших руках.', noPicture: 'Этот экран не удалось прочитать.', updated: (at: string) => `Экран от ${at}`, screenFor: (name: string) => `Экран телефона ${name}`, screenError: 'Экран не загрузился. Попробуйте снова.',
+    recordings: 'Записи с телефона', noRecordings: 'На этой задаче еще не было сеансов с телефоном.', play: 'Смотреть', pause: 'Пауза', previous: 'Предыдущий кадр', next: 'Следующий кадр', replay: 'Открыть запись', closeReplay: 'Закрыть запись', frameOf: (n: number, total: number) => `Кадр ${n} из ${total}`,
+    recordingStates: { queued: 'В очереди', starting: 'Запускается', active: 'Идет запись', revoking: 'Останавливается', ended: 'Завершен', cancelled: 'Отменен' },
+  },
   routes: {
     unavailable: 'Не найдено или нет доступа',
     accessDenied: 'Недостаточно прав',
@@ -1003,14 +1018,13 @@ export const ru: Messages = {
     olderBuild: 'старая',
     browserFailed: 'Браузер не запустился',
     browserFailedNote: reason => `Браузер для проверок не запустился (${reason}). Выполните на этой машине команду установки еще раз без --join или посмотрите журнал ноды.`,
-    drainMark: { waiting: 'Ждет обновления', postponed: 'Обновление отложено', restarting: 'Обновляется' },
-    drainWaiting: (turns, parts, until) => {
+    drainMark: { waiting: 'Ждет обновления', restarting: 'Обновляется' },
+    drainWaiting: (turns, parts, since) => {
       const withTurns = turns > 0 || parts === 0;
       const verb = withTurns ? plural('ru', turns, { one: 'остался', other: 'осталось' }) : plural('ru', parts, { one: 'осталась', other: 'осталось' });
       const left = [withTurns ? `${turns} ${plural('ru', turns, { one: 'ход', few: 'хода', many: 'ходов', other: 'хода' })}` : '', parts > 0 ? `${parts} ${plural('ru', parts, { one: 'часть прогона', few: 'части прогона', many: 'частей прогона', other: 'части прогона' })}` : ''].filter(Boolean).join(' и ');
-      return `Ждет конца работы агентов перед обновлением: ${verb} ${left}, до ${until}`;
+      return `С ${since} ждет конца работы агентов перед обновлением: ${verb} ${left}. До тех пор новой работы не берет`;
     },
-    drainPostponed: at => `Обновление отложено: агенты не успели закончить работу. Следующая попытка в ${at}`,
     drainRestarting: 'Идет обновление: машина перезапустится и сама снова возьмет работу',
   },
   briefing: {
@@ -2245,6 +2259,12 @@ export const ru: Messages = {
     nodeWaitsFor: work => `Ждет: ${work}`,
   },
   errors: {
+    phone_invalid: 'Проверьте название телефона, машину и адрес.',
+    phone_unknown: 'Этот телефон или запись недоступны.',
+    phone_not_allowed: 'У вас нет доступа к этому телефону или записи.',
+    phone_unavailable: 'Телефон не отвечает. Проверьте подключение и разрешение на его экране.',
+    phone_busy: 'Этот телефон уже добавлен и занят. Завершите сеанс, прежде чем менять подключение.',
+    phone_session_gone: 'Сеанс завершен или владелец забрал телефон.',
     maintenance: 'Hornhoof ставит обновление и не принимает изменений, пока оно не закончится. Попробуйте через несколько минут.',
     read_only: 'Сейчас Hornhoof на этой машине только читает, поэтому ничего не изменилось.',
     not_confirmed: 'Hornhoof не смог подтвердить это изменение. Возможно, оно сохранено: проверьте, прежде чем повторять.',
@@ -2565,6 +2585,10 @@ export const ru: Messages = {
       suppressed: 'Этот человек попросил больше не писать ему. Его адрес нельзя добавить снова.',
       added: (address: string) => `${address} теперь может получать сообщения этого канала.`,
       known: (address: string) => `${address} уже есть в списке этого канала.`,
+      listTitle: 'Адреса этого канала',
+      none: 'В этот канал еще не добавляли адресов.',
+      statuses: { granted: 'согласие есть', revoked: 'согласие отозвано', refused: 'просили не писать' },
+      revoke: 'Отозвать согласие',
     },
     by: (person: string) => `решение: ${person}`,
     byVia: (person: string, agent: string) => `решение: ${person}, выполнил агент ${agent}`,
@@ -2607,6 +2631,8 @@ export const ru: Messages = {
       account_revoked: 'Ящик выведен из работы',
       account_bound: 'Назначен автор ящика',
       account_released: 'У ящика больше нет автора',
+      contact_added: 'Адрес добавлен',
+      consent_revoked: 'Согласие адреса отозвано',
     },
   },
   outbound: {

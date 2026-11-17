@@ -16,9 +16,9 @@ import { afterLeave, cutReplication, leaveData, type Leaving } from './scope.js'
 import { ALWAYS_SHARE, NEWCOMER_MS, placePins, scoreOf, settle, whyOf, type Measured, type Scored, type WhyContext } from './score.js';
 
 /* The machines after the leader that hold a copy: numbers 2 and 3. */
-export const COPIES = 2;
-export const RANK_EVERY_MS = 60_000;
-export const RESCORE_EVERY_MS = 86_400_000;
+const COPIES = 2;
+const RANK_EVERY_MS = 60_000;
+const RESCORE_EVERY_MS = 86_400_000;
 
 /* A machine's place. number: none for a machine that may not take the server. why: a key the card turns into words.
    clearPin: a pin ends when its machine becomes number 1. leave: it holds the data and its person no longer sees the
@@ -77,7 +77,7 @@ export function rankOf(all: Candidate[], o: { leader: string; link: boolean; now
   });
 }
 
-export const HANDOVER_EVERY_MS = 86_400_000;
+const HANDOVER_EVERY_MS = 86_400_000;
 
 /* grant: the machines that get the company's data now. retire: the copy that gives it up now, one a run. handover: a
    grant took no free seat, so a copy is being handed from one machine to another. */

@@ -7,7 +7,7 @@ import type { ColorRole, SkinColors } from './roles';
 const HEX = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i;
 const RGBA = /^rgba\((\d{1,3}), ?(\d{1,3}), ?(\d{1,3}), ?(0|1|0?\.\d{1,4}|1\.0{1,4})\)$/;
 
-export type Rgba = { r: number; g: number; b: number; a: number };
+type Rgba = { r: number; g: number; b: number; a: number };
 
 export function readColor(value: string): Rgba | null {
   const hex = HEX.exec(value);
@@ -33,7 +33,7 @@ const SURFACES = ['bg', 'surface', 'surface2'] as const satisfies readonly Color
 /* Roles a screen writes text in. Accent, warning and attention are fills and lines, their *_ink twins are the text. */
 const TEXT = ['ink', 'muted', 'accent_ink', 'warning_ink', 'attention_ink', 'success', 'danger', 'provider_claude', 'provider_kimi', 'provider_glm', 'provider_antigravity'] as const satisfies readonly ColorRole[];
 
-export type ContrastPair = { text: ColorRole; on: ColorRole; least: number; kind: 'text' | 'line' };
+type ContrastPair = { text: ColorRole; on: ColorRole; least: number; kind: 'text' | 'line' };
 
 /* Every pair a skin must hold. The accent ink is also the focus ring, held here at the higher bar of text. */
 export const CONTRAST_PAIRS: readonly ContrastPair[] = [
@@ -46,7 +46,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
 
 /* Glass is see-through: muted text on it stands on the glass over whatever the page shows under it, held here over a white
    page and over a black one. */
-export const GLASS_PAIR: ContrastPair = { text: 'muted', on: 'hud', least: 4.5, kind: 'text' };
+const GLASS_PAIR: ContrastPair = { text: 'muted', on: 'hud', least: 4.5, kind: 'text' };
 const UNDER_GLASS: readonly Rgba[] = [{ r: 255, g: 255, b: 255, a: 1 }, { r: 0, g: 0, b: 0, a: 1 }];
 
 /* A see-through colour as it shows over an opaque one. */
