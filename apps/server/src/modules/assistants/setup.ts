@@ -136,7 +136,7 @@ export async function removeAssistantAgent(ctx: Ctx, assistantId: string, by: Pe
   const id = row.agentId;
   await db.transaction(async tx => {
     const [agent] = await tx.update(agents).set({ removedAt: new Date() }).where(and(eq(agents.id, id), isNull(agents.removedAt))).returning(only(agents, 'companyId'));
-    if (agent) await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...changedBy(by), field: 'removed', before: null, after: null });
+    if (agent) await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...employeeChangedBy(by), field: 'removed', before: null, after: null });
   });
   await stopJobs(ctx, eq(jobs.agentId, id));
 }
