@@ -18,6 +18,21 @@ it('lets any person register their network phone on a company machine, with an o
   expect(await c.db.select().from(companyPhones)).toHaveLength(1);
 });
 
+it('lets a person register a phone plugged by cable into the machine by its serial number', async () => {
+  const c = await phoneCompany();
+  const made = await c.app.inject({ method: 'POST', url: '/api/phones', ...as(c.claraSession), payload: { machineId: c.machine.id, endpoint: 'ZF525LRDQS', name: 'Clara phone on a cable' } });
+  expect(made.statusCode).toBe(201);
+  expect(made.json()).toMatchObject({ endpoint: 'ZF525LRDQS' });
+  expect(c.calls.find(m => m.type === 'phone.probe')).toMatchObject({ endpoint: 'ZF525LRDQS' });
+});
+
+it('never sends the node to an address on its own machine, where its agents\' tools listen', async () => {
+  const c = await phoneCompany();
+  const local = await c.app.inject({ method: 'POST', url: '/api/phones/probe', ...as(c.claraSession), payload: { machineId: c.machine.id, endpoint: '127.0.0.1:43117' } });
+  expect(local.statusCode).toBe(400);
+  expect(c.calls).toEqual([]);
+});
+
 it("lets the orchestrator, acting for the owner, look for a phone and stop and resume any person's phone", async () => {
   const c = await phoneCompany();
   const phone = (await c.addPhone()).json();
