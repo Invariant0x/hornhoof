@@ -3,14 +3,14 @@ import type { Ctx } from '../../app.js';
 import { availableMemory, resources } from '../testruns/capacity.js';
 import { keyOf, type NodeHub, type NodeIdentity } from './hub.js';
 
-/* An agent program with the tools it runs takes up to about a gigabyte, its helpers inside it, and a Vitest worker of its
-   tests about as much. */
-const PROGRAM_BYTES = 2 ** 30;
+/* An agent program takes up to about half a gigabyte, 340 to 450 MB as measured on 16 November: its type checks and tests
+   wait for the machine's check slot and run one after another, each with a Vitest worker of about a gigabyte. */
+const PROGRAM_BYTES = 2 ** 29;
 const WORKER_BYTES = 2 ** 30;
-/* What a machine must have free for a new program to start there: the program's own gigabyte and one Vitest worker's, the
-   fewest its tests run with. Below that the new program's first test run takes the memory the programs already there work
-   in, and the system kills one of them, as it did on a machine of 12.5 GB with four programs and six of their helpers
-   testing. A program that runs there is never stopped for this. */
+/* What a machine must have free for a new program to start there: the program's own half gigabyte and one Vitest worker's,
+   the fewest a check runs with. Below that the check that runs next takes the memory the programs already there work in,
+   and the system kills one of them, as it did on a machine of 12.5 GB with four programs and six of their helpers testing.
+   A program that runs there is never stopped for this. */
 export const START_FREE_BYTES = PROGRAM_BYTES + WORKER_BYTES;
 /* How long a program sent to start counts against its machine's memory while its node does not name it yet: one that does
    not show its prompt within two minutes fails its turn. */

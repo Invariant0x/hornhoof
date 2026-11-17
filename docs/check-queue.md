@@ -18,6 +18,8 @@ hh-check -- npm run build -w apps/node
 
 The wrapper preserves stdout, stderr and the command's exit status. While waiting it prints `Waiting for a machine check slot. Position 2.` Positions start at one for the next waiting command. A nested wrapper reuses its parent's live slot only for the same agent.
 
+An agent's own type checks, tests, lint and browser tests wait for a slot with nothing for the agent to add. The node puts a `node` of its own in front of the real one on the agent's `PATH`, which `npx`, npm scripts and a tool started by its name reach too. When an agent starts TypeScript (`tsc`), Vitest, ESLint, Jest or Playwright, that `node` runs `hh-check --wait -- node ...`: the command waits for a slot like for a lock, then runs right in the agent's shell, with its own terminal, folder and environment, and holds the slot until it ends. What runs inside it holds the same slot. Nothing is refused this way. With no slot to be had, as with no turn or with the node away from Hornhoof, the command runs at once, as it would with no queue.
+
 The bridge authenticates the calling process and requires a current agent turn. Commands it starts become live process roots for that agent, so nested wrappers and bridge calls retain the same ownership checks. It starts commands as the agent user, never as root, with the caller's environment. Working-directory changes happen after dropping privileges. Cancellation stops the process group, waits up to five seconds before KILL, and holds the slot until process cleanup finishes.
 
 ## Node API
@@ -41,7 +43,7 @@ Load reports older than 90 seconds are not refreshed by a slot request. Nodes lo
 
 Queue waiting defers stalled-program alarms in the task watchdog and first-activity alarms in the program operator. Their normal quiet interval starts again after waiting ends. Missing-node alarms remain active. The operator cannot send keys to an agent while it waits for a check slot.
 
-The capacity calibration is conservative and based on the supplied workload. It does not impose a per-process CPU affinity or replace each command's cancellation and execution limit. Commands started outside the wrapper or the node API do not participate in admission.
+The capacity calibration is conservative and based on the supplied workload. It does not impose a per-process CPU affinity or replace each command's cancellation and execution limit. Commands started outside the wrapper, the agent's `node` or the node API do not participate in admission.
 
 ## Validation
 

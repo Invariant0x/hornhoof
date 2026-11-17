@@ -2,13 +2,13 @@ import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import ts from 'typescript';
 import { CheckClient } from '../src/check-client.js';
 import { currentCheckLease, setCheckClient, withCheckSlot } from '../src/check-queue.js';
-import { configureCheckCommands } from '../src/check-command-runner.js';
+import { configureCheckCommands, installCheckCommand } from '../src/check-command-runner.js';
 import { classifyAgentCommand } from '../src/command-guard.js';
 import { createAgentCommandGuard } from '../src/check-runtime.js';
-import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import type { JobUser } from '../src/isolation.js';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Bridge, type OpensCheck } from '../src/terminal/bridge.js';
 import { procOwner } from '../src/terminal/peer.js';
 import { spawn } from 'node:child_process';
@@ -351,5 +351,72 @@ describe('command policy boundary', () => {
     release(); await finished;
     await request;
     expect({ started: existsSync(c.sentinel), acquired: c.acquired() }).toEqual({ started: false, acquired: 0 });
+  });
+});
+
+/* A heavy check an agent starts in its own shell waits for a machine check slot like for a lock, and runs right there. */
+describe('a heavy check in the agent\'s own shell', () => {
+  const output = (child: ReturnType<typeof spawn>) => new Promise<string>(resolve => {
+    let stdout = ''; child.stdout!.on('data', chunk => { stdout += String(chunk); });
+    child.once('close', code => resolve(`${code}:${stdout}`));
+  });
+  function machine(grantAtOnce: boolean, online = true) {
+    const key = '10000000-0000-4000-8000-000000000011', frames: string[] = [];
+    let grant = () => {};
+    const client = new CheckClient(frame => {
+      frames.push(frame.type);
+      if (frame.type === 'check.acquire') grant = () => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 });
+      if (grantAtOnce && frame.type === 'check.acquire') queueMicrotask(grant);
+      return true;
+    });
+    client.online(online); setCheckClient(client);
+    const bridge = new Bridge('http://127.0.0.1:1', () => {});
+    onTestFinished(() => { bridge.stop(); client.stop(); setCheckClient(null); });
+    const dir = mkdtempSync(join(tmpdir(), 'hh-check-wait-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    return { key, frames, bridge, dir, grant: () => grant(), start: async () => { await bridge.start(); bridge.setToken(key, 'turn'); return bridge.agent(key).hookUrl; } };
+  }
+
+  it('runs the command in its own shell once a slot is given, and holds the slot until the command ends', async () => {
+    const m = machine(false), hook = await m.start();
+    const said = 'process.stdout.write([process.ppid, process.cwd(), process.env.HH_CHECK_SLOT ? "slot" : "none"].join(" ")); process.exit(7)';
+    const child = spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { cwd: m.dir, env: { PATH: process.env.PATH, HH_BRIDGE: hook }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const done = output(child);
+    await eventually(() => m.frames.includes('check.acquire'));
+    expect(m.frames).toEqual(['check.acquire']);
+    m.grant();
+    expect(await done).toBe(`7:${child.pid} ${realpathSync(m.dir)} slot`);
+    await eventually(() => m.frames.includes('check.release'));
+    expect(m.frames).toEqual(['check.acquire', 'check.release']);
+  });
+
+  it('runs the command at once when the machine has no slot to give or it is not an agent\'s', async () => {
+    const m = machine(false, false), hook = await m.start();
+    const said = 'process.stdout.write(process.env.HH_CHECK_SLOT ?? "none"); process.exit(3)';
+    const run = (env: NodeJS.ProcessEnv) => output(spawn(process.execPath, [cli, '--wait', '--', process.execPath, '-e', said], { env, stdio: ['ignore', 'pipe', 'pipe'] }));
+    expect(await run({ PATH: process.env.PATH, HH_BRIDGE: hook })).toBe('3:none');
+    expect(await run({ PATH: process.env.PATH })).toBe('3:none');
+  });
+
+  it('makes an agent\'s tsc, vitest, eslint, jest and playwright wait for a slot however they start, and nothing else', async () => {
+    const m = machine(true), hook = await m.start();
+    installCheckCommand(m.dir, cli);
+    mkdirSync(join(m.dir, 'node_modules', '.bin'), { recursive: true });
+    const tool = (name: string) => {
+      const path = join(m.dir, 'node_modules', '.bin', name);
+      writeFileSync(path, '#!/usr/bin/env node\nprocess.stdout.write(process.env.HH_CHECK_SLOT ? "slot" : "none");\n', { mode: 0o755 });
+      return path;
+    };
+    const path = `${join(m.dir, 'tools', 'bin')}:${dirname(process.execPath)}:/usr/bin:/bin`, agent = { PATH: path, HH_BRIDGE: hook };
+    const run = (command: string, args: string[], env: NodeJS.ProcessEnv = agent) => output(spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] }));
+    /* As npx and npm scripts start them: by the name in node_modules/.bin, whose first line asks for node. */
+    for (const name of ['tsc', 'vitest', 'eslint', 'jest', 'playwright']) expect(await run(tool(name), ['--noEmit']), name).toBe('0:slot');
+    expect(await run(join(m.dir, 'tools', 'bin', 'node'), [tool('vitest'), 'run'])).toBe('0:slot');
+    expect(m.frames.filter(type => type === 'check.acquire')).toHaveLength(6);
+    expect(await run(tool('light'), [])).toBe('0:none');
+    expect(await run(tool('tsc'), [], { PATH: path })).toBe('0:none');
+    /* One that runs inside a check already holds its slot. */
+    expect(await run(tool('vitest'), [], { ...agent, HH_CHECK_SLOT: 'held' })).toBe('0:slot');
+    expect(m.frames.filter(type => type === 'check.acquire')).toHaveLength(6);
   });
 });

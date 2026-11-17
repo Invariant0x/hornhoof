@@ -13,7 +13,7 @@ import { refusalText, type AgentCommandVerdict, type CommandInput } from './comm
 export type CheckCommandGuard = (key: string, input: Pick<CommandInput, 'command' | 'cwd'>) => Promise<AgentCommandVerdict>;
 
 const Word = z.string().max(100_000).refine(value => !value.includes('\0'));
-const Command = z.object({ command: z.array(Word).min(1).max(1000), cwd: Word, env: z.record(z.string().regex(/^[^=\0]+$/), Word), lease: z.uuid().optional() });
+const Command = z.object({ command: z.array(Word).min(1).max(1000), cwd: Word, env: z.record(z.string().regex(/^[^=\0]+$/), Word), lease: z.uuid().optional(), wait: z.literal(true).optional() });
 type Command = z.infer<typeof Command>;
 let user: JobUser | null = null;
 let commandGuard: CheckCommandGuard | undefined;
@@ -27,18 +27,31 @@ async function commandPolicy(key: string, input: Command): Promise<AgentCommandV
   return { allow: false, code: 'command_guard_unavailable', category: 'command_context' };
 }
 
-export function installCheckCommand(dir: string): void {
-  const bin = join(dir, 'tools', 'bin'), target = fileURLToPath(new URL('./check-command.js', import.meta.url));
+const MARKER = '#!/bin/sh\n# Hornhoof machine check command.\n';
+
+/* hh-check runs a command under a machine check slot. The node next to it comes first on an agent's PATH, so npx and npm
+   scripts start node through it too: an agent's own TypeScript, Vitest, ESLint, Jest or Playwright waits there for a slot,
+   like for a lock, and then runs in the agent's shell; whatever else node runs goes on at once. */
+export function installCheckCommand(dir: string, cli = fileURLToPath(new URL('./check-command.js', import.meta.url))): void {
+  const bin = join(dir, 'tools', 'bin');
   mkdirSync(bin, { recursive: true });
-  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  const marker = '#!/bin/sh\n# Hornhoof machine check command.\n';
-  const script = `${marker}exec ${quote(process.execPath)} ${quote(target)} "$@"\n`;
-  const path = join(bin, 'hh-check'), existing = lstatSync(path, { throwIfNoEntry: false });
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`, node = quote(process.execPath), target = quote(cli);
+  install(join(bin, 'hh-check'), `exec ${node} ${target} "$@"\n`);
+  install(join(bin, 'node'), [
+    'case "${HH_BRIDGE:+agent}${HH_CHECK_SLOT:+held}:$1" in',
+    `  agent:*/tsc|agent:*/vitest|agent:*/vitest.mjs|agent:*/eslint|agent:*/eslint.js|agent:*/jest|agent:*/jest.js|agent:*/playwright) exec ${node} ${target} --wait -- ${node} "$@" ;;`,
+    'esac',
+    `exec ${node} "$@"\n`,
+  ].join('\n'));
+}
+
+function install(path: string, body: string): void {
+  const script = MARKER + body, existing = lstatSync(path, { throwIfNoEntry: false });
   if (existing) {
-    if (!existing.isFile()) throw new Error('The hh-check command path is already occupied.');
+    if (!existing.isFile()) throw new Error(`The ${basename(path)} command path is already occupied.`);
     const previous = readFileSync(path, 'utf8');
     if (previous === script) return;
-    if (!previous.startsWith(marker)) throw new Error('The hh-check command path is already occupied.');
+    if (!previous.startsWith(MARKER)) throw new Error(`The ${basename(path)} command path is already occupied.`);
   }
   writeFileSync(path, script, { mode: 0o755 });
 }
@@ -55,8 +68,14 @@ async function assertCommandPolicy(key: string, input: Command, signal: AbortSig
 }
 
 /* jobId: the step of the tools Hornhoof opened for a command with no turn running, whose slot it is. */
+/* A command that runs in the agent's own shell: the slot stays its own until the shell lets the request go. */
+const held = (res: ServerResponse) => (signal: AbortSignal) => new Promise<boolean>(resolve => {
+  send(res, { type: 'slot', lease: currentCheckLease() });
+  signal.addEventListener('abort', () => resolve(true), { once: true });
+});
+
 async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse, jobId: string | undefined): Promise<boolean> {
-  const run = (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
+  const run = input.wait ? held(res) : (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
   if (input.lease) return reuseCheckLease(input.lease, key, signal, run);
   return withCheckSlot(run, { agentId: key, ...(jobId ? { jobId } : {}), label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
 }
@@ -77,7 +96,8 @@ export async function serveCheckCommand(key: string, body: Buffer, signal: Abort
   const input = parseCommand(body);
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
   try {
-    await assertCommandPolicy(key, input, signal);
+    /* One that only waits runs in the agent's shell as it would with no queue, whatever it is. */
+    if (!input.wait) await assertCommandPolicy(key, input, signal);
     return await admitCommand(key, input, signal, res, jobId);
   } catch (error) {
     send(res, { type: 'error', message: error instanceof Error ? error.message : 'Check command stopped.' });
