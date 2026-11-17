@@ -481,37 +481,42 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(text(res)).toMatch(/permission denied/);
   });
 
-  it('is refused the keys, a change of what only Hornhoof writes, and the tables themselves', async () => {
+  it("is refused a change of what only Hornhoof writes, the network's own records, and the tables themselves", async () => {
     const { app } = await company();
     const client = await mcp(app, TOKEN);
     /* The tool refuses every statement here, so none changes the database this file shares. */
     // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The agent's statements are refused, and the file's end check would find one that was not.
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT * FROM authority', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', "UPDATE machine_access SET until = now() + interval '1 day'", "DELETE FROM computer_runs", 'SELECT * FROM net.backups', "UPDATE machines SET role = 'data'", 'SELECT password_hash FROM people', 'SELECT password_enc FROM vault_entries', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+    for (const sql of ["UPDATE public_links SET url = 'https://evil.test'", "DELETE FROM plan_credentials", "DELETE FROM sessions", "UPDATE people SET password_hash = 'forged'", "UPDATE machine_access SET until = now() + interval '1 day'", "DELETE FROM computer_runs", 'SELECT * FROM net.backups', "UPDATE machines SET role = 'data'", "UPDATE vault_entries SET password_enc = 'forged'", 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/permission denied|must be owner|Hornhoof did not run this SQL/);
     }
-    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('name the other columns');
+    const hidden = text(await call(client, 'database', { sql: "UPDATE public_links SET url = 'https://evil.test'" }));
+    expect(hidden).toContain('itself: the tool only reads them.');
+    expect(hidden).not.toMatch(/closed to this tool|name the other columns/);
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT cause FROM node_connections' })))[0].rows).toEqual([]);
   });
 
-  it('reads every table and column but the keys', async () => {
+  it('reads every table and column, the keys and what carries one too', async () => {
     const { app, db, ceoId } = await company();
     const client = await mcp(app, TOKEN);
+    const description = (await client.listTools()).tools.find(t => t.name === 'database')!.description!;
+    expect(description).toContain('It reads every table and every column, keys, tokens and secrets included');
+    expect(description).not.toMatch(/but the keys|name columns instead of \*|closed to this tool/);
     /* A table that shows its rows to no role of its own shows them to the orchestrator. */
     const [acme] = await db.select().from(companies);
     await db.insert(recoveryKeys).values({ companyId: acme!.id, recipient: 'age1recipientofthistest', madeBy: ceoId });
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT recipient FROM recovery_keys' })))[0].rows).toEqual([{ recipient: 'age1recipientofthistest' }]);
-    for (const sql of ['SELECT person_id, expires_at FROM sessions', 'SELECT * FROM machine_online', 'SELECT * FROM certificates', 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT name, site, login FROM vault_entries', 'SELECT * FROM vault_log', 'SELECT * FROM phone_sessions', 'SELECT * FROM outbound_channels', 'SELECT account FROM nodes', 'SELECT text, answer FROM requests', 'SELECT url, hidden FROM public_links']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM machine_online', 'SELECT * FROM certificates', 'SELECT * FROM computer_runs', 'SELECT * FROM recovery_keys', 'SELECT * FROM vault_entries', 'SELECT * FROM vault_log', 'SELECT * FROM phone_sessions', 'SELECT * FROM outbound_channels', 'SELECT * FROM nodes', 'SELECT * FROM requests', 'SELECT * FROM public_links', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM sign_in_attempts', 'SELECT * FROM link_tls', 'SELECT * FROM plan_credentials', 'SELECT * FROM authority', 'SELECT * FROM peer_secrets', 'SELECT * FROM machine_tickets', 'SELECT * FROM person_keys', 'SELECT * FROM machine_access', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT machine_key FROM machines', 'SELECT * FROM assistants', 'SELECT * FROM assistant_events', 'SELECT * FROM tool_calls']) {
       const res = await call(client, 'database', { sql });
       expect([sql, res.isError ?? false, text(res)]).toEqual([sql, false, expect.stringContaining('"rows"')]);
     }
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT count(*)::int AS n FROM sessions' })))[0].rows).toEqual([{ n: expect.any(Number) }]);
-    /* Every table of Hornhoof, none left out. */
+    /* Every column of every table of Hornhoof, none left out. */
     const [{ rows: tables }] = JSON.parse(text(await call(client, 'database', { sql: "SELECT tablename FROM pg_tables WHERE schemaname = 'public'" }))) as [{ rows: { tablename: string }[] }];
     expect(tables.length).toBeGreaterThan(100);
-    const every = await call(client, 'database', { sql: tables.map(({ tablename }) => `SELECT count(*) FROM "${tablename}"`).join('; ') });
+    const every = await call(client, 'database', { sql: tables.map(({ tablename }) => `SELECT * FROM "${tablename}" LIMIT 0`).join('; ') });
     expect([every.isError ?? false, text(every)]).toEqual([false, expect.stringContaining('"rows"')]);
   });
 
@@ -584,7 +589,7 @@ describe('the orchestrator reads and changes the database itself', () => {
 
   it('undoes the whole call when one of its statements fails', async () => {
     const { app, db, bruno } = await company();
-    const res = await call(await mcp(app, TOKEN), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT * FROM sessions` });
+    const res = await call(await mcp(app, TOKEN), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT * FROM net.pulse` });
     expect(res.isError).toBe(true);
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
   });
@@ -620,13 +625,10 @@ describe('the orchestrator reads and changes the database itself', () => {
       [`UPDATE agents SET skills = '["ops-task-watch"]' WHERE id = '${bruno.id}'`, /change_employee/],
       [`UPDATE agents SET department_id = '${design!.id}' WHERE id = '${hana.id}'`, /a head stays in its department/],
       [`INSERT INTO agents (company_id, kind, name, model, role_key) VALUES ('${bruno.companyId}', 'head', 'Mole', '', 'OPS-HEAD')`, /hire/],
-      [`UPDATE jobs SET tool_token_hash = 'forged' WHERE agent_id = '${orchestrator.id}'`, /tool_token_hash/],
-      [`INSERT INTO jobs (company_id, subscription_id, agent_id, prompt, timeout_ms, status, tool_token_hash) SELECT company_id, subscription_id, agent_id, 'x', 1000, 'running', 'forged' FROM jobs LIMIT 1`, /tool_token_hash/],
-      ['SELECT tool_token_hash FROM jobs', /tool_token_hash/],
-      [`UPDATE nodes SET key_hash = 'forged'`, /key_hash/],
-      ['SELECT key_hash FROM nodes', /key_hash/],
-      ['SELECT machine_key FROM machines', /machine_key/],
-      [`UPDATE machines SET machine_key = 'taken-0001-abcd'`, /machine_key/],
+      [`UPDATE jobs SET tool_token_hash = 'forged' WHERE agent_id = '${orchestrator.id}'`, /changes only their status/],
+      [`INSERT INTO jobs (company_id, subscription_id, agent_id, prompt, timeout_ms, status, tool_token_hash) SELECT company_id, subscription_id, agent_id, 'x', 1000, 'running', 'forged' FROM jobs LIMIT 1`, /Hornhoof starts the turns/],
+      [`UPDATE nodes SET key_hash = 'forged'`, /only the CEO/],
+      [`UPDATE machines SET machine_key = 'taken-0001-abcd'`, /only the CEO/],
       [`UPDATE nodes SET status = 'ready'`, /only the CEO/],
       ['UPDATE subscriptions SET budget = 10', /only the CEO/],
       ['UPDATE machines SET revoked_at = now()', /only the CEO/],
@@ -642,9 +644,7 @@ describe('the orchestrator reads and changes the database itself', () => {
       [`UPDATE agents SET name = 'Ivy' WHERE id = '${ava!.id}'`, /an assistant's own agent belongs to its owner/],
       [`UPDATE agents SET removed_at = now() WHERE id = '${ava!.id}'`, /an assistant's own agent belongs to its owner/],
       [`UPDATE assistants SET events_url = 'https://evil.test/'`, /People screen/],
-      [`UPDATE assistants SET key_hash = 'forged'`, /key_hash/],
-      ['SELECT key_hash FROM assistants', /key_hash/],
-      ['SELECT wake_secret_enc FROM assistants', /wake_secret_enc/],
+      [`UPDATE assistants SET key_hash = 'forged'`, /People screen/],
       ['DELETE FROM assistant_events', /only reads/],
       ['UPDATE assistant_replies SET answered = true', /only reads/],
       [`UPDATE agent_inbox SET sender_name = 'Ivan'`, /inbox_mark/],

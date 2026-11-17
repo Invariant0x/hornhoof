@@ -19,9 +19,10 @@ export type SqlCall = { invocation: string; jobId: string; answer: (results: Sql
 /* Agents' own way into the database. Each call is one transaction under the role of its mode. */
 export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => Promise<SqlAnswer[]>; close: () => Promise<void> };
 
-/* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
-   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made
-   by a model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on.
+/* Tables the orchestrator reads but never changes, and Operations does not read at all. Signing in, joining and
+   installing a node stay out of reach, and so does the public link, whose address goes into machine commands. Plans'
+   sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a model too: their
+   held-out examples stay away from who tunes a prompt, and no row put there can turn a check on.
    The outbound gateway too: contacts and payloads are private, and a row put there would forge an approval, a receipt,
    a consent, a day's count or a line of who set it up, even from a turn of the orchestrator answering the CEO. Waits'
    owners, dates and policies too: a row written by hand could move a promise or quiet an alarm, and they name private
@@ -36,8 +37,8 @@ const OUTBOUND = [
 ];
 export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames', ...OUTBOUND];
 /* Columns that hold a password, a token or a key, or private words: neither role writes them and Operations reads none of
-   them; the orchestrator reads those that are no key. A machine's key goes with every join from it, so it is one too. The
-   account a node is signed in to names a person's email. */
+   them; the orchestrator reads them all. A machine's key goes with every join from it, so it is one too. The account a
+   node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
   people: ['password_hash'],
   jobs: ['tool_token_hash'],
@@ -64,7 +65,7 @@ export const SECRET: Record<string, string[]> = {
    through a person's guarded API. An employee's inbox, whose letters name who wrote them: a forged one would put words in
    a person's or an employee's mouth, so only Hornhoof keeps it and the employee marks it with inbox_mark. What each turn
    used of its subscription, which Hornhoof writes as the node told it, so that what a connection costs can be believed. A
-   head's Telegram bot, which only a person sets on its card, with its token kept from both roles. Which employee works on a
+   head's Telegram bot, which only a person sets on its card, with its token kept from Operations. Which employee works on a
    fallback plan and the plan it goes back to, which only Hornhoof writes, as a forged row would move it to another plan. */
 export const ASSISTANT_TABLES = ['assistants', 'assistant_events', 'assistant_seqs', 'assistant_replies', 'assistant_requests'];
 const READ_ONLY = [
@@ -129,7 +130,7 @@ const readVisible = (tables: string[], name: string) =>
    nothing, so it cannot change the tables themselves, and as no superuser it reads no server files and runs no programs.
    A call may not sit in an open transaction, and how long it may take is the role's own setting. */
 const role = (settings: string[], rights: (name: string) => string) => (name: string) => `DO $grants$
-DECLARE t text; c text; k text;
+DECLARE t text; c text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${name}') THEN CREATE ROLE "${name}" NOLOGIN; END IF;
 ${settings.map(setting => `  ALTER ROLE "${name}" ${setting};`).join('\n')}
@@ -145,40 +146,21 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
     EXECUTE format('${grant}', t);
   END LOOP;`;
 
-/* The keys: what opens a sign-in, a machine, a plan, a link or a secret, sealed, hashed or as it is. Besides these, every
-   column whose name ends in _enc or _hash. */
-export const KEY_NAMES = ['sealed', 'wrapped', 'salt', 'iv', 'grant', 'machine_key', 'capability', 'bytes'];
-/* These payloads hold signed download links; the delivery addresses may themselves carry a program's key. Their
-   ordinary column names do not make those bearer credentials safe to read. */
-export const KEY_FIELDS: Record<string, string[]> = {
-  assistant_events: ['data'],
-  tool_calls: ['answer'],
-  assistants: ['events_url', 'skills_url'],
-};
-const KEY_END = '(_enc|_hash)$';
-export const isKey = (column: string) => new RegExp(KEY_END).test(column) || KEY_NAMES.includes(column);
-const KEY_COLUMN = `column_name ~ '${KEY_END}' OR column_name = ANY (${quoted(KEY_NAMES)}) OR ${Object.entries(KEY_FIELDS).map(([table, fields]) => `(table_name = '${table}' AND column_name = ANY (${quoted(fields)}))`).join(' OR ')}`;
-
-/* The orchestrator knows everything of the system (Ivan's word of 16 November 2026): its role reads every table and
-   column but the keys, the rows of a table that shows them to no role of its own too. Those rows show to its columns
-   alone: a right on the whole table, as a build from before these tables gave it, sees none of them. */
-const readAllButKeys = (name: string) => `  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
-    SELECT string_agg(quote_ident(column_name), ', ') FILTER (WHERE NOT (${KEY_COLUMN})),
-      string_agg(quote_ident(column_name), ', ') FILTER (WHERE ${KEY_COLUMN}) INTO c, k
-      FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t;
-    IF k IS NOT NULL THEN
-      EXECUTE format('REVOKE SELECT ON %I FROM "${name}"', t);
-      EXECUTE format('REVOKE SELECT (%s) ON %I FROM "${name}"', k, t);
-    END IF;
+/* The orchestrator sees everything of the system (Ivan's word of 16 and 17 November 2026): its role reads every table and
+   every column, the keys and what carries one too, and every row of a table that shows its rows to no other role. The
+   right goes column by column, never on a whole table: the keeper takes any right of an agent on a whole table of where
+   changes came from, or on the network's own tables in net, for a fence that does not hold, and leads no more. */
+const readAll = (name: string) => `  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+    SELECT string_agg(quote_ident(column_name), ', ') INTO c FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t;
     IF c IS NOT NULL THEN EXECUTE format('GRANT SELECT (%s) ON %I TO "${name}"', c, t); END IF;
   END LOOP;
-  FOR t IN SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relrowsecurity AND relname <> 'agents' LOOP
+  FOR t IN SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p') AND relrowsecurity AND relname <> 'agents' LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON %I', '${name}_reads', t);
-    EXECUTE format('CREATE POLICY %I ON %I FOR SELECT TO "${name}" USING (NOT has_table_privilege(current_user, %L, ''SELECT''))', '${name}_reads', t, 'public.' || t);
+    EXECUTE format('CREATE POLICY %I ON %I FOR SELECT TO "${name}" USING (true)', '${name}_reads', t);
   END LOOP;`;
 
-/* The orchestrator's role reads every table and column but the keys, and changes the rows of every table but the hidden
-   ones and the secrets, with these exceptions. People, their access, subscriptions, machines and repositories only
+/* The orchestrator's role reads everything, and changes the rows of every table but the hidden ones and the secrets,
+   with these exceptions. People, their access, subscriptions, machines and repositories only
    change through the tools the CEO alone may ask for, which make the CEO's checks. An employee is added by hiring, keeps
    its kind, role, skills and subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
    forged or swapped. An assistant and its own agent are their owner's: neither changes here, nor what the assistant reads,
@@ -187,17 +169,16 @@ const readAllButKeys = (name: string) => `  FOR t IN SELECT tablename FROM pg_ta
 export const grantsFor = role(
   ['RESET statement_timeout', "SET transaction_timeout = '5s'"],
   name =>
-    `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(URGENCY), ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
-${Object.entries(URGENCY).map(([table, but]) => `  EXECUTE format('GRANT SELECT (%1$s), DELETE ON ${table} TO "${name}"; GRANT INSERT (%2$s), UPDATE (%2$s) ON ${table} TO "${name}"', ${visible(table)}, ${columns(table, [...but, ...(SECRET[table] ?? [])])});`).join('\n')}
-${readVisible(READ_ONLY, name)}
-  EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...DEPARTMENT_SETTINGS])});
-  EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
-  EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
+    `  GRANT USAGE ON SCHEMA net TO "${name}";
+${readAll(name)}
+${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(URGENCY), ...Object.keys(SECRET)], `GRANT INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
+${Object.entries(URGENCY).map(([table, but]) => `  EXECUTE format('GRANT DELETE ON ${table} TO "${name}"; GRANT INSERT (%1$s), UPDATE (%1$s) ON ${table} TO "${name}"', ${columns(table, [...but, ...(SECRET[table] ?? [])])});`).join('\n')}
+  EXECUTE format('GRANT INSERT (%1$s), UPDATE (%1$s), DELETE ON departments TO "${name}"', ${columns('departments', [...SECRET.departments!, ...DEPARTMENT_SETTINGS])});
+  EXECUTE format('GRANT UPDATE (%s) ON agents TO "${name}"', ${columns('agents', AGENT_FIXED)});
+  GRANT UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}";
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";
-  GRANT USAGE ON SCHEMA net TO "${name}";
   GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid) TO "${name}";
   GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid, uuid, jsonb) TO "${name}";
-${readAllButKeys(name)}
   EXECUTE $trigger$
     CREATE OR REPLACE FUNCTION hornhoof_head_stays() RETURNS trigger LANGUAGE plpgsql AS $body$
     BEGIN

@@ -63,7 +63,7 @@ describe('canonical private question storage', () => {
   it.each([
     { table: 'requests', columns: 'text,options,explained' },
     { table: 'proposals', columns: 'brief,items' },
-  ])("keeps $table raw source content from Operations, shows it to the orchestrator, and keeps both from people's keys", async ({ table, columns }) => {
+  ])("keeps $table raw source content and people's keys from Operations, and shows both to the orchestrator", async ({ table, columns }) => {
     const { $client: client } = await createTestDb();
     const { names, run } = await roles(client);
     const [orchestrator, operations] = names as [string, string];
@@ -71,10 +71,9 @@ describe('canonical private question storage', () => {
       await expect(run(operations, `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
       expect((await run(orchestrator, `SELECT ${column} FROM ${table}`))[0]!.rows).toEqual([]);
     }
-    for (const name of names) {
-      expect((await run(name, `SELECT id,status FROM ${table}`))[0]!.rows).toEqual([]);
-      await expect(run(name, 'SELECT password_hash FROM people')).rejects.toThrow(/permission denied/);
-    }
+    for (const name of names) expect((await run(name, `SELECT id,status FROM ${table}`))[0]!.rows).toEqual([]);
+    await expect(run(operations, 'SELECT password_hash FROM people')).rejects.toThrow(/permission denied/);
+    expect((await run(orchestrator, 'SELECT password_hash FROM people'))[0]!.rows).toEqual([]);
   });
 
   it('cannot attach private content to another company request', async () => {

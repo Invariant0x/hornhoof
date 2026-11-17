@@ -94,7 +94,7 @@ describe('private repository credential revision', () => {
     expect((await c.db.select().from(departments).where(eq(departments.id, c.id)))[0]!.repoTokenEnc).toBeNull();
   });
 
-  it('shows the revision to the orchestrator alone, and keeps the token and any change of either from both SQL roles', async () => {
+  it('shows the revision and the token to the orchestrator alone, and keeps any change of either from both SQL roles', async () => {
     const { $client: client } = await createTestDb();
     expect((await client.query<{ column_name: string }>("select column_name from information_schema.columns where table_name = 'departments' and column_name = 'repo_token_revision'")).rows).toEqual([{ column_name: 'repo_token_revision' }]);
     const [orchestrator, operations] = [agentRole('postgres'), readerRole('postgres')];
@@ -103,9 +103,11 @@ describe('private repository credential revision', () => {
       await tx.exec(`SET LOCAL ROLE "${role}"`);
       return tx.exec(statement);
     });
-    expect((await run(orchestrator, 'select repo_token_revision from departments'))[0]!.rows).toEqual([]);
-    await expect(run(operations, 'select repo_token_revision from departments')).rejects.toThrow(/permission denied/);
-    for (const role of [orchestrator, operations]) for (const statement of ['select repo_token_enc from departments', 'update departments set repo_token_revision = 999']) {
+    for (const statement of ['select repo_token_revision from departments', 'select repo_token_enc from departments']) {
+      expect((await run(orchestrator, statement))[0]!.rows, statement).toEqual([]);
+      await expect(run(operations, statement), statement).rejects.toThrow(/permission denied/);
+    }
+    for (const role of [orchestrator, operations]) for (const statement of ["update departments set repo_token_enc = 'forged'", 'update departments set repo_token_revision = 999']) {
       await expect(run(role, statement), `${role}: ${statement}`).rejects.toThrow(/permission denied|read-only/);
     }
   });

@@ -1,21 +1,23 @@
 import { expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
-import { agentRole, HIDDEN, isKey, openAgentSql, readerRole, SECRET, type AgentSql, type SqlMode } from '../../src/db/agent-sql.js';
+import { agentRole, HIDDEN, openAgentSql, readerRole, SECRET, type AgentSql, type SqlMode } from '../../src/db/agent-sql.js';
 import { companies, people } from '../../src/db/schema.js';
 import { privatePostgres } from './helpers.js';
 
-/* Operations reads no hidden table and no secret column; the orchestrator reads every table and column but the keys. */
-async function deniedReads(sql: AgentSql, mode: SqlMode): Promise<void> {
+/* Operations reads no hidden table and no secret column; the orchestrator reads every table and column, the keys too. */
+async function secretReads(sql: AgentSql, mode: SqlMode): Promise<void> {
   for (const table of HIDDEN) {
     if (mode === 'read') await expect(sql.run(`SELECT 1 FROM "${table}"`, mode)).rejects.toMatchObject({ code: '42501' });
-    else expect((await sql.run(`SELECT 1 FROM "${table}"`, mode))[0]!.changed, table).toBe(0);
+    else expect((await sql.run(`SELECT * FROM "${table}"`, mode))[0]!.changed, table).toBe(0);
   }
   for (const [table, columns] of Object.entries(SECRET)) {
-    for (const column of columns.filter(column => mode === 'read' || isKey(column))) {
-      await expect(sql.run(`SELECT "${column}" FROM "${table}"`, mode)).rejects.toMatchObject({ code: '42501' });
+    for (const column of columns) {
+      if (mode === 'read') await expect(sql.run(`SELECT "${column}" FROM "${table}"`, mode)).rejects.toMatchObject({ code: '42501' });
+      else expect((await sql.run(`SELECT "${column}" FROM "${table}"`, mode))[0]!.changed, `${table}.${column}`).toBe(0);
     }
   }
+  if (mode === 'write') expect((await sql.run('SELECT password_hash FROM people', mode))[0]!.rows).toEqual([{ password_hash: 'fixture-only-password-hash' }]);
 }
 
 async function rejectsWrongPassword(url: string, role: string): Promise<void> {
@@ -37,7 +39,7 @@ async function restrictedIdentity(sql: AgentSql, mode: SqlMode, name: string): P
   expect(identity!.rows).toEqual([{ role: name, login: name, rolsuper: false, rolcanlogin: true }]);
   const [metadata] = await sql.run('SELECT name FROM people', mode);
   expect(metadata!.rows).toEqual([{ name: 'Role fixture owner' }]);
-  await deniedReads(sql, mode);
+  await secretReads(sql, mode);
 }
 
 it('authenticates production SQL roles with SCRAM and enforces metadata, secrets and write permissions', async () => {

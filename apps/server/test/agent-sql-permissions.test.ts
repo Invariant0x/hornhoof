@@ -66,12 +66,11 @@ it.each(['wait_id', 'generation', 'level', 'purpose', 'route_revision'])('keeps 
 it.each([
   { table: 'program_operator_cases', secret: 'capability', metadata: 'id, status, reason' },
   { table: 'attachments', secret: 'bytes', metadata: 'id, media_type, size, operator_case_id' },
-])('hides $table.$secret while both SQL roles can read metadata', async ({ table, secret, metadata }) => {
+])('hides the $secret column of $table from Operations, shows it to the orchestrator, and both read metadata', async ({ table, secret, metadata }) => {
   const run = await roles();
-  for (const mode of ['write', 'read'] as const) {
-    await expect(run(mode, `SELECT ${secret} FROM ${table}`), mode).rejects.toThrow(/permission denied/);
-    expect((await run(mode, `SELECT ${metadata} FROM ${table}`))[0]!.rows).toEqual([]);
-  }
+  await expect(run('read', `SELECT ${secret} FROM ${table}`)).rejects.toThrow(/permission denied/);
+  expect((await run('write', `SELECT ${secret} FROM ${table}`))[0]!.rows).toEqual([]);
+  for (const mode of ['write', 'read'] as const) expect((await run(mode, `SELECT ${metadata} FROM ${table}`))[0]!.rows).toEqual([]);
 });
 
 it('keeps request material history from Operations and unchanged by either SQL role, and lets the orchestrator read it', async () => {
@@ -123,12 +122,14 @@ it('keeps departments.autonomous_release readable and not writable by either SQL
   }
 });
 
-it("keeps a head's Telegram bot token from both SQL roles, while the bot itself stays readable", async () => {
+it("keeps a head's Telegram bot token from Operations and from any change, shows it to the orchestrator, and the bot stays readable", async () => {
   const run = await roles();
   for (const mode of ['write', 'read'] as const) {
     expect((await run(mode, 'SELECT id, agent_id FROM telegram_bots WHERE false'))[0]!.rows).toEqual([]);
-    for (const statement of ['SELECT token_enc FROM telegram_bots', 'SELECT * FROM telegram_bots', "UPDATE telegram_bots SET token_enc = 'x' WHERE false"]) {
-      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
-    }
+    await expect(run(mode, "UPDATE telegram_bots SET token_enc = 'x' WHERE false"), mode).rejects.toThrow(/permission denied/);
+  }
+  for (const statement of ['SELECT token_enc FROM telegram_bots', 'SELECT * FROM telegram_bots']) {
+    await expect(run('read', statement), `read: ${statement}`).rejects.toThrow(/permission denied/);
+    expect((await run('write', statement))[0]!.rows, `write: ${statement}`).toEqual([]);
   }
 });

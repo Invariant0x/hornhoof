@@ -43,7 +43,7 @@ describe('the tables of the gateway in the database', () => {
     expect(HIDDEN).toEqual(expect.arrayContaining(tables));
   });
 
-  it.each(GATEWAY)('give Operations no right on %s, and the orchestrator its columns to read alone', async table => {
+  it.each(GATEWAY)('give Operations no right on %s, and the orchestrator a read of every column of it alone', async table => {
     const { client } = await roles();
     const has = async (query: string) => (await client.query<{ has: boolean }>(query)).rows[0]!.has;
     for (const role of Object.values(ROLE)) {
@@ -51,7 +51,7 @@ describe('the tables of the gateway in the database', () => {
       expect(await has(`SELECT has_any_column_privilege('${role}', 'public.${table}', 'INSERT, UPDATE, REFERENCES') AS has`), role).toBe(false);
     }
     expect(await has(`SELECT has_any_column_privilege('${ROLE.read}', 'public.${table}', 'SELECT') AS has`)).toBe(false);
-    expect(await has(`SELECT has_any_column_privilege('${ROLE.write}', 'public.${table}', 'SELECT') AS has`)).toBe(true);
+    expect(await has(`SELECT bool_and(has_column_privilege('${ROLE.write}', 'public.${table}', column_name, 'SELECT')) AS has FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table}'`)).toBe(true);
   });
 
   it.each(GATEWAY)('refuse every write of both roles and every read of Operations on %s, and let the orchestrator read it', async table => {
@@ -62,13 +62,14 @@ describe('the tables of the gateway in the database', () => {
     for (const statement of writesOf(table, 'id')) {
       await expect(run('write', statement), `write: ${statement}`).rejects.toThrow(/permission denied/);
     }
-    expect((await run('write', `SELECT id FROM ${table}`))[0]!.rows).toEqual([]);
+    expect((await run('write', `SELECT * FROM ${table}`))[0]!.rows).toEqual([]);
   });
 
-  it.each(SEALED)('keep what is sealed from the orchestrator too: %s', async name => {
+  it.each(SEALED)('show what is sealed to the orchestrator and not to Operations: %s', async name => {
     const { run } = await roles();
     const [table, column] = name.split('.') as [string, string];
-    await expect(run('write', `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
+    expect((await run('write', `SELECT ${column} FROM ${table}`))[0]!.rows).toEqual([]);
+    await expect(run('read', `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
   });
 
   it('are owned by neither role, and no function of the schema runs with its owner\'s rights', async () => {

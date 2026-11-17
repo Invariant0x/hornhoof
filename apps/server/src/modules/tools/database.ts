@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { ASSISTANT_TABLES, HIDDEN, isKey, KEY_FIELDS, KEY_NAMES, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
+import { ASSISTANT_TABLES, HIDDEN, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
 import { notConfirmed } from '../../db/confirm.js';
 import { checkAgentSql, SqlRefused } from '../../db/sql-check.js';
 import { sources } from '../../db/sources.js';
@@ -20,9 +20,6 @@ const SECRETS = Object.values(SECRET).flat().join(', ');
 const CLOSED_AFTER_SIGN_INS =
   "invites, install codes, sealed plan sign-ins, the public link, Hornhoof's records of where changes came from, the company's certificate authority, its machines' certificates and the peer secrets, the machines' join tickets and online time, people's keys, the machines' computer access and the commands run there, and the recovery keys";
 const CLOSED = `Sign-ins, ${CLOSED_AFTER_SIGN_INS} are closed to this tool.`;
-/* What the orchestrator reads of them and of every other table: all but the keys. */
-const KEYS = `the keys (columns ending in _enc or _hash, and ${KEY_NAMES.slice(0, -1).join(', ')} and ${KEY_NAMES.at(-1)})`;
-const KEYS_CLOSED = `The tool reads every column but ${KEYS}, secret tool answers, assistant event payloads and delivery addresses: name the other columns instead of *.`;
 const HORNHOOF_WRITES = `Hornhoof writes sign-ins, ${CLOSED_AFTER_SIGN_INS} itself: the tool only reads them.`;
 export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
 /* The orchestrator's in a company with no active owner, for whom else it would write. */
@@ -71,11 +68,6 @@ const RULES: Record<string, string> = {
 const closedColumns = (table: string, columns: string[]) =>
   `${columns.join(' and ')} ${columns.length > 1 ? 'are' : 'is'} closed to this tool: name the other columns of ${table} instead of *.`;
 const secretsOf = (table: string) => (SECRET[table] ? closedColumns(table, SECRET[table]) : undefined);
-/* The orchestrator's: the keys of a table it knows by name, or which they are. */
-const keysOf = (table: string) => {
-  const keys = [...(SECRET[table] ?? []).filter(isKey), ...(KEY_FIELDS[table] ?? [])];
-  return keys.length ? closedColumns(table, keys) : KEYS_CLOSED;
-};
 const closedToRead = (table: string): string | undefined =>
   ASSISTANT_TABLES.includes(table) ? ASSISTANTS_CLOSED : secretsOf(table);
 const isReadOnlyError = (denied: boolean, err: Error & { code?: string }): boolean =>
@@ -86,14 +78,14 @@ function readWhy(denied: boolean, err: Error & { code?: string }, table: string 
 }
 
 /* The database's words, and after them why, when it refused. A read-only role refused only a write, unless the table is
-   hidden, an assistant table or has secrets. */
+   hidden, an assistant table or has secrets. The orchestrator reads everything, so it was refused only a change. */
 function refusal(err: Error & { code?: string }, mode: SqlMode, readOnly = READ_ONLY): string {
   const table = /permission denied for table "?(\w+)"?/.exec(err.message)?.[1];
   const denied = err.code === '42501' || /permission denied/.test(err.message);
   let why: string | undefined;
   if (mode === 'read' && table && HIDDEN.includes(table)) why = CLOSED;
   else if (mode === 'read') why = readWhy(denied, err, table, readOnly);
-  else if (table) why = [RULES[table] ?? (HIDDEN.includes(table) ? HORNHOOF_WRITES : undefined), keysOf(table)].filter(Boolean).join(' ');
+  else if (table) why = RULES[table] ?? (HIDDEN.includes(table) ? HORNHOOF_WRITES : undefined);
   return `The database answered: ${err.message}${why ? `. ${why}` : ''}`;
 }
 
@@ -112,8 +104,9 @@ function failureText(err: Error, mode: SqlMode, readOnly: string): string {
 const DESCRIPTIONS: Record<SqlMode, string> = {
   write:
     "Runs SQL on Hornhoof's own Postgres database, to see how Hornhoof runs right now with source and logs, and for what no other tool does: fixing a stuck row, changing a field, removing what the screens cannot. " +
-    'Only SELECT, INSERT, UPDATE, DELETE and WITH statements run, several in one transaction that Hornhoof begins and commits, undone together when one fails; a call may take 5 seconds. It reads and changes the rows of every table ' +
-    `but sign-ins, ${CLOSED_AFTER_SIGN_INS}, which it only reads; it reads every table and column but ${KEYS}, so name columns instead of * where a table has one. ` +
+    'Only SELECT, INSERT, UPDATE, DELETE and WITH statements run, several in one transaction that Hornhoof begins and commits, undone together when one fails; a call may take 5 seconds. ' +
+    "It reads every table and every column, keys, tokens and secrets included; only the network's own records in schema net stay closed. " +
+    `It changes the rows of every table but sign-ins, ${CLOSED_AFTER_SIGN_INS}, which Hornhoof writes itself. ` +
     "People and their access, subscriptions, machines, repositories, an employee's kind, role, skills and subscription, a head's department and a turn but its status change only through the other tools. " +
     'It cannot change the tables themselves. A change skips the checks and notices the other tools make, so prefer them, read before you write and change only ' +
     'the rows you mean. Each statement comes back as { rows, changed }.',

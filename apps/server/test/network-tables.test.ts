@@ -11,8 +11,9 @@ const rowsOf = <T>(answer: unknown): T[] => (answer as { rows: T[] }).rows;
 
 describe("the network's tables and the orchestrator's SQL", () => {
   /* A build from before these tables grants the orchestrator every table of public it does not hide, as after a way back
-     to it. The tables keep their rows to their owner whatever is granted. */
-  it("keeps the orchestrator out of them even when it is granted them", async () => {
+     to it. The orchestrator reads every row, its keys too, and the tables keep every change to their owner whatever is
+     granted. */
+  it('shows them to the orchestrator and keeps its changes out even when it is granted them', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);
     const agentSql = app.ctx.agentSql!;
@@ -28,15 +29,16 @@ describe("the network's tables and the orchestrator's SQL", () => {
     await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON authority, certificates, peer_secrets TO "${agentRole('postgres')}"`));
 
     for (const table of ['authority', 'certificates', 'peer_secrets']) {
-      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toEqual([]);
+      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toHaveLength(1);
       expect((await rows(`DELETE FROM ${table}`)).changed, table).toBe(0);
     }
+    expect((await rows('SELECT key_enc FROM authority')).rows).toEqual([{ key_enc: 'key' }]);
     expect((await rows(`UPDATE peer_secrets SET secret_enc = 'x'`)).changed).toBe(0);
     await expect(rows(`INSERT INTO peer_secrets (kind, secret_enc) VALUES ('data', 'x')`)).rejects.toMatchObject({ code: '42501' });
     expect(rowsOf(await db.execute(sql`SELECT count(*)::int AS n FROM peer_secrets`))).toEqual([{ n: 1 }]);
   });
 
-  it('keeps the orchestrator out of the tables of joined machines too, even when it is granted them', async () => {
+  it('shows the tables of joined machines to the orchestrator and keeps its changes out, even when it is granted them', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);
     const agentSql = app.ctx.agentSql!;
@@ -50,13 +52,15 @@ describe("the network's tables and the orchestrator's SQL", () => {
     await db.execute(sql`INSERT INTO person_keys (person_id, company_id, public_key, wrapped, salt, iv, iterations) VALUES (${owner!.id}, ${company!.id}, 'p', 'w', 's', 'i', 600000)`);
     await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON machine_tickets, machine_online, person_keys TO "${agentRole('postgres')}"`));
     for (const table of ['machine_tickets', 'machine_online', 'person_keys']) {
-      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toEqual([]);
+      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toHaveLength(1);
       expect((await rows(`DELETE FROM ${table}`)).changed, table).toBe(0);
     }
+    expect((await rows('SELECT ticket_hash FROM machine_tickets')).rows).toEqual([{ ticket_hash: 'h' }]);
+    expect((await rows('SELECT wrapped, salt, iv FROM person_keys')).rows).toEqual([{ wrapped: 'w', salt: 's', iv: 'i' }]);
     await expect(rows(`INSERT INTO machine_online (machine_id, day, seconds) VALUES ('${machine!.id}', '2026-11-11', 20)`)).rejects.toMatchObject({ code: '42501' });
   });
 
-  it('keeps the orchestrator out of computer access and its commands, even when it is granted them', async () => {
+  it('shows computer access and its commands to the orchestrator and keeps its changes out, even when it is granted them', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);
     const agentSql = app.ctx.agentSql!;
@@ -69,7 +73,7 @@ describe("the network's tables and the orchestrator's SQL", () => {
     await db.execute(sql`INSERT INTO computer_runs (company_id, machine_id, command, timeout_s) VALUES (${company!.id}, ${machine!.id}, 'true', 300)`);
     await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON machine_access, computer_runs TO "${agentRole('postgres')}"`));
     for (const table of ['machine_access', 'computer_runs']) {
-      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toEqual([]);
+      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toHaveLength(1);
       expect((await rows(`DELETE FROM ${table}`)).changed, table).toBe(0);
     }
     expect((await rows(`UPDATE machine_access SET until = now() + interval '1 hour'`)).changed).toBe(0);
@@ -78,7 +82,7 @@ describe("the network's tables and the orchestrator's SQL", () => {
     expect(rowsOf(await db.execute(sql`SELECT count(*)::int AS n FROM computer_runs`))).toEqual([{ n: 1 }]);
   });
 
-  it('keeps the orchestrator out of the backups and the recovery keys, even when it is granted them', async () => {
+  it('shows the recovery keys to the orchestrator, keeps the backups from it and its changes out, even when it is granted them', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);
     const agentSql = app.ctx.agentSql!;
@@ -89,7 +93,7 @@ describe("the network's tables and the orchestrator's SQL", () => {
     await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'mac-0001-abcd' });
     await db.execute(sql`INSERT INTO recovery_keys (company_id, recipient, made_by) VALUES (${company!.id}, 'age1recovery', ${owner!.id})`);
     await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON recovery_keys TO "${agentRole('postgres')}"`));
-    expect((await rows('SELECT * FROM recovery_keys')).rows).toEqual([]);
+    expect((await rows('SELECT recipient FROM recovery_keys')).rows).toEqual([{ recipient: 'age1recovery' }]);
     expect((await rows('DELETE FROM recovery_keys')).changed).toBe(0);
     await expect(rows(`INSERT INTO recovery_keys (company_id, recipient, made_by) VALUES ('${company!.id}', 'age1other', '${owner!.id}')`)).rejects.toMatchObject({ code: '42501' });
     await expect(rows('SELECT * FROM net.backups')).rejects.toMatchObject({ code: '42501' });
@@ -98,7 +102,7 @@ describe("the network's tables and the orchestrator's SQL", () => {
     await expect(rows(`UPDATE machines SET age_key = 'age1mine'`)).rejects.toMatchObject({ code: '42501' });
   });
 
-  it('lets the orchestrator read the rows of these tables but their keys, and change none of them', async () => {
+  it('lets the orchestrator read the rows of these tables and their keys, and change none of them', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);
     const agentSql = app.ctx.agentSql!;
@@ -113,7 +117,7 @@ describe("the network's tables and the orchestrator's SQL", () => {
     expect((await rows('SELECT kind FROM peer_secrets')).rows).toEqual([{ kind: 'app' }]);
     expect((await rows('SELECT seconds FROM machine_online')).rows).toEqual([{ seconds: 20 }]);
     expect((await rows('SELECT command FROM computer_runs')).rows).toEqual([{ command: 'true' }]);
-    await expect(rows('SELECT secret_enc FROM peer_secrets')).rejects.toMatchObject({ code: '42501' });
+    expect((await rows('SELECT secret_enc FROM peer_secrets')).rows).toEqual([{ secret_enc: 'secret' }]);
     await expect(rows('DELETE FROM computer_runs')).rejects.toMatchObject({ code: '42501' });
     await expect(rows(`UPDATE machine_online SET seconds = 0`)).rejects.toMatchObject({ code: '42501' });
   });

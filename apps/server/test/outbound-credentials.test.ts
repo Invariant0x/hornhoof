@@ -97,13 +97,13 @@ describe('the settings of a sending account', () => {
     }
   });
 
-  it('are out of the generic database tool for every agent, the orchestrator\'s turn answering the CEO included', async () => {
+  it('reach the orchestrator\'s database tool only sealed, as it reads everything, and never in plain words', async () => {
     const { w } = await usedOnMail();
     const tools = await w.c.tools(w.c.orchestrator, w.c.ids.ceo);
     const answer = await tools.callTool({ name: 'database', arguments: { sql: 'SELECT config_enc FROM outbound_accounts' } }) as Tool;
-    expect(answer.isError).toBe(true);
+    expect(answer.isError ?? false).toBe(false);
+    expect(JSON.stringify(answer)).toContain('config_enc');
     expectNoSecretIn(JSON.stringify(answer));
-    expect(JSON.stringify(answer)).not.toContain('v1.');
   });
 
   it('never come out of a failing transport, in what is kept or what is logged', async () => {

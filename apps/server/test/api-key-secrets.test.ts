@@ -91,10 +91,12 @@ describe("the agents' SQL", () => {
     });
   }
 
-  it("never reads a key, and reads a connection's address, protocol, models and last 4 characters without changing them", async () => {
+  it("shows a key to the orchestrator alone, and reads a connection's address, protocol, models and last 4 characters without changing them", async () => {
     const run = await roles();
+    await expect(run('read', 'SELECT secret_enc FROM subscriptions')).rejects.toThrow(/permission denied/);
+    expect((await run('write', 'SELECT secret_enc FROM subscriptions'))[0]!.rows).toEqual([]);
     for (const mode of ['write', 'read'] as const) {
-      await expect(run(mode, 'SELECT secret_enc FROM subscriptions'), mode).rejects.toThrow(/permission denied/);
+      await expect(run(mode, "UPDATE subscriptions SET secret_enc = 'forged' WHERE false"), mode).rejects.toThrow(/permission denied/);
       expect((await run(mode, 'SELECT id, provider, last4, base_url, api_protocol, models FROM subscriptions'))[0]!.rows).toEqual([]);
       await expect(run(mode, "UPDATE subscriptions SET base_url = 'https://elsewhere.example' WHERE false"), mode).rejects.toThrow(/permission denied/);
     }
