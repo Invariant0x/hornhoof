@@ -38,6 +38,21 @@ export async function setupLogOf(db: Pick<Db, 'select'>, companyId: string, depa
   }));
 }
 
+type Named = { id: string; name: string } | null;
+
+/* Who added each of these permissions, as the setup log has it: the person whose word it was, and the agent that carried
+   it out, where one did. A permission from before the log kept this has none. */
+export async function addersOf(db: Pick<Db, 'select'>, companyId: string, permissionIds: readonly string[]): Promise<Map<string, { person: Named; agent: Named }>> {
+  if (!permissionIds.length) return new Map();
+  const rows = await db
+    .select({ subjectId: outboundSetupEvents.subjectId, personId: people.id, personName: people.name, agentId: agents.id, agentName: agents.name })
+    .from(outboundSetupEvents)
+    .innerJoin(people, eq(people.id, outboundSetupEvents.personId))
+    .leftJoin(agents, eq(agents.id, outboundSetupEvents.agentId))
+    .where(and(eq(outboundSetupEvents.companyId, companyId), eq(outboundSetupEvents.kind, 'contact_added'), inArray(outboundSetupEvents.subjectId, [...permissionIds])));
+  return new Map(rows.map(row => [row.subjectId!, { person: { id: row.personId, name: row.personName }, agent: row.agentId ? { id: row.agentId, name: row.agentName! } : null }]));
+}
+
 /* Who carried out the publishing of each of these revisions for a person, where an agent did. */
 export async function publishersOf(db: Pick<Db, 'select'>, companyId: string, revisionIds: readonly string[]): Promise<Map<string, { id: string; name: string }>> {
   if (!revisionIds.length) return new Map();
