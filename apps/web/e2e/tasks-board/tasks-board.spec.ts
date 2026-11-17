@@ -598,6 +598,26 @@ for (const dir of ['ltr', 'rtl'] as const) for (const width of [1440, 375]) {
   });
 }
 
+/* Design's finding on the pictures of #1329: a goal's history says what changed in words of the person's language, here
+   its due date, never the name the code keeps it under. */
+const DUE_CHANGED: Record<Language, string> = { en: 'Ivan changed the due date', ru: 'Ivan изменил срок' };
+for (const lang of LANGUAGES.map(l => l.id)) {
+  test(`says in words what changed in a goal's history: ${lang}`, async ({ page }) => {
+    const t = MESSAGES[lang];
+    const goal = GOALS[1]!;
+    await serveTasksBoard(page);
+    await serveGoalHistory(page);
+    await open(page, lang, 1440, '/tasks');
+    await page.getByRole('region', { name: t.tracker.yourGoals, exact: true }).getByRole('button', { name: goal.title, exact: true }).click();
+    const history = page.getByRole('complementary', { name: goal.title, exact: true }).getByRole('list', { name: t.tracker.card.history });
+    /* Its three lines, set, edited and the note, are there; the edit is read once, so a wrong word fails at once. */
+    await expect(history.getByRole('listitem')).toHaveCount(3);
+    const edit = await history.getByRole('listitem').nth(1).innerText();
+    expect(edit).toContain(DUE_CHANGED[lang]);
+    expect(edit).not.toContain('dueAt');
+  });
+}
+
 for (const lang of LANGUAGES.map(l => l.id)) {
   test(`opens the lists as a drawer on a phone and closes it on a choice: ${lang} 375`, async ({ page }, info) => {
     const t = MESSAGES[lang];

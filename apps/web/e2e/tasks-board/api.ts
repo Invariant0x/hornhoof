@@ -178,13 +178,14 @@ export async function serveOutsideWork(page: Page) {
   return gift;
 }
 
-/* The history of the goal Card payments: Ivan set it, moved its date, and Hana wrote a note on it, a sentence of its own. */
+/* The history of the goal Card payments: Ivan set it, moved its date, and Hana wrote a note on it, a sentence of its own. An
+   edit names what changed as the server writes it (goals.ts FIELD_NAMES): "due" for the due date. */
 export const GOAL_NOTE = 'The bank asks for two more weeks, 3 of 5 checks are done.';
 export async function serveGoalHistory(page: Page) {
   const by = { kind: 'person' as const, id: IVAN.id, name: IVAN.name };
   const log: TaskLogLine[] = [
     { kind: 'created', text: '', data: {}, by, at: '2026-11-10T09:00:00.000Z' },
-    { kind: 'edited', text: '', data: { fields: ['dueAt'] }, by, at: '2026-11-12T09:30:00.000Z' },
+    { kind: 'edited', text: '', data: { fields: ['due'] }, by, at: '2026-11-12T09:30:00.000Z' },
     { kind: 'comment', text: GOAL_NOTE, data: {}, by: { kind: 'agent', id: HANA.id, name: HANA.name }, at: '2026-11-14T16:45:00.000Z' },
   ];
   await page.route('**/api/**', route => {
