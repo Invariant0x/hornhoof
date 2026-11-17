@@ -342,9 +342,14 @@ export class Tmux {
 
   async kill(name: string): Promise<void> {
     await this.ended(name);
-    const removed = await this.run(['kill-session', '-t', `=${name}`]).then(() => true, () => false);
+    const removed = await this.removeSession(name);
     this.recordings.remove(name);
     if (removed) this.recordings.release(name);
+  }
+
+  private async removeSession(name: string): Promise<boolean> {
+    try { await this.run(['kill-session', '-t', `=${name}`]); return true; }
+    catch { return !(await this.has(name)); }
   }
 
   async stopAll(): Promise<void> {
