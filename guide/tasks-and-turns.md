@@ -1,8 +1,8 @@
 # Tasks and turns
 
-> In short: you write to the orchestrator, and he lays the work out as tasks under goals, each with one person who answers for it. The Tasks tab shows that work as a list, a board and a map. Each department releases its work in turns, and different departments run theirs side by side. Each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit, unless the CEO has turned on autonomous release.
+> In short: you write to the orchestrator, and he lays the work out as tasks under goals, each with one person who answers for it. The Tasks tab shows that work as a list, a board and a graph. Each department releases its work in turns, and different departments run theirs side by side. Each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit, unless the people who run the department have turned on its autonomous release.
 
-![Tasks and turns](../.github/assets/tasks.gif)
+![The task tracker: a list, a task's card and the board](../.github/assets/tasks.gif)
 
 ## What is a turn?
 
@@ -215,6 +215,6 @@ Anyone whose access lists a department can give it a task in the tracker. It goe
 
 Nothing reaches the main branch until someone who sees the whole company, or the orchestrator, approves the exact commit. The department's people see it waiting.
 
-The one exception is autonomous release. Only the signed-in CEO turns it on or off, for the whole company, with the switch among a department's approvals. While it is on, an exact commit for the main branch goes in without that approval when a whole test run of its release passed on it, on the main branch or a release branch, a PASS from another employee who checked that commit, and a fast-forward path from the main branch. The "Autonomous release log" next to the switch lists each such commit.
+The one exception is autonomous release. Each department has its own, with the switch among its approvals, and only a person who runs that department, or the CEO, turns it on or off, never an agent. While it is on, an exact commit for the main branch goes in without that approval when a whole test run of its release passed on it, on the main branch or a release branch, each change in it was checked, by another employee with a PASS or, in the release of a turn, by the turnkey team member who did that task whole and checked it, and there is a fast-forward path from the main branch. The "Autonomous release log" next to the switch lists each such commit.
 
 [Back to the guide](README.md)

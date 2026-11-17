@@ -7,6 +7,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { IssueInput } from '../src/modules/tasks/review-findings.js';
+import { FIND, USE } from '../src/modules/tools/shelf.js';
 import { copyTemplates, CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
@@ -368,7 +369,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(64);
-    expect(skills).toHaveLength(185);
+    expect(skills).toHaveLength(186);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -434,14 +435,14 @@ describe('templates', () => {
   it('gives the orchestrator his own skills', () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
       'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables',
-      'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls',
+      'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working',
     ]);
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
     for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks', 'hh-tables']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
-    expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls']);
+    expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead', 'hh-one-shot-calls', 'hh-ways-of-working']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
     for (const r of roles) expect(r.skills.map(s => s.id).some(id => id.startsWith('orch-')), r.id).toBe(false);
@@ -1969,6 +1970,73 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(skill.body).toMatch(/as many at once as[^.]*memory/);
     expect(skill.body).not.toMatch(/check queue/);
     expect(skill.body).not.toMatch(/(?:^|\s)#\d+\b|\b202\d-\d{2}-\d{2}\b|@\S+\.\S+|\/(?:Users|home)\/\w+|Claude|Codex|Kimi|Antigravity/i);
+  });
+
+  /* Which way a piece of work goes, for whoever picks it: the orchestrator and every head. */
+  const WAYS = 'hh-ways-of-working';
+  const ways = () => templates.skills.get(WAYS)!;
+
+  it('tells in English and Russian which way of working fits, each way with how it starts and what not to do with it', () => {
+    const skill = ways();
+    expect(skill.kind).toBe('procedure');
+    expect(skill.title).toEqual({ en: 'Ways of working', ru: 'Способы работы' });
+    expect(skill.description.en).toMatch(/standing employees[\s\S]*turnkey[\s\S]*route[\s\S]*one-shot calls[\s\S]*chain[\s\S]*assistant[\s\S]*program operator/i);
+    expect(skill.description.ru).toMatch(/постоянн[\s\S]*под ключ[\s\S]*маршрут[\s\S]*разов[\s\S]*цепоч[\s\S]*помощник[\s\S]*оператор/i);
+    const body = skill.body;
+    /* Seven ways, each in its own paragraph that says what not to do with it. */
+    const sections = body.split(/^\*\*\d\. /m).slice(1);
+    expect(sections.map(s => s.split('.')[0])).toEqual(['Standing employees', 'Turnkey', 'Route of stages', 'One-shot calls', 'Chains', 'Personal assistants', 'The program operator and Operations']);
+    for (const section of sections) expect(section.split('\n\n')[0]).toMatch(/\b(?:Do not|Never|not a way)\b/);
+    expect(sections[0]).toMatch(/add_tasks[\s\S]*create_task[\s\S]*message_employee/);
+    for (const word of ['"Works turnkey"', 'create_task', 'report']) expect(sections[1], word).toContain(word);
+    expect(sections[2]).toMatch(/create_task[\s\S]*resultKind document[^.]*submit[^.]*no commit/);
+    expect(sections[3]).toMatch(/start_calls[\s\S]*calls[\s\S]*stop_calls/);
+    expect(sections[3]).toMatch(/as many at once as[^.]*free memory/);
+    expect(sections[3]).toMatch(/plan's limits/);
+    expect(sections[3]).toMatch(/oneShot[^.]*fanOut[^.]*judge/);
+    /* How to brief calls stays in the ability every employee carries, named by its title. */
+    expect(sections[3]).toContain(`the ability "${templates.skills.get('hh-one-shot-calls')!.title.en}"`);
+    expect(sections[4]).toMatch(/holder[^.]*drives|drives[^.]*holder/);
+    expect(sections[5]).toMatch(/not a way to give out work/);
+    expect(sections[6]).toMatch(/program_screen[\s\S]*tell_orchestrator/);
+    /* Every tool it names is one the server registers. */
+    const src = fileURLToPath(new URL('../src', import.meta.url));
+    const registered = new Set([FIND, USE, ...readdirSync(src, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.ts')).flatMap(f => [...readFileSync(join(src, f), 'utf8').matchAll(/(?:registerTool|tool)\(\s*'([a-z_]+)'/g)].map(m => m[1]!))]);
+    const named = [...new Set([...body.matchAll(/\b[a-z]+(?:_[a-z]+)+\b/g)].map(m => m[0]))];
+    expect(named.length).toBeGreaterThan(8);
+    for (const tool of [...named, 'calls', 'submit', 'report', 'verdict']) expect(registered.has(tool), tool).toBe(true);
+  });
+
+  it('decides the way by signals, shows the patterns of chains and who drives them, and ends with which to use when', () => {
+    const body = ways().body;
+    const signals = body.split('\n### ').find(part => part.startsWith('Read the signals'))!;
+    for (const signal of [/\bSize\b/, /Independent pieces/, /Memory and questions midway/, /phone, a browser or a sign-in/, /Cost/, /tokens/, /plan's limits/, /Independent check/]) expect(signals, String(signal)).toMatch(signal);
+    const patterns = body.split('\n### ').find(part => part.startsWith('Patterns'))!;
+    for (const pattern of [/hard bug[\s\S]*hypothes[\s\S]*verif/i, /scan[\s\S]*synthesis/i, /language versions[\s\S]*native speaker/i, /variants[\s\S]*tournament/i, /audit[\s\S]*file[\s\S]*one report/i]) expect(patterns, String(pattern)).toMatch(pattern);
+    expect(body.split('\n### ').at(-1)).toMatch(/^Which to use when\n/);
+  });
+
+  it('locks the ways of working on for the orchestrator and every head, read as a file when it is needed, and for nobody else', () => {
+    expect(ORCHESTRATOR_SKILLS).toContain(WAYS);
+    expect(orchestratorSteady(templates).skills.map(f => f.name)).toContain(WAYS);
+    const heads = roles.filter(role => role.kind === 'head');
+    expect(heads).toHaveLength(TEMPLATE_KEYS.length);
+    for (const head of heads) {
+      expect(head.skills.find(s => s.id === WAYS), head.id).toEqual({ id: WAYS, on: true, locked: true });
+      const rendered = render(head, []);
+      expect(rendered.skills.map(f => f.name), head.id).toContain(WAYS);
+      expect(rendered.text, head.id).toContain(`\n- ${WAYS}: `);
+    }
+    expect(roles.filter(role => role.skills.some(s => s.id === WAYS)).map(role => role.id).sort()).toEqual(heads.map(head => head.id).sort());
+  });
+
+  it('names no company, product or programming language in the ways of working, with no long dash, curly quote or ё', () => {
+    const text = [ways().body, ways().title.en, ways().title.ru, ways().description.en, ways().description.ru].join('\n');
+    expect(text).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+    expect(text).not.toMatch(INCIDENT_ATTRIBUTION_RE);
+    expect(text).not.toMatch(/\b(?:anthropic|openai|gemini|avaclone|openclaw|hermes|telegram|google|acme)\b/i);
+    expect(text).not.toMatch(/\b(?:TypeScript|JavaScript|Python|Rust|Ruby|PHP|Kotlin|Java|React)\b/);
+    expect(text).not.toMatch(/[–—‘’“”ёЁ]/);
   });
 
   it('includes hh-tables in CORE_SKILLS and ORCHESTRATOR_SKILLS, forbids refusing spreadsheet delivery, and keeps DEV-HEAD within limits', () => {

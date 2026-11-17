@@ -30,6 +30,7 @@ export default defineConfig({
       size: { width: 1440, height: 900 },
     },
     trace: 'off',
+    screenshot: 'only-on-failure',
   },
   projects: [
     {

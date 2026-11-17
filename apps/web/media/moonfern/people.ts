@@ -61,7 +61,7 @@ export const MOONFERN_ME: Me = {
     id: MAYA_VIEW.id,
     companyId: MOONFERN_COMPANY.id,
     name: MAYA_VIEW.name,
-    email: MAYA_VIEW.email,
+    email: MAYA_VIEW.email ?? '',
     title: MAYA_VIEW.title,
     status: 'active',
     scopeKind: 'company',

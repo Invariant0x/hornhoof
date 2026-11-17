@@ -19,6 +19,8 @@ import type {
 } from '../../src/types';
 import { BASE_ISO, BASE_MS, isoMinutes } from './clock';
 import { GIB } from './machines';
+import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
+import { employeeTask, routeAt } from './route';
 import { buildDecisions } from './tasks';
 
 const L = (en: string): Lang => ({ en, ru: en });
@@ -58,7 +60,7 @@ export const OAK_ME: Me = {
     id: NINA_VIEW.id,
     companyId: OAK_COMPANY.id,
     name: NINA_VIEW.name,
-    email: NINA_VIEW.email,
+    email: NINA_VIEW.email ?? '',
     title: NINA_VIEW.title,
     status: 'active',
     scopeKind: 'company',
@@ -206,7 +208,7 @@ const emp = (
   status,
   on: true,
   timer: roleId === 'OPS-WATCH' ? 10 : null,
-  task: task ? { id: `oak-t-${task.number}`, number: task.number, title: task.title, stage: 0, gateCount: 0, bounces: 0 } : null,
+  task: task ? employeeTask(`oak-t-${task.number}`, task.number, task.title, 0, 0) : null,
   context: 0.31,
   program: status === 'working'
     ? { state: 'tool', since: BASE_MS - 180_000, tool: 'Bash', screenAt: BASE_MS - 5000, signAt: BASE_MS - 5000, retry: null, reportedAt: BASE_MS - 2000 }
@@ -352,7 +354,7 @@ export const OAK_TASKS: TaskLine[] = [
     brief: 'ASUS main router has security update 7.2.0; reboot takes 3 minutes after 23:30.',
     status: 'waiting', department: HOM_PLACE, product: null,
     assignee: { id: 'oak-hom-net', name: 'Mina', kind: 'worker', role: L('Network and Wi-Fi') },
-    stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 4, parentId: null, waitsFor: [],
+    echelons: routeAt(0, 0), turn: 4, parentId: null, waitsFor: [],
     createdAt: isoMinutes(-95), updatedAt: isoMinutes(-14),
   },
   {
@@ -360,7 +362,7 @@ export const OAK_TASKS: TaskLine[] = [
     brief: 'Found three ad-injector extensions added to Chrome profile on old-macbook.',
     status: 'waiting', department: HOM_PLACE, product: null,
     assignee: { id: 'oak-hom-clean', name: 'Cleo', kind: 'worker', role: L('Device cleanup') },
-    stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 4, parentId: null, waitsFor: [],
+    echelons: routeAt(0, 0), turn: 4, parentId: null, waitsFor: [],
     createdAt: isoMinutes(-80), updatedAt: isoMinutes(-9),
   },
   {
@@ -368,7 +370,7 @@ export const OAK_TASKS: TaskLine[] = [
     brief: 'Check 2.4 GHz Wi-Fi lease and PoE port draw for living room camera.',
     status: 'working', department: HOM_PLACE, product: null,
     assignee: { id: 'oak-hom-smart', name: 'Gus', kind: 'worker', role: L('Smart devices') },
-    stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 4, parentId: null, waitsFor: [],
+    echelons: routeAt(0, 0), turn: 4, parentId: null, waitsFor: [],
     createdAt: isoMinutes(-60), updatedAt: isoMinutes(-5),
   },
   {
@@ -376,7 +378,7 @@ export const OAK_TASKS: TaskLine[] = [
     brief: 'Pantry staples, dishwasher salt, coffee beans and ingredients for Sunday roast.',
     status: 'working', department: HHD_PLACE, product: null,
     assignee: { id: 'oak-hhd-shop', name: 'June', kind: 'worker', role: L('Shopping and supplies') },
-    stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 4, parentId: null, waitsFor: [],
+    echelons: routeAt(0, 0), turn: 4, parentId: null, waitsFor: [],
     createdAt: isoMinutes(-110), updatedAt: isoMinutes(-12),
   },
   {
@@ -384,7 +386,7 @@ export const OAK_TASKS: TaskLine[] = [
     brief: 'Compare October kWh usage against September and prepare payment reminder.',
     status: 'working', department: HHD_PLACE, product: null,
     assignee: { id: 'oak-hhd-bills', name: 'Ben', kind: 'worker', role: L('Bills and subscriptions') },
-    stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 4, parentId: null, waitsFor: [],
+    echelons: routeAt(0, 0), turn: 4, parentId: null, waitsFor: [],
     createdAt: isoMinutes(-130), updatedAt: isoMinutes(-20),
   },
   {
@@ -392,7 +394,7 @@ export const OAK_TASKS: TaskLine[] = [
     brief: 'Set 20.5 C at 06:30 on weekdays and 18 C overnight starting Monday.',
     status: 'done', department: HOM_PLACE, product: null,
     assignee: { id: 'oak-hom-smart', name: 'Gus', kind: 'worker', role: L('Smart devices') },
-    stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 4, parentId: null, waitsFor: [],
+    echelons: routeAt(0, 0), turn: 4, parentId: null, waitsFor: [],
     createdAt: isoMinutes(-200), updatedAt: isoMinutes(-50),
   },
 ];
@@ -409,6 +411,11 @@ export const OAK_TURNS: TurnView[] = [
     startedAt: isoMinutes(-220),
     openedAt: isoMinutes(-218),
     closedAt: null,
+    version: null,
+    commit: null,
+    baseVersion: null,
+    departmentId: 'oak-hom',
+    releases: false,
     tasks: { total: 6, done: 1 },
   },
 ];
@@ -469,7 +476,7 @@ export function oakTaskDetail(taskId: string): TaskDetail | null {
     parent: null,
     after: [],
     executor: line.assignee,
-    gates: [],
+    echelonFindings: emptyEchelonFindings(),
     createdBy: { kind: 'person', id: NINA_VIEW.id, name: NINA_VIEW.name },
     subtasks: [],
     log: [],
@@ -483,6 +490,7 @@ export function oakAgentCard(agentId: string): AgentCardView | null {
   const { e, d } = empItem;
   return {
     id: e.id,
+    canRemove: false,
     currentTask: e.task ? { id: e.task.id, number: e.task.number, title: e.task.title } : null,
     kind: e.kind,
     name: e.name,

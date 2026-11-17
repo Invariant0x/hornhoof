@@ -1,57 +1,39 @@
 import { expect, test } from '@playwright/test';
-import { createSceneRecorder, smoothScrollBody } from '../moonfern/record';
+import { createSceneRecorder } from '../moonfern/record';
 import { serveMoonfern } from '../moonfern/serve';
-import { prepareScenePage, pushStream } from '../moonfern/stream';
-import { INITIAL_MOONFERN_REQUESTS, MOONFERN_TASKS, MOONFERN_TURNS } from '../moonfern/tasks';
+import { prepareScenePage } from '../moonfern/stream';
+import { pickView, reportUnmocked } from '../moonfern/tracker-scene';
 
-test('tasks.gif: designer choice with three images, commit approval, question and Turn 6 tasks', async ({ page }) => {
+/* The tracker as Maya meets Development's work: the list grouped by what each task needs now, with who does it, who answers
+   for it, its goal and its date; a task's card with its why, its time and its parts; then the same work as a board. */
+test('tasks.gif: the tracker shows a department as a list, a card and a board', async ({ page }) => {
   const recorder = createSceneRecorder(page);
   const watcher = await prepareScenePage(page);
-  const api = await serveMoonfern(page);
+  await serveMoonfern(page);
 
-  await page.goto('/');
-  await page.getByRole('button', { name: /Tasks/ }).click();
-  await expect(page.getByRole('heading', { name: 'Tasks', exact: true })).toBeVisible();
-  await expect(page.locator('.req-option img')).toHaveCount(3);
-  await page.evaluate(async () => {
-    const imgs = [...document.querySelectorAll<HTMLImageElement>('.req-option img')];
-    await Promise.all(imgs.map(img => (img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; }))));
-  });
+  await page.goto('/tasks?department=dept-dev');
+  const list = page.getByRole('region', { name: 'List', exact: true });
+  await expect(list).toBeVisible();
+  await expect(list.getByRole('listitem').first()).toBeVisible();
   await recorder.markReady();
+  await page.waitForTimeout(1700);
 
-  /* Hold on the designer's three plant-card options at the top. */
-  await page.waitForTimeout(1600);
+  /* The camera flow: why it exists, who answers for it, when it is due, how long it is in work and its three parts. */
+  await list.getByRole('listitem', { name: '#221 Plant identification camera flow', exact: true }).locator('.tr-title').first().click();
+  await expect(page.getByText('Naming a plant from a photo is why people install Moonfern.').first()).toBeVisible();
+  await page.waitForTimeout(3000);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
 
-  /* Scroll smoothly so the commit approval, the question and Turn 6's tasks below are all in view. */
-  await smoothScrollBody(page, 372, 10, 44);
-  await page.waitForTimeout(1250);
+  /* The same work as a board: a column for each state, cards moved by the work itself. */
+  await pickView(page, 'Board');
+  await page.waitForTimeout(2600);
 
-  /* Approve Dana's commit for the watering reminder engine. */
-  const approvalCard = page.locator('.req-approval');
-  await approvalCard.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(400);
-  await approvalCard.getByRole('button', { name: 'Approve', exact: true }).click();
-
-  await expect(page.locator('.req-approval')).toHaveCount(0);
-  await expect(page.getByText('25 of 40 tasks done')).toBeVisible();
-  await page.waitForTimeout(450);
-
-  /* Scroll down so Turn 6 progress and the turn's task rows stand clearly in frame. */
-  await smoothScrollBody(page, 790, 10, 44);
-  await page.waitForTimeout(1500);
-
-  /* Restore requests, tasks and turn progress and scroll smoothly back to top so loop frames match. */
+  /* Back to the list, as the loop began. */
+  await pickView(page, 'List');
   await page.mouse.move(8, 8);
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
-  api.setRequests(structuredClone(INITIAL_MOONFERN_REQUESTS));
-  api.setTasks(structuredClone(MOONFERN_TASKS));
-  api.setTurns(structuredClone(MOONFERN_TURNS));
-  await pushStream(page, { type: 'requests' });
-  await pushStream(page, { type: 'task', id: 't-218', spot: { departmentId: 'dept-dev' } });
-  await smoothScrollBody(page, 0, 12, 42);
-  await expect(page.locator('.req-approval')).toHaveCount(1);
-  await page.waitForTimeout(650);
+  await page.waitForTimeout(900);
 
-  watcher.assertClean();
+  reportUnmocked(watcher.errors);
   await recorder.finishGif('tasks');
 });

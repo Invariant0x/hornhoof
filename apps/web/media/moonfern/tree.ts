@@ -7,11 +7,22 @@ import type {
   TreeActivity,
   TreeAgent,
   TreeLine,
-  TreeReview,
   TreeSegment,
 } from '../../src/types';
+import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { MOONFERN_DEPARTMENTS, MOONFERN_ORG } from './agents';
+import { employeeTask, routeAt } from './route';
 import { clockIso, secondsBetweenIso } from './tree-clock';
+
+/* A turn review as the tree once drew it. The tree has no review rows now; the reviewers' time still counts. */
+type TreeReview = {
+  taskId: string;
+  number: number;
+  openedAt: string;
+  closedAt: string | null;
+  head: TreeAgent;
+  reviewers: { agent: TreeAgent; verdict: { at: string; pass: boolean; findings: number } | null; segments: TreeSegment[]; lastActionAt: string; live: boolean }[];
+};
 
 export type TreeSnapshot = {
   now: string;
@@ -62,6 +73,9 @@ function taskLine(
   const cutAt = clockIso(cut);
   const mergedAt = merged ? clockIso(merged) : null;
   return {
+    echelons: routeAt(0),
+    echelonFindings: emptyEchelonFindings(),
+    ownerSince: cutAt,
     taskId: `t-${number}`,
     number,
     title,
@@ -405,10 +419,7 @@ function buildStep(hhmm: string, step: number): TreeSnapshot {
       startedAt: turnStart,
     },
     repository: true,
-    stage: review2 ? 'review' : 'work',
     lines,
-    review: review2 ?? review1,
-    reviews,
     waiting,
     activity,
     time,
@@ -438,21 +449,21 @@ function buildStep(hhmm: string, step: number): TreeSnapshot {
         program: working ? activeProgram('Edit', clockIso('14:22')) : null,
         state: (working ? 'working' : 'sleeping') as Employee['state'],
         status: (working ? 'working' : 'idle') as Employee['status'],
-        task: working ? { id: 't-235', number: 235, title: 'Widget refresh budget on iOS 18', stage: 0, gateCount: 3, bounces: 0 } : null,
+        task: working ? employeeTask('t-235', 235, 'Widget refresh budget on iOS 18', 0, 3) : null,
       };
     }
     if (emp.id === 'dev-6' && step >= 1) {
       return {
         ...emp,
         program: freshProgram,
-        task: { id: 't-241', number: 241, title: 'Background sync retry backoff on cellular', stage: 0, gateCount: 3, bounces: 0 },
+        task: employeeTask('t-241', 241, 'Background sync retry backoff on cellular', 0, 3),
       };
     }
     if (emp.id === 'dev-1' && step >= 2) {
       return {
         ...emp,
         program: freshProgram,
-        task: { id: 't-243', number: 243, title: 'Low-light exposure hint banner', stage: 0, gateCount: 3, bounces: 0 },
+        task: employeeTask('t-243', 243, 'Low-light exposure hint banner', 0, 3),
       };
     }
     if (emp.id === 'dev-7' && step >= 2) {
