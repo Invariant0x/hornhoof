@@ -44,8 +44,11 @@ ranking.sort((a, b) => a.characters - b.characters || a.id.localeCompare(b.id));
 const rtl = LANGUAGES.find(({ id }) => /^(ar|he|fa|ur)(-|$)/.test(id));
 const locales = [...new Set([ranking[0]!.id, ranking.at(-1)!.id, ...(rtl ? [rtl.id] : [])])];
 
-/* Close the page while its held SSE route is still intercepted, before route teardown can reach the real proxy. */
-test.afterEach(async ({ page }) => { await page.close(); });
+/* Leave the app before removing its held SSE route, as the other real-page checks do. */
+test.afterEach(async ({ page }) => {
+  await page.goto('about:blank');
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
 
 for (const locale of locales) {
   for (const theme of ['light', 'cyberpunk']) {
