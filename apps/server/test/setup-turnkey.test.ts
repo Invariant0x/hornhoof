@@ -1,7 +1,7 @@
 import { COMPANY_TEMPLATE_KEYS, COMPANY_TEMPLATES, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -37,7 +37,7 @@ describe('POST /api/setup staffs the template', () => {
     onTestFinished(() => rmSync(templates, { recursive: true, force: true }));
     cpSync(new URL('../../../templates', import.meta.url), templates, { recursive: true });
     const route = join(templates, 'echelons', 'marketing.md');
-    writeFileSync(route, readFileSync(route, 'utf8').replace('stage: review, ability: hh-check-work', 'stage: review, ability: hh-check-work, oneShot: { fanOut: 3, judge: Private judge brief }'));
+    writeFileSync(route, `---\ndepartment: marketing\nstages:\n  - { stage: development }\n  - { stage: review, ability: hh-check-work, oneShot: { fanOut: 3, judge: Private judge brief } }\n---\n`);
     const { app, db } = await testApp({ TEMPLATES_DIR: templates });
     const { ceo } = await setUp(app, { ...LATER, template: 'corporation' });
 
@@ -114,6 +114,26 @@ describe('POST /api/setup staffs the template', () => {
 });
 
 describe('every ready-made company', () => {
+  it.each([...COMPANY_TEMPLATE_KEYS])('%s shows its declared ghost places on the map before any subscription is connected', async template => {
+    const { app } = await testApp();
+    const { ceo } = await setUp(app, { ...LATER, template });
+    expect(await plans(app)).toEqual([]);
+    const res = await app.inject({ url: '/api/org', ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    const { departments: org } = res.json();
+    const listed = COMPANY_TEMPLATES.find(t => t.key === template)!.departments;
+    const expected = listed.map(({ template: key }) => ({
+      templateKey: key,
+      oneShotStages: app.ctx.templates.stagesOf(key).stages.flatMap(({ stage, oneShot }) =>
+        oneShot ? [{ stage, fanOut: oneShot.fanOut, judge: oneShot.judge !== null }] : [],
+      ),
+      calls: [],
+    }));
+    expect(expected.some(dept => dept.oneShotStages.length > 0)).toBe(true);
+    expect(org).toHaveLength(expected.length);
+    expect(org).toEqual(expect.arrayContaining(expected.map(dept => expect.objectContaining(dept))));
+  });
+
   it.each([...COMPANY_TEMPLATE_KEYS])('%s brings each department with its head and employees, each with skills, waiting for a subscription', async template => {
     const { app, db } = await testApp();
     await setUp(app, { ...LATER, template });
