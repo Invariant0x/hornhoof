@@ -10,7 +10,7 @@ import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
-import { createTestDb, invitePerson, SETUP, sessionFrom, TEST_SECRET, TUNNEL, viaLink } from './helpers.js';
+import { createTestDb, fixture, invitePerson, SETUP, sessionFrom, TEST_SECRET, TUNNEL, viaLink } from './helpers.js';
 
 type Route = { method: string; url: string; websocket: boolean };
 type Origin = 'local' | 'link';
@@ -58,7 +58,7 @@ async function idsOfEveryTable(db: Db): Promise<string[]> {
   return [...new Set(ids)];
 }
 
-const FIXED_PARAMS: Record<string, string> = { name: 'acme', token: 'x', number: '1', item: '1', index: '1', channel: 'email', key: 'x', kind: 'x', '*': 'x' };
+const FIXED_PARAMS: Record<string, string> = { name: 'acme', token: 'x', number: '1', item: '1', index: '1', sequence: '1', channel: 'email', key: 'x', kind: 'x', '*': 'x' };
 
 /* The urls a route is asked at: its parameters are filled by name, `:id` once with each real id, `:teamId` with the one
    real team, so that a department and its sub-unit are asked for as a real pair. */
@@ -88,21 +88,26 @@ describe('urlsOf', () => {
   });
 });
 
+/* The company's rows are made once for the file and put back for each test, as making them takes most of a test's setup. */
 async function companyWithPeople() {
   const routes: Route[] = [];
-  const db = (await createTestDb()) as unknown as Db;
+  const testDb = await createTestDb();
+  const db = testDb as unknown as Db;
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', TUNNEL_HOST: TUNNEL, WEB_DIST: fakeDist() });
   const app = await buildApp({ db, config, onRoute: (r: { method: string | string[]; url: string; websocket?: boolean }) =>
       routes.push(...[r.method].flat().map(method => ({ method, url: r.url, websocket: !!r.websocket }))),
   });
   onTestFinished(() => app.close());
-  const ceoToken = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'startup' } }));
-  const [made] = await db.select().from(schema.departments).limit(1);
-  const zebra = crypto.randomUUID();
-  const teamId = crypto.randomUUID();
-  await db.insert(schema.departments).values({ ...made!, id: zebra, name: 'Zebra Payments' });
-  await db.insert(schema.teams).values({ id: teamId, companyId: made!.companyId, departmentId: zebra, name: 'Zebra Settlements' });
-  await invitePerson(app, ceoToken, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
+  const { ceoToken, teamId } = await fixture(testDb.$client, 'before sign-in company', async () => {
+    const token = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'startup' } }));
+    const [made] = await db.select().from(schema.departments).limit(1);
+    const zebra = crypto.randomUUID();
+    const team = crypto.randomUUID();
+    await db.insert(schema.departments).values({ ...made!, id: zebra, name: 'Zebra Payments' });
+    await db.insert(schema.teams).values({ id: team, companyId: made!.companyId, departmentId: zebra, name: 'Zebra Settlements' });
+    await invitePerson(app, token, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
+    return { ceoToken: token, teamId: team };
+  });
   return { app, db, routes, ceoToken, teamId };
 }
 
@@ -114,15 +119,19 @@ const askFrom = (app: FastifyInstance, route: Route, url: string, origin: Origin
     ...(route.method === 'GET' || route.method === 'HEAD' ? {} : { payload: {} }),
   });
 
+/* Every route is asked from both sides, a route with an id once with each id: twenty thousand questions and more. They
+   are shared among the parts by the place of the route in the app, and every part asks every id of its routes. */
+const PARTS = 8;
+
 describe('before sign-in', () => {
-  it('answers nothing that names the company before sign-in, locally and over the link', async () => {
+  it.each(Array.from({ length: PARTS }, (_, part) => part + 1))('answers nothing that names the company before sign-in, locally and over the link, part %i of 8', async part => {
     const { app, db, routes, teamId } = await companyWithPeople();
     await app.ready();
     const ids = await idsOfEveryTable(db);
     expect(ids).toContain(teamId);
     expect(routes.length).toBeGreaterThanOrEqual(30);
     const unlisted: string[] = [];
-    for (const route of routes) {
+    for (const route of routes.filter((_, place) => place % PARTS === part - 1)) {
       for (const origin of ['local', 'link'] as const) {
         for (const url of urlsOf(route.url, ids, teamId)) {
           const res = await askFrom(app, route, url, origin);
@@ -134,8 +143,7 @@ describe('before sign-in', () => {
       }
     }
     expect([...new Set(unlisted)]).toEqual([]);
-    /* Every route is asked from both sides: the test grows with the routes. */
-  }, 120_000);
+  });
 });
 
 /* What the upgrade request of a socket carries as the address it came from, the way a real connection does. */

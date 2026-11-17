@@ -11,7 +11,6 @@ import { CHOICE_FILE, type KeptDatabases } from '../src/modules/merge/kept.js';
 import { forkWanted, MERGE_EVERY_MS, Merger, RETRY_MAX_MS } from '../src/modules/merge/merger.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { appOn, ownDatabases, setUpCompany } from './helpers.js';
-import { until } from './helpers-basic.js';
 import { openTestDb } from './helpers-db.js';
 import { forkOf, pgliteSource, type Side } from './merge-fixture.js';
 
@@ -365,18 +364,27 @@ describe('the databases a restore set aside', () => {
 
   it('merges one at a time, only while leading', async () => {
     const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
-    writeKeeperState(control, { mode: 'lead', at: new Date().toISOString(), link: null });
+    const keeperSays = (mode: 'lead' | 'read') => writeKeeperState(control, { mode, at: new Date().toISOString(), link: null });
+    keeperSays('lead');
     const s = await stand({ HORNHOOF_CONTROL_DIR: control, HORNHOOF_KEEPER: 'on' });
+    /* A live keeper says its word every second, and the app obeys only a recent one: the test says it again before each
+       step, however long what came before took, and the app reads it at once. */
+    const modeAfter = async (mode: 'lead' | 'read') => {
+      keeperSays(mode);
+      await s.app.ctx.mode.check();
+      expect(s.app.ctx.mode.current()).toBe(mode);
+    };
     for (const name of ['hornhoof_before_t1', 'hornhoof_before_t2']) await s.keep(name);
+    await modeAfter('lead');
     await s.merger.discover();
     await s.merger.tick();
     expect((await s.merges()).map(row => row.status).sort()).toEqual(['merged', 'pending']);
     /* Two ticks at once are one. */
+    await modeAfter('lead');
     await Promise.all([s.merger.tick(), s.merger.tick()]);
     expect((await s.merges()).map(row => row.status)).toEqual(['merged', 'merged']);
     await s.keep('hornhoof_before_t3');
-    writeKeeperState(control, { mode: 'read', at: new Date().toISOString(), link: null });
-    await until(() => s.app.ctx.mode.current() === 'read');
+    await modeAfter('read');
     await s.merger.tick();
     expect(await s.merges()).toHaveLength(2);
   });
