@@ -1,12 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { build } from 'esbuild';
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { HELLO_IDS_BEFORE_ACKS, parseNodeMessage, parseTestEnvironment } from '@hornhoof/protocol';
 import { readTestEnvironment } from '../src/test-environment.js';
@@ -121,21 +122,36 @@ function nodeDir(server: string) {
 }
 
 describe('reporting the node lifecycle', () => {
+  /* The node a child process runs: its own sources and the lifecycle fake, built once for the file with the esbuild tsx
+     runs on, so a start costs the node's start and not a compile of its sources. The node's code stays a module apart
+     from the fake that starts it, as under tsx, so it does not take itself for the command being run. The folder sits
+     one level inside apps/node, where the node's dependencies resolve and its paths next to its sources
+     (../package.json) stay the same. It goes when the file ends, whatever its tests did. */
+  let built: string | null = null;
+  beforeAll(async () => {
+    built = mkdtempSync(join(import.meta.dirname, '..', '.lifecycle-child-'));
+    await build({
+      entryPoints: [join(import.meta.dirname, 'fakes', 'run-lifecycle.mjs'), join(import.meta.dirname, '..', 'src', 'main.ts')],
+      outdir: built, entryNames: '[name]', outExtension: { '.js': '.mjs' },
+      bundle: true, splitting: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent',
+    });
+  });
+  afterAll(() => { if (built) rmSync(built, { recursive: true, force: true }); });
+
   it('reports a real SIGKILL as an unclean exit with the previous process log after startup', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
-    const start = () => {
-      const child = spawn(process.execPath, ['--import', 'tsx', join(import.meta.dirname, 'fakes', 'run-lifecycle.mjs')], { env: { FAKE_LIFECYCLE_NODE_DIR: dir, PATH: process.env.PATH }, stdio: 'ignore' });
-      onTestFinished(() => { child.kill('SIGKILL'); });
-      return child;
-    };
-    const first = start();
+    const first = spawn(process.execPath, [join(built!, 'run-lifecycle.mjs')], { env: { FAKE_LIFECYCLE_NODE_DIR: dir, PATH: process.env.PATH }, stdio: 'ignore' });
+    onTestFinished(() => { first.kill('SIGKILL'); });
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     const boot = server.received[0]!.boot as { startedAt: string };
     const ended = once(first, 'exit');
     first.kill('SIGKILL');
     await ended;
-    start();
+    /* The next start is the same runNode on the same folder, here in the test's own process: what a kill leaves behind is
+       read by the node that starts after it, whichever process that is. */
+    const second = await runNode({ dir, adapter, log: () => {} });
+    onTestFinished(() => second.stop());
     await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     expect(server.received.findLast(m => m.type === 'hello')).toMatchObject({ restart: { kind: 'unplanned', reason: 'unclean_exit', at: null, startedAt: boot.startedAt, log: expect.stringContaining(`Node started at ${boot.startedAt}.`) } });
     expect(server.received.filter(m => m.type === 'node.stopping')).toEqual([]);
@@ -1364,8 +1380,9 @@ describe('runNode', () => {
     }
 
     it('sends numbered messages again until the server confirms them', async () => {
-      const server = await fakeServer({ acks: true });
-      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async input => (input.onEvent?.({ kind: 'text', text: 'a' }), input.onEvent?.({ kind: 'text', text: 'b' }), adapter.run(input)) }, log: () => {} });
+      const server = await fakeServer({ acks: true }), logs: string[] = [];
+      fakeClock();
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async input => (input.onEvent?.({ kind: 'text', text: 'a' }), input.onEvent?.({ kind: 'text', text: 'b' }), adapter.run(input)) }, log: line => logs.push(line) });
       onTestFinished(() => node.stop());
       await server.wait(() => server.received.some(m => m.type === 'hello'));
       server.send(run);
@@ -1374,7 +1391,7 @@ describe('runNode', () => {
       expect(first.map(m => [m.type, m.n])).toEqual([['job.started', 1], ['job.event', 2], ['job.event', 3], ['job.done', 4]]);
 
       const seen = server.received.length;
-      server.drop();
+      await dropAndReturn(server, logs);
       await server.wait(() => helloCount(server) === 2);
       await server.wait(() => numbered(server, seen).length === 4);
       expect(numbered(server, seen)).toEqual(first);
@@ -1384,7 +1401,7 @@ describe('runNode', () => {
       server.send({ type: 'ack', upto: 4 });
       await server.barrier('confirmed');
       const before = server.received.length;
-      server.drop();
+      await dropAndReturn(server, logs);
       await server.wait(() => helloCount(server) === 3);
       await server.barrier('third-hello');
       expect(numbered(server, before)).toEqual([]);
@@ -1420,6 +1437,7 @@ describe('runNode', () => {
       const talking = gated();
       const dir = nodeDir(first.url);
       const lines: string[] = [];
+      fakeClock();
       const node = await runNode({ dir, adapter: talking.adapter, log: line => lines.push(line) });
       onTestFinished(() => node.stop());
       await first.wait(() => first.received.some(m => m.type === 'hello'));
@@ -1434,12 +1452,13 @@ describe('runNode', () => {
       await first.wait(() => readFileSync(join(dir, 'outbox.jsonl'), 'utf8').includes('"job.done"'));
 
       const second = await fakeServer({ port: first.port });
+      await comeBack();
       await second.wait(() => second.received.some(m => m.type === 'job.done'));
       expect(numbered(second).map(m => m.type)).toEqual(['job.event', 'job.done']);
       expect(second.received[0]).toMatchObject({ type: 'hello', running: ['j1'] });
 
       const before = second.received.length;
-      second.drop();
+      await dropAndReturn(second, lines);
       await second.wait(() => helloCount(second) === 2);
       await second.wait(() => numbered(second, before).length > 0);
       await second.barrier('second-hello');
@@ -1448,7 +1467,7 @@ describe('runNode', () => {
       second.send({ type: 'job.ack', jobId: 'j1' });
       await second.barrier('confirmed');
       const last = second.received.length;
-      second.drop();
+      await dropAndReturn(second, lines);
       await second.wait(() => helloCount(second) === 3);
       await second.barrier('third-hello');
       expect(numbered(second, last)).toEqual([]);
@@ -1480,14 +1499,16 @@ describe('runNode', () => {
         if (++reads > 1) await reading;
         return [{ id: 'm', name: 'M' }];
       };
-      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models }, log: () => {} });
+      const logs: string[] = [];
+      fakeClock();
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models }, log: line => logs.push(line) });
       onTestFinished(() => node.stop());
       await server.wait(() => helloCount(server) === 1);
       server.send(run);
       await server.wait(() => reads === 2);
       expect(server.received.some(m => m.type === 'job.done')).toBe(false);
 
-      server.drop();
+      await dropAndReturn(server, logs);
       await server.wait(() => server.received.some(m => m.type === 'job.done'));
       const end = server.received.find(m => m.type === 'job.done')!;
       server.send({ type: 'ack', upto: end.n });
@@ -1527,8 +1548,9 @@ describe('runNode', () => {
         const server = await fakeServer();
         const dir = nodeDir(server.url);
         ends(dir);
-        const talking = gated();
-        const node = await runNode({ dir, adapter: talking.adapter, log: () => {} });
+        const talking = gated(), logs: string[] = [];
+        fakeClock();
+        const node = await runNode({ dir, adapter: talking.adapter, log: line => logs.push(line) });
         onTestFinished(() => {
           talking.open();
           node.stop();
@@ -1539,7 +1561,7 @@ describe('runNode', () => {
 
         server.send(run);
         await server.wait(() => server.received.some(m => m.type === 'job.started'));
-        server.drop();
+        await dropAndReturn(server, logs);
         await server.wait(() => helloCount(server) === 2);
         expect(lastHello(server).running).toHaveLength(HELLO_IDS_BEFORE_ACKS);
         expect(lastHello(server).running[0]).toBe('j1');
@@ -1564,6 +1586,7 @@ describe('runNode', () => {
 
     it('stays connected until Hornhoof confirms removed, and says it again on a new connection', async () => {
       const server = await fakeServer({ acks: true });
+      fakeClock();
       const { dir, lines } = await connected(server);
       server.send({ type: 'remove' });
       await server.wait(() => removals(server).length === 1);
@@ -1571,11 +1594,14 @@ describe('runNode', () => {
       expect(server.open()).toBe(1);
       expect(stopped(lines)).toBe(false);
 
-      server.drop();
+      await dropAndReturn(server, lines);
       await server.wait(() => removals(server).length === 2);
       expect(removals(server)[1]).toEqual(removals(server)[0]);
 
       server.send({ type: 'ack', upto: removals(server)[0]!.n });
+      await server.wait(() => stopped(lines));
+      /* The node lets its last message leave before it closes its socket: that pause is on the test's clock. */
+      await vi.runOnlyPendingTimersAsync();
       await server.wait(() => server.open() === 0);
       expect(stopped(lines)).toBe(true);
       expect(new Outbox(dir).pending()).toEqual([]);
@@ -1592,13 +1618,17 @@ describe('runNode', () => {
             input.signal?.addEventListener('abort', () => void stopping.then(() => done({ ok: false, sessionId: null, result: '', output: 'stopped', error: 'agent_failed', limits: null })));
           }),
       };
-      const { lines } = await connected(server, slow);
+      fakeClock();
+      const { dir, lines } = await connected(server, slow);
       server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
       await server.wait(() => server.received.some(m => m.type === 'job.started'));
       server.send({ type: 'remove' });
       server.drop();
       await server.wait(() => lines.some(line => line.startsWith('Connection closed')));
       letGo();
+      /* Its jobs have stopped while it has no socket: removed waits for the next connection, which the pause then brings. */
+      await server.wait(() => new Outbox(dir).owes('removed'));
+      await comeBack();
       await server.wait(() => removals(server).length === 1);
       expect(server.received.filter(m => m.type === 'hello')).toHaveLength(2);
       return lines;
