@@ -24,6 +24,10 @@ describe('node-owned author check messages', () => {
     expect(sameAuthorCheck(a, { ...a, paths: ['other.ts'] })).toBe(false);
   });
 
+  it.each(['__tests__', 'spec', 'specs', 'testdata'])('keeps Markdown test material under %s on Review', folder => {
+    expect(authorCheckDocuments([`docs/${folder}/case.md`])).toBe(false);
+  });
+
   it('carries only the server-pinned command identity and numbers the result for durable delivery', () => {
     expect(parseServerMessage(JSON.stringify(request))).toEqual(request);
     const result = parseNodeMessage(JSON.stringify(done));

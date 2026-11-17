@@ -29,7 +29,7 @@ export type AuthorCheckDone = z.infer<typeof AuthorCheckDone>;
 /* Markdown in source or tests can affect executable behavior, and retains Review. */
 export function authorCheckDocuments(paths: readonly string[]): boolean {
   return paths.length > 0 && paths.every(path => Path.safeParse(path).success && path.endsWith('.md')
-    && !/^apps\/[^/]+\/src\//.test(path) && !/(^|\/)(?:test|tests|e2e)\//.test(path) && !/\.(?:test|spec)\./.test(path));
+    && !/^apps\/[^/]+\/src\//.test(path) && !/(^|\/)(?:test|tests|e2e|__tests__|spec|specs|testdata)\//.test(path) && !/\.(?:test|spec)\./.test(path));
 }
 
 export function sameAuthorCheck(a: AuthorCheckRequest, b: AuthorCheckRequest | AuthorCheckDone): boolean {
