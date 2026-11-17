@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { employeeChangedBy } from '../../auth/session.js';
 import { agentChanges, agents, departments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { standingPrincipal } from '../conversation/decision-context.js';
+import { headStandingPrincipal } from '../conversation/decision-context.js';
 import { onAgent } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import type { ToolJob } from '../tools/job.js';
@@ -34,7 +34,7 @@ export async function setAssignment(ctx: Ctx, job: ToolJob, body: z.infer<typeof
       else overrides.base = body.assignment;
       if (JSON.stringify(overrides) === JSON.stringify(employee.overrides)) return;
       await tx.update(agents).set({ overrides }).where(eq(agents.id, employee.id));
-      const principal = await standingPrincipal(tx, job.id);
+      const principal = head.kind === 'head' ? await headStandingPrincipal(tx, head) : null;
       const by = employeeChangedBy({ id: principal?.personId ?? null, via: head.id, ...(head.kind === 'head' ? { viaHead: true as const } : {}) });
       await tx.insert(agentChanges).values({ companyId: job.companyId, agentId: employee.id, ...by, field: 'prompt', before: employee.overrides, after: overrides });
     });

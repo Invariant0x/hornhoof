@@ -56,20 +56,26 @@ async function headOwner(db: Reader, companyId: string, departmentId: string): P
   return owner && (await runsDepartment(db, owner, departmentId)) ? { personId: owner.id, sourceSeq: null } : null;
 }
 
-/* The same standing authority for decisions and management, resolved again whenever a write rechecks its delegation. */
-async function asOwner(db: Reader, turn: Words, found: Principal | null): Promise<Principal | null> {
-  if (turn.job.agentKind === 'head') {
-    if (!turn.job.departmentId) return null;
-    const named = await headOwner(db, turn.job.companyId, turn.job.departmentId);
-    if (named) return named;
-    found = null;
-  } else if (found && (await actingCeo(db, found.personId))) return found;
+async function companyOwner(db: Reader, companyId: string): Promise<Principal | null> {
   const [owner] = await db
     .select(idOnly(people))
     .from(people)
-    .where(and(eq(people.companyId, turn.job.companyId), eq(people.isOwner, true), eq(people.status, 'active')))
+    .where(and(eq(people.companyId, companyId), eq(people.isOwner, true), eq(people.status, 'active')))
     .limit(1);
-  return owner ? { personId: owner.id, sourceSeq: null } : found;
+  return owner ? { personId: owner.id, sourceSeq: null } : null;
+}
+
+/* A head's standing authority is the same in a conversation and when its program calls a tool between turns. */
+export async function headStandingPrincipal(db: Reader, head: { companyId: string; departmentId: string | null }): Promise<Principal | null> {
+  if (!head.departmentId) return null;
+  return (await headOwner(db, head.companyId, head.departmentId)) ?? companyOwner(db, head.companyId);
+}
+
+/* The same standing authority for decisions and management, resolved again whenever a write rechecks its delegation. */
+async function asOwner(db: Reader, turn: Words, found: Principal | null): Promise<Principal | null> {
+  if (turn.job.agentKind === 'head') return headStandingPrincipal(db, turn.job);
+  if (found && (await actingCeo(db, found.personId))) return found;
+  return (await companyOwner(db, turn.job.companyId)) ?? found;
 }
 
 /* Whom the turn answers by its words alone, before applying standing authority: what the marks of an Enter keep. */

@@ -24,9 +24,9 @@ async function fixture() {
   const head = await hire('head');
   const worker = await hire('worker');
   const other = await hire('worker', sales!.id);
-  const connect = async (agentId: string) => {
+  const connect = async (agentId: string, kind: 'conversation' | 'tools' = 'conversation') => {
     const token = `assignment-test-${agentId}`;
-    await db.insert(jobs).values({ companyId: company!.id, subscriptionId: subscription!.id, agentId, kind: 'conversation', prompt: 'work', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
+    await db.insert(jobs).values({ companyId: company!.id, subscriptionId: subscription!.id, agentId, kind, prompt: 'work', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
     const client = new Client({ name: 'assignment-test', version: '0.0.0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     onTestFinished(() => client.close());
@@ -52,6 +52,16 @@ describe('employee assignment authority', () => {
     expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment: null } })).isError).toBeFalsy();
     const [cleared] = await db.select().from(agents).where(eq(agents.id, worker.id));
     expect(cleared!.overrides).toEqual(worker.overrides);
+  });
+
+  it('records the head and its standing authority outside a conversation', async () => {
+    const { db, head, worker, connect } = await fixture();
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const client = await connect(head.id, 'tools');
+    const assignment = 'Own the current order.';
+    expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment } })).isError).toBeFalsy();
+    expect(await db.select().from(agentChanges).where(eq(agentChanges.agentId, worker.id)))
+      .toMatchObject([{ field: 'prompt', personId: owner!.id, actingAgentId: head.id }]);
   });
 
   it('saves the full text of a long assignment from a head', async () => {
