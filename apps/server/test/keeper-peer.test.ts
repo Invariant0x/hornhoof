@@ -11,7 +11,7 @@ import { gzipSync } from 'node:zlib';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { PGlite } from '@electric-sql/pglite';
-import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { testPort } from '../../../test-support/ports.mjs';
 import type { Db } from '../src/db/client.js';
 import { loadConfig } from '../src/config.js';
@@ -204,8 +204,10 @@ function send(to: Target, options: http.RequestOptions, body: unknown): Promise<
 
 const closed = (session: ClientHttp2Session): Promise<void> => new Promise(resolve => (session.closed || session.destroyed ? resolve() : session.once('close', () => resolve())));
 
+/* A prepared database is the input to these scenarios, rather than work under the first scenario's deadline. */
+await prepareSharedDatabase();
+
 describe('the peer link in the keeper', () => {
-  beforeAll(prepareSharedDatabase);
   beforeEach(peerTime);
   it('serves the peer link once its certificate is in, and names each peer to the app by its certificate', async () => {
     const c = await company();

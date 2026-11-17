@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { companies } from '../src/db/schema.js';
-import { createTestDb, fixture } from './helpers-db.js';
+import { createTestDb, fixture, prepareSharedDatabase } from './helpers-db.js';
+
+await prepareSharedDatabase();
 
 const AT = Date.parse('2030-01-01T00:00:00Z');
 
