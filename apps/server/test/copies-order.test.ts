@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asc, eq, isNotNull, sql } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { certificates, companies, departments, machineOnline, machines, peerSecrets, people, personAccess, publicLinks, teams } from '../src/db/schema.js';
 import { storeThroughput } from '../src/modules/copies/measured.js';
 import { candidates, planRoles, rank, Ranking, rankOf } from '../src/modules/copies/order.js';
@@ -467,19 +467,26 @@ describe('the ranking on the server', () => {
     expect(await rate(a!.id)).toBe(20);
   });
 
+  /* The minute is virtual: a rank comes when the test moves the clock by one, and none once it stopped, however far. */
   it('ranks every minute while it leads', async () => {
     const c = await company();
     const late = await c.joined(c.ownerId, 2, { kind: 'phone' });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    onTestFinished(() => void vi.useRealTimers());
     const ranking = new Ranking(c.ctx, { everyMs: 100 });
     onTestFinished(() => ranking.stop());
     ranking.start();
     await until(async () => (await c.places()).server?.[0] === 1);
     expect((await c.places()).m1).toEqual([null, null, 'worker']);
     await c.db.update(machines).set({ kind: 'computer' }).where(eq(machines.id, late.id));
+    await vi.advanceTimersByTimeAsync(99);
+    expect((await c.places()).m1).toEqual([null, null, 'worker']);
+    await vi.advanceTimersByTimeAsync(1);
     await until(async () => (await c.places()).m1?.[0] === 2);
     ranking.stop();
     const other = await c.joined(c.mariaId, 3);
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(vi.getTimerCount()).toBe(0);
     expect((await c.db.select().from(machines).where(eq(machines.id, other.id)))[0]!.serverOrder).toBeNull();
   });
 
