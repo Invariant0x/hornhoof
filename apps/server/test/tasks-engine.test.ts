@@ -179,7 +179,11 @@ describe('the task engine', () => {
     expect(await snapshot(task.id)).toMatchObject({ stage: 'tests', phase: 'active', ownerAgentId: tess.id });
     expect(woken(checked)).toEqual([[tess.id, 'assigned']]);
     expect((await read(task.id)).closedAt).toBeNull();
-    expect(await reason(verdict(ctx, tess.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'A verdict cannot replace finished test receipts.' }))).toBe('task_not_yours');
+    /* Tests gives no verdict: its owner is told how a repair goes in and how its report is given (07dedb90, #1208). */
+    await expect(verdict(ctx, tess.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'A verdict cannot replace finished test receipts.' }))
+      .rejects.toMatchObject({ status: 409, reason: 'task_invalid', message: expect.stringMatching(/submit.*report/s) as unknown });
+    expect(await snapshot(task.id)).toMatchObject({ stage: 'tests', phase: 'active', ownerAgentId: tess.id });
+    expect((await read(task.id)).closedAt).toBeNull();
   });
 
   it('keeps repeated findings with the reviewer and never wakes the original producer for repair', async () => {
