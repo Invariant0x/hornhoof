@@ -52,6 +52,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Company phones: an owner lends an Android phone to the company's assistants through Wireless debugging.
 - An owner watches a lent phone's live screen and takes it back with Stop; a task keeps its phone recordings.
 - Each channel of a department to its contacts takes an address, with the person's consent to its purpose.
+- Who runs a department sees its channels' addresses and takes back consent on the web, logged without the address.
 - A node's record (`update_wait_since`), Machines and Versions say since when it waits for an update.
 
 ### Changed
