@@ -1,7 +1,7 @@
 import { onTestFinished, vi, type TestContext } from 'vitest';
 import type { Keeper } from '../src/modules/keeper/keeper.js';
 import { until as stateUntil } from './helpers-basic.js';
-import { controlledTime, registerStep, until as runSteps } from './worker-keeper-time.js';
+import { controlledTime } from './worker-keeper-time.js';
 
 let monotonic = 0;
 let signal: AbortSignal;
@@ -34,16 +34,12 @@ export async function state(check: () => boolean | Promise<boolean>): Promise<vo
   });
 }
 
-/* A completed round, with no interval dispatch and no deadline running during I/O. */
-export async function step(ms = 20): Promise<void> {
-  advance(ms);
-  await runSteps(() => true);
-}
-
-export async function until(check: () => boolean | Promise<boolean>): Promise<void> {
+/* Only lease decisions advance here. Native port and socket completion waits never run keeper rounds. */
+export async function leaseUntil(keeper: Keeper, check: () => boolean): Promise<void> {
   await state(async () => {
-    if (await check()) return true;
-    await step();
+    if (check()) return true;
+    advance(20);
+    await leaseRound(keeper);
     return check();
   });
 }
@@ -84,13 +80,14 @@ export async function networkRound(keeper: Keeper): Promise<void> {
 }
 
 export async function tunnelRound(keeper: Keeper): Promise<void> {
-  await keeper['tunnel']?.['tick']();
-  await keeper['peers']?.['tunnel']?.['tick']();
+  for (const tunnel of [keeper['tunnel'], keeper['peers']?.['tunnel']]) {
+    await state(() => !tunnel?.['reading']);
+    await tunnel?.['tick']();
+  }
 }
 
-export function registerKeeper(keeper: Keeper, round: () => Promise<void>): () => void {
+export function registerKeeper(keeper: Keeper): () => void {
   const lease = () => leaseRound(keeper);
   leases.add(lease);
-  const remove = registerStep(round);
-  return () => { leases.delete(lease); remove(); };
+  return () => { leases.delete(lease); };
 }
