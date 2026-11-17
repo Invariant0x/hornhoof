@@ -6,6 +6,7 @@ import { agentChanges, agentEvents, agents, approvalPolicies, departments, jobs,
 import { only } from '../src/db/selections.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { company } from './department-owner-fixture.js';
+import { as } from './helpers.js';
 
 /* A department runs itself: what a person who runs it decides in its head's window, its head carries out at once, as that
    person, with no word of the orchestrator or the CEO. Nothing outside the department comes with it. */
@@ -51,7 +52,7 @@ describe('a department head for a person who runs its department', () => {
     expect((await c.db.select().from(teams).where(eq(teams.id, mobile!.id)))[0]!.urgentOnly).toBe(true);
   });
 
-  it('hires into its department and changes, resets and fires its employees, each kept as that person\'s decision', async () => {
+  it('records the head and its authority person for hiring, changes, reset, team removal and firing', async () => {
     const c = await company();
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     const hana = await c.tools(c.head);
@@ -63,15 +64,20 @@ describe('a department head for a person who runs its department', () => {
     const [web] = await c.db.insert(teams).values({ companyId: c.companyId, departmentId: c.dev.id, name: 'Web' }).returning();
     ok(await call(hana, 'change_employee', { employee: c.worker.id, name: 'Bob', team: web!.id }));
     expect(await agentRow(c, c.worker.id)).toMatchObject({ name: 'Bob', teamId: web!.id });
+    ok(await call(hana, 'change_department', { teams: [{ id: web!.id, remove: true }] }));
     ok(await call(hana, 'reset_employee', { employee: c.worker.id }));
     ok(await call(hana, 'fire_employee', { employee: ira!.id }));
     expect((await agentRow(c, ira!.id)).removedAt).not.toBeNull();
     const changes = await c.db.select().from(agentChanges).where(inArray(agentChanges.agentId, [c.worker.id, ira!.id]));
-    expect(changes.map(ch => ch.field).sort()).toEqual(['hired', 'name', 'removed', 'reset', 'team']);
-    for (const change of changes) expect(change, change.field).toMatchObject({ personId: c.ids.dana, byOrchestrator: false });
+    expect(changes.map(ch => ch.field).sort()).toEqual(['hired', 'name', 'removed', 'reset', 'team', 'team']);
+    for (const change of changes) expect(change, change.field).toMatchObject({ actingAgentId: c.head.id, personId: c.ids.dana, byOrchestrator: false });
     const applied = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.head.id), eq(agentEvents.kind, 'applied')));
-    expect(applied).toHaveLength(1);
-    expect(applied[0]).toMatchObject({ personId: null, data: { kind: 'staff', department: c.dev.id, onBehalfOfPersonId: c.ids.dana, sourceSeq: null } });
+    expect(applied).toHaveLength(2);
+    expect(applied).toContainEqual(expect.objectContaining({ personId: null, data: expect.objectContaining({ kind: 'staff', department: c.dev.id, onBehalfOfPersonId: c.ids.dana, sourceSeq: null }) }));
+    await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.head.id));
+    const card = await c.app.inject({ method: 'GET', url: `/api/agents/${c.worker.id}`, ...as(c.danaToken) });
+    expect(card.statusCode).toBe(200);
+    for (const change of card.json().changes) expect(change).toMatchObject({ actingAgent: { id: c.head.id, name: 'Hana' }, personName: 'Dana', byOrchestrator: false });
   });
 
   it('moves an employee who holds work into an urgent-only sub-unit', async () => {
@@ -106,6 +112,20 @@ describe('a department head for a person who runs its department', () => {
     for (const event of applied) expect(event).toMatchObject({ agentId: c.orchestrator.id, personId: null, data: { onBehalfOfPersonId: c.ids.ceo, sourceSeq: null } });
     expect(applied).toContainEqual(expect.objectContaining({ data: expect.objectContaining({ kind: 'staff' }) }));
     expect(await teamNames(c)).toEqual(['Mobile']);
+    const [change] = await c.db.select().from(agentChanges).where(eq(agentChanges.field, 'hired'));
+    expect(change).toMatchObject({ actingAgentId: null, personId: null, byOrchestrator: true });
+  });
+
+  it('keeps a human author and refuses author fields sent in the request', async () => {
+    const c = await company();
+    const forged = await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.worker.id}`, ...as(c.danaToken), payload: { name: 'Bob', actingAgentId: c.head.id, personId: c.ids.ceo, byOrchestrator: true } });
+    expect(forged.statusCode).toBe(400);
+    expect(await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id))).toEqual([]);
+    const changed = await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.worker.id}`, ...as(c.danaToken), payload: { name: 'Bob' } });
+    expect(changed.statusCode).toBe(200);
+    const [change] = await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id));
+    expect(change).toMatchObject({ actingAgentId: null, personId: c.ids.dana, byOrchestrator: false });
+    expect(changed.json().changes).toMatchObject([{ actingAgent: null, personName: 'Dana', byOrchestrator: false }]);
   });
 
   it('keeps its own owner when another person, assistant or employee writes into the turn', async () => {
@@ -120,7 +140,7 @@ describe('a department head for a person who runs its department', () => {
     await appendEvent(c.app.ctx, { companyId: c.companyId, agentId: c.head.id, jobId: turn!.id, kind: 'message', personId: null, data: { text: 'Please hire me a helper.', from: 'agent', name: 'Bruno', by: c.worker.id } });
     ok(await call(hana, 'change_employee', { employee: c.worker.id, name: 'Bob' }));
     const [change] = await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id));
-    expect(change).toMatchObject({ personId: c.ids.dana, byOrchestrator: false });
+    expect(change).toMatchObject({ actingAgentId: c.head.id, personId: c.ids.dana, byOrchestrator: false });
   });
 });
 
@@ -133,7 +153,7 @@ describe('a department head refuses', () => {
     }
     const changes = await c.db.select().from(agentChanges).where(eq(agentChanges.agentId, c.worker.id));
     expect(changes).toHaveLength(3);
-    for (const change of changes) expect(change).toMatchObject({ personId: c.ids.ceo, byOrchestrator: false });
+    for (const change of changes) expect(change).toMatchObject({ actingAgentId: c.head.id, personId: c.ids.ceo, byOrchestrator: false });
   });
 
   it('anything outside its own department, even on the CEO\'s word', async () => {

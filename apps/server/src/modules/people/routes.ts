@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { AccessInput, accessOf, agentSpot, canReach, checkAccess, saveAccess } from '../../auth/access.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword } from '../../auth/password.js';
-import { changedBy, personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
+import { employeeChangedBy, personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
@@ -169,7 +169,7 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
       if (stays) return;
       await db.transaction(async tx => {
         await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id));
-        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...changedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...employeeChangedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
       });
       await releaseLeftProgram(ctx, id, agent.subscriptionId);
       freed = true;

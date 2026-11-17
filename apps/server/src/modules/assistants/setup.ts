@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { changedBy, personColumns, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { employeeChangedBy, personColumns, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
@@ -118,7 +118,7 @@ export async function releaseAssistantAgent(ctx: Ctx, assistantId: string, by: P
     if (!agent?.subscriptionId) return null;
     await db.transaction(async tx => {
       await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id));
-      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...changedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
+      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...employeeChangedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
     });
     return agent.subscriptionId;
   });

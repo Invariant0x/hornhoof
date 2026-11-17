@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireDepartmentChanger } from '../../auth/departments.js';
-import { changedBy, type Person } from '../../auth/session.js';
+import { employeeChangedBy, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
@@ -65,7 +65,7 @@ async function keepBot(ctx: Ctx, me: Person, agent: AgentRow, token: string, bot
         await tx.update(telegramBots).set({ ...values, updateOffset: same ? before.updateOffset : 0 }).where(eq(telegramBots.id, before.id));
         if (!same) await tx.delete(telegramReplies).where(eq(telegramReplies.botId, before.id));
       }
-      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'telegram', before: before ? `@${before.username}` : null, after: `@${bot.username}` });
+      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'telegram', before: before ? `@${before.username}` : null, after: `@${bot.username}` });
     });
   } catch (err) {
     if (isUniqueViolation(err)) throw new ApiError(409, 'conflict', 'This bot belongs to another employee already. Make a new bot for this one with @BotFather.', 'telegram_taken');
@@ -92,7 +92,7 @@ export function telegramRoutes(app: FastifyInstance, ctx: Ctx): void {
     await requireBotKeeper(ctx.db, me, agent);
     const removed = await ctx.db.transaction(async tx => {
       const [gone] = await tx.delete(telegramBots).where(eq(telegramBots.agentId, agent.id)).returning({ username: telegramBots.username });
-      if (gone) await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'telegram', before: `@${gone.username}`, after: null });
+      if (gone) await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...employeeChangedBy(me), field: 'telegram', before: `@${gone.username}`, after: null });
       return Boolean(gone);
     });
     await ctx.telegram.refresh([agent.id]);

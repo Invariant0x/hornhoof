@@ -118,7 +118,7 @@ describe('the employee card', () => {
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(card.runsOn.map((r: { subscription: { id: string } }) => r.subscription.id)).toEqual([codex, orchestrator!.subscriptionId, teamKey]);
     expect(card.runsOn.find((r: { subscription: { id: string } }) => r.subscription.id === teamKey).models).toEqual(API_MODELS.anthropic_api);
-    expect(card.changes).toMatchObject([{ field: 'hired', personName: 'Ivan' }]);
+    expect(card.changes).toMatchObject([{ field: 'hired', personName: 'Ivan', actingAgent: null }]);
   });
 
   it('moves an employee to another provider, where it starts on the model its role asks for, and lets a person pick the program default', async () => {

@@ -357,7 +357,7 @@ export type AgentCardView = {
   /* How long the text every turn sends is, and the most it may be. */
   instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
-  changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string }[];
+  changes: { field: string; personName: string | null; actingAgent: { id: string; name: string } | null; byOrchestrator: boolean; at: string }[];
   /* Its latest turns a node restart cut off, the latest first; node: none for the built-in node. */
   interrupted: { job: string; at: string; cause: RestartCause; node: string | null; task: { id: string; number: number } | null; retry: boolean }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
