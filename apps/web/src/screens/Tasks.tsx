@@ -375,6 +375,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
   const who = viewed ?? me.person.id;
   const whoName = people.find(p => p.id === who)?.name ?? t.tasks.someone;
   const other = who !== me.person.id;
+  const pickerPeople = people.filter(p => p.id !== me.person.id && !p.assistant && (p.status === 'active' || p.id === viewed));
   const asking = new Set((decisions?.requests ?? []).filter(r => r.canAnswer).map(r => r.task.id));
   const asksYou = (id: string) => asking.has(id);
   const place_ = (p: TaskLine['department']) => placeName(t, org, p);
@@ -511,7 +512,7 @@ export function Tasks({ me, place, onPlace, decisions, decisionsFailure, onDecis
                     <TrackerIcon name="chevron" />
                     <select {...p} value={other ? who : ''} onChange={e => onPlace({ ...place, personId: e.target.value || undefined })}>
                       <option value="">{t.tracker.viewAsSelf(me.person.name)}</option>
-                      {people.filter(p => p.id !== me.person.id && !p.assistant && p.status === 'active').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      {pickerPeople.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </span>
                 )}
