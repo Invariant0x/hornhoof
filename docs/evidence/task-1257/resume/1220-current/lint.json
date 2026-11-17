@@ -1,0 +1,33 @@
+{
+  "commit": "f3a9064500ffbaf5c4d7d300f834ec10982dafe9",
+  "cwd": ".",
+  "command": [
+    "npx",
+    "--no-install",
+    "eslint",
+    "apps/server/src/auth/session.ts",
+    "apps/server/src/db/schema.ts",
+    "apps/server/src/modules/agents/routes.ts",
+    "apps/server/src/modules/assistants/setup.ts",
+    "apps/server/src/modules/departments/hire.ts",
+    "apps/server/src/modules/departments/routes.ts",
+    "apps/server/src/modules/people/routes.ts",
+    "apps/server/src/modules/telegram/routes.ts",
+    "apps/server/test/agent-changes-migration.test.ts",
+    "apps/server/test/agents.test.ts",
+    "apps/server/test/head-department-control.test.ts",
+    "apps/web/e2e/agent-history.config.ts",
+    "apps/web/e2e/agent-history.spec.ts",
+    "apps/web/src/i18n/en.ts",
+    "apps/web/src/i18n/ru.ts",
+    "apps/web/src/types.ts",
+    "apps/web/src/ui/AgentCard.tsx",
+    "apps/web/test/AgentCard.test.tsx",
+    "apps/web/test/api-mock.ts"
+  ],
+  "exit": 0,
+  "log": "lint.log",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "gate": "PASS",
+  "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

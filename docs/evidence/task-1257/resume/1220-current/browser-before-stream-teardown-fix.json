@@ -1,0 +1,17 @@
+{
+  "commit": "0c4c03022d025cb54f8b2d79cd91596fd0d5311a",
+  "cwd": "apps/web",
+  "command": [
+    "npx",
+    "--no-install",
+    "playwright",
+    "test",
+    "e2e/agent-history.spec.ts",
+    "--config=e2e/agent-history.config.ts"
+  ],
+  "exit": 0,
+  "log": "browser-before-stream-teardown-fix.log",
+  "sha256": "9bba03495e48a43114a0a15b6b036d7b3d2c663cfb9b7029b1dc5af26fbe6705",
+  "gate": "NOT_PASS: Vite proxy error for the held /api/stream during page teardown despite 24 case passes",
+  "originalSha256": "9bba03495e48a43114a0a15b6b036d7b3d2c663cfb9b7029b1dc5af26fbe6705"
+}

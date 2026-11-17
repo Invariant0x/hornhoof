@@ -1,0 +1,15 @@
+{
+  "commit": "03bce94da105fb537223f14a6690d39ea1369dda",
+  "cwd": "apps/web",
+  "command": [
+    "npx",
+    "--no-install",
+    "vitest",
+    "run",
+    "test/ApprovalPolicy.test.tsx"
+  ],
+  "exit": 0,
+  "log": "web.log",
+  "sha256": "e401033b8bc1a4eb0fa886c4569938f0033dff10916e8fee700ef8151ee4773b",
+  "originalSha256": "45e9774433fbccca9169d75704ccedb6db53a60ab7d05947ca5760603b92d866"
+}

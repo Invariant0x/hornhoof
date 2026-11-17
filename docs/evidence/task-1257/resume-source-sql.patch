@@ -1,0 +1,80 @@
+diff --git a/apps/server/src/db/agent-sql.ts b/apps/server/src/db/agent-sql.ts
+index 32928465a..c16840eb1 100644
+--- a/apps/server/src/db/agent-sql.ts
++++ b/apps/server/src/db/agent-sql.ts
+@@ -34,7 +34,7 @@ const OUTBOUND = [
+   'outbound_setup_events',
+   'support_tickets', 'support_classifications',
+ ];
+-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames', ...OUTBOUND];
++export const HIDDEN = ['secret_redactions', 'sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', 'sign_in_attempts', 'link_tls', 'applied', 'tool_calls', 'authority', 'certificates', 'peer_secrets', 'machine_tickets', 'machine_online', 'person_keys', 'machine_access', 'computer_runs', 'recovery_keys', 'repo_hosts', 'google_sheets', 'vault_entries', 'vault_log', 'company_phones', 'phone_sessions', 'phone_frames', ...OUTBOUND];
+ /* Columns that hold a password, a token or a key, or private words: neither role writes them and Operations reads none of
+    them; the orchestrator reads those that are no key. A machine's key goes with every join from it, so it is one too. The
+    account a node is signed in to names a person's email. */
+@@ -149,11 +149,13 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
+    column whose name ends in _enc or _hash. */
+ export const KEY_NAMES = ['sealed', 'wrapped', 'salt', 'iv', 'grant', 'machine_key', 'capability', 'bytes'];
+ /* These payloads hold signed download links; the delivery addresses may themselves carry a program's key. Their
+-   ordinary column names do not make those bearer credentials safe to read. */
++   ordinary column names do not make those bearer credentials safe to read. A hidden value's fingerprint is its sha256
++   with no salt, and with its length a weak password is found again by trying, so both are keys too. */
+ export const KEY_FIELDS: Record<string, string[]> = {
+   assistant_events: ['data'],
+   tool_calls: ['answer'],
+   assistants: ['events_url', 'skills_url'],
++  secret_redactions: ['fingerprint', 'characters'],
+ };
+ const KEY_END = '(_enc|_hash)$';
+ export const isKey = (column: string) => new RegExp(KEY_END).test(column) || KEY_NAMES.includes(column);
+diff --git a/apps/server/test/orchestrator-sql-secrets.test.ts b/apps/server/test/orchestrator-sql-secrets.test.ts
+index 074c008ff..77345997d 100644
+--- a/apps/server/test/orchestrator-sql-secrets.test.ts
++++ b/apps/server/test/orchestrator-sql-secrets.test.ts
+@@ -44,3 +44,24 @@ it('keeps secrets closed through expressions and older grants while ordinary rea
+     await expect(run(text), text).rejects.toThrow(/permission denied/);
+   }
+ });
++
++/* A hidden value's fingerprint is its sha256 with no salt; with its length, a weak password is found again by trying. The
++   orchestrator reads who hid what and when, never these two, nor the window's hash, a key by its name. */
++it('keeps the fingerprint and the length of a hidden value from the orchestrator', async () => {
++  const { role, run, client } = await access();
++  for (const text of [
++    'SELECT fingerprint FROM secret_redactions',
++    'SELECT characters FROM secret_redactions',
++    'SELECT window_hash FROM secret_redactions',
++    'SELECT r.* FROM secret_redactions r',
++    'SELECT to_jsonb(r) FROM secret_redactions r',
++    "SELECT id FROM secret_redactions WHERE fingerprint = 'x'",
++    'SELECT id FROM secret_redactions WHERE characters > 7',
++  ]) await expect(run(text), text).rejects.toThrow(/permission denied/);
++  expect((await run('SELECT id, company_id, person_id, created_at FROM secret_redactions'))[0]!.rows).toEqual([]);
++  const { rows } = await client.query<{ column_name: string }>(`
++    SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'secret_redactions'
++      AND has_column_privilege('${role}', 'secret_redactions', column_name, 'SELECT') ORDER BY column_name
++  `);
++  expect(rows.map(row => row.column_name)).toEqual(['company_id', 'created_at', 'id', 'person_id']);
++});
+diff --git a/apps/server/test/secret-redaction-rights.test.ts b/apps/server/test/secret-redaction-rights.test.ts
+new file mode 100644
+index 000000000..55b3d39ab
+--- /dev/null
++++ b/apps/server/test/secret-redaction-rights.test.ts
+@@ -0,0 +1,17 @@
++import { sql } from 'drizzle-orm';
++import { expect, it } from 'vitest';
++import { ownDatabases, setUpCompany, testApp } from './helpers.js';
++
++ownDatabases();
++
++it('keeps suppression records out of agent SQL, and leaves the database no function or trigger that sees a value', async () => {
++  const { app, db } = await testApp();
++  await setUpCompany(app);
++  const agentSql = app.ctx.agentSql!;
++  await expect(agentSql.run('select * from secret_redactions', 'read')).rejects.toMatchObject({ code: '42501' });
++  await expect(agentSql.run('delete from secret_redactions', 'write')).rejects.toMatchObject({ code: '42501' });
++  const left = await db.execute(sql`select p.proname as name from pg_proc p join pg_namespace n on n.oid = p.pronamespace
++    where n.nspname in ('public', 'net') and p.proname ~ '(hide_secret|hidden_secret|secret_company|secret_text)'
++    union all select t.tgname from pg_trigger t where t.tgname ~ 'hidden_secrets'`) as { rows: { name: string }[] };
++  expect(left.rows).toEqual([]);
++});

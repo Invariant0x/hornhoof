@@ -1,0 +1,16 @@
+{
+  "commit": "f3ef5896c81bec9fa81b5912bfdd84f377372fb7",
+  "cwd": ".",
+  "command": [
+    "npx",
+    "--no-install",
+    "tsc",
+    "-p",
+    "apps/server/tsconfig.eslint.json",
+    "--noEmit"
+  ],
+  "exit": 0,
+  "log": "server-types.log",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

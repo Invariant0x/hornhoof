@@ -1,0 +1,16 @@
+{
+  "commit": "907c42ac5ff11d73eaa084a228504f482aeacbee",
+  "cwd": "apps/web",
+  "command": [
+    "npx",
+    "--no-install",
+    "playwright",
+    "test",
+    "e2e/agent-history.spec.ts",
+    "--config=e2e/agent-history.config.ts"
+  ],
+  "exit": 0,
+  "log": "browser.log",
+  "sha256": "4d99d03709f571aa08a621d40f628cb852d0cddb649135956aed8cb743002b19",
+  "originalSha256": "4d99d03709f571aa08a621d40f628cb852d0cddb649135956aed8cb743002b19"
+}
