@@ -68,6 +68,34 @@ describe('a program that sleeps between turns', () => {
     expect(c.launch.mock.calls.length).toBeGreaterThan(before);
   });
 
+  /* The turns a program's log tells of are over, whatever the node did with the program since: after a sleep, a node
+     restart, which forgets all it knew of the agent, and sleep after sleep, each turn starts the program again at once, and
+     no turn of a person opens from what the log said before. Each logs the turns it takes: Kimi as turn.prompt, Codex the
+     words it took, Claude the person's line. */
+  it.each(['claude', 'codex', 'kimi'] as const)('starts %s at once for each turn across a node restart and sleeps in a row, and opens no turn from its log', async kind => {
+    const c = await atWorkThatSleeps(kind);
+    const logsTurn = () => c.record(kind === 'kimi' ? { type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'HANG' }] }
+      : kind === 'codex' ? userMessage('HANG', c.turnId()) : { type: 'user', message: { role: 'user', content: 'HANG' } });
+    let turn = c.running;
+    for (const between of ['sleep', 'restart', 'sleep', 'sleep'] as const) {
+      logsTurn();
+      const slept = c.stop.mock.calls.length;
+      c.finish();
+      expect(await c.on(turn)).toMatchObject({ ok: true });
+      await c.until(() => c.stop.mock.calls.length > slept);
+      /* The node that starts again has no program running: they went with the machine's tmux. */
+      if (between === 'restart') c.host['agents'].delete('receipt');
+      const before = c.launch.mock.calls.length;
+      turn = c.run();
+      await c.pass(1000);
+      expect(c.launch.mock.calls.length).toBe(before + 1);
+      await c.until(() => c.host['agents'].get('receipt')!.busy);
+    }
+    c.finish();
+    expect(await c.on(turn)).toMatchObject({ ok: true, sessionId: SESSION });
+    expect(c.sent.filter(m => m.type === 'turn.open')).toEqual([]);
+  });
+
   /* So with a program closed for a plan the agent left, when the agent comes back to this node's plan. */
   it('starts codex again at once for a turn after its node closed it for a plan the agent left', async () => {
     const c = await atWorkThatSleeps('codex');
