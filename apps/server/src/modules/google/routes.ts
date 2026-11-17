@@ -31,7 +31,7 @@ function requireShareFor(kind: Row['kind'], shareEmail: string | null): void {
   }
 }
 
-export const googleSheetsView = (row: Row) => ({
+const googleSheetsView = (row: Row) => ({
   kind: row.kind,
   account: row.account,
   shareEmail: row.shareEmail,
@@ -71,9 +71,10 @@ export function googleSheetsRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row!;
   }
 
-  /* Only a person who may change the whole company, by themselves and never through a model, holds the company's Google key. */
+  /* Only a person who may change the whole company, by themselves or through the orchestrator, never a head, holds the
+     company's Google key. */
   async function requireWholeCompany(me: Person): Promise<void> {
-    if (me.via) throw new ApiError(403, 'forbidden', 'A person connects Google Sheets directly in Settings, under Integrations.');
+    if (me.viaHead) throw new ApiError(403, 'forbidden', 'A person connects Google Sheets directly in Settings, under Integrations, or the orchestrator does.');
     await requireDepartmentChanger(db, me, null);
   }
 

@@ -22,11 +22,13 @@ export async function setAssignment(ctx: Ctx, job: ToolJob, body: z.infer<typeof
     }, async tx => {
       /* The audit FK already holds KEY SHARE. Serialize ACL changes without deadlocking parallel audit inserts. */
       const [head] = await tx.select().from(agents).where(and(eq(agents.id, job.agentId), eq(agents.companyId, job.companyId), isNull(agents.removedAt))).for('no key update');
-      if (!head || head.kind !== 'head' || !head.departmentId) throw forbidden();
-      const [department] = await tx.select().from(departments).where(and(eq(departments.id, head.departmentId), eq(departments.companyId, job.companyId), isNull(departments.parentId)));
+      /* A head in its own department; the orchestrator in the one it names. */
+      const own = head?.kind === 'head' ? head.departmentId : head?.kind === 'orchestrator' ? job.departmentId : null;
+      if (!own) throw forbidden();
+      const [department] = await tx.select().from(departments).where(and(eq(departments.id, own), eq(departments.companyId, job.companyId), isNull(departments.parentId)));
       if (!department) throw forbidden();
       const [employee] = await tx.select().from(agents).where(and(eq(agents.id, body.employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt))).for('update');
-      if (!employee || employee.kind !== 'worker' || employee.departmentId !== head.departmentId) throw forbidden();
+      if (!employee || employee.kind !== 'worker' || employee.departmentId !== own) throw forbidden();
       const overrides = { ...employee.overrides };
       if (body.assignment === null) delete overrides.base;
       else overrides.base = body.assignment;

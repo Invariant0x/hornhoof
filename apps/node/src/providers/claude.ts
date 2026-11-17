@@ -15,7 +15,7 @@ import { anthropicTokens, claudeModel, withModel } from '../turn-tokens.js';
 import { NPM_PACKAGES } from './packages.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
-export type ClaudeMode = 'plan' | 'api_key' | 'glm';
+type ClaudeMode = 'plan' | 'api_key' | 'glm';
 
 /* api: an API by the token at an address, in Anthropic's protocol, such as OpenRouter: a key there runs at that address. */
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null; api?: ApiEndpoint | null };

@@ -44,6 +44,9 @@ export async function atWork(kind: Kind, mode: Mode, { watched = true }: { watch
   const tmux = new Tmux({ env: { HOME: home } });
   let input = '';
   let initial = true;
+  /* Codex gives each turn an id of its own; the first is 'turn'. */
+  let turns = 0;
+  const turnId = () => (turns > 1 ? `turn-${turns}` : 'turn');
   const screen = () => kind === 'claude' ? `❯ ${input}\n` : kind === 'codex' ? `OpenAI Codex\n${codexPrompt(input)}`
     : kimiScreen(input);
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
@@ -78,7 +81,7 @@ export async function atWork(kind: Kind, mode: Mode, { watched = true }: { watch
       input = '';
       if (initial) {
         initial = false;
-        if (kind === 'codex') record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn' } });
+        if (kind === 'codex') record({ type: 'event_msg', payload: { type: 'task_started', turn_id: turnId() } });
         else await host['hook']('receipt', 'prompt', { prompt: text });
       } else if (kind === 'claude' && mode !== 'silent') {
         if (mode === 'hook') await host['hook']('receipt', 'prompt', { prompt: text });
@@ -105,6 +108,7 @@ export async function atWork(kind: Kind, mode: Mode, { watched = true }: { watch
   if (mode === 'bridge') await host.start();
   const run = () => {
     initial = true;
+    turns++;
     return host.run({ ...makeJob('receipt', 'HANG', { jobId: 'job-receipt', workDir, sessionId: SESSION }), home }).then(result => {
       sent.push(jobDone('job-receipt', result, []));
       return result;
@@ -113,7 +117,7 @@ export async function atWork(kind: Kind, mode: Mode, { watched = true }: { watch
   const running = run();
   const drain = () => host['drain'](host['agents'].get('receipt')!);
   const finish = () => {
-    if (kind === 'codex') record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn', last_agent_message: 'Done.' } });
+    if (kind === 'codex') record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: turnId(), last_agent_message: 'Done.' } });
     else if (kind === 'claude') record({ type: 'system', subtype: 'turn_duration', durationMs: 1 });
     else record({ type: 'turn.ended', reason: 'completed' });
     drain();
@@ -127,7 +131,7 @@ export async function atWork(kind: Kind, mode: Mode, { watched = true }: { watch
     drain(); drain();
   };
   const unheard = () => sent.filter(m => m.type === 'agent.unheard');
-  return { host, tmux, running, run, sent, keys, alive, home, workDir, record, drain, finish, expire, unheard, input: () => input,
+  return { host, tmux, running, run, sent, keys, alive, home, workDir, record, drain, finish, expire, unheard, turnId, input: () => input,
     until: (check: () => boolean | Promise<boolean>) => untilOnClock(check, clocked),
     on: <T>(promise: Promise<T>) => onClock(promise, clocked),
     pass: (ms: number) => passOnClock(ms, clocked) };

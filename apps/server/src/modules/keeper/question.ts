@@ -6,6 +6,7 @@ import type { Beat, Heard } from './beats.js';
 import type { Clocks } from './lease.js';
 import { reasonOf } from './machine-keys.js';
 import { CEO_KEEP_MS } from './takeover-step.js';
+import { Ticker } from './ticker.js';
 
 /* The question a copy puts to the CEO when the machine that leads is gone and the copy may lack changes: which copy
    to go on from, or to wait for the leader. The keeper writes the question into its word to the app, the app shows it
@@ -84,8 +85,7 @@ const OK = { status: 200, body: { ok: true } };
 const WHAT_IT_HOLDS = 'what it holds';
 
 export class Recovery {
-  private timer: NodeJS.Timeout | null = null;
-  private stopped = false;
+  private readonly ticks: Ticker;
   private working = false;
   private went: number | null = null;
   private waits: number | null = null;
@@ -93,18 +93,15 @@ export class Recovery {
 
   constructor(private readonly opts: RecoveryOptions) {
     this.clocks = opts.now ?? (() => ({ wall: Date.now(), mono: performance.now() }));
+    this.ticks = new Ticker(() => this.tick(), opts.everyMs ?? EVERY_MS);
   }
 
   start(): void {
-    if (this.timer || this.stopped) return;
-    this.timer = setInterval(() => void this.tick(), this.opts.everyMs ?? EVERY_MS);
-    this.timer.unref();
+    this.ticks.start();
   }
 
   stop(): void {
-    this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.ticks.stop();
   }
 
   /* When the CEO said to go on from this copy, by the clock that never jumps; null once that word is too old, or
@@ -122,7 +119,7 @@ export class Recovery {
 
   /* One look, each second: the CEO's answer, when the app wrote one, is acted on and removed. */
   async tick(): Promise<void> {
-    if (this.stopped || this.working) return;
+    if (this.ticks.stopped || this.working) return;
     this.working = true;
     try {
       const word = this.take();

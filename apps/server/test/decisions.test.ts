@@ -263,11 +263,10 @@ describe('telling screens that decisions changed', () => {
     await until(() => streams.dan.messages.some(m => m.type === 'computer'));
   });
 
-  it('tells the orchestrator acting for the CEO nothing of the request for the computer, which it may not read', async () => {
+  it('tells the orchestrator acting for the CEO nothing of the request for the computer on its stream', async () => {
     const c = await company();
     await listen(c.app);
     const headers = orchestratorHeaders(c.ids.ivan, c.orchestrator.id);
-    expect((await c.app.inject({ url: '/api/computer', headers })).statusCode).toBe(403);
     const inside = await openStream(c.app, undefined, headers);
     expect(inside.res.status).toBe(200);
     await c.askComputer('Inspect disk space.');

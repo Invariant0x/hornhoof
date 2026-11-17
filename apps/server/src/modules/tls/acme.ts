@@ -13,8 +13,8 @@ const HTTP_DATE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} G
 const DEFAULT_BACKOFF: Backoff = { attempts: 10, min: 2000, max: 10000 };
 
 export type ChallengeHooks = { answer(token: string, keyAuthorization: string): void; forget(token: string): void };
-export type AcmeErrorKind = 'not_ready' | 'refused' | 'invalid' | 'unreachable';
-export type Backoff = { attempts: number; min: number; max: number };
+type AcmeErrorKind = 'not_ready' | 'refused' | 'invalid' | 'unreachable';
+type Backoff = { attempts: number; min: number; max: number };
 export type Problem = { status: number; type: string; detail: string | null; retryAfterS: number | null };
 
 type Issued = { certPem: string; keyPem: string };

@@ -85,7 +85,7 @@ export const readCommit = async (repo: RepoAddress, want: CommitWanted, timeoutM
 };
 
 /* The branches in a repository's refs, by name; tags are no branches. */
-export const headsIn = (refs: Map<string, string>): Record<string, string> =>
+const headsIn = (refs: Map<string, string>): Record<string, string> =>
   Object.fromEntries([...refs].filter(([ref]) => ref.startsWith(HEADS)).map(([ref, sha]) => [ref.slice(HEADS.length), sha]));
 
 /* Every branch a repository has now, with its commit. */
@@ -95,10 +95,10 @@ export const readBranches: BranchReader = async (repo, timeoutMs = READ_MS) => {
 };
 
 /* Every tag a repository has now, with the commit it is on: for an annotated tag the commit it points at. */
-export type TagsAt = { tags: Record<string, string> } | { problem: string };
+type TagsAt = { tags: Record<string, string> } | { problem: string };
 export type TagReader = (repo: RepoAddress, timeoutMs?: number) => Promise<TagsAt>;
 const TAGS = 'refs/tags/';
-export const tagsIn = (refs: Map<string, string>): Record<string, string> => {
+const tagsIn = (refs: Map<string, string>): Record<string, string> => {
   const tags: Record<string, string> = {};
   for (const [ref, sha] of refs) {
     if (!ref.startsWith(TAGS)) continue;
@@ -114,7 +114,7 @@ export const readTags: TagReader = async (repo, timeoutMs = READ_MS) => {
 };
 
 /* What making a branch came to: it is there now at the commit asked for, or why it is not. */
-export type BranchMade = { made: true } | { problem: string };
+type BranchMade = { made: true } | { problem: string };
 export type BranchCreator = (repo: RepoAddress, branch: string, commit: string, timeoutMs?: number) => Promise<BranchMade>;
 
 const RECEIVE_ADVERTISEMENT = 'application/x-git-receive-pack-advertisement';

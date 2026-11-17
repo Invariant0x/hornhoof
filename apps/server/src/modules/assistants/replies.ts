@@ -2,8 +2,11 @@ import { and, asc, eq, gt } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, assistantReplies, jobs, type AssistantEventKind } from '../../db/schema.js';
 import { only } from '../../db/selections.js';
+import type { MessagePicture } from '../conversation/pictures.js';
 import { turnGoingOn } from '../conversation/queue.js';
+import { publicUrl } from '../link/link.js';
 import { storeEvent } from './events.js';
+import { fileLink } from './files.js';
 
 type ReplyRow = typeof assistantReplies.$inferSelect;
 /* Tells of a new event of an assistant once it is kept. worth: the event is worth a turn of a program's model whatever its
@@ -12,11 +15,14 @@ export type Told = (assistantId: string, seq: number, kind: AssistantEventKind, 
 
 const OPEN = ['queued', 'running'];
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
-/* The files the agent attached to these words with hh-attach --chat, by the ids the assistant downloads them with. */
-const filesOf = (data: unknown): { files?: { id: string; name: string }[] } => {
-  const pictures = data && typeof data === 'object' && 'pictures' in data && Array.isArray(data.pictures) ? (data.pictures as { id: string; name: string }[]) : [];
-  return pictures.length ? { files: pictures.map(({ id, name }) => ({ id, name })) } : {};
-};
+/* The files the agent attached to these words with hh-attach --chat: by the id the assistant downloads one with, and by a
+   link its owner opens on a phone. */
+async function filesOf(ctx: Ctx, data: unknown): Promise<{ files?: { id: string; name: string; url: string; big?: true }[] }> {
+  const pictures = data && typeof data === 'object' && 'pictures' in data && Array.isArray(data.pictures) ? (data.pictures as MessagePicture[]) : [];
+  if (!pictures.length) return {};
+  const base = await publicUrl(ctx.db, ctx.config);
+  return { files: pictures.map(({ id, name, big }) => ({ id, name, url: fileLink(ctx.config.secret, base, id), ...(big ? { big } : {}) })) };
+}
 
 /* The agent an answer is from, as an event names it. */
 async function agentOf(ctx: Pick<Ctx, 'db'>, agentId: string) {
@@ -34,7 +40,7 @@ async function passOn(ctx: Ctx, row: ReplyRow, told: Told): Promise<boolean> {
   if (!said.length) return row.answered;
   const agent = await agentOf(ctx, row.agentId);
   for (const words of said) {
-    const data = { messageId: row.messageId, agent, byOwnAgent: row.byOwnAgent, text: textOf(words.data), ...filesOf(words.data) };
+    const data = { messageId: row.messageId, agent, byOwnAgent: row.byOwnAgent, text: textOf(words.data), ...(await filesOf(ctx, words.data)) };
     const seq = await storeEvent(ctx.db, { companyId: row.companyId, assistantId: row.assistantId, kind: 'reply', data }, async tx => {
       await tx.update(assistantReplies).set({ afterSeq: words.seq, answered: true }).where(eq(assistantReplies.id, row.id));
     });

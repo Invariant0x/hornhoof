@@ -62,10 +62,10 @@ An error answers with a status and this body:
 
 `code` is one of `validation` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict` (409), `too_many` (429), `unavailable` (503). `reason`, where there is one, is stable and meant for programs; `message` is for people and may change. A program decides by status and `reason`.
 
-Where there is a `reason`, `message` says to the owner why, in one neutral phrase that reads after what did not go, such as "<file name> did not come: " (in Russian "<file name> не дошел: "): in Russian when the call's `Accept-Language` starts with `ru`, and in English otherwise. For example, with `Accept-Language: ru`, the owner reads "Отчет.pdf не дошел: такого файла в Hornhoof нет, или вам его там не открыть." from:
+Where there is a `reason`, `message` says to the owner why, in one neutral phrase that reads after what did not go, such as "<file name> did not come: " (in Russian "<file name> не дошел: "): in Russian when the call's `Accept-Language` starts with `ru`, and in English otherwise. For example, with `Accept-Language: ru`, the owner reads "Отчет.pdf не дошел: такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть." from:
 
 ```json
-{ "error": { "code": "not_found", "message": "такого файла в Hornhoof нет, или вам его там не открыть.", "reason": "attachment_unknown" } }
+{ "error": { "code": "not_found", "message": "такого файла в Hornhoof нет, его удалили через 30 дней, или вам его там не открыть.", "reason": "attachment_unknown" } }
 ```
 
 | Status | `reason` | When |
@@ -79,8 +79,10 @@ Where there is a `reason`, `message` says to the owner why, in one neutral phras
 | 404 | `request_unknown` | There is no such request in the company. |
 | 404 | `attachment_unknown` | There is no such file visible to the owner: see "GET /api/assistant/attachments/:id". In a message, a file not sent for that agent with `POST /api/assistant/files`. |
 | 400 | `file_empty` | The file sent has no bytes. |
-| 413 | `file_too_big` | The file sent is over 50 MB. |
+| 413 | `file_too_big` | The file sent is over 50 MB, and this Hornhoof keeps no bigger files: its machine has no `FILES_DIR`. |
 | 413 | `attachment_invalid` | Hornhoof has no room left for the company's files. |
+| 410 | `file_lost` | A file over 50 MB is not on the machine that serves Hornhoof now: see "Big files". |
+| 410 | `file_link_expired` | A file's link from a `reply` is older than 7 days: see "GET /api/files/&lt;link&gt;". |
 | 409 | `orchestrator_not_ready`, `agent_not_ready` | The agent cannot answer right now, for example while it has no plan to run on, or the message has no `agentId` and the assistant has no agent of its own yet. Try again later. |
 | 409 | `request_closed` | The request is answered already. |
 | 400 | `task_invalid` | The answer does not fit the request: see "Answer a request". |
@@ -105,7 +107,7 @@ Who the assistant is, whom it acts for, and what that person is in the company n
 }
 ```
 
-* `contract` is the version of this API the server keeps. 3 supports attachment downloads with `GET /api/assistant/attachments/:id`, files sent with `POST /api/assistant/files` and named in a message's `files`, the `files` an agent attaches to a `reply`, `message` in the owner's language, and adds `byOwnAgent` to `reply` and `reply_end`. It keeps the message limits of 2: `freshText` and up to 50000 characters of `text`. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
+* `contract` is the version of this API the server keeps. 3 supports attachment downloads with `GET /api/assistant/attachments/:id`, files sent with `POST /api/assistant/files` and named in a message's `files`, the `files` an agent attaches to a `reply` with a link to each, `message` in the owner's language, and adds `byOwnAgent` to `reply` and `reply_end`. It keeps the message limits of 2: `freshText` and up to 50000 characters of `text`. A server that gives no `contract` keeps the first version: it refuses a message with `freshText` (400) and takes up to 20000 characters of `text`. Send `freshText` only to a server that gives 2 or more.
 * `program` is `avaclone`, `openclaw`, `hermes` or `other`.
 * `agentId` is the assistant's own agent, or `null` until its owner picks a plan for it. `agentReady` is true while that agent can answer now: it has a plan, and the plan is ready on a machine that is online. Read it again from time to time, for example every minute, to tell the owner when the agent stops being ready.
 * `ceo` is true for the company's owner. `ceoDelegate` is true for the CEO delegate. `wholeCompany` is true when the owner sees the whole company: the CEO, the CEO delegate or a person with access to all of it.
@@ -168,9 +170,17 @@ Content-Type: image/heic
 { "file": { "id": "3f0c9a6e-…", "name": "IMG_0042.heic" } }
 ```
 
-* Refusals, each with words for the owner in `message`: `400 file_empty` for no bytes, `413 file_too_big` for more than 50 MB, `413 attachment_invalid` when Hornhoof has no room left for the company's files, and for the agent the same as for a message (`404 agent_unknown`, `403 assistant_agent_refused`, `409 agent_not_ready`).
+* A file of any size goes. One over 50 MB is a big file: see "Big files".
+* Refusals, each with words for the owner in `message`: `400 file_empty` for no bytes, `413 attachment_invalid` when Hornhoof has no room left for the company's files, `413 file_too_big` for more than 50 MB where Hornhoof keeps no big files, and for the agent the same as for a message (`404 agent_unknown`, `403 assistant_agent_refused`, `409 agent_not_ready`).
 * When a file is refused, tell the owner "<file name> did not come: " and the words of `message`. When the program still sends the rest of the message, add a line to `text` naming the file that did not come and why, so the agent knows of it too.
 * Hornhoof keeps a file 30 days after it was sent, as every file of a message.
+
+### Big files
+
+A big file lives 30 days on one machine and is lost if that machine goes. A file over 50 MB, more than the database carries, is written to the disk of the machine that took it as it comes, never whole in memory. It is in no copy of the database and no backup, and it counts in the company's room for files as any other file. Hornhoof deletes it 30 days after it came, whatever its task.
+
+* While Hornhoof runs on another machine, or when that machine's disk lost it, every download of it, by link too, answers `410 file_lost`.
+* A big file comes in a `reply` with `big: true`. Give the owner its `url` and say: "A big file lives 30 days on one machine and is lost if that machine goes."
 
 ### GET /api/assistant/events?after=&lt;seq&gt;&amp;wait=&lt;seconds&gt;
 
@@ -204,7 +214,7 @@ The kinds of event and their `data`:
 | `request` | `{ request }` | A request now waits for the owner. `request` is as in `GET /api/assistant/requests`. |
 | `request_closed` | `{ requestId, status }` | The request waits for the owner no more: it was answered, here or in Hornhoof, withdrawn, or no longer the owner's. `status` is the request's status now: `open`, `answered`, `approved`, `declined`, `withdrawn` or `resolved_internal`. |
 
-`files` in a `reply` lists the files the agent attached to its answer with `hh-attach --chat`, each as `{ id, name }`, and `text` may then be empty. Download each with `GET /api/assistant/attachments/:id` and pass it on to the owner under its name. When one cannot be downloaded or delivered, tell the owner plainly that it did not arrive and why, and write it to the agent with `POST /api/assistant/messages`, so both know.
+`files` in a `reply` lists the files the agent attached to its answer with `hh-attach --chat`, each as `{ id, name, url }`, and `big: true` for a file over 50 MB, and `text` may then be empty. Download each with `GET /api/assistant/attachments/:id` and pass it on to the owner under its name. `url` downloads the same file for 7 days with no key and no sign-in, for the owner to open on a phone: give it to them next to the file, and in place of a file their chat does not take, such as one over the 50 MB a Telegram bot sends. When one cannot be downloaded or delivered, tell the owner plainly that it did not arrive and why, and write it to the agent with `POST /api/assistant/messages`, so both know.
 
 `byOwnAgent` is true when the assistant's own agent sent the original message through `send_message`, and false when the assistant program sent it through HTTP or MCP. It names the sender of the original message, not the agent answering it. The value stays the same in every `reply` and the `reply_end` for that message, including after a restart or continued turn. A direct `tell_owner` reply has `byOwnAgent: true`. Events kept before contract 3 retain their earlier data; old events are not rewritten. Pending answers started before the update use false.
 
@@ -301,6 +311,18 @@ Content-Security-Policy: default-src 'none'
 * Each download uses the same visibility rule as the owner's interface, with the owner's current rights. An unavailable file, a file of another company, an id nothing has and something that is no id at all all answer the same `404 attachment_unknown`, with the same body and headers, so the answer never tells whether such a file exists. Hornhoof's screenshots of agent programs and operator case files remain unavailable through this route, even when the owner may see the case in the interface.
 * No key, a key in another form, a replaced or revoked key, or an assistant that is switched off answer `401 assistant_key_invalid`, as for every call, before the id is looked at; an owner who is switched off or gone `403 assistant_owner_inactive`.
 
+### GET /api/files/&lt;link&gt;
+
+The `url` of a file in a `reply`. It downloads that one file with no key and no sign-in, so the owner opens it on a phone, and it works for 7 days after the reply was made. Hornhoof signs it with the company's secret, so a link changed in any way opens nothing.
+
+```
+GET /api/files/eyJmIjoiM2YwYzlhNmUt….Jx0v…
+```
+
+* Answers `200` with the file's bytes and the headers of `GET /api/assistant/attachments/:id`.
+* After the 7 days it answers `410 file_link_expired`; ask the agent for the file again. A big file not on the machine that serves Hornhoof now answers `410 file_lost`. A link changed in any way, signed for anything else, or of a file Hornhoof no longer keeps answers `404 attachment_unknown`. The words in `message` follow the phone's `Accept-Language`.
+* Anyone who has the link opens the file until the 7 days end: pass it only to the owner.
+
 ## MCP
 
 A program that is an MCP client, such as OpenClaw, Hermes Agent, Claude Code or Codex, may take the calls above as MCP tools instead of making them itself.
@@ -358,7 +380,7 @@ X-Hornhoof-Signature: sha256=<64 hex characters>
 
 A skill may take a file the agent makes or has, for example a report to put in the owner's calendar, or to send in the owner's chat when the agent answers no message of the program. A file the agent attaches while it answers a message of the program goes to the owner by itself, in the reply's `files`. The file goes to a skill by its id:
 
-1. In its turn, the agent puts the file in Hornhoof with `hh-attach --chat FILE` (any file up to 50 MB), which prints the file's name and its id. Its instructions tell it to.
+1. In its turn, the agent puts the file in Hornhoof with `hh-attach --chat FILE` (any file; one over 50 MB is a big file), which prints the file's name and its id. Its instructions tell it to.
 2. The agent calls `persona_call` with that id in the skill's arguments, under the name the program's message gives for it, for example `{"name":"send_file","arguments":{"attachmentId":"3f0c9a6e-…"}}`.
 3. The program downloads the file with `GET /api/assistant/attachments/3f0c9a6e-…` and its key, takes the name from `Content-Disposition`, and answers the skill's call.
 
@@ -505,7 +527,7 @@ The `platforms` part is there only when the card has an events address. Hermes' 
 | What | Limit |
 | --- | --- |
 | Message text | 1 to 50000 characters, or none with files |
-| Files of a message | up to 10, each up to 50 MB, kept 30 days |
+| Files of a message | up to 10, of any size, kept 30 days; one over 50 MB on one machine only |
 | A message's `freshText` | up to 200000 characters |
 | A message's body | 2 MiB |
 | Long poll wait | 0 to 50 seconds |
@@ -516,7 +538,8 @@ The `platforms` part is there only when the card has an events address. Hermes' 
 | Events address | `http` or `https`, at most 500 characters |
 | Skills address | `http` or `https`, at most 500 characters |
 | Skill call | 120 seconds to answer, at most 100 KB |
-| A file of the own agent | up to 50 MB, from `hh-attach --chat`, kept 30 days |
+| A file of the own agent | any size, from `hh-attach --chat`, kept 30 days; one over 50 MB on one machine only |
+| A file's link in a `reply` | 7 days |
 | Key and signing secret | `hha_` and `hhs_`, each followed by 43 base64url characters |
 
 ## Example session

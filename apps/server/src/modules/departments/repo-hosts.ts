@@ -16,7 +16,7 @@ import { deptName } from './templates.js';
 export type HostKey = { provider: 'github'; owner: string; token: string };
 export type NewRepository = { name: string; description: string };
 /* The new repository's address to clone and its branch, and the page people open; or why it was not created. */
-export type CreatedRepository = { url: string; branch: string; page: string } | { problem: string };
+type CreatedRepository = { url: string; branch: string; page: string } | { problem: string };
 export type RepositoryCreator = (key: HostKey, repo: NewRepository) => Promise<CreatedRepository>;
 
 type Row = typeof repoHosts.$inferSelect;
@@ -37,8 +37,8 @@ export const NewRepositoryBody = z.object({
 const CreateBody = NewRepositoryBody.extend({ first: z.literal(true).optional() });
 
 /* A key as people who set it read it: never the key, only its last characters. */
-export const hostView = (h: Row) => ({ provider: h.provider, owner: h.owner, tokenLast4: h.tokenLast4 });
-export type HostShown = ReturnType<typeof hostView> & { own: boolean };
+const hostView = (h: Row) => ({ provider: h.provider, owner: h.owner, tokenLast4: h.tokenLast4 });
+type HostShown = ReturnType<typeof hostView> & { own: boolean };
 
 /* The keys that create the company's repositories: each top-level department's own, else the company's, with which of them
    it is. */

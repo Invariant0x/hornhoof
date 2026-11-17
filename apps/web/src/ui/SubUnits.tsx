@@ -3,7 +3,7 @@ import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { Department, Employee, Team } from '../types';
 
-export type EmployeeGroup = { key: string; title: string; members: Employee[] };
+type EmployeeGroup = { key: string; title: string; members: Employee[] };
 
 async function runAction(onFail: (err: unknown) => void, work: () => Promise<unknown>) {
   onFail(null);
