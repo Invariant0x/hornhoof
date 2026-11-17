@@ -1,11 +1,15 @@
 import { createVerify, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import Fastify from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { HIDDEN } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies, departments, jobs, people, personAccess, subscriptions, telegramReplies } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
+import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { sendDocument, TelegramError } from '../src/modules/telegram/api.js';
 import { listenAt } from '../../../test-support/ports.mjs';
@@ -671,6 +675,40 @@ describe('the edges of a table delivered to a person', () => {
       expect(reply.content[0]!.text, person).toMatch(/^There is no active person (?:named "[^"]+"|with that id) in this company\.$/);
     }
     expect(c.tg.sentDocuments).toEqual([]);
+  });
+
+  it('gives a file over 50 MB on Telegram as its link, saying it lives 30 days on one machine, and goes on with the chat', async () => {
+    const c = await marketingCompany();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-files-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    c.app.ctx.config.filesDir = dir;
+    const big = Buffer.alloc(FILE_BYTES + 1, 5);
+    c.tg.write(BOT_TOKEN, CEO_TG, 'Пришли архив');
+    const run = await nextOf(c.node, 'job.run');
+    c.node.send({ type: 'job.started', jobId: run.jobId });
+    await until(async () => (await c.db.select().from(telegramReplies)).length === 1);
+    const up = await c.app.inject({
+      method: 'POST',
+      url: '/api/attachments?chat=1&name=archive.zip',
+      payload: big,
+      headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${run.toolToken}` },
+    });
+    expect(up.statusCode).toBe(201);
+    c.node.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Вот архив.' } });
+    await until(() => c.tg.sent.filter(s => s.chat_id === CEO_TG.id).length === 2);
+    expect(c.tg.sentDocuments).toHaveLength(0);
+    const said = c.tg.sent.filter(s => s.chat_id === CEO_TG.id).map(s => s.text);
+    expect(said).toContain('Вот архив.');
+    const link = said.map(s => /^Файл archive\.zip большой: он хранится 30 дней на одной машине и пропадет, если этой машины не станет\. По ссылке его можно скачать 7 дней: (\S+)$/.exec(s)?.[1]).find(Boolean);
+    const opened = await c.app.inject({ url: new URL(link!).pathname });
+    expect(opened.rawPayload.equals(big)).toBe(true);
+
+    /* A bot sends no file that big, so the agent gets its link to pass on. */
+    const client = await mcp(c.app, run.toolToken!);
+    const tool = (await client.callTool({ name: 'send_telegram_file', arguments: { person: c.ceo.id, attachment: up.json().id } })) as ToolReply;
+    expect(tool.isError).toBe(true);
+    expect(tool.content[0]!.text).toMatch(/^archive\.zip is over 50 MB, more than a Telegram bot sends\. Give Ivan its link instead, which opens it for 7 days with no sign-in, and say that a big file lives 30 days on one machine and is lost if that machine goes: http\S+\/api\/files\/\S+$/);
+    expect(c.tg.sentDocuments).toHaveLength(0);
   });
 
   it('shows a picture an agent attached to its chat as a picture, and gives every other chat file to save', async () => {

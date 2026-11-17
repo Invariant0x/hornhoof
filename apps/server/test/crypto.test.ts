@@ -1,7 +1,8 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { hashPassword, verifyPassword } from '../src/auth/password.js';
 import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
-import { hashToken, newToken } from '../src/crypto/tokens.js';
+import { hashToken, newToken, signedBody, signedToken } from '../src/crypto/tokens.js';
 
 const KEY = Buffer.alloc(32, 3);
 
@@ -50,5 +51,15 @@ describe('tokens', () => {
     expect(newToken()).not.toBe(t);
     expect(hashToken(t)).toBe(hashToken(t));
     expect(hashToken(t)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('signs a body for one purpose as base64url JSON and the HMAC of the purpose and it, and reads back only that', () => {
+    const payload = Buffer.from('{"f":1}').toString('base64url');
+    const token = signedToken(KEY, 'purpose one', { f: 1 });
+    expect(token).toBe(`${payload}.${createHmac('sha256', KEY).update(`purpose one\n${payload}`).digest('base64url')}`);
+    expect(signedBody(KEY, 'purpose one', token)).toEqual({ f: 1 });
+    for (const [key, purpose, given] of [[Buffer.alloc(32, 4), 'purpose one', token], [KEY, 'purpose two', token], [KEY, 'purpose one', `${token}x`], [KEY, 'purpose one', `${token}.x`], [KEY, 'purpose one', 'x']] as const) {
+      expect(signedBody(key, purpose, given)).toBeNull();
+    }
   });
 });

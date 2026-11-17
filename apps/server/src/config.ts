@@ -67,6 +67,8 @@ export type Config = {
   /* Where the bundles of products' test harnesses lie, and how much they may take. No folder: each machine builds its own. */
   harnessDir?: string;
   harnessBytes: number;
+  /* Where a file over 50 MB lives, on this machine's disk. No folder: such a file is turned away. */
+  filesDir?: string;
   /* The ACME directory the link's certificate comes from; null with certificates off. */
   acmeDirectory: string | null;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
@@ -133,6 +135,7 @@ const Env = z.object({
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HARNESS_DIR: z.preprocess(unset, z.string().min(1).optional()),
+  FILES_DIR: z.preprocess(unset, z.string().min(1).optional()),
   HARNESS_MB: wholeNumber(1, 100_000_000, 'HARNESS_MB must be a whole number of megabytes, like 20480.'),
   ACME_DIRECTORY: z.preprocess(
     unset,
@@ -254,6 +257,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     keeper: set.HORNHOOF_KEEPER === 'on',
     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
     ...harnessSettings(set),
+    ...(set.FILES_DIR ? { filesDir: set.FILES_DIR } : {}),
     hostId: set.HORNHOOF_HOST_ID ?? null,
     machineId: set.HORNHOOF_MACHINE_ID ?? null,
     ownerKey: set.HORNHOOF_OWNER_KEY && isP256(set.HORNHOOF_OWNER_KEY) ? set.HORNHOOF_OWNER_KEY : null,
