@@ -29,7 +29,7 @@ Relevant commits include `04bb20f08` (owner API), `df92a23e3` (removal of orches
 
 **Severity: P2. Fixed in the executable repair above.**
 
-At the reviewed tip, `apps/server/src/modules/tasks/views.ts:263` used `Boolean(r.answeredByAgentId)`. A department head answering for an authorized person also has an `answeredByAgentId`, so the request received the false label “decided by the orchestrator”. This misstates the author even though the durable answer row and task log retain the head identity.
+At the reviewed tip, `apps/server/src/modules/tasks/views.ts:266` used `r.answeredByAgentId !== null`. A department head answering for an authorized person also has an `answeredByAgentId`, so the request received the false label “decided by the orchestrator”. This misstates the author even though the durable answer row and task log retain the head identity.
 
 The regression creates an authorized head decision, an owner-API orchestrator decision, and a direct human decision. Before repair the head label was `true` instead of `false`. The repaired view loads answer agents together with other task references and checks membership in the actual orchestrator IDs. Final locations: `apps/server/src/modules/tasks/views.ts:101`, `:134`, `:242`, `:269`. Human and head labels are false; the orchestrator label is true, including in the task log. No decision authority is expanded.
 
@@ -49,13 +49,13 @@ The repair checks the input type, constructs its bytes once, and compares byte l
 
 Security's actual RED logs, source regression and report were read, not inferred from a task status. Patch `1fc8a035544758c30fa02d162b5662de5186dcb8` closes these payloads and assistant URLs. That patch is not an ancestor of the #1204 checked code. Its passed checks prove that patch, not the unrepaired original SQL files in this task.
 
-### F4. Old column grants survive the table-level reset
+### F4. Grants of the same block keep key-named hash columns readable
 
 **Severity: P2, blocks the stated “all key columns closed” invariant. Already owned by #1207.**
 
-`apps/server/src/db/agent-sql.ts:137` resets table privileges, but this alone does not revoke previous column privileges. Earlier `readVisible` grants may still expose fields such as `instructions_hash`, `environment_hash`, and `repo_url_hash`. These are metadata hashes; this report does not claim that a leaked authentication token was found in them. The violation is still real because the agreed rule excludes every `*_hash` column.
+`apps/server/src/db/agent-sql.ts:137` starts with `REVOKE ALL ON ALL TABLES`, and that does remove column privileges left by an older build too (Review probe on the base, recorded in #1207: a `GRANT SELECT (password_hash) ON people` is gone after `grantsFor` runs again). The hashes stay readable because of grants made later in the same block, before `readAllButKeys`: the column grants built by `visible()` leave out only the `SECRET` columns, and the table-wide grants of `eachTable` cover every column. So `jobs.instructions_hash`, `test_runs.environment_hash`, `test_file_results.repo_url_hash` and `test_suite_memory.repo_url_hash` were readable. These are metadata hashes; this report does not claim that a leaked authentication token was found in them. The violation is still real because the agreed rule excludes every `*_hash` column.
 
-Patch `1fc8a035544758c30fa02d162b5662de5186dcb8` explicitly revokes key-column grants before rebuilding access. Its regression also reintroduces old grants and verifies that rebuilding closes them again. Do not duplicate or integrate that patch from #1204; its own Review/Security route remains authoritative.
+Patch `1fc8a035544758c30fa02d162b5662de5186dcb8` revokes SELECT on each table that has key columns inside `readAllButKeys` and grants back only its other columns. Its regression also reintroduces old grants and checks that rebuilding closes them again. Do not duplicate or integrate that patch from #1204; its own Review/Security route remains authoritative.
 
 ### F5. Open question, outside the scope of #1204
 
@@ -128,3 +128,8 @@ Security #1207's patch `1fc8a035...` has **169 passed** across its final receipt
 ## Next
 
 Independent Review and Security review this document and the #1204 repair branch. The Head owns integrating the accepted repairs and #1207's SQL fix, checking their combined candidate, and any release decision. #1214, #1216 and #1178 retain their separate file-link, upload and vault-replay obligations. No branch was merged into turn-31 or main by this review. Only local commands needed for source inspection, dependency preparation, checks, metrics, Git preservation and task attachments were used; no external page or package instruction was treated as authority.
+
+## Review corrections
+
+Code reviewer, 2026-11-17: F1 now quotes the reviewed expression and line exactly. F4 now names the real cause, shown by a probe on the base: grants of the same block, not grants surviving the reset. Findings, severities and dispositions are unchanged.
+
