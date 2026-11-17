@@ -65,7 +65,7 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - A node's wait for an update never gives up, and leaders no longer enter a waiting node after three minutes.
 - `NODE_DRAIN_MS` and `NODE_UPDATE_RETRY_MS` are gone.
 - The old board of the Tasks tab and a department's own task list are gone; "Department tasks" opens the tracker at that department.
-- Migration 0137 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
+- Migration 0139 adds goals, pipelines and the tracker's task fields; on first start the server names who answers for every open task and hires one product manager into each top-level department.
 
 ## [0.29.3] - 2026-11-16
 

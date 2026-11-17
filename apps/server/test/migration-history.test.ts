@@ -41,8 +41,9 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
      Migration 0131 gives every plan no fallbacks of its own. */
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null, base_url: null, api_protocol: null, fallbacks: [] } }));
   /* Every head and member gets the speed skill its role lists, and everyone the machine of a built-in node, empty.
-     Migration 0124 gives every card an empty inbox mode of its own, every company the inbox and every turn no inbox wake. */
-  if (table === 'agents') return rows.map(({ row }) => ({ row: { ...row, builtin_machine: null, inbox_mode: null, ...(['head', 'worker'].includes(row.kind as string) ? { skills: [...(row.skills as string[]), 'hh-work-fast'] } : {}) } }));
+     Migration 0124 gives every card an empty inbox mode of its own, every company the inbox and every turn no inbox wake.
+     The tracker's migration gives every card no nudge of its timer yet. */
+  if (table === 'agents') return rows.map(({ row }) => ({ row: { ...row, builtin_machine: null, inbox_mode: null, timer_nudged_at: null, ...(['head', 'worker'].includes(row.kind as string) ? { skills: [...(row.skills as string[]), 'hh-work-fast'] } : {}) } }));
   /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. The tracker's migration marks every
      company there before it for its one-time upgrade. */
   if (table === 'companies') return rows.map(row => ({ row: { ...row.row, task_numbers_used: 1, turn_numbers_used: 0, inbox_mode: 'inbox', tracker_due: true } }));
