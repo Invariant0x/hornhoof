@@ -3,12 +3,15 @@ import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentEvents, agents, attachments, jobs, people } from '../src/db/schema.js';
+import { agentEvents, agents, assistants, attachments, jobs, people } from '../src/db/schema.js';
+import { hashToken } from '../src/crypto/tokens.js';
+import { FILE_BYTES } from '../src/modules/tasks/attachments.js';
+import { createTask } from '../src/modules/tasks/engine.js';
 import { KEEP_IN_REPOSITORY } from '../src/modules/conversation/pictures.js';
 import { albums } from '../src/modules/telegram/bots.js';
 import { whatCame } from '../src/modules/telegram/inbox.js';
 import { fakeTelegram, type TelegramUser } from './fake-telegram.js';
-import { as, connectNode, listen, nextOf, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, listen, mcp, nextOf, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ';
@@ -171,5 +174,69 @@ describe('what a Telegram message carries', () => {
   it('groups only the updates of one album in one chat, in turn', () => {
     const u = (id: number, group?: string, chat = 1) => ({ update_id: id, message: { message_id: id, chat: { id: chat, type: 'private' }, ...(group ? { media_group_id: group } : {}) } });
     expect(albums([u(1), u(2, 'a'), u(3, 'a'), u(4, 'a', 2), u(5, 'b'), u(6)]).map(g => g.map(x => x.update_id))).toEqual([[1], [2, 3], [4], [5], [6]]);
+  });
+});
+
+
+describe('the sender of a Telegram file', () => {
+  async function sender() {
+    const c = await company();
+    const companyId = c.orchestrator.companyId;
+    const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
+    await c.db.update(people).set({ telegramUserId: IVAN.id }).where(eq(people.id, ceo!.id));
+    const [worker] = await c.db.insert(agents).values({ companyId, kind: 'worker', name: 'Developer', model: '', subscriptionId: c.orchestrator.subscriptionId }).returning();
+    const token = 'telegram-file-sender-1214';
+    await c.db.insert(jobs).values({ companyId, agentId: worker!.id, subscriptionId: worker!.subscriptionId!, kind: 'conversation', prompt: 'Send a file', status: 'running', startedAt: new Date(), timeoutMs: 900000, toolTokenHash: hashToken(token) });
+    const client = await mcp(c.app, token);
+    const send = (id: string) => client.callTool({ name: 'send_telegram_file', arguments: { person: ceo!.id, attachment: id } });
+    return { ...c, companyId, ceo: ceo!, worker: worker!, token, send };
+  }
+
+  it.each(['small', 'big'] as const)('refuses a %s private assistant file exactly like an absent file before sharing it', async size => {
+    const c = await sender();
+    const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Personal assistant', status: 'active', isAgent: true, assistantOf: c.ceo.id, scopeKind: 'company' }).returning();
+    const [assistant] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Personal assistant', model: '', subscriptionId: c.orchestrator.subscriptionId }).returning();
+    await c.db.insert(assistants).values({ personId: person!.id, companyId: c.companyId, program: 'avaclone', agentId: assistant!.id });
+    /* A disk-backed row exercises the link branch without transferring 50 MB through a bot. */
+    const [file] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: assistant!.id, name: 'private.bin', mediaType: 'application/octet-stream', bytes: size === 'big' ? Buffer.alloc(0) : ZIP, size: size === 'big' ? FILE_BYTES + 1 : ZIP.length }).returning();
+    const read = await c.app.inject({ url: `/api/attachments/file?task=message&file=${file!.id}`, headers: { authorization: `Bearer ${c.token}` } });
+    expect(read.statusCode).toBe(404);
+    const absent = await c.send('12140000-0000-4000-8000-000000000000');
+    const refused = await c.send(file!.id);
+    expect.soft(refused).toEqual(absent);
+    expect.soft(JSON.stringify(refused)).not.toContain('/api/files/');
+    expect(c.tg.sentDocuments).toEqual([]);
+  });
+
+  it('never lets its own file, named after another file of the task, vouch for that file', async () => {
+    const c = await sender();
+    const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Share file', brief: '', body: '', departmentId: null, assigneeAgentId: c.worker.id, executor: true });
+    /* A file an assistant left on the task, such as its archived text: hh-fetch gives it to no other agent. */
+    const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Personal assistant', status: 'active', isAgent: true, assistantOf: c.ceo.id, scopeKind: 'company' }).returning();
+    const [assistant] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Personal assistant', model: '', subscriptionId: c.orchestrator.subscriptionId }).returning();
+    await c.db.insert(assistants).values({ personId: person!.id, companyId: c.companyId, program: 'avaclone', agentId: assistant!.id });
+    const [theirs] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: assistant!.id, taskId: task.id, name: 'assistant.bin', mediaType: 'application/octet-stream', bytes: ZIP, size: ZIP.length }).returning();
+    const read = await c.app.inject({ url: `/api/attachments/file?task=${task.number}&file=${theirs!.id}`, headers: { authorization: `Bearer ${c.token}` } });
+    expect(read.statusCode).toBe(404);
+    await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.worker.id, taskId: task.id, name: theirs!.id, mediaType: 'application/octet-stream', bytes: Buffer.from('mine'), size: 4 });
+    const absent = await c.send('12140000-0000-4000-8000-000000000000');
+    expect(await c.send(theirs!.id)).toEqual(absent);
+    expect(c.tg.sentDocuments).toEqual([]);
+  });
+
+  it.each(['small', 'big'] as const)('still shares a %s company task file that the sender may read', async size => {
+    const c = await sender();
+    const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Share file', brief: '', body: '', departmentId: null, assigneeAgentId: c.worker.id, executor: true });
+    const [file] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.worker.id, taskId: task.id, name: 'report.bin', mediaType: 'application/octet-stream', bytes: size === 'big' ? Buffer.alloc(0) : ZIP, size: size === 'big' ? FILE_BYTES + 1 : ZIP.length }).returning();
+    const result = await c.send(file!.id);
+    if (size === 'big') {
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).toContain('/api/files/');
+      expect(c.tg.sentDocuments).toEqual([]);
+    } else {
+      expect(result.isError).toBeFalsy();
+      expect(c.tg.sentDocuments).toHaveLength(1);
+      expect(c.tg.sentDocuments[0]!.bytes).toEqual(ZIP);
+    }
   });
 });
