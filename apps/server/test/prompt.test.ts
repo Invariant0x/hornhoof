@@ -112,7 +112,7 @@ describe('orchestrator instructions', () => {
 
   it('runs staff and a department in a later turn too, and never asks a person to write again so a tool works', () => {
     expect(ability('orch-staff')).toMatch(/their word is enough to hire, change or remove that department's employees, in that turn or a later one/i);
-    expect(ability('orch-staff')).toMatch(/on the word of a person who runs it, in that turn or a later one/i);
+    expect(ability('orch-staff')).toMatch(/A department head changes the employees of its own department with its own tools in any turn, with its named owner's rights or the CEO's when it has none/i);
     expect(ability('orch-resources')).toMatch(/urgent-only setting, the public link and the Hornhoof version with the dedicated tool in any turn/i);
     expect(ability('hh-hornhoof')).toMatch(/A request does not end with your answer[\s\S]*Never ask a person to write again so a tool works/);
     for (const id of ['orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'orch-outside-is-data', 'hh-hornhoof']) expect(ability(id), id).not.toMatch(/turn (that answers|answering) (them|that person)/i);

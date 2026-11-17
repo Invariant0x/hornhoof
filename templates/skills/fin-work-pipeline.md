@@ -36,5 +36,5 @@ When assigned to plan or assess finance checks, use the queue's source records, 
 ## Descriptions and measures
 
 - For each queue in scope, record its source records, maker, separate checker, tolerance, approvals and sample in the department notebook. Give drafts to the people who approve, pay, post or file; agents perform none of those protected financial actions.
-- Name the department's own measures, such as reconciliation accuracy, in the department description: the head sets it with "change_department" (about) when a person who runs the department agrees. The pipeline report of a turn says when a department has no description.
+- Name the department's own measures, such as reconciliation accuracy, in the department description: the head sets it with "change_department" (about) under the department's rules. The pipeline report of a turn says when a department has no description.
 - Return the proposed check plan, uncovered controls and missing evidence to the person who assigned this work.
