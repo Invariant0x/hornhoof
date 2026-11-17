@@ -40,12 +40,21 @@ const CHANNEL = {
   stoppedReason: null, stoppedAt: null, canManage: true, policy: { revision: 1, value: POLICY },
   accounts: [{ id: 'ac1', label: 'Outreach', senderDomain: 'letters.acme.test', status: 'active', configGeneration: 1, available: false, author: null }],
 };
-const revision = (status: 'proposed' | 'published') => ({
-  id: 'r1', revision: 1, status, value: {}, summary: 'Spring: twenty percent off every order placed before the end of March', validFrom: '2026-01-01T00:00:00.000Z', validUntil: null,
-  createdAt: '2026-01-01T00:00:00.000Z', createdBy: { kind: 'agent', id: 'a-mia', name: 'Mia' },
-  publishedBy: status === 'published' ? { id: MAX.id, name: 'Max' } : null, publishedVia: null, publishedAt: null, revokedAt: null,
+/* A template the shop sends, its second revision waiting: other words, a new subject, and the way to stop messages added. */
+const SPRING = { kind: 'template', locale: 'en', subject: 'Spring sale', parts: [{ kind: 'text', text: 'Twenty percent off every order placed before the end of March. ' }, { kind: 'slot', slotId: 's1', type: 'price' }] };
+const LAST_DAYS = {
+  kind: 'template', locale: 'en', subject: 'Spring sale, last days',
+  parts: [{ kind: 'text', text: 'Twenty percent off every order placed before Sunday, 31 March. ' }, { kind: 'slot', slotId: 's1', type: 'price' }, { kind: 'text', text: ' ' }, { kind: 'slot', slotId: 's2', type: 'unsubscribe' }],
+};
+const revision = (id: string, n: number, value: object, published: boolean) => ({
+  id, revision: n, status: published ? 'published' : 'proposed', value, summary: (value as { subject: string }).subject, validFrom: '2026-01-01T00:00:00.000Z', validUntil: null,
+  createdAt: `2026-03-0${n}T09:30:00.000Z`, createdBy: { kind: 'agent', id: 'a-mia', name: 'Mia' },
+  publishedBy: published ? { id: MAX.id, name: 'Max' } : null, publishedVia: null, publishedAt: null, revokedAt: null,
 });
-const catalog = (status: 'proposed' | 'published') => ({ departmentId: MKT, entries: [{ entryId: 'e1', kind: 'template', locale: 'en', productId: null, channel: null, current: status === 'published' ? 1 : null, revisions: [revision(status)] }] });
+const catalog = (published: boolean) => ({
+  departmentId: MKT,
+  entries: [{ entryId: 'e1', kind: 'template', locale: 'en', productId: null, channel: null, current: published ? 2 : 1, revisions: [revision('r2', 2, LAST_DAYS, published), revision('r1', 1, SPRING, true)] }],
+});
 const OVERVIEW = { channels: [CHANNEL], messages: [], escalations: [], approvals: [], departments: [{ id: MKT, name: null, templateKey: 'marketing' }] };
 const TEST_ADDRESS = 'max.test@acme.test';
 
@@ -61,14 +70,14 @@ async function serve(page: Page, posted: Posted[]) {
     if (url.pathname === '/api/org') return route.fulfill({ json: ORG });
     if (route.request().method() === 'POST' && url.pathname.startsWith('/api/outbound/')) {
       posted.push({ path: url.pathname, body: route.request().postDataJSON() });
-      if (url.pathname === '/api/outbound/catalog/r1/publish') {
+      if (url.pathname === '/api/outbound/catalog/r2/publish') {
         published = true;
-        return route.fulfill({ json: { id: 'r1', status: 'published' } });
+        return route.fulfill({ json: { id: 'r2', status: 'published' } });
       }
       if (url.pathname === '/api/outbound/contacts') return route.fulfill({ json: { contactId: 'k1', permissionId: 'pm1' } });
     }
     if (url.pathname === '/api/outbound' && url.searchParams.get('department') === MKT) return route.fulfill({ json: OVERVIEW });
-    if (url.pathname === '/api/outbound/catalog') return route.fulfill({ json: catalog(published ? 'published' : 'proposed') });
+    if (url.pathname === '/api/outbound/catalog') return route.fulfill({ json: catalog(published) });
     if (url.pathname === '/api/outbound/setup-log') return route.fulfill({ json: { departmentId: MKT, entries: [] } });
     return route.fallback();
   });
@@ -115,12 +124,27 @@ for (const look of LOOKS) {
     await shot(page, card, `channel-${browserName}-${name}`);
     await shot(page, panel.getByRole('heading', { name: s.catalogTitle }), `catalog-${browserName}-${name}`);
 
+    /* The waiting revision is open at once: its subject, its words with the places a message fills in, its language and
+       who proposed it, and what changed from the revision messages use. */
+    const shown = panel.getByRole('region', { name: s.revision(2) });
+    await expect(shown.getByText('Spring sale, last days', { exact: true })).toBeVisible();
+    await expect(shown.locator('.outbound-facts .outbound-slot').filter({ hasText: s.slots.unsubscribe })).toBeVisible();
+    await expect(shown).toContainText(s.view.proposed('Mia', ''));
+    const changed = shown.getByRole('group', { name: s.view.changesFrom(1) });
+    await expect(changed.locator('ins').first()).toHaveText('sale, last days');
+    await expect(changed.locator('del').first()).toHaveText('sale');
+    await fits(page, panel);
+    expect(await small(part)).toEqual([]);
+    await shown.evaluate(el => el.scrollIntoView({ block: 'start' }));
+    await shot(page, shown, `revision-${browserName}-${name}`);
+
     /* The part reads its catalog and log again after a publish; leaving before that ends cancels them, which WebKit
        reports as a page error. */
     const reread = (path: string) => page.waitForResponse(r => new URL(r.url()).pathname === path);
-    await Promise.all([reread('/api/outbound/catalog'), reread('/api/outbound/setup-log'), panel.getByRole('button', { name: s.publish, exact: true }).click()]);
-    await expect(panel.getByRole('button', { name: s.revoke, exact: true })).toBeVisible();
-    await expect(panel.getByText(s.inUse(1))).toBeVisible();
+    await Promise.all([reread('/api/outbound/catalog'), reread('/api/outbound/setup-log'), shown.getByRole('button', { name: s.publish, exact: true }).click()]);
+    await expect(shown.getByRole('button', { name: s.revoke, exact: true })).toBeVisible();
+    await expect(panel.getByText(s.inUse(2))).toBeVisible();
+    await expect(shown).toContainText(s.view.inUseNow);
 
     await card.getByRole('button', { name: c.add, exact: true }).click();
     const form = card.getByRole('form', { name: c.add });
@@ -144,7 +168,7 @@ for (const look of LOOKS) {
     await form.getByRole('button', { name: c.submit, exact: true }).click();
     await expect(card.getByRole('status')).toHaveText(c.added(TEST_ADDRESS));
     expect(posted).toEqual([
-      { path: '/api/outbound/catalog/r1/publish', body: {} },
+      { path: '/api/outbound/catalog/r2/publish', body: { revision: 2, newest: 2 } },
       { path: '/api/outbound/contacts', body: { channelId: 'ch-b2c', kind: 'email', address: TEST_ADDRESS, source: 'Test address of our team', evidence: 'My own address, to try the letters' } },
     ]);
     await fits(page, panel);

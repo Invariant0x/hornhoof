@@ -2,6 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requestInternal, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { createTask, GOING_ON_TURNS, SILENT_TURNS, submit, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -193,7 +194,7 @@ describe('internal stuck routing', () => {
     await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, taskId: task.id, kind: 'conversation', prompt: 'Work on the turn plan.', timeoutMs: 900000 });
     for (let i = 0; i < SILENT_TURNS; i++) {
       await c.finish(c.orchestrator.id, task.id);
-      const [current] = await c.db.select({ silent: tasks.silent }).from(tasks).where(eq(tasks.id, task.id));
+      const [current] = await c.db.select(only(tasks, 'silent')).from(tasks).where(eq(tasks.id, task.id));
       expect(current?.silent, `silent turns after ${i + 1}`).toBe(i + 1);
     }
 

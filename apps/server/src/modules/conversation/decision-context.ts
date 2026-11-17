@@ -6,7 +6,7 @@ import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import { runsDepartment } from '../../auth/departments.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agentInbox, agents, jobs, people, requests, tasks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
@@ -157,7 +157,7 @@ export async function departmentPrincipal(db: Reader, jobId: string, departmentI
    owner while active. */
 async function activeMachinePerson(db: Reader, personId: string, ownerPersonId: string): Promise<string | null> {
   if (personId !== ownerPersonId) return actingCeo(db, personId);
-  const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, personId));
+  const [owner] = await db.select(only(people, 'status')).from(people).where(eq(people.id, personId));
   return owner?.status === 'active' ? personId : null;
 }
 

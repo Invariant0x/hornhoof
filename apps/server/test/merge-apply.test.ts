@@ -6,7 +6,7 @@ import {
   agentChanges, agentEvents, agents, attachments, companies, computerRuns, departments, jobs, machineAccess, machines, mapReturns, nodes, notebookNotes, people, personAccess, programInstances,
   programOperatorCases, sessions, subscriptions, taskEvents, tasks, teams, testParts, testRuns, turns,
 } from '../src/db/schema.js';
-import { idOnly } from '../src/db/selections.js';
+import { idOnly, only } from '../src/db/selections.js';
 import { nodeSource, withSource } from '../src/db/sources.js';
 import { MergeRefused, runMerge, type MergeResult } from '../src/modules/merge/apply.js';
 import { complete } from '../src/modules/merge/check.js';
@@ -67,7 +67,7 @@ async function stand() {
   const kept = (id: string) => rowsOf<Kept>(db, sql`SELECT * FROM net.merge_rows WHERE merge = ${id} ORDER BY tbl, how`);
   const consumed = (id: string) => rowsOf<{ journal: string; how: string }>(db, sql`SELECT journal, how FROM net.merge_consumed WHERE merge = ${id}`);
   const mergeRow = async (id: string) => (await rowsOf<{ status: string; path: string | null; xact: string | null; tasks: string[]; counts: Record<string, unknown>; task_wanted: boolean; from_at: Date | null; to_at: Date | null; applied_at: Date | null }>(db, sql`SELECT * FROM net.merges WHERE id = ${id}`))[0]!;
-  const titleOf = async (side: Db, id: string) => (await side.select({ title: tasks.title }).from(tasks).where(eq(tasks.id, id)))[0]?.title ?? null;
+  const titleOf = async (side: Db, id: string) => (await side.select(only(tasks, 'title')).from(tasks).where(eq(tasks.id, id)))[0]?.title ?? null;
   return { sides, db, acme: acme!, on, owner: owner!, plan: plan!, staff, orchestrator: orchestrator!, dev: dev!, head: head!, ana: ana!, ben: ben!, turn: turn!, one, two, task, merge, checked, conflicts, kept, consumed, mergeRow, titleOf };
 }
 

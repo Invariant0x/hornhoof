@@ -607,6 +607,8 @@ export const nodes = pgTable(
     account: jsonb('account').$type<Account>(),
     /* How it came up, as it said last: what tells why the turns it ran are gone when it says it again. */
     boot: jsonb('boot').$type<Boot & { stopped?: NodeExit }>(),
+    /* Since when it waits for an update: it takes no new turn until it is back from it. Empty when it does not wait. */
+    updateWaitSince: timestamp('update_wait_since', { withTimezone: true }),
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
@@ -1366,6 +1368,37 @@ export const attachments = pgTable(
   t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
 );
 
+/* A phone is lent independently of its host computer's root access and compute pool. */
+export const companyPhones = pgTable('company_phones', {
+  id: id(), companyId: companyId(), personId: uuid('person_id').notNull().references(() => people.id),
+  machineId: uuid('machine_id').notNull().references(() => machines.id), nodeId: uuid('node_id').notNull().references(() => nodes.id),
+  /* The phone's address on the network, as adb names it. */
+  serial: text('serial').notNull(), hardwareKey: text('hardware_key').notNull(),
+  name: text('name').notNull(), lending: boolean('lending').notNull().default(true), generation: integer('generation').notNull().default(0),
+  createdAt: createdAt(), removedAt: timestamp('removed_at', { withTimezone: true }),
+}, t => [uniqueIndex('company_phones_machine_serial').on(t.machineId, t.serial).where(sql`${t.removedAt} is null`), uniqueIndex('company_phones_hardware').on(t.hardwareKey).where(sql`${t.removedAt} is null`), index('company_phones_company').on(t.companyId), check('company_phones_generation', sql`${t.generation} >= 0`)]);
+
+export const phoneSessions = pgTable('phone_sessions', {
+  id: id(), companyId: companyId(), phoneId: uuid('phone_id').notNull().references(() => companyPhones.id),
+  order: bigserial('queue_order', { mode: 'number' }).notNull(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id), jobId: uuid('job_id').notNull().references(() => jobs.id),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  status: text('status', { enum: ['queued', 'starting', 'active', 'revoking', 'ended', 'cancelled'] }).notNull().default('queued'),
+  generation: integer('generation'), leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  createdAt: createdAt(), startedAt: timestamp('started_at', { withTimezone: true }), endedAt: timestamp('ended_at', { withTimezone: true }),
+  reason: text('reason', { enum: ['completed', 'cancelled', 'lost', 'stopped', 'offline', 'recording_limit', 'failed'] }),
+}, t => [
+  index('phone_sessions_task').on(t.taskId), index('phone_sessions_job').on(t.jobId), index('phone_sessions_queue').on(t.phoneId, t.order),
+  uniqueIndex('phone_sessions_active').on(t.phoneId).where(sql`${t.status} in ('starting', 'active', 'revoking')`),
+  uniqueIndex('phone_sessions_borrower').on(t.phoneId, t.jobId).where(sql`${t.status} in ('queued', 'starting', 'active', 'revoking')`),
+]);
+
+/* A session's screens, in order, each picture an attachment of its task. */
+export const phoneFrames = pgTable('phone_frames', {
+  id: id(), companyId: companyId(), sessionId: uuid('session_id').notNull().references(() => phoneSessions.id), sequence: integer('sequence').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull(), attachmentId: uuid('attachment_id').references(() => attachments.id, { onDelete: 'cascade' }),
+}, t => [unique('phone_frames_sequence').on(t.sessionId, t.sequence), index('phone_frames_session').on(t.sessionId)]);
+
 /* A physical agent program, distinct from the provider session it resumes. */
 export const programInstances = pgTable('program_instances', {
   id: uuid('id').primaryKey(),
@@ -1445,7 +1478,7 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
-  version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
+  version: 1; repositoryScope: RepositoryScope; suite?: string;
   /* The time limit of a part the run asked for, when it asked for one. */
   minutes?: number;
   requestId: string | null; nodeId: string | null; builtin: boolean;
@@ -1459,10 +1492,9 @@ export type TestEnvironmentSelection = { selection: TestExecution['selection']; 
 export type TestFileKey = { suiteId: string; file: string };
 /* How a run reused green results. mode: cached reuses what kept its fingerprint, full runs everything, off had no fingerprints
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
-export type ReusedTestUnit = UnitFingerprint & { runId: string; commitSha: string };
 export type TestRunFileCache = {
-  mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
-  reusedUnits?: ReusedTestUnit[];
+  /* release: the release the run checks, whose results it may take; none on a run from before releases were kept. */
+  mode: 'cached' | 'full' | 'off'; release?: string; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
   verifiedFingerprints?: UnitFingerprint[];
   /* How many green results the run kept for later, once it ended. */
   kept?: number;
@@ -1633,7 +1665,7 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
-    /* Proved on the repository's main branch or the turn's. A release takes these, and those proved on a commit the main branch holds now. */
+    /* No longer read: every shared run checks a release now. It stays until a migration drops it. */
     mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },

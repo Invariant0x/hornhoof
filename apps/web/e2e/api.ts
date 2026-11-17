@@ -88,6 +88,7 @@ const ROUTES: Record<string, unknown> = {
   '/api/network/switched': { switched: null },
   '/api/network/question': { question: null, canAnswer: false },
   '/api/machines': { machines: [] },
+  '/api/phones': { phones: [] },
   /* The link's certificate, asked beside the machines, and the backups a wide look at every screen opens. */
   '/api/link': { link: null, domain: 'hornhoof.org' },
   '/api/backups': { last: null, recovery: null, recoveryNeeded: false, linkChanged: false, restore: null, kept: [], bundles: [] } satisfies BackupsView,
@@ -122,6 +123,7 @@ export async function serveApi(page: Page) {
        reconnect the whole app fetches what it missed, which keeps every page in every test busy. */
     if (path === '/api/stream') return;
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
+    if (/^\/api\/tasks\/[^/]+\/phone-recordings$/.test(path)) return route.fulfill(json({ recordings: [] }));
     if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));
     if (/^\/api\/subscriptions\/[^/]+\/tokens(\?|$)/.test(path)) return route.fulfill(json({ tokens: NO_TOKENS }));
     /* A department has no task branch outside main unless a test says otherwise. */

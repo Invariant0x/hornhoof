@@ -2,6 +2,7 @@ import { apiEndpoint, currentLimits, modelsFor, type Account, type ApiEndpoint, 
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type PlanFallback, type Provider, type SUBSCRIPTION_STATUSES, type TARGET_KINDS } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { nodeIdentity, ownBuiltin, type NodeIdentity, type NodeHub } from '../nodes/hub.js';
@@ -155,7 +156,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
   const listedOwners = [...new Set(rows.filter(r => r.kind === 'personal' && r.ownerScopeKind !== 'company').map(r => r.ownerId))];
   const access = listedOwners.length ? await db.select().from(personAccess).where(inArray(personAccess.personId, listedOwners)) : [];
   const orderedDepts = deptRows.map(d => d.id);
-  const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(and(eq(agents.kind, 'orchestrator'), companyId ? eq(agents.companyId, companyId) : undefined));
+  const [orchestrator] = await db.select(only(agents, 'subscriptionId')).from(agents).where(and(eq(agents.kind, 'orchestrator'), companyId ? eq(agents.companyId, companyId) : undefined));
   const allNodes = await planNodes(db, rows.filter(r => r.kind === 'personal').map(r => r.id));
   const told = allNodes.length ? await db.select({ id: nodes.id, account: nodes.account }).from(nodes).where(inArray(nodes.id, allNodes.map(n => n.id))) : [];
   const accountOf = new Map(told.map(n => [n.id, n.account]));

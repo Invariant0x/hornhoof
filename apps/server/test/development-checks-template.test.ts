@@ -34,7 +34,7 @@ describe('development check ownership', () => {
     expect(implement).toMatch(/submit its exact SHA, requirements-to-tests, observed results/);
     expect(implement).not.toMatch(/Finish[^\n]*(formatter|linter|type checker|crapper|dryer)/);
     const selection = body('dev-testing-policy').split('\n').find(line => line.startsWith('- **T2:'))!;
-    expect(selection).toContain('run_tests');
+    expect(selection).toMatch(/Check what you touched with local tests of the files it reaches; every test runs together once per release, on the turn's branch or a release branch before main, or on main\./);
     expect(selection).not.toMatch(/lint|crapper|dryer/);
     const ordinary = body('dev-testing-policy').split('\n').find(line => line.startsWith('- **T3:'))!;
     expect(ordinary).toContain('affected tests');
@@ -45,35 +45,25 @@ describe('development check ownership', () => {
     expect(body('dev-gates')).toMatch(/When broader validation is assigned/);
     expect(body('dev-testing-policy')).toMatch(/If assigned full candidate validation/);
     expect(body('dev-work-pipeline')).toMatch(/When a full candidate validation is assigned/);
-    for (const id of ['dev-language-rules', 'dev-browser-check']) expect(body(id), id).toContain('run_tests');
+    expect(body('dev-language-rules')).toContain('run_tests');
     expect(body('dev-review-diff')).not.toMatch(/developer runs them before submitting|one reviewer[^.]*runs mutator/);
     expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
   });
 });
 
 describe('where change checks run and what proves them', () => {
-  it('lets an assignment widen what is checked, never move change checks to run_tests', () => {
+  it('keeps change checks in the workspace, with named local tests when the workspace cannot run or bound one', () => {
     for (const id of ['dev-task-flow', 'dev-gates', 'hh-task-flow']) {
       expect(body(id), id).not.toMatch(/stricter[^.]*assignment|assignment can require every check there|takes precedence/i);
     }
-    for (const id of ['hh-run-checks', 'dev-task-flow', 'dev-gates', 'hh-task-flow']) {
-      expect(body(id), id).toMatch(/assignment can widen what is checked[^.]*never move[^.]*change checks to "?run_tests"?/i);
-    }
     for (const id of ['hh-run-checks', 'dev-implement']) {
       expect(body(id), id).not.toMatch(/use\s+`?"?run_tests`?"?\s+(?:for\s+one\s+)?(?:only\s+)?when\s+your\s+(?:own\s+)?workspace\s+cannot\s+run\s+it/i);
-      expect(body(id), id).toMatch(/when your workspace cannot run a check[\s\S]*named local tests of the touched area[\s\S]*say what is missing[\s\S]*release owner's `?"?run_tests"?`? run once per release candidate on the combined release candidate before main/i);
+      expect(body(id), id).toMatch(/when your workspace cannot run a check[\s\S]*named local tests of the touched area[\s\S]*say what is missing/i);
     }
   });
 
-  it('tells whoever leads not to order change checks through run_tests', () => {
-    for (const id of ['hh-lead-tasks', 'dev-lead', 'hh-brief-members']) expect(body(id), id).toMatch(/never order[^.]*change checks[^.]*run_tests/i);
-  });
-
-  it('takes the author\'s check record for the exact commit and asks a run_tests receipt only for a whole suite', () => {
-    for (const id of ['dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/author's check record for the exact commit/);
-    for (const id of ['dev-review-verdict', 'dev-review-diff', 'dev-testing-policy']) {
-      expect(body(id), id).toMatch(/run_tests receipt is needed only for a whole suite or declared profile/);
-    }
+  it('reads the author\'s description of the local checks they ran and reruns what the reviewer doubts', () => {
+    for (const id of ['dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/author's description of the local checks they ran[^.]*rerun what you doubt in your own workspace/);
   });
 });
 
@@ -134,7 +124,7 @@ describe('turnkey work', () => {
     for (const id of ['orch-plan-turn', 'orch-company', 'hh-head', 'hh-lead-tasks', 'dev-lead']) expect(body(id), id).not.toMatch(/plan_turn|\bmode\b/);
   });
 
-  it('tells the member of a turnkey team to carry its task end to end alone, skip per-task run_tests except on a standalone release, and close it with report', () => {
-    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*no per-task run_tests \(unless this task itself assembles the final release to main\)[^.]*report done true/);
+  it('tells the member of a turnkey team to carry its task end to end alone and close it with report', () => {
+    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*nobody else called onto it[^.]*report done true/);
   });
 });

@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { tasks, turns } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { echelonsTurn } from './helpers.js';
 import { call, company, text, work } from './turns-company.js';
 
@@ -28,7 +29,7 @@ describe('tasks flow outside every turn until their results are accepted', () =>
     await call(await tools(orchestrator), 'add_tasks', { tasks: [work(dev.id, 'Checkout')] });
     const done = await call(await tools(hana), 'report', { task: 1, done: true, summary: 'Shipped.' });
     expect(done.isError, text(done)).toBeFalsy();
-    expect((await db.select({ status: turns.status }).from(turns).where(eq(turns.id, open.id)))[0]).toEqual({ status: 'open' });
+    expect((await db.select(only(turns, 'status')).from(turns).where(eq(turns.id, open.id)))[0]).toEqual({ status: 'open' });
     expect((await rows(db)).map(r => [r.number, r.status, r.turnId])).toEqual([[1, 'done', null]]);
   });
 

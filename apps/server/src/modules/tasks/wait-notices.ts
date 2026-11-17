@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { accessOf, canReach } from '../../auth/access.js';
 import { agents, people, requests, taskEvents, tasks, taskWaits, waitNotices, type TaskEventKind } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { loggable } from '../../errors.js';
 import { insertOrDeliverTurn, liveSubscription, pump } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
@@ -63,7 +63,7 @@ export async function recordRequestedNotice(db: Writer, notice: NewWaitNotice): 
 
 /* A request holds while its task still waits on that employee in that episode. */
 async function waitOnStands(db: Pick<Db, 'select'>, companyId: string, guard: NonNullable<WaitNoticeGuard['waitOn']>, now: Date): Promise<boolean> {
-  const [task] = await db.select({ externalWait: tasks.externalWait }).from(tasks).where(and(eq(tasks.id, guard.taskId), eq(tasks.companyId, companyId)));
+  const [task] = await db.select(only(tasks, 'externalWait')).from(tasks).where(and(eq(tasks.id, guard.taskId), eq(tasks.companyId, companyId)));
   const wait = task?.externalWait;
   if (wait?.on?.kind !== 'employee' || wait.on.employee !== guard.employee || new Date(wait.until) <= now) return false;
   return (await waitEpisode(db, guard.taskId)) === guard.episode;
@@ -134,7 +134,7 @@ async function cardStands(db: Pick<Db, 'select'>, guard: WaitNoticeGuard): Promi
 }
 
 async function cardTask(db: Pick<Db, 'select'>, card: Notice): Promise<Task | null> {
-  const [wait] = card.waitId ? await db.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, card.waitId)) : [];
+  const [wait] = card.waitId ? await db.select(only(taskWaits, 'taskId')).from(taskWaits).where(eq(taskWaits.id, card.waitId)) : [];
   const taskId = wait?.taskId ?? card.guard.turn?.taskId;
   const [task] = taskId ? await db.select().from(tasks).where(eq(tasks.id, taskId)) : [];
   return task ?? null;

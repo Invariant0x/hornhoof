@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { only } from '../src/db/selections.js';
 import { GONE_ALONG, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { nodeConnected, nodeDisconnected } from '../src/modules/nodes/connections.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
@@ -93,10 +94,10 @@ async function company() {
     queueTaskMessage(ctx, { companyId, agentId: bruno.id, task: task.number, actor: { agentId: head.id }, text }, { companyId, agentId: bruno.id, prompt: `Hana (Head of development): ${text}`, createdBy: null, message: { personId: null, text, from: 'agent', name: 'Hana', by: head.id } });
   /* The CEO comments on a task, which wakes the one who holds it. */
   const ask = async (taskId: string, text: string) => wakeAll(ctx, (await comment(ctx, { personId: ceo!.id }, taskId, text)).wakes);
-  const continued = (taskId: string) => db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'continued'))).orderBy(asc(taskEvents.createdAt));
+  const continued = (taskId: string) => db.select(only(taskEvents, 'data')).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'continued'))).orderBy(asc(taskEvents.createdAt));
   const stuck = () => db.select({ taskId: requests.taskId, text: requests.text }).from(requests).where(eq(requests.kind, 'stuck'));
-  const statusOf = async (taskId: string) => (await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId)))[0]!.status;
-  const silentOf = async (taskId: string) => (await db.select({ silent: tasks.silent }).from(tasks).where(eq(tasks.id, taskId)))[0]!.silent;
+  const statusOf = async (taskId: string) => (await db.select(only(tasks, 'status')).from(tasks).where(eq(tasks.id, taskId)))[0]!.status;
+  const silentOf = async (taskId: string) => (await db.select(only(tasks, 'silent')).from(tasks).where(eq(tasks.id, taskId)))[0]!.silent;
   const reminded = async (taskId: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'reminded')))).length;
   const sentPrompt = (jobId: string) => {
     const call = send.mock.calls.find(([, m]) => m.type === 'job.run' && m.jobId === jobId);

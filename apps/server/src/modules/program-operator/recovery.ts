@@ -2,7 +2,7 @@ import { and, eq, exists, gte, inArray, isNotNull, isNull, lte, or, sql, type SQ
 import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programDeliveries, programOperatorCases, tasks } from '../../db/schema.js';
-import { idOnly } from '../../db/selections.js';
+import { idOnly, only } from '../../db/selections.js';
 import { conversationOf, GONE_ALONG, insertTurn, liveSubscription, NoSubscription, STOPPED_ON_PURPOSE, turnGoingOn } from '../conversation/queue.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
 import type { MessageParty } from '../events/parties.js';
@@ -26,7 +26,7 @@ const OWNER_TURN: HoldEnd = { outcome: 'owner_turn', text: 'The existing owner t
 const NOT_AWAITED: HoldEnd = { outcome: 'not_awaited', text: 'The task no longer waits for these words, so they do not go on.' };
 const BY_ITSELF = ['went_on', 'program_gone'];
 const stoppedOnPurpose = (job: Job) => STOPPED_ON_PURPOSE.includes(job.error ?? '');
-const agentRemoved = async (ctx: Ctx, row: Case) => Boolean((await ctx.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, row.agentId)))[0]?.removedAt);
+const agentRemoved = async (ctx: Ctx, row: Case) => Boolean((await ctx.db.select(only(agents, 'removedAt')).from(agents).where(eq(agents.id, row.agentId)))[0]?.removedAt);
 const deliveryOf = async (ctx: Ctx, row: Case) => row.deliveryId ? (await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)))[0] : undefined;
 const programLeft = (delivery: typeof programDeliveries.$inferSelect) => delivery.outcome === 'cancelled' || delivery.outcome === 'not_taken';
 

@@ -5,6 +5,7 @@ import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people, requests, taskEvents, tasks, turns, type AgentKind, type RequestOption } from '../../db/schema.js';
+import { only } from '../../db/selections.js';
 import { commitUrl, filesOf, picturesOf } from './attachments.js';
 import { deptName } from '../departments/templates.js';
 import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
@@ -271,7 +272,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
 /* Without the hub, as in a reader that knows no machine, nothing is said of one. */
 async function holderOffline(ctx: Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'hub'>>, agentId: string | null): Promise<OfflineMachine | null> {
   if (!ctx.hub || !agentId) return null;
-  const [holder] = await ctx.db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.id, agentId));
+  const [holder] = await ctx.db.select(only(agents, 'subscriptionId')).from(agents).where(eq(agents.id, agentId));
   return offlineMachine({ db: ctx.db, hub: ctx.hub }, holder?.subscriptionId ?? null);
 }
 

@@ -69,7 +69,7 @@ export function markPromise(full: string | null | undefined, command: string): s
 }
 
 /* A run of the product's own environment that stands for the whole product: what GitHub would otherwise run again. Files that kept
-   a green result at their fingerprint count as checked, as they do for the turn; the full run every so many turns checks them. */
+   a green result of the release count as checked: its first run ran them. */
 const wholeProduct = (run: Run): boolean => Boolean(run.environmentSnapshot && run.environmentRequest && runPurpose(run.environmentSnapshot, run.environmentRequest.suite) === 'final');
 
 /* The open test run with this id, when it pinned a commit and either runs to the letter what its repository declared as the whole

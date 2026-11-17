@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type R
 import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import type { Messages } from '../i18n/en';
+import { joined, RevisionView, whenOf } from './CatalogRevision';
 import { Field } from './Field';
 import { TickBox } from './TickBox';
 
@@ -39,6 +40,7 @@ type Revision = {
   revision: number;
   status: 'proposed' | 'published' | 'revoked';
   summary: string;
+  value: { kind?: string };
   createdAt: string;
   createdBy: { kind: 'person' | 'agent'; name: string | null };
   publishedBy: Named;
@@ -49,7 +51,8 @@ type LogEntry = { id: string; kind: keyof Messages['outboundSetup']['log']; chan
 
 export type RunDepartment = { id: string; name: string | null; templateKey: keyof Messages['templates'] | null };
 
-const errorOf = (t: Messages, err: unknown): string => (err instanceof ApiFailure && err.reason === 'outbound_invalid' ? t.outboundSetup.invalid : errorText(t, err));
+const reasonOf = (err: unknown): string | undefined => (err instanceof ApiFailure ? err.reason : undefined);
+const errorOf = (t: Messages, err: unknown): string => (reasonOf(err) === 'outbound_invalid' ? t.outboundSetup.invalid : errorText(t, err));
 
 /* A move that reloads what it changed, with its failure shown where it was made. */
 function useMove(onDone: () => void) {
@@ -72,7 +75,7 @@ function useMove(onDone: () => void) {
 
 function Failure({ failure }: { failure: unknown }) {
   const t = useT();
-  return failure === null ? null : <p className="alert" role="alert">{errorOf(t, failure)}</p>;
+  return failure === null ? null : <p className="alert" role="alert" dir="auto">{errorOf(t, failure)}</p>;
 }
 
 /* The buttons of an entry, and the foot of a form: each a group at the end of its line. */
@@ -90,9 +93,6 @@ const TONE: Record<string, 'active' | 'invited' | 'offline'> = { active: 'active
 function Status({ of, children }: { of: string; children: ReactNode }) {
   return <span className={`status ${TONE[of] ?? 'offline'}`}>{children}</span>;
 }
-
-/* Pieces of one line, the dot held to the piece before it, so that no line begins with it. */
-const joined = (pieces: readonly (string | null | undefined | false)[]): string => pieces.filter(Boolean).join('\u00a0· ');
 
 /* A mail account or a webhook for a channel. Its password or key leaves this form once and is forgotten here at once. */
 function AccountForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDone(): void; onCancel(): void }) {
@@ -197,20 +197,20 @@ function PolicyForm({ channel, onDone, onCancel }: { channel: SetupChannel; onDo
         <TickBox checked={v.autoSend} onChange={e => setV({ ...v, autoSend: e.target.checked })} />
         <span>
           <b>{s.autoSend}</b>
-          <small>{channel.audience === 'public' ? s.autoSendPublic : s.autoSendHint}</small>
+          <small dir="auto">{channel.audience === 'public' ? s.autoSendPublic : s.autoSendHint}</small>
         </span>
       </label>
       <fieldset className="field-group outbound-numbers">
         <legend>{s.reviewTitle}</legend>
         <div className="field-group-body">
-          <p className="hint">{s.reviewHint}</p>
+          <p className="hint" dir="auto">{s.reviewHint}</p>
           {NUMBERS.slice(0, 4).map(([, key]) => count(key, key === 'everyNth' ? 1 : 0))}
         </div>
       </fieldset>
       <fieldset className="field-group outbound-numbers">
         <legend>{s.circuitTitle}</legend>
         <div className="field-group-body">
-          <p className="hint">{s.circuitHint}</p>
+          <p className="hint" dir="auto">{s.circuitHint}</p>
           {NUMBERS.slice(4).map(([, key]) => count(key, key === 'windowHours' || key === 'minimumSample' ? 1 : 0))}
         </div>
       </fieldset>
@@ -236,7 +236,7 @@ function AccountLine({ account }: { account: SetupAccount }) {
         <b>{account.label}</b>
         <Status of={account.status}>{s.accountStatuses[account.status]}</Status>
       </span>
-      <small>
+      <small dir="auto">
         <bdi className="outbound-address">{account.senderDomain}</bdi>
         {`\u00a0· ${account.author ? s.writes(account.author.name) : s.nobodyWrites}`}
       </small>
@@ -265,16 +265,16 @@ function ChannelCard({ channel, onChanged }: { channel: SetupChannel; onChanged(
           <Status of={channel.status}>{t.outbound.channelStatuses[channel.status]}</Status>
         </div>
         <p className="outbound-meta">
-          <span>{joined([s.adapters[channel.adapter], s.audiences[channel.audience]])}</span>
-          <span>{policyLine(s, channel.policy)}</span>
+          <span dir="auto">{joined([s.adapters[channel.adapter], s.audiences[channel.audience]])}</span>
+          <span dir="auto">{policyLine(s, channel.policy)}</span>
         </p>
       </header>
       {channel.accounts.length ? <ul className="outbound-list">{channel.accounts.map(a => <AccountLine key={a.id} account={a} />)}</ul> : null}
-      {!working && <p className="muted">{s.noAccount}</p>}
+      {!working && <p className="muted" dir="auto">{s.noAccount}</p>}
       {open === 'account' && <AccountForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'policy' && <PolicyForm channel={channel} onDone={done} onCancel={() => setOpen(null)} />}
       {open === 'contact' && <ContactForm channel={channel} onDone={said => { setOpen(null); setAdded(said); }} onCancel={() => setOpen(null)} />}
-      {added && <p className="muted outbound-added" role="status">{added}</p>}
+      {added && <p className="muted outbound-added" role="status" dir="auto">{added}</p>}
       {open === null && <ChannelActions channel={channel} onOpen={form => { setAdded(null); setOpen(form); }} onChanged={onChanged} />}
     </div>
   );
@@ -389,15 +389,15 @@ function ContactForm({ channel, onDone, onCancel }: { channel: SetupChannel; onD
         <TickBox ref={refs.agreed} checked={v.agreed} onChange={e => setV({ ...v, agreed: e.target.checked })} aria-invalid={agreedNote ? true : undefined} aria-describedby={agreedNote || undefined} />
         <span>
           <b>{c.agreed}</b>
-          <small>{c.purpose(channel.purpose)}</small>
+          <small dir="auto">{c.purpose(channel.purpose)}</small>
         </span>
       </label>
-      {agreedNote && <span id={agreedNote} className="bad">{problems.agreed}</span>}
+      {agreedNote && <span id={agreedNote} className="bad" dir="auto">{problems.agreed}</span>}
       <FormFoot>
         <button className="btn" type="submit" disabled={busy}>{c.submit}</button>
         <button className="btn ghost" type="button" onClick={onCancel}>{t.common.cancel}</button>
       </FormFoot>
-      {alert && <p className="alert" role="alert">{alert}</p>}
+      {alert && <p className="alert" role="alert" dir="auto">{alert}</p>}
     </form>
   );
 }
@@ -453,23 +453,60 @@ function byWhom(s: Messages['outboundSetup'], person: Named, agent: Named): stri
   return agent ? s.byVia(person.name, agent.name) : s.by(person.name);
 }
 
-function RevisionLine({ revision, onChanged }: { revision: Revision; onChanged(): void }) {
-  const s = useT().outboundSetup;
+/* A revision with its view, the newest one open at once: what is published or taken back is the revision shown, as its
+   entry stood when it was shown, so a newer version since makes the server refuse and the catalog is read again. */
+const MOVES: Partial<Record<Revision['status'], 'publish' | 'revoke'>> = { proposed: 'publish', published: 'revoke' };
+
+/* Publishes or takes back the revision shown, with the newest one of its entry then; a newer one since reads it again. */
+function useRevisionMove(revision: Revision, newest: number, onChanged: () => void) {
   const { busy, failure, run } = useMove(onChanged);
-  const author = revision.createdBy.name ?? '';
-  const move = revision.status === 'proposed' ? 'publish' : revision.status === 'published' ? 'revoke' : null;
+  const act = (to: 'publish' | 'revoke') =>
+    run(async () => {
+      try {
+        await api.post(`/api/outbound/catalog/${revision.id}/${to}`, { revision: revision.revision, newest });
+      } catch (err) {
+        if (reasonOf(err) === 'outbound_changed') onChanged();
+        throw err;
+      }
+    });
+  return { busy, failure, act };
+}
+
+function RevisionHead({ revision }: { revision: Revision }) {
+  const s = useT().outboundSetup;
   return (
-    <li className="outbound-entry">
+    <>
       <span className="outbound-title">
         <b>{s.revision(revision.revision)}</b>
         <Status of={revision.status}>{s.statuses[revision.status]}</Status>
       </span>
       <span>{revision.summary}</span>
-      <small>{joined([s.wrote(author), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
-      {move && (
-        <EntryActions>
-          <button className={move === 'revoke' ? 'btn ghost danger' : 'btn ghost'} type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/outbound/catalog/${revision.id}/${move}`, {}))}>{s[move]}</button>
-        </EntryActions>
+      <small dir="auto">{joined([s.wrote(revision.createdBy.name ?? ''), revision.status !== 'proposed' && byWhom(s, revision.publishedBy, revision.publishedVia)])}</small>
+    </>
+  );
+}
+
+function RevisionLine({ entry, revision, onChanged }: { entry: Entry; revision: Revision; onChanged(): void }) {
+  const s = useT().outboundSetup;
+  const newest = entry.revisions[0]!.revision;
+  const { busy, failure, act } = useRevisionMove(revision, newest, onChanged);
+  const [open, setOpen] = useState(revision.revision === newest);
+  const viewId = useId();
+  const move = MOVES[revision.status];
+  return (
+    <li className="outbound-entry">
+      <RevisionHead revision={revision} />
+      <EntryActions>
+        <button className="btn ghost" type="button" aria-expanded={open} aria-controls={viewId} onClick={() => setOpen(!open)}>{open ? s.hide(revision.revision) : s.show(revision.revision)}</button>
+      </EntryActions>
+      {open && (
+        <RevisionView id={viewId} entry={entry} revision={revision}>
+          {move && (
+            <EntryActions>
+              <button className={move === 'revoke' ? 'btn ghost danger' : 'btn'} type="button" disabled={busy} onClick={() => void act(move)}>{s[move]}</button>
+            </EntryActions>
+          )}
+        </RevisionView>
       )}
       <Failure failure={failure} />
     </li>
@@ -485,11 +522,11 @@ function CatalogEntry({ entry, onChanged }: { entry: Entry; onChanged(): void })
       <header>
         <h3>{`${kind}: ${entry.revisions[0]!.summary}`}</h3>
         <p className="outbound-meta">
-          {where && <span>{where}</span>}
-          <span>{entry.current === null ? s.notInUse : s.inUse(entry.current)}</span>
+          {where && <span dir="auto">{where}</span>}
+          <span dir="auto">{entry.current === null ? s.notInUse : s.inUse(entry.current)}</span>
         </p>
       </header>
-      <ul className="outbound-list outbound-entries">{entry.revisions.map(r => <RevisionLine key={r.id} revision={r} onChanged={onChanged} />)}</ul>
+      <ul className="outbound-list outbound-entries">{entry.revisions.map(r => <RevisionLine key={r.id} entry={entry} revision={r} onChanged={onChanged} />)}</ul>
     </div>
   );
 }
@@ -497,13 +534,13 @@ function CatalogEntry({ entry, onChanged }: { entry: Entry; onChanged(): void })
 function LogLine({ entry }: { entry: LogEntry }) {
   const s = useT().outboundSetup;
   const { language } = useLanguage();
-  const at = new Date(entry.at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const at = whenOf(language, entry.at);
   const what = s.log[entry.kind] ?? entry.kind;
   return (
     <li className="outbound-entry">
       <b>{what}</b>
       {entry.channel && <span>{entry.channel.name}</span>}
-      <small>{joined([at, byWhom(s, entry.person, entry.agent)])}</small>
+      <small dir="auto">{joined([at, byWhom(s, entry.person, entry.agent)])}</small>
     </li>
   );
 }
@@ -561,26 +598,26 @@ export function DepartmentMessaging({ departmentId }: { departmentId: string }) 
   const t = useT();
   const { data, failure, load } = useDepartmentMessaging(departmentId);
   if (data?.runs === false) return null;
-  if (failure !== null) return <p className="alert" role="alert">{errorOf(t, failure)}</p>;
-  return data ? <SetupBody data={data} departmentId={departmentId} onChanged={load} /> : <p className="muted" role="status">{t.common.loading}</p>;
+  if (failure !== null) return <p className="alert" role="alert" dir="auto">{errorOf(t, failure)}</p>;
+  return data ? <SetupBody data={data} departmentId={departmentId} onChanged={load} /> : <p className="muted" role="status" dir="auto">{t.common.loading}</p>;
 }
 
 function SetupBody({ data, departmentId, onChanged: load }: { data: Extract<Loaded, { runs: true }>; departmentId: string; onChanged(): void }) {
   const s = useT().outboundSetup;
   return (
     <div className="outbound-setup">
-      <p className="muted">{s.intro}</p>
+      <p className="muted" dir="auto">{s.intro}</p>
       <Part title={s.channelsTitle}>
-        {data.channels.length === 0 && <p className="muted">{s.noChannels}</p>}
+        {data.channels.length === 0 && <p className="muted" dir="auto">{s.noChannels}</p>}
         <div className="imps">{data.channels.map(c => <ChannelCard key={c.id} channel={c} onChanged={load} />)}</div>
         <NewChannel departmentId={departmentId} onChanged={load} />
       </Part>
       <Part title={s.catalogTitle}>
-        <p className="muted">{s.catalogIntro}</p>
-        {data.entries.length === 0 ? <p className="muted">{s.catalogEmpty}</p> : <div className="imps">{data.entries.map(e => <CatalogEntry key={e.entryId} entry={e} onChanged={load} />)}</div>}
+        <p className="muted" dir="auto">{s.catalogIntro}</p>
+        {data.entries.length === 0 ? <p className="muted" dir="auto">{s.catalogEmpty}</p> : <div className="imps">{data.entries.map(e => <CatalogEntry key={e.entryId} entry={e} onChanged={load} />)}</div>}
       </Part>
       <Part title={s.logTitle}>
-        {data.log.length === 0 ? <p className="muted">{s.logEmpty}</p> : <ul className="outbound-list outbound-entries">{data.log.map(e => <LogLine key={e.id} entry={e} />)}</ul>}
+        {data.log.length === 0 ? <p className="muted" dir="auto">{s.logEmpty}</p> : <ul className="outbound-list outbound-entries">{data.log.map(e => <LogLine key={e.id} entry={e} />)}</ul>}
       </Part>
     </div>
   );
