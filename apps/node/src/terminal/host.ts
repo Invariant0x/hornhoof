@@ -683,7 +683,7 @@ export class TerminalHost {
       if (failed) return failed;
       const done = await this.runRequested(a, job, turn, tools, goesOn, a.ended!);
       if (!goesOn && !tools && done.ok) await this.toolsConnected(a, job);
-      return { ...done, sensitive: a.privateOutput || turn.privacy?.sensitive, privateValues: turn.privacy?.values };
+      return this.privateResult(a, turn, done);
     } finally {
       this.closesTurn(a, job, turn, starting);
     }
@@ -699,6 +699,10 @@ export class TerminalHost {
     while (!job.input.signal?.aborted && (await this.opts.tmux.alive(a.name))) {
       if (await Promise.race([over, sleep(this.pollMs).then(() => false)])) return;
     }
+  }
+
+  private privateResult(agent: Agent, turn: Turn, result: RunResult): RunResult {
+    return { ...result, sensitive: agent.privateOutput || turn.privacy?.sensitive, privateValues: turn.privacy?.values };
   }
 
   private opensTurn(a: Agent, job: TermJob, goesOn: boolean, tools: Promise<unknown> | null): { turn: Turn; starting: Promise<unknown> | null } {
