@@ -1,4 +1,5 @@
 import type { NodeMessage, ProgramState } from '@hornhoof/protocol';
+import type { ProgramView } from '@hornhoof/protocol/program-operator';
 import { and, asc, eq } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -8,6 +9,8 @@ import { only } from '../src/db/selections.js';
 import { insertTurn, pump, TURN_TIMEOUT_MS } from '../src/modules/conversation/queue.js';
 import { keyOf, nodeIdentity, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
+import { moveStalledQueues } from '../src/modules/tasks/orphan-turns.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { jobOf } from '../src/modules/tools/job.js';
 import { BUILTIN } from './builtin.js';
@@ -183,6 +186,49 @@ describe('a running turn that no live program holds', () => {
   });
 });
 
+describe('a terminal exit whose final job result was lost', () => {
+  it('fails the exact departed program even when the node still holds its job', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Review the branch.');
+    const next = await c.message(c.hana.id, 'The repairs are ready.');
+    c.later(2 * MIN);
+    await c.pulse(c.node, turn, 'gone');
+    c.later(MIN);
+    await c.answer(c.node, [turn], [turn]);
+    expect((await c.job(turn)).status).toBe('running');
+    c.later(MIN);
+    /* A terminal node names the programs that run on it with each of its load reports (apps/node/src/main.ts:694). */
+    await c.live(c.node, [c.orchestrator.id]);
+    await c.answer(c.node, [turn], [turn]);
+    expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
+    expect((await c.job(next)).status).toBe('running');
+    expect((await c.facts(turn)).map(f => f.text)).toEqual([expect.stringMatching(/program was gone/)]);
+    const sent = c.send.mock.calls.map(([, frame]) => frame);
+    const cancel = sent.findIndex(frame => frame.type === 'job.cancel' && frame.jobId === turn);
+    const run = sent.findIndex(frame => frame.type === 'job.run' && frame.jobId === next);
+    expect(cancel).toBeGreaterThan(-1);
+    expect(run).toBeGreaterThan(cancel);
+    await c.answer(c.node, [turn], [turn]);
+    expect(await c.facts(turn)).toHaveLength(1);
+  });
+
+  it('keeps a held turn when a foreign node reports an exit or newer work supersedes it', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Review the branch.');
+    c.later(2 * MIN);
+    await c.pulse(BUILTIN, turn, 'gone');
+    c.later(3 * MIN);
+    await c.answer(c.node, [turn], [turn]);
+    expect((await c.job(turn)).status).toBe('running');
+    await c.pulse(c.node, turn, 'gone');
+    c.later(MIN);
+    await c.pulse(c.node, turn, 'thinking');
+    c.later(3 * MIN);
+    await c.answer(c.node, [turn], [turn]);
+    expect((await c.job(turn)).status).toBe('running');
+  });
+});
+
 describe('a running turn with a live program', () => {
   it('goes on while its program thinks, however long, on the plan\'s node and on the built-in node', async () => {
     const c = await company();
@@ -224,6 +270,116 @@ describe('a running turn with a live program', () => {
 });
 
 describe('a live program its queue waits behind', () => {
+  function screens(c: Awaited<ReturnType<typeof company>>, turn: string) {
+    vi.spyOn(c.ctx.hub, 'hasProgramOperator').mockReturnValue(true);
+    let view: Partial<ProgramView> = {};
+    const asked: string[] = [];
+    c.send.mockImplementation((node, msg) => {
+      if (msg.type === 'program.view_get') {
+        asked.push(keyOf(node));
+        receiveOperatorReply(c.ctx, node, {
+          type: 'program.view', agentKey: msg.agentKey, request: msg.request,
+          result: 'ok', reason: null, snapshot: 'fresh-snapshot', instance: 'program-1', jobId: turn,
+          state: 'idle', tool: null, question: null, input: 'empty', undelivered: false,
+          cols: 80, rows: 24, cells: 'completed turn and empty prompt', ...view,
+        });
+      }
+      return true;
+    });
+    return { asked, show: (next: Partial<ProgramView>) => { view = next; } };
+  }
+
+  it('closes a lost end from two independent idle screens even while rejected hooks leave work reported', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const next = await c.message(c.hana.id, 'The branch is ready.');
+    const screen = screens(c, turn);
+    const lastSign = Date.now();
+    c.later(2 * MIN);
+    await c.pulse(c.node, turn, 'thinking', lastSign, lastSign);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    c.later(2 * MIN);
+    await c.pulse(c.node, turn, 'thinking', lastSign, lastSign);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('done');
+    expect((await c.job(next)).status).toBe('running');
+    expect(screen.asked).toEqual([keyOf(c.node), keyOf(c.node)]);
+  });
+
+  it('keeps two completed observations across rotating chrome only with the same explicit response proof', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const screen = screens(c, turn);
+    const proof = 'a'.repeat(64);
+    screen.show({ completion: proof, cells: 'response with the first toolbar tip' });
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    screen.show({ completion: proof, cells: 'same response with another toolbar tip' });
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('done');
+  });
+
+  it('restarts completed observations for changed response proof and legacy screen content', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const screen = screens(c, turn);
+    screen.show({ completion: 'a'.repeat(64) });
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    screen.show({ completion: 'b'.repeat(64) });
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    screen.show({ cells: 'legacy response changed' });
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
+  it('closes a lost end with no waiting message and does not inherit idle time across instances or activity', async () => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const screen = screens(c, turn);
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    screen.show({ instance: 'program-2' });
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    screen.show({ instance: 'program-2', state: 'working' });
+    c.later();
+    await moveStalledQueues(c.ctx, new Date());
+    screen.show({ instance: 'program-2' });
+    c.later();
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('done');
+  });
+
+  it.each([
+    { jobId: 'another-turn' }, { result: 'refused' as const }, { state: 'working' as const },
+    { tool: 'Bash' }, { input: 'words' as const }, { input: 'unknown' as const },
+    { undelivered: true }, { instance: null }, { snapshot: null },
+    { question: { id: 'q', kind: 'permission' as const, text: 'Allow?', tool: 'Bash', callId: null } },
+  ])('does not close from unsafe or uncertain screen %j', async unsafe => {
+    const c = await company();
+    const turn = await c.message(c.hana.id, 'Plan the release.');
+    const screen = screens(c, turn);
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    screen.show(unsafe);
+    c.later(2 * MIN);
+    await moveStalledQueues(c.ctx, new Date());
+    screen.show({});
+    c.later();
+    await moveStalledQueues(c.ctx, new Date());
+    expect((await c.job(turn)).status).toBe('running');
+  });
+
   /* The orchestrator's turn its node still runs, whose program has stood idle at its prompt since a minute after it began,
      while Ivan's message waits behind it: the end of that turn never reached Hornhoof. */
   async function idleBehind(c: Awaited<ReturnType<typeof company>>) {
@@ -416,5 +572,24 @@ describe('a turn its node still lists whose program is gone', () => {
 
     expect((await c.job(turn)).status).toBe('running');
     expect((await c.job(next)).status).toBe('queued');
+  });
+
+  /* A node that falls silent says no list of its programs either: the turn is not held for ever, it ends by the path of a
+     machine that went away, five minutes after the hub found it gone. */
+  it('ends as a turn of a machine that went away when the node falls silent after the program went, naming no programs', async () => {
+    const c = await company();
+    const { turn } = await goneHeld(c);
+    await c.roundHeld(c.node);
+    expect((await c.job(turn)).status).toBe('running');
+
+    c.away();
+    for (let i = 0; i < 5; i++) {
+      c.later();
+      await reconcile(c.ctx, new Date());
+      expect((await c.job(turn)).status).toBe('running');
+    }
+    c.later();
+    await reconcile(c.ctx, new Date());
+    expect(await c.job(turn)).toMatchObject({ status: 'failed', error: 'machine_offline' });
   });
 });
