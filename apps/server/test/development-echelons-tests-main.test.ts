@@ -55,9 +55,9 @@ describe('Tests takes the main line into a candidate whose own change passed', (
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', candidateId: f.snapshot.candidateId });
   });
 
-  it('takes the same base as a repair, so a merge named on the old base is refused for what the main line changed outside the scope', async () => {
-    const f = await behindMain(FROM_MAIN, MERGED, { [`${BASE}..${MERGED}`]: [...FROM_MAIN, ...OWN] });
-    await expect(f.took(BASE)).rejects.toMatchObject({ status: 403 });
+  it('refuses the same base, as nothing of the main line was taken in', async () => {
+    const f = await behindMain();
+    await expect(f.took(BASE)).rejects.toMatchObject({ status: 409 });
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', candidateId: f.snapshot.candidateId });
   });
 
