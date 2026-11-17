@@ -19,14 +19,16 @@ async function nothingGranted(fixture: PostgresFixture, role: string, table: str
 /* A write by the reader may be refused for its read-only transaction before its rights are looked at: both are refusals. */
 const refused = (mode: SqlMode) => ({ code: expect.stringMatching(mode === 'read' ? /^(42501|25006)$/ : /^42501$/) });
 
+const noRowsChanged = [{ rows: [], changed: 0 }];
+
+/* Operations reads none of these tables; the orchestrator reads them but their keys. Neither changes them. */
 async function statementsRefused(sql: AgentSql, mode: SqlMode, table: string): Promise<void> {
-  await expect(sql.run(`SELECT * FROM "${table}"`, mode), `${mode} reads ${table}`).rejects.toMatchObject({ code: '42501' });
+  if (mode === 'read') await expect(sql.run(`SELECT * FROM "${table}"`, mode), `${mode} reads ${table}`).rejects.toMatchObject({ code: '42501' });
+  else expect(await sql.run(`SELECT id FROM "${table}"`, mode), `${mode} reads ${table}`).toEqual(noRowsChanged);
   for (const statement of [`INSERT INTO "${table}" (id) SELECT id FROM "${table}" WHERE false`, `UPDATE "${table}" SET id = id WHERE false`, `DELETE FROM "${table}" WHERE false`, `TRUNCATE "${table}"`]) {
     await expect(sql.run(statement, mode), `${mode}: ${statement}`).rejects.toMatchObject(refused(mode));
   }
 }
-
-const noRowsChanged = [{ rows: [], changed: 0 }];
 
 async function settingsClosed(sql: AgentSql, mode: SqlMode): Promise<void> {
   expect(await sql.run('SELECT id, channel, mode FROM approval_policies', mode)).toEqual(noRowsChanged);
@@ -36,7 +38,7 @@ async function settingsClosed(sql: AgentSql, mode: SqlMode): Promise<void> {
   }
 }
 
-it('gives neither production SQL role anything on any table of the gateway, signed in as itself', { timeout: 180000 }, async () => {
+it('gives neither production SQL role a right on the whole of any table of the gateway, nor a change of one, and Operations not a read, signed in as itself', { timeout: 180000 }, async () => {
   const fixture = await privatePostgres();
   const sql = await openAgentSql(fixture.url);
   expect(sql, 'Production openAgentSql must create both LOGIN pools').not.toBeNull();
@@ -52,6 +54,10 @@ it('gives neither production SQL role anything on any table of the gateway, sign
       await statementsRefused(sql, mode, table);
     }
     await settingsClosed(sql, mode);
+  }
+  for (const name of ['outbound_accounts.config_enc', 'outbound_contacts.address_enc', 'outbound_message_revisions.sealed_enc', 'support_tickets.text_enc']) {
+    const [table, column] = name.split('.') as [string, string];
+    await expect(sql.run(`SELECT ${column} FROM ${table}`, 'write'), name).rejects.toMatchObject({ code: '42501' });
   }
   expect((await fixture.admin.query("SELECT proname FROM pg_proc WHERE prosecdef AND pronamespace = 'public'::regnamespace")).rows).toEqual([]);
   /* Last, so that an open table shows up as the right it really has, not as a name missing from a list. */

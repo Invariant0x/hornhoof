@@ -23,7 +23,8 @@ const MIN = 60_000;
 async function atWork() {
   const c = await failureCompany();
   await echelonsTurn(c.db, c.companyId);
-  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, resultKind: 'code' });
+  const builder = await c.hire('Dana', 'worker', 'DEV-BE', c.dev.id);
+  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, architectAgentId: c.agent.id, assigneeAgentId: builder.id, executor: true, resultKind: 'code' });
   await wakeAll(c.ctx, [{ agentId: c.agent.id, taskId: task.id, why: 'assigned' }]);
   return { ...c, task, first: (await c.turnsOf())[0]! };
 }

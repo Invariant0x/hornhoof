@@ -6,13 +6,16 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { privateTurn } from '../tools/private-turns.js';
+import { privateFilename, privateUpload } from '../tools/private-upload.js';
+import { PRIVATE_TURN_LOST } from '@hornhoof/protocol';
 import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { countOnly, idOnly, only } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
-import { appendEvent } from '../events/store.js';
+import { appendEvent, sensitiveTurn } from '../events/store.js';
 import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
@@ -451,17 +454,19 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     scope.addContentTypeParser(['application/octet-stream', 'image/png', 'image/jpeg', 'image/webp'], (_req, body, done) => done(null, body));
     scope.post('/api/attachments', async (req, reply) => {
       const job = await attachmentJobOf(ctx, req);
+      const values = await uploadValues(db, job.id);
       const { task: ref, chat, name: raw } = SendQuery.parse(req.query);
       const toChat = chat === '1' || chat === 'true';
       const task = ref === undefined ? null : await taskByRef(ctx, job.companyId, ref);
       checkAttachmentTask(job, task, toChat);
       if (ref !== undefined && (!task || !onTask(job, task))) throw new ApiError(404, 'not_found', `There is no task ${ref} you work on.`, 'task_unknown');
+
       const [sent] = await db.select(countOnly()).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
       await checkAttachmentSpace(ctx, job.companyId, task, toChat, Number(req.headers['content-length'] ?? 0) || 0);
-      const taken = await received(ctx.config.filesDir, req.body);
+      const taken = await received(ctx.config.filesDir, privateUpload(req.body, values));
       const row = await keepTaken(ctx.config.filesDir, taken, async () => {
-        const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, raw);
+        const { name, pic, type } = checkedUploadMeta(taken, ref !== undefined || toChat, ref !== undefined, privateFilename(values, raw));
         await checkAttachmentSpace(ctx, job.companyId, task, toChat, taken.size);
         const [kept] = await db
           .insert(attachments)
@@ -519,4 +524,10 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       .type(file.mediaType)
       .send(await fileStream(ctx, file.id, file.length));
   });
+}
+
+async function uploadValues(db: Db, jobId: string) {
+  const values = privateTurn(db, jobId)?.values;
+  if (!values && await sensitiveTurn(db, jobId, true)) throw new ApiError(409, 'conflict', PRIVATE_TURN_LOST, 'attachment_invalid');
+  return values;
 }

@@ -131,6 +131,7 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
   server.registerTool(
     'computer',
     {
+      _meta: { secretCommand: true },
       description:
         'Runs a bash command as root on a machine of the company, while its owner keeps access to it open, and gives back its exit code and the end of its output. ' +
         'It works in any turn of yours for as long as access stays open, with no new word of anyone, but not in one whose last words came from a person other than the CEO, the CEO delegate or the machine\'s owner, their task, comment or answer included, or from someone Hornhoof cannot name. ' +

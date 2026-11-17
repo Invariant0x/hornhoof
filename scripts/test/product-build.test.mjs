@@ -74,7 +74,10 @@ test('Dockerfile gives the image our package files as they are, over those the i
   const image = stagesOf('Dockerfile').find(stage => stage.name === null).text;
   const after = image.slice(image.indexOf('COPY --from=deps /app /app\n'));
   assert.ok(after.length < image.length, 'the image copies what deps installed');
-  assert.deepEqual(fromRepository(after).filter(path => path.endsWith('.json')).sort(), OWN);
+  /* It takes the whole tree, and Docker leaves none of them out of it. */
+  assert.deepEqual(fromRepository(after), ['.']);
+  const ignored = read('.dockerignore').split('\n').map(line => line.trim());
+  assert.deepEqual(OWN.filter(path => ignored.includes(path)), []);
 });
 
 test('apps/node/Dockerfile gives the image the package files of the node and the protocol as they are', () => {

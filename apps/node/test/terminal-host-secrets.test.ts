@@ -1,8 +1,12 @@
 import type { NodeMessage } from '@hornhoof/protocol';
+import { existsSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jobDone } from '../src/runner.js';
 import { cleanups, liveTerminal } from './terminal-host-live-helpers.js';
 import { SECRET } from './terminal-host-helpers.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 /* What a node shows of a program never carries a known secret, and only a person who may type types into it. tmux and the
    program never run: the test writes what they would show, and checks what our side makes of it. */
@@ -74,6 +78,108 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
+  it.each([true, false])('restores private output after a node restart, resuming the secret turn: %s', async resumed => {
+    const marker = 'private-node-restart-marker-1178';
+    const jobId = resumed ? 'job-private' : 'job-next';
+    const t = await liveTerminal('claude', 'queued', { jobId, privateJob: 'job-private' });
+    t.finish(resumed ? `Report with ${marker}.` : 'Safe follow-up report.');
+    const result = await t.on(t.running);
+    const done = jobDone(jobId, result, []);
+    expect(JSON.stringify(t.sent)).not.toContain(marker);
+    expect(JSON.stringify(done)).not.toContain(marker);
+    expect(done.result).toBe(resumed ? 'Sensitive tool data and raw terminal output hidden.' : 'Safe follow-up report.');
+  });
+
+  it.each(['vault_entry', 'vault_save', 'custom_secret'])('learns %s through the bridge when the program emits no tool transcript', async name => {
+    const marker = 'private-unreported-bridge-marker-1178';
+    let recordingFile = '';
+    let fileAtCall = true;
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => { body += String(chunk); });
+      req.on('end', () => {
+        const call = JSON.parse(body) as { id: number; method: string };
+        if (call.method === 'tools/call') fileAtCall = existsSync(recordingFile);
+        const result = call.method === 'tools/list' ? { tools: [{ name, _meta: { sensitive: true } }] }
+          : { content: [{ type: 'image', data: 'aaaa', mimeType: 'image/png' }, { type: 'text', text: name === 'vault_entry' ? JSON.stringify({ password: marker }) : name === 'vault_save' ? 'Saved.' : marker }] };
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
+      });
+    });
+    await listenIn(server);
+    cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+    const t = await liveTerminal('claude', 'queued', { host: { hornhoof: `http://127.0.0.1:${(server.address() as AddressInfo).port}` } });
+    const recording = t.tmux['recordings'].create('a-receipt', t.tmux.scratch());
+    recordingFile = recording.file;
+    writeFileSync(recordingFile, marker);
+    const post = (method: string, params?: unknown) => fetch(t.host['bridge'].agent('receipt').mcpUrl, { method: 'POST', headers: { connection: 'close' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+    await t.on(t.carry(async () => {
+      if (name === 'custom_secret') await (await post('tools/list')).text();
+      const response = await post('tools/call', { name, arguments: { password: marker } });
+      expect(response.status).toBe(200);
+      await response.text();
+    }));
+    expect(fileAtCall).toBe(false);
+    expect(existsSync(recordingFile)).toBe(false);
+    t.screen.mockResolvedValueOnce(`screen with ${marker}`);
+    expect((await t.host['operatorPane']('receipt')).cells).toMatch(/hidden/i);
+    t.finish(`Report with ${marker}.`);
+    const result = await t.on(t.running);
+    expect(result.result).toBe('Report with [hidden].');
+    expect(jobDone('job-receipt', result, []).tail).toMatch(/hidden/i);
+    expect(JSON.stringify(t.sent)).not.toContain(marker);
+  });
+
+  it.each([false, true])('keeps the retained terminal tail private in a later typed turn, completed: %s', async completed => {
+    const marker = 'retained-tail-marker-1178';
+    const t = await liveTerminal('claude', 'queued');
+    t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'secret-call', name: 'mcp__hornhoof__vault_save', input: { password: marker } }] } });
+    await t.until(() => t.host['agents'].get('receipt')?.turn?.privacy?.sensitive === true);
+    t.finish('Ready.');
+    await t.on(t.running);
+    const prompted = t.hook('prompt', { prompt: 'Next request.' });
+    await t.until(() => t.sent.some(m => m.type === 'turn.open'));
+    const opened = t.sent.find((m): m is Extract<NodeMessage, { type: 'turn.open' }> => m.type === 'turn.open')!;
+    t.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed-after-secret', toolToken: 'typed-token', ref: opened.ref });
+    await t.on(prompted);
+    if (completed) t.finish('Follow-up delivered.');
+    else t.ends(`retained pane ${marker}`, 3);
+    await t.until(() => t.sent.some(m => m.type === 'job.done' && m.jobId === 'typed-after-secret'));
+    const done = t.sent.find((m): m is Extract<NodeMessage, { type: 'job.done' }> => m.type === 'job.done' && m.jobId === 'typed-after-secret')!;
+    expect(done.tail).not.toContain(marker);
+    expect(done.tail).toMatch(/hidden/i);
+    if (completed) expect(done.result).toBe('Follow-up delivered.');
+  });
+
+  it('shows a clean screen after the sensitive program and its tmux session were removed', async () => {
+    const t = await liveTerminal('claude', 'queued');
+    t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'secret-call', name: 'mcp__hornhoof__vault_save', input: { password: 'private-screen-marker' } }] } });
+    await t.until(() => t.host['agents'].get('receipt')?.turn?.privacy?.sensitive === true);
+    t.finish('Ready.');
+    await t.on(t.running);
+    vi.mocked(t.tmux.has).mockResolvedValue(false);
+    await t.on(t.host['closeProgram'](t.host['agents'].get('receipt')!));
+    vi.mocked(t.tmux.has).mockResolvedValue(true);
+    await t.on(t.host.open({ type: 'term.open', termId: 'clean-view', agentKey: 'receipt', cols: 100, rows: 30, write: true }));
+    t.views[0]!.view.stdout.write('Clean restarted screen.\n');
+    await t.until(() => frames(t.sent, 'clean-view').includes('Clean restarted screen.'));
+  });
+
+  it('hides a sensitive tool transcript and its raw terminal completion', async () => {
+    const marker = 'private-terminal-marker-1178';
+    const t = await liveTerminal('claude', 'queued');
+    t.record({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'vault-call', name: 'mcp__hornhoof__vault_save', input: { password: marker } }] } });
+    t.record({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'vault-call', content: marker }] } });
+    await t.until(() => t.host['agents'].get('receipt')?.turn?.privacy?.sensitive === true);
+    t.ends(`raw transcript ${marker}`, 3);
+    const result = await t.on(t.running);
+    expect(result.sensitive).toBe(true);
+    const done = jobDone('job-receipt', result, []);
+    expect(JSON.stringify(t.sent)).not.toContain(marker);
+    expect(JSON.stringify(done)).not.toContain(marker);
+    expect(done.tail).toMatch(/hidden/i);
+  });
+
   it('hides a multiline secret before clipping a typed turn that ended before its acknowledgement', async () => {
     const secret = 'multiline-private-token\nprivate-suffix-0123456789';
     const t = await liveTerminal('claude', 'queued', { prompt: '', openMs: 15_000, secrets: [secret] });
