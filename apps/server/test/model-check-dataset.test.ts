@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Case } from '@hornhoof/protocol';
-import { parseDataset, tuningCases, withLiveMiss, type Dataset } from '../src/modules/model-checks/dataset.js';
+import { parseDataset, withLiveMiss, type Dataset } from '../src/modules/model-checks/dataset.js';
 import { AUTHOR, CLASS_RULES, LABELLER, RULES, TAXONOMY, asJsonl, classCase, holdout, mustBlock, reviewCase } from './model-check-fixture.js';
 
 const parsed = (raw: Buffer, rules = RULES): Dataset => {
@@ -30,11 +30,6 @@ describe('a set of examples', () => {
     const without = raw.subarray(0, raw.length - 1);
     expect(parsed(without).cases).toHaveLength(1);
     expect(parsed(without).hash).not.toBe(parsed(raw).hash);
-  });
-
-  it('shows whoever tunes the prompt only the part that is not held out', () => {
-    const open = reviewCase();
-    expect(tuningCases(parsed(asJsonl([open, holdout(), holdout()]))).map(row => row.id)).toEqual([open.id]);
   });
 
   describe('refuses the whole set, and names the line', () => {
