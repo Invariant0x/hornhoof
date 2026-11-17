@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { constants } from 'node:os';
 import type { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -59,7 +60,7 @@ function ask(env: NodeJS.ProcessEnv, body: object, signal: AbortSignal): Promise
 /* The lease of the slot the machine gave, which stays this command's while the request stays open. */
 async function slot(command: string[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string | undefined> {
   if (!env.HH_BRIDGE) return undefined;
-  const response = await ask(env, { command, cwd: process.cwd(), env: {}, wait: true }, signal);
+  const response = await ask(env, { command, cwd: process.cwd(), env: {}, wait: true, ...(env.HH_CHECK_SLOT ? { lease: env.HH_CHECK_SLOT } : {}) }, signal);
   if (!response.ok || !response.body) return undefined;
   for await (const frame of frames(response.body.getReader())) {
     if (frame.type === 'slot') return frame.lease;
@@ -77,8 +78,8 @@ async function waited(command: string[], env: NodeJS.ProcessEnv): Promise<number
     const lease = await slot(command, env, stop.signal).catch(() => undefined);
     const child = spawn(command[0]!, command.slice(1), { stdio: 'inherit', env: lease ? { ...env, HH_CHECK_SLOT: lease } : env });
     for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, () => child.kill(signal));
-    const [code] = (await once(child, 'exit')) as [number | null];
-    return code ?? 1;
+    const [code, signal] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
+    return code ?? (signal ? 128 + constants.signals[signal] : 1);
   } finally { stop.abort(); }
 }
 
