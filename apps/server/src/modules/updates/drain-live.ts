@@ -134,9 +134,13 @@ async function anyJobLive(ctx: Ctx, runningJobs: RunningJob[], activity: Map<str
   return runningJobs.some(j => jobLive(ctx, j, j.taskId ? (waits.get(j.taskId) ?? null) : null, activity.get(j.id), now));
 }
 
+/* Work a node took this recently counts as live whatever it shows, as long as the node is heard from: an hour and three
+   quarters, past the 99th percentile of the turns that ended well (5438 s in a week of them on 2026-11-04). */
+const RECENT_WORK_MS = 105 * 60_000;
+
 /* Whether running work on this node still holds a planned update back: a node silent past SILENT_TURN_MS, or one whose
-   newest running work it took more than a full drain-and-retry cycle ago without any genuinely live turn or test part,
-   updates without waiting. */
+   newest running work it took more than RECENT_WORK_MS ago without any genuinely live turn or test part, updates without
+   waiting. */
 export async function hasLiveDrainWork(ctx: Ctx, node: NodeIdentity, now: number): Promise<boolean> {
   const { runningJobs, runningParts } = await runningWorkOf(ctx, node);
   if (!runningJobs.length && !runningParts.length) return false;
@@ -144,6 +148,6 @@ export async function hasLiveDrainWork(ctx: Ctx, node: NodeIdentity, now: number
   const takenAt = lastTakenWorkAt(runningJobs, runningParts);
   const signAt = await nodeSignAt(ctx, node, runningJobs, activity, takenAt);
   if (signAt !== null && now - signAt >= SILENT_TURN_MS) return false;
-  if (takenAt !== null && now - takenAt < ctx.config.nodeDrainMs + ctx.config.nodeUpdateRetryMs) return true;
+  if (takenAt !== null && now - takenAt < RECENT_WORK_MS) return true;
   return runningParts.some(partLive(now)) || anyJobLive(ctx, runningJobs, activity, now);
 }
