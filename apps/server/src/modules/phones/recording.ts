@@ -97,6 +97,6 @@ export async function imageBytes(ctx: Ctx, companyId: string, id: string | null)
   return Buffer.from(file.bytes);
 }
 
-async function frameBytes(db: Parameters<typeof sensitiveTurn>[0], jobId: string, png: string | undefined): Promise<Buffer | null> {
+async function frameBytes(db: Parameters<typeof sensitiveTurn>[0], jobId: string, png: string | null): Promise<Buffer | null> {
   return await sensitiveTurn(db, jobId, true) || !png ? null : Buffer.from(png, 'base64');
 }
