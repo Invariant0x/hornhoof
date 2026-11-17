@@ -11,7 +11,7 @@ built in parallel on the contract below; the contract changes only with Neo's co
    the access closes by itself and the orchestrator's window gets a line (`state: expired`). Tests use virtual time only.
 3. The answer carries `openedBy` (the person) and `openedAt`. The owner, the CEO and the CEO delegate close it with one
    call, as today.
-4. Only the machine's owner opens, as today. `all_agents` needs `confirm: true` in the request; without it, 400.
+4. Among people, only the machine's owner opens, as today. The orchestrator retains its owner-API exception under Ivan's rule `df92a23e`, as confirmed by the Head during Security. `all_agents` needs `confirm: true`; without it, 400. Through the owner API this confirmation is the agent's, not a person's.
 5. The orchestrator's request ("Asks for access") carries its reason, as today (`asked: { reason, at }`), for the card with
    "Open for ..." and "Not now" (`decline`).
 6. With `all_agents`, any worker or head of the company runs `computer` on that machine until `until`; no agent of
@@ -32,7 +32,7 @@ type AccessView = {
   asked: { reason: string; at: string } | null; // as today: the orchestrator's request
   until: string | null;                        // ISO; null when closed or expired
   scope: AccessScope | null;                   // new; null exactly when until is null
-  openedBy: { id: string; name: string } | null; // new; the person who opened it, null when closed
+  openedBy: { id: string; name: string } | null; // person who opened it; null when closed or opened by the orchestrator
   openedAt: string | null;                     // new; ISO, null when closed
   canOpen: boolean;                            // as today: the owner on their own screen
   canClose: boolean;                           // as today: owner, CEO, CEO delegate
@@ -180,3 +180,34 @@ with computer-scope, decision-context and decisions, this passed 72 checks. Sour
 The author-check run on 36df758ab was interrupted by its author for this repair, after checking the owned process and
 workspace. It is not a passed result. The final author wrapper checks the follow-up delta against that published candidate;
 the hand-in also carries the earlier named checks and unchanged-file fingerprints for the complete change against turn-31.
+
+
+## Security repair and evidence, 17 November 2026
+
+Input candidate: `4bbfd4961517e3802b9b014cfcc305ec60ce24c7`, immutable candidate `a002f02d-cb17-4dff-8415-9dd92eac5f29`. Task base: `887fa6540bad796c30ed907fb14a2b48d3f7994c`. Security repair: `db740c505bf0fa10a19c5bf8c13bc48a9e732afb`.
+
+The Head explicitly retained the orchestrator's ability to open `all_agents` with its own `confirm: true`. This is agent confirmation, not human approval. Requiring a person is a separate policy decision, outside this repair. The same signature, company, duration and expiry checks remain in place.
+
+Two remaining attribution defects were reproduced and repaired within `computer/routes.ts` and `computer-scope.test.ts`:
+
+- A pending access request caused self-opening to send `computer_access` from the CEO, say “The CEO opened access”, and create a turn with the CEO as `createdBy` and `answersCeo: true`. The new real-MCP test first failed because its envelope named a person rather than the orchestrator. The notification now uses `actorOf(me)`, names the orchestrator in its text, and its new turn has no human creator and no `answersCeo` flag. The existing human path is preserved.
+- `closed` and `declined` used `me.id` in the computer event. After the Head explicitly included them, a second real-MCP test observed both events attributed to the CEO. They now use `personOf(me)` and retain the orchestrator's agent identity. No access right or API response shape changed.
+
+The regression also checks a default one-hour self-opening and its `openedBy: null`. Existing scope tests cover all three durations, signed spans, confirmation, human close rights, expiry, company/assistant rejection and private run results. Tests use the controlled Date and recorded fixtures, not a live machine.
+
+Affected local checks on the repair working tree, committed without subsequent executable edits:
+
+- From `apps/server`: `npx --no-install vitest run test/computer-scope.test.ts test/computer.test.ts test/computer-machines.test.ts test/request-sources.test.ts test/decision-context.test.ts test/computer-scope-input.test.ts --maxWorkers=1 --no-file-parallelism`: 6 files, 113 passed, exit 0.
+- After adding explicit event ordering to the new test, `npx --no-install vitest run test/computer-scope.test.ts --maxWorkers=1 --no-file-parallelism`: 18 passed, exit 0. This supersedes those 18 cases in the preceding receipt; it is not 18 additional unique tests.
+- `NODE_OPTIONS=--max-old-space-size=2048 npm run -s build -w @hornhoof/server`: exit 0.
+- `NODE_OPTIONS=--max-old-space-size=2048 npx --no-install tsc -p apps/server/tsconfig.eslint.json --noEmit`: exit 0.
+- `NODE_OPTIONS=--max-old-space-size=2048 npx --no-install eslint apps/server/src/modules/computer/routes.ts apps/server/test/computer-scope.test.ts`: exit 0.
+- `git diff --check`: exit 0.
+
+Raw receipts and actual exit files are attached as `security-1119-raw-logs.tar.gz`, SHA-256 `9b922467ec8c9e4fcbe04f4a5c2a929ef9a4f4fe822a10e24936d0f312b6f81e`, with `security-1119-manifest.json`. The manifest records commands, input state, the repair commit, final source hashes and all 16 raw-file hashes/sizes. The downloaded archive and every raw hash were verified. Do not hash a formatted presentation instead of the raw bytes.
+
+Earlier evidence was read without rerunning unchanged author checks: all 35 author log hashes matched the archive manifest; the recorded 239-test named run completed with exit 0 and no failure markers. Review's 121 assertions on its candidate passed; these old receipts are not relabelled as execution of the Security repair. The unchanged migration's upgrade receipt passed. Recomputed snapshot differences are only `machine_access.scope` and its check constraint, with `prevId` pointing to 0136 in this pinned branch. Integration must still re-link the migration behind the actual preceding migration, assign a later journal time and check the resulting new candidate.
+
+Concerns and route: the six-file run took 167.73 s. `computer-machines` reported 37.782 s of tests, beyond the 30 s file budget; the final standalone scope run took 33.48 s overall, with 8.364 s of tests. These timing defects are recorded, not called a passed time budget; the Head restricted this repair to attribution. No limits or assertions were weakened, and no full suite or `run_tests` ran. Native `codex review --base review-1119-base` failed before reading code because bwrap could not create a namespace; its shell exit 0 is NOT_RUN, not approval. Manual Security inspection was performed.
+
+This is Security's own repair, not an independent PASS on it. The Head will assign an independent check after submission. No shared branch, main, live machine or production data was changed. Web rendering remains owned by #1115; this server change preserves its response contract.
