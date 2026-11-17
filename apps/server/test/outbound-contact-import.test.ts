@@ -73,7 +73,7 @@ describe('a consented contact table', () => {
 
   it('uses the channel adapter for direct addresses rather than treating every address as email', async () => {
     const w = await world();
-    const channel = await aChannelOf(w.c, { adapter: 'webhook' });
+    const channel = await aChannelOf(w.c, { name: 'Partners', adapter: 'webhook' });
     const data = Buffer.from('address,consent,name\npartner-1,yes,Ann').toString('base64');
     const response = await w.c.app.inject({ method: 'POST', url: '/api/outbound/contacts/import', ...as(w.c.ceoToken), payload: { channelId: channel.id, filename: 'contacts.csv', data, source: 'Signup', evidence: 'Consent' } });
     expect(response.statusCode, response.body).toBe(200);
