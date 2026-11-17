@@ -1,7 +1,7 @@
 # Employee history attribution, task 1220
 
-Architecture only. Base: `task-1112` at `72c1a37423e03c79e49670bf4280379c326e5d30`.
-This belongs to turn 32 and must never enter turn 31. The head's order is to save this plan, finish task 1119, then implement this task or resume when task 1112 is accepted. Refresh the accepted base before implementation; task 1112 is still under review.
+Implementation base: `task-1112` at `76c4b7d571aba37c5eefd12cac4eeee4945c01e5`.
+This belongs to turn 32 and must never enter turn 31. The head explicitly authorized implementation from this checked base. Take later changes of task 1112 into this branch if it moves. Review, independent Security and Tests precede integration by the head.
 
 ## Storage and authorship
 
@@ -15,7 +15,7 @@ Join the acting agent through a separate table alias in the card query. Keep `pe
 
 ## Migration and checks
 
-Generate an additive migration and snapshot with Drizzle after taking the accepted task 1112 and the turn 32 migration journal. Tell the head the exact next number and paths before submission. Do not reserve 0130 from task 1112's old journal or change any shipped migration. Leave old rows untouched. Check a fresh database, upgrade with existing history, and repeat application. Old code can ignore the nullable column; down migrations are not supplied by this project.
+Generated the additive migration and snapshot with Drizzle. The head reserved `0139_agent_change_actor`: 0137 belongs to task 1077 and 0138 to task 1119. Its journal time, 1794902232536, is strictly after 0138's 1794891391437. The snapshot follows 0136 in this base; the head will link it to 0138 when integrating the three changes. No existing migration or row is changed. Check a fresh database, upgrade with existing history, and repeat application. Old code can ignore the nullable column; down migrations are not supplied by this project.
 
 RED first: the head's hire/change/reset/fire/team-removal records lack the acting agent on this base. GREEN must prove both agent and authority person, a department owner and CEO fallback, unchanged human/orchestrator attribution, and that input cannot choose the author. Check the employee card response and en/ru rendering, including an old row and a removed head.
 
@@ -25,8 +25,8 @@ Named local checks: `head-department-control.test.ts`, `agents.test.ts`, a focus
 
 - `docs/tasks/task-1220-plan.md`
 - `apps/server/src/db/schema.ts`
-- `apps/server/drizzle/0NNN_agent_change_actor.sql`
-- `apps/server/drizzle/meta/0NNN_snapshot.json`
+- `apps/server/drizzle/0139_agent_change_actor.sql`
+- `apps/server/drizzle/meta/0139_snapshot.json`
 - `apps/server/drizzle/meta/_journal.json`
 - `apps/server/src/auth/session.ts`
 - `apps/server/src/modules/agents/routes.ts`
@@ -43,8 +43,9 @@ Named local checks: `head-department-control.test.ts`, `agents.test.ts`, a focus
 - `apps/web/src/i18n/en.ts`
 - `apps/web/src/i18n/ru.ts`
 - `apps/web/test/AgentCard.test.tsx`
+- `apps/web/test/api-mock.ts`
 - `apps/web/e2e/agent-history.spec.ts`
-- `apps/web/e2e/owner-screens.config.ts` if the existing selector must include the new scenario
+- `apps/web/e2e/agent-history.config.ts`
 - `templates/skills/hh-head.md`
 
-Confirm the final numbered paths with the head before Development submission. Review and independent Security are mandatory, followed by Tests on the final exact candidate. Integration requires the head's authorization and targets turn 32 only.
+The head added all 24 paths to the task before submission. Review and independent Security are mandatory, followed by Tests on the final exact candidate. Integration requires the head's authorization and targets turn 32 only.

@@ -1599,6 +1599,7 @@ export const ru: Messages = {
     templateChanged: 'Шаблон изменился',
     rawBroken: 'Оставьте описание сотрудника, заголовки и метки назначения и навыков как есть. Навыки включаются и выключаются в списке выше.',
     history: 'Изменения',
+    byHead: (head, person) => `глава ${head} (права ${person ?? 'неизвестно'})`,
     changed: (what: string, who: string | null, when: string) => (who ? `${what}: ${who}, ${when}` : `${what}, ${when}`),
     timer: 'Таймер',
     timerAbout: 'Сотрудник сам просыпается через заданное время, вне задач, и делает то, что здесь написано.',

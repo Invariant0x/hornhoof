@@ -228,7 +228,7 @@ export const CARD: AgentCardView = {
     { subscription: TEAM_KEY, models: [OPUS, SONNET] },
     { subscription: OLEG_CODEX, models: [SOL] },
   ],
-  changes: [{ field: 'hired', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T08:00:00.000Z' }],
+  changes: [{ field: 'hired', personName: 'Ivan', actingAgent: null, byOrchestrator: false, at: '2026-10-30T08:00:00.000Z' }],
   interrupted: [],
   timer: null,
   canEdit: true,
