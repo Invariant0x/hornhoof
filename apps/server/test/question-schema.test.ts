@@ -63,12 +63,17 @@ describe('canonical private question storage', () => {
   it.each([
     { table: 'requests', columns: 'text,options,explained' },
     { table: 'proposals', columns: 'brief,items' },
-  ])('keeps $table raw source content out of both generic SQL roles', async ({ table, columns }) => {
+  ])("keeps $table raw source content from Operations, shows it to the orchestrator, and keeps both from people's keys", async ({ table, columns }) => {
     const { $client: client } = await createTestDb();
     const { names, run } = await roles(client);
+    const [orchestrator, operations] = names as [string, string];
+    for (const column of columns.split(',')) {
+      await expect(run(operations, `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
+      expect((await run(orchestrator, `SELECT ${column} FROM ${table}`))[0]!.rows).toEqual([]);
+    }
     for (const name of names) {
-      for (const column of columns.split(',')) await expect(run(name, `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
       expect((await run(name, `SELECT id,status FROM ${table}`))[0]!.rows).toEqual([]);
+      await expect(run(name, 'SELECT password_hash FROM people')).rejects.toThrow(/permission denied/);
     }
   });
 
@@ -85,7 +90,7 @@ describe('canonical private question storage', () => {
     await expect(client.exec(`UPDATE requests SET status='resolved_internal',answered_by='${PERSON}' WHERE id='${FIRST}'`)).rejects.toThrow(/check constraint/);
   });
 
-  it.each(['requests', 'proposals'])('bounds %s source metadata and keeps private authority out of generic SQL', async table => {
+  it.each(['requests', 'proposals'])('bounds %s source metadata and keeps private authority from Operations, not from the orchestrator', async table => {
     const { $client: client } = await createTestDb();
     await client.exec(LEGACY);
     await client.query(`SELECT question_revision,route_revision,source_key,source_sequence,classification FROM ${table}`);
@@ -95,23 +100,23 @@ describe('canonical private question storage', () => {
       "classification=jsonb_build_object('oversized',repeat('x',32769))",
     ]) await expect(client.exec(`UPDATE ${table} SET ${fields}`), fields).rejects.toThrow(/check constraint/);
     const { names, run } = await roles(client);
-    for (const name of names) {
-      for (const column of ['source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification']) {
-        await expect(run(name, `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
-      }
+    const [orchestrator, operations] = names as [string, string];
+    for (const column of ['source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification']) {
+      await expect(run(operations, `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
+      expect((await run(orchestrator, `SELECT ${column} FROM ${table}`))[0]!.rows.length).toBeGreaterThan(0);
     }
   });
 
-  it('keeps internal resolver provenance in the private sidecar without borrowing person-answer fields', async () => {
+  it('keeps internal resolver provenance in the private sidecar, for the orchestrator to read, without borrowing person-answer fields', async () => {
     const { $client: client } = await createTestDb();
     await client.exec(LEGACY);
     await client.query('SELECT technical_text,executor_instruction,resolved_by_agent_id,resolved_by_job_id,resolved_source_sequence,resolved_at,recovery_intent FROM request_internal');
     await expect(client.exec(`UPDATE request_internal SET resolved_at=now() WHERE request_id='${FIRST}'`)).rejects.toThrow(/check constraint/);
     await expect(client.exec(`UPDATE request_internal SET resolved_source_sequence=-1 WHERE request_id='${FIRST}'`)).rejects.toThrow(/check constraint/);
     const { names, run } = await roles(client);
-    for (const name of names) {
-      await expect(run(name, 'SELECT technical_text,executor_instruction,recovery_intent FROM request_internal')).rejects.toThrow(/permission denied/);
-    }
+    const [orchestrator, operations] = names as [string, string];
+    await expect(run(operations, 'SELECT technical_text,executor_instruction,recovery_intent FROM request_internal')).rejects.toThrow(/permission denied/);
+    expect((await run(orchestrator, 'SELECT technical_text,executor_instruction,recovery_intent FROM request_internal'))[0]!.rows).toHaveLength(1);
   });
 });
 

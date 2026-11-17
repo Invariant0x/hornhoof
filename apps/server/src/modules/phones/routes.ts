@@ -58,7 +58,7 @@ export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/phones/:id/live/image', async (req, reply) => {
     const me = await requirePerson(req, ctx.db);
     const live = await livePhone(ctx, me, Id.parse(req.params).id);
-    return reply.type('image/png').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff').send(await imageBytes(ctx, me.companyId, live.attachmentId));
+    return reply.type('image/jpeg').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff').send(await imageBytes(ctx, me.companyId, live.attachmentId));
   });
   app.get('/api/tasks/:id/phone-recordings', async (req, reply) => {
     const me = await requirePerson(req, ctx.db);
@@ -68,6 +68,6 @@ export function phoneRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, ctx.db);
     const { id, sequence } = z.strictObject({ id: z.uuid(), sequence: z.coerce.number().int().nonnegative() }).parse(req.params);
     const attachmentId = await recordingImage(ctx, me, id, sequence);
-    return reply.type('image/png').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff').send(await imageBytes(ctx, me.companyId, attachmentId));
+    return reply.type('image/jpeg').header('cache-control', 'no-store').header('x-content-type-options', 'nosniff').send(await imageBytes(ctx, me.companyId, attachmentId));
   });
 }
