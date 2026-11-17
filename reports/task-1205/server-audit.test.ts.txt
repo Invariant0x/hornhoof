@@ -1,0 +1,64 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { eq } from 'drizzle-orm';
+import { expect, it, onTestFinished } from 'vitest';
+import { agents, assistants, attachments, jobs, people } from '../src/db/schema.js';
+import { hashToken } from '../src/crypto/tokens.js';
+import { FILE_BYTES, received } from '../src/modules/tasks/attachments.js';
+import { aclCompany } from './agent-view-company.js';
+import { as, mcp } from './helpers.js';
+
+/* Audit observations, not acceptance tests for these defects. The report preserves this source separately. */
+it('records whether an employee gets a bearer link to a private assistant file through Telegram delivery', async () => {
+  const c = await aclCompany();
+  const dir = await mkdtemp(join(tmpdir(), 'hh-review-1205-'));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  c.app.ctx.config.filesDir = dir;
+  const added = await c.app.inject({ method: 'POST', url: '/api/people/assistants', payload: { name: 'Private Ava', owner: c.ids.ceo, program: 'avaclone' }, ...as(c.tokens.ceo) });
+  expect(added.statusCode).toBe(201);
+  const [privateAgent] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'assistant', name: 'Private agent', model: '' }).returning();
+  await c.db.update(assistants).set({ agentId: privateAgent!.id }).where(eq(assistants.personId, added.json().person.id));
+  await c.db.update(people).set({ telegramUserId: 12345678 }).where(eq(people.id, c.ids.ceo));
+  const id = randomUUID();
+  const bytes = Buffer.alloc(FILE_BYTES + 1, 7);
+  await writeFile(join(dir, id), bytes);
+  await c.db.insert(attachments).values({ id, companyId: c.companyId, agentId: privateAgent!.id, name: 'private.zip', mediaType: 'application/octet-stream', bytes: Buffer.alloc(0), size: bytes.length });
+  expect((await c.get(`/api/attachments/${id}`, c.tokens.ann)).statusCode).toBe(404);
+  const token = 'audit-1205-tool-token-0123456789';
+  await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.crew.mine.id, subscriptionId: c.plans.ann.id, kind: 'conversation', prompt: 'audit', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
+  const ownRead = await c.app.inject({ url: `/api/attachments/file?task=message&file=${id}`, headers: { authorization: `Bearer ${token}` } });
+  expect(ownRead.statusCode).toBe(404);
+  const client = await mcp(c.app, token);
+  const reply = await client.callTool({ name: 'send_telegram_file', arguments: { person: c.ids.ceo, attachment: id } }) as { content: { text: string }[] };
+  const link = /https?:\/\/\S+\/api\/files\/\S+/.exec(reply.content[0]!.text)?.[0];
+  expect(link).toBeDefined();
+  const downloaded = await c.app.inject({ url: new URL(link!).pathname });
+  expect(downloaded.statusCode).toBe(200);
+  expect(downloaded.rawPayload.equals(bytes)).toBe(true);
+  console.info('AUDIT private file: employee download 404, delivery tool returned bearer link, anonymous download 200 with exact bytes.');
+});
+
+it('records disk consumption before a streamed upload ends and cleanup after an interrupted upload', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hh-review-1205-stream-'));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  let observed = 0;
+  const body = Readable.from((async function* () {
+    yield Buffer.alloc(FILE_BYTES + 1);
+    /* Wait for the state, without a clock or deadline, while the consumer writes the first chunk. */
+    while (!observed) {
+      for (const name of await readdir(dir)) {
+        const size = (await stat(join(dir, name))).size;
+        if (size >= FILE_BYTES + 1) observed = size;
+      }
+      if (!observed) await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    throw new Error('recorded upload interrupted');
+  })(), { highWaterMark: 1 });
+  await expect(received(dir, body)).rejects.toThrow('recorded upload interrupted');
+  expect(observed).toBe(FILE_BYTES + 1);
+  expect(await readdir(dir)).toEqual([]);
+  console.info(`AUDIT stream: ${observed} bytes were on disk before end-of-body; interruption removed the partial file.`);
+});
