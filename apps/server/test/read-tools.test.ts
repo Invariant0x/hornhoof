@@ -53,7 +53,7 @@ describe('the tools of an agent on a machine that only reads', () => {
     const reading = await s.tools();
     expect((await reading.listTools()).tools.map(tool => tool.name).sort()).toEqual(leading);
     /* The orchestrator's own read tools are among them; the employees' ones come with an employee's turn. */
-    for (const name of ['company', 'staffing_options', 'tasks', 'task', 'turns', 'improvements', 'database', 'view', 'pool']) {
+    for (const name of ['company', 'staffing_options', 'tasks', 'task', 'turns', 'improvements', 'database', 'api', 'pool']) {
       expect(leading, name).toContain(name);
       expect(READ_TOOLS.has(name), name).toBe(true);
     }
@@ -74,8 +74,11 @@ describe('the tools of an agent on a machine that only reads', () => {
     const cut = await s.tools();
     const refused = await s.call(cut, 'remember', { text: 'A note.' });
     expect(refused).toEqual({ isError: true, content: [{ type: 'text', text: CUT_OFF }] });
-    /* A tool that reads still answers there. */
+    /* A tool that reads still answers there, and so does a page of the API; a change through it is refused by its route. */
     expect((await s.call(cut, 'tasks')).isError).toBeFalsy();
+    expect(JSON.parse((await s.call(cut, 'api', { path: '/api/people' })).content[0]!.text).people).toHaveLength(1);
+    const changed = await s.call(cut, 'api', { method: 'PATCH', path: `/api/agents/${(await s.db.select().from(agents).where(eq(agents.kind, 'orchestrator')))[0]!.id}`, body: { name: 'Other' } });
+    expect([changed.isError, changed.content[0]!.text]).toEqual([true, expect.stringContaining('only reads')]);
     /* With the internet the machine waits for the leader or for the CEO: the call is refused before any tool runs, so
        front tries it again. */
     await s.say('read', { internet: true });
@@ -132,6 +135,8 @@ describe('the tools of an agent on a machine that only reads', () => {
 
   it("reads the call's name", () => {
     expect(callName({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'update_task', arguments: {} } })).toBe('update_task');
+    expect(callName({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'use_tool', arguments: { name: 'tasks', arguments: {} } } })).toBe('tasks');
+    expect(callName({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'use_tool', arguments: {} } })).toBe('use_tool');
     for (const body of [{ jsonrpc: '2.0', id: 1, method: 'tools/list' }, [{ method: 'tools/call', params: { name: 'x' } }], 'tools/call', null, { method: 'tools/call' }, { method: 'tools/call', params: { name: 7 } }]) {
       expect(callName(body), JSON.stringify(body)).toBeNull();
     }

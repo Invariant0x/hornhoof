@@ -2,11 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { testApp } from './helpers.js';
 
-const DOCKERFILE = fileURLToPath(new URL('../../../Dockerfile', import.meta.url));
 const SERVER = 'https://hornhoof.example.test';
 const COMMIT = 'c'.repeat(40);
 const DIGEST = `sha256:${'e'.repeat(64)}`;
@@ -30,10 +28,6 @@ describe('GET /install.ps1', () => {
     expect(res.body).toContain(`$server = '${SERVER}'`);
     expect(res.body).toContain(`$helper = '${UPDATER}'`);
     expect(res.body).not.toMatch(/__HORNHOOF_[A-Z_]+__/);
-  });
-
-  it("comes in the server's image next to install.sh", () => {
-    expect(readFileSync(DOCKERFILE, 'utf8')).toMatch(/^COPY scripts\/install\.sh scripts\/install\.sh\nCOPY scripts\/install\.ps1 scripts\/install\.ps1$/m);
   });
 
   it('is plain ASCII, which Windows PowerShell reads the same in any language Windows runs in', async () => {

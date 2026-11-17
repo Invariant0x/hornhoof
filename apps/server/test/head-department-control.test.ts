@@ -30,7 +30,7 @@ describe("a department head's tools", () => {
     const names = async (agent: { id: string }) => (await (await c.tools(agent)).listTools()).tools.map(t => t.name);
     const head = await names(c.head);
     expect(head).toEqual(expect.arrayContaining(HEAD_TOOLS));
-    for (const name of ['build_structure', 'view', 'invite_person', 'change_person', 'set_repository']) expect(head, name).not.toContain(name);
+    for (const name of ['build_structure', 'api', 'invite_person', 'change_person', 'set_repository']) expect(head, name).not.toContain(name);
     const worker = await names(c.worker);
     for (const name of HEAD_TOOLS) expect(worker, name).not.toContain(name);
   });
