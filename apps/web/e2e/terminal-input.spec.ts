@@ -16,10 +16,12 @@ const COPY = {
   en: {
     members: 'Members', control: "Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.",
     uploading: 'Uploading the file...', uploaded: 'The file path is in the terminal. Press Enter to send it.', denied: 'This file is too big. A file is at most 10 MB.',
+    notSent: 'Not sent',
   },
   ru: {
     members: 'Сотрудники', control: 'Управлять программой агента может только владелец его подписки. Попросите владельца или напишите обычное сообщение.',
     uploading: 'Файл загружается...', uploaded: 'Путь к файлу вставлен в терминал. Нажмите Enter для отправки.', denied: 'Файл слишком большой. Предел для файла 10 МБ.',
+    notSent: 'Не отправлено',
   },
 };
 
@@ -90,12 +92,16 @@ async function pictureEvent(page: Page, kind: 'paste' | 'drop') {
   }, kind);
 }
 
-async function expectInsideTerminal(window: Locator, notice: Locator) {
-  const outer = await window.locator('.t-term').boundingBox();
-  const inner = await notice.boundingBox();
-  expect(inner).not.toBeNull();
-  expect(inner!.y).toBeGreaterThanOrEqual(outer!.y);
-  expect(inner!.y + inner!.height).toBeLessThanOrEqual(outer!.y + outer!.height);
+/* A note stands at the foot of the window, under the terminal and never over it, inside the window (#1115). */
+async function expectAtFoot(window: Locator, notice: Locator) {
+  const term = await window.locator('.t-term').boundingBox();
+  const frame = await window.boundingBox();
+  const note = await notice.boundingBox();
+  expect(note).not.toBeNull();
+  expect(note!.y).toBeGreaterThanOrEqual(term!.y + term!.height - 0.5);
+  expect(note!.x).toBeGreaterThanOrEqual(frame!.x - 0.5);
+  expect(note!.x + note!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 0.5);
+  expect(note!.y + note!.height).toBeLessThanOrEqual(frame!.y + frame!.height + 0.5);
 }
 
 for (const options of [
@@ -111,7 +117,7 @@ for (const options of [
     terminal.answer();
     const uploaded = terminal.window.getByRole('status').filter({ hasText: COPY[options.lang].uploaded });
     await expect(uploaded).toBeVisible();
-    await expectInsideTerminal(terminal.window, uploaded);
+    await expectAtFoot(terminal.window, uploaded);
     const inserted = options.legacyPicture ? 'screen.png: hh-fetch message p1' : "'/home/agent/screen.png' ";
     expect(terminal.inputs.join('')).toBe(inserted);
     expect(terminal.uploads()).toBe(1);
@@ -154,7 +160,10 @@ test('a refused picture shows the reason and inserts no partial input', async ({
   const terminal = await openTerminal(page, { lang: 'en', theme: 'dark', width: 1440, message: true, pictureStatus: 413 });
   await pictureEvent(page, 'drop');
   terminal.answer();
-  await expect(terminal.window.getByRole('alert')).toHaveText(COPY.en.denied);
+  /* The reason, led by the framed word of a note that did not go (#1115). */
+  const refused = terminal.window.getByRole('alert');
+  await expect(refused).toHaveText(`${COPY.en.notSent} ${COPY.en.denied}`);
+  await expect(refused.getByText(COPY.en.notSent, { exact: true })).toBeVisible();
   expect(terminal.inputs).toEqual([]);
   expect(terminal.uploads()).toBe(1);
   await page.screenshot({ path: info.outputPath('picture-refused.png') });
