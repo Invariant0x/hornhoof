@@ -252,19 +252,43 @@ async function putBack(client: PGlite, { tables, numbers }: Rows): Promise<void>
   });
 }
 
+/* Rows fixture() is still making or putting back. */
+const making = new Set<Promise<unknown>>();
+
+/* A turn of the event loop as the real clock gives it, as a test can end with the clock not real. */
+const { setImmediate: nextTurn } = globalThis;
+
+/* A test whose end waits for rows goes on to the rows it asks for next, which stand on them, within a turn of the event
+   loop. */
+async function madeAll(): Promise<void> {
+  do {
+    await Promise.allSettled(making);
+    await new Promise(next => nextTurn(next));
+  } while (making.size);
+}
+
 /* Rows a group of tests starts from: make builds them through the real code for the first test of the file that asks,
    and every later one that asks on the same rows gets the rows and numbers make left back, with a copy of what make
    returned, which holds no function. So one set of rows can stand on another made the same way. On other rows they are
    made again, as on any database, and so they are while the clock is not real: kept ones would hold the time of the real
    one. Under one key, make builds the same rows each time. */
-export async function fixture<T>(client: PGlite, key: string, make: () => Promise<T>, clock?: { at: number }): Promise<T> {
-  /* An explicit frozen wall time has its own cache. Ordinary fake-clock callers still make fresh rows, and a caller
-     that moves its clock while making or restoring rows gets no cached result. */
+export function fixture<T>(client: PGlite, key: string, make: () => Promise<T>, clock?: { at: number }): Promise<T> {
+  if (vi.isFakeTimers() && !clock) return make();
+  /* Keep Switch's completion barrier: a test that ends while rows are being made must finish that work before its
+     app and database close, so the next test can reuse the completed snapshot. */
+  if (TestRunner.getCurrentTest()) onTestFinished(madeAll);
+  const call = keptOrMade(client, key, make, clock);
+  making.add(call);
+  call.then(() => making.delete(call), () => making.delete(call));
+  return call;
+}
+
+async function keptOrMade<T>(client: PGlite, key: string, make: () => Promise<T>, clock?: { at: number }): Promise<T> {
+  /* An explicit frozen wall time has its own cache. Ordinary fake-clock callers still make fresh rows. */
   const checkClock = () => {
     if (clock && (!vi.isFakeTimers() || Date.now() !== clock.at)) throw new Error('The fixture clock must stay frozen at its declared time.');
   };
   checkClock();
-  if (vi.isFakeTimers() && !clock) return make();
   const on = `${clock ? `at ${clock.at}` : 'real'}\n${key}\n${await digestOf(await rowsOf(client))}`;
   const kept = made.get(on);
   if (kept) {
