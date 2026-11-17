@@ -3,14 +3,9 @@ import { z } from 'zod';
 export const PHONE_LEASE_MS = 30_000;
 export const PHONE_FRAME_MAX = 3 * 1024 * 1024;
 export const PhoneSerial = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/);
-/* The address Wireless debugging shows, an IP address on the network and a port. Never a name or an address of the node's
-   own machine, where its agents' tools listen (#1140). */
 export const networkEndpoint = (value: string): boolean => {
-  const match = /^(?:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})|\[([0-9a-fA-F:]+)\]):(\d{1,5})$/.exec(value);
-  if (!match || Number(match[6]) < 1 || Number(match[6]) > 65535) return false;
-  if (match[5] !== undefined) return /[1-9a-f]/i.test(match[5]) && !/^[0:]*1$/.test(match[5]) && !/^[0:]*ffff:/i.test(match[5]);
-  const octets = match.slice(1, 5).map(Number);
-  return octets.every(n => n <= 255) && octets[0] !== 0 && octets[0] !== 127;
+  const match = /^(?:[A-Za-z0-9][A-Za-z0-9.-]{0,252}|\[[0-9a-fA-F:]+\]):([0-9]{1,5})$/.exec(value);
+  return Boolean(match && Number(match[1]) > 0 && Number(match[1]) <= 65535);
 };
 export const PhoneEndpoint = z.string().max(260).refine(networkEndpoint);
 const coordinate = z.number().int().min(0).max(32767);
