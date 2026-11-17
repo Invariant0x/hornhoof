@@ -859,7 +859,7 @@ describe('prepared PGlite compatibility', () => {
 
     const provided: Record<string, string> = {};
     process.env.HH_PGLITE_TEMPLATE = templateDir;
-    const metadata = vi.fn((_dump: Buffer) => 'recorded schema metadata');
+    const metadata = vi.fn(() => 'recorded schema metadata');
     const cleanup = await setup({ provide: (key, value) => { provided[key] = value; } }, { root: fixture, dump: fallbackSpy, metadata });
     try {
       expect(fallbackSpy).not.toHaveBeenCalled();
