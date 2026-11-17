@@ -50,6 +50,7 @@ describe('future stage owners when an employee leaves', () => {
     expect(letter!.text).toContain(`#${f.task.number}`);
     expect(letter!.text).toContain(`#${second.task.number}`);
     expect(letter!.text).toContain('review');
+    expect(letter!.text).toContain('update_task, echelonStage and ownerAgentId');
     for (const id of [f.task.id, second.task.id]) {
       const detail = await f.detail(id);
       expect(detail.echelons).toMatchObject({ stage: 'development', ownerAgentId: f.author.id });

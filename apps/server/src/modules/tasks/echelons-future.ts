@@ -61,7 +61,7 @@ export async function notifyUnfilledStages(ctx: Ctx, leaving: Agent, missing: Un
   if (!missing.length) return;
   const recipient = await stuckRecipient(ctx.db, leaving, leaving);
   if (!recipient) return;
-  const text = `${leaving.name} is no longer available. No eligible employee of the same role can take these future stages:\n${missing.map(item => `#${item.task.number}: ${item.stage}`).join('\n')}\nAssign each future stage with update_task, stage and ownerAgentId.`;
+  const text = `${leaving.name} is no longer available. No eligible employee of the same role can take these future stages:\n${missing.map(item => `#${item.task.number}: ${item.stage}`).join('\n')}\nAssign each future stage with update_task, echelonStage and ownerAgentId.`;
   const tasks = [...new Map(missing.map(item => [item.task.id, { id: item.task.id, number: item.task.number }])).values()];
   await enqueueTurn(ctx, { companyId: leaving.companyId, agentId: recipient.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'switched', tasks } } });
 }
