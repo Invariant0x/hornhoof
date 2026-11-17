@@ -1,8 +1,8 @@
 # Task 1177: direct keeper-peer scenarios
 
-Current integration base: `41baacd7b4b59350a1c91418d6020ba182fbdd67`.
+Current integration base: `a27bc368b1e027af70883d06d1da9ba2b07985ab`.
 The incoming merge did not change the task's five test/helper files or the lockfile.
-Verification of the merged candidate is in progress.
+The hand-in names the exact checked candidate. Run receipts, raw timing/load data and the 28-case before/after table are retained on `task-1177-evidence` and attached to task 1177, preserving the checked source SHA.
 
 ## Cause and repair
 
@@ -14,7 +14,7 @@ A later instrumented run exposed another amplification in the test fixture. On `
 
 Port readiness now awaits `peerPorts` directly. Session and socket completion waits run no keeper rounds. A changed network view, report, backup, slot sweep or beat gets its own explicit step. Lease scenarios advance only their own virtual clocks and lease decisions. A tunnel step waits for an already running read before issuing its next read. Bootstrap rereads only when its first answer renewed a stale certificate, rather than while listen is pending. The production keeper code has not changed.
 
-Every original assertion remains; successful upload and copy response, read mode after fencing and the exact virtual endpoint are also asserted. An intermediate verification found and corrected a local `state` name collision before the final series.
+Every original keeper assertion remains; successful upload and copy response, read mode after fencing and the exact virtual endpoint are also asserted. An intermediate verification found and corrected a local `state` name collision before the final series.
 
 ## Commit provenance
 
@@ -36,3 +36,19 @@ The first selected caller file, `migrations.test.ts`, completed 41 cases with ei
 - Migration 0131, fallback lists while preserving plans and cards: 41,640 ms.
 
 Oracle also reported an earlier 60-second timeout of “carries computer access over the peer link” under load 25 to 30. On this branch that case is in `worker-keeper.test.ts:628`, outside task 1177's current file. The attempted acknowledgement to Oracle hit Hornhoof's ten-message limit; no delivery is claimed. The shared worker clock and the `f5171f05` production app-call mechanism remain unchanged.
+
+## Prepared comparison input
+
+The three-file check on `454318e56eebbc08d9becd09d6a57b0a7ef1a453` passed all 28 keeper cases, including the former failing port case in 727 ms. It exposed a comparison-control allocation in `shared-test-database.test.ts`: its rights/roles case took 22,712.939 ms, with 21,818.704 ms in setup. That comparison had allocated another pristine embedded database inside the scenario.
+
+The file now prepares immutable rows, rights, connection setting and planner values from an independent migrated copy during collection, and closes that copy before scenarios start. Comparisons retain their complete values and strict equality. The separate case that creates a second database and proves its independence remains unchanged. On `b3c45ec2f7fc8861e366d6bf9b6adba0e6a061e4`, the three named files passed: 72 passed and 2 expected failures, 74 executed. Server types including tests also exited 0.
+
+## Authorized verification
+
+The head's 02:50 and 03:15 decisions retain the three named files, twenty consecutive isolated keeper-peer runs on the final source SHA, server build, server types including tests and eslint. The head assigned the eight migration timeouts to task 1185. The expanded author check remains a concern, not a passing receipt. `task-1177-unchanged-functions.txt` records an empty diff and identical complete declarations for `freshPglite` and `ownDatabases` against the merge base. The head's collection-time preparation decision of 00:56 was restored explicitly in the task body after its earlier beforeAll wording reappeared. Neither timeout was raised.
+
+The verification command is saved in `task-1177-series.txt`. It uses the installed Vitest API without watch mode, checks the exact named-file selection, requires the original 20-second test and 10-second hook limits, and isolates each file in a fresh fork. Run 00 executes the three area files; runs 01 through 20 execute only `keeper-peer.test.ts`. Each records the source SHA, JSON results, module diagnostics, load every two seconds, load at every case's start/end, and the separately logged database preparation duration. Any failed or skipped case, unhandled error, file-selection mismatch or source-tree change stops the series. No build runs alongside it.
+
+Manual self-review checked the opt-in frozen-clock guard, database isolation and snapshot completion, unchanged assertions and production limits, recorded child termination, cancellation of unfinished waits and the retained actual peer HTTP/TLS path. Security inspection found only test/measurement changes and no production access, secret, process-execution or deployment change. No independent checker, whole-suite result or main integration is claimed.
+
+The head accepted the merge attestation in the task body at 03:15: 6a052242 has no trailer; attestation is in 3410fd97. Every subsequent task commit carries Signed-off-by.
