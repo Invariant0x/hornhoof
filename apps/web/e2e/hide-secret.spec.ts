@@ -44,6 +44,21 @@ for (const language of locales) for (const skin of BUILTIN_SKINS) for (const wid
     const form = panel.getByRole('form', { name: words.action });
     for (const direction of ['ltr', 'rtl']) {
       await form.evaluate((element, direction) => { element.setAttribute('dir', direction); }, direction);
+      const punctuation = await form.getByText(words.hint, { exact: true }).evaluate(element => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        let last: Node | null = null;
+        while ((node = walker.nextNode())) last = node;
+        const range = document.createRange();
+        const length = last!.textContent!.length;
+        range.setStart(last!, length - 1);
+        range.setEnd(last!, length);
+        const period = range.getBoundingClientRect().x;
+        range.setStart(last!, length - 2);
+        range.setEnd(last!, length - 1);
+        return period - range.getBoundingClientRect().x;
+      });
+      expect(punctuation, 'The final period follows the English or Russian hint, including in an RTL form.').toBeGreaterThan(0);
       const geometry = await form.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth, controls: [...element.querySelectorAll('button')].map(button => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })) }));
       expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
       for (const control of geometry.controls) {

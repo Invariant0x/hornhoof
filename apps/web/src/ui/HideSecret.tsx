@@ -36,7 +36,7 @@ export function HideSecret({ taskId, onChanged }: { taskId: string; onChanged: (
   </div>;
 
   return <form className="secret-action" onSubmit={event => void submit(event)} aria-label={words.action}>
-    <p className="muted">{words.hint}</p>
+    <p className="muted"><bdi>{words.hint}</bdi></p>
     <Field label={words.value}>
       {props => <input {...props} type="password" autoComplete="off" value={value} disabled={busy} onChange={event => setValue(event.target.value)} />}
     </Field>
