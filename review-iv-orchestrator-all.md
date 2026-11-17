@@ -132,4 +132,3 @@ Independent Review and Security review this document and the #1204 repair branch
 ## Review corrections
 
 Code reviewer, 2026-11-17: F1 now quotes the reviewed expression and line exactly. F4 now names the real cause, shown by a probe on the base: grants of the same block, not grants surviving the reset. Findings, severities and dispositions are unchanged.
-
