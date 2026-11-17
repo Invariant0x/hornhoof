@@ -122,11 +122,14 @@ export const people = pgTable(
     isAgent: boolean('is_agent').notNull().default(false),
     assistantOf: uuid('assistant_of').references((): AnyPgColumn => people.id),
     createdAt: createdAt(),
+    /* Deleted by the CEO: off the lists and the map, with no sign-in, email or Telegram, while the old tasks and answers
+       that name them keep pointing here. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
   },
   t => [
     index('people_company_id').on(t.companyId), uniqueIndex('people_telegram_username').on(t.telegramUsername), uniqueIndex('people_telegram_user_id').on(t.telegramUserId),
     index('people_assistant_of').on(t.assistantOf),
-    check('people_assistant', sql`(${t.isAgent} AND ${t.assistantOf} IS NOT NULL AND ${t.passwordHash} IS NULL) OR (NOT ${t.isAgent} AND ${t.assistantOf} IS NULL AND ${t.email} IS NOT NULL)`),
+    check('people_assistant', sql`(${t.isAgent} AND ${t.assistantOf} IS NOT NULL AND ${t.passwordHash} IS NULL) OR (NOT ${t.isAgent} AND ${t.assistantOf} IS NULL AND (${t.email} IS NOT NULL OR ${t.removedAt} IS NOT NULL))`),
   ],
 );
 

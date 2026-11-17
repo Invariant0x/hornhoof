@@ -478,32 +478,39 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     if (!ownsOrCompany(me, sub.ownerPersonId) && !(await mayKeep(me, sub))) throw notOwner();
-    await db.transaction(async tx => {
-      await tx
-        .update(subscriptions)
-        .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
-        .where(eq(subscriptions.id, sub.id));
-      await endRemovedPlanCommands(tx, [sub.id]);
-      await endFallbacksOn(tx, sub.id);
-      await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
-      await tx.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.subscriptionId, sub.id));
-      /* Its sign-in, sealed to its nodes, goes with it. */
-      await tx.delete(planCredentials).where(eq(planCredentials.subscriptionId, sub.id));
-    });
-    /* The nodes stop their jobs when they hear remove, and may never report them, so they end here. */
-    const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
-    const gone = sub.kind === 'personal' ? (await planNodes(db, [sub.id])).map(n => n.id) : [];
-    if (gone.length) await loseParts(ctx, inArray(testParts.nodeId, gone), 'subscription_removed');
-    /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
-    if (sub.kind === 'personal') for (const id of gone) hub.send(nodeIdentity(id), { type: 'remove' });
-    else if (ended.length) {
-      /* Each to the built-in node it went out to. */
-      const sent = await db.select({ id: jobs.id, builtinMachine: jobs.builtinMachine }).from(jobs).where(inArray(jobs.id, ended));
-      for (const job of sent) hub.send(job.builtinMachine ? builtinOf(job.builtinMachine) : ownBuiltin(ctx.config), { type: 'job.cancel', jobId: job.id });
-    }
-    await tryPlaceOperator(ctx, sub.companyId);
-    /* Who sees the agents that ran on it changed with it. */
-    ctx.bus.accessChanged(sub.companyId);
+    await removeSubscription(ctx, sub);
     return reply.code(204).send();
   });
+}
+
+/* A plan leaves the company: the agents on it and those on it for a while let go, its nodes stop, its sign-in goes and its
+   open jobs end. */
+export async function removeSubscription(ctx: Ctx, sub: typeof subscriptions.$inferSelect): Promise<void> {
+  const { db, hub } = ctx;
+  await db.transaction(async tx => {
+    await tx
+      .update(subscriptions)
+      .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
+      .where(eq(subscriptions.id, sub.id));
+    await endRemovedPlanCommands(tx, [sub.id]);
+    await endFallbacksOn(tx, sub.id);
+    await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
+    await tx.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.subscriptionId, sub.id));
+    /* Its sign-in, sealed to its nodes, goes with it. */
+    await tx.delete(planCredentials).where(eq(planCredentials.subscriptionId, sub.id));
+  });
+  /* The nodes stop their jobs when they hear remove, and may never report them, so they end here. */
+  const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
+  const gone = sub.kind === 'personal' ? (await planNodes(db, [sub.id])).map(n => n.id) : [];
+  if (gone.length) await loseParts(ctx, inArray(testParts.nodeId, gone), 'subscription_removed');
+  /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
+  if (sub.kind === 'personal') for (const id of gone) hub.send(nodeIdentity(id), { type: 'remove' });
+  else if (ended.length) {
+    /* Each to the built-in node it went out to. */
+    const sent = await db.select({ id: jobs.id, builtinMachine: jobs.builtinMachine }).from(jobs).where(inArray(jobs.id, ended));
+    for (const job of sent) hub.send(job.builtinMachine ? builtinOf(job.builtinMachine) : ownBuiltin(ctx.config), { type: 'job.cancel', jobId: job.id });
+  }
+  await tryPlaceOperator(ctx, sub.companyId);
+  /* Who sees the agents that ran on it changed with it. */
+  ctx.bus.accessChanged(sub.companyId);
 }

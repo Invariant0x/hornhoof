@@ -10,15 +10,16 @@ import { changedBy, personColumns, requireCompanyScope, requirePerson, startSess
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions, personKeys } from '../../db/schema.js';
+import { agentChanges, agents, assistants, companies, invites, machines, people, personChanges, sessions, subscriptions, personKeys } from '../../db/schema.js';
 import { idOnly } from '../../db/selections.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
-import { releaseAssistantAgent } from '../assistants/setup.js';
+import { releaseAssistantAgent, removeAssistantAgent } from '../assistants/setup.js';
 import { onAgent } from '../conversation/queue.js';
 import { afterLeave, cutReplication, leaveData, leavingData } from '../copies/scope.js';
 import { publicUrl } from '../link/link.js';
 import { disconnectMachines, refuseLeader } from '../nodes/disconnect.js';
+import { removeSubscription } from '../subscriptions/routes.js';
 import { personView, personViews } from './views.js';
 
 const INVITE_DAYS = 7;
@@ -197,6 +198,28 @@ export async function disablePerson(ctx: Ctx, personId: string, by?: Person): Pr
   await passResponsibility(ctx, person.companyId, personId);
 }
 
+/* A person or an assistant leaves the company for good: their account ends as when disabled, and with it their sign-in,
+   invites, keys and own plans; an assistant's own agent leaves too, and so do the person's own assistants. The row stays,
+   with its name, for the old tasks and answers that point at it, and leaves the lists and the map. Its email and Telegram
+   are free for someone else. */
+export async function removePerson(ctx: Ctx, personId: string, by: Person): Promise<void> {
+  const { db } = ctx;
+  const helpers = await db.select(idOnly(people)).from(people).where(and(eq(people.assistantOf, personId), isNull(people.removedAt)));
+  for (const { id } of helpers) await removePerson(ctx, id, by);
+  const now = new Date();
+  await db.transaction(async tx => {
+    await tx.update(people).set({ removedAt: now, email: null, passwordHash: null, telegramUsername: null, telegramUserId: null }).where(eq(people.id, personId));
+    await tx.update(invites).set({ usedAt: now }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
+    await tx.delete(personKeys).where(eq(personKeys.personId, personId));
+    await tx.update(assistants).set({ keyHash: null, keyCreatedAt: null, wakeSecretEnc: null }).where(eq(assistants.personId, personId));
+  });
+  await disablePerson(ctx, personId, by);
+  /* Their own plans run on their sign-in; a key they added for the company is the company's and stays. */
+  const plans = await db.select().from(subscriptions).where(and(eq(subscriptions.ownerPersonId, personId), eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
+  for (const plan of plans) await removeSubscription(ctx, plan);
+  await removeAssistantAgent(ctx, personId, by);
+}
+
 export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
   const acceptAttempts = limiter();
@@ -216,7 +239,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/people', async req => {
     const me = await requirePerson(req, db);
-    const rows = await db.select(personColumns).from(people).where(eq(people.companyId, me.companyId)).orderBy(asc(people.createdAt));
+    const rows = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), isNull(people.removedAt))).orderBy(asc(people.createdAt));
     return { people: await personViews(db, rows) };
   });
 
@@ -251,7 +274,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
-    const [target] = await db.select({ ...personColumns, isAgent: people.isAgent }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+    const [target] = await db.select({ ...personColumns, isAgent: people.isAgent }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId), isNull(people.removedAt)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     if (target.isAgent) throw new ApiError(409, 'conflict', 'An assistant never signs in: it reaches the company with its key. Make a new key on its card.', 'assistant_no_sign_in');
     if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.', 'owner_locked');
@@ -313,7 +336,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [target] = await db
       .select({ ...personColumns, passwordHash: people.passwordHash, telegramUsername: people.telegramUsername, telegramUserId: people.telegramUserId, isAgent: people.isAgent })
       .from(people)
-      .where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+      .where(and(eq(people.id, id), eq(people.companyId, me.companyId), isNull(people.removedAt)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     if (target.isAgent) guardAssistantPatch(body, telegram);
     if (telegram !== undefined) guardTelegram(me, target);
@@ -368,6 +391,23 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const person = status === 'disabled' ? (await db.select(personColumns).from(people).where(eq(people.id, id)))[0]! : changed;
     tellOfChange(ctx, me.companyId, Boolean(status || body.access), person.name !== target.name);
     return { person: await personView(db, person) };
+  });
+
+  /* The CEO deletes a person or an assistant for good, by himself or through the orchestrator: never himself, nor a person
+     whose machine runs the company server, which moves first. */
+  app.delete('/api/people/:id', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO deletes a person.', 'not_owner');
+    const { id } = IdParams.parse(req.params);
+    const [target] = await db.select(personColumns).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId), isNull(people.removedAt)));
+    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+    if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be deleted.', 'owner_locked');
+    const theirs = await db.select(idOnly(machines)).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
+    await refuseLeader(db, config, theirs.map(m => m.id));
+    await removePerson(ctx, id, me);
+    ctx.bus.accessChanged(me.companyId);
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    return reply.code(204).send();
   });
 
   /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off, by himself or through the

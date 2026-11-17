@@ -50,8 +50,9 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, builtin_machine: null, inbox_wake: false } }));
   /* The same for a part of a test run: none ran on a machine's built-in node before there were any. */
   if (table === 'test_parts') return rows.map(row => ({ row: { ...row.row, builtin_machine: null } }));
-  /* Migration 0098 gives every person an empty Telegram, and 0100 makes every one a person and no assistant. */
-  if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null } }));
+  /* Migration 0098 gives every person an empty Telegram, 0100 makes every one a person and no assistant, and the deletion
+     of people deletes nobody. */
+  if (table === 'people') return rows.map(row => ({ row: { ...row.row, telegram_username: null, telegram_user_id: null, is_agent: false, assistant_of: null, removed_at: null } }));
   /* Migration 0100: nobody's assistant answered a request before. */
   if (table === 'requests') return rows.map(row => ({ row: { ...row.row, answered_by_assistant_id: null } }));
   if (table !== 'tasks') return rows;
