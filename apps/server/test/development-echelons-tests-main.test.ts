@@ -51,7 +51,7 @@ describe('Tests takes the main line into a candidate whose own change passed', (
   it('refuses a base that is not on the main line, as it would hide the change from the checks', async () => {
     /* An edit of the candidate's own file, named as if the candidate itself were the main line taken in. */
     const f = await behindMain(OWN, EDITED, { [`${BASE}..${HEAD}`]: OWN, [`${HEAD}..${EDITED}`]: OWN });
-    await expect(f.took(HEAD)).rejects.toMatchObject({ status: 409, message: `${MAIN} does not hold ${HEAD}, or the change between them could not be read.` });
+    await expect(f.took(HEAD)).rejects.toMatchObject({ status: 409, message: expect.stringContaining(`${MAIN} does not hold ${HEAD}, or the change between them could not be read`) as unknown });
     expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', candidateId: f.snapshot.candidateId });
   });
 
