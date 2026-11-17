@@ -44,6 +44,12 @@ number is the turn; the last counts releases between turns. Releases before 0.31
 - Tests owners can repair test files or return source fixes without cancelling the task.
 - A Tests owner's repair is taken on the candidate's own base, without a new main or a full run's ids.
 - Vault values an agent uses stay out of turn records, replays, terminal recordings and phone runs.
+- A program's hooks are accepted from its own terminal even when the shell that sent them lost its parent.
+- A failed tmux lookup makes a program's hooks retry instead of refusing them for good.
+- A Claude, Codex, Kimi or Antigravity turn whose end was lost ends when its finished answer stays for two minutes.
+- Kimi's changing toolbar tips no longer restart the watch of an unchanged finished answer.
+- A job whose program exited and whose result was lost fails after two minutes, and its queue goes on.
+- An operator who looked at a program can still type within 30 seconds while Hornhoof looks at it too.
 
 ### Added
 
