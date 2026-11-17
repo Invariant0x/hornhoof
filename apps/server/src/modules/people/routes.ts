@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
-import { passResponsibility } from '../tracker/upgrade.js';
+import { passResponsibility } from '../tracker/handoff.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
