@@ -2423,6 +2423,7 @@ export const en = {
     pipeline_unknown: 'This pipeline no longer exists. Reload the page.',
     pipeline_changed: 'Someone changed this pipeline meanwhile. Look at it again and retry.',
     pipeline_invalid: 'This pipeline or stage does not fit: every stage needs a name and one who does it, and a task joins a pipeline of its own department.',
+    stage_gone: 'Someone took this stage off its pipeline meanwhile. Look at the pipeline again and choose another stage.',
     task_closed: 'This task is closed already.',
     urgent_not_allowed: 'Only the CEO, the CEO delegate or the owner of the department can say that work is urgent.',
     urgent_follows_parent: 'This task is as urgent as the task above it. Change the task at the top.',

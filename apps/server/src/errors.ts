@@ -125,6 +125,7 @@ export type ErrorReason =
   | 'pipeline_unknown'
   | 'pipeline_changed'
   | 'pipeline_invalid'
+  | 'stage_gone'
   | 'responsible_invalid'
   | 'view_as_ceo_only'
   | 'urgent_not_allowed'

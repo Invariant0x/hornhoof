@@ -1,9 +1,10 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, assistants, companies, departments, goals, jobs, people, pipelines, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, assistants, companies, departments, goals, jobs, people, pipelines, pipelineStages, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import { createPipeline, editPipeline } from '../src/modules/tracker/pipelines.js';
 import { as, echelonsTurn, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -95,6 +96,36 @@ describe('tracker tools', () => {
     const updated = await call(await tools(head), 'update_task', { task: task!.number, why: 'People pay without calling.', due: '2026-12-01T00:00:00.000Z' });
     expect(updated.isError, text(updated)).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.id, task!.id)))[0]).toMatchObject({ why: 'People pay without calling.', dueAt: new Date('2026-12-01T00:00:00.000Z') });
+  });
+
+  it('change the work and the stage of update_task together or not at all, when the stage goes meanwhile', async () => {
+    const { app, db, companyId, dev, head, tools, work } = await company();
+    const anyone = async () => {};
+    const pipe = await createPipeline(app.ctx, companyId, { agentId: head.id }, anyone, dev.id, { name: 'Releases', why: '', stages: [
+      { key: 'build', parent: null, name: 'Build', ownerRole: 'DEV-BE' },
+      { key: 'check', parent: 'build', name: 'Check', ownerRole: 'DEV-HEAD' },
+    ] });
+    const stage = async (name: string) => (await db.select().from(pipelineStages).where(eq(pipelineStages.name, name)))[0]!;
+    const [build, check] = [await stage('Build'), await stage('Check')];
+    const { task } = await work();
+    await db.update(tasks).set({ pipelineId: pipe.id, pipelineStageId: build.id }).where(eq(tasks.id, task.id));
+    const asHead = await tools(head);
+    /* Someone takes Check off the pipeline once the tool checked what it names, as the work is about to be written. */
+    const begin = db.transaction.bind(db);
+    let raced = false;
+    vi.spyOn(db, 'transaction').mockImplementation(async (fn, config) => {
+      if (!raced && /\bupdateTask\b/.test(new Error().stack ?? '')) {
+        raced = true;
+        await editPipeline(app.ctx, companyId, anyone, pipe.id, { stages: [{ key: 'build', id: build.id, parent: null, name: 'Build', ownerRole: 'DEV-BE' }] });
+      }
+      return begin(fn, config);
+    });
+    const res = await call(asHead, 'update_task', { task: task.number, title: 'Checkout by card', stage: check.id });
+    expect(raced).toBe(true);
+    expect(res.isError, text(res)).toBe(true);
+    expect(text(res)).toMatch(/took this stage off its pipeline meanwhile/);
+    const [after] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+    expect([after!.title, after!.version, after!.pipelineStageId]).toEqual(['Checkout', task.version, build.id]);
   });
 
   it('let the product manager tidy only its own department, naming as responsible only the decision owner or a person on the goal', async () => {

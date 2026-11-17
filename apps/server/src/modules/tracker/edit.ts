@@ -1,8 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { pipelineStages, tasks } from '../../db/schema.js';
-import { note, published, refuse, taskSpot, type Actor, type Task } from '../tasks/engine.js';
-import { placeOnPipeline } from './pipelines.js';
+import { ApiError } from '../../errors.js';
+import { note, published, refuse, taskSpot, type Actor, type Task, type Tx } from '../tasks/engine.js';
+import { holdPipelines, placeOnPipeline, stageGone } from './pipelines.js';
 import { requireAnswersFor } from './responsible.js';
 import { goalFor } from './task-fields.js';
 
@@ -69,19 +70,33 @@ export const nextRevision = () => sql`${tasks.trackerRevision} + 1`;
    since then refuses it, so neither is written over. It gives no work and is no move of it: it wakes nobody, leaves what
    the task waits for as it is, and keeps the task's version and its time of the last change, by which turns kept for it
    and the quiet department's alarm tell the work going on. Its own revision grows instead. Its line in the history says
-   what changed. */
+   what changed. It is checked on the task as read first, so a wrong edit is refused before it waits on anything, and
+   again as it is written. */
 export async function editTask(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, task: Task, edit: TaskEdit, seen: Seen): Promise<Task> {
   const changed = () => refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
   if (!sameAs(task, seen)) throw changed();
-  const { set, fields } = await trackerSet(ctx, task, edit);
-  if (!fields.length) return task;
+  if (!(await trackerSet(ctx, task, edit)).fields.length) return task;
   const row = await ctx.db.transaction(async tx => {
+    /* The pipelines first, then the task, as a change of a pipeline takes them. */
+    await holdPipelines(tx, [task.pipelineId, edit.pipelineId]);
     const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for('update');
     if (!fresh || !sameAs(fresh, seen)) throw changed();
-    const [row] = await tx.update(tasks).set({ ...set, trackerRevision: nextRevision() }).where(eq(tasks.id, task.id)).returning();
-    await note(tx, row!, { kind: 'edited', actor, data: { fields } });
-    return row!;
+    return writeEdit(tx, actor, fresh, edit);
   });
+  if (!row) return task;
   published(ctx, row);
   return row;
+}
+
+/* Writes an edit of what the tracker keeps inside the change that writes it, its pipelines held by then: checked once more
+   on the task as it is, it writes what still holds, and a stage taken off its pipeline since the first check is a
+   conflict, not a broken write. None: nothing to change. */
+export async function writeEdit(tx: Tx, actor: Actor, task: Task, edit: TaskEdit): Promise<Task | null> {
+  const { set, fields } = await trackerSet({ db: tx }, task, edit).catch((err: unknown) => {
+    throw err instanceof ApiError && err.reason === 'pipeline_invalid' ? stageGone() : err;
+  });
+  if (!fields.length) return null;
+  const [row] = await tx.update(tasks).set({ ...set, trackerRevision: nextRevision() }).where(eq(tasks.id, task.id)).returning();
+  await note(tx, row!, { kind: 'edited', actor, data: { fields } });
+  return row!;
 }
