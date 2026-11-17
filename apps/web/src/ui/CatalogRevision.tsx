@@ -9,7 +9,7 @@ import { changes, partsAsTokens, wordsOf, type Piece, type Token } from './catal
 type Part = { kind: 'text'; text: string } | { kind: 'slot'; slotId: string; type: string };
 type TemplateValue = { kind: 'template'; locale: string; subject: string | null; parts: Part[] };
 export type ShownRevision = { revision: number; summary: string; value: { kind?: string }; createdAt: string; createdBy: { name: string | null } };
-export type ShownEntry = { locale: string | null; current: number | null; revisions: ShownRevision[] };
+type ShownEntry = { locale: string | null; current: number | null; revisions: ShownRevision[] };
 
 /* Pieces of one line, the dot held to the piece before it, so that no line begins with it. */
 export const joined = (pieces: readonly (string | null | undefined | false)[]): string => pieces.filter(Boolean).join(' · ');

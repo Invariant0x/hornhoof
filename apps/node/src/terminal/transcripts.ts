@@ -126,7 +126,7 @@ function windowName(minutes: unknown): string {
 
 /* What a line of Codex's session log tells: things to show, the session, a turn's start, what a person typed, the turn's
    end, failure or that a person stopped it, the limits, how full the context is. */
-export type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; typed?: string; ended?: { message: string }; aborted?: true; failed?: Failure; limits?: Limits; context?: number };
+type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; typed?: string; ended?: { message: string }; aborted?: true; failed?: Failure; limits?: Limits; context?: number };
 
 /* Codex counts its context past the part every session starts with, and so does Hornhoof, to show what its screen shows. */
 const CODEX_BASELINE = 12_000;

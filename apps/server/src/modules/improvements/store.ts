@@ -10,8 +10,8 @@ import { fingerprintOfReport } from '../feedback/inbox.js';
 import { fateOf } from '../feedback/released.js';
 import type { Tx } from '../tasks/engine.js';
 
-export type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
-export type ImprovementScope = (typeof IMPROVEMENT_SCOPES)[number];
+type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
+type ImprovementScope = (typeof IMPROVEMENT_SCOPES)[number];
 /* How many closed ones are listed; every one that waits or is in work is. */
 const CLOSED_LISTED = 200;
 const ACTIVE: readonly ImprovementStatus[] = ['open', 'taken'];
@@ -115,7 +115,7 @@ export async function countOnSent(ctx: Pick<Ctx, 'db' | 'bus'> & Fate, companyId
 export const improvementsChanged = (ctx: Pick<Ctx, 'bus'>, companyId: string) => ctx.bus.publish(companyId, { type: 'improvements', spot: { departmentId: null } });
 
 /* Moves an improvement inside a caller's transaction, with the same company and source-status guards everywhere. */
-export async function moveImprovementTx(db: Db | Tx, companyId: string, id: string, from: ImprovementStatus, to: PgUpdateSetSource<typeof improvements>) {
+async function moveImprovementTx(db: Db | Tx, companyId: string, id: string, from: ImprovementStatus, to: PgUpdateSetSource<typeof improvements>) {
   const [moved] = await db
     .update(improvements)
     .set({ ...to, updatedAt: new Date() })

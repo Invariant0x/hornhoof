@@ -1,4 +1,4 @@
-export type WaitEdge = { from: string; to: string };
+type WaitEdge = { from: string; to: string };
 type Graph = Map<string, string[]>;
 
 /* A mutually waiting group carries every task reason between its members. */

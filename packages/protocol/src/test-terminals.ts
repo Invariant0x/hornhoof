@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 /* Public browser metadata and codecs only. Admission, nonce consumption, signature
    verification and stream ordering belong to the authenticated broker. */
-export const TEST_TERMINAL_LIMITS = { bindBytes: 4096, proofBytes: 1024, frameBytes: 65536, dataBytes: 32768, originBytes: 2048 } as const;
-export const TEST_TERMINAL_CLOSE = {
+const TEST_TERMINAL_LIMITS = { bindBytes: 4096, proofBytes: 1024, frameBytes: 65536, dataBytes: 32768, originBytes: 2048 } as const;
+const TEST_TERMINAL_CLOSE = {
   closed: { code: 1000, reason: 'closed' }, denied: { code: 4403, reason: 'denied' },
   expired: { code: 4408, reason: 'expired' }, unavailable: { code: 4503, reason: 'unavailable' },
   unknown: { code: 4500, reason: 'unknown' },

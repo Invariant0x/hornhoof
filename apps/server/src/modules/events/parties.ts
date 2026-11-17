@@ -17,7 +17,7 @@ const Party = z.object({
 export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional(), channel: z.enum(['telegram', 'assistant']).optional(), assistant: z.object({ id: z.string(), name: z.string() }).optional() });
 export type MessageParty = z.infer<typeof Party>;
 export type MessageEnvelope = z.infer<typeof MessageEnvelopeSchema>;
-export type PartyContext = Pick<Ctx, 'db' | 'templates'>;
+type PartyContext = Pick<Ctx, 'db' | 'templates'>;
 
 export const HORNHOOF: MessageParty = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
 

@@ -18,7 +18,7 @@ export type { CheckPlace } from './place.js';
 /* Checks made by a model as they stand in the database. Each write goes under a lock on its check, so that a change and the
    end of a run see each other. Whatever changes a binding turns the check off and queues one run in the same transaction. */
 
-export type CheckDefinition = Pick<CheckBinding, 'checkerCodeHash' | 'promptHash' | 'outputSchemaHash' | 'sourceListHash' | 'taxonomyHash' | 'model'>;
+type CheckDefinition = Pick<CheckBinding, 'checkerCodeHash' | 'promptHash' | 'outputSchemaHash' | 'sourceListHash' | 'taxonomyHash' | 'model'>;
 export type SavedSet = { ok: true; version: number; hash: string } | { ok: false; problems: DatasetProblem[] };
 
 type Reader = Pick<Db, 'select'>;

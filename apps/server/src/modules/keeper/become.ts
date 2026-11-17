@@ -34,7 +34,7 @@ const Secrets = z.strictObject({
 });
 const Answer = z.object({ sealed: z.string().min(1) });
 
-export type BecomingOptions = {
+type BecomingOptions = {
   controlDir: string;
   /* A request of the keeper's own to the leader's app. */
   ask: (method: 'POST', path: string) => Promise<{ status: number; body: unknown }>;
