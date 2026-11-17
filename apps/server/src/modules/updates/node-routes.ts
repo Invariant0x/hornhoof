@@ -25,9 +25,8 @@ async function targets(ctx: Ctx, req: FastifyRequest): Promise<ServerNode[]> {
   return nodes ? all.filter(n => nodes.includes(n.name)) : all;
 }
 
-/* The one that says most of why they wait: one still waiting, or else put off, or else the first. */
-const longestWait = (views: MachineDrain[]): MachineDrain | null =>
-  views.find(v => v.state === 'waiting') ?? views.find(v => v.state === 'postponed') ?? views[0] ?? null;
+/* The one that says most of why they wait: one still waiting, or else the first. */
+const longestWait = (views: MachineDrain[]): MachineDrain | null => views.find(v => v.state === 'waiting') ?? views[0] ?? null;
 
 const allFree = (views: MachineDrain[], free: string[]): boolean => views.length > 0 && free.length === views.length;
 

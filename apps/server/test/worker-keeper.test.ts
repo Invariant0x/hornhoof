@@ -726,21 +726,14 @@ describe("a worker's keeper", { timeout: 60_000 }, () => {
     const w = await worker(c);
     const row = () => c.rowOf(w.machine);
     const control = (name: string) => join(w.config.controlDir, name);
-    /* The leader's word on this machine's upload, read now: the next report is made on it. */
-    const told = async (upload: 'waiting' | 'wipe') => {
-      await w.keeper['readView']();
-      expect(w.keeper.known()?.copy?.upload).toBe(upload);
-    };
-    /* One report of the machine, made now and heard by the leader. No round runs between the steps, so no other report
-       goes, and none made before a step lands after it and undoes it. */
+    /* Rounds until the leader's word on this machine's upload reached it. A round reads the view and then reports, so
+       that report is made on the word; and rounds go one at a time, so none made before a step lands after it. */
+    const told = (upload: 'waiting' | 'wipe') => until(() => w.keeper.known()?.copy?.upload === upload);
+    /* Rounds until one more report of the machine reached the leader. */
     const report = async () => {
-      const before = (await row()).reportAt!.getTime();
-      vi.setSystemTime(Date.now() + 1);
-      await w.keeper['report']();
-      expect((await row()).reportAt!.getTime()).toBeGreaterThan(before);
+      const before = (await row()).reportAt?.getTime() ?? 0;
+      await until(async () => ((await row()).reportAt?.getTime() ?? 0) > before);
     };
-    /* Rounds until the machine found the leader and reported once; from here the test makes each step itself. */
-    await until(async () => (await row()).reportAt !== null);
     /* While its updater still wipes it, it says nothing of the kind. */
     writeFileSync(control(WIPE_FILE), JSON.stringify({ id: 'w1', step: 'volume' }));
     await c.db.update(machines).set({ uploadState: 'kept', dataLeftAt: new Date() }).where(eq(machines.id, w.machine));
