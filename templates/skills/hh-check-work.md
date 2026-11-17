@@ -15,7 +15,7 @@ Read "task" first: its body says what was asked and how it is accepted, and task
 2. **Is each claim true?** Take every number, name, date, price, quote and link to its source and compare. Rebuild a total from its source records instead of reading the author's workings. A claim with no source is a finding.
 3. **Is it fit for whom it reaches?** The language, tone and form the task names. Nothing private, and nothing promised that nobody approved.
 4. **The department's own rules.** The other skills on your card say what else a result of this kind must meet, such as a brand voice, an approval limit or a support policy. Apply them.
-5. **Protected steps.** Publishing, sending, paying, signing and any other step that cannot be undone keeps its own approval by a person. Your PASS never replaces it.
+5. **Protected steps.** Paying, signing in the company's name and deleting for good keep a person's own yes: a payment and a signature are a person's, and an irreversible deletion needs the CEO's yes. Your PASS never replaces that yes. Publishing, sending and posting are the department's own work and wait for nobody's yes unless the department set an approval rule for them.
 
 **Each finding** has a place (the file and its line or section), what is wrong and the harm to a person. Check it against the source before you record it: a wrong finding costs its reader a round.
 

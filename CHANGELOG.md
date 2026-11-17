@@ -5,6 +5,12 @@ line per entry under `### Fixed`, `### Added` and `### Changed`, in that order, 
 step people must take before updating is the first entry under Changed, starting with "Before you update:". The middle
 number is the turn; the last counts releases between turns. Releases before 0.31.0 keep their older form.
 
+## [Unreleased]
+
+### Changed
+
+- Skills no longer hold the company's own work for a person: agents sign in and sign up themselves with the vault, publishing and sending wait for nobody, the orchestrator gives access, subscriptions and machines to whoever asked and may approve an exact commit for the owner, and a department's own people decide its outbound work and its design system. Only paying, signing and deleting for good wait for a person.
+
 ## [0.32.0] - 2026-11-17
 
 ### Fixed

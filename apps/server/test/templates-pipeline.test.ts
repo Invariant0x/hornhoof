@@ -65,11 +65,11 @@ const POINTS: Record<string, RegExp[]> = {
     /states[\s\S]*widths[\s\S]*themes[\s\S]*languages/i,
     /independent checker is not the author[\s\S]*does not edit/i,
     /contrast[\s\S]*token use[\s\S]*overflow/i,
-    /breaking system change needs the CEO's decision[\s\S]*cost/i,
+    /breaking system change needs the decision of the department's own responsible people[\s\S]*cost/i,
   ],
   'ops-work-pipeline': [
     /blast radius[\s\S]*rollback/i,
-    /spending[\s\S]*cross-department access[\s\S]*irreversible/i,
+    /spending[\s\S]*irreversible[\s\S]*access to another department the orchestrator or Operations grants/i,
     /independent Security[\s\S]*exact candidate before shared merge[\s\S]*urgent[\s\S]*small[\s\S]*named[\s\S]*review fixes/i,
     /failed check[\s\S]*rollback before investigation/i,
     /valid and rejected cases/i,
