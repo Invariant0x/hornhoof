@@ -3,14 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { idOnly } from '../src/db/selections.js';
 import { builtinOf } from '../src/modules/nodes/hub.js';
-import { drainPostponed, drainWork } from '../src/modules/updates/drain-work.js';
+import { drainWork } from '../src/modules/updates/drain-work.js';
 import { nodeDrain } from '../src/modules/updates/node-drain.js';
-import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 import { BUILTIN } from './builtin.js';
 
 const NODE_KEY = 'builtin-drain-key-0123456789abcdef';
@@ -82,7 +81,7 @@ describe('planned node updates', () => {
     const f = await fixture();
     const waiting = await f.prepare();
     expect(waiting.statusCode).toBe(200);
-    expect(waiting.json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1, partsLeft: 0, until: expect.any(String) } });
+    expect(waiting.json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1, partsLeft: 0, since: expect.any(String) } });
     expect((await f.db.select().from(jobs).where(eq(jobs.id, f.job.id)))[0]).toMatchObject({ status: 'running', error: null });
     const view = (await f.app.inject({ url: '/api/machines', ...as(f.ceo) })).json();
     expect(view.builtin.drain).toEqual(waiting.json().drain);
@@ -91,67 +90,27 @@ describe('planned node updates', () => {
     expect((await f.db.select().from(jobs).where(eq(jobs.id, f.job.id)))[0]!.error).toBeNull();
   });
 
-  it('keeps a turn intact at the deadline, notifies Operations once and retries automatically', async () => {
+  it('keeps a turn intact however long the node waits, wakes nobody, and permits the update once the turn ends', async () => {
     stillClock();
-    const f = await fixture({ NODE_DRAIN_MS: '50', NODE_UPDATE_RETRY_MS: '1500' });
-    const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
-    const [head] = await f.db.insert(agents).values({ companyId: f.company.id, departmentId: ops!.id, subscriptionId: f.agent.subscriptionId, kind: 'head', model: '', roleKey: 'OPS-HEAD', name: 'Operations' }).returning();
-    expect((await f.prepare()).json().drain.state).toBe('waiting');
-    await vi.advanceTimersByTimeAsync(50);
-    expect((await f.prepare()).json().drain.state).toBe('postponed');
-    const notices = await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id));
-    expect(notices).toHaveLength(1);
-    expect(notices[0]!.prompt).toContain(f.job.id);
-    expect(notices[0]!.prompt).toContain('built-in node');
-    expect((await f.db.select().from(jobs).where(eq(jobs.id, f.job.id)))[0]).toMatchObject({ status: 'running', error: null });
-    await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, f.job.id));
-    await vi.advanceTimersByTimeAsync(1500);
-    expect((await f.prepare()).json().ready).toBe(true);
-  });
-
-  it('names the machine and the turn on it to the head of Operations, and no turn elsewhere', async () => {
-    stillClock();
-    const f = await fixture({ NODE_DRAIN_MS: '50', NODE_UPDATE_RETRY_MS: '3600000' });
-    const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
-    const [head] = await f.db.insert(agents).values({ companyId: f.company.id, departmentId: ops!.id, subscriptionId: f.agent.subscriptionId, kind: 'head', model: '', roleKey: 'OPS-HEAD', name: 'Operations' }).returning();
-    const { key, nodeId } = await serverHostNode(f);
-    const [task] = await f.db.insert(tasks).values({ companyId: f.company.id, number: 501, title: 'A long one', body: '', createdByAgentId: f.agent.id }).returning();
-    const [turn] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, nodeId, taskId: task!.id, kind: 'conversation', prompt: 'On the machine', status: 'running', startedAt: new Date(), timeoutMs: 900_000 }).returning();
-    const asMachine = () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${key}` }, payload: {} });
-    await asMachine();
-    await vi.advanceTimersByTimeAsync(50);
-    expect((await asMachine()).json().drain.state).toBe('postponed');
-    const [notice] = await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id));
-    expect(notice!.prompt).toContain('server-host');
-    expect(notice!.prompt).toContain(`${turn!.id} (#${task!.number})`);
-    expect(notice!.prompt).toContain('No running work was stopped');
-    expect(notice!.prompt).toContain('Run parts: none');
-    expect(notice!.prompt).not.toContain(f.job.id);
-  });
-
-  it("names the machine of another machine's built-in node to the head of Operations", async () => {
     const f = await fixture();
-    const other = 'b0'.repeat(16);
     const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
     const [head] = await f.db.insert(agents).values({ companyId: f.company.id, departmentId: ops!.id, subscriptionId: f.agent.subscriptionId, kind: 'head', model: '', roleKey: 'OPS-HEAD', name: 'Operations' }).returning();
-    const [person] = await f.db.select(idOnly(people)).from(people);
-    await f.db.insert(machines).values({ companyId: f.company.id, personId: person!.id, machineKey: 'studio-key', hostname: 'studio', role: 'data', networkId: other });
-    const [turn] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, kind: 'conversation', prompt: 'On the copy', status: 'running', startedAt: new Date(), timeoutMs: 900_000, builtinMachine: other }).returning();
-    await drainPostponed(f.app.ctx, builtinOf(other), '2026-11-11T13:00:00.000Z', await drainWork(f.app.ctx, builtinOf(other)));
-    const [notice] = await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id));
-    /* The built-in node of a machine that keeps a copy is named by its machine; this server's own stays "the built-in node". */
-    expect(notice!.prompt).toContain('the planned update of the built-in node of studio:');
-    expect(notice!.prompt).toContain(turn!.id);
-    expect(notice!.prompt).not.toContain(f.job.id);
-  });
+    const node = await connectNode(await listen(f.app), NODE_KEY);
+    node.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [f.job.id] });
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
+    expect((await f.prepare()).json().drain.state).toBe('waiting');
 
-  it('keeps asking within the lease while postponed, so the machine still says so until the retry', async () => {
-    stillClock();
-    const f = await fixture({ NODE_DRAIN_MS: '50', NODE_UPDATE_RETRY_MS: '3600000' });
-    await f.prepare();
-    await vi.advanceTimersByTimeAsync(50);
-    expect((await f.prepare()).json().drain.state).toBe('postponed');
-    expect((await f.prepare()).json().pollAfterMs).toBeLessThan(60_000);
+    /* Past an hour and a half, with the node heard from all along. */
+    vi.setSystemTime(Date.now() + 95 * 60_000);
+    node.send({ type: 'status', loggedIn: true, limits: null });
+    await until(() => f.app.ctx.hub.lastSeenAt(BUILTIN) === Date.now());
+    expect((await f.prepare()).json()).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id))).toEqual([]);
+    expect((await f.db.select().from(jobs).where(eq(jobs.id, f.job.id)))[0]).toMatchObject({ status: 'running', error: null });
+    await f.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, f.job.id));
+    expect((await f.prepare()).json()).toMatchObject({ ready: true, drain: { state: 'restarting' } });
   });
 
   it('requires a current node key', async () => {
@@ -182,12 +141,6 @@ describe('planned node updates', () => {
     expect((await server('DELETE')).statusCode).toBe(204);
     expect(nodeDrain(f.app.ctx, BUILTIN)).toBeNull();
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId })).toBeNull();
-  });
-
-  it('waits an hour and a half and retries a quarter of an hour later, unless set otherwise', () => {
-    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET })).toMatchObject({ nodeDrainMs: 5_400_000, nodeUpdateRetryMs: 900_000 });
-    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_DRAIN_MS: '', NODE_UPDATE_RETRY_MS: '' })).toMatchObject({ nodeDrainMs: 5_400_000, nodeUpdateRetryMs: 900_000 });
-    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_DRAIN_MS: '60000', NODE_UPDATE_RETRY_MS: '1000' })).toMatchObject({ nodeDrainMs: 60_000, nodeUpdateRetryMs: 1000 });
   });
 
   it('keeps the connection ready while waiting, and releases a hold only after a new boot', async () => {
