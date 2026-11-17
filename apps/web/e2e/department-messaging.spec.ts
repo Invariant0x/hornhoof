@@ -64,6 +64,12 @@ type Posted = { path: string; body: unknown };
 async function serve(page: Page, posted: Posted[]) {
   await serveRoutes(page);
   let published = false;
+  /* The address Max adds, as the server lists it: agreed once added, its consent taken back once he takes it back. */
+  let added: 'no' | 'granted' | 'revoked' = 'no';
+  const contacts = () => (added === 'no' ? [] : [{
+    permissionId: 'pm1', channelId: 'ch-b2c', kind: 'email', address: TEST_ADDRESS, purpose: 'newsletter', source: 'Test address of our team', status: added,
+    grantedAt: '2026-03-02T09:30:00.000Z', revokedAt: added === 'revoked' ? '2026-03-02T10:00:00.000Z' : null, doNotContact: false, addedBy: { person: { id: MAX.id, name: 'Max' }, agent: null },
+  }]);
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/me') return route.fulfill({ json: ME_MAX });
@@ -74,11 +80,19 @@ async function serve(page: Page, posted: Posted[]) {
         published = true;
         return route.fulfill({ json: { id: 'r2', status: 'published' } });
       }
-      if (url.pathname === '/api/outbound/contacts') return route.fulfill({ json: { contactId: 'k1', permissionId: 'pm1' } });
+      if (url.pathname === '/api/outbound/contacts') {
+        added = 'granted';
+        return route.fulfill({ json: { contactId: 'k1', permissionId: 'pm1' } });
+      }
+      if (url.pathname === '/api/outbound/permissions/pm1/revoke') {
+        added = 'revoked';
+        return route.fulfill({ json: { permissionId: 'pm1', status: 'revoked' } });
+      }
     }
     if (url.pathname === '/api/outbound' && url.searchParams.get('department') === MKT) return route.fulfill({ json: OVERVIEW });
     if (url.pathname === '/api/outbound/catalog') return route.fulfill({ json: catalog(published) });
     if (url.pathname === '/api/outbound/setup-log') return route.fulfill({ json: { departmentId: MKT, entries: [] } });
+    if (url.pathname === '/api/outbound/contacts') return route.fulfill({ json: { departmentId: MKT, contacts: contacts() } });
     return route.fallback();
   });
 }
@@ -141,7 +155,7 @@ for (const look of LOOKS) {
     /* The part reads its catalog and log again after a publish; leaving before that ends cancels them, which WebKit
        reports as a page error. */
     const reread = (path: string) => page.waitForResponse(r => new URL(r.url()).pathname === path);
-    await Promise.all([reread('/api/outbound/catalog'), reread('/api/outbound/setup-log'), shown.getByRole('button', { name: s.publish, exact: true }).click()]);
+    await Promise.all([reread('/api/outbound/catalog'), reread('/api/outbound/setup-log'), reread('/api/outbound/contacts'), shown.getByRole('button', { name: s.publish, exact: true }).click()]);
     await expect(shown.getByRole('button', { name: s.revoke, exact: true })).toBeVisible();
     await expect(panel.getByText(s.inUse(2))).toBeVisible();
     await expect(shown).toContainText(s.view.inUseNow);
@@ -165,7 +179,7 @@ for (const look of LOOKS) {
     await form.getByLabel(c.evidence, { exact: true }).fill('My own address, to try the letters');
     await form.getByRole('checkbox').check();
     await shot(page, form, `address-form-${browserName}-${name}`);
-    await form.getByRole('button', { name: c.submit, exact: true }).click();
+    await Promise.all([reread('/api/outbound/contacts'), reread('/api/outbound/setup-log'), form.getByRole('button', { name: c.submit, exact: true }).click()]);
     await expect(card.getByRole('status')).toHaveText(c.added(TEST_ADDRESS));
     expect(posted).toEqual([
       { path: '/api/outbound/catalog/r2/publish', body: { revision: 2, newest: 2 } },
@@ -173,6 +187,23 @@ for (const look of LOOKS) {
     ]);
     await fits(page, panel);
     await shot(page, card, `address-added-${browserName}-${name}`);
+
+    /* The address is on the channel's list, agreed and added by Max; he takes its consent back there. */
+    const listed = card.getByRole('list', { name: c.listTitle });
+    const line = listed.getByRole('listitem').filter({ hasText: TEST_ADDRESS });
+    await expect(line).toContainText(c.statuses.granted);
+    expect(await small(line)).toEqual([]);
+    await fits(page, panel);
+    const listWords = { ...words, statuses: [...words.statuses, ...Object.values(c.statuses)] };
+    expect.soft(await offences(part, { ...listWords, danger: [s.stop, c.revoke] })).toEqual([]);
+    await shot(page, listed, `address-agreed-${browserName}-${name}`);
+    await Promise.all([reread('/api/outbound/contacts'), reread('/api/outbound/setup-log'), line.getByRole('button', { name: c.revoke, exact: true }).click()]);
+    await expect(line).toContainText(c.statuses.revoked);
+    await expect(line.getByRole('button')).toHaveCount(0);
+    expect(posted.at(-1)).toEqual({ path: '/api/outbound/permissions/pm1/revoke', body: {} });
+    await fits(page, panel);
+    expect.soft(await offences(part, { ...listWords, danger: [] })).toEqual([]);
+    await shot(page, listed, `address-taken-back-${browserName}-${name}`);
 
     /* A narrow screen gives the panel all of its width, over the buttons: it closes first. */
     await panel.getByRole('button', { name: t.dept.close, exact: true }).click();
