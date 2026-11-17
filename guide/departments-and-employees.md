@@ -215,7 +215,7 @@ A kind with no rule asks every time. The rules stay as they are when the owner c
 
 The CEO and the CEO delegate can always answer any request themselves, but a department's approvals no longer add to the CEO's count once it has an owner. The head brings the CEO in when the department misses a goal or its plan.
 
-To approve an exact commit for a release, an employee always asks, whatever the rules say. Only autonomous release, which the CEO alone turns on, lets such a commit go in without asking: [Tasks and turns](tasks-and-turns.md#who-approves-what-reaches-the-main-branch) says when.
+To approve an exact commit for a release, an employee always asks, whatever the rules say. Only the department's autonomous release, which the people who run it or the CEO turn on, lets such a commit go in without asking: [Tasks and turns](tasks-and-turns.md#who-approves-what-reaches-the-main-branch) says when.
 
 ## Who sees which departments?
 

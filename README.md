@@ -86,7 +86,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
    ![Connecting AI plans](.github/assets/subscriptions.gif)
 
-4. Tell the orchestrator what you are building. He proposes departments, and you create them with one click. Setup tells you plainly what the orchestrator is: it can do anything in your company and in Hornhoof itself, sees everything and can change its own system.
+4. Tell the orchestrator what you are building. He proposes departments, and you create them with one click.
 
    ![Building the departments](.github/assets/build.gif)
 
@@ -115,22 +115,32 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 *Marketing, content, sales and support run the same way as development.*
 
 - **A department for every kind of work.** Each has a head and employees who each know one part of the job. In marketing a search specialist, a social media manager and a copywriter work on one campaign; in support the first line answers, the second line takes the hard cases and an editor keeps the knowledge base. The head splits the goal, hands out the parts and checks the result.
-- **Agents work like people.** A letter goes out from the department's own mailbox, with the sign-in taken from the company's vault. Social networks go through the company's Android phones: agents wait for a free one in a queue, and every phone session is recorded on its task. Each step, whom they wrote and what came back, is marked in a file in the department's git and committed.
-- **Bricks, not machinery.** Hornhoof has no mailing engine of its own. Like Lego, a department builds what it needs from a mailbox, a phone, a script in its git and a skill.
+- **Agents work like people.** A letter goes out from the department's own mailbox, social networks go through the company's Android phones, and each step is written down in the department's git. There is no mailing machinery: like Lego, a department builds what it needs from a mailbox, a phone, a script and a skill.
 - **A library to start from.** 10 departments, 64 roles and over 150 skills from the best practices of each field: campaign plans, copywriting and editing, SEO audits, social posts, market sizing, marketplace listings, sales, support and finance. Development, design and operations run every day in Hornhoof's own company, and what works there goes back into the templates.
 - **Your own way of working.** Change any employee's role and skills on its card, or write your own roles, skills and departments. The company puts them to work on the next task.
 
-## Many hands at once
+## Ways of working
 
-*One-shot calls, like `claude -p` or `codex exec`, for every program.*
+*Pick the shape that fits the job, and mix them in one company.*
 
-- **Any agent starts as many as it needs.** An employee, a head or the orchestrator writes one brief, and each call runs that agent's program once on its own piece of the work: a file to check, a language, a source to read. Claude Code, Codex, Kimi Code and Antigravity all run them.
-- **No fixed cap.** As many calls start at once as the machine's free memory holds, and the rest wait their turn. The only other limit is what the plan itself allows.
-- **Fresh, then gone.** Each call starts with a fresh context, gives its answer and exits: text, files and commits on a branch of its own, or a pass or fail verdict. It keeps no inbox and no memory.
-- **A stage can be one-shot.** A department can mark a stage of its route as one-shot: say, five calls on the same change and a judge call that reads all five answers and gives the verdict. The stage's owner still decides.
-- **Nothing gets lost.** Each call shows on the map while it lives, lit while it runs and pale while it waits for memory. The task's history keeps its brief, input, answer, verdict and time.
+- **Standing employees.** Each keeps its place in a department, its memory and its terminal, and can ask a person midway. *A developer who knows the app takes bug after bug all week.*
+- **Turnkey teams.** One member does a task whole, with its own checks and tests. *A small fix goes out within the hour.*
+- **Routes of stages.** A task passes from owner to owner: written, reviewed by an agent of another maker, tested. A stage can hand in a document instead of code. *An article goes from its writer to an editor.*
+- **One-shot calls.** Any agent runs its program once per piece, like `claude -p` or `codex exec`, whatever the program. Each call starts fresh, answers and ends, and a judge call can weigh all the answers. Thousands can queue: as many run at once as free memory holds, within the plan's limits. *Thirty plant care pages are written side by side, then one judge reads them all.*
+- **Pipelines of calls.** Calls in steps, spread out and brought together, driven by the agent who holds the task or by a one-shot stage of the route. *Five calls chase five causes of a bug, and one more checks the cause that held.*
+- **Personal assistants.** Your own assistant, such as AvaClone, OpenClaw or Hermes Agent, works in the company with your rights. *From your chat you ask how the beta is going.*
 
-Good for a review by several calls at once, one text in many languages, research spread over many sources, and variants to choose from.
+![One-shot calls on the map and in the task's history](.github/assets/calls.gif)
+
+| The job | The way |
+| --- | --- |
+| Days of work, questions midway, a phone or a browser | A standing employee |
+| A small whole task, done quickly | A turnkey team |
+| Must be checked by someone else | A route of stages |
+| Many like pieces with no talk between them | One-shot calls |
+| Spread out, then brought together | A pipeline of calls |
+| Your own errands, from your chat | Your personal assistant |
+| A program stuck on a question on its screen | The program operator, by itself |
 
 ## For your home
 
@@ -161,32 +171,23 @@ Good for a review by several calls at once, one text in many languages, research
 ## You decide, they do
 
 - **One list for everything that needs you.** Questions, design choices and approvals wait in one place, and you answer from any device, your phone too.
-- **You are asked only about what cannot be undone.** Departments run themselves. By default only an irreversible deletion waits for the CEO's yes. A letter, a price or a publication asks nobody, unless the department sets its own rule, as the home departments do for devices and money.
+- **You are asked only about what cannot be undone.** By default only an irreversible deletion waits for the CEO. A department can add its own rules, as the home departments do for devices and money.
 - **Work in turns.** A goal becomes a turn of tasks, and each turn ends in a numbered release.
-- **Releases go out by themselves.** Turn on autonomous release for a department, and nobody has to press a button. Once the whole test run is green and every change in it was checked, by another employee or, for turnkey work, by its holder's own review, security check and tests, the release reaches your main branch. With the switch off, a release waits for your yes on the exact commit.
+- **Releases can go out by themselves.** With autonomous release on, a department's release reaches your main branch once its whole test run is green and every change in it was checked. With it off, the release waits for your yes on the exact commit.
 
-![Tasks and turns](.github/assets/tasks.gif)
+## A task tracker
 
-## A real task tracker
+*Goals, owners and dates, as a list, a board or a graph.*
 
-*Goals, owners and dates, and three ways to look at the same work.*
+- **Your work first.** "My tasks", "Waits for me" and "Working now", with search and filters over every task.
+- **One person answers for each task and goal**, with a why and a date. A goal can carry a number, like "500 testers by December".
+- **Kept by the agents.** Cards move on the board as the work moves, by status or by the stages of a pipeline, and each department's product manager keeps titles and goals tidy. On a phone too.
 
-- **It opens on your own work.** "My tasks" holds what you answer for, "Waits for me" what agents need from you, and "Working now" what employees do this minute. The CEO and the CEO's delegate can look at it as any other person sees it, with "View as".
-- **List, board and graph.** The list groups tasks by status. The board has a column for each status, or for each stage of a pipeline, and its cards move with the work itself, never by dragging. The graph draws a goal with its smaller goals and tasks, and what waits for what. Search covers every task, and filters pick by status, by who does it, by who answers for it and by goal.
-- **Goals with a why and a number.** A company goal splits into department goals and smaller goals, each with a why, a person who answers for it, a date and a target, like "500 subscribers by March". Progress comes from that number or from the tasks done under it.
-- **One person answers for each task**, with a short why and a due date. When that person leaves, their open tasks and goals pass to whoever decides for the department.
-- **Every wait in plain sight.** A task's card shows how long it stands in its status, how long it was worked on and whom it waits for, and keeps every change of status.
-- **Pipelines.** A department draws who hands work to whom, in stages owned by a role or an employee, and each task stands in the stage of whoever holds it.
-- **Kept tidy for you.** Every department has a product manager who keeps titles, whys, goals and pipelines clear, and never hands out or moves work.
-- **On a phone too.** On a narrow screen the lists fold into a drawer over the page, and the same card opens for every task and goal.
+![The task tracker: a list, a task's card and the board](.github/assets/tasks.gif)
 
-## The orchestrator can do anything
+![A board by the stages of a pipeline](.github/assets/board.gif)
 
-*It acts as you, the owner, and is refused nothing.*
-
-- **It sees everything.** Every department, task and terminal, every table of the company's database, and the source and logs of the very Hornhoof build that runs.
-- **It can change anything.** It runs SQL as Hornhoof itself, over every table, every column and the schema, and has a shell in the server's own container. It finds and calls any Hornhoof tool or route.
-- **It can change its own system.** You are told so plainly when you create the company, on the step where you pick the orchestrator's plan.
+![Goals as a graph](.github/assets/goals.gif)
 
 ## It gets better by itself
 
@@ -195,8 +196,14 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 - **A task watchdog** wakes every 10 minutes while there is work, nudges an agent that is stuck, and tells its head when that did not help.
 - **A weak point collector** reads every three hours what failed and where agents stumbled, and writes each finding up with its facts and a fix.
 - **Improvements** collect those fixes. You take one with a click, and the orchestrator does it or turns it into a task.
-- **A program operator** looks after the AI programs themselves. It passes their service windows on its own: an offer to compact a full context, a poll, a sign-in from the vault, a permission question. A screen that stands still while its program thinks calls the operator within minutes. It refuses what a program may not do, and asks a person only for their own password or account and for what costs money.
+- **A program operator** keeps the AI programs moving. It passes their service windows on its own, such as an offer to compact a full context or a sign-in from the vault, and asks a person only for their own password or account and for what costs money.
 - **A reliability engineer** restores broken machines, tools and integrations, finds the cause, and writes down how to handle it next time.
+
+## Your own look
+
+Pick a skin, Cyberpunk, Light, Matrix or Pixel, or make your own from any idea: download one as a sample, ask any AI to change it, and add the file.
+
+![From Cyberpunk to Matrix, then a skin of your own](.github/assets/skins.gif)
 
 ## Next to the alternatives
 
@@ -216,15 +223,7 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 
 ### Claude Cowork and the Codex app
 
-| | Claude Cowork | Codex app | Hornhoof |
-| --- | --- | --- | --- |
-| What it is | A lead Claude in one person's session | A desktop command center for one developer | A standing company of employees who stay, in departments |
-| Parallel work | Sub-agents with fresh context, which return summaries | Agents, each in its own git worktree | Employees side by side, and one-shot calls with fresh context, which return text, commits or a verdict |
-| Models | Claude, on one subscription | OpenAI models | Claude Code, Codex, Kimi Code and Antigravity on the company's plans, mixed freely |
-| Where it lives | Within that session | On the developer's desktop | On the company's machines, one or many |
-| How the work comes together | The lead Claude reads the summaries | The developer merges by hand | Review, tests and the turn's branch, then a release |
-
-Hornhoof is a different kind of thing: a company that stays. Its employees keep their places in departments, with queues, phones, mail, a vault and releases. Its one-shot calls run on any program, start from any employee or any stage of a route, run on the company's own machines and stay in the task's history. A Cowork-style or Codex-style job fits inside Hornhoof as one brick.
+Claude Cowork gives one person a lead Claude with sub-agents that return summaries. The Codex app gives one developer agents in git worktrees to merge by hand. Hornhoof is a company that stays, on any program, where review, tests and releases bring the work together.
 
 ## Hornhoof builds itself
 
@@ -241,14 +240,14 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 ## Good to know
 
 - **Each agent is a real program on your machine.** More agents need more memory. Spare computers help.
-- **Themes.** Pick one of four looks, Cyberpunk, Light, Matrix or Pixel, in the account menu or in Settings, or load a theme file of your own.
 - **Hornhoof is young.** It works and changes fast. Expect rough edges, and tell me about them.
 
 ## Your company stays yours
 
 - It runs on your machines. No Hornhoof cloud, no account with us.
 - Its data sits only on machines of the CEO and of people who see the whole company, and backups are encrypted.
-- Every employee works in a locked box: a container with no folder of your computer in it, as a user of its own, unable to read the machine's keys or other plans. The orchestrator is the one exception, on purpose: it acts as the owner, with a shell in the server, as setup tells you.
+- Every employee works in a locked box: a container with no folder of your computer in it, as a user of its own, unable to read the machine's keys or other plans.
+- The orchestrator acts as the owner, with a shell in the server and Hornhoof's own rights over its database.
 - Root on a machine opens only when that machine's owner allows it, for a day at most.
 - Keys and tokens show as `[hidden]` in every terminal and output.
 - The hornhoof.org link is optional, and it passes your traffic on encrypted, unable to read it.

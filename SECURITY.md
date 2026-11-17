@@ -39,7 +39,7 @@ Hornhoof is built so that your company stays yours. It runs on your own machines
 - Each person sees only the departments they are given.
 - Only the owner of a plan types into its agents' terminals. Everyone else who reaches the employee watches.
 - The orchestrator takes orders about people, access, plans, machines, repositories, the public link and updates only in a turn that answers the CEO.
-- The orchestrator's database role cannot read or write passwords, tokens or keys, nor the tables of sign-ins, invites and install commands.
+- The orchestrator's database tool runs as Hornhoof itself: it reads and changes every table, every column and the schema. The head of Operations only reads, and never sees passwords, tokens or keys, nor the tables of sign-ins, invites and install commands.
 - Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to the orchestrator only when that machine's owner opens access to it, for one day at most, and only in turns that answer the CEO. Nobody else can open it, the CEO included.
 
 ## The hornhoof.org link

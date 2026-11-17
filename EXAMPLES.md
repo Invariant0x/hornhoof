@@ -22,7 +22,7 @@ Instead of a dozen chats you have one company. You write to the orchestrator onc
 
 ![An employee's terminal](.github/assets/terminal.gif)
 
-![Tasks and turns](.github/assets/tasks.gif)
+![The task tracker: a list, a task's card and the board](.github/assets/tasks.gif)
 
 ### A development team that checks its own work
 
